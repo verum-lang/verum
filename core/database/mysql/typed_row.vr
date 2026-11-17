@@ -222,12 +222,12 @@ public fn rows_typed_my<R: MysqlTypedRow>(
         match r {
             Result.Ok(v)  => { out.push(v); }
             Result.Err(e) => {
-                return Result.Err(DbError.Adapter(AdapterSpecific {
-                    adapter: AdMysql,
-                    code: "MYSQL_TYPED_ROW_DECODE".clone(),
-                    message: f"row {i}: {e}",
-                    retryable: false,
-                }));
+                return Result.Err(DbError.Adapter(AdapterSpecific.new(
+                    AdMysql,
+                    "MYSQL_TYPED_ROW_DECODE".clone(),
+                    f"row {i}: {e}",
+                    false,
+                )));
             }
         }
         i = i + 1;
@@ -245,24 +245,24 @@ public fn rows_typed_my<R: MysqlTypedRow>(
 public fn expect_arity(row: &List<RowValue>, want: Int) -> Result<(), DbError> {
     let got = row.len() as Int;
     if got != want {
-        return Result.Err(DbError.Adapter(AdapterSpecific {
-            adapter: AdMysql,
-            code: "MYSQL_TYPED_ROW_ARITY".clone(),
-            message: f"MysqlTypedRow: expected {want} columns, got {got}",
-            retryable: false,
-        }));
+        return Result.Err(DbError.Adapter(AdapterSpecific.new(
+            AdMysql,
+            "MYSQL_TYPED_ROW_ARITY".clone(),
+            f"MysqlTypedRow: expected {want} columns, got {got}",
+            false,
+        )));
     }
     Result.Ok(())
 }
 
 fn typed_row_error(col: Int, want: &Text, got: &RowValue) -> DbError {
     let got_name = row_value_name(got);
-    DbError.Adapter(AdapterSpecific {
-        adapter: AdMysql,
-        code: "MYSQL_TYPED_ROW_DECODE".clone(),
-        message: f"MysqlTypedRow: column {col}: expected {want}, got {got_name}",
-        retryable: false,
-    })
+    DbError.Adapter(AdapterSpecific.new(
+        AdMysql,
+        "MYSQL_TYPED_ROW_DECODE".clone(),
+        f"MysqlTypedRow: column {col}: expected {want}, got {got_name}",
+        false,
+    ))
 }
 
 fn row_value_name(v: &RowValue) -> Text {

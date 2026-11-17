@@ -491,19 +491,19 @@ fn wire_text_or_empty(v: &WireValue) -> Text {
 }
 
 fn must_be_physical(what: &Text) -> DbError {
-    DbError.Adapter(AdapterSpecific {
-        adapter: AdPostgres,
-        code: "BB_BAD_MODE".clone(),
-        message: f"{what} requires RmPhysical replication conn".to_owned(),
-        retryable: false,
-    })
+    DbError.Adapter(AdapterSpecific.new(
+        AdPostgres,
+        "BB_BAD_MODE".clone(),
+        f"{what} requires RmPhysical replication conn".to_owned(),
+        false,
+    ))
 }
 
 fn bad_state(what: &Text) -> DbError {
-    DbError.Adapter(AdapterSpecific {
-        adapter: AdPostgres,
-        code: "BB_BAD_STATE".clone(),
-        message: f"BASE_BACKUP state error: {what}",
-        retryable: false,
-    })
+    DbError.Adapter(AdapterSpecific.new(
+        AdPostgres,
+        "BB_BAD_STATE".clone(),
+        f"BASE_BACKUP state error: {what}",
+        false,
+    ))
 }

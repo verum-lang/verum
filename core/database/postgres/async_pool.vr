@@ -367,7 +367,7 @@ implement AsyncPgPoolGuard {
             Maybe.None => {
                 // SQLSTATE `02000` = no_data (per ISO/IEC 9075-2 §22.1).
                 let sql_state = core.database.common.error.SqlState.parse(&"02000".to_text())
-                    .unwrap_or_else(|| core.database.common.error.SqlState { code: "02000".to_text() });
+                    .expect("02000 is the no-data SQLSTATE");
                 Result.Err(DbError.QueryFailed {
                     sql_state,
                     message:  "query_one: zero rows returned (expected exactly one)".to_text(),
@@ -532,12 +532,12 @@ implement Drop for AsyncPgPoolGuard {
 // =============================================================================
 
 fn pool_err(what: &Text) -> DbError {
-    DbError.Adapter(AdapterSpecific {
-        adapter: AdPostgres,
-        code: "ASYNC_POOL".clone(),
-        message: f"async pool error: {what}",
-        retryable: false,
-    })
+    DbError.Adapter(AdapterSpecific.new(
+        AdPostgres,
+        "ASYNC_POOL".clone(),
+        f"async pool error: {what}",
+        false,
+    ))
 }
 
 /// Open a fresh `AsyncPgConnection` and run the warmup hot-list

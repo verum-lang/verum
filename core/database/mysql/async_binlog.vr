@@ -279,10 +279,10 @@ fn run_actor(
 // =============================================================================
 
 fn actor_dropped(what: &Text) -> DbError {
-    DbError.Adapter(AdapterSpecific {
-        adapter: AdMysql,
-        code: "BINLOG_ACTOR_CLOSED".clone(),
-        message: f"async binlog actor unavailable during {what}",
-        retryable: false,
-    })
+    DbError.Adapter(AdapterSpecific.new(
+        AdMysql,
+        "BINLOG_ACTOR_CLOSED".clone(),
+        f"async binlog actor unavailable during {what}",
+        false,
+    ))
 }

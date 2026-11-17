@@ -850,30 +850,30 @@ fn append_all(dst: &mut List<Byte>, src: &[Byte]) {
 // -----------------------------------------------------------------------------
 
 fn poisoned_err(msg: Text) -> DbError {
-    DbError.Adapter(AdapterSpecific {
-        adapter: AdPostgres,
-        code: "PIPELINE_POISONED".clone(),
-        message: msg,
-        retryable: false,
-    })
+    DbError.Adapter(AdapterSpecific.new(
+        AdPostgres,
+        "PIPELINE_POISONED".clone(),
+        msg,
+        false,
+    ))
 }
 
 fn closed_err() -> DbError {
-    DbError.Adapter(AdapterSpecific {
-        adapter: AdPostgres,
-        code: "PIPELINE_CLOSED".clone(),
-        message: "pipeline submitted to after close".clone(),
-        retryable: true,
-    })
+    DbError.Adapter(AdapterSpecific.new(
+        AdPostgres,
+        "PIPELINE_CLOSED".clone(),
+        "pipeline submitted to after close".clone(),
+        true,
+    ))
 }
 
 fn pipeline_aborted_err() -> DbError {
-    DbError.Adapter(AdapterSpecific {
-        adapter: AdPostgres,
-        code: "PIPELINE_ABORTED".clone(),
-        message: "queued query aborted by an earlier ErrorResponse in the same Sync batch".clone(),
-        retryable: true,
-    })
+    DbError.Adapter(AdapterSpecific.new(
+        AdPostgres,
+        "PIPELINE_ABORTED".clone(),
+        "queued query aborted by an earlier ErrorResponse in the same Sync batch".clone(),
+        true,
+    ))
 }
 
 // -----------------------------------------------------------------------------

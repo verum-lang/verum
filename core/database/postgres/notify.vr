@@ -715,10 +715,10 @@ fn clone_route(r: &ChannelRoute) -> ChannelRoute {
 }
 
 fn notify_poisoned(msg: Text) -> DbError {
-    DbError.Adapter(AdapterSpecific {
-        adapter: AdPostgres,
-        code: "NOTIFY_POISONED".clone(),
-        message: msg,
-        retryable: false,
-    })
+    DbError.Adapter(AdapterSpecific.new(
+        AdPostgres,
+        "NOTIFY_POISONED".clone(),
+        msg,
+        false,
+    ))
 }

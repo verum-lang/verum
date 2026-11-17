@@ -1,0 +1,10 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L2
+// @expected-error: E202
+// @description: A caller must validate SQLSTATE text through SqlState.parse.
+mount core.database.common.error.SqlState;
+
+fn main() {
+    let state = SqlState { code: "23z05".to_text() };
+}

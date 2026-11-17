@@ -229,6 +229,10 @@ implement AdapterSpecific {
     public fn new(adapter: AdapterId, code: Text, message: Text, retryable: Bool) -> AdapterSpecific {
         AdapterSpecific { adapter: adapter, code: code, message: message, retryable: retryable }
     }
+
+    public fn code(&self) -> &Text { &self.code }
+
+    public fn message(&self) -> &Text { &self.message }
 }
 
 // -----------------------------------------------------------------------------
@@ -238,34 +242,33 @@ implement AdapterSpecific {
 /// Wire-decoder context that explains *which* column on *what* row
 /// failed and what the server claimed it was sending.
 public type DecodeFault is {
-    column_index: Int,
-    column_name: Text,
-    expected_type: Text,
-    found_oid: Int,
-    detail: Text,
+    public column_index: Int,
+    public column_name: Text,
+    public expected_type: Text,
+    public found_oid: Int,
+    public detail: Text,
 };
 
 public type EncodeFault is {
-    param_index: Int,
-    type_name: Text,
-    reason: Text,
+    public param_index: Int,
+    public type_name: Text,
+    public reason: Text,
 };
 
 public type DbError is
-      ConnectionFailed { source: ConnectionErrorKind, adapter: AdapterId }
-    | QueryFailed     { sql_state: SqlState, message: Text, position: Maybe<Int> }
-    | DecodeFailed    { fault: DecodeFault }
-    | EncodeFailed    { fault: EncodeFault }
-    | TimedOut        { phase: TimeoutPhase }
+    | ConnectionFailed { public source: ConnectionErrorKind, public adapter: AdapterId }
+    | QueryFailed     { public sql_state: SqlState, public message: Text, public position: Maybe<Int> }
+    | DecodeFailed    { public fault: DecodeFault }
+    | EncodeFailed    { public fault: EncodeFault }
+    | TimedOut        { public phase: TimeoutPhase }
     | Cancelled
-    | RefinementViolated { column: Text, predicate: Text }
-    | PoolFailure     { kind: PoolErrorKind }
-    | AuthFailed      { kind: AuthErrorKind }
+    | RefinementViolated { public column: Text, public predicate: Text }
+    | PoolFailure     { public kind: PoolErrorKind }
+    | AuthFailed      { public kind: AuthErrorKind }
     | Adapter(AdapterSpecific);
 
 implement DbError {
-    /// Short human-readable summary — never includes secrets / SQL
-    /// text. For full context use `DbError.detail()`.
+    /// Summarize this error for diagnostics. Adapter errors include the vendor message.
     public fn message(&self) -> Text {
         match self {
             ConnectionFailed { adapter, .. } =>
@@ -862,6 +865,14 @@ public type ConstraintViolation is {
 };
 
 implement ConstraintViolation {
+    public fn column(&self) -> Maybe<&Text> { self.column.as_ref() }
+
+    public fn predicate(&self) -> Maybe<&Text> { self.predicate.as_ref() }
+
+    public fn kind(&self) -> &ConstraintKind { &self.kind }
+
+    public fn detected_at(&self) -> &ViolationDetection { &self.detected_at }
+
     /// Stable label combining kind + detection — useful as a
     /// metric-cardinality-bounded tag.
     public fn metric_tag(&self) -> Text {
@@ -907,7 +918,7 @@ fn extract_constraint_name(message: &Text) -> Maybe<Text> {
         buf.push(bytes[k]);
         k = k + 1;
     }
-    match Text.from_utf8(buf) {
+    match Text.from_utf8(buf.as_slice()) {
         Result.Ok(t)  => Maybe.Some(t),
         Result.Err(_) => Maybe.None,
     }

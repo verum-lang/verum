@@ -271,10 +271,10 @@ fn run_drain(
 // =============================================================================
 
 fn actor_dropped(what: &Text) -> DbError {
-    DbError.Adapter(AdapterSpecific {
-        adapter: AdPostgres,
-        code: "BB_ACTOR_CLOSED".clone(),
-        message: f"async base_backup actor unavailable during {what}",
-        retryable: false,
-    })
+    DbError.Adapter(AdapterSpecific.new(
+        AdPostgres,
+        "BB_ACTOR_CLOSED".clone(),
+        f"async base_backup actor unavailable during {what}",
+        false,
+    ))
 }

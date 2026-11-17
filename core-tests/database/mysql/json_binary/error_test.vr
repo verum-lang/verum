@@ -1,0 +1,28 @@
+mount core.database.mysql.json_binary.decode_json_binary;
+mount core.database.common.error.{DbError, ErrorCategory};
+mount core.encoding.json.JsonValue;
+mount core.collections.List;
+
+@test
+fn test_binary_json_decoder_returns_the_vendor_error() {
+    let bytes: List<Byte> = List.new();
+    match decode_json_binary(bytes) {
+        Result.Err(error) => {
+            assert(!error.is_retryable());
+            assert(error.category() is ErrorCategory.EcUpstream);
+            match error {
+                DbError.Adapter(details) => {
+                    assert_eq(*details.code(), "BINLOG_JSON");
+                    assert_eq(*details.message(), "binary JSON decode error: empty payload");
+                }
+                _ => panic("expected an adapter error"),
+            }
+        }
+        Result.Ok(_) => panic("empty binary JSON accepted"),
+    }
+    let mut literal: List<Byte> = List.new();
+    literal.push(4 as Byte);
+    literal.push(1 as Byte);
+    let decoded = decode_json_binary(literal).unwrap();
+    assert(decoded is JsonValue.JsonBool(true));
+}

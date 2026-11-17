@@ -275,24 +275,24 @@ public fn decode_field<T: TypedRow>(
 public fn expect_arity(row: &List<TypedValue>, want: Int) -> Result<(), DbError> {
     let got = row.len() as Int;
     if got != want {
-        return Result.Err(DbError.Adapter(AdapterSpecific {
-            adapter: AdPostgres,
-            code: "TYPED_ROW_ARITY".clone(),
-            message: f"TypedRow: expected {want} columns, got {got}",
-            retryable: false,
-        }));
+        return Result.Err(DbError.Adapter(AdapterSpecific.new(
+            AdPostgres,
+            "TYPED_ROW_ARITY".clone(),
+            f"TypedRow: expected {want} columns, got {got}",
+            false,
+        )));
     }
     Result.Ok(())
 }
 
 fn typed_row_error(col: Int, want: &Text, got: &TypedValue) -> DbError {
     let got_name = got.type_name();
-    DbError.Adapter(AdapterSpecific {
-        adapter: AdPostgres,
-        code: "TYPED_ROW_DECODE".clone(),
-        message: f"TypedRow: column {col}: expected {want}, got {got_name}",
-        retryable: false,
-    })
+    DbError.Adapter(AdapterSpecific.new(
+        AdPostgres,
+        "TYPED_ROW_DECODE".clone(),
+        f"TypedRow: column {col}: expected {want}, got {got_name}",
+        false,
+    ))
 }
 
 // =============================================================================
@@ -312,12 +312,12 @@ public fn rows_typed<R: TypedRow>(
         match r {
             Result.Ok(v)  => { out.push(v); }
             Result.Err(e) => {
-                return Result.Err(DbError.Adapter(AdapterSpecific {
-                    adapter: AdPostgres,
-                    code: "TYPED_ROW_DECODE".clone(),
-                    message: f"row {i}: {e}",
-                    retryable: false,
-                }));
+                return Result.Err(DbError.Adapter(AdapterSpecific.new(
+                    AdPostgres,
+                    "TYPED_ROW_DECODE".clone(),
+                    f"row {i}: {e}",
+                    false,
+                )));
             }
         }
         i = i + 1;

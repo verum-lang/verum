@@ -284,36 +284,36 @@ fn connect_with_optional_replication(
                 match upgrade_to_tls(tcp, &config.host, &tls_config) {
                     Result.Ok(s) => s,
                     Result.Err(e) => {
-                        return Result.Err(DbError.Adapter(AdapterSpecific {
-                            adapter: AdPostgres,
-                            code: "TLS_HANDSHAKE_FAILED".clone(),
-                            message: f"TLS handshake failed: {e}",
-                            retryable: false,
-                        }));
+                        return Result.Err(DbError.Adapter(AdapterSpecific.new(
+                            AdPostgres,
+                            "TLS_HANDSHAKE_FAILED".clone(),
+                            f"TLS handshake failed: {e}",
+                            false,
+                        )));
                     }
                 }
             } else if v == 0x4E {
                 // 'N' — server declined TLS. Per the mode:
                 if !config.tls_mode.permits_plaintext_fallback() {
                     tcp.drop();
-                    return Result.Err(DbError.Adapter(AdapterSpecific {
-                        adapter: AdPostgres,
-                        code: "TLS_REJECTED_BY_SERVER".clone(),
-                        message: f"server declined TLS (mode {config.tls_mode.name()} requires encryption)",
-                        retryable: false,
-                    }));
+                    return Result.Err(DbError.Adapter(AdapterSpecific.new(
+                        AdPostgres,
+                        "TLS_REJECTED_BY_SERVER".clone(),
+                        f"server declined TLS (mode {config.tls_mode.name()} requires encryption)",
+                        false,
+                    )));
                 }
                 // PtmAllow tolerates plaintext fallback — continue
                 // with the same TCP socket.
                 PsPlain(tcp)
             } else {
                 tcp.drop();
-                return Result.Err(DbError.Adapter(AdapterSpecific {
-                    adapter: AdPostgres,
-                    code: "SSLREQUEST_PROTOCOL_VIOLATION".clone(),
-                    message: f"server replied 0x{v:x} to SSLRequest (expected 'S' or 'N')",
-                    retryable: false,
-                }));
+                return Result.Err(DbError.Adapter(AdapterSpecific.new(
+                    AdPostgres,
+                    "SSLREQUEST_PROTOCOL_VIOLATION".clone(),
+                    f"server replied 0x{v:x} to SSLRequest (expected 'S' or 'N')",
+                    false,
+                )));
             }
         }
     };
@@ -383,12 +383,12 @@ implement PgConnection {
     public fn simple_query(&mut self, sql: &Text) -> Result<PgSimpleQueryResult, DbError> {
         match self.state {
             PcsReady => {}
-            _ => { return Result.Err(DbError.Adapter(AdapterSpecific {
-                adapter: AdPostgres,
-                code: "BAD_STATE".clone(),
-                message: "simple_query requires Ready state".clone(),
-                retryable: false,
-            })); }
+            _ => { return Result.Err(DbError.Adapter(AdapterSpecific.new(
+                AdPostgres,
+                "BAD_STATE".clone(),
+                "simple_query requires Ready state".clone(),
+                false,
+            ))); }
         }
         self.state = PcsBusy;
         let payload = simple_query(sql);
@@ -465,12 +465,12 @@ implement PgConnection {
     public fn simple_query_arena(&mut self, sql: &Text) -> Result<PgSimpleQueryArenaResult, DbError> {
         match self.state {
             PcsReady => {}
-            _ => { return Result.Err(DbError.Adapter(AdapterSpecific {
-                adapter: AdPostgres,
-                code: "BAD_STATE".clone(),
-                message: "simple_query_arena requires Ready state".clone(),
-                retryable: false,
-            })); }
+            _ => { return Result.Err(DbError.Adapter(AdapterSpecific.new(
+                AdPostgres,
+                "BAD_STATE".clone(),
+                "simple_query_arena requires Ready state".clone(),
+                false,
+            ))); }
         }
         self.state = PcsBusy;
         let payload = simple_query(sql);
@@ -591,12 +591,12 @@ implement PgConnection {
     ) -> Result<Int, DbError> {
         match self.state {
             PcsReady => {}
-            _ => { return Result.Err(DbError.Adapter(AdapterSpecific {
-                adapter: AdPostgres,
-                code: "BAD_STATE".clone(),
-                message: "copy_in requires Ready state".clone(),
-                retryable: false,
-            })); }
+            _ => { return Result.Err(DbError.Adapter(AdapterSpecific.new(
+                AdPostgres,
+                "BAD_STATE".clone(),
+                "copy_in requires Ready state".clone(),
+                false,
+            ))); }
         }
         self.state = PcsBusy;
         let payload = simple_query(sql);
@@ -619,12 +619,12 @@ implement PgConnection {
                 }
                 _ => {
                     let _ = drain_to_ready(self);
-                    return Result.Err(DbError.Adapter(AdapterSpecific {
-                        adapter: AdPostgres,
-                        code: "COPY_PROTOCOL_VIOLATION".clone(),
-                        message: "expected CopyInResponse".clone(),
-                        retryable: false,
-                    }));
+                    return Result.Err(DbError.Adapter(AdapterSpecific.new(
+                        AdPostgres,
+                        "COPY_PROTOCOL_VIOLATION".clone(),
+                        "expected CopyInResponse".clone(),
+                        false,
+                    )));
                 }
             }
         }
@@ -726,12 +726,12 @@ implement PgConnection {
     public fn start_copy_in_session(&mut self, sql: &Text) -> Result<(), DbError> {
         match self.state {
             PcsReady => {}
-            _ => { return Result.Err(DbError.Adapter(AdapterSpecific {
-                adapter: AdPostgres,
-                code: "BAD_STATE".clone(),
-                message: "start_copy_in_session requires Ready state".clone(),
-                retryable: false,
-            })); }
+            _ => { return Result.Err(DbError.Adapter(AdapterSpecific.new(
+                AdPostgres,
+                "BAD_STATE".clone(),
+                "start_copy_in_session requires Ready state".clone(),
+                false,
+            ))); }
         }
         self.state = PcsBusy;
         let payload = simple_query(sql);
@@ -742,12 +742,12 @@ implement PgConnection {
             match msg {
                 BmCopyInResponse(_)  => { return Result.Ok(()); }
                 BmCopyOutResponse(_) => {
-                    return Result.Err(DbError.Adapter(AdapterSpecific {
-                        adapter: AdPostgres,
-                        code: "COPY_DIRECTION".clone(),
-                        message: "expected CopyInResponse, got CopyOutResponse".clone(),
-                        retryable: false,
-                    }));
+                    return Result.Err(DbError.Adapter(AdapterSpecific.new(
+                        AdPostgres,
+                        "COPY_DIRECTION".clone(),
+                        "expected CopyInResponse, got CopyOutResponse".clone(),
+                        false,
+                    )));
                 }
                 BmError(d) => {
                     let _ = drain_to_ready(self);
@@ -756,12 +756,12 @@ implement PgConnection {
                 BmNotice(_) | BmParameterStatus(_) => {}
                 BmReadyForQuery(_) => {
                     self.state = PcsReady;
-                    return Result.Err(DbError.Adapter(AdapterSpecific {
-                        adapter: AdPostgres,
-                        code: "COPY_NO_RESPONSE".clone(),
-                        message: "COPY command returned RFQ without CopyInResponse".clone(),
-                        retryable: false,
-                    }));
+                    return Result.Err(DbError.Adapter(AdapterSpecific.new(
+                        AdPostgres,
+                        "COPY_NO_RESPONSE".clone(),
+                        "COPY command returned RFQ without CopyInResponse".clone(),
+                        false,
+                    )));
                 }
                 _ => {}
             }
@@ -821,12 +821,12 @@ implement PgConnection {
     public fn start_copy_out_session(&mut self, sql: &Text) -> Result<(), DbError> {
         match self.state {
             PcsReady => {}
-            _ => { return Result.Err(DbError.Adapter(AdapterSpecific {
-                adapter: AdPostgres,
-                code: "BAD_STATE".clone(),
-                message: "start_copy_out_session requires Ready state".clone(),
-                retryable: false,
-            })); }
+            _ => { return Result.Err(DbError.Adapter(AdapterSpecific.new(
+                AdPostgres,
+                "BAD_STATE".clone(),
+                "start_copy_out_session requires Ready state".clone(),
+                false,
+            ))); }
         }
         self.state = PcsBusy;
         let payload = simple_query(sql);
@@ -837,12 +837,12 @@ implement PgConnection {
             match msg {
                 BmCopyOutResponse(_) => { return Result.Ok(()); }
                 BmCopyInResponse(_) => {
-                    return Result.Err(DbError.Adapter(AdapterSpecific {
-                        adapter: AdPostgres,
-                        code: "COPY_DIRECTION".clone(),
-                        message: "expected CopyOutResponse, got CopyInResponse".clone(),
-                        retryable: false,
-                    }));
+                    return Result.Err(DbError.Adapter(AdapterSpecific.new(
+                        AdPostgres,
+                        "COPY_DIRECTION".clone(),
+                        "expected CopyOutResponse, got CopyInResponse".clone(),
+                        false,
+                    )));
                 }
                 BmError(d) => {
                     let _ = drain_to_ready(self);
@@ -851,12 +851,12 @@ implement PgConnection {
                 BmNotice(_) | BmParameterStatus(_) => {}
                 BmReadyForQuery(_) => {
                     self.state = PcsReady;
-                    return Result.Err(DbError.Adapter(AdapterSpecific {
-                        adapter: AdPostgres,
-                        code: "COPY_NO_RESPONSE".clone(),
-                        message: "COPY command returned RFQ without CopyOutResponse".clone(),
-                        retryable: false,
-                    }));
+                    return Result.Err(DbError.Adapter(AdapterSpecific.new(
+                        AdPostgres,
+                        "COPY_NO_RESPONSE".clone(),
+                        "COPY command returned RFQ without CopyOutResponse".clone(),
+                        false,
+                    )));
                 }
                 _ => {}
             }
@@ -924,12 +924,12 @@ implement PgConnection {
     ) -> Result<List<List<Byte>>, DbError> {
         match self.state {
             PcsReady => {}
-            _ => { return Result.Err(DbError.Adapter(AdapterSpecific {
-                adapter: AdPostgres,
-                code: "BAD_STATE".clone(),
-                message: "copy_out requires Ready state".clone(),
-                retryable: false,
-            })); }
+            _ => { return Result.Err(DbError.Adapter(AdapterSpecific.new(
+                AdPostgres,
+                "BAD_STATE".clone(),
+                "copy_out requires Ready state".clone(),
+                false,
+            ))); }
         }
         self.state = PcsBusy;
         let payload = simple_query(sql);
@@ -987,12 +987,12 @@ implement PgConnection {
     public fn prepare(&mut self, sql: &Text) -> Result<PgPreparedStatement, DbError> {
         match self.state {
             PcsReady => {}
-            _ => { return Result.Err(DbError.Adapter(AdapterSpecific {
-                adapter: AdPostgres,
-                code: "BAD_STATE".clone(),
-                message: "prepare requires Ready state".clone(),
-                retryable: false,
-            })); }
+            _ => { return Result.Err(DbError.Adapter(AdapterSpecific.new(
+                AdPostgres,
+                "BAD_STATE".clone(),
+                "prepare requires Ready state".clone(),
+                false,
+            ))); }
         }
         let name = f"s{self.prepared_counter}";
         self.prepared_counter = self.prepared_counter + 1;
@@ -1056,12 +1056,12 @@ implement PgConnection {
     ) -> Result<PgSimpleQueryResult, DbError> {
         match self.state {
             PcsReady => {}
-            _ => { return Result.Err(DbError.Adapter(AdapterSpecific {
-                adapter: AdPostgres,
-                code: "BAD_STATE".clone(),
-                message: "execute_prepared requires Ready state".clone(),
-                retryable: false,
-            })); }
+            _ => { return Result.Err(DbError.Adapter(AdapterSpecific.new(
+                AdPostgres,
+                "BAD_STATE".clone(),
+                "execute_prepared requires Ready state".clone(),
+                false,
+            ))); }
         }
         let portal = "".clone();          // unnamed portal
         let text_formats: List<Int> = List.new();    // empty → text for all
@@ -1148,12 +1148,12 @@ implement PgConnection {
     ) -> Result<PgTypedQueryResult, DbError> {
         match self.state {
             PcsReady => {}
-            _ => { return Result.Err(DbError.Adapter(AdapterSpecific {
-                adapter: AdPostgres,
-                code: "BAD_STATE".clone(),
-                message: "execute_prepared_typed requires Ready state".clone(),
-                retryable: false,
-            })); }
+            _ => { return Result.Err(DbError.Adapter(AdapterSpecific.new(
+                AdPostgres,
+                "BAD_STATE".clone(),
+                "execute_prepared_typed requires Ready state".clone(),
+                false,
+            ))); }
         }
 
         // Encode every param via the OID-dispatched binary encoder.
@@ -1312,12 +1312,12 @@ implement PgConnection {
     {
         match self.state {
             PcsReady => {}
-            _ => { return Result.Err(DbError.Adapter(AdapterSpecific {
-                adapter: AdPostgres,
-                code: "BAD_STATE".clone(),
-                message: "close_prepared requires Ready state".clone(),
-                retryable: false,
-            })); }
+            _ => { return Result.Err(DbError.Adapter(AdapterSpecific.new(
+                AdPostgres,
+                "BAD_STATE".clone(),
+                "close_prepared requires Ready state".clone(),
+                false,
+            ))); }
         }
         let c = close_statement(&stmt.name);
         let s = sync();
@@ -1511,12 +1511,12 @@ implement PgConnection {
     /// pulling from the wire.
     public fn push_back_replication(&mut self, msg: BackendMessage) -> Result<(), DbError> {
         match self.replication_stash {
-            Maybe.Some(_) => Result.Err(DbError.Adapter(AdapterSpecific {
-                adapter: AdPostgres,
-                code: "REPL_STASH_FULL".clone(),
-                message: "replication push_back stash already occupied".clone(),
-                retryable: false,
-            })),
+            Maybe.Some(_) => Result.Err(DbError.Adapter(AdapterSpecific.new(
+                AdPostgres,
+                "REPL_STASH_FULL".clone(),
+                "replication push_back stash already occupied".clone(),
+                false,
+            ))),
             Maybe.None => {
                 self.replication_stash = Maybe.Some(msg);
                 Result.Ok(())
@@ -1541,12 +1541,12 @@ implement PgConnection {
     {
         match self.stream.tcp_mut().set_read_timeout(timeout_ms) {
             Result.Ok(())  => Result.Ok(()),
-            Result.Err(_)  => Result.Err(DbError.Adapter(AdapterSpecific {
-                adapter: AdPostgres,
-                code: "TIMEOUT_SET".clone(),
-                message: "failed to set TCP recv timeout".clone(),
-                retryable: false,
-            })),
+            Result.Err(_)  => Result.Err(DbError.Adapter(AdapterSpecific.new(
+                AdPostgres,
+                "TIMEOUT_SET".clone(),
+                "failed to set TCP recv timeout".clone(),
+                false,
+            ))),
         }
     }
 
@@ -1589,12 +1589,12 @@ implement PgConnection {
                 }
                 Result.Ok(Maybe.None) => {}
                 Result.Err(_) => {
-                    return Result.Err(DbError.Adapter(AdapterSpecific {
-                        adapter: AdPostgres,
-                        code: "BAD_FRAME".clone(),
-                        message: "wire protocol violation".clone(),
-                        retryable: false,
-                    }));
+                    return Result.Err(DbError.Adapter(AdapterSpecific.new(
+                        AdPostgres,
+                        "BAD_FRAME".clone(),
+                        "wire protocol violation".clone(),
+                        false,
+                    )));
                 }
             }
 
@@ -1659,12 +1659,12 @@ implement PgConnection {
         expects_rows: Bool,
     ) -> Result<PipelineHandle, DbError> {
         match &self.pipeline {
-            Maybe.None => Result.Err(DbError.Adapter(AdapterSpecific {
-                adapter: AdPostgres,
-                code: "PIPELINE_NOT_ATTACHED".clone(),
-                message: "submit_pipelined called without attach_pipeline".clone(),
-                retryable: false,
-            })),
+            Maybe.None => Result.Err(DbError.Adapter(AdapterSpecific.new(
+                AdPostgres,
+                "PIPELINE_NOT_ATTACHED".clone(),
+                "submit_pipelined called without attach_pipeline".clone(),
+                false,
+            ))),
             Maybe.Some(p) => p.submit(parse_bytes, bind_bytes, execute_bytes, expects_rows),
         }
     }
@@ -1685,12 +1685,12 @@ implement PgConnection {
         // Snapshot the live count to avoid holding any borrow on
         // the pipeline across the read/write loops below.
         let mut remaining: Int = match &self.pipeline {
-            Maybe.None    => return Result.Err(DbError.Adapter(AdapterSpecific {
-                adapter: AdPostgres,
-                code: "PIPELINE_NOT_ATTACHED".clone(),
-                message: "pump_pipeline called without attach_pipeline".clone(),
-                retryable: false,
-            })),
+            Maybe.None    => return Result.Err(DbError.Adapter(AdapterSpecific.new(
+                AdPostgres,
+                "PIPELINE_NOT_ATTACHED".clone(),
+                "pump_pipeline called without attach_pipeline".clone(),
+                false,
+            ))),
             Maybe.Some(p) => p.live_count(),
         };
         if remaining == 0 {
@@ -1860,12 +1860,12 @@ implement PgConnection {
         let key = match self.backend_key {
             Maybe.Some(k) => k,
             Maybe.None    => {
-                return Result.Err(DbError.Adapter(AdapterSpecific {
-                    adapter: AdPostgres,
-                    code: "NO_BACKEND_KEY".clone(),
-                    message: "cancel_running_query: BackendKeyData was never received".clone(),
-                    retryable: false,
-                }));
+                return Result.Err(DbError.Adapter(AdapterSpecific.new(
+                    AdPostgres,
+                    "NO_BACKEND_KEY".clone(),
+                    "cancel_running_query: BackendKeyData was never received".clone(),
+                    false,
+                )));
             }
         };
         // Source-IP-bind from this connection's own local address
@@ -2344,12 +2344,12 @@ fn read_message(conn: &mut PgConnection) -> Result<BackendMessage, DbError> {
                 }
             }
             Result.Err(_) => {
-                return Result.Err(DbError.Adapter(AdapterSpecific {
-                    adapter: AdPostgres,
-                    code: "BAD_FRAME".clone(),
-                    message: "wire protocol violation".clone(),
-                    retryable: false,
-                }));
+                return Result.Err(DbError.Adapter(AdapterSpecific.new(
+                    AdPostgres,
+                    "BAD_FRAME".clone(),
+                    "wire protocol violation".clone(),
+                    false,
+                )));
             }
         }
     }
@@ -2358,12 +2358,12 @@ fn read_message(conn: &mut PgConnection) -> Result<BackendMessage, DbError> {
 fn decode_one(frame: PgFrame, formats: &List<Int>) -> Result<BackendMessage, DbError> {
     match parse_backend(frame, formats) {
         Result.Ok(m)  => Result.Ok(m),
-        Result.Err(_) => Result.Err(DbError.Adapter(AdapterSpecific {
-            adapter: AdPostgres,
-            code: "BAD_DECODE".clone(),
-            message: "backend message decode failed".clone(),
-            retryable: false,
-        })),
+        Result.Err(_) => Result.Err(DbError.Adapter(AdapterSpecific.new(
+            AdPostgres,
+            "BAD_DECODE".clone(),
+            "backend message decode failed".clone(),
+            false,
+        ))),
     }
 }
 
@@ -2386,12 +2386,12 @@ fn read_message_arena(conn: &mut PgConnection) -> Result<BackendMessageArena, Db
                 ) {
                     Result.Ok(m)  => m,
                     Result.Err(_) => {
-                        return Result.Err(DbError.Adapter(AdapterSpecific {
-                            adapter: AdPostgres,
-                            code: "BAD_DECODE".clone(),
-                            message: "arena decode failed".clone(),
-                            retryable: false,
-                        }));
+                        return Result.Err(DbError.Adapter(AdapterSpecific.new(
+                            AdPostgres,
+                            "BAD_DECODE".clone(),
+                            "arena decode failed".clone(),
+                            false,
+                        )));
                     }
                 };
                 match msg {
@@ -2432,12 +2432,12 @@ fn read_message_arena(conn: &mut PgConnection) -> Result<BackendMessageArena, Db
                 }
             }
             Result.Err(_) => {
-                return Result.Err(DbError.Adapter(AdapterSpecific {
-                    adapter: AdPostgres,
-                    code: "BAD_FRAME".clone(),
-                    message: "wire protocol violation".clone(),
-                    retryable: false,
-                }));
+                return Result.Err(DbError.Adapter(AdapterSpecific.new(
+                    AdPostgres,
+                    "BAD_FRAME".clone(),
+                    "wire protocol violation".clone(),
+                    false,
+                )));
             }
         }
     }

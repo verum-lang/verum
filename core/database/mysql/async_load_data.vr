@@ -203,12 +203,12 @@ public async fn load_data_local_async_with_token(
 }
 
 fn cancelled_err(what: &Text) -> DbError {
-    DbError.Adapter(AdapterSpecific {
-        adapter: AdMysql,
-        code: "CANCELLED".clone(),
-        message: f"async LOAD DATA cancelled at {what}",
-        retryable: false,
-    })
+    DbError.Adapter(AdapterSpecific.new(
+        AdMysql,
+        "CANCELLED".clone(),
+        f"async LOAD DATA cancelled at {what}",
+        false,
+    ))
 }
 
 // =============================================================================
@@ -216,10 +216,10 @@ fn cancelled_err(what: &Text) -> DbError {
 // =============================================================================
 
 fn actor_dropped(what: &Text) -> DbError {
-    DbError.Adapter(AdapterSpecific {
-        adapter: AdMysql,
-        code: "ACTOR_CLOSED".clone(),
-        message: f"async MySQL actor unavailable during {what}",
-        retryable: false,
-    })
+    DbError.Adapter(AdapterSpecific.new(
+        AdMysql,
+        "ACTOR_CLOSED".clone(),
+        f"async MySQL actor unavailable during {what}",
+        false,
+    ))
 }

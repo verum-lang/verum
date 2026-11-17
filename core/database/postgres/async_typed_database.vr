@@ -205,10 +205,10 @@ public fn async_readonly_database_from_pool(pool: AsyncPgPool)
 // =============================================================================
 
 fn scope_used(what: &Text) -> DbError {
-    DbError.Adapter(core.database.common.error.AdapterSpecific {
-        adapter: AdPostgres,
-        code: "TX_SCOPE_USED".clone(),
-        message: f"AsyncPgTxScope already consumed at {what}",
-        retryable: false,
-    })
+    DbError.Adapter(core.database.common.error.AdapterSpecific.new(
+        AdPostgres,
+        "TX_SCOPE_USED".clone(),
+        f"AsyncPgTxScope already consumed at {what}",
+        false,
+    ))
 }

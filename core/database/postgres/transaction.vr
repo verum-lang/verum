@@ -210,20 +210,20 @@ public fn commit_tx(
             // Postgres requires ROLLBACK after error; COMMIT here is
             // server-error-equivalent. Force the user to take the
             // recovery path explicitly.
-            return Result.Err(DbError.Adapter(AdapterSpecific {
-                adapter: AdPostgres,
-                code: "TX_ABORTED".clone(),
-                message: "commit_tx: transaction is in failed state — call rollback_tx".clone(),
-                retryable: false,
-            }));
+            return Result.Err(DbError.Adapter(AdapterSpecific.new(
+                AdPostgres,
+                "TX_ABORTED".clone(),
+                "commit_tx: transaction is in failed state — call rollback_tx".clone(),
+                false,
+            )));
         }
         _ => {
-            return Result.Err(DbError.Adapter(AdapterSpecific {
-                adapter: AdPostgres,
-                code: "TX_NOT_ACTIVE".clone(),
-                message: "commit_tx: no transaction is in progress".clone(),
-                retryable: false,
-            }));
+            return Result.Err(DbError.Adapter(AdapterSpecific.new(
+                AdPostgres,
+                "TX_NOT_ACTIVE".clone(),
+                "commit_tx: no transaction is in progress".clone(),
+                false,
+            )));
         }
     }
     match conn.execute(&"COMMIT".clone()) {

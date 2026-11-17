@@ -202,12 +202,12 @@ implement AsyncMysqlConnection {
     /// recv_packet returns with that error.
     public async fn cancel_running_query(&self) -> Result<(), DbError> {
         if self.connection_id == 0 {
-            return Result.Err(DbError.Adapter(AdapterSpecific {
-                adapter: AdMysql,
-                code: "CANCEL_NO_CONN_ID".clone(),
-                message: "connection_id absent — handshake didn't populate".clone(),
-                retryable: false,
-            }));
+            return Result.Err(DbError.Adapter(AdapterSpecific.new(
+                AdMysql,
+                "CANCEL_NO_CONN_ID".clone(),
+                "connection_id absent — handshake didn't populate".clone(),
+                false,
+            )));
         }
         self.fire_kill(false).await
     }
@@ -218,12 +218,12 @@ implement AsyncMysqlConnection {
     /// with ACTOR_CLOSED.
     public async fn cancel_session(&self) -> Result<(), DbError> {
         if self.connection_id == 0 {
-            return Result.Err(DbError.Adapter(AdapterSpecific {
-                adapter: AdMysql,
-                code: "CANCEL_NO_CONN_ID".clone(),
-                message: "connection_id absent — handshake didn't populate".clone(),
-                retryable: false,
-            }));
+            return Result.Err(DbError.Adapter(AdapterSpecific.new(
+                AdMysql,
+                "CANCEL_NO_CONN_ID".clone(),
+                "connection_id absent — handshake didn't populate".clone(),
+                false,
+            )));
         }
         self.fire_kill(true).await
     }
@@ -671,12 +671,12 @@ fn run_load_data_subloop(
 }
 
 fn actor_dropped(what: &Text) -> DbError {
-    DbError.Adapter(AdapterSpecific {
-        adapter: AdMysql,
-        code: "ACTOR_CLOSED".clone(),
-        message: f"async MySQL actor unavailable during {what}",
-        retryable: false,
-    })
+    DbError.Adapter(AdapterSpecific.new(
+        AdMysql,
+        "ACTOR_CLOSED".clone(),
+        f"async MySQL actor unavailable during {what}",
+        false,
+    ))
 }
 
 /// Clone a `MysqlPreparedStatement` for the actor's stmt-cache

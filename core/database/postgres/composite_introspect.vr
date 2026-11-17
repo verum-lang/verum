@@ -407,10 +407,10 @@ fn value_to_text(v: &WireValue) -> Text {
 }
 
 fn pg_error(code: Text, message: Text) -> DbError {
-    DbError.Adapter(AdapterSpecific {
-        adapter: AdPostgres,
-        code: code,
-        message: message,
-        retryable: false,
-    })
+    DbError.Adapter(AdapterSpecific.new(
+        AdPostgres,
+        code,
+        message,
+        false,
+    ))
 }

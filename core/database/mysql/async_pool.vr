@@ -208,12 +208,12 @@ implement Drop for AsyncMysqlPoolGuard {
 }
 
 fn pool_err(what: &Text) -> DbError {
-    DbError.Adapter(AdapterSpecific {
-        adapter: AdMysql,
-        code: "ASYNC_POOL".clone(),
-        message: f"async MySQL pool error: {what}",
-        retryable: false,
-    })
+    DbError.Adapter(AdapterSpecific.new(
+        AdMysql,
+        "ASYNC_POOL".clone(),
+        f"async MySQL pool error: {what}",
+        false,
+    ))
 }
 
 /// Open a fresh `AsyncMysqlConnection` and run the warmup

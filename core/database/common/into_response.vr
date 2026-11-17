@@ -83,7 +83,7 @@ implement IntoResponse for DbError {
 }
 
 fn render_for_constraint(cv: &ConstraintViolation, err: &DbError) -> (StatusCode, Text) {
-    match cv.kind {
+    match cv.kind() {
         // Conflict-class constraints: the row's data is internally
         // consistent but conflicts with existing rows. 409 Conflict
         // is the canonical HTTP semantic — clients typically retry

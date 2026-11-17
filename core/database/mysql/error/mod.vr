@@ -35,12 +35,12 @@ const MYSQL_ER_PARSE_ERROR:      Int = 1064;
 ///  * everything else → QueryFailed with the decoded SQLSTATE if the server provided one
 public fn dberr_from_mysql(err: ErrPacket) -> DbError {
     if err.code == MYSQL_ER_LOCK_DEADLOCK || err.code == MYSQL_ER_LOCK_WAIT_TIMEOUT {
-        return DbError.Adapter(AdapterSpecific {
-            adapter: AdMysql,
-            code: itoa(err.code),
-            message: err.message,
-            retryable: true,
-        });
+        return DbError.Adapter(AdapterSpecific.new(
+            AdMysql,
+            itoa(err.code),
+            err.message,
+            true,
+        ));
     }
     if err.code == MYSQL_ER_ACCESS_DENIED {
         return DbError.AuthFailed {

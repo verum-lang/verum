@@ -722,10 +722,10 @@ fn text_decode_failed(col_idx: Int, name: &Text, expected: &Text, detail: Text) 
 }
 
 fn column_not_found(name: &Text) -> DbError {
-    DbError.Adapter(AdapterSpecific {
-        adapter:   AdPostgres,
-        code:      "PG_ROW_COL_NOT_FOUND".to_text(),
-        message:   f"row has no column named '{name}'",
-        retryable: false,
-    })
+    DbError.Adapter(AdapterSpecific.new(
+        AdPostgres,
+        "PG_ROW_COL_NOT_FOUND".to_text(),
+        f"row has no column named '{name}'",
+        false,
+    ))
 }

@@ -141,10 +141,10 @@ public fn async_mysql_readonly_database_from_pool(pool: AsyncMysqlPool)
 }
 
 fn scope_used(what: &Text) -> DbError {
-    DbError.Adapter(core.database.common.error.AdapterSpecific {
-        adapter: AdMysql,
-        code: "TX_SCOPE_USED".clone(),
-        message: f"AsyncMysqlTxScope already consumed at {what}",
-        retryable: false,
-    })
+    DbError.Adapter(core.database.common.error.AdapterSpecific.new(
+        AdMysql,
+        "TX_SCOPE_USED".clone(),
+        f"AsyncMysqlTxScope already consumed at {what}",
+        false,
+    ))
 }

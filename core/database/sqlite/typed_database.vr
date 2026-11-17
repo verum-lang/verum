@@ -296,12 +296,12 @@ implement SqliteTxScope<SqlitePool> {
 }
 
 fn tx_already_consumed() -> DbError {
-    DbError.Adapter(AdapterSpecific {
-        adapter: core.database.common.error.AdSqlite,
-        code: "TX_ALREADY_CONSUMED".clone(),
-        message: "SqliteTxScope.commit/rollback called twice".clone(),
-        retryable: false,
-    })
+    DbError.Adapter(AdapterSpecific.new(
+        core.database.common.error.AdSqlite,
+        "TX_ALREADY_CONSUMED".clone(),
+        "SqliteTxScope.commit/rollback called twice".clone(),
+        false,
+    ))
 }
 
 // -----------------------------------------------------------------------------

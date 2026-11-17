@@ -219,12 +219,12 @@ implement MysqlConnection {
     public fn simple_query(&mut self, sql: &Text) -> Result<MySimpleQueryResult, DbError> {
         match self.state {
             McsReady => {}
-            _ => { return Result.Err(DbError.Adapter(AdapterSpecific {
-                adapter: AdMysql,
-                code: "BAD_STATE".clone(),
-                message: "simple_query requires Ready state".clone(),
-                retryable: false,
-            })); }
+            _ => { return Result.Err(DbError.Adapter(AdapterSpecific.new(
+                AdMysql,
+                "BAD_STATE".clone(),
+                "simple_query requires Ready state".clone(),
+                false,
+            ))); }
         }
         self.state = McsBusy;
 
@@ -266,12 +266,12 @@ implement MysqlConnection {
             }
             SkLocalInfile => {
                 self.state = McsFailed;
-                return Result.Err(DbError.Adapter(AdapterSpecific {
-                    adapter: AdMysql,
-                    code: "LOCAL_INFILE_DISABLED".clone(),
-                    message: "LOCAL INFILE protocol disabled".clone(),
-                    retryable: false,
-                }));
+                return Result.Err(DbError.Adapter(AdapterSpecific.new(
+                    AdMysql,
+                    "LOCAL_INFILE_DISABLED".clone(),
+                    "LOCAL INFILE protocol disabled".clone(),
+                    false,
+                )));
             }
             _ => {
                 // Column-count LEI; fall through to result-set decoder.
@@ -368,12 +368,12 @@ implement MysqlConnection {
     {
         match self.state {
             McsReady => {}
-            _ => { return Result.Err(DbError.Adapter(AdapterSpecific {
-                adapter: AdMysql,
-                code: "BAD_STATE".clone(),
-                message: "multi_query requires Ready state".clone(),
-                retryable: false,
-            })); }
+            _ => { return Result.Err(DbError.Adapter(AdapterSpecific.new(
+                AdMysql,
+                "BAD_STATE".clone(),
+                "multi_query requires Ready state".clone(),
+                false,
+            ))); }
         }
         self.state = McsBusy;
         self.sequence = 0;
@@ -425,12 +425,12 @@ implement MysqlConnection {
             }
             SkLocalInfile => {
                 self.state = McsFailed;
-                return Result.Err(DbError.Adapter(AdapterSpecific {
-                    adapter: AdMysql,
-                    code: "LOCAL_INFILE_DISABLED".clone(),
-                    message: "LOCAL INFILE not supported in multi_query".clone(),
-                    retryable: false,
-                }));
+                return Result.Err(DbError.Adapter(AdapterSpecific.new(
+                    AdMysql,
+                    "LOCAL_INFILE_DISABLED".clone(),
+                    "LOCAL INFILE not supported in multi_query".clone(),
+                    false,
+                )));
             }
             _ => {}    // column-count LEI; fall through
         }
@@ -565,12 +565,12 @@ implement MysqlConnection {
     public fn prepare(&mut self, sql: &Text) -> Result<MysqlPreparedStatement, DbError> {
         match self.state {
             McsReady => {}
-            _ => { return Result.Err(DbError.Adapter(AdapterSpecific {
-                adapter: AdMysql,
-                code: "BAD_STATE".clone(),
-                message: "prepare requires Ready state".clone(),
-                retryable: false,
-            })); }
+            _ => { return Result.Err(DbError.Adapter(AdapterSpecific.new(
+                AdMysql,
+                "BAD_STATE".clone(),
+                "prepare requires Ready state".clone(),
+                false,
+            ))); }
         }
         self.sequence = 0;
         let payload = com_stmt_prepare(sql);
@@ -647,21 +647,21 @@ implement MysqlConnection {
         params: &List<StmtParam>,
     ) -> Result<MysqlPreparedResult, DbError> {
         if params.len() != stmt.num_params {
-            return Result.Err(DbError.Adapter(AdapterSpecific {
-                adapter: AdMysql,
-                code: "PARAM_COUNT_MISMATCH".clone(),
-                message: f"execute_prepared: expected {stmt.num_params} params, got {params.len()}".clone(),
-                retryable: false,
-            }));
+            return Result.Err(DbError.Adapter(AdapterSpecific.new(
+                AdMysql,
+                "PARAM_COUNT_MISMATCH".clone(),
+                f"execute_prepared: expected {stmt.num_params} params, got {params.len()}".clone(),
+                false,
+            )));
         }
         match self.state {
             McsReady => {}
-            _ => { return Result.Err(DbError.Adapter(AdapterSpecific {
-                adapter: AdMysql,
-                code: "BAD_STATE".clone(),
-                message: "execute requires Ready state".clone(),
-                retryable: false,
-            })); }
+            _ => { return Result.Err(DbError.Adapter(AdapterSpecific.new(
+                AdMysql,
+                "BAD_STATE".clone(),
+                "execute requires Ready state".clone(),
+                false,
+            ))); }
         }
         self.sequence = 0;
         let payload = com_stmt_execute(stmt.statement_id, params);
@@ -786,12 +786,12 @@ implement MysqlConnection {
     {
         match self.state {
             McsReady => {}
-            _ => { return Result.Err(DbError.Adapter(AdapterSpecific {
-                adapter: AdMysql,
-                code: "BAD_STATE".clone(),
-                message: "reset requires Ready state".clone(),
-                retryable: false,
-            })); }
+            _ => { return Result.Err(DbError.Adapter(AdapterSpecific.new(
+                AdMysql,
+                "BAD_STATE".clone(),
+                "reset requires Ready state".clone(),
+                false,
+            ))); }
         }
         self.sequence = 0;
         let payload = com_stmt_reset(stmt.statement_id);
@@ -815,12 +815,12 @@ implement MysqlConnection {
     public fn ping(&mut self) -> Result<(), DbError> {
         match self.state {
             McsReady => {}
-            _ => { return Result.Err(DbError.Adapter(AdapterSpecific {
-                adapter: AdMysql,
-                code: "BAD_STATE".clone(),
-                message: "ping requires Ready state".clone(),
-                retryable: false,
-            })); }
+            _ => { return Result.Err(DbError.Adapter(AdapterSpecific.new(
+                AdMysql,
+                "BAD_STATE".clone(),
+                "ping requires Ready state".clone(),
+                false,
+            ))); }
         }
         self.sequence = 0;
         let payload = com_ping();
@@ -895,39 +895,39 @@ implement MysqlConnection {
     ) -> Result<(), DbError> {
         match self.state {
             McsReady => {}
-            _ => { return Result.Err(DbError.Adapter(AdapterSpecific {
-                adapter: AdMysql,
-                code: "BAD_STATE".clone(),
-                message: "register_slave requires Ready state".clone(),
-                retryable: false,
-            })); }
+            _ => { return Result.Err(DbError.Adapter(AdapterSpecific.new(
+                AdMysql,
+                "BAD_STATE".clone(),
+                "register_slave requires Ready state".clone(),
+                false,
+            ))); }
         }
         let host_bytes = host.as_bytes();
         let user_bytes = user.as_bytes();
         let pw_bytes   = password.as_bytes();
         if (host_bytes.len() as Int) > 255 {
-            return Result.Err(DbError.Adapter(AdapterSpecific {
-                adapter: AdMysql,
-                code: "REGISTER_SLAVE_HOST_TOO_LONG".clone(),
-                message: f"host length {host_bytes.len()} > 255".clone(),
-                retryable: false,
-            }));
+            return Result.Err(DbError.Adapter(AdapterSpecific.new(
+                AdMysql,
+                "REGISTER_SLAVE_HOST_TOO_LONG".clone(),
+                f"host length {host_bytes.len()} > 255".clone(),
+                false,
+            )));
         }
         if (user_bytes.len() as Int) > 255 {
-            return Result.Err(DbError.Adapter(AdapterSpecific {
-                adapter: AdMysql,
-                code: "REGISTER_SLAVE_USER_TOO_LONG".clone(),
-                message: f"user length {user_bytes.len()} > 255".clone(),
-                retryable: false,
-            }));
+            return Result.Err(DbError.Adapter(AdapterSpecific.new(
+                AdMysql,
+                "REGISTER_SLAVE_USER_TOO_LONG".clone(),
+                f"user length {user_bytes.len()} > 255".clone(),
+                false,
+            )));
         }
         if (pw_bytes.len() as Int) > 255 {
-            return Result.Err(DbError.Adapter(AdapterSpecific {
-                adapter: AdMysql,
-                code: "REGISTER_SLAVE_PW_TOO_LONG".clone(),
-                message: f"password length {pw_bytes.len()} > 255".clone(),
-                retryable: false,
-            }));
+            return Result.Err(DbError.Adapter(AdapterSpecific.new(
+                AdMysql,
+                "REGISTER_SLAVE_PW_TOO_LONG".clone(),
+                f"password length {pw_bytes.len()} > 255".clone(),
+                false,
+            )));
         }
         let mut payload: List<Byte> = List.with_capacity(
             18 + host_bytes.len() + user_bytes.len() + pw_bytes.len(),
@@ -965,12 +965,12 @@ implement MysqlConnection {
                 let _ = parse_ok(body.as_slice(), self.capabilities);
                 Result.Ok(())
             }
-            _ => Result.Err(DbError.Adapter(AdapterSpecific {
-                adapter: AdMysql,
-                code: "REGISTER_SLAVE_BAD_REPLY".clone(),
-                message: "expected OK/ERR after COM_REGISTER_SLAVE".clone(),
-                retryable: false,
-            })),
+            _ => Result.Err(DbError.Adapter(AdapterSpecific.new(
+                AdMysql,
+                "REGISTER_SLAVE_BAD_REPLY".clone(),
+                "expected OK/ERR after COM_REGISTER_SLAVE".clone(),
+                false,
+            ))),
         }
     }
 
@@ -981,12 +981,12 @@ implement MysqlConnection {
     public fn binlog_send_command(&mut self, payload: &[Byte]) -> Result<(), DbError> {
         match self.state {
             McsReady => {}
-            _ => { return Result.Err(DbError.Adapter(AdapterSpecific {
-                adapter: AdMysql,
-                code: "BAD_STATE".clone(),
-                message: "binlog_send_command requires Ready state".clone(),
-                retryable: false,
-            })); }
+            _ => { return Result.Err(DbError.Adapter(AdapterSpecific.new(
+                AdMysql,
+                "BAD_STATE".clone(),
+                "binlog_send_command requires Ready state".clone(),
+                false,
+            ))); }
         }
         self.sequence = 0;
         send_packet(self, payload)?;
@@ -1035,12 +1035,12 @@ implement MysqlConnection {
     {
         match self.state {
             McsReady => {}
-            _ => { return Result.Err(DbError.Adapter(AdapterSpecific {
-                adapter: AdMysql,
-                code: "BAD_STATE".clone(),
-                message: "start_load_data_local_session requires Ready state".clone(),
-                retryable: false,
-            })); }
+            _ => { return Result.Err(DbError.Adapter(AdapterSpecific.new(
+                AdMysql,
+                "BAD_STATE".clone(),
+                "start_load_data_local_session requires Ready state".clone(),
+                false,
+            ))); }
         }
         self.state = McsBusy;
         self.sequence = 0;
@@ -1071,19 +1071,19 @@ implement MysqlConnection {
                 // didn't enter the data-streaming substate, so
                 // return to Ready.
                 self.state = McsReady;
-                Result.Err(DbError.Adapter(AdapterSpecific {
-                    adapter: AdMysql,
-                    code: "LOAD_DATA_NO_REQUEST".clone(),
-                    message: "server returned OK without Local Infile Request".clone(),
-                    retryable: false,
-                }))
+                Result.Err(DbError.Adapter(AdapterSpecific.new(
+                    AdMysql,
+                    "LOAD_DATA_NO_REQUEST".clone(),
+                    "server returned OK without Local Infile Request".clone(),
+                    false,
+                )))
             }
-            _ => Result.Err(DbError.Adapter(AdapterSpecific {
-                adapter: AdMysql,
-                code: "LOAD_DATA_BAD_STATE".clone(),
-                message: "unexpected packet kind awaiting Local Infile Request".clone(),
-                retryable: false,
-            })),
+            _ => Result.Err(DbError.Adapter(AdapterSpecific.new(
+                AdMysql,
+                "LOAD_DATA_BAD_STATE".clone(),
+                "unexpected packet kind awaiting Local Infile Request".clone(),
+                false,
+            ))),
         }
     }
 
@@ -1127,12 +1127,12 @@ implement MysqlConnection {
             }
             _ => {
                 self.state = McsFailed;
-                Result.Err(DbError.Adapter(AdapterSpecific {
-                    adapter: AdMysql,
-                    code: "LOAD_DATA_BAD_REPLY".clone(),
-                    message: "unexpected packet kind after empty terminator".clone(),
-                    retryable: false,
-                }))
+                Result.Err(DbError.Adapter(AdapterSpecific.new(
+                    AdMysql,
+                    "LOAD_DATA_BAD_REPLY".clone(),
+                    "unexpected packet kind after empty terminator".clone(),
+                    false,
+                )))
             }
         }
     }
@@ -1168,12 +1168,12 @@ implement MysqlConnection {
                 let _ = reason;
                 Result.Err(underlying)
             }
-            _ => Result.Err(DbError.Adapter(AdapterSpecific {
-                adapter: AdMysql,
-                code: "LOAD_DATA_CANCEL_BAD_REPLY".clone(),
-                message: f"unexpected packet kind after cancel ({reason})",
-                retryable: false,
-            })),
+            _ => Result.Err(DbError.Adapter(AdapterSpecific.new(
+                AdMysql,
+                "LOAD_DATA_CANCEL_BAD_REPLY".clone(),
+                f"unexpected packet kind after cancel ({reason})",
+                false,
+            ))),
         }
     }
 }
@@ -1601,12 +1601,12 @@ fn itoa(n: Int) -> Text {
 }
 
 fn bad_decode(label: &Text) -> DbError {
-    DbError.Adapter(AdapterSpecific {
-        adapter: AdMysql,
-        code: "BAD_DECODE".clone(),
-        message: f"protocol decode failed: {label}",
-        retryable: false,
-    })
+    DbError.Adapter(AdapterSpecific.new(
+        AdMysql,
+        "BAD_DECODE".clone(),
+        f"protocol decode failed: {label}",
+        false,
+    ))
 }
 
 // =============================================================================
@@ -1638,12 +1638,12 @@ fn drive_tls_upgrade(
         if config.tls_mode.permits_plaintext_fallback() {
             return Result.Ok(());
         }
-        return Result.Err(DbError.Adapter(AdapterSpecific {
-            adapter: AdMysql,
-            code: "TLS_REJECTED_BY_SERVER".clone(),
-            message: f"server lacks CAP_SSL (mode {config.tls_mode.name()} requires encryption)",
-            retryable: false,
-        }));
+        return Result.Err(DbError.Adapter(AdapterSpecific.new(
+            AdMysql,
+            "TLS_REJECTED_BY_SERVER".clone(),
+            f"server lacks CAP_SSL (mode {config.tls_mode.name()} requires encryption)",
+            false,
+        )));
     }
 
     // Step 3 — send SSL-only HandshakeResponse (sequence number
@@ -1676,12 +1676,12 @@ fn drive_tls_upgrade(
         MsTls(_) => {
             // Already TLS — protocol violation if `drive_tls_upgrade`
             // was somehow called twice on the same connection.
-            return Result.Err(DbError.Adapter(AdapterSpecific {
-                adapter: AdMysql,
-                code: "TLS_DOUBLE_UPGRADE".clone(),
-                message: "drive_tls_upgrade called on an already-TLS connection".clone(),
-                retryable: false,
-            }));
+            return Result.Err(DbError.Adapter(AdapterSpecific.new(
+                AdMysql,
+                "TLS_DOUBLE_UPGRADE".clone(),
+                "drive_tls_upgrade called on an already-TLS connection".clone(),
+                false,
+            )));
         }
     };
     let _ = upgraded;
@@ -1711,21 +1711,21 @@ fn swap_to_tls(
         MsPlain(t) => match t.try_clone() {
             Result.Ok(c)  => c,
             Result.Err(_) => {
-                return Result.Err(DbError.Adapter(AdapterSpecific {
-                    adapter: AdMysql,
-                    code: "TLS_HANDSHAKE_FAILED".clone(),
-                    message: "TcpStream.try_clone failed before TLS handshake".clone(),
-                    retryable: false,
-                }));
+                return Result.Err(DbError.Adapter(AdapterSpecific.new(
+                    AdMysql,
+                    "TLS_HANDSHAKE_FAILED".clone(),
+                    "TcpStream.try_clone failed before TLS handshake".clone(),
+                    false,
+                )));
             }
         },
         MsTls(_) => {
-            return Result.Err(DbError.Adapter(AdapterSpecific {
-                adapter: AdMysql,
-                code: "TLS_DOUBLE_UPGRADE".clone(),
-                message: "swap_to_tls on TLS already".clone(),
-                retryable: false,
-            }));
+            return Result.Err(DbError.Adapter(AdapterSpecific.new(
+                AdMysql,
+                "TLS_DOUBLE_UPGRADE".clone(),
+                "swap_to_tls on TLS already".clone(),
+                false,
+            )));
         }
     };
     match upgrade_to_tls(tcp_clone, server_name, tls_config) {
@@ -1733,12 +1733,12 @@ fn swap_to_tls(
             conn.stream = s;
             Result.Ok(())
         }
-        Result.Err(e) => Result.Err(DbError.Adapter(AdapterSpecific {
-            adapter: AdMysql,
-            code: "TLS_HANDSHAKE_FAILED".clone(),
-            message: f"TLS handshake failed: {e}",
-            retryable: false,
-        })),
+        Result.Err(e) => Result.Err(DbError.Adapter(AdapterSpecific.new(
+            AdMysql,
+            "TLS_HANDSHAKE_FAILED".clone(),
+            f"TLS handshake failed: {e}",
+            false,
+        ))),
     }
 }
 

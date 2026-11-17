@@ -285,7 +285,7 @@ fn is_unknown_stmt_handler(e: &DbError) -> Bool {
             sql_state_is_42000(sql_state)
         }
         DbError.Adapter(a) => {
-            text_contains_errno(&a.message, MY_ER_UNKNOWN_STMT_HANDLER)
+            text_contains_errno(a.message(), MY_ER_UNKNOWN_STMT_HANDLER)
         }
         _ => false,
     }
@@ -320,7 +320,7 @@ fn text_contains_errno(t: &Text, code: Int) -> Bool {
 /// for *exactly* 42000 — broader 42*** classes are real syntax
 /// errors that MUST NOT trigger silent retry.
 fn sql_state_is_42000(s: &core.database.common.error.SqlState) -> Bool {
-    s.0 == "42000".clone()
+    *s.code() == "42000"
 }
 
 // -----------------------------------------------------------------------------

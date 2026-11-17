@@ -17,10 +17,8 @@
 //   * SqlState parse + .code + .class + .is_retryable + .is_integrity +
 //     .integrity_kind + ConstraintKind dispatch
 //
-// DbError 10-variant + DecodeFault / EncodeFault / AdapterSpecific
-// records carry mixed record payloads and would require direct
-// record-literal construction to sidestep cross-module ctor defects.
-// Deferred to integration suite.
+// observation_test.vr checks the shared error surface used by adapters
+// and services, including vendor diagnostics and constraint classification.
 // =============================================================================
 
 mount core.database.common.error.{

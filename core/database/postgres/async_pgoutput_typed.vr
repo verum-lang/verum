@@ -113,12 +113,12 @@ public fn typed_tuple(
     let n = tuple.columns.len() as Int;
     let rel_n = relation.columns.len() as Int;
     if n != rel_n {
-        return Result.Err(DbError.Adapter(AdapterSpecific {
-            adapter: AdPostgres,
-            code: "PGOUTPUT_TYPED_ARITY".clone(),
-            message: f"typed_tuple: tuple has {n} columns, relation has {rel_n}",
-            retryable: false,
-        }));
+        return Result.Err(DbError.Adapter(AdapterSpecific.new(
+            AdPostgres,
+            "PGOUTPUT_TYPED_ARITY".clone(),
+            f"typed_tuple: tuple has {n} columns, relation has {rel_n}",
+            false,
+        )));
     }
     let mut out: List<TupleValue> = List.with_capacity(n);
     let mut i: Int = 0;

@@ -917,30 +917,30 @@ fn bytes_to_text(b: &List<Byte>) -> Text {
 }
 
 fn stream_state_error(what: &Text) -> DbError {
-    DbError.Adapter(AdapterSpecific {
-        adapter: AdMysql,
-        code: "BINLOG_BAD_STATE".clone(),
-        message: f"binlog state violation: {what}",
-        retryable: false,
-    })
+    DbError.Adapter(AdapterSpecific.new(
+        AdMysql,
+        "BINLOG_BAD_STATE".clone(),
+        f"binlog state violation: {what}",
+        false,
+    ))
 }
 
 fn bad_binlog(what: &Text) -> DbError {
-    DbError.Adapter(AdapterSpecific {
-        adapter: AdMysql,
-        code: "BINLOG_PROTOCOL".clone(),
-        message: f"binlog protocol error: {what}",
-        retryable: false,
-    })
+    DbError.Adapter(AdapterSpecific.new(
+        AdMysql,
+        "BINLOG_PROTOCOL".clone(),
+        f"binlog protocol error: {what}",
+        false,
+    ))
 }
 
 fn crc_mismatch_error(expected: Int, actual: Int) -> DbError {
-    DbError.Adapter(AdapterSpecific {
-        adapter: AdMysql,
-        code: "BINLOG_CRC32_MISMATCH".clone(),
-        message: f"binlog CRC32 mismatch: expected={expected & 0xFFFFFFFF} actual={actual & 0xFFFFFFFF}",
+    DbError.Adapter(AdapterSpecific.new(
+        AdMysql,
+        "BINLOG_CRC32_MISMATCH".clone(),
+        f"binlog CRC32 mismatch: expected={expected & 0xFFFFFFFF} actual={actual & 0xFFFFFFFF}",
         // Not retryable — wire is corrupt; caller should reconnect
         // from the last-known-good GTID/position.
-        retryable: false,
-    })
+        false,
+    ))
 }

@@ -191,7 +191,7 @@ fn is_unknown_stmt_handler(e: &DbError) -> Bool {
             text_contains_errno(message, MY_ER_UNKNOWN_STMT_HANDLER)
         }
         DbError.Adapter(a) => {
-            text_contains_errno(&a.message, MY_ER_UNKNOWN_STMT_HANDLER)
+            text_contains_errno(a.message(), MY_ER_UNKNOWN_STMT_HANDLER)
         }
         _ => false,
     }

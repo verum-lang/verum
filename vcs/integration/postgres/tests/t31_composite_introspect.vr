@@ -121,7 +121,7 @@ fn main() {
         Err(e) => match e {
             DbError.Adapter(spec) => {
                 expect(
-                    spec.code == "PG_TYPE_NOT_FOUND",
+                    *spec.code() == "PG_TYPE_NOT_FOUND",
                     &"missing type returns PG_TYPE_NOT_FOUND".clone(),
                 );
             }
@@ -137,7 +137,7 @@ fn main() {
         Err(e) => match e {
             DbError.Adapter(spec) => {
                 expect(
-                    spec.code == "PG_TYPE_NOT_COMPOSITE",
+                    *spec.code() == "PG_TYPE_NOT_COMPOSITE",
                     &"int4 returns PG_TYPE_NOT_COMPOSITE".clone(),
                 );
             }

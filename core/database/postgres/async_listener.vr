@@ -389,10 +389,10 @@ fn quote_identifier(s: &Text) -> Text {
 // =============================================================================
 
 fn actor_dropped(what: &Text) -> DbError {
-    DbError.Adapter(AdapterSpecific {
-        adapter: AdPostgres,
-        code: "LISTENER_ACTOR_CLOSED".clone(),
-        message: f"async listener actor unavailable during {what}",
-        retryable: false,
-    })
+    DbError.Adapter(AdapterSpecific.new(
+        AdPostgres,
+        "LISTENER_ACTOR_CLOSED".clone(),
+        f"async listener actor unavailable during {what}",
+        false,
+    ))
 }

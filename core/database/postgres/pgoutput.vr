@@ -520,12 +520,12 @@ fn read_cstr(r: &mut WireReader, what: &Text) -> Result<Text, DbError> {
 }
 
 fn decode_err(what: &Text) -> DbError {
-    DbError.Adapter(AdapterSpecific {
-        adapter: AdPostgres,
-        code: "PGOUTPUT_DECODE".clone(),
-        message: f"pgoutput decode error: {what}",
-        retryable: false,
-    })
+    DbError.Adapter(AdapterSpecific.new(
+        AdPostgres,
+        "PGOUTPUT_DECODE".clone(),
+        f"pgoutput decode error: {what}",
+        false,
+    ))
 }
 
 // =============================================================================

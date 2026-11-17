@@ -169,10 +169,10 @@ public async fn rollback_to_savepoint_async(
 }
 
 fn actor_dropped(what: &Text) -> DbError {
-    DbError.Adapter(AdapterSpecific {
-        adapter: AdMysql,
-        code: "ACTOR_CLOSED".clone(),
-        message: f"async MySQL actor unavailable during {what}",
-        retryable: false,
-    })
+    DbError.Adapter(AdapterSpecific.new(
+        AdMysql,
+        "ACTOR_CLOSED".clone(),
+        f"async MySQL actor unavailable during {what}",
+        false,
+    ))
 }

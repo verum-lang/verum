@@ -267,12 +267,12 @@ implement AsyncPgoutputBufferedConsumer {
                                     }
                                     AppendOverflow => {
                                         return Maybe.Some(BcTerminated(
-                                            DbError.Adapter(AdapterSpecific {
-                                                adapter: AdPostgres,
-                                                code: "PGOUTPUT_TX_BUFFER_OVERFLOW".clone(),
-                                                message: f"streamed tx xid={xid} exceeded cap (rows={self.row_cap}, bytes={self.byte_cap})",
-                                                retryable: false,
-                                            })
+                                            DbError.Adapter(AdapterSpecific.new(
+                                                AdPostgres,
+                                                "PGOUTPUT_TX_BUFFER_OVERFLOW".clone(),
+                                                f"streamed tx xid={xid} exceeded cap (rows={self.row_cap}, bytes={self.byte_cap})",
+                                                false,
+                                            ))
                                         ));
                                     }
                                 }

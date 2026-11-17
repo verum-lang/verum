@@ -520,10 +520,10 @@ fn attach_crs(geom: JsonValue, srid: Int) -> JsonValue {
 }
 
 fn bad_wkb(what: &Text) -> DbError {
-    DbError.Adapter(AdapterSpecific {
-        adapter: AdMysql,
-        code: "WKB_DECODE".clone(),
-        message: f"WKB decode error: {what}",
-        retryable: false,
-    })
+    DbError.Adapter(AdapterSpecific.new(
+        AdMysql,
+        "WKB_DECODE".clone(),
+        f"WKB decode error: {what}",
+        false,
+    ))
 }

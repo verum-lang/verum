@@ -90,12 +90,12 @@ public fn typed_prepared_row(
     let n = row.len() as Int;
     let m = column_types.len() as Int;
     if n != m {
-        return Result.Err(DbError.Adapter(AdapterSpecific {
-            adapter: AdMysql,
-            code: "PREPARED_ROW_ARITY".clone(),
-            message: f"typed_prepared_row: row has {n} cells, column_types {m}",
-            retryable: false,
-        }));
+        return Result.Err(DbError.Adapter(AdapterSpecific.new(
+            AdMysql,
+            "PREPARED_ROW_ARITY".clone(),
+            f"typed_prepared_row: row has {n} cells, column_types {m}",
+            false,
+        )));
     }
     let mut out: List<RowValue> = List.with_capacity(n);
     let mut i: Int = 0;
@@ -138,12 +138,12 @@ public fn typed_prepared_rows(
         match r {
             Result.Ok(v)  => { out.push(v); }
             Result.Err(e) => {
-                return Result.Err(DbError.Adapter(AdapterSpecific {
-                    adapter: AdMysql,
-                    code: "PREPARED_ROWS_DECODE".clone(),
-                    message: f"row {i}: {e}",
-                    retryable: false,
-                }));
+                return Result.Err(DbError.Adapter(AdapterSpecific.new(
+                    AdMysql,
+                    "PREPARED_ROWS_DECODE".clone(),
+                    f"row {i}: {e}",
+                    false,
+                )));
             }
         }
         i = i + 1;

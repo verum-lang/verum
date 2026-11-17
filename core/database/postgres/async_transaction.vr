@@ -235,10 +235,10 @@ public async fn with_transaction_async<R, F: fn(&AsyncPgConnection) -> Result<R,
 // =============================================================================
 
 fn actor_dropped(what: &Text) -> DbError {
-    DbError.Adapter(AdapterSpecific {
-        adapter: AdPostgres,
-        code: "ACTOR_CLOSED".clone(),
-        message: f"async PG actor unavailable during {what}",
-        retryable: false,
-    })
+    DbError.Adapter(AdapterSpecific.new(
+        AdPostgres,
+        "ACTOR_CLOSED".clone(),
+        f"async PG actor unavailable during {what}",
+        false,
+    ))
 }

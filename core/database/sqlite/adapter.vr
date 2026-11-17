@@ -160,14 +160,13 @@ implement SqliteAdapter {
         match cfg.target {
             StMemory => SqliteConnection.open_in_memory(cfg.capability.clone()),
             StSharedMemory(_) => {
-                Result.Err(DbError.Adapter(core.database.common.error.AdapterSpecific {
-                    adapter: AdSqlite,
-                    code: "UNSUPPORTED".clone(),
-                    message:
-                        "shared-memory mode pending multi-conn pager actor (sqlite-native.md §8.3)"
+                Result.Err(DbError.Adapter(core.database.common.error.AdapterSpecific.new(
+                    AdSqlite,
+                    "UNSUPPORTED".clone(),
+                    "shared-memory mode pending multi-conn pager actor (sqlite-native.md §8.3)"
                         .clone(),
-                    retryable: false,
-                }))
+                    false,
+                )))
             }
             StFile(ref path) => {
                 // Closed in T20: loom L1/L6/L7 now parameterise over

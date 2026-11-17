@@ -491,12 +491,12 @@ implement<C> ConnectionPool<C> {
     // -------------------------------------------------------------------------
 
     fn poisoned_err(&self) -> DbError {
-        DbError.Adapter(AdapterSpecific {
-            adapter: self.config.adapter_id.clone(),
-            code: "POOL_POISONED".clone(),
-            message: "pool mutex poisoned".clone(),
-            retryable: false,
-        })
+        DbError.Adapter(AdapterSpecific.new(
+            self.config.adapter_id.clone(),
+            "POOL_POISONED".clone(),
+            "pool mutex poisoned".clone(),
+            false,
+        ))
     }
 }
 

@@ -264,12 +264,12 @@ implement AsyncPgConnection {
         let key = match self.backend_key {
             Maybe.Some(k) => k,
             Maybe.None => {
-                return Result.Err(DbError.Adapter(AdapterSpecific {
-                    adapter: AdPostgres,
-                    code: "CANCEL_NO_KEY".clone(),
-                    message: "BackendKeyData not captured during handshake — cancel impossible".clone(),
-                    retryable: false,
-                }));
+                return Result.Err(DbError.Adapter(AdapterSpecific.new(
+                    AdPostgres,
+                    "CANCEL_NO_KEY".clone(),
+                    "BackendKeyData not captured during handshake — cancel impossible".clone(),
+                    false,
+                )));
             }
         };
         let host = self.cancel_host.clone();
@@ -787,12 +787,12 @@ fn run_copy_out_subloop(
 // =============================================================================
 
 fn actor_dropped(what: &Text) -> DbError {
-    DbError.Adapter(AdapterSpecific {
-        adapter: AdPostgres,
-        code: "ACTOR_CLOSED".clone(),
-        message: f"async PG actor unavailable during {what}",
-        retryable: false,
-    })
+    DbError.Adapter(AdapterSpecific.new(
+        AdPostgres,
+        "ACTOR_CLOSED".clone(),
+        f"async PG actor unavailable during {what}",
+        false,
+    ))
 }
 
 /// Clone a `PgPreparedStatement` for the actor's stmt-cache flow.

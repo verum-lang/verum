@@ -422,10 +422,10 @@ fn bits_to_f64(bits: Int) -> Float {
 }
 
 fn bad_json(what: &Text) -> DbError {
-    DbError.Adapter(AdapterSpecific {
-        adapter: AdMysql,
-        code: "BINLOG_JSON".clone(),
-        message: f"binary JSON decode error: {what}",
-        retryable: false,
-    })
+    DbError.Adapter(AdapterSpecific.new(
+        AdMysql,
+        "BINLOG_JSON".clone(),
+        f"binary JSON decode error: {what}",
+        false,
+    ))
 }

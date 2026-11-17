@@ -758,10 +758,10 @@ fn int_to_text(n: Int) -> Text {
 }
 
 fn gtid_error(code: Text, message: Text) -> DbError {
-    DbError.Adapter(AdapterSpecific {
-        adapter: AdMysql,
-        code: code,
-        message: message,
-        retryable: false,
-    })
+    DbError.Adapter(AdapterSpecific.new(
+        AdMysql,
+        code,
+        message,
+        false,
+    ))
 }

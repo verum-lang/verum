@@ -307,19 +307,19 @@ public async fn copy_out_async(
 }
 
 fn cancelled_err(what: &Text) -> DbError {
-    DbError.Adapter(AdapterSpecific {
-        adapter: AdPostgres,
-        code: "CANCELLED".clone(),
-        message: f"async COPY cancelled at {what}",
-        retryable: false,
-    })
+    DbError.Adapter(AdapterSpecific.new(
+        AdPostgres,
+        "CANCELLED".clone(),
+        f"async COPY cancelled at {what}",
+        false,
+    ))
 }
 
 fn actor_dropped(what: &Text) -> DbError {
-    DbError.Adapter(AdapterSpecific {
-        adapter: AdPostgres,
-        code: "ACTOR_CLOSED".clone(),
-        message: f"async PG actor unavailable during {what}",
-        retryable: false,
-    })
+    DbError.Adapter(AdapterSpecific.new(
+        AdPostgres,
+        "ACTOR_CLOSED".clone(),
+        f"async PG actor unavailable during {what}",
+        false,
+    ))
 }

@@ -681,21 +681,21 @@ public fn connect_replication(cfg: &PgReplicationConfig)
 // =============================================================================
 
 fn streaming_state_error(what: &Text) -> DbError {
-    DbError.Adapter(AdapterSpecific {
-        adapter: AdPostgres,
-        code: "REPL_BAD_STATE".clone(),
-        message: f"replication state violation: {what}",
-        retryable: false,
-    })
+    DbError.Adapter(AdapterSpecific.new(
+        AdPostgres,
+        "REPL_BAD_STATE".clone(),
+        f"replication state violation: {what}",
+        false,
+    ))
 }
 
 fn bad_replication(what: &Text) -> DbError {
-    DbError.Adapter(AdapterSpecific {
-        adapter: AdPostgres,
-        code: "REPL_PROTOCOL".clone(),
-        message: f"replication protocol error: {what}",
-        retryable: false,
-    })
+    DbError.Adapter(AdapterSpecific.new(
+        AdPostgres,
+        "REPL_PROTOCOL".clone(),
+        f"replication protocol error: {what}",
+        false,
+    ))
 }
 
 fn wire_text(v: &core.database.common.types.WireValue) -> Result<Text, DbError> {

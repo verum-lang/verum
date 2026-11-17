@@ -320,7 +320,7 @@ fn clone_stmt(s: &PgPreparedStatement) -> PgPreparedStatement {
 fn is_invalid_stmt_name(e: &DbError) -> Bool {
     match e {
         DbError.Adapter(spec) => {
-            let code = &spec.code;
+            let code = spec.code();
             // PG diagnostic SQLSTATE field surfaces as the
             // adapter-specific code via dberr_from_pg.
             *code == PG_INVALID_SQL_STATEMENT_NAME

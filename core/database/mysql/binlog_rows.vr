@@ -1476,10 +1476,10 @@ implement TableMapCache {
 }
 
 fn bad_rows(what: &Text) -> DbError {
-    DbError.Adapter(AdapterSpecific {
-        adapter: AdMysql,
-        code: "BINLOG_ROWS".clone(),
-        message: f"binlog rows decode error: {what}",
-        retryable: false,
-    })
+    DbError.Adapter(AdapterSpecific.new(
+        AdMysql,
+        "BINLOG_ROWS".clone(),
+        f"binlog rows decode error: {what}",
+        false,
+    ))
 }

@@ -103,12 +103,12 @@ public fn dberr_from_loom(e: core.database.sqlite.native.l7_api.DbError) -> DbEr
             // given one, surface as a misuse adapter error tagged
             // against the sqlite adapter (this conversion is the
             // sqlite-native → unified-DbError boundary).
-            DbError.Adapter(AdapterSpecific {
-                adapter: AdSqlite,
-                code: "OK".clone(),
-                message: "loom DbOk reached the error path".clone(),
-                retryable: false,
-            })
+            DbError.Adapter(AdapterSpecific.new(
+                AdSqlite,
+                "OK".clone(),
+                "loom DbOk reached the error path".clone(),
+                false,
+            ))
         }
         DbGeneric(msg) => adapter_err(SQLSTATE_GENERIC.clone(), msg, false),
         DbBusy         => adapter_err("BUSY".clone(),     "database is busy".clone(),       true),
@@ -172,12 +172,12 @@ public fn dberr_from_loom(e: core.database.sqlite.native.l7_api.DbError) -> DbEr
 }
 
 fn adapter_err(code: Text, msg: Text, retryable: Bool) -> DbError {
-    DbError.Adapter(AdapterSpecific {
-        adapter: AdSqlite,
-        code: code,
-        message: msg,
-        retryable: retryable,
-    })
+    DbError.Adapter(AdapterSpecific.new(
+        AdSqlite,
+        code,
+        msg,
+        retryable,
+    ))
 }
 
 fn error_module_fault(param_index: Int) -> EncodeFault {

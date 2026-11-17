@@ -1,0 +1,48 @@
+mount core.database.common.error.{
+    AdapterId, AdapterSpecific, ConstraintKind, DbError, ErrorCategory, SqlState, ViolationDetection,
+};
+
+@test
+fn test_validated_sqlstate_classifies_query_errors() {
+    assert(SqlState.parse(&"23x05".to_text()).is_none());
+    assert(SqlState.parse(&"2350".to_text()).is_none());
+    let state = SqlState.parse(&"23505".to_text()).unwrap();
+    assert_eq(*state.code(), "23505");
+    let error: DbError = DbError.QueryFailed {
+        sql_state: state,
+        message: "violates constraint \"accounts_email\"".to_text(),
+        position: Maybe.Some(12),
+    };
+    assert(error.is_constraint_violation());
+    assert(!error.is_retryable());
+    let violation = error.as_constraint_violation().unwrap();
+    assert(violation.kind().equals(&ConstraintKind.CkUnique));
+    assert(violation.column().is_none());
+    assert_eq(*violation.predicate().unwrap(), "accounts_email");
+    assert(violation.detected_at().equals(&ViolationDetection.VdServerReject));
+    assert_eq(violation.metric_tag(), "server_reject/unique");
+}
+
+@test
+fn test_adapter_observations_preserve_the_vendor_payload() {
+    let packet = AdapterSpecific.new(AdapterId.AdMysql, "1213".to_text(), "deadlock".to_text(), true);
+    assert_eq(*packet.code(), "1213");
+    assert_eq(*packet.message(), "deadlock");
+    let error = DbError.Adapter(packet);
+    assert(error.is_retryable());
+    assert(error.category() is ErrorCategory.EcTransient);
+    assert(error.as_constraint_violation().is_none());
+}
+
+@test
+fn test_client_constraint_preserves_column_and_predicate() {
+    let error: DbError = DbError.RefinementViolated {
+        column: "quantity".to_text(),
+        predicate: "quantity > 0".to_text(),
+    };
+    let violation = error.as_constraint_violation().unwrap();
+    assert(violation.kind().equals(&ConstraintKind.CkCheck));
+    assert_eq(*violation.column().unwrap(), "quantity");
+    assert_eq(*violation.predicate().unwrap(), "quantity > 0");
+    assert(violation.detected_at().equals(&ViolationDetection.VdClientPreflight));
+}
