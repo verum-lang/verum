@@ -962,6 +962,15 @@ impl VbcCodegen {
     pub(super) fn resolve_source_value_export(
         &self, path: &str, consumer: &str,
     ) -> Result<Option<(String, FunctionInfo)>, String> {
+        self.resolve_source_value_export_ref(path, consumer)
+            .map(|selected| selected.map(|(key, info)| (key, info.clone())))
+    }
+
+    /// Use the live declaration for call-site queries; registration callers
+    /// explicitly take their own snapshot through resolve_source_value_export.
+    fn resolve_source_value_export_ref(
+        &self, path: &str, consumer: &str,
+    ) -> Result<Option<(String, &FunctionInfo)>, String> {
         let mut scope = consumer;
         let candidates = loop {
             let candidates = self.source_export_candidates_in(path, Some(scope), Some(DeclarationNamespace::Value));
@@ -983,7 +992,7 @@ impl VbcCodegen {
                 && (kinds.contains(&DeclarationCategory::Callable)
                     || kinds.contains(&DeclarationCategory::Value) && info.is_const)
             {
-                return Ok(Some((key.clone(), info.clone())));
+                return Ok(Some((key.clone(), info)));
             }
             if !kinds.contains(&DeclarationCategory::Callable) { return Ok(None); }
         } else {
@@ -993,12 +1002,42 @@ impl VbcCodegen {
             let nominal = self.source_export_candidates_in(path, Some(scope), Some(DeclarationNamespace::Type));
             if nominal.inaccessible { return Err(format!("type mount `{path}` is inaccessible from `{consumer}`")); }
             if let Some(key) = nominal.nominal() {
-                return Ok(self.ctx.lookup_function(key).map(|info| (key.clone(), info.clone())));
+                return Ok(self.ctx.lookup_function(key).map(|info| (key.clone(), info)));
             }
             if !nominal.declarations.is_empty() { return Ok(None); }
             let namespace = self.source_export_candidates_in(path, Some(scope), Some(DeclarationNamespace::Module));
             if !namespace.declarations.is_empty() && !namespace.inaccessible { return Ok(None); }
         }
         Err(format!("no callable declaration for mount `{path}`"))
+    }
+
+    /// Resolve a named value import in the body owner's namespace. The mount
+    /// inventory is shared with type lookup, but a value binding is not a type
+    /// binding. Missing, private and conflicting declarations cannot supply an
+    /// ambient builtin or another source unit's same-named function.
+    pub(super) fn source_mounted_function(
+        &self, name: &str, arity: usize,
+    ) -> Option<super::CodegenResult<&FunctionInfo>> {
+        let owner = self.lexical_type_scope();
+        let binding = self.source_type_mounts.get(&Text::from(owner))?.get(&Text::from(name))?;
+        let invalid = |message: String| super::CodegenError::new(
+            super::CodegenErrorKind::InvalidSourceMount([message].into_iter().collect()));
+        let SourceMountBinding::Targets(targets) = binding else {
+            return Some(Err(invalid(format!("conflicting callable binding `{name}` in `{owner}`"))));
+        };
+        let mut selected: Option<(String, &FunctionInfo)> = None;
+        for path in targets {
+            let candidate = match self.resolve_source_value_export_ref(path, owner) {
+                Ok(Some(candidate)) => candidate,
+                Ok(None) => continue,
+                Err(message) => return Some(Err(invalid(message))),
+            };
+            if selected.as_ref().is_some_and(|(key, _)| key != &candidate.0) {
+                return Some(Err(invalid(format!("ambiguous callable binding `{name}` in `{owner}`"))));
+            }
+            selected = Some(candidate);
+        }
+        selected.map(|(key, primary)| Ok(
+            self.ctx.lookup_function_with_arity(&key, arity).unwrap_or(primary)))
     }
 }

@@ -6834,35 +6834,15 @@ impl VbcCodegen {
             }
         }
 
-        // Handle built-in functions.
-        //
-        // T1120: a MODULE-LOCAL DECLARATION OUTRANKS AN AMBIENT BUILTIN.
-        // `docs/architecture/name-resolution.md` §3.2 puts a local
-        // declaration at rank 4 and an ambient name at rank 6, and this
-        // call site inverted that for every builtin the table carries:
-        // `try_compile_builtin` answered `Some` for `min`/`max`/`abs`
-        // and returned, so a unit's own `fn min` never ran — silently,
-        // with the wrong value and no diagnostic.
-        //
-        // The test below is not new machinery. `unit_declared_fns` is
-        // already consulted ~500 lines further down in this same
-        // function, where it can no longer be reached for these names.
-        // Moving the question ahead of the builtin is the whole fix.
-        //
-        // IT CANNOT AFFECT THE STDLIB. The set is populated only in the
-        // user phase — `codegen/mod.rs` inserts under
-        // `!prefer_existing_functions`, and the stdlib bake runs with
-        // that flag TRUE (mod.rs:8350 names the two phases). So while
-        // compiling `core/`, `unit_declared_fns` is empty and every
-        // bare `min` still reaches the builtin, which is what
-        // `core/math/elementary.vr:640`'s `max(lo, min(x, hi))` needs.
-        //
-        // Qualified names are excluded: `a.b()` and `a::b()` are not
-        // bare-name resolution and must not consult a bare-name set.
-        let unit_declares_this_name = !func_name.contains('.')
-            && !func_name.contains("::")
-            && self.ctx.unit_declared_fns.contains(&func_name);
-        if !unit_declares_this_name
+        // Spec: Name Resolution §3.2 — a lexical declaration outranks an
+        // ambient builtin. A declaration in another source unit is not a
+        // local binding, including while materializing a protocol default.
+        let bare_name = !func_name.contains('.') && !func_name.contains("::");
+        let unit_declares_this_name = bare_name
+            && self.ctx.lookup_declared_function(&func_name).is_some();
+        let source_binds_this_name = unit_declares_this_name
+            || (bare_name && self.source_mounted_function(&func_name, args.len()).transpose()?.is_some());
+        if !source_binds_this_name
             && let Some(result) = self.try_compile_builtin(&func_name, args, type_args)?
         {
             return Ok(result);
@@ -6879,7 +6859,7 @@ impl VbcCodegen {
         // outranks it (T1120, name-resolution.md §3.2). Fixing the
         // builtin arm and leaving its exact copy four lines below would
         // repair one of two instances of one defect.
-        if !unit_declares_this_name
+        if !source_binds_this_name
             && func_name == "format"
             && let Some(result) = self.try_compile_format_call(args)?
         {
@@ -7567,7 +7547,7 @@ impl VbcCodegen {
             && !func_name.contains('.') && !func_name.contains("::");
         let retained_lexical_lookup = retained_lexical_call.then(|| {
             lexical_scoped_lookup.clone().filter(|(_, info)| is_free_fn(info))
-                .or_else(|| self.ctx.lookup_function_with_arity_in_scope(&func_name, args.len())
+                .or_else(|| self.lookup_source_function(&func_name, args.len())
                     .filter(|info| is_free_fn(info))
                     .map(|info| (func_name.clone(), info.clone())))
         });
@@ -7697,7 +7677,7 @@ impl VbcCodegen {
                         result.1.id.0,
                         callbind_arm,
                         self.ctx.current_source_module,
-                        self.ctx.unit_declared_fns.contains(&func_name),
+                        self.ctx.lookup_declared_function(&func_name).is_some(),
                         self.is_ffi_function(&func_name),
                     );
                 }
@@ -11908,11 +11888,8 @@ impl VbcCodegen {
         if !ambiguous || self.ctx.get_var_reg(name).is_ok() {
             return Ok(None);
         }
-        if self.ctx.unit_declared_fns.contains(name)
-            && self
-                .ctx
-                .lookup_function_in_scope(name)
-                .is_some_and(|info| info.variant_tag.is_none())
+        if self.ctx.lookup_declared_function(name)
+            .is_some_and(|info| info.variant_tag.is_none())
         {
             return Ok(None);
         }

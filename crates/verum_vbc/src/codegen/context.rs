@@ -317,15 +317,6 @@ pub struct CodegenContext {
     /// has said `@foo` is unimplemented, repeating it per occurrence turns a
     /// true statement into the kind of noise that gets silenced wholesale.
     pub reported_unimplemented_meta: std::collections::HashSet<String>,
-    /// NAMES of free fns DECLARED by the unit being compiled (user-phase
-    /// AST declarations only; stdlib bake — `prefer_existing_functions` —
-    /// never writes here). Bare-name call resolution consults this
-    /// FIRST: the unit's own `fn take` must beat `core.base.memory.take`
-    /// in the type-aware overload scan (task #20). Stores names only —
-    /// FunctionInfo snapshots go stale when ids are renumbered after
-    /// declaration (a cached clone produced `Call 536870934` → "Function
-    /// not found"); the lookup reads the LIVE registration instead.
-    pub unit_declared_fns: std::collections::HashSet<String>,
 
     /// **ARCH-P2 stage 1 — content-addressed canonical function index**
     /// (dual keying, warn-on-divergence).  See
@@ -1700,7 +1691,6 @@ impl CodegenContext {
             scoped_functions: HashMap::new(),
             variadic_ffi_fns: std::collections::HashSet::new(),
             reported_unimplemented_meta: std::collections::HashSet::new(),
-            unit_declared_fns: std::collections::HashSet::new(),
             canonical_index: HashMap::new(),
             prefer_existing_functions: false,
             stage3_stub_names: HashMap::new(),
@@ -3903,6 +3893,14 @@ impl CodegenContext {
             .unwrap_or(declared)
     }
 
+    /// Exact lexical declaration, independent of unrelated source units and
+    /// ambient aliases. Name precedence is independent of the call's arity.
+    pub(super) fn lookup_declared_function(&self, name: &str) -> Option<&FunctionInfo> {
+        let key = (self.source_function_scope().to_owned(), name.to_owned());
+        self.scoped_functions.get(&key)
+            .map(|info| self.live_scoped_function(name, info))
+    }
+
     /// Exact source declaration and arity, with no ambient bare-name fallback.
     pub(super) fn lookup_declared_function_with_arity(
         &self,
@@ -3919,8 +3917,7 @@ impl CodegenContext {
     /// An ambient bare-name registration is never evidence of local ownership.
     pub(super) fn lookup_source_call(&self, name: &str, arity: usize) -> Option<&FunctionInfo> {
         self.lookup_declared_function_with_arity(name, arity).or_else(|| {
-            let key = (self.source_function_scope().to_owned(), name.to_owned());
-            let primary = self.scoped_functions.get(&key)?;
+            let primary = self.lookup_declared_function(name)?;
             let own = self.lookup_declared_function_with_arity(name, primary.param_count)?;
             self.arity_admits(name, own, arity).then_some(own)
         })
@@ -3937,9 +3934,7 @@ impl CodegenContext {
     /// this over plain `lookup_function` to dodge cross-module
     /// first-wins shadowing.
     pub fn lookup_function_in_scope(&self, name: &str) -> Option<&FunctionInfo> {
-        let key = (self.source_function_scope().to_owned(), name.to_owned());
-        if let Some(declared) = self.scoped_functions.get(&key) {
-            let info = self.live_scoped_function(name, declared);
+        if let Some(info) = self.lookup_declared_function(name) {
             self.note_resolution(name, info);
             return Some(info);
         }
@@ -3989,9 +3984,7 @@ impl CodegenContext {
                 self.note_resolution(name, info);
                 return Some(info);
             }
-            let key = (self.source_function_scope().to_owned(), name.to_owned());
-            if let Some(declared) = self.scoped_functions.get(&key) {
-                let info = self.live_scoped_function(name, declared);
+            if let Some(info) = self.lookup_declared_function(name) {
                 if self.arity_admits(name, info, arity) {
                     self.note_resolution(name, info);
                     return Some(info);
@@ -5001,7 +4994,6 @@ impl CodegenContext {
         self.semantic_fn_params.clear();
         self.source_callable_bounds.clear();
         self.scoped_functions.clear();
-        self.unit_declared_fns.clear();
         // ARCH-P2 stage 1 — the canonical index is DUAL-keyed with
         // `functions` and shares its lifetime: clear it at the same
         // per-module reset boundary so a fresh module never inherits

@@ -656,6 +656,18 @@ impl VbcCodegen {
         Some(result)
     }
 
+    /// Resolve a source call in its retained lexical environment. A mount is
+    /// an explicit binding even when its target cannot be linked; it must not
+    /// fall through to an unrelated declaration or an ambient builtin.
+    pub(super) fn lookup_source_function(&self, name: &str, arity: usize) -> Option<&FunctionInfo> {
+        if !name.contains('.') && !name.contains("::")
+            && let Some(selected) = self.source_mounted_function(name, arity)
+        {
+            return selected.ok();
+        }
+        self.ctx.lookup_function_with_arity_in_scope(name, arity)
+    }
+
     pub(super) fn source_call_declaration(
         &self,
         expr: &Expr,
@@ -719,9 +731,7 @@ impl VbcCodegen {
             }
             _ => return None,
         };
-        let function = self
-            .ctx
-            .lookup_function_with_arity_in_scope(&name, args.len())?;
+        let function = self.lookup_source_function(&name, args.len())?;
         self.source_call_result(function, None, type_args, args, expected, depth)
     }
 

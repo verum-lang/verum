@@ -10971,12 +10971,6 @@ impl VbcCodegen {
             }
         }
 
-        // task #20: user-phase declarations claim unit-level precedence
-        // for bare-name call resolution (stdlib bake is excluded via
-        // prefer_existing_functions).
-        if !self.ctx.prefer_existing_functions && !name.contains('.') && !name.contains("::") {
-            self.ctx.unit_declared_fns.insert(name.clone());
-        }
         self.capture_declaration_interface(func, source_signature, &info, &name, None, &dense, &shadow)?;
         self.ctx.register_function(name.clone(), info.clone());
         if self.nested_function_scope.is_empty() {
@@ -11603,7 +11597,6 @@ impl VbcCodegen {
             self.ctx.variadic_ffi_fns.insert(key.clone());
         }
         info.foreign_declaration = Some(key.into());
-        self.ctx.unit_declared_fns.insert(name.to_owned());
         self.ctx.register_function(name.to_owned(), info.clone());
         self.ctx.register_source_function(name, &info);
         if path != name {
@@ -15194,7 +15187,7 @@ impl VbcCodegen {
         // the authority, so the repair belongs here: a declaration that
         // is NOT a transparent wrapper takes its own name back.
         //
-        // USER PHASE ONLY, mirroring `unit_declared_fns`: during the
+        // USER PHASE ONLY: during the
         // stdlib bake `prefer_existing_functions` is true and the
         // first-wins/ownership discipline at :24562 stays in charge —
         // otherwise a core record could evict a core newtype's entry
