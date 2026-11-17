@@ -57,13 +57,34 @@ fn accepted(source: &str) {
 }
 
 const FACTORY: &str = r#"
+type Constructible is protocol { fn from_value(value: Int) -> Self; };
 type Answer is { value: Int };
-implement Answer { fn from_value(value: Int) -> Answer { Answer { value } } }
+implement Constructible for Answer { fn from_value(value: Int) -> Answer { Answer { value } } }
 type Factory<Item> is { value: Item };
 implement<Item> Factory<Item> {
-    fn build<Output>(self) -> Output { Output.from_value(7) }
+    fn build<Output: Constructible>(self) -> Output { Output.from_value(7) }
 }
 "#;
+
+#[test]
+fn an_unbounded_generic_cannot_assume_the_concrete_callers_factory() {
+    let source = FACTORY.replace("Output: Constructible", "Output");
+    let errors = errors(&source);
+    assert!(errors.iter().any(|error| error.contains("MethodNotFound")
+        && error.contains("from_value")), "{errors:?}");
+}
+
+#[test]
+fn a_same_named_factory_cannot_replace_the_declared_protocol_bound() {
+    let source = format!(r#"{FACTORY}
+        type Foreign is {{ value: Int }};
+        implement Foreign {{ fn from_value(value: Int) -> Self {{ Foreign {{ value }} }} }}
+        fn probe(factory: Factory<Int>) -> Foreign {{ factory.build<Foreign>() }}
+    "#);
+    let errors = errors(&source);
+    assert!(!errors.is_empty(), "an inherent method is not a protocol implementation");
+    assert!(errors.iter().any(|error| error.contains("Constructible")), "{errors:?}");
+}
 
 #[test]
 fn explicit_method_result_needs_no_let_annotation() {
@@ -96,11 +117,12 @@ fn probe() -> Int {
 fn method_generic_shadow_is_distinct_from_receiver_parameter() {
     accepted(
         r#"
+type Constructible is protocol { fn from_value(value: Int) -> Self; };
 type Answer is { value: Int };
-implement Answer { fn from_value(value: Int) -> Answer { Answer { value } } }
+implement Constructible for Answer { fn from_value(value: Int) -> Answer { Answer { value } } }
 type Factory<Item> is { value: Item };
 implement<Item> Factory<Item> {
-    fn build<Item>(self) -> Item { Item.from_value(7) }
+    fn build<Item: Constructible>(self) -> Item { Item.from_value(7) }
 }
 fn probe() -> Int {
     let factory: Factory<Int> = Factory { value: 7 };
@@ -231,11 +253,12 @@ fn probe() -> Bool {
 fn shadowed_method_does_not_replace_the_next_methods_owner_parameter() {
     accepted(
         r#"
+type Constructible is protocol { fn from_value(value: Int) -> Self; };
 type Answer is { value: Int };
-implement Answer { fn from_value(value: Int) -> Answer { Answer { value } } }
+implement Constructible for Answer { fn from_value(value: Int) -> Answer { Answer { value } } }
 type Factory<Item> is { value: Item };
 implement<Item> Factory<Item> {
-    fn build<Item>(self) -> Item { Item.from_value(7) }
+    fn build<Item: Constructible>(self) -> Item { Item.from_value(7) }
     fn original(self) -> Item { self.value }
 }
 fn probe() -> Int {
