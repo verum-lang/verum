@@ -109,6 +109,15 @@ pub struct CopyPlan {
     pub nodes: List<CopyNode>,
 }
 
+/// The copy operation selected for a canonical primitive. An unknown owner
+/// requires its full declaration, and may execute a retain operation.
+pub(crate) fn builtin_copy_node(owner: TypeId) -> Option<CopyNode> {
+    Some(match owner.builtin_value_storage()? {
+        BuiltinValueStorage::Immediate => CopyNode::Identity,
+        BuiltinValueStorage::Text => CopyNode::Text,
+    })
+}
+
 struct Builder<'a> {
     module: &'a VbcModule,
     types: List<TypeRef>,
@@ -158,14 +167,10 @@ impl Builder<'_> {
                 }
                 return Ok(CopyNode::Callable(ty.clone()));
             }
-            TypeRef::Concrete(id) if id.builtin_value_storage().is_some() => {
-                return Ok(match id.builtin_value_storage() {
-                    Some(BuiltinValueStorage::Text) => CopyNode::Text,
-                    Some(BuiltinValueStorage::Immediate) => CopyNode::Identity,
-                    None => unreachable!("guard established built-in storage"),
-                });
-            }
-            TypeRef::Concrete(id) => (*id, &[][..]),
+            TypeRef::Concrete(id) => match builtin_copy_node(*id) {
+                Some(node) => return Ok(node),
+                None => (*id, &[][..]),
+            },
             TypeRef::Instantiated { base, args } => (*base, args.as_slice()),
             TypeRef::Tuple(parts) => {
                 return Ok(CopyNode::Record {

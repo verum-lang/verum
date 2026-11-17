@@ -2,6 +2,7 @@
 //! This module describes actual producers, not semantic array types or ownership.
 use crate::encoding::decode_reg;
 use crate::instruction::{ArithSubOpcode, Instruction, MemSubOpcode, Reg};
+use crate::types::TypeRef;
 use verum_common::{Map, Maybe};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -59,6 +60,22 @@ impl ArrayResultFacts {
                 if let Some(fact) = fact {
                     self.values.insert(*dst, fact);
                 }
+            }
+            I::CloneTyped { dst, src, type_ref: TypeRef::Concrete(owner) }
+                if matches!(crate::copy_plan::builtin_copy_node(*owner), Some(crate::copy_plan::CopyNode::Identity)) =>
+            {
+                // A completed primitive copy can carry a scalar constant. It
+                // cannot certify packed or List storage for its destination.
+                let source = self.get(*src);
+                self.forget(*dst);
+                if let Some(value @ ArrayResultFact::Integer(_)) = source {
+                    self.values.insert(*dst, value);
+                }
+            }
+            I::DropTyped { src, type_ref: TypeRef::Concrete(owner) }
+                if matches!(crate::drop_plan::builtin_drop_plan(*owner), Some(crate::drop_plan::DropPlan::Ignore)) =>
+            {
+                self.forget(*src);
             }
             I::LoadI { dst, value } => {
                 self.values.insert(*dst, ArrayResultFact::Integer(*value));

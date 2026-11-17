@@ -2,7 +2,7 @@
 use super::{CodegenResult, VbcCodegen};
 use crate::array_storage::ArrayResultFact;
 use crate::instruction::Reg;
-use crate::types::{TypeId, TypeRef};
+use crate::types::TypeRef;
 
 pub(super) use crate::array_storage::ArrayResultFacts;
 
@@ -11,10 +11,16 @@ impl VbcCodegen {
     /// hints belong to initializers/arguments/fields and are not return targets.
     pub(super) fn materialize_list_return(&mut self, source: Reg) -> CodegenResult<Reg> {
         let (returns_list, signed_bits) = match self.ctx.return_type.as_ref() {
-            Some(TypeRef::Instantiated { base, args }) if *base == TypeId::LIST => {
-                (true, args.first().and_then(|element| self.array_element_signed_bits(element)))
-            }
-            Some(TypeRef::Concrete(base)) if *base == TypeId::LIST => (true, None),
+            Some(TypeRef::Instantiated { base, args }) => self.declared_runtime_carrier(*base)
+                .and_then(|carrier| carrier.array_construction_element_parameter())
+                .and_then(|position| args.get(position))
+                .map(|element| (true, self.array_element_signed_bits(element)))
+                .unwrap_or((false, None)),
+            Some(TypeRef::Concrete(base)) => (
+                self.declared_runtime_carrier(*base)
+                    .and_then(|carrier| carrier.array_construction_element_parameter()).is_some(),
+                None,
+            ),
             _ => (false, None),
         };
         if returns_list

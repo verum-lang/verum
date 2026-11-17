@@ -129,6 +129,38 @@ fn drop_glue_cannot_preserve_other_storage_proofs() {
 }
 
 #[test]
+fn primitive_copy_and_drop_only_update_the_affected_register() {
+    use crate::types::{TypeId, TypeRef};
+    let mut facts = ArrayResultFacts::default();
+    let count = Reg(10);
+    let packed = Reg(11);
+    let scratch = Reg(12);
+    let scalar = TypeRef::Concrete(TypeId::I16);
+    facts.observe(&Instruction::LoadSmallI { dst: count, value: 3 });
+    facts.observe(&allocation(packed, count, Reg(0), Some(2)));
+    let geometry = facts.get(packed).unwrap();
+    for dst in [count, scratch] {
+        assert!(facts.observe(&Instruction::CloneTyped { dst, src: count, type_ref: scalar.clone() }));
+        assert_eq!(facts.get(dst), Some(ArrayResultFact::Integer(3)));
+    }
+    assert!(facts.observe(&Instruction::CloneTyped { dst: scratch, src: packed, type_ref: scalar.clone() }));
+    assert_eq!(facts.get(scratch), None);
+    assert!(facts.observe(&Instruction::DropTyped { src: count, type_ref: scalar }));
+    assert_eq!(facts.get(count), None);
+    assert_eq!(facts.get(packed), Some(geometry));
+    for owner in [TypeId::TEXT, TypeId(TypeId::FIRST_USER)] {
+        for op in [
+            Instruction::CloneTyped { dst: scratch, src: count, type_ref: TypeRef::Concrete(owner) },
+            Instruction::DropTyped { src: count, type_ref: TypeRef::Concrete(owner) },
+        ] {
+            let mut probe = facts.clone();
+            assert!(!probe.observe(&op));
+            assert_eq!(probe.get(packed), None);
+        }
+    }
+}
+
+#[test]
 fn completed_body_summary_distinguishes_list_and_packed_returns() {
     use super::straight_line_array_return;
     let list = [
