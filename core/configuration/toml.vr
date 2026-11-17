@@ -318,19 +318,13 @@ fn require_newline_or_eof(p: &mut Parser, ctx: &Text) -> Result<(), TomlError> {
 // Parse a full TOML document into a TomlTable.
 // Returns the root table (always TomlTable variant).
 public fn parse(source: &Text) -> Result<TomlValue, TomlError> {
-    let bytes = source.as_bytes();
-    let mut p = new_parser(bytes);
-    let mut root: Map<Text, TomlValue> = Map.new();
-    parse_document(&mut p, &mut root)?;
-    Result.Ok(TomlValue.TomlTable(root))
+    Result.Ok(TomlValue.TomlTable(parse_table(source)?))
 }
 
 // Parse a TOML document and return the typed root table directly.
 public fn parse_table(source: &Text) -> Result<Map<Text, TomlValue>, TomlError> {
-    match parse(source)? {
-        TomlValue.TomlTable(t) => Result.Ok(t),
-        _ => unreachable(),  // parse() always returns TomlTable
-    }
+    let mut parser = new_parser(source.as_bytes());
+    parse_document(&mut parser)
 }
 
 // =============================================================================
@@ -344,7 +338,8 @@ public fn parse_table(source: &Text) -> Result<Map<Text, TomlValue>, TomlError> 
 //
 // The parser maintains a "current path" pointing into root, and applies
 // each subsequent key-value pair to the table at that path.
-fn parse_document(p: &mut Parser, root: &mut Map<Text, TomlValue>) -> Result<(), TomlError> {
+fn parse_document(p: &mut Parser) -> Result<Map<Text, TomlValue>, TomlError> {
+    let mut root: Map<Text, TomlValue> = Map.new();
     // current_path is the dotted-key path of the active table.
     // Empty list means root.
     let mut current_path: List<Text> = List.new();
@@ -361,7 +356,7 @@ fn parse_document(p: &mut Parser, root: &mut Map<Text, TomlValue>) -> Result<(),
                 expect_byte(p, 0x5D_u8, &"expected ']' after array-of-tables key")?;
                 expect_byte(p, 0x5D_u8, &"expected ']]' after array-of-tables key")?;
                 require_newline_or_eof(p, &"trailing garbage after [[header]]")?;
-                push_aot(root, &path, p)?;
+                push_aot(&mut root, &path, p)?;
                 current_path = path;
             } else {
                 // [table]
@@ -369,7 +364,7 @@ fn parse_document(p: &mut Parser, root: &mut Map<Text, TomlValue>) -> Result<(),
                 let path = parse_key_path(p)?;
                 expect_byte(p, 0x5D_u8, &"expected ']' after table key")?;
                 require_newline_or_eof(p, &"trailing garbage after [header]")?;
-                define_table(root, &path, p)?;
+                define_table(&mut root, &path, p)?;
                 current_path = path;
             }
         } else {
@@ -382,12 +377,12 @@ fn parse_document(p: &mut Parser, root: &mut Map<Text, TomlValue>) -> Result<(),
             require_newline_or_eof(p, &"trailing garbage after value")?;
 
             // Resolve target table by current_path, then set key_path inside it.
-            let target = resolve_target(root, &current_path, p)?;
+            let target = resolve_target(&mut root, &current_path, p)?;
             insert_dotted(target, &key_path, value, p)?;
         }
         skip_ws_and_comments(p);
     }
-    Result.Ok(())
+    Result.Ok(root)
 }
 
 // Parse a dotted key-path: bare-key | quoted-key (. bare-key | quoted-key)*

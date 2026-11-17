@@ -1,0 +1,23 @@
+mount core.configuration.toml.{TomlValue, parse, parse_table};
+
+@test
+fn test_toml_document_and_table_entry_points() {
+    let empty = parse_table(&"").unwrap();
+    assert_eq(empty.len(), 0);
+    let source = "enabled = true\nanswer = 42\n";
+    let fields = parse_table(&source).unwrap();
+    assert_eq(fields.len(), 2);
+    assert(fields.get("enabled").unwrap() is TomlValue.TomlBool(true));
+    assert(fields.get("answer").unwrap() is TomlValue.TomlInt(42));
+    match parse(&source).unwrap() {
+        TomlValue.TomlTable(table) => {
+            assert_eq(table.len(), 2);
+            assert(table.get("enabled").unwrap() is TomlValue.TomlBool(true));
+            assert(table.get("answer").unwrap() is TomlValue.TomlInt(42));
+        }
+        _ => panic("the TOML document root must be a table"),
+    };
+    let duplicate = "entry = 1\nentry = 2\n";
+    assert(parse(&duplicate).is_err());
+    assert(parse_table(&duplicate).is_err());
+}
