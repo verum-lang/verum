@@ -15233,6 +15233,8 @@ impl VbcCodegen {
         // payload typing maps variant payload templates to param
         // POSITIONS (see ctx.type_generic_params doc).
         if !type_decl.generics.is_empty() {
+            let owner = self.ctx.current_source_module.as_deref().unwrap_or(&self.config.module_name);
+            let qualified = crate::module::qualify_module_name(owner, &type_name);
             let params: Vec<String> = type_decl
                 .generics
                 .iter()
@@ -15247,6 +15249,10 @@ impl VbcCodegen {
                 })
                 .collect();
             if params.len() == type_decl.generics.len() {
+                // Imported field templates use the source-qualified receiver.
+                if qualified != type_name {
+                    self.ctx.type_generic_params.insert(qualified.clone(), params.clone());
+                }
                 self.ctx
                     .type_generic_params
                     .insert(type_name.clone(), params);
@@ -15265,6 +15271,9 @@ impl VbcCodegen {
                 })
                 .collect();
             if !const_names.is_empty() {
+                if qualified != type_name {
+                    self.ctx.type_const_param_names.insert(qualified, const_names.clone());
+                }
                 self.ctx
                     .type_const_param_names
                     .insert(type_name.clone(), const_names);

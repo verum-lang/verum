@@ -27,6 +27,7 @@
 )
 module core.collections.graph;
 
+mount core.base.protocols.Clone;
 
 /// A directed edge from `src` to `tgt` with optional label `L`.
 public type Edge<V, L> is {
@@ -34,6 +35,16 @@ public type Edge<V, L> is {
     public tgt: V,
     public label: L,
 };
+
+implement<V: Clone, L: Clone> Clone for Edge<V, L> {
+    fn clone(&self) -> Edge<V, L> {
+        Edge {
+            src: self.src.clone(),
+            tgt: self.tgt.clone(),
+            label: self.label.clone(),
+        }
+    }
+}
 
 /// An unlabelled directed edge — `()` is the trivial label.
 public type UEdge<V> is Edge<V, ()>;

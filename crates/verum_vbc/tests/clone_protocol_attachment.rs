@@ -611,3 +611,80 @@ fn the_wire_reader_rejects_an_unknown_definition_version() {
     let error = deserialize_module(&bytes).unwrap_err();
     assert!(error.to_string().contains("source definition identity"), "{error}");
 }
+
+#[test]
+fn standard_graph_edge_clones_both_vertices_and_its_label() {
+    let clone_protocol = protocol();
+    let graph = Parser::new(include_str!("../../../core/collections/graph.vr"))
+        .parse_module()
+        .unwrap();
+    let other = Parser::new(
+        "module other; public type Edge<L, V> is { public label: L, public tgt: V, public src: V };",
+    )
+    .parse_module()
+    .unwrap();
+    let client = Parser::new(
+        r#"
+        module edge_client;
+        mount core.collections.graph.Edge;
+        mount core.base.protocols.Clone;
+        mount other.Edge as OtherEdge;
+
+        type Stamp is { value: Int, copies: Int };
+        implement Clone for Stamp {
+            fn clone(&self) -> Stamp { Stamp { value: self.value, copies: self.copies + 1 } }
+        }
+        type Label is { copies: Int, value: Text };
+        implement Clone for Label {
+            fn clone(&self) -> Label { Label { copies: self.copies + 1, value: self.value } }
+        }
+        fn copy_edge<V: Clone, L: Clone>(edge: &Edge<V, L>) -> Edge<V, L> { edge.clone() }
+        fn probe() -> Int {
+            let edge: Edge<Stamp, Label> = Edge {
+                src: Stamp { value: 11, copies: 13 },
+                tgt: Stamp { value: 22, copies: 17 },
+                label: Label { copies: 19, value: "road" },
+            };
+            let copy = copy_edge(&edge);
+            assert_eq(copy.src.value, 11);
+            assert_eq(copy.tgt.value, 22);
+            assert_eq(copy.label.value, "road");
+            assert_eq(copy.src.copies, 14);
+            assert_eq(copy.tgt.copies, 18);
+            assert_eq(copy.label.copies, 20);
+            assert_eq(edge.src.copies, 13);
+            assert_eq(edge.tgt.copies, 17);
+            assert_eq(edge.label.copies, 19);
+            let other: OtherEdge<Label, Stamp> = OtherEdge {
+                label: Label { copies: 3, value: "rail" },
+                src: Stamp { value: 31, copies: 5 },
+                tgt: Stamp { value: 47, copies: 7 },
+            };
+            assert_eq(other.label.value, "rail");
+            assert_eq(other.src.value, 31);
+            assert_eq(other.tgt.value, 47);
+            42
+        }
+    "#,
+    )
+    .parse_module()
+    .unwrap();
+    for providers in [[&graph, &other], [&other, &graph]] {
+        let units = [&clone_protocol, providers[0], providers[1], &client];
+        let mut codegen = VbcCodegen::with_config(CodegenConfig::new(""));
+        codegen.initialize();
+        codegen.collect_unit_declarations(&units).unwrap();
+        codegen.resolve_pending_imports();
+        codegen
+            .compile_unit_items(&units, ItemFailurePolicy::Strict)
+            .unwrap();
+        let mut source = codegen.finalize_module().unwrap();
+        source.resolve_protocol_dispatch();
+        let decoded = wire(&source);
+        for module in [source, decoded] {
+            let entry = module.find_function_by_name("edge_client.probe").unwrap();
+            let mut vm = verum_vbc::interpreter::Interpreter::new(module.into());
+            assert_eq!(vm.execute_function(entry).unwrap().try_as_i64(), Some(42));
+        }
+    }
+}
