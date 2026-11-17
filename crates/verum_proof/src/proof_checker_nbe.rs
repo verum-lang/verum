@@ -235,46 +235,48 @@ pub enum Value {
 
 /// Neutral term — a stuck reduction. Represents level-indexed free
 /// variables and applications headed by neutrals.
+/// Each elimination shares its immutable operands. Reading a variable that
+/// occurs twice in an application keeps the earlier neutral computation shared.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Neutral {
     /// An opaque proof of function equality; no reflexivity computation rule.
     NFunExt {
-        function_type: Box<Value>,
-        lhs: Box<Value>,
-        rhs: Box<Value>,
-        pointwise: Box<Value>,
+        function_type: Arc<Value>,
+        lhs: Arc<Value>,
+        rhs: Arc<Value>,
+        pointwise: Arc<Value>,
     },
     NInduct {
-        scrutinee: Box<Value>,
-        motive: Box<Value>,
-        cases: Vec<Value>,
+        scrutinee: Arc<Value>,
+        motive: Arc<Value>,
+        cases: Arc<[Value]>,
     },
 
     /// Free variable at the given level. Levels are stable under
     /// binder addition (unlike indices).
     NVar(usize),
     /// Application `n x` where `n` is neutral. Cannot reduce.
-    NApp(Box<Neutral>, Box<Value>),
+    NApp(Arc<Neutral>, Arc<Value>),
     /// Stuck first projection `fst(n)`.
-    NFst(Box<Neutral>),
+    NFst(Arc<Neutral>),
     /// Stuck second projection `snd(n)`.
-    NSnd(Box<Neutral>),
+    NSnd(Arc<Neutral>),
     /// Stuck path induction — the J scrutinee canonicalised to a
     /// neutral path (free variable, stuck projection, etc.) rather
     /// than a refl, so the β-rule `J(_, h, refl) → h` did not fire.
     NJ {
         /// Motive value `P : Π(_ : A). Universe(_)`.
-        motive: Box<Value>,
+        motive: Arc<Value>,
         /// Base case `h : P(a)`.
-        base: Box<Value>,
+        base: Arc<Value>,
         /// Stuck path scrutinee head.
-        scrutinee: Box<Neutral>,
+        scrutinee: Arc<Neutral>,
     },
     /// Stuck based identity induction; the motive also binds the proof.
     NIdElim {
-        motive: Box<Value>,
-        base: Box<Value>,
-        scrutinee: Box<Neutral>,
+        motive: Arc<Value>,
+        base: Arc<Value>,
+        scrutinee: Arc<Neutral>,
     },
     /// Soundness gate: a stuck head that is itself a non-function,
     /// non-pair, non-path value (e.g. `Universe(_)` applied to an
@@ -287,7 +289,7 @@ pub enum Neutral {
     /// adversarial fuzz input may still reach it, and the
     /// stuck-head form keeps the kernel's reject/accept verdicts in
     /// sync with the trusted base.
-    NStuck(Box<Value>),
+    NStuck(Arc<Value>),
 }
 
 /// Environment — outer-first list of values. Pushed at binder
@@ -312,10 +314,10 @@ pub fn eval(term: &Term, env: &Env) -> Value {
             rhs,
             pointwise,
         } => Value::VNeutral(Neutral::NFunExt {
-            function_type: Box::new(eval(function_type, env)),
-            lhs: Box::new(eval(lhs, env)),
-            rhs: Box::new(eval(rhs, env)),
-            pointwise: Box::new(eval(pointwise, env)),
+            function_type: Arc::new(eval(function_type, env)),
+            lhs: Arc::new(eval(lhs, env)),
+            rhs: Arc::new(eval(rhs, env)),
+            pointwise: Arc::new(eval(pointwise, env)),
         }),
         Term::Let { value, body } => {
             let mut extended = env.clone();
@@ -483,9 +485,9 @@ pub fn apply_induct(scrutinee: Value, motive: Value, cases: Vec<Value>) -> Value
         }
     }
     Value::VNeutral(Neutral::NInduct {
-        scrutinee: Box::new(scrutinee),
-        motive: Box::new(motive),
-        cases,
+        scrutinee: Arc::new(scrutinee),
+        motive: Arc::new(motive),
+        cases: cases.into(),
     })
 }
 
@@ -500,11 +502,11 @@ fn apply_identity_elim(motive: Value, base: Value, scrutinee: Value, dependent: 
     let path = match scrutinee {
         Value::VRefl(_) => return base,
         Value::VNeutral(n) => n,
-        other => Neutral::NStuck(Box::new(other)),
+        other => Neutral::NStuck(Arc::new(other)),
     };
-    let motive = Box::new(motive);
-    let base = Box::new(base);
-    let scrutinee = Box::new(path);
+    let motive = Arc::new(motive);
+    let base = Arc::new(base);
+    let scrutinee = Arc::new(path);
     Value::VNeutral(if dependent {
         Neutral::NIdElim {
             motive,
@@ -549,14 +551,14 @@ pub fn apply_value(f: Value, x: Value) -> Value {
                 arguments,
             }
         }
-        Value::VNeutral(n) => Value::VNeutral(Neutral::NApp(Box::new(n), Box::new(x))),
+        Value::VNeutral(n) => Value::VNeutral(Neutral::NApp(Arc::new(n), Arc::new(x))),
         other => {
             // wrap the non-function head in NStuck so def_eq
             // sees the application structurally and doesn't equate
             // `App(other, x)` with `other`.
             Value::VNeutral(Neutral::NApp(
-                Box::new(Neutral::NStuck(Box::new(other))),
-                Box::new(x),
+                Arc::new(Neutral::NStuck(Arc::new(other))),
+                Arc::new(x),
             ))
         }
     }
@@ -568,8 +570,8 @@ pub fn apply_value(f: Value, x: Value) -> Value {
 pub fn apply_fst(p: Value) -> Value {
     match p {
         Value::VPair(a, _) => *a,
-        Value::VNeutral(n) => Value::VNeutral(Neutral::NFst(Box::new(n))),
-        other => Value::VNeutral(Neutral::NFst(Box::new(Neutral::NStuck(Box::new(other))))),
+        Value::VNeutral(n) => Value::VNeutral(Neutral::NFst(Arc::new(n))),
+        other => Value::VNeutral(Neutral::NFst(Arc::new(Neutral::NStuck(Arc::new(other))))),
     }
 }
 
@@ -577,8 +579,8 @@ pub fn apply_fst(p: Value) -> Value {
 pub fn apply_snd(p: Value) -> Value {
     match p {
         Value::VPair(_, b) => *b,
-        Value::VNeutral(n) => Value::VNeutral(Neutral::NSnd(Box::new(n))),
-        other => Value::VNeutral(Neutral::NSnd(Box::new(Neutral::NStuck(Box::new(other))))),
+        Value::VNeutral(n) => Value::VNeutral(Neutral::NSnd(Arc::new(n))),
+        other => Value::VNeutral(Neutral::NSnd(Arc::new(Neutral::NStuck(Arc::new(other))))),
     }
 }
 
@@ -991,7 +993,7 @@ fn def_eq_neutral(a: &Neutral, b: &Neutral, level: usize) -> bool {
             def_eq(a, b, level)
                 && def_eq(am, bm, level)
                 && ac.len() == bc.len()
-                && ac.iter().zip(bc).all(|(a, b)| def_eq(a, b, level))
+                && ac.iter().zip(bc.iter()).all(|(a, b)| def_eq(a, b, level))
         }
 
         (Neutral::NVar(i), Neutral::NVar(j)) => i == j,
