@@ -6918,7 +6918,7 @@ impl VbcCodegen {
             let only_simple_segment = !func_name.contains("::") && !func_name.contains('.');
             if !only_simple_segment {
                 None
-            } else if let Some(src_mod) = self.ctx.current_source_module.as_deref() {
+            } else if let Some(src_mod) = self.ctx.lexical_source_scope() {
                 if src_mod.is_empty() || src_mod == "main" {
                     None
                 } else {
@@ -7519,7 +7519,18 @@ impl VbcCodegen {
         } else {
             ""
         };
-        let (resolved_name, func_info) = match lexical_scoped_lookup
+        // An inherited body carries its declaration's lexical environment.
+        // Use the same scoped callee for emitted calls and result witnesses;
+        // unrelated global candidates cannot fill a missing dependency.
+        let retained_lexical_call = self.ctx.lexical_source_module.is_some()
+            && !func_name.contains('.') && !func_name.contains("::");
+        let retained_lexical_lookup = retained_lexical_call.then(|| {
+            lexical_scoped_lookup.clone().filter(|(_, info)| is_free_fn(info))
+                .or_else(|| self.ctx.lookup_function_with_arity_in_scope(&func_name, args.len())
+                    .filter(|info| is_free_fn(info))
+                    .map(|info| (func_name.clone(), info.clone())))
+        });
+        let (resolved_name, func_info) = match retained_lexical_lookup.unwrap_or_else(|| lexical_scoped_lookup
             .filter(|(_, info)| is_free_fn(info))
             // Lexical scope outranks EVERYTHING: the call site sits
             // inside the declaring function, so no import/module/global
@@ -7618,7 +7629,7 @@ impl VbcCodegen {
                 self.resolve_qualified_source_call(&parts, args.len())
                     .filter(|(_, info)| is_free_fn(info))
             })
-        {
+        ) {
             // CALL-BIND diagnostic (T0114/T0144): report WHICH spelling
             // a bare-name call bound to, under WHICH module scope. A
             // cross-module bare-name collision (two modules each
@@ -7652,6 +7663,9 @@ impl VbcCodegen {
                 result
             }
             None => {
+                if retained_lexical_call {
+                    return Err(CodegenError::new(CodegenErrorKind::UndefinedFunction(func_name)));
+                }
                 // Try fallback: if qualified path like "darwin::tls::init_main_thread_tls" fails,
                 // try just the simple function name "init_main_thread_tls". Functions are often
                 // registered with their simple names even when called with qualified paths.

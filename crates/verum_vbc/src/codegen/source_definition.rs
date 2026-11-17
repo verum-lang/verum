@@ -164,7 +164,7 @@ impl VbcCodegen {
             .unwrap_or(&self.config.module_name);
         let mut scopes = self.definition_lexical_scopes(owner)?;
         if let Some(body_owner) = self
-            .default_body_type_scope
+            .ctx.lexical_source_module
             .as_deref()
             .filter(|body_owner| *body_owner != owner)
         {

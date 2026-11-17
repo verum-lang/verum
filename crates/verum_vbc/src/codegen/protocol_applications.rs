@@ -638,14 +638,14 @@ impl VbcCodegen {
         lower: impl FnOnce(&mut Self) -> CodegenResult<T>,
     ) -> CodegenResult<T> {
         let previous_owner = std::mem::replace(&mut self.ctx.current_source_module, owner.clone());
-        let previous_lexical = std::mem::replace(&mut self.default_body_type_scope, owner);
+        let previous_lexical = std::mem::replace(&mut self.ctx.lexical_source_module, owner.as_deref().map(Into::into));
         let previous_substitution =
             std::mem::replace(&mut self.current_source_substitution, substitution);
         let previous_receiver =
             receiver.map(|receiver| self.current_impl_receiver.replace(receiver));
         let result = lower(self);
         self.ctx.current_source_module = previous_owner;
-        self.default_body_type_scope = previous_lexical;
+        self.ctx.lexical_source_module = previous_lexical;
         self.current_source_substitution = previous_substitution;
         if let Some(previous) = previous_receiver {
             self.current_impl_receiver = previous;

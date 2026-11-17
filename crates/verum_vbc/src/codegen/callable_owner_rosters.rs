@@ -328,12 +328,12 @@ impl VbcCodegen {
                         let owner = owner.as_ref().ok_or_else(|| {
                             invalid("receiver value domain has no declared lexical owner")
                         })?;
-                        let previous = self.default_body_type_scope.replace(owner.clone());
+                        let previous = self.ctx.lexical_source_module.replace(owner.as_str().into());
                         let carrier = self
                             .resolve_signature_type_ref(ty, &scope)
                             .ok()
                             .and_then(|domain| self.runtime_value_carrier(&domain));
-                        self.default_body_type_scope = previous;
+                        self.ctx.lexical_source_module = previous;
                         let mut parameter = parameter.clone();
                         parameter.witness_slot = Some(*id);
                         parameter.explicit_slot = None;

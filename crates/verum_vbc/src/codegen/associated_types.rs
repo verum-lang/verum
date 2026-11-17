@@ -5,7 +5,7 @@ use crate::{
     mono::TypeSubstitution,
     types::{TypeId, TypeRef},
 };
-use verum_common::{List, Set};
+use verum_common::{List, Map, Set};
 
 /// A written protocol qualifier must be elaborated as an exact application.
 /// The current source lowerer cannot produce that witness, so it may not erase
@@ -17,6 +17,10 @@ pub(super) fn require_projection_application_evidence(ty: &verum_ast::Type) -> s
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "../../tests/codegen/associated_member_selection.rs"]
+mod associated_member_selection;
 
 /// Source identities for fully specialized implementation heads. The ABI maps both
 /// pointer-width integers to PTR; it cannot distinguish their implementations.
@@ -65,6 +69,104 @@ impl ConcreteImplType {
 }
 
 impl VbcCodegen {
+    /// An associated equation belongs to its complete implementation head.
+    /// The nominal table deliberately omits equations of concrete instances;
+    /// it cannot decide this query, nor prove an implementation's prerequisites.
+    pub(super) fn selected_implementation_member(
+        &self,
+        actual: &TypeRef,
+        protocol: verum_common::well_known_types::WellKnownProtocol,
+        member: &str,
+    ) -> Option<TypeRef> {
+        use super::{formal_parameters::DeclarationTypeScope, source_substitution::SourceTypeSubstitution};
+        use crate::{mono::match_declared_types, types::TypeParamId};
+        use verum_ast::{decl::{ImplItemKind, ImplKind}, ty::GenericParamKind};
+
+        let (id, arguments) = match actual {
+            TypeRef::Concrete(id) => (*id, &[][..]),
+            TypeRef::Instantiated { base, args } => (*base, args.as_slice()),
+            _ => return None,
+        };
+        let owner = self.type_by_id(id)?;
+        if owner.type_params.len() != arguments.len() || !self.declared_type_in_scope(actual) {
+            return None;
+        }
+        let empty = SourceTypeSubstitution::default();
+        let mut seen = Set::new();
+        let mut selected = None;
+        for row in owner.protocols.iter().filter(|row|
+            self.declared_protocol_role(TypeId(row.protocol.0)) == Some(protocol))
+        {
+            let source = row.source_implementation.as_ref()?;
+            let repeated_source = !seen.insert(source);
+            let implementation = source.declaration().ok()?;
+            let ImplKind::Protocol { protocol: path, protocol_args, for_type } = &implementation.kind else {
+                return None;
+            };
+            if !protocol_args.is_empty()
+                || self.nominal_type_id_in_scope(&Self::format_type_path(path), source.origin_module())
+                    != Some(TypeId(row.protocol.0))
+            { return None; }
+            let mut parameters = Map::new();
+            let mut ids = List::new();
+            let mut conditional = false;
+            for parameter in &implementation.generics {
+                match &parameter.kind {
+                    GenericParamKind::Type { name, bounds, .. } => {
+                        let id = u16::try_from(ids.len()).ok()?;
+                        if parameters.insert(name.name.to_string(), id).is_some() { return None; }
+                        ids.push(TypeParamId(id));
+                        conditional |= !bounds.is_empty();
+                    }
+                    GenericParamKind::Lifetime { .. } => {}
+                    _ => return None,
+                }
+            }
+            let parameters = parameters.into();
+            let lexical = DeclarationTypeScope {
+                owner: source.origin_module(), substitution: &empty, receiver: None,
+            };
+            let head = self.semantic_formal_type_in_declaration(
+                for_type, &parameters, &ids, &Default::default(), &lexical,
+            )?;
+            let mut bindings = TypeSubstitution::empty();
+            if !match_declared_types(&head, actual, &mut bindings)
+                || bindings.apply(&head).ok()?.ne(actual)
+            { continue; }
+            // A registered conditional row is not a checked applicability
+            // judgment. Keep unsupported or unproved obligations unknown.
+            if conditional || implementation.specialize_attr.is_some()
+                || implementation.generic_where_clause.as_ref().is_some_and(|clause| !clause.predicates.is_empty())
+                || implementation.meta_where_clause.as_ref().is_some_and(|clause| !clause.predicates.is_empty())
+                || ids.iter().any(|id| bindings.get(*id).is_none())
+            { return None; }
+            let receiver = super::ImplReceiverWitness { ty: head, semantic: true };
+            let lexical = DeclarationTypeScope { receiver: Some(&receiver), ..lexical };
+            let mut assignments = implementation.items.iter().filter_map(|item| match &item.kind {
+                ImplItemKind::Type { name, ty, type_params } if name.name.as_str() == member =>
+                    Some((ty, type_params)),
+                _ => None,
+            });
+            let (body, family) = assignments.next()?;
+            if !family.is_empty() || assignments.next().is_some()
+                || (selected.is_some() && !repeated_source) { return None; }
+            let body = self.semantic_formal_type_in_declaration(
+                body, &parameters, &ids, &Default::default(), &lexical,
+            )?;
+            let result = bindings.apply(&body).ok()?;
+            if !self.declared_type_in_scope(&result) { return None; }
+            // A retained unconditional row must agree with its source. It is
+            // never a replacement for a missing or contradictory source head.
+            for (name, carried) in &row.associated_types {
+                if self.ctx.strings.get(name.0 as usize).is_some_and(|name| name == member)
+                    && TypeSubstitution::new(&owner.type_params, arguments).apply(carried).ok()? != result
+                { return None; }
+            }
+            selected = Some(result);
+        }
+        selected
+    }
+
     /// Capture the nominal declarations a foreign implementor will need when
     /// checking inherited default signatures and bodies. Resolve them as
     /// ordinary signatures in this file, including their generic binders.

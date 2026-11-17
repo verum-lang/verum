@@ -1193,8 +1193,6 @@ pub struct VbcCodegen {
     pending_default_methods: Vec<(FunctionId, DeferredDefaultMethod)>,
     /// Entries left open until all explicit overrides and defaults have registered.
     pending_protocol_method_slots: HashMap<verum_ast::source_implementation::AssociatedImplementationSource, Vec<(usize, String, TypeRef)>>,
-    /// Lexical lookup for an inherited signature and body; its function still belongs to the concrete receiver.
-    default_body_type_scope: Option<String>,
     /// Predicate lowering uses its retained lexical owner, never caller names.
     refinement_scope_active: bool,
     /// T0701 (default-steals-slot class): default-method
@@ -1786,7 +1784,7 @@ impl VbcCodegen {
     }
 
     fn lexical_type_scope(&self) -> &str {
-        self.default_body_type_scope.as_deref().or(self.ctx.current_source_module.as_deref())
+        self.ctx.lexical_source_scope()
             .unwrap_or(&self.config.module_name)
     }
 
@@ -1795,7 +1793,10 @@ impl VbcCodegen {
     /// context table. The fallback supports callers that seed a context without
     /// collecting source declarations.
     fn mounted_type_path(&self, name: &str) -> Maybe<&str> {
-        let owner = self.lexical_type_scope();
+        self.mounted_type_path_in_scope(name, self.lexical_type_scope())
+    }
+
+    fn mounted_type_path_in_scope(&self, name: &str, owner: &str) -> Maybe<&str> {
         let owner = Text::from(owner);
         let name_key = Text::from(name);
         if self.source_type_mounts.contains_key(&owner) {
@@ -2512,7 +2513,6 @@ impl VbcCodegen {
             // Pending default protocol methods for deferred compilation
             pending_default_methods: Vec::new(),
             pending_protocol_method_slots: HashMap::new(),
-            default_body_type_scope: None,
             refinement_scope_active: false,
             pending_default_registrations: Vec::new(),
             concrete_impl_bindings: HashMap::new(),
@@ -3686,7 +3686,7 @@ impl VbcCodegen {
     ) -> CodegenResult<T> {
         let scope = &method.implementation;
         let previous_owner = std::mem::replace(&mut self.ctx.current_source_module, scope.declaration.owner.clone());
-        let previous_lexical = std::mem::replace(&mut self.default_body_type_scope, method.lexical_owner.clone());
+        let previous_lexical = std::mem::replace(&mut self.ctx.lexical_source_module, method.lexical_owner.as_deref().map(Into::into));
         let previous_impl = self.current_deferred_impl.replace(scope.clone());
         let previous_receiver = self.current_impl_receiver.replace(scope.receiver.clone());
         let previous_substitution = std::mem::replace(&mut self.current_source_substitution, scope.source_substitution.clone());
@@ -3700,7 +3700,7 @@ impl VbcCodegen {
         let previous_ids = std::mem::take(&mut self.ctx.current_generic_param_ids);
         let result = lower(self);
         self.ctx.current_source_module = previous_owner;
-        self.default_body_type_scope = previous_lexical;
+        self.ctx.lexical_source_module = previous_lexical;
         self.current_deferred_impl = previous_impl;
         self.current_impl_receiver = previous_receiver;
         self.current_source_substitution = previous_substitution;
@@ -17953,14 +17953,23 @@ impl VbcCodegen {
         {
             return Ok(owner.clone());
         }
-        // The constant evaluator may be executing a foreign initializer.
-        // Its exact declared owner wins over the consumer's bare-name slot.
+        // Foreign declarations retain their complete lexical type environment,
+        // including mounts and aliases. A consumer's bare slot has no authority.
         if let TypeKind::Path(path) = &ty.kind
-            && path.is_single()
             && let Some(scope) = declaration_scope
-            && let Some(id) = self.type_name_to_id.get(&format!("{scope}.{}", path))
         {
-            return Ok(TypeRef::Concrete(*id));
+            let name = path.to_string().replace("::", ".");
+            if let Some(alias) = self.selected_language_alias_in_scope(&name, scope) {
+                return self.language_alias_type_ref(alias);
+            }
+            let id = self.nominal_type_id_in_scope(&name, scope)
+                .filter(|_| self.nominal_path_is_declared_in_scope(ty, scope))
+                .ok_or_else(|| CodegenError::with_span(CodegenErrorKind::InvalidSourceSignature(
+                    format!("unresolved nominal type '{name}' in declaration scope '{scope}'"),
+                ), ty.span))?;
+            return Ok(TypeRef::Concrete(if preserve_refs && path.is_single() {
+                id.declared_scalar_identity(&name)
+            } else { id }));
         }
         let resolved = self.ast_type_to_type_ref(ty)?;
         if preserve_refs && let TypeKind::Path(path) = &ty.kind

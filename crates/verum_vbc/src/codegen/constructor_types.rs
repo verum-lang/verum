@@ -120,17 +120,7 @@ impl VbcCodegen {
     pub(super) fn declared_protocol_member(
         &self, ty: &TypeRef, protocol: verum_common::well_known_types::WellKnownProtocol, member: &str,
     ) -> Option<TypeRef> {
-        let (id, args) = match ty {
-            TypeRef::Concrete(id) => (*id, &[][..]),
-            TypeRef::Instantiated { base, args } => (*base, args.as_slice()),
-            _ => return None,
-        };
-        let owner = self.type_by_id(id)?;
-        if owner.type_params.len() != args.len() { return None; }
-        let implementations = owner.protocols.iter().filter(|implementation|
-            self.declared_protocol_role(crate::types::TypeId(implementation.protocol.0)) == Some(protocol));
-        let target = self.associated_binding(implementations, member)?;
-        TypeSubstitution::new(&owner.type_params, args).apply(target).ok()
+        self.selected_implementation_member(ty, protocol, member)
     }
 
     fn future_output_declaration(&self, owner: crate::types::TypeId) -> Option<&TypeRef> {

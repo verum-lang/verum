@@ -802,10 +802,14 @@ impl VbcCodegen {
     /// A selected source binding is authoritative even when it cannot resolve.
     /// Walk actual lexical parents, never namespace prefixes or sibling aliases.
     pub(super) fn source_nominal_type_id(&self, name: &str) -> Option<Option<TypeId>> {
+        self.source_nominal_type_id_in_scope(name, self.lexical_type_scope())
+    }
+
+    pub(super) fn source_nominal_type_id_in_scope(&self, name: &str, scope: &str) -> Option<Option<TypeId>> {
         if let Some((head, tail)) = name.split_once('.') {
-            return Some(self.qualified_source_type_id(name, head, tail));
+            return Some(self.qualified_source_type_id(name, head, tail, scope));
         }
-        let mut owner = self.lexical_type_scope();
+        let mut owner = scope;
         loop {
             if let Some(local) = self.type_name_to_id.get(&format!("{owner}.{name}")) {
                 return Some(Some(*local));
@@ -836,8 +840,7 @@ impl VbcCodegen {
     /// A qualified use selects its written namespace before following exports.
     /// Imported namespace aliases and real lexical children are authoritative;
     /// an unbound relative head cannot borrow a sibling under the cog root.
-    fn qualified_source_type_id(&self, name: &str, head: &str, tail: &str) -> Option<TypeId> {
-        let scope = self.lexical_type_scope();
+    fn qualified_source_type_id(&self, name: &str, head: &str, tail: &str, scope: &str) -> Option<TypeId> {
         let mut owner = scope;
         loop {
             if let Some(binding) = self.source_type_binding(owner, head) {
@@ -877,10 +880,16 @@ impl VbcCodegen {
     pub(super) fn selected_language_alias(
         &self, name: &str,
     ) -> Option<&'static verum_ast::language_aliases::LanguageTypeAlias> {
+        self.selected_language_alias_in_scope(name, self.lexical_type_scope())
+    }
+
+    pub(super) fn selected_language_alias_in_scope(
+        &self, name: &str, owner: &str,
+    ) -> Option<&'static verum_ast::language_aliases::LanguageTypeAlias> {
         let declaration = verum_ast::language_aliases::lookup(name)?;
-        if self.source_nominal_type_id(name).is_some()
-            || self.mounted_type_path(name).is_some()
-            || self.source_glob_type_id(name, self.lexical_type_scope()).is_some()
+        if self.source_nominal_type_id_in_scope(name, owner).is_some()
+            || self.mounted_type_path_in_scope(name, owner).is_some()
+            || self.source_glob_type_id(name, owner).is_some()
         {
             return None;
         }
@@ -903,9 +912,12 @@ impl VbcCodegen {
     }
 
     pub(super) fn nominal_type_id(&self, name: &str) -> Option<TypeId> {
-        if let Some(selected) = self.source_nominal_type_id(name) { return selected; }
-        let owner = self.lexical_type_scope();
-        if let Some(mounted) = self.mounted_type_path(name) {
+        self.nominal_type_id_in_scope(name, self.lexical_type_scope())
+    }
+
+    pub(super) fn nominal_type_id_in_scope(&self, name: &str, owner: &str) -> Option<TypeId> {
+        if let Some(selected) = self.source_nominal_type_id_in_scope(name, owner) { return selected; }
+        if let Some(mounted) = self.mounted_type_path_in_scope(name, owner) {
             return self.source_export_type_id(mounted, owner);
         }
         if let Some(selected) = self.source_glob_type_id(name, owner) { return selected; }

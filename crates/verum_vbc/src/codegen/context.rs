@@ -416,6 +416,10 @@ pub struct CodegenContext {
     /// "use `config.module_name` as-is".
     pub current_source_module: Option<String>,
 
+    /// Declaration scope retained by an inherited body or imported signature.
+    /// Lookup uses this owner; registration still belongs to current_source_module.
+    pub(super) lexical_source_module: Option<Text>,
+
     /// Statistics for codegen.
     pub stats: CodegenStats,
 
@@ -1702,6 +1706,7 @@ impl CodegenContext {
             stage3_stub_names: HashMap::new(),
             pending_mount_aliases: HashMap::new(),
             current_source_module: None,
+            lexical_source_module: None,
             stats: CodegenStats::default(),
             tier_context: TierContext::new(),
             suspend_point_count: 0,
@@ -3848,13 +3853,17 @@ impl CodegenContext {
     /// Scope used by source function declarations. An unnamed/root module
     /// has an empty internal key; a declared child named `main` stays distinct.
     fn source_function_scope(&self) -> &str {
-        self.current_source_module.as_deref().unwrap_or("")
+        self.lexical_source_scope().unwrap_or("")
+    }
+
+    pub(super) fn lexical_source_scope(&self) -> Option<&str> {
+        self.lexical_source_module.as_deref().or(self.current_source_module.as_deref())
     }
 
     /// Called only by the AST function-declaration producer. Ambient names,
     /// archive aliases and builtins must not acquire root declaration ownership.
     pub(super) fn register_source_function(&mut self, name: &str, info: &FunctionInfo) {
-        let scope = self.source_function_scope().to_owned();
+        let scope = self.current_source_module.as_deref().unwrap_or("").to_owned();
         self.register_function_declaration(&scope, name, info);
     }
 
@@ -3934,6 +3943,9 @@ impl CodegenContext {
             self.note_resolution(name, info);
             return Some(info);
         }
+        if self.lexical_source_module.is_some() && !name.contains('.') && !name.contains("::") {
+            return None;
+        }
         let found = self.functions.get(name);
         if let Some(info) = found {
             self.note_resolution(name, info);
@@ -3985,6 +3997,7 @@ impl CodegenContext {
                     return Some(info);
                 }
             }
+            if self.lexical_source_module.is_some() { return None; }
         }
         self.lookup_function_with_arity(name, arity)
     }
@@ -4287,7 +4300,7 @@ impl CodegenContext {
         parts: &[String],
         arity: usize,
     ) -> Option<(String, FunctionInfo)> {
-        self.resolve_qualified_dotted_call_in_scope(parts, arity, self.current_source_module.as_deref())
+        self.resolve_qualified_dotted_call_in_scope(parts, arity, self.lexical_source_scope())
     }
 
     pub(super) fn resolve_qualified_dotted_call_in_scope(

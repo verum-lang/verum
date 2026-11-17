@@ -6,6 +6,14 @@ use crate::types::{CbgrTier, Mutability, TypeId, TypeParamId, TypeRef};
 use verum_ast::{FunctionDecl, FunctionParamKind};
 use verum_common::List;
 
+/// A retained declaration is resolved in its own lexical and binder context,
+/// independently of the function currently being emitted.
+pub(super) struct DeclarationTypeScope<'a> {
+    pub owner: &'a str,
+    pub substitution: &'a super::source_substitution::SourceTypeSubstitution,
+    pub receiver: Option<&'a super::ImplReceiverWitness>,
+}
+
 impl VbcCodegen {
     /// Resolve the target in the actual impl declaration, before any inherited
     /// method changes lexical scope. Method-local binders cannot define Self.
@@ -225,16 +233,21 @@ impl VbcCodegen {
             return self.current_impl_receiver.as_ref()
                 .is_some_and(|receiver| receiver.semantic);
         }
+        self.nominal_path_is_declared_in_scope(ast, self.lexical_type_scope())
+    }
+
+    pub(super) fn nominal_path_is_declared_in_scope(&self, ast: &verum_ast::Type, owner: &str) -> bool {
+        let verum_ast::ty::TypeKind::Path(path) = &ast.kind else { return false; };
+        let name = path.to_string().replace("::", ".");
         if !path.is_single() {
-            return self.nominal_type_id(&name).is_some();
+            return self.nominal_type_id_in_scope(&name, owner).is_some();
         }
-        if self.selected_language_alias(&name).is_some() {
+        if self.selected_language_alias_in_scope(&name, owner).is_some() {
             return true;
         }
-        let owner = self.lexical_type_scope();
-        if let Some(selected) = self.source_nominal_type_id(&name) { return selected.is_some(); }
-        if self.mounted_type_path(&name).is_some() {
-            return self.nominal_type_id(&name).is_some();
+        if let Some(selected) = self.source_nominal_type_id_in_scope(&name, owner) { return selected.is_some(); }
+        if self.mounted_type_path_in_scope(&name, owner).is_some() {
+            return self.nominal_type_id_in_scope(&name, owner).is_some();
         }
         if self
             .type_name_claim_owner
@@ -250,7 +263,7 @@ impl VbcCodegen {
         if let Some(selected) = self.source_glob_type_id(&name, owner) {
             return selected.is_some();
         }
-        self.nominal_type_id(&name).is_some_and(|id| id.is_builtin()
+        self.nominal_type_id_in_scope(&name, owner).is_some_and(|id| id.is_builtin()
             || (id.well_known_name() == Some(name.as_str())
                 && (self.is_builtin_ctor_collection(&name)
                     || verum_common::well_known_types::BUILTIN_VARIANT_CARRIERS
@@ -307,11 +320,38 @@ impl VbcCodegen {
         declared_ids: &[TypeParamId],
         values: &std::collections::HashSet<String>,
     ) -> Option<TypeRef> {
+        self.semantic_formal_type_in_declaration(ast, scope, declared_ids, values, &DeclarationTypeScope {
+            owner: self.lexical_type_scope(),
+            substitution: &self.current_source_substitution,
+            receiver: self.current_impl_receiver.as_ref(),
+        })
+    }
+
+    fn declaration_signature_type(
+        &self, ast: &verum_ast::Type, scope: &std::collections::HashMap<String, u16>,
+        declaration: &DeclarationTypeScope<'_>,
+        count: &mut dyn FnMut(&verum_ast::Expr) -> Option<u64>,
+    ) -> super::CodegenResult<TypeRef> {
+        declaration.substitution.elaborate(scope, |scope, values| {
+            self.resolve_type_ref_in_scope(ast, scope, true, Some(declaration.owner), count,
+                declaration.receiver.map(|receiver| &receiver.ty), values, &[])
+        })
+    }
+
+    pub(super) fn semantic_formal_type_in_declaration(
+        &self,
+        ast: &verum_ast::Type,
+        scope: &std::collections::HashMap<String, u16>,
+        declared_ids: &[TypeParamId],
+        values: &std::collections::HashSet<String>,
+        declaration: &DeclarationTypeScope<'_>,
+    ) -> Option<TypeRef> {
         use verum_ast::ty::{GenericArg, TypeKind};
         fn parameter_path<'a>(
             ty: &verum_ast::Type,
             scope: &std::collections::HashMap<String, u16>,
             cg: &'a VbcCodegen,
+            declaration: &DeclarationTypeScope<'a>,
             declared_ids: &[TypeParamId],
             binders: u32,
             retained: &mut List<&'a TypeRef>,
@@ -325,9 +365,9 @@ impl VbcCodegen {
                     || declared_ids.contains(&TypeParamId((index - binders) as u16)));
             }
             let witness = if VbcCodegen::ast_type_is_bare_self(ty) {
-                cg.current_impl_receiver.as_ref()
+                declaration.receiver
             } else {
-                cg.current_source_substitution.get(&name)
+                declaration.substitution.get(&name)
             }?;
             if witness.semantic {
                 retained.push(&witness.ty);
@@ -339,16 +379,17 @@ impl VbcCodegen {
             scope: &std::collections::HashMap<String, u16>,
             depth: usize,
             cg: &'a VbcCodegen,
+            declaration: &DeclarationTypeScope<'a>,
             declared_ids: &[TypeParamId],
             binders: u32,
             retained: &mut List<&'a TypeRef>,
         ) -> bool {
             if depth > 64 { return false; }
             match &ty.kind {
-                TypeKind::Path(_) => parameter_path(ty, scope, cg, declared_ids, binders, retained) == Some(true),
-                TypeKind::AssociatedType { base, .. } => generic_projection_base(base, scope, depth + 1, cg, declared_ids, binders, retained),
+                TypeKind::Path(_) => parameter_path(ty, scope, cg, declaration, declared_ids, binders, retained) == Some(true),
+                TypeKind::AssociatedType { base, .. } => generic_projection_base(base, scope, depth + 1, cg, declaration, declared_ids, binders, retained),
                 TypeKind::Qualified { self_ty, trait_ref, .. } => trait_ref.segments.is_empty()
-                    && generic_projection_base(self_ty, scope, depth + 1, cg, declared_ids, binders, retained),
+                    && generic_projection_base(self_ty, scope, depth + 1, cg, declaration, declared_ids, binders, retained),
                 _ => false,
             }
         }
@@ -357,6 +398,7 @@ impl VbcCodegen {
             depth: usize,
             budget: &mut usize,
             cg: &'a VbcCodegen,
+            declaration: &DeclarationTypeScope<'a>,
             scope: &std::collections::HashMap<String, u16>,
             declared_ids: &[TypeParamId],
             binders: u32,
@@ -374,29 +416,29 @@ impl VbcCodegen {
                 | TypeKind::Char
                 | TypeKind::Unit
                 | TypeKind::Never => true,
-                TypeKind::Path(_) => parameter_path(ty, scope, cg, declared_ids, binders, retained)
-                    .unwrap_or_else(|| cg.semantic_formal_path_is_declared(ty, scope)),
-                TypeKind::AssociatedType { base, .. } => generic_projection_base(base, scope, depth + 1, cg, declared_ids, binders, retained),
+                TypeKind::Path(_) => parameter_path(ty, scope, cg, declaration, declared_ids, binders, retained)
+                    .unwrap_or_else(|| cg.nominal_path_is_declared_in_scope(ty, declaration.owner)),
+                TypeKind::AssociatedType { base, .. } => generic_projection_base(base, scope, depth + 1, cg, declaration, declared_ids, binders, retained),
                 TypeKind::Qualified { self_ty, trait_ref, .. } => trait_ref.segments.is_empty()
-                    && generic_projection_base(self_ty, scope, depth + 1, cg, declared_ids, binders, retained),
+                    && generic_projection_base(self_ty, scope, depth + 1, cg, declaration, declared_ids, binders, retained),
                 TypeKind::Reference { inner, .. }
                 | TypeKind::CheckedReference { inner, .. }
                 | TypeKind::UnsafeReference { inner, .. }
                 | TypeKind::Pointer { inner, .. }
-                | TypeKind::Slice(inner) => supported(inner, depth + 1, budget, cg, scope, declared_ids, binders, retained),
+                | TypeKind::Slice(inner) => supported(inner, depth + 1, budget, cg, declaration, scope, declared_ids, binders, retained),
                 TypeKind::Array { element, size } => {
-                    size.is_some() && supported(element, depth + 1, budget, cg, scope, declared_ids, binders, retained)
+                    size.is_some() && supported(element, depth + 1, budget, cg, declaration, scope, declared_ids, binders, retained)
                 }
                 TypeKind::Tuple(parts) => parts
                     .iter()
-                    .all(|p| supported(p, depth + 1, budget, cg, scope, declared_ids, binders, retained)),
+                    .all(|p| supported(p, depth + 1, budget, cg, declaration, scope, declared_ids, binders, retained)),
                 TypeKind::Generic { base, args } => {
-                    supported(base, depth + 1, budget, cg, scope, declared_ids, binders, retained)
-                        && matches!(cg.resolve_signature_type_ref(base, scope), Ok(TypeRef::Concrete(id))
+                    supported(base, depth + 1, budget, cg, declaration, scope, declared_ids, binders, retained)
+                        && matches!(cg.declaration_signature_type(base, scope, declaration, &mut |_| None), Ok(TypeRef::Concrete(id))
                         if id != TypeId::PTR && id != TypeId::RESERVED)
                         && args.iter().all(|arg| {
                             match arg {
-                                GenericArg::Type(ty) => supported(ty, depth + 1, budget, cg, scope, declared_ids, binders, retained),
+                                GenericArg::Type(ty) => supported(ty, depth + 1, budget, cg, declaration, scope, declared_ids, binders, retained),
                                 // The scoped mapper below checks the exact value or
                                 // declaration binder, including source substitutions.
                                 GenericArg::Const(_) => true,
@@ -416,8 +458,8 @@ impl VbcCodegen {
                         && contexts.requirements.is_empty()
                         && params
                             .iter()
-                            .all(|p| supported(p, depth + 1, budget, cg, scope, declared_ids, binders, retained))
-                        && supported(return_type, depth + 1, budget, cg, scope, declared_ids, binders, retained)
+                            .all(|p| supported(p, depth + 1, budget, cg, declaration, scope, declared_ids, binders, retained))
+                        && supported(return_type, depth + 1, budget, cg, declaration, scope, declared_ids, binders, retained)
                 }
                 TypeKind::Rank2Function {
                     type_params, params, return_type, contexts, calling_convention, where_clause,
@@ -430,10 +472,10 @@ impl VbcCodegen {
                     calling_convention.is_none()
                         && contexts.requirements.is_empty()
                         && where_clause.as_ref().is_none_or(|clause| clause.predicates.is_empty())
-                        && params.iter().all(|p| supported(p, depth + 1, budget, cg, &inner, declared_ids, binders, retained))
-                        && supported(return_type, depth + 1, budget, cg, &inner, declared_ids, binders, retained)
+                        && params.iter().all(|p| supported(p, depth + 1, budget, cg, declaration, &inner, declared_ids, binders, retained))
+                        && supported(return_type, depth + 1, budget, cg, declaration, &inner, declared_ids, binders, retained)
                 }
-                TypeKind::DynProtocol { .. } => cg.resolve_signature_type_ref(ty, scope)
+                TypeKind::DynProtocol { .. } => cg.declaration_signature_type(ty, scope, declaration, &mut |_| None)
                     .is_ok_and(|resolved| resolved_in_scope(&resolved,
                         &mut |id| declared_ids.contains(&id), depth + 1, binders, false)),
                 // Other unsupported forms do not establish an exact
@@ -442,7 +484,7 @@ impl VbcCodegen {
             }
         }
         let mut retained = List::new();
-        if !supported(ast, 0, &mut 4096, self, scope, declared_ids, 0, &mut retained) {
+        if !supported(ast, 0, &mut 4096, self, declaration, scope, declared_ids, 0, &mut retained) {
             return None;
         }
         // Substitution transports an already checked type, including its free
@@ -456,7 +498,7 @@ impl VbcCodegen {
                 true
             }, 0, 0, false) { return None; }
         }
-        let owner = self.lexical_type_scope();
+        let owner = declaration.owner;
         // A fixed extent requires its exact declaring scope. The wildcard
         // family bypasses this evaluator and never claims a numeric extent.
         let mut complete = true;
@@ -474,7 +516,7 @@ impl VbcCodegen {
             complete &= extent.is_some();
             extent
         };
-        let ty = self.resolve_type_ref_scoped_with_count(ast, scope, true, Some(owner), &mut array_count).ok()?;
+        let ty = self.declaration_signature_type(ast, scope, declaration, &mut array_count).ok()?;
         (complete && resolved(&ty, &admitted_ids, 0)).then_some(ty)
     }
 }

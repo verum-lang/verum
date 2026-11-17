@@ -195,7 +195,7 @@ impl VbcCodegen {
             .origin_module
             .and_then(|id| module.strings.get(id))
             .unwrap_or(&module.name);
-        let previous_owner = self.default_body_type_scope.replace(owner.to_owned());
+        let previous_owner = self.ctx.lexical_source_module.replace(owner.into());
         let previous_substitution = std::mem::take(&mut self.current_source_substitution);
         let scope = descriptor
             .type_params
@@ -222,7 +222,7 @@ impl VbcCodegen {
         let completion =
             self.complete_imported_callable_owners(module, descriptor, remap, &mut roster);
         self.current_source_substitution = previous_substitution;
-        self.default_body_type_scope = previous_owner;
+        self.ctx.lexical_source_module = previous_owner;
         if let Err(error) = completion {
             let name = module.strings.get(descriptor.name).unwrap_or("<missing name>");
             self.record_source_declaration_error(error.with_context(format!("imported callable {owner}.{name}")));
