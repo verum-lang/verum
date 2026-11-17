@@ -34,6 +34,45 @@ const CHOICE: &str = "type Choice<T> is Empty | Hold(T);";
 const CELL: &str = "type Cell is { public pointer:&Int, public value:Int };";
 
 #[test]
+fn diagnostic_environment_cannot_authorize_missing_record_fields() {
+    const CHILD: &str = "VERUM_RECORD_ADMISSION_TEST_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        // Separate processes avoid mutating the environment of parallel tests.
+        for trace in [false, true] {
+            let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+            command.args(["--exact", "diagnostic_environment_cannot_authorize_missing_record_fields", "--nocapture"])
+                .env(CHILD, "1").env_remove("VERUM_TRACE_MISSING_FIELD");
+            if trace { command.env("VERUM_TRACE_MISSING_FIELD", "1"); }
+            let output = command.output().expect("record admission child");
+            assert!(output.status.success(), "trace={trace}: stdout={:?}; stderr={:?}",
+                std::str::from_utf8(&output.stdout), std::str::from_utf8(&output.stderr));
+        }
+        return;
+    }
+
+    let record = "type Pair is { public first:Int, public second:Int };";
+    for body in [
+        "fn probe() { let value:Pair = Pair { first:1 }; }",
+        "fn probe()->Pair { Pair { first:1 } }",
+        "implement Pair { fn probe()->Self { Self { first:1 } } }",
+    ] {
+        let source = format!("{record} {body}");
+        let found = errors(&source, &[]);
+        assert!(found.iter().any(|error| error.contains("Missing required field 'second'")),
+            "incomplete record admitted or misdiagnosed: {source}: {found:?}");
+    }
+    for body in [
+        "fn probe()->Pair { Pair { first:1, second:2 } }",
+        "implement Pair { fn probe()->Self { Self { first:1, second:2 } } }",
+        "fn probe(original:Pair)->Pair { Pair { first:1, ..original } }",
+    ] {
+        let source = format!("{record} {body}");
+        let found = errors(&source, &[]);
+        assert!(found.is_empty(), "valid record rejected: {source}: {found:?}");
+    }
+}
+
+#[test]
 fn qualified_and_bare_constructors_do_not_invoke_callable_payloads() {
     for constructor in ["Choice.Hold", "Hold"] {
         let source = format!("{CHOICE} fn wrap(callback:fn()->Int)->Choice<fn()->Int> {{let value={constructor}(callback);value}}");

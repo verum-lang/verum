@@ -2317,10 +2317,8 @@ impl TypeChecker {
                     // its remaining fields from the base, and 289 literals in
                     // `core/` are of that form.
                     //
-                    // `VERUM_TRACE_MISSING_FIELD=1` reports and CONTINUES, which
-                    // is how the population was counted: a hard error returns on
-                    // the first, so one run would have shown one site per
-                    // function.
+                    // Optional diagnostics observe the failed check; they must
+                    // never change whether the source program is admitted.
                     if base.is_none() {
                         for (expected_name, expected_ty) in expected_fields.iter() {
                             if fields
