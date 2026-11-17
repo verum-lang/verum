@@ -891,8 +891,8 @@ fn a_sync_callback_can_call_an_imported_method_with_a_proven_sync_body() {
             &modules,
         );
         assert!(errors.iter().any(|error| error.contains("Mismatch")
-            && error.contains("expected: Text { inner: \"fn() -> Unit [bound: excludes {Async}; observed: unknown]\" }")
-            && error.contains("actual: Text { inner: \"fn() -> Unit [bound: unrestricted; observed: unknown]\" }")),
+            && error.contains("expected: Text { inner: \"fn(demo.jobs.Job) -> Int [bound: excludes {Async}; observed: unknown]\" }")
+            && error.contains("actual: Text { inner: \"fn(demo.jobs.Job) -> Int [bound: unrestricted; observed: unknown]\" }")),
             "{call}: {errors:?}");
     }
 }

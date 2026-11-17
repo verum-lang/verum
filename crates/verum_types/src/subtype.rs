@@ -311,31 +311,10 @@ impl Subtyping {
             // Function subtyping (contravariant in params, covariant in return)
             // Subtyping: structural subtyping for records, refinement subtyping (T{P} <: T when P holds), protocol-based nominal subtyping — .3 line 9574-9576
             (
-                Function {
-                    property_requirement: property_requirement1,
-                    params: p1,
-                    return_type: r1,
-                    type_params: tp1,
-                    contexts: c1,
-                    properties: properties1,
-                },
-                Function {
-                    property_requirement: property_requirement2,
-                    params: p2,
-                    return_type: r2,
-                    type_params: tp2,
-                    contexts: c2,
-                    properties: _,
-                },
-            ) => {
-                // Differently bound polymorphic contracts need instantiation and
-                // bound entailment, neither of which this boolean checker proves.
-                let properties_compatible = property_requirement2.satisfied_by(
-                    property_requirement1, properties1.as_ref());
-                tp1 == tp2
-                    && properties_compatible
-                    && self.check_function_subtype(p1, r1, c1, p2, r2, c2)
-            }
+                Function { params: p1, return_type: r1, .. },
+                Function { params: p2, return_type: r2, .. },
+            ) => self.callable_header_is_subtype(t1, t2)
+                && self.check_function_values(p1, r1, p2, r2),
 
             // Tuple subtyping (covariant in components)
             // Subtyping: structural subtyping for records, refinement subtyping (T{P} <: T when P holds), protocol-based nominal subtyping — .3 line 9578-9585
@@ -1156,30 +1135,38 @@ impl Subtyping {
         }
     }
 
-    /// Check function subtyping: contravariant in parameters, covariant in return.
-    ///
-    /// Subtyping: structural subtyping for records, refinement subtyping (T{P} <: T when P holds), protocol-based nominal subtyping — .3 line 9621-9638
-    /// Context system: capability-based dependency injection with "context" declarations, "using" requirements, "provide" injection, ~5-30ns runtime overhead via task-local storage — Context requirement subtyping
-    ///
-    /// Function subtyping rules:
-    /// - Parameters: contravariant (accept more inputs)
-    /// - Return type: covariant (produce more specific outputs)
-    /// - Contexts: S can have FEWER contexts than T
-    ///
-    /// Example:
-    /// ```verum
-    /// type IntToBool is Int -> Bool
-    /// type PosToBool is Int{> 0} -> Bool
-    /// // IntToBool <: PosToBool (accepts more inputs)
-    /// ```
-    fn check_function_subtype(
+    /// Compare quantifiers, computational requirements and required contexts.
+    /// Parameter and return conversions are checked by the surrounding relation.
+    pub(crate) fn callable_header_is_subtype(&self, actual: &Type, expected: &Type) -> bool {
+        let (
+            Type::Function {
+                type_params: actual_params,
+                contexts: actual_contexts,
+                property_requirement: actual_bound,
+                properties,
+                ..
+            },
+            Type::Function {
+                type_params: expected_params,
+                contexts: expected_contexts,
+                property_requirement: expected_bound,
+                ..
+            },
+        ) = (actual, expected) else {
+            return false;
+        };
+        // Different quantifiers need instantiation and bound entailment.
+        actual_params == expected_params
+            && expected_bound.satisfied_by(actual_bound, properties.as_ref())
+            && self.check_context_subtype(actual_contexts, expected_contexts)
+    }
+
+    fn check_function_values(
         &self,
         params1: &[Type],
         return1: &Type,
-        contexts1: &Option<crate::di::requirement::ContextExpr>,
         params2: &[Type],
         return2: &Type,
-        contexts2: &Option<crate::di::requirement::ContextExpr>,
     ) -> bool {
         // Parameter counts must match
         if params1.len() != params2.len() {
@@ -1194,15 +1181,7 @@ impl Subtyping {
             }
         }
 
-        // Return type is covariant
-        if !self.is_subtype(return1, return2) {
-            return false;
-        }
-
-        // Context subtyping: S can have FEWER contexts than T
-        // This allows passing pure functions (None) where contextful functions expected
-        // Context group expansion: resolving context group names to their constituent contexts recursively — Context requirement subtyping
-        self.check_context_subtype(contexts1, contexts2)
+        self.is_subtype(return1, return2)
     }
 
     /// Check context subtyping: S can have FEWER contexts than T.

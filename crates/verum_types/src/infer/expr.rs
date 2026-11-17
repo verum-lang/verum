@@ -1515,48 +1515,44 @@ impl TypeChecker {
         self.synth_and_check(expr, expected)
     }
 
-    /// Synthesize then check subsumption.
-    ///
-    /// Includes auto-borrow coercion: T → &T when expected is immutable reference.
-    /// Type system improvements: refinement evidence tracking, flow-sensitive propagation, prototype mode — Section 3 (Auto-Borrow at a call position)
-    /// Bidirectional type-check a closure expression.
-    /// When `expected` is a `Forall` (rank-2), instantiates the quantified
-    /// variables. When a `Function` type is known, uses it to bind params;
-    /// otherwise falls back to synthesis + subsumption.
     fn closure_callable_properties(
         &mut self,
         body: &Expr,
         is_async: bool,
-    ) -> Result<crate::computational_properties::PropertyRequirement> {
+    ) -> crate::computational_properties::PropertyRequirement {
         let bound = self.callable_body_bound(body);
-        Ok(Self::callable_bound_with_marker(bound, is_async))
+        Self::callable_bound_with_marker(bound, is_async)
     }
 
-    fn check_closure_properties(
+    /// Record the checked closure signature, including its actual result when
+    /// the context permits discarding it. Only its header is compared here:
+    /// parameter patterns and the body have already been checked in scope.
+    fn checked_closure_callable(
         &mut self,
         body: &Expr,
         is_async: bool,
         expected: &Type,
+        result: &Type,
         span: Span,
-    ) -> Result<crate::computational_properties::PropertyRequirement> {
-        let bound = self.closure_callable_properties(body, is_async)?;
+    ) -> Result<Type> {
+        let bound = self.closure_callable_properties(body, is_async);
+        let expected = self.unifier.try_apply(expected, span)?;
+        let mut actual = expected.clone();
         let Type::Function {
-            property_requirement: expected_requirement,
+            property_requirement,
+            properties,
+            return_type,
             ..
-        } = expected
-        else {
+        } = &mut actual else {
             return Err(TypeError::Other(
                 "closure property check needs a callable contract".into(),
             ));
         };
-        let mut actual = Type::function_with_requirement(List::new(), Type::Unit, bound.clone());
-        if let Type::Function { properties, .. } = &mut actual {
-            *properties = bound.finite_footprint().cloned();
-        }
-        let contract =
-            Type::function_with_requirement(List::new(), Type::Unit, expected_requirement.clone());
-        self.check_call_type_bound(&actual, &contract, span, 0)?;
-        Ok(bound)
+        **return_type = self.unifier.try_apply(result, span)?;
+        *properties = bound.finite_footprint().cloned();
+        *property_requirement = bound;
+        self.check_callable_header(&actual, &expected, span)?;
+        Ok(actual)
     }
 
     fn check_closure_expr(&mut self, expr: &Expr, expected: &Type) -> Result<InferResult> {
@@ -1658,10 +1654,11 @@ impl TypeChecker {
                     checker.current_function_return_type =
                         verum_common::Maybe::Some(ret_ty.clone());
                     checker.infer_closure_result(closure_body, Some(&ret_ty))?;
-                    checker.check_closure_properties(
+                    checker.checked_closure_callable(
                         closure_body,
                         *async_,
                         &normalized_body,
+                        &ret_ty,
                         expr.span,
                     )?;
 
@@ -1726,7 +1723,7 @@ impl TypeChecker {
                 // T0653: capture exclusivity is checked on THIS path
                 // too — this is the branch most closures take
                 // (`.map(|x| …)`, typed argument, typed binding).
-                let callable_properties = self.with_closure_scope(expr, |checker| {
+                let actual = self.with_closure_scope(expr, |checker| {
                     // Bind parameters.
                     // Normalize each param type to resolve associated type projections
                     // (e.g., ::Item[Range<Int>] → Int) before binding, so that the
@@ -1754,31 +1751,14 @@ impl TypeChecker {
                     checker.current_function_return_type =
                         verum_common::Maybe::Some(ret_ty.clone());
                     checker.infer_closure_result(closure_body, Some(&ret_ty))?;
-                    let callable_properties = checker.check_closure_properties(
+                    checker.checked_closure_callable(
                         closure_body,
                         *async_,
                         &normalized_expected,
+                        &ret_ty,
                         expr.span,
-                    )?;
-
-                    Ok(callable_properties)
+                    )
                 })?;
-
-                // Preserve the annotated callable result even when the
-                // bound permits discarding it. A generic F denotes this
-                // actual closure type, not the contract used to check it.
-                let mut actual = normalized_expected.clone();
-                if let Type::Function {
-                    return_type,
-                    properties,
-                    property_requirement,
-                    ..
-                } = &mut actual
-                {
-                    *return_type = Box::new(ret_ty);
-                    *properties = callable_properties.finite_footprint().cloned();
-                    *property_requirement = callable_properties.clone();
-                }
                 if let Type::Var(var) = self.unifier.apply(expected) {
                     self.unifier.unify(&Type::Var(var), &actual, expr.span)?;
                 }
@@ -6478,7 +6458,7 @@ impl TypeChecker {
 
         // Async callables obey the same eager output law as
         // named functions. Only explicit Future values are polled.
-        let properties = self.closure_callable_properties(body, *async_)?;
+        let properties = self.closure_callable_properties(body, *async_);
         let func_ty = if !*async_
             && properties.finite_footprint().is_some_and(|p| p.is_pure())
             && let (true, Some(param_name)) =

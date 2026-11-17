@@ -610,46 +610,12 @@ impl TypeChecker {
         bound: &Type,
         span: Span,
     ) -> Result<()> {
-        if let (
-            Type::Function {
-                property_requirement: actual_property_requirement,
-                type_params: actual_generics,
-                contexts: actual_contexts,
-                properties: actual_properties,
-                ..
-            },
-            Type::Function {
-                property_requirement: bound_property_requirement,
-                type_params: bound_generics,
-                contexts: bound_contexts,
-                properties: bound_properties,
-                ..
-            },
-        ) = (actual, bound)
-        {
-            let actual_contract = Type::Function {
-                property_requirement: actual_property_requirement.clone(),
-                params: List::new(),
-                return_type: Box::new(Type::Unit),
-                type_params: actual_generics.clone(),
-                contexts: actual_contexts.clone(),
-                properties: actual_properties.clone(),
-            };
-            let bound_contract = Type::Function {
-                property_requirement: bound_property_requirement.clone(),
-                params: List::new(),
-                return_type: Box::new(Type::Unit),
-                type_params: bound_generics.clone(),
-                contexts: bound_contexts.clone(),
-                properties: bound_properties.clone(),
-            };
-            if !self.subtyping.is_subtype(&actual_contract, &bound_contract) {
-                return Err(TypeError::Mismatch {
-                    expected: bound.diagnostic_text(),
-                    actual: actual.diagnostic_text(),
-                    span,
-                });
-            }
+        if !self.subtyping.callable_header_is_subtype(actual, bound) {
+            return Err(TypeError::Mismatch {
+                expected: bound.diagnostic_text(),
+                actual: actual.diagnostic_text(),
+                span,
+            });
         }
         Ok(())
     }

@@ -204,3 +204,18 @@ fn actual_unknown_callback_and_explicit_async_have_distinct_diagnostics() {
     );
     assert!(synchronous.is_empty(), "{synchronous:?}");
 }
+
+#[test]
+fn discarding_a_callback_result_preserves_its_actual_signature_on_refusal() {
+    let errors = check(
+        "fn consume(f: fn(Int) -> ()) {} fn probe(work: async fn(Int) -> Bool) { consume(|n| -> Bool { work(n) }); }",
+    );
+    assert_eq!(
+        errors.as_slice(),
+        ["Type mismatch: expected 'fn(Int) -> Unit [bound: excludes {Async}; observed: unknown]', found 'fn(Int) -> Bool [bound: unrestricted; observed: unknown]'"]
+    );
+    let valid = check(
+        "fn consume(f: fn(Int) -> ()) {} fn probe() { consume(|n| -> Bool { n > 0 }); }",
+    );
+    assert!(valid.is_empty(), "{valid:?}");
+}
