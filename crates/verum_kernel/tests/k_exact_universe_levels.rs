@@ -1,5 +1,5 @@
 //! T1768: the concrete carrier must never identify different universe levels.
-use verum_kernel::proof_checker::{Certificate, Context, Level, Term, infer};
+use verum_kernel::proof_checker::{Certificate, CheckError, Context, Level, Term, infer};
 use verum_kernel::proof_checker_nbe;
 
 fn successor(level: Level) -> Level {
@@ -28,7 +28,39 @@ fn successor_above_concrete_carrier_never_collapses() {
     let larger = successor(top.clone());
     assert_ne!(larger.clone().normalize(), top);
     assert_eq!(larger.as_concrete(), None);
-    assert!(infer(&Context::new(), &Term::universe(u32::MAX)).is_err());
+    let term = Term::universe(u32::MAX);
+    let expected = Term::universe_at(larger.clone());
+    assert_eq!(infer(&Context::new(), &term).unwrap(), expected);
+    assert_eq!(exact(&larger), u64::from(u32::MAX) + 1);
+    let valid = Certificate {
+        term: term.clone(),
+        claimed_type: expected,
+        metadata: Default::default(),
+    };
+    let decoded: Certificate =
+        serde_json::from_slice(&serde_json::to_vec(&valid).unwrap()).unwrap();
+    for certificate in [&valid, &decoded] {
+        certificate.verify().unwrap();
+        proof_checker_nbe::verify_certificate(certificate).unwrap();
+    }
+    // The u32 wire integer is only a compact carrier. Reject both saturation
+    // (Type MAX : Type MAX) and an invented second successor.
+    for wrong_level in [top, successor(larger)] {
+        let forged = Certificate {
+            term: term.clone(),
+            claimed_type: Term::universe_at(wrong_level),
+            metadata: Default::default(),
+        };
+        for result in [
+            forged.verify(),
+            proof_checker_nbe::verify_certificate(&forged),
+        ] {
+            assert!(
+                matches!(result, Err(CheckError::TypeMismatch { .. })),
+                "{result:?}"
+            );
+        }
+    }
 }
 
 #[test]
