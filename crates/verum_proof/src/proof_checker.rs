@@ -25,16 +25,8 @@ use std::{borrow::Cow, future::Future, rc::Rc};
 /// representable in `u32`; larger or symbolic successors use exact syntax.
 /// The wire integer width does not bound the mathematical universe hierarchy.
 ///
-/// Equality is decided up to algebraic normalisation
-/// (idempotency / commutativity of `Max`, identity at `Concrete(0)`,
-/// `Max(Succ(a), Succ(b)) = Succ(Max(a, b))`, and structural
-/// flattening).  The relation is sound (no false positives) and
-/// complete on closed levels representable by a single `Concrete`.
-/// Larger closed levels retain exact successor syntax; comparison may
-/// conservatively reject different expressions for the same level.  Open levels with the same
-/// canonical form are equal; structurally distinct expressions
-/// over the same variables are conservatively rejected — this
-/// is a conservative structural comparison, not a universe-constraint solver.
+/// Equality compares maxima of affine atoms: constants and named variables
+/// plus natural offsets. It holds exactly when all natural valuations agree.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub enum Level {
     /// `Type@n` for a concrete non-negative `n`.
@@ -47,8 +39,8 @@ pub enum Level {
     /// `l + 1`.  Stays symbolic when the inner level isn't
     /// concrete.
     Succ(Box<Level>),
-    /// `max(l1, l2)`.  Normalisation flattens nested `Max`,
-    /// dedupes summands, and pulls out common `Succ` prefixes.
+    /// `max(l1, l2)`. Normalisation keeps the greatest shift per parameter,
+    /// factors shared offsets and balances the remaining maximum tree.
     Max(Box<Level>, Box<Level>),
     /// Exact addition of a concrete offset without allocating one node
     /// per successor. Older certificates remain readable; readers of this
@@ -116,111 +108,47 @@ impl Level {
         }
     }
 
-    /// Compute `max(self, other)` with algebraic simplifications:
-    ///   * `max(C(n), C(m)) = C(n.max(m))` (concrete reduction)
-    ///   * `max(C(0), x)    = x`           (identity at zero)
-    ///   * `max(x, x)       = x`           (idempotency, post-normalisation)
-    ///
-    /// Otherwise, builds `Max(self, other)` after normalisation;
-    /// the structural form is canonicalised by [`Self::normalize`]
-    /// before the equality decision.
+    /// Form the exact maximum of two levels.
     pub fn max_with(self, other: Self) -> Self {
-        let a = self.normalize();
-        let b = other.normalize();
-        match (a, b) {
-            (Level::Concrete(n), Level::Concrete(m)) => Level::Concrete(n.max(m)),
-            (Level::Concrete(0), x) | (x, Level::Concrete(0)) => x,
-            (a, b) if a == b => a,
-            (a, b) => Level::Max(Box::new(a), Box::new(b)).normalize(),
-        }
+        Level::Max(Box::new(self), Box::new(other)).normalize()
     }
 
-    /// Reduce this level to a canonical form.  Idempotent.
-    ///
-    /// Rules applied (bottom-up):
-    ///   1. `Succ(Concrete(n))         → Concrete(n + 1)` if it fits;
-    ///      otherwise retain `Succ(Concrete(n))` exactly.
-    ///   2. `Max(Concrete(a), C(b))    → Concrete(a.max(b))`
-    ///   3. `Max(Concrete(0), x)       → x`
-    ///   4. `Max(x, x)                 → x`
-    ///   5. `Max(Succ(a), Succ(b))     → Succ(Max(a, b))`
-    ///   6. `Max(Max(a, b), c)         → Max(a, Max(b, c))` (flatten)
-    ///      then sort summands by structural ordering for canonical form
-    ///
-    /// **Soundness**: every rule is a definitional equality of the
-    /// underlying universe-level algebra (associative-commutative-
-    /// idempotent monoid with `0` identity, plus a successor that
-    /// distributes over `max`).  Two levels with the same canonical
-    /// form denote the same universe; the converse does NOT hold
-    /// (the algorithm is conservative on free variables — see
-    /// "Equality is decided up to" in the type doc).
+    /// Collect the largest offset for each variable and the independent
+    /// constant. Rebuild a balanced maximum with common offsets factored.
     pub fn normalize(self) -> Self {
-        match self {
-            Level::Concrete(_) | Level::Var(_) => self,
-
-            Level::Succ(inner) => level_add_offset(inner.normalize(), 1),
-            Level::Offset(base, by) => level_add_offset(base.normalize(), by),
-
-            Level::Max(a, b) => {
-                let a = a.normalize();
-                let b = b.normalize();
-                level_max_canonical(a, b)
+        let result = level_profile(&self).to_level();
+        // Consume the owned input iteratively, including skewed maximum trees.
+        let mut pending = vec![self];
+        while let Some(level) = pending.pop() {
+            match level {
+                Level::Succ(inner) | Level::Offset(inner, _) => pending.push(*inner),
+                Level::Max(left, right) => {
+                    pending.push(*left);
+                    pending.push(*right);
+                }
+                Level::Concrete(_) | Level::Var(_) => {}
             }
         }
+        result
     }
 
-    /// Return the concrete carrier if this level reduces to one.
-    /// Used by callers that need a `u32` (e.g. JSON serialisation
-    /// of legacy proof formats); returns `None` for symbolic
-    /// levels.
+    /// Return the value of a closed level when it fits the wire integer.
     pub fn as_concrete(&self) -> Option<u32> {
-        match self.clone().normalize() {
-            Level::Concrete(n) => Some(n),
-            _ => None,
+        let profile = level_profile(self);
+        if profile.parameters.is_empty() {
+            u32::try_from(profile.constant).ok()
+        } else {
+            None
         }
     }
 
-    /// Add `by` exactly. Large offsets are represented compactly rather
-    /// than expanded into `by` successor nodes. Work depends on the input
-    /// expression, not the numerical value of the offset. Comparison remains
-    /// conservative where different exact expressions do not normalize alike.
+    /// Lift a level without expanding the offset into individual successors.
     pub fn shifted_by(self, by: u32) -> Self {
         if by == 0 {
-            return self;
+            self
+        } else {
+            Level::Offset(Box::new(self), by).normalize()
         }
-        level_add_offset(self.normalize(), by)
-    }
-}
-
-/// Add to an already-normalized level without expanding the numerical offset.
-/// Combining two offsets that exceed u32 keeps two exact constructors; it
-/// never saturates either the mathematical value or an allocation counter.
-fn level_add_offset(base: Level, by: u32) -> Level {
-    if by == 0 {
-        return base;
-    }
-    match base {
-        Level::Concrete(n) => match n.checked_add(by) {
-            Some(next) => Level::Concrete(next),
-            None => level_offset_node(Level::Concrete(u32::MAX), by - (u32::MAX - n)),
-        },
-        Level::Succ(inner) => match by.checked_add(1) {
-            Some(sum) => level_add_offset(*inner, sum),
-            None => level_offset_node(Level::Succ(inner), by),
-        },
-        Level::Offset(inner, prior) => match prior.checked_add(by) {
-            Some(sum) => level_add_offset(*inner, sum),
-            None => level_offset_node(Level::Offset(inner, prior), by),
-        },
-        other => level_offset_node(other, by),
-    }
-}
-
-fn level_offset_node(base: Level, by: u32) -> Level {
-    match by {
-        0 => base,
-        1 => Level::Succ(Box::new(base)),
-        _ => Level::Offset(Box::new(base), by),
     }
 }
 
@@ -249,189 +177,111 @@ impl std::fmt::Display for Level {
     }
 }
 
-/// Build the canonical form of `Max(a, b)` assuming both arguments
-/// are already normalised individually.  Flattens nested `Max`s,
-/// merges concrete summands, dedupes, factors common `Succ`
-/// prefixes, and lexicographically orders the remaining summands.
-fn level_max_canonical(a: Level, b: Level) -> Level {
-    // Flatten into a multiset of summands.
-    let mut summands: Vec<Level> = Vec::new();
-    flatten_max_into(a, &mut summands);
-    flatten_max_into(b, &mut summands);
-
-    // Merge all concrete summands into one (taking the maximum).
-    let mut concrete: Option<u32> = None;
-    let mut symbolic: Vec<Level> = Vec::new();
-    for s in summands {
-        match s {
-            Level::Concrete(n) => concrete = Some(concrete.map_or(n, |c| c.max(n))),
-            other => symbolic.push(other),
-        }
-    }
-
-    // Dedupe symbolic summands (idempotency at the `max` level).
-    symbolic.sort_by(level_struct_cmp);
-    symbolic.dedup();
-
-    // Factor common `Succ` prefixes when every summand (including
-    // the concrete one if present) has a Succ outermost: pull the
-    // common Succ out so `max(Succ(a), Succ(b)) = Succ(max(a, b))`.
-    //
-    // Only apply when at least two summands exist; the single-
-    // summand case is handled by the trivial-`Max` collapse at the
-    // bottom.
-    let total_summands = symbolic.len() + concrete.is_some() as usize;
-    if total_summands >= 2 {
-        let succ_count = level_common_succ_depth(&concrete, &symbolic);
-        if succ_count > 0 {
-            let stripped_concrete = concrete.map(|n| n.saturating_sub(succ_count));
-            let stripped_symbolic: Vec<Level> = symbolic
-                .into_iter()
-                .map(|s| level_strip_succ(s, succ_count))
-                .collect();
-            // Stripping can expose another common compact offset. Normalize
-            // the smaller interior before rewrapping, so normalization is
-            // idempotent even when the total common shift exceeds u32.
-            let inner = level_assemble_max(stripped_concrete, stripped_symbolic).normalize();
-            // Factor the common shift compactly, including large offsets.
-            return level_add_offset(inner, succ_count);
-        }
-    }
-
-    level_assemble_max(concrete, symbolic)
+/// Every finite syntax tree is a maximum of a constant and its parameter
+/// atoms. The offset along any path is at most u32::MAX times its node count.
+/// The number of owned nodes fits usize (at most 64 bits on supported targets),
+/// so every such path sum fits u128, independently of admission limits.
+#[derive(PartialEq, Eq)]
+struct LevelProfile<'a> {
+    constant: u128,
+    parameters: Vec<(&'a str, u128)>,
 }
 
-/// Walk a (possibly-nested) `Max` and collect every summand into
-/// `out`.  Non-`Max` levels are pushed verbatim.
-fn flatten_max_into(level: Level, out: &mut Vec<Level>) {
-    match level {
-        Level::Max(a, b) => {
-            flatten_max_into(*a, out);
-            flatten_max_into(*b, out);
-        }
-        other => out.push(other),
-    }
-}
-
-/// Total ordering on canonical `Level`s — used to sort `Max`
-/// summands so structurally-identical sets compare equal even
-/// when the build order differed.
-fn level_struct_cmp(a: &Level, b: &Level) -> std::cmp::Ordering {
-    use std::cmp::Ordering;
-    fn rank(l: &Level) -> u8 {
-        match l {
-            Level::Concrete(_) => 0,
-            Level::Var(_) => 1,
-            Level::Succ(_) => 2,
-            Level::Max(_, _) => 3,
-            Level::Offset(_, _) => 4,
-        }
-    }
-    match rank(a).cmp(&rank(b)) {
-        Ordering::Equal => match (a, b) {
-            (Level::Concrete(x), Level::Concrete(y)) => x.cmp(y),
-            (Level::Var(x), Level::Var(y)) => x.cmp(y),
-            (Level::Succ(x), Level::Succ(y)) => level_struct_cmp(x, y),
-            (Level::Offset(x, n), Level::Offset(y, m)) => {
-                level_struct_cmp(x, y).then_with(|| n.cmp(m))
+fn level_profile(level: &Level) -> LevelProfile<'_> {
+    let mut constant = 0;
+    let mut parameters = Vec::new();
+    let mut pending = vec![(level, 0u128)];
+    while let Some((node, shift)) = pending.pop() {
+        match node {
+            Level::Concrete(n) => constant = constant.max(shift + u128::from(*n)),
+            Level::Var(name) => parameters.push((name.as_str(), shift)),
+            Level::Succ(base) => pending.push((base, shift + 1)),
+            Level::Offset(base, amount) => pending.push((base, shift + u128::from(*amount))),
+            Level::Max(left, right) => {
+                pending.push((left, shift));
+                pending.push((right, shift));
             }
-            (Level::Max(xa, xb), Level::Max(ya, yb)) => {
-                level_struct_cmp(xa, ya).then_with(|| level_struct_cmp(xb, yb))
-            }
-            _ => Ordering::Equal,
-        },
-        other => other,
-    }
-}
-
-/// Count the number of leading `Succ`s common to every summand
-/// in a max — used by `level_max_canonical` to factor them out.
-/// A `Concrete(n)` summand contributes `n` to the depth budget
-/// (since `Concrete(n) = Succ^n(Concrete(0))` algebraically).
-fn level_common_succ_depth(concrete: &Option<u32>, symbolic: &[Level]) -> u32 {
-    let mut symbolic_depths: Vec<u32> = symbolic.iter().map(level_succ_depth).collect();
-    if let Some(c) = *concrete {
-        symbolic_depths.push(c);
-    }
-    symbolic_depths.into_iter().min().unwrap_or(0)
-}
-
-/// Number of `Succ` constructors at the head of `level`.
-fn level_succ_depth(level: &Level) -> u32 {
-    let mut depth = 0u32;
-    let mut cur = level;
-    loop {
-        match cur {
-            Level::Succ(inner) => {
-                depth = depth.saturating_add(1);
-                cur = inner;
-            }
-            Level::Offset(inner, by) => {
-                depth = depth.saturating_add(*by);
-                cur = inner;
-            }
-            _ => return depth,
         }
     }
-}
-
-/// Strip an actually available common offset. The count is capped by u32,
-/// but subtraction remains exact even when the full prefix is larger.
-fn level_strip_succ(level: Level, count: u32) -> Level {
-    let mut cur = level;
-    let mut remaining = count;
-    while remaining > 0 {
-        match cur {
-            Level::Succ(inner) => {
-                cur = *inner;
-                remaining -= 1;
-            }
-            Level::Offset(inner, by) if by <= remaining => {
-                cur = *inner;
-                remaining -= by;
-            }
-            Level::Offset(inner, by) => return level_add_offset(*inner, by - remaining),
-            other => return other,
+    parameters.sort_unstable_by_key(|&(name, _)| name);
+    parameters.dedup_by(|current, prior| {
+        if current.0 == prior.0 {
+            prior.1 = prior.1.max(current.1);
+            true
+        } else {
+            false
         }
+    });
+    // Valuations are nonnegative. A parameter's offset already implies this
+    // constant floor at every valuation if it does so at the zero valuation.
+    if parameters.iter().any(|&(_, offset)| offset >= constant) {
+        constant = 0;
     }
-    cur
+    LevelProfile {
+        constant,
+        parameters,
+    }
 }
 
-/// Reassemble a `Max` from a concrete summand and a list of
-/// symbolic summands.  Single-summand cases collapse to the
-/// summand directly; the empty case (impossible in practice if
-/// the caller flattens correctly) returns `Concrete(0)`.
-fn level_assemble_max(concrete: Option<u32>, mut symbolic: Vec<Level>) -> Level {
-    // Drop the concrete arm if it's the identity element (0) and
-    // any symbolic summand exists — `max(0, x) = x`.
-    let drop_zero = matches!(concrete, Some(0)) && !symbolic.is_empty();
-    let concrete_to_keep = if drop_zero { None } else { concrete };
-
-    let mut all: Vec<Level> = Vec::new();
-    if let Some(n) = concrete_to_keep {
-        all.push(Level::Concrete(n));
-    }
-    all.append(&mut symbolic);
-
-    match all.len() {
-        0 => Level::Concrete(0),
-        1 => all.pop().unwrap(),
-        _ => {
-            // Fold left into a right-associated `Max` chain.  The
-            // sort order above ensures the chain has a canonical
-            // shape: `Max(a, Max(b, Max(c, d)))` with
-            // `level_struct_cmp(a, b, c, d)` ascending.
-            let mut iter = all.into_iter().rev();
-            let last = iter.next().unwrap();
-            iter.fold(last, |acc, x| Level::Max(Box::new(x), Box::new(acc)))
+impl LevelProfile<'_> {
+    fn to_level(&self) -> Level {
+        let mut terms = Vec::new();
+        if self.constant != 0 || self.parameters.is_empty() {
+            terms.push((Level::Concrete(0), self.constant));
         }
+        terms.extend(
+            self.parameters
+                .iter()
+                .map(|&(name, offset)| (Level::var(name), offset)),
+        );
+
+        // Iterative pairwise reduction keeps the resulting maximum balanced.
+        // Factoring each shared shift avoids duplicating large offsets beneath it.
+        while terms.len() > 1 {
+            let mut next = Vec::with_capacity(terms.len().div_ceil(2));
+            let mut children = terms.into_iter();
+            while let Some((left, left_shift)) = children.next() {
+                if let Some((right, right_shift)) = children.next() {
+                    let common = left_shift.min(right_shift);
+                    let left = level_with_offset(left, left_shift - common);
+                    let right = level_with_offset(right, right_shift - common);
+                    next.push((Level::Max(Box::new(left), Box::new(right)), common));
+                } else {
+                    next.push((left, left_shift));
+                }
+            }
+            terms = next;
+        }
+        let (base, amount) = terms.pop().expect("a level has at least one atom");
+        level_with_offset(base, amount)
     }
 }
 
-/// Decide definitional equality on levels — normalises both sides
-/// and compares structurally.  Sound, complete on closed levels.
+/// Reify a path sum in bounded wire chunks. The loop runs at most once per
+/// input offset on that path. It never iterates once per successor value.
+fn level_with_offset(mut base: Level, mut amount: u128) -> Level {
+    const CHUNK: u128 = u32::MAX as u128;
+    if let Level::Concrete(n) = base {
+        amount += u128::from(n);
+        let literal = amount.min(CHUNK);
+        base = Level::Concrete(literal as u32);
+        amount -= literal;
+    }
+    while amount >= CHUNK {
+        base = Level::Offset(Box::new(base), u32::MAX);
+        amount -= CHUNK;
+    }
+    match amount as u32 {
+        0 => base,
+        1 => Level::Succ(Box::new(base)),
+        remainder => Level::Offset(Box::new(base), remainder),
+    }
+}
+
+/// Equality of affine maxima for every valuation of the free parameters.
+/// Both the substitution checker and the NbE checker call this decision.
 pub(crate) fn level_eq(a: &Level, b: &Level) -> bool {
-    a.clone().normalize() == b.clone().normalize()
+    level_profile(a) == level_profile(b)
 }
 
 /// Shift a term up by one binder (cutoff 0).  Crate-public so the

@@ -23,9 +23,9 @@ import VerumExternalReplay.FunctionExtensionality
     **Universe polymorphism (FV-19)**: `Universe` carries a
     structured `Level` (Concrete / Var / Succ / Max / Offset).  The Lean
     side uses `Nat` for storage and enforces Rust `u32` bounds on wire
-    literals; structured levels can denote larger values exactly. Equality is decided up to algebraic
-    normalisation (idempotency, identity at zero, common-succ
-    factoring, lexicographic flattening of `Max`). -/
+    literals; structured levels can denote larger values exactly. Equality compares
+    the maximum of the constant and shifted parameter terms under every natural
+    valuation. `UniverseLevelEquality` proves this criterion for the function below. -/
 
 namespace VerumKernel
 
@@ -149,33 +149,6 @@ def Level.successor (l : Level) : Level :=
   | .concrete n => if n < Level.wireMax then .concrete (n + 1) else .succ l
   | other => .succ other
 
-/-- Lexicographic structural ordering on canonical Levels.  Used by
-    [`Level.maxCanonical`] to produce a deterministic Max-summand
-    order so commutative variants compare equal. -/
-partial def Level.lexCompare (a b : Level) : Ordering :=
-  let rank : Level → Nat
-    | .concrete _ => 0
-    | .var _      => 1
-    | .succ _     => 2
-    | .max _ _    => 3
-    | .offset _ _ => 4
-  match compare (rank a) (rank b) with
-  | .eq =>
-    match a, b with
-    | .concrete x, .concrete y => compare x y
-    | .var x,      .var y      => compare x y
-    | .succ x,     .succ y     => Level.lexCompare x y
-    | .offset x n, .offset y m =>
-      match Level.lexCompare x y with
-      | .eq => compare n m
-      | order => order
-    | .max xa xb,  .max ya yb  =>
-      match Level.lexCompare xa ya with
-      | .eq    => Level.lexCompare xb yb
-      | other  => other
-    | _, _ => .eq
-  | other => other
-
 /-- Common-prefix budget, capped at the wire integer width. This bound is
     only a factoring budget; it never saturates a universe's value. -/
 def Level.succDepth : Level → Nat
@@ -200,16 +173,6 @@ def Level.flattenMax (l : Level) : List Level :=
   | .max a b => Level.flattenMax a ++ Level.flattenMax b
   | other    => [other]
 
-/-- Sort + dedupe summands using structural ordering.  Implements the
-    canonical-form invariant for `max`. -/
-partial def Level.sortDedupe (xs : List Level) : List Level :=
-  let sorted := xs.toArray.qsort (fun a b => Level.lexCompare a b == .lt) |>.toList
-  -- Dedupe consecutive equals (we just sorted, so equals cluster).
-  sorted.foldr (fun x acc =>
-    match acc with
-    | []      => [x]
-    | h :: _  => if x == h then acc else x :: acc) []
-
 /-- Reassemble a `max` from a concrete summand (if any) and a list
     of symbolic summands. -/
 def Level.assembleMax (concrete : Option Nat) (symbolic : List Level) : Level :=
@@ -227,57 +190,46 @@ def Level.assembleMax (concrete : Option Nat) (symbolic : List Level) : Level :=
   | [] => .concrete 0
   | last :: rest => rest.foldl (fun acc x => .max x acc) last
 
-mutual
+/-- A constant or a parameter plus a natural offset. -/
+structure Level.Atom where
+  parameter : Option String
+  offset : Nat
+  deriving DecidableEq, Repr
 
-/-- Build the canonical form of `max(a, b)` assuming both are
-    already individually normalised. -/
-partial def Level.maxCanonical (a b : Level) : Level :=
-  let summands := Level.flattenMax a ++ Level.flattenMax b
-  -- Split into concrete / symbolic.
-  let (concretes, symbolics) := summands.partition (fun s =>
-    match s with | .concrete _ => true | _ => false)
-  let concreteMax : Option Nat :=
-    concretes.foldl (fun acc s =>
-      match s, acc with
-      | .concrete n, none      => some n
-      | .concrete n, some prev => some (Nat.max prev n)
-      | _,           acc       => acc) none
-  let symbolicSorted := Level.sortDedupe symbolics
-  let totalCount := symbolicSorted.length + (if concreteMax.isSome then 1 else 0)
-  if totalCount ≥ 2 then
-    -- Try to factor a common `succ` prefix.
-    let depthList : List Nat :=
-      symbolicSorted.map Level.succDepth
-        ++ (match concreteMax with | some n => [n] | none => [])
-    let common := depthList.foldl Nat.min (depthList.headD 0)
-    if common > 0 then
-      let strippedConcrete := concreteMax.map (fun n => n - common)
-      let strippedSymbolic := symbolicSorted.map (fun s => Level.stripSucc s common)
-      let inner := Level.normalize (Level.assembleMax strippedConcrete strippedSymbolic)
-      Level.addOffset inner common
-    else
-      Level.assembleMax concreteMax symbolicSorted
-  else
-    Level.assembleMax concreteMax symbolicSorted
+/-- Distribute each shift only along its source paths. A large wire offset
+    contributes one addition regardless of its numerical value. -/
+def Level.atomsFrom (shift : Nat) : Level → List Level.Atom
+  | .concrete n => [⟨none, shift + n⟩]
+  | .var x => [⟨some x, shift⟩]
+  | .succ base => base.atomsFrom (shift + 1)
+  | .offset base amount => base.atomsFrom (shift + amount)
+  | .max left right => left.atomsFrom shift ++ right.atomsFrom shift
 
-/-- Normalise a level to canonical form.  Idempotent. -/
-partial def Level.normalize (l : Level) : Level :=
-  match l with
-  | .concrete _  => l
-  | .var _       => l
-  | .succ inner => Level.addOffset (Level.normalize inner) 1
-  | .offset inner by_ => Level.addOffset (Level.normalize inner) by_
-  | .max a b =>
-    let aN := Level.normalize a
-    let bN := Level.normalize b
-    Level.maxCanonical aN bN
+/-- Coverage for every nonnegative valuation. A constant needs only a large
+    enough offset, while a parameter needs an offset on the same name. -/
+def Level.Atom.coveredBy (a b : Level.Atom) : Bool :=
+  decide (a.offset ≤ b.offset ∧ (a.parameter = none ∨ a.parameter = b.parameter))
 
-end
+def Level.leEverywhere (a b : Level) : Bool :=
+  let right := b.atomsFrom 0
+  (a.atomsFrom 0).all (fun x => right.any (fun y => x.coveredBy y))
 
-/-- Definitional equality on levels — normalise both sides and
-    compare structurally. -/
-def Level.eq (a b : Level) : Bool :=
-  Level.normalize a == Level.normalize b
+/-- Exact universal equality, independent of the chosen wire representation. -/
+def Level.eq (a b : Level) : Bool := a.leEverywhere b && b.leEverywhere a
+
+/-- Drop a dominated maximum branch. For incomparable branches retain both.
+    The reference checker may choose a different expression from native replay. -/
+def Level.maxCanonical (a b : Level) : Level :=
+  if a.leEverywhere b then b else if b.leEverywhere a then a else .max a b
+
+/-- Executable simplification. Equality is decided by the complete valuation
+    criterion above and does not require a particular ordering of branches. -/
+def Level.normalize : Level → Level
+  | .concrete n => .concrete n
+  | .var name => .var name
+  | .succ base => Level.addOffset base.normalize 1
+  | .offset base by_ => Level.addOffset base.normalize by_
+  | .max a b => Level.maxCanonical a.normalize b.normalize
 
 /-- Compact exact lifting, with work bounded by the expression size. -/
 def Level.shiftedBy (l : Level) (by_ : Nat) : Level :=

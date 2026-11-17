@@ -11,11 +11,11 @@ fn maximum(a: Level, b: Level) -> Level {
 fn successor(level: Level) -> Level {
     Level::Succ(Box::new(level))
 }
-fn cases() -> Vec<(&'static str, Certificate, bool)> {
+fn comparisons() -> Vec<(&'static str, Level, Level, bool)> {
     let u = Level::var("u");
     let v = Level::var("v");
     let big = u32::MAX;
-    let pairs = [
+    vec![
         ("zero-offset", offset(u.clone(), 0), u.clone(), true),
         (
             "successor",
@@ -81,11 +81,65 @@ fn cases() -> Vec<(&'static str, Certificate, bool)> {
             false,
         ),
         ("wrong-variable", offset(u.clone(), 2), offset(v, 2), false),
-        // Native equality is deliberately conservative on symbolic dominance.
+        // A parameter shifted by one dominates the same unshifted parameter.
         (
-            "no-invented-dominance",
+            "same-parameter-dominance",
             maximum(u.clone(), successor(u.clone())),
             successor(u),
+            true,
+        ),
+        (
+            "symbolic-offset-chunk-associativity",
+            offset(offset(Level::var("u"), big), 1),
+            offset(offset(Level::var("u"), 1), big),
+            true,
+        ),
+        (
+            "closed-offset-chunk-associativity",
+            offset(offset(Level::Concrete(big), big), 1),
+            offset(offset(Level::Concrete(big), 1), big),
+            true,
+        ),
+        (
+            "distributed-asymmetric-wide-shift",
+            maximum(
+                offset(Level::var("u"), big),
+                offset(offset(Level::var("v"), big), 3),
+            ),
+            offset(maximum(Level::var("u"), offset(Level::var("v"), 3)), big),
+            true,
+        ),
+        (
+            "wide-dominated-constant",
+            maximum(
+                offset(Level::Concrete(big), 1),
+                offset(offset(Level::var("v"), 1), big),
+            ),
+            offset(offset(Level::var("v"), big), 1),
+            true,
+        ),
+        (
+            "wide-undominated-constant",
+            maximum(
+                offset(Level::Concrete(big), 2),
+                offset(offset(Level::var("v"), 1), big),
+            ),
+            offset(offset(Level::var("v"), big), 1),
+            false,
+        ),
+        (
+            "different-parameter-separated-above-large-floor",
+            maximum(
+                offset(Level::var("u"), big),
+                offset(offset(Level::var("v"), big), 1),
+            ),
+            offset(offset(Level::var("v"), big), 1),
+            false,
+        ),
+        (
+            "nearby-wide-sums-stay-distinct",
+            offset(offset(Level::var("u"), big), big),
+            offset(offset(Level::var("u"), big - 1), big),
             false,
         ),
         (
@@ -94,8 +148,12 @@ fn cases() -> Vec<(&'static str, Certificate, bool)> {
             Level::Concrete(big),
             true,
         ),
-    ];
-    let mut cases: Vec<_> = pairs
+    ]
+}
+
+fn cases() -> Vec<(&'static str, Certificate, bool)> {
+    let big = u32::MAX;
+    let mut cases: Vec<_> = comparisons()
         .into_iter()
         .map(|(id, left, right, accepted)| {
             let domain = Term::universe_at(right);
@@ -211,4 +269,117 @@ fn independent_compact_universes_and_wire_bounds() {
         assert_eq!(rejected.status.code(), Some(4), "invalid level: {invalid}");
     }
     std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn normalization_consumes_skewed_maxima_and_emits_a_balanced_tree() {
+    let mut tree = Level::var("root");
+    for index in 0..16_384 {
+        tree = maximum(tree, Level::var(format!("parameter-{index}")));
+    }
+    let result = tree.normalize();
+    let mut pending = vec![(&result, 0)];
+    let mut variables = 0;
+    while let Some((node, depth)) = pending.pop() {
+        assert!(depth <= 15, "maximum should be balanced");
+        match node {
+            Level::Max(left, right) => {
+                pending.push((left, depth + 1));
+                pending.push((right, depth + 1));
+            }
+            Level::Var(_) => variables += 1,
+            _ => panic!("all input atoms are unshifted parameters"),
+        }
+    }
+    assert_eq!(variables, 16_385);
+}
+
+// Encode the observed data. Lean independently checks equality under every
+// valuation, and rejects a successor substituted for each result.
+fn lean_level(level: &Level) -> String {
+    match level {
+        Level::Concrete(n) => format!("(.concrete {n})"),
+        Level::Var(name) => {
+            let scalars: Vec<_> = name
+                .chars()
+                .map(|c| format!("Char.ofNat {}", u32::from(c)))
+                .collect();
+            format!("(.var (String.ofList [{}]))", scalars.join(", "))
+        }
+        Level::Succ(base) => format!("(.succ {})", lean_level(base)),
+        Level::Offset(base, n) => format!("(.offset {} {n})", lean_level(base)),
+        Level::Max(left, right) => format!("(.max {} {})", lean_level(left), lean_level(right)),
+    }
+}
+
+#[test]
+#[ignore = "requires Lean and the freshly built reference checker library"]
+fn lean_checks_compiled_native_results_at_every_valuation() {
+    use std::{fmt::Write as _, path::PathBuf};
+    let replay =
+        PathBuf::from(std::env::var_os("VERUM_LEAN_REPLAY").expect("build verum_replay_checker"));
+    let library = replay.parent().unwrap().parent().unwrap().join("lib/lean");
+    let mut source = include_str!(
+        "../../../verification/external/lean/VerumExternalReplay/UniverseLevelEquality.lean"
+    )
+    .to_string();
+    source.push_str("\nnamespace VerumKernel\n");
+    for (id, left, right, expected) in comparisons() {
+        let source_left = lean_level(&left);
+        let source_right = lean_level(&right);
+        let raw = [
+            (source_left.clone(), left.clone().normalize()),
+            (source_right.clone(), right.clone().normalize()),
+            (
+                format!("(.max {source_left} {source_right})"),
+                left.clone().max_with(right.clone()),
+            ),
+            (
+                format!("(.offset {source_left} {})", u32::MAX),
+                left.clone().shifted_by(u32::MAX),
+            ),
+            (format!("(.succ {source_right})"), right.successor()),
+        ];
+        writeln!(source, "-- {id}").unwrap();
+        for (spec, actual) in raw {
+            let output = lean_level(&actual);
+            writeln!(source, "example (ρ : String → Nat) : Level.denote ρ {spec} = Level.denote ρ {output} := (Level.eq_iff_denote _ _).mp (by decide) ρ").unwrap();
+            writeln!(
+                source,
+                "example : Level.eq {spec} (.succ {output}) = false := by decide"
+            )
+            .unwrap();
+        }
+        let accepted = left.clone().normalize() == right.clone().normalize();
+        assert_eq!(accepted, expected, "{id}");
+        writeln!(
+            source,
+            "example : Level.eq {source_left} {source_right} = {accepted} := by decide"
+        )
+        .unwrap();
+    }
+    source.push_str("end VerumKernel\n");
+    let output_dir = std::env::var_os("VERUM_UNIVERSE_WITNESS_OUTPUT").map(PathBuf::from);
+    let dir = output_dir.clone().unwrap_or_else(std::env::temp_dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let witness = dir.join(format!(
+        "NativeUniverseWitnesses{}.lean",
+        std::process::id()
+    ));
+    std::fs::write(&witness, source).unwrap();
+    let result = Command::new(std::env::var_os("VERUM_LEAN").unwrap_or_else(|| "lean".into()))
+        .env("LEAN_PATH", library)
+        .arg(&witness)
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "Lean rejected {}:\n{}\n{}",
+        witness.display(),
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+    if output_dir.is_none() {
+        std::fs::remove_file(witness).unwrap();
+    }
 }
