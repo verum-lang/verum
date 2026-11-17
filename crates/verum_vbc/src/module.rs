@@ -635,11 +635,11 @@ impl VbcModule {
     /// The module name is automatically interned in the string table.
     pub fn new(name: String) -> Self {
         let mut strings = StringTable::new();
-        // Intern the module name as the first string (ID 0)
-        strings.intern(&name);
+        // Offset zero belongs to StringId::EMPTY, never to a module name.
+        let module_name = strings.intern(&name);
 
         Self {
-            header: VbcHeader::new(),
+            header: VbcHeader { module_name_offset: module_name.0, ..VbcHeader::new() },
             name,
             declaration_type_bindings: Default::default(),
             strings,
@@ -2603,7 +2603,7 @@ pub fn is_abstract_operator_method(bare: &str) -> bool {
 ///
 /// Strings are stored once and referenced by [`StringId`].
 /// The ID is the byte offset in the serialized form.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct StringTable {
     /// Map from string to ID for deduplication.
     index: IndexMap<String, StringId>,
@@ -2618,14 +2618,67 @@ pub struct StringTable {
     id_to_idx: std::sync::OnceLock<HashMap<StringId, usize>>,
 }
 
+impl<'de> Deserialize<'de> for StringTable {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct Entries {
+            index: IndexMap<String, StringId>,
+            next_offset: u32,
+        }
+        let Entries { mut index, next_offset } = Entries::deserialize(deserializer)?;
+        // A serde map has no ordering contract. Its stored offsets own the
+        // order; validate that they describe one contiguous table below.
+        index.sort_by(|_, left, _, right| left.0.cmp(&right.0));
+        let table = Self { index, next_offset, id_to_idx: std::sync::OnceLock::new() };
+        table.validate_identity().map_err(serde::de::Error::custom)?;
+        Ok(table)
+    }
+}
+
+impl Default for StringTable {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl StringTable {
-    /// Creates a new empty string table.
+    /// Creates a string table with the reserved empty identity at offset zero.
     pub fn new() -> Self {
-        Self {
+        let mut table = Self {
             index: IndexMap::new(),
             next_offset: 0,
             id_to_idx: std::sync::OnceLock::new(),
+        };
+        table.intern("");
+        table
+    }
+
+    fn has_empty_identity(&self) -> bool {
+        self.index.first().is_some_and(|(value, id)| {
+            value.is_empty() && *id == StringId::EMPTY
+        })
+    }
+
+    /// The stored IDs must denote exactly the offsets the writer will emit.
+    /// Validate once at module boundaries, not once per descriptor or lookup.
+    pub(crate) fn validate_identity(&self) -> Result<(), Text> {
+        if !self.has_empty_identity() {
+            return Err("string table lacks the reserved empty identity; rebuild the VBC artifact".into());
         }
+        let mut offset = 0u32;
+        for (value, id) in &self.index {
+            if id.0 != offset {
+                return Err("string table identity disagrees with its serialized offset".into());
+            }
+            offset = u32::try_from(value.len()).ok()
+                .and_then(|len| len.checked_add(4))
+                .and_then(|len| offset.checked_add(len))
+                .ok_or_else(|| Text::from("string table exceeds the VBC address space"))?;
+        }
+        if offset != self.next_offset {
+            return Err("string table extent disagrees with its serialized entries".into());
+        }
+        Ok(())
     }
 
     /// Interns a string, returning its ID.

@@ -154,7 +154,9 @@ pub const VERSION_MAJOR: u16 = 2;
 // v2.59: declaration-owned finite numeric bounds after witness substitution.
 // v2.60: emitted-body owned-value-parameter calling convention.
 // v2.61: explicit generated closure environment ABI, independent of its name.
-pub const VERSION_MINOR: u16 = 61;
+// v2.62: offset zero is the empty string identity, never a real spelling.
+// Ambiguous pre-release string tables require regeneration, not guessed remaps.
+pub const VERSION_MINOR: u16 = 62;
 
 /// Minor-version floors for sections whose presence readers gate on.  The
 /// register-type-hints section has been written unconditionally since minor 2,

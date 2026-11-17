@@ -680,6 +680,7 @@ impl<'a> Deserializer<'a> {
  /// Parses the string table.
  fn parse_string_table(&mut self, size: u32) -> VbcResult<StringTable> {
  let mut table = StringTable::new();
+ let table_start = self.offset;
  // Use checked_add for the section-end calculation — on
  // 32-bit targets the cast `size as usize` covers full u32
  // (4 GB) and adding *offset can overflow. On 64-bit the
@@ -735,10 +736,20 @@ impl<'a> Deserializer<'a> {
  error: String::from_utf8(bytes.to_vec()).unwrap_err(),
  })?;
 
- table.intern(s);
+ let id = table.intern(s);
+ if id.0 as usize != str_start - table_start {
+ return Err(VbcError::Deserialization(
+ "string table entries must have exact unique offsets and a reserved empty identity; rebuild the VBC artifact".into(),
+ ));
+ }
  self.offset = str_end;
  }
 
+ if table.serialized_size() != size {
+ return Err(VbcError::Deserialization(
+ "string table lacks the reserved empty identity; rebuild the VBC artifact".into(),
+ ));
+ }
  Ok(table)
  }
 

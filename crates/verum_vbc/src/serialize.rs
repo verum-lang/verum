@@ -293,6 +293,8 @@ impl Serializer {
 
     /// Serializes the string table.
     fn serialize_string_table(&mut self, module: &VbcModule) -> VbcResult<u32> {
+        module.strings.validate_identity()
+            .map_err(|message| VbcError::Serialization(message.into_string()))?;
         let start = self.output.len();
 
         // Write each string: u32 length + UTF-8 bytes
@@ -1761,6 +1763,10 @@ mod tests {
         assert!(loaded.bytecode.iter().all(|&b| b == 0x00));
         assert_eq!(
             loaded.get_string(crate::types::StringId(0)),
+            Some("")
+        );
+        assert_eq!(
+            loaded.get_string(crate::types::StringId(loaded.header.module_name_offset)),
             Some("compression_test")
         );
         assert_eq!(loaded.constants.len(), 2);

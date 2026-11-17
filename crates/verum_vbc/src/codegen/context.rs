@@ -1646,7 +1646,7 @@ impl Default for CodegenContext {
 impl CodegenContext {
     /// Creates a new codegen context.
     pub fn new() -> Self {
-        Self {
+        let mut context = Self {
             archive_function_ids: Map::new(),
             archive_fn_param_types: HashMap::new(),
             archive_fn_parameter_generics: Map::new(),
@@ -1750,7 +1750,11 @@ impl CodegenContext {
             thread_local_vars: HashMap::new(),
             static_mut_byte_widths: HashMap::new(),
             next_tls_slot: 0,
-        }
+        };
+        // Optional metadata uses StringId::EMPTY in both index and wire
+        // namespaces. A real source spelling must never claim that identity.
+        context.intern_string_raw("");
+        context
     }
 
     /// Creates a new codegen context with tier analysis results.
@@ -4989,6 +4993,7 @@ impl CodegenContext {
         self.constants.clear();
         self.strings.clear();
         self.string_intern.clear();
+        self.intern_string_raw("");
         self.functions.clear();
         self.archive_function_ids.clear();
         self.semantic_fn_params.clear();

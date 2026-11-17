@@ -211,6 +211,9 @@ impl<'a> Validator<'a> {
 
     /// Validates the string table.
     fn validate_string_table(&mut self) {
+        if let Err(message) = self.module.strings.validate_identity() {
+            self.errors.push(VbcError::Deserialization(message.into_string()));
+        }
         // Check for empty module name
         if self.module.name.is_empty() {
             // Not an error, but could be a warning

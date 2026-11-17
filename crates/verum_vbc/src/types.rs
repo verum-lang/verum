@@ -22,7 +22,7 @@ use verum_common::{List, Text};
 pub struct StringId(pub u32);
 
 impl StringId {
-    /// Empty string (by convention at offset 0).
+    /// Reserved empty string identity in codegen and serialized string tables.
     pub const EMPTY: StringId = StringId(0);
 }
 

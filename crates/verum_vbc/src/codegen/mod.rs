@@ -24795,8 +24795,8 @@ impl VbcCodegen {
             // amortised vs the linear scan in `Self::intern_string`.
             crate::types::StringId(this.ctx.intern_string_raw(&name))
         };
-        // Optional metadata uses EMPTY as absence even when archive byte
-        // offset zero contains a real string. Required names still use intern.
+        // Preserve absent metadata across the archive and codegen namespaces.
+        // Both reserve EMPTY for the empty string.
         let intern_optional = |this: &mut Self, sid: crate::types::StringId| {
             if sid == crate::types::StringId::EMPTY {
                 sid
