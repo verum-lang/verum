@@ -3045,7 +3045,7 @@ impl VbcCodegen {
         left: &Expr,
         right: &Expr,
     ) -> CodegenResult<Option<Reg>> {
-        let result = self.compile_binary_inner(op, left, right)?;
+        let result = self.compile_binary_inner(op, left, right, None)?;
         let widens = matches!(
             op,
             BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Pow | BinOp::Shl
@@ -3079,6 +3079,7 @@ impl VbcCodegen {
         op: BinOp,
         left: &Expr,
         right: &Expr,
+        expected_right_owner: Option<String>,
     ) -> CodegenResult<Option<Reg>> {
         // Handle short-circuit operators specially
         match op {
@@ -3108,9 +3109,12 @@ impl VbcCodegen {
             left, Some(left_reg), left_start, self.ctx.instructions.len(),
         );
         let right_start = self.ctx.instructions.len();
-        let right_reg = self
-            .compile_expr(right)?
-            .or_internal("binary op right has no value")?;
+        let previous_owner = expected_right_owner.map(|owner| self.ctx.push_disambig_context(Some(owner)));
+        let right_result = self.compile_expr(right);
+        if let Some(previous) = previous_owner {
+            self.ctx.pop_disambig_context(previous);
+        }
+        let right_reg = right_result?.or_internal("binary op right has no value")?;
         let right_declaration = self.declared_expression_result(
             right, Some(right_reg), right_start, self.ctx.instructions.len(),
         );
@@ -10316,117 +10320,34 @@ impl VbcCodegen {
                 Ok(Some(Some(result)))
             }
 
-            "assert_eq" => {
+            "assert_eq" | "assert_ne" => {
                 if args.len() < 2 {
                     return Err(CodegenError::new(CodegenErrorKind::WrongArgumentCount {
                         expected: 2,
                         found: args.len(),
-                        function: "assert_eq".to_string(),
+                        function: name.to_string(),
                     }));
                 }
-                let left_reg = self
-                    .compile_expr(&args[0])?
-                    .or_internal("assert_eq left has no value")?;
-                // Propagate the first argument's variable type name (if it is
-                // a Path) as `current_return_type_name` so that a bare variant
-                // constructor in the second argument (e.g.
-                // `assert_eq(err_value, None)` where `err_value: Maybe<Int>`)
-                // resolves the ambiguous simple name against the first
-                // argument's nominal type. Unifies with the let-binding and
-                // param-type disambiguation paths.
-                let saved_assert_rt = if let ExprKind::Path(p) = &args[0].kind
-                    && p.segments.len() == 1
-                    && let Some(PathSegment::Name(id)) = p.segments.first()
-                    && let Some(type_name) =
-                        self.ctx.variable_type_names.get(id.name.as_str()).cloned()
-                {
-                    let base = type_name
-                        .split('<')
-                        .next()
-                        .unwrap_or(type_name.as_str())
-                        .to_string();
-                    Some(self.ctx.push_disambig_context(Some(base)))
+                // A bare variant in the right operand inherits the left binding's
+                // nominal owner. The equality operator selects the actual comparison.
+                let right_owner = Self::named_place_binding(&args[0])
+                    .and_then(|binding| self.ctx.variable_type_names.get(binding))
+                    .map(|owner| Self::strip_generic_args(owner).to_string());
+                let equal = self.compile_binary_inner(BinOp::Eq, &args[0], &args[1], right_owner)?
+                    .or_internal("assertion equality has no result")?;
+                let (condition, message) = if name == "assert_ne" {
+                    let different = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::Not { dst: different, src: equal });
+                    self.ctx.free_temp(equal);
+                    (different, "assertion failed: left == right")
                 } else {
-                    None
+                    (equal, "assertion failed: left != right")
                 };
-                let right_reg = self
-                    .compile_expr(&args[1])?
-                    .or_internal("assert_eq right has no value")?;
-                if let Some(saved) = saved_assert_rt {
-                    self.ctx.pop_disambig_context(saved);
-                }
-
-                // Compare values using generic equality (works for all types)
-                let cmp_result = self.ctx.alloc_temp();
-                self.ctx.emit(Instruction::CmpG {
-                    eq: true, // Equality comparison via Eq protocol
-                    dst: cmp_result,
-                    a: left_reg,
-                    b: right_reg,
-                    protocol_id: 0, // Generic comparison, runtime determines type
-                });
-
-                // Assert the comparison result
-                let message_id =
-                    self.intern_string(&assertion_message(args, 2, "assertion failed: left != right"));
-                self.ctx.emit(Instruction::Assert {
-                    cond: cmp_result,
-                    message_id,
-                });
-
-                self.ctx.free_temp(cmp_result);
-                self.ctx.free_temp(right_reg);
-                self.ctx.free_temp(left_reg);
+                let message_id = self.intern_string(&assertion_message(args, 2, message));
+                self.ctx.emit(Instruction::Assert { cond: condition, message_id });
+                self.ctx.free_temp(condition);
                 Ok(Some(None))
             }
-
-            "assert_ne" => {
-                if args.len() < 2 {
-                    return Err(CodegenError::new(CodegenErrorKind::WrongArgumentCount {
-                        expected: 2,
-                        found: args.len(),
-                        function: "assert_ne".to_string(),
-                    }));
-                }
-                let left_reg = self
-                    .compile_expr(&args[0])?
-                    .or_internal("assert_ne left has no value")?;
-                let right_reg = self
-                    .compile_expr(&args[1])?
-                    .or_internal("assert_ne right has no value")?;
-
-                // Compare values using generic equality then negate
-                let eq_result = self.ctx.alloc_temp();
-                self.ctx.emit(Instruction::CmpG {
-                    eq: true, // Equality comparison via Eq protocol
-                    dst: eq_result,
-                    a: left_reg,
-                    b: right_reg,
-                    protocol_id: 0, // Generic comparison, runtime determines type
-                });
-
-                // Negate: not equal = !equal
-                let cmp_result = self.ctx.alloc_temp();
-                self.ctx.emit(Instruction::Not {
-                    dst: cmp_result,
-                    src: eq_result,
-                });
-                self.ctx.free_temp(eq_result);
-
-                // Assert the comparison result
-                let message_id =
-                    self.intern_string(&assertion_message(args, 2, "assertion failed: left == right"));
-                self.ctx.emit(Instruction::Assert {
-                    cond: cmp_result,
-                    message_id,
-                });
-
-                self.ctx.free_temp(cmp_result);
-                self.ctx.free_temp(right_reg);
-                self.ctx.free_temp(left_reg);
-                Ok(Some(None))
-            }
-
             "debug_assert" => {
                 // Checked only when the build carries debug assertions.
                 //

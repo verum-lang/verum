@@ -360,6 +360,26 @@ fn native_packed_array_copy_preserves_encoding_and_ownership() {
     run_native(include_str!("../../verum_vbc/tests/fixtures/packed_array_copy.vr"));
 }
 
+#[test]
+fn a_fixed_array_copy_preserves_the_storage_returned_by_its_callee() {
+    let wire = module(r#"
+        fn values() -> [Byte; 2] { [7 as Byte, 9 as Byte] }
+        fn main() -> Int {
+            let mut original = values();
+            let mut copied = original;
+            original[0] = 2 as Byte;
+            copied[1] = 3 as Byte;
+            assert_eq(copied[0], 7 as Byte);
+            assert_eq(original[1], 9 as Byte);
+            73
+        }
+    "#);
+    let entry = wire.find_function_by_name("main").unwrap();
+    let mut vm = verum_vbc::interpreter::Interpreter::try_new_validated(wire.clone().into()).unwrap();
+    assert_eq!(vm.execute_function(entry).unwrap().try_as_i64(), Some(73));
+    run_native_module(wire);
+}
+
 fn run_native_module(mut wire: verum_vbc::VbcModule) {
     let mut graph = verum_vbc::mono::InstantiationGraph::new();
     for function in &mut wire.functions {

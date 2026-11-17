@@ -129,6 +129,23 @@ fn drop_glue_cannot_preserve_other_storage_proofs() {
 }
 
 #[test]
+fn a_list_backed_array_copy_forgets_unrelated_facts_when_its_element_can_run_code() {
+    use crate::types::{TypeId, TypeRef};
+    for (element, keep_count) in [(TypeId::U16, true), (TypeId(TypeId::FIRST_USER), false)] {
+        let mut facts = ArrayResultFacts::default();
+        facts.observe(&Instruction::LoadI { dst: Reg(0), value: 2 });
+        facts.observe(&Instruction::NewList { dst: Reg(1), capacity_hint: 2 });
+        assert!(facts.observe(&Instruction::CloneTyped {
+            dst: Reg(2),
+            src: Reg(1),
+            type_ref: TypeRef::Array { element: Box::new(TypeRef::Concrete(element)), length: 2 },
+        }));
+        assert_eq!(facts.get(Reg(2)), Some(ArrayResultFact::List));
+        assert_eq!(facts.get(Reg(0)), keep_count.then_some(ArrayResultFact::Integer(2)));
+    }
+}
+
+#[test]
 fn primitive_copy_and_drop_only_update_the_affected_register() {
     use crate::types::{TypeId, TypeRef};
     let mut facts = ArrayResultFacts::default();

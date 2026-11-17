@@ -84,15 +84,27 @@ impl ArrayResultFacts {
                 }
             }
             I::CloneTyped { dst, src, type_ref: TypeRef::Array { element, length } } => {
-                let source = self.get(*src);
-                if let Some(fact @ ArrayResultFact::Packed { width, float, count }) = source
-                    && count == *length
-                    && PackedElement::for_element(element) == Some(PackedElement { width, float }) {
-                    self.values.insert(*dst, fact);
-                } else {
-                    self.clear();
-                    return false;
-                }
+                let copied = match self.get(*src) {
+                    Some(ArrayResultFact::List) => {
+                        // Copying an element can run its retain implementation.
+                        // Only the new List is established after arbitrary user code.
+                        let immediate = matches!(element.as_ref(), TypeRef::Concrete(owner)
+                            if matches!(crate::copy_plan::builtin_copy_node(*owner),
+                                Some(crate::copy_plan::CopyNode::Identity)));
+                        if !immediate {
+                            self.clear();
+                        }
+                        ArrayResultFact::List
+                    }
+                    Some(fact @ ArrayResultFact::Packed { width, float, count })
+                        if count == *length && PackedElement::for_element(element)
+                            == Some(PackedElement { width, float }) => fact,
+                    _ => {
+                        self.clear();
+                        return false;
+                    }
+                };
+                self.values.insert(*dst, copied);
             }
             I::CloneTyped { dst, src, type_ref: TypeRef::Concrete(owner) }
                 if matches!(crate::copy_plan::builtin_copy_node(*owner), Some(crate::copy_plan::CopyNode::Identity)) =>

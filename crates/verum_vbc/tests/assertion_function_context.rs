@@ -17,6 +17,19 @@ fn first(flag: Bool) -> Int { assert(flag, "retained failure"); 99 }
 fn second(flag: Bool) -> Int { assert(flag, "retained failure"); 99 }
 fn caller() -> Int { first(false) }
 fn passing() -> Int { first(true) }
+type State is Open | Closed;
+type Door is Closed | Open;
+fn next(counter: &mut Int) -> Int { *counter = *counter + 1; *counter }
+fn comparisons() -> Int {
+    let mut count = 0;
+    assert_eq(next(&mut count), 1);
+    assert_ne(next(&mut count), 1);
+    let state: State = State.Closed;
+    assert_eq(state, Closed);
+    assert_ne(state, Open);
+    count
+}
+fn same_byte() -> Int { assert_ne(19 as Byte, 19 as Byte, "retained failure"); 0 }
 "#;
 
 fn source_or_wire(wire: bool) -> (&'static str, VbcModule) {
@@ -142,6 +155,20 @@ fn source_passing_assertion_preserves_its_return() {
 #[test]
 fn wire_passing_assertion_preserves_its_return() {
     passing_assertion(true);
+}
+
+#[test]
+fn equality_assertions_evaluate_once_resolve_the_right_owner_and_keep_the_message() {
+    for wire in [false, true] {
+        let (route, module) = source_or_wire(wire);
+        let passing = module.find_function_by_name("diagnostic.assertion.comparisons").unwrap();
+        let name = "diagnostic.assertion.same_byte";
+        let failing = module.find_function_by_name(name).unwrap();
+        let pc = assertion_end_pc(&module, name);
+        let mut vm = Interpreter::new(Shared::new(module).into_arc());
+        assert_eq!(vm.execute_function(passing).unwrap().try_as_i64(), Some(2), "{route}");
+        check_error(vm.execute_function(failing).unwrap_err(), name, pc, route);
+    }
 }
 
 #[test]
