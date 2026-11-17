@@ -71,10 +71,10 @@ mount base.{Result, Ok, Err, Maybe, Some, None, Text};
 mount time.rfc3339.{Rfc3339Time};
 mount time.rfc3339.{parse as rfc3339_parse, format_with_offset as rfc3339_format_with_offset};
 mount configuration.value.{ConfigValue};
-mount configuration.error.{ConfigError, ConfigErrorKind, format_id_toml};
+mount configuration.error.{ConfigError, ConfigErrorKind, FormatId, format_id_toml};
 mount configuration.format.{
-    ConfigFormat, FormatCapabilities, ConfigFormatOptions, FormatId,
-    FormatRegistry, register_format, default_capabilities,
+    ConfigFormat, FormatCapabilities, ConfigFormatOptions,
+    FormatRegistry, register_format,
 };
 
 // =============================================================================
@@ -92,7 +92,7 @@ mount configuration.format.{
 //   * TomlLocalDate — date only.
 //   * TomlLocalTime — time only.
 //   * TomlArray — homogeneous-or-heterogeneous list of values.
-//   * TomlTable — keyed table; insertion-ordered by underlying Map.
+//   * TomlTable — keyed table; key order is unspecified by Map.
 public type TomlValue is
       TomlString(Text)
     | TomlInt(Int)
@@ -1559,21 +1559,18 @@ implement ConfigFormat for TomlFormat {
     }
 
     fn capabilities(&self) -> FormatCapabilities {
-        // TOML has datetime, no null, no bytes, heterogeneous-arrays
-        // disallowed (TOML 1.0 §"Array" — homogeneous), preserves key order,
-        // single root, no comments preserved (parser drops them).
-        let mut c = default_capabilities();
-        c.has_null = false;
-        c.has_bytes = false;
-        c.has_offset_datetime = true;
-        c.has_local_datetime = true;
-        c.has_duration = false;
-        c.has_references = false;
-        c.has_heterogeneous_arrays = false;
-        c.preserves_key_order = true;
-        c.preserves_comments = false;
-        c.single_root = true;
-        c
+        FormatCapabilities {
+            preserves_comments: false,
+            has_null: false,
+            has_bytes: false,
+            has_offset_datetime: true,
+            has_local_datetime: true,
+            has_duration: false,
+            has_references: false,
+            has_heterogeneous_arrays: true,
+            preserves_key_order: false,
+            single_root: true,
+        }
     }
 
     fn parse(&self, source: &Text) -> Result<ConfigValue, ConfigError> {

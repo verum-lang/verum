@@ -1,0 +1,35 @@
+mount core.configuration.format.ConfigFormat;
+mount core.configuration.toml.{TomlValue, parse_table, toml_format};
+
+@test
+fn test_toml_format_capabilities() {
+    let capabilities = toml_format().capabilities();
+    assert(capabilities.has_heterogeneous_arrays);
+    assert(capabilities.has_offset_datetime);
+    assert(capabilities.has_local_datetime);
+    assert(capabilities.single_root);
+    assert(!capabilities.preserves_comments);
+    assert(!capabilities.has_null);
+    assert(!capabilities.has_bytes);
+    assert(!capabilities.has_duration);
+    assert(!capabilities.has_references);
+    assert(!capabilities.preserves_key_order);
+}
+
+@test
+fn test_toml_parser_preserves_mixed_array_elements() {
+    let fields = parse_table(&"items = [1, true, \"two\"]\n").unwrap();
+    match fields.get("items").unwrap() {
+        TomlValue.TomlArray(items) => {
+            assert_eq(items.len(), 3);
+            assert(items.get(0).unwrap() is TomlValue.TomlInt(1));
+            assert(items.get(1).unwrap() is TomlValue.TomlBool(true));
+            match items.get(2).unwrap() {
+                TomlValue.TomlString(text) => assert_eq(*text, "two"),
+                _ => panic("the third TOML element must be text"),
+            };
+        }
+        _ => panic("the items key must hold an array"),
+    };
+    assert(parse_table(&"items = [1, true, \"two\"\n").is_err());
+}
