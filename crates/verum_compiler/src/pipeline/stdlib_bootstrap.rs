@@ -268,26 +268,22 @@ impl<'s> CompilationPipeline<'s> {
         {
             let module_registry = self.session.module_registry();
             for (module_name, ast_modules_with_paths) in &all_parsed_modules {
-                for OwnedSourceFile { path: file_path, owner: source_owner, ast: ast_module } in ast_modules_with_paths {
+                for OwnedSourceFile { owner: source_owner, ast: ast_module, .. } in ast_modules_with_paths {
                     // Compute module path from module name + file
                     // Module names are already in dot-separated format (e.g., "core.base.primitives")
                     let module_path = ModulePath::from_str(&source_owner);
                     let module_id = module_registry.read().allocate_id();
 
-                    let file_id = ast_module
-                        .items
-                        .first()
-                        .map(|item| item.span.file_id)
-                        .unwrap_or_else(|| verum_ast::FileId::new(0));
-
-                    let source_text = std::fs::read_to_string(file_path).unwrap_or_default();
+                    let file_id = ast_module.file_id;
+                    let source = self.session.get_source(file_id)
+                        .ok_or_else(|| anyhow::anyhow!("missing parsed source for {source_owner}"))?;
 
                     let mut module_info = ModuleInfo::new(
                         module_id,
                         module_path.clone(),
                         ast_module.clone(),
                         file_id,
-                        Text::from(source_text),
+                        source.source.clone(),
                     );
 
                     // Extract exports for cross-module import resolution

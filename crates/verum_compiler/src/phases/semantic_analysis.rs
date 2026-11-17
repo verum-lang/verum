@@ -15,7 +15,7 @@ use anyhow::Result;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Instant;
-use verum_common::{List, Map, Text};
+use verum_common::{List, Map, OrderedMap, Set, Text};
 use verum_diagnostics::{Diagnostic, DiagnosticBuilder, Severity};
 use verum_types::TypeChecker;
 use verum_types::core_metadata::CoreMetadata;
@@ -89,12 +89,65 @@ fn diagnostic_details(errors: &[Diagnostic]) -> Text {
             line.push(' ');
         }
         line.push_str(diagnostic.message());
+        for related in diagnostic.secondary_labels() {
+            line.push_str(&format!("\n  {}: {}", related.span, related.message));
+        }
         for note in diagnostic.notes() {
             line.push_str("\n  note: ");
             line.push_str(&note.message);
         }
         line
     }).collect::<List<_>>().join("\n").into()
+}
+
+/// Report only relationships witnessed by labels in this exact source roster.
+/// Equal error codes or field names alone cannot identify a common declaration.
+fn shared_diagnostic_locations(
+    sources: &[(Text, Text, verum_ast::Module)],
+    outcomes: &[SourceCheckOutcome],
+) -> Text {
+    let files: Set<_> = sources.iter().map(|(_, path, _)| path.as_str()).collect();
+    let mut sites = OrderedMap::new();
+    for ((owner, _, _), outcome) in sources.iter().zip(outcomes) {
+        for diagnostic in &outcome.diagnostics {
+            let mut visited = Set::new();
+            for label in diagnostic.secondary_labels() {
+                let span = &label.span;
+                if !files.contains(&span.file.as_str()) {
+                    continue;
+                }
+                let site = (
+                    span.file.as_str(), span.line, span.column,
+                    span.end_line.unwrap_or(span.line), span.end_column,
+                    diagnostic.code(), label.message.as_str(),
+                );
+                if visited.insert(site) {
+                    let owners = sites.entry(site).or_insert_with(Map::new);
+                    *owners.entry(owner.as_str()).or_insert(0usize) += 1;
+                }
+            }
+        }
+    }
+    let mut shared: List<_> = sites.into_iter()
+        .filter(|(_, owners)| owners.len() > 1)
+        .map(|(site, owners)| (site, owners.len(), owners.values().sum::<usize>()))
+        .collect();
+    if shared.is_empty() {
+        return Text::new();
+    }
+    shared.sort_by_key(|(site, owners, count)| {
+        (std::cmp::Reverse(*owners), std::cmp::Reverse(*count), *site)
+    });
+    let mut rendered = Text::from("Related source locations shared by modules:\n");
+    for ((path, line, column, _, _, code, label), owners, count) in shared {
+        rendered.push_str(&format!("  {path}:{line}:{column}: "));
+        if let Some(code) = code {
+            rendered.push_str(code);
+            rendered.push(' ');
+        }
+        rendered.push_str(&format!("{label} ({count} diagnostics in {owners} modules)\n"));
+    }
+    rendered
 }
 
 impl SemanticAnalysisPhase {
@@ -159,12 +212,19 @@ impl SemanticAnalysisPhase {
         session: &crate::Session,
     ) -> anyhow::Result<()> {
         let graph = verum_common::Shared::new(parking_lot::RwLock::new(session.module_registry().read().clone()));
-        crate::owned_source_semantics::register_sources(&graph,
-            selected.iter().map(|(owner, path, module)| (owner.as_str(), path.as_str(), module)))?;
+        crate::owned_source_semantics::register_sources_with_text(&graph,
+            selected.iter().map(|(owner, path, module)| (owner.as_str(), path.as_str(), module)),
+            |id| session.get_source(id).map(|file| file.source.clone()))?;
         let outcomes = self.check_source_roster(
             selected, &graph, session.options().num_threads,
             |error| error.to_diagnostic_with_span(Some(|span| session.convert_span(span))),
         )?;
+        // A failed owner cannot poison a sibling's inference state, and no
+        // source may proceed to lowering until the complete roster is admitted.
+        if outcomes.iter().all(|outcome| outcome.diagnostics.is_empty()) {
+            return Ok(());
+        }
+        let shared = shared_diagnostic_locations(selected, &outcomes);
         let mut failures: List<Text> = List::new();
         for ((owner, path, _), outcome) in selected.iter().zip(outcomes) {
             if !outcome.diagnostics.is_empty() {
@@ -172,12 +232,7 @@ impl SemanticAnalysisPhase {
                 session.emit_diagnostics(outcome.diagnostics);
             }
         }
-        // A failed owner cannot poison a sibling's inference state, and no
-        // source may proceed to lowering until the complete roster is admitted.
-        if !failures.is_empty() {
-            anyhow::bail!("semantic checking failed in {} module(s):\n{}", failures.len(), failures.join("\n"));
-        }
-        Ok(())
+        anyhow::bail!("semantic checking failed in {} module(s):\n{shared}{}", failures.len(), failures.join("\n"));
     }
 
     /// Both production entry points share this runner. The graph is complete

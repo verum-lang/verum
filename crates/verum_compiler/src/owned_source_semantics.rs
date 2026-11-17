@@ -21,6 +21,14 @@ pub(crate) fn register_sources<'a>(
     registry: &SourceRegistry,
     sources: impl IntoIterator<Item = (&'a str, &'a str, &'a Module)>,
 ) -> anyhow::Result<()> {
+    register_sources_with_text(registry, sources, |_| None)
+}
+
+pub(crate) fn register_sources_with_text<'a>(
+    registry: &SourceRegistry,
+    sources: impl IntoIterator<Item = (&'a str, &'a str, &'a Module)>,
+    source_text: impl Fn(verum_ast::FileId) -> Option<Text>,
+) -> anyhow::Result<()> {
     let sources: List<_> = sources.into_iter().collect();
     let mut inline = List::new();
     for (owner, path, module) in &sources {
@@ -34,7 +42,7 @@ pub(crate) fn register_sources<'a>(
                 .map(|(owner, path, module)| (owner.as_str(), path.as_str(), module)),
         )
         .collect();
-    register_source_entries(registry, &sources)?;
+    register_source_entries(registry, &sources, source_text)?;
     let mut registry = registry.write();
     verum_modules::resolve_specific_reexport_kinds(&mut registry)?;
     verum_modules::resolve_glob_reexports(&mut registry)?;
@@ -50,11 +58,18 @@ pub(crate) fn register_inline_sources(
 ) -> anyhow::Result<()> {
     let mut inline = List::new();
     collect_inline_sources(parent, parent, module, &mut inline);
+    if inline.is_empty() {
+        return Ok(());
+    }
+    let declaring_file = registry.read().get_by_path(parent)
+        .filter(|info| info.file_id == module.file_id && info.ast == *module);
     let sources: List<_> = inline
         .iter()
         .map(|(owner, path, module)| (owner.as_str(), path.as_str(), module))
         .collect();
-    register_source_entries(registry, &sources)
+    register_source_entries(registry, &sources, |id| {
+        declaring_file.as_ref().filter(|info| info.file_id == id).map(|info| info.source.clone())
+    })
 }
 fn collect_inline_sources(
     owner: &str,
@@ -84,11 +99,13 @@ fn collect_inline_sources(
 fn register_source_entries(
     registry: &SourceRegistry,
     sources: &[(&str, &str, &Module)],
+    source_text: impl Fn(verum_ast::FileId) -> Option<Text>,
 ) -> anyhow::Result<()> {
     let sources = unique_source_entries(sources)?;
     let mut registry = registry.write();
     for (owner, source, module) in sources {
-        let id = if let Some(existing) = registry.get_by_path(owner) {
+        let existing = registry.get_by_path(owner);
+        let id = if let Some(existing) = &existing {
             anyhow::ensure!(
                 existing.ast == *module || existing.ast.items.is_empty(),
                 "source {source} conflicts with existing declarations for owner {owner}"
@@ -100,12 +117,18 @@ fn register_source_entries(
             registry.allocate_id()
         };
         let path = ModulePath::from_str(owner);
+        // Only this compilation's bytes, or the same already-registered AST,
+        // can witness a declaration range. FileIds alone are local to a run.
+        let text = source_text(module.file_id).or_else(|| {
+            existing.as_ref().filter(|info| info.file_id == module.file_id && !info.ast.items.is_empty())
+                .map(|info| info.source.clone())
+        }).unwrap_or_default();
         let mut info = ModuleInfo::new(
             id,
             path.clone(),
             module.clone(),
             module.file_id,
-            Text::new(),
+            text,
         );
         info.exports = extract_exports_from_module(module, id, &path)?;
         registry.register(info);
