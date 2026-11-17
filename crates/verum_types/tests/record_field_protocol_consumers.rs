@@ -84,9 +84,13 @@ fn collect_diagnostics(checker: &mut TypeChecker, errors: &mut List<Text>) {
 }
 
 fn check(helpers: &str, probe: &str) -> List<Text> {
+    check_with_declarations(DECLARATIONS, helpers, probe)
+}
+
+fn check_with_declarations(declarations: &str, helpers: &str, probe: &str) -> List<Text> {
     let source = format!("mount {OWNER}.{{Packet}}; {helpers} {probe}");
     let mut registry = ModuleRegistry::new();
-    for (index, (owner, text)) in [(OWNER, DECLARATIONS), ("consumer", source.as_str())]
+    for (index, (owner, text)) in [(OWNER, declarations), ("consumer", source.as_str())]
         .into_iter()
         .enumerate()
     {
@@ -300,6 +304,97 @@ fn declared_maybe_private_reference_inner_field_is_refused() {
         MAYBE,
         "fn probe(value: Maybe<&Packet>) -> Maybe<Int> { value?.hidden }",
     );
+}
+
+#[test]
+fn optional_methods_and_nested_fields_keep_declared_result_owner() {
+    let helpers = format!(r#"{MAYBE}
+        type Local is {{ value: Int, nested: Maybe<Int> }};
+        implement Local {{
+            fn amount(&self) -> Int {{ self.value }}
+            fn optional(&self) -> Maybe<Int> {{ self.nested }}
+        }}
+    "#);
+    for expression in ["value?.amount()", "value?.optional()", "value?.nested"] {
+        assert_public(&helpers, &format!(
+            "fn probe(value: Maybe<Local>) -> Maybe<Int> {{ {expression} }}"
+        ));
+    }
+}
+
+#[test]
+fn optional_field_result_uses_the_imported_family_owner() {
+    let declarations = format!("{DECLARATIONS} public type Maybe<T> is None | Some(T);");
+    let errors = check_with_declarations(&declarations,
+        &format!("mount {OWNER}.{{Maybe}};"),
+        "fn probe(value: Maybe<Packet>) -> Maybe<Int> { value?.visible }",
+    );
+    assert!(errors.is_empty(), "declaring module identity: {errors:?}");
+}
+
+#[test]
+fn optional_field_result_keeps_serialized_nominal_family_identity() {
+    use std::sync::Arc;
+    use verum_types::core_metadata::*;
+    let mut metadata = CoreMetadata { version: CORE_METADATA_VERSION, ..Default::default() };
+    let key: Text = format!("{OWNER}.Maybe").into();
+    metadata.type_declaration_order.push(key.clone());
+    metadata.declaration_type_bindings.insert(OWNER.into(), Default::default());
+    metadata.types.insert(key, TypeDescriptor {
+        name: "Maybe".into(), module_path: OWNER.into(), origin_module_path: None,
+        source_declaration: None,
+        generic_params: List::from_single(GenericParam {
+            name: "T".into(), bounds: List::new(), default: None,
+            type_bounds: List::new(), pid: Some(0),
+        }),
+        kind: TypeDescriptorKind::Variant { cases: List::from_iter([
+            VariantCase { name: "None".into(), payload: None },
+            VariantCase { name: "Some".into(),
+                payload: Some(VariantPayload::Tuple(List::from_single("T".into()))) },
+        ]) },
+        size: None, alignment: None, methods: List::new(), implements: List::new(),
+        decl_span: None, is_public: true, is_transparent_wrapper: false,
+        resource_discipline: verum_common::ResourceDiscipline::Unrestricted,
+    });
+    // This exercises the metadata consumer and wire codec, not a full bake.
+    let metadata = Arc::new(decode_metadata(&encode_metadata(&metadata).unwrap()).unwrap());
+    for eager in [false, true] {
+        let mut checker = if eager { TypeChecker::new_with_core_eager(metadata.clone()) }
+            else { TypeChecker::new_with_core(metadata.clone()) };
+        checker.register_primitives();
+        checker.set_current_module_path("consumer");
+        let module = parse(&format!(r#"
+            mount {OWNER}.Maybe;
+            type Local is {{ value: Int }};
+            fn probe(value: Maybe<Local>) -> Maybe<Int> {{ value?.value }}
+        "#), 3);
+        let mut errors: List<Text> = checker.prepare_module_declarations(&module)
+            .into_iter().map(|error| format!("{error:?}").into()).collect();
+        for item in &module.items {
+            if let Err(error) = checker.check_item(item) { errors.push(format!("{error:?}").into()); }
+        }
+        collect_diagnostics(&mut checker, &mut errors);
+        assert!(errors.is_empty(), "eager={eager}: {errors:?}");
+    }
+}
+
+#[test]
+fn a_record_named_maybe_cannot_supply_a_nullable_result() {
+    let errors = check(
+        "type Optional<T> is None | Some(T); type Maybe<T> is { payload: T };",
+        "fn probe(value: Optional<Packet>) -> Maybe<Int> { value?.visible }",
+    );
+    assert!(errors.iter().any(|error| error.contains("E405")
+        && error.contains("declared nullable result family")), "{errors:?}");
+}
+
+#[test]
+fn a_record_named_maybe_cannot_supply_null_coalescing_payload() {
+    let errors = check("type Maybe<T> is { payload: T };",
+        "fn probe(value: Maybe<Int>) -> Int { value ?? 0 }",
+    );
+    assert!(errors.iter().any(|error| error.contains("Mismatch")
+        && error.contains("Maybe")), "{errors:?}");
 }
 
 #[test]

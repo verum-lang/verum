@@ -6956,10 +6956,7 @@ impl TypeChecker {
             let obj_result = self.synth_expr(obj)?;
 
             // Use protocol-based Maybe resolution to extract inner type
-            let maybe_resolution = self
-                .protocol_checker
-                .read()
-                .resolve_maybe_protocol(&obj_result.ty);
+            let maybe_resolution = self.resolve_maybe_carrier(&obj_result.ty)?;
             let inner_ty = match &maybe_resolution {
                 Some(resolution) => resolution.inner.clone(),
                 None => {
@@ -7029,18 +7026,7 @@ impl TypeChecker {
             // Wrap result in Maybe if it isn't already
             // Monadic flattening: if return type is already Maybe, don't double wrap
             let result_ty = if maybe_resolution.is_some() {
-                // Original was Maybe, wrap result in Maybe
-                if self
-                    .protocol_checker
-                    .read()
-                    .resolve_maybe_protocol(&method_result.ty)
-                    .is_some()
-                {
-                    // Return type is already Maybe - don't double wrap
-                    method_result.ty
-                } else {
-                    Type::maybe(method_result.ty)
-                }
+                self.optional_chain_result_type(method_result.ty, expr.span)?
             } else {
                 method_result.ty
             };
@@ -11406,11 +11392,7 @@ impl TypeChecker {
         // Protocol-based Maybe resolution for ?? operator
         // Maybe operator resolution: ? on Maybe<T> desugars to match with None -> return None propagation
         // =========================================================================
-        match self
-            .protocol_checker
-            .read()
-            .resolve_maybe_protocol(&left_result.ty)
-        {
+        match self.resolve_maybe_carrier(&left_result.ty)? {
             Some(resolution) => {
                 // Maybe<T> ?? T -> T
                 self.unifier
@@ -11454,14 +11436,8 @@ impl TypeChecker {
             }
         }
 
-        let inner_ty = {
-            let checker = self.protocol_checker.read();
-            let resolution = match checker.resolve_maybe_protocol(&obj_result.ty) {
-                Some(resolution) => Some(resolution),
-                None => checker.resolve_maybe_protocol(&self.expand_generic_to_variant(&obj_result.ty)?),
-            };
-            resolution.map_or_else(|| obj_result.ty.clone(), |resolution| resolution.inner)
-        };
+        let inner_ty = self.resolve_maybe_carrier(&obj_result.ty)?
+            .map_or_else(|| obj_result.ty.clone(), |resolution| resolution.inner);
 
         // Unwrap reference types before field access (Maybe<&Point>?.field)
         self.check_record_field_visibility(&inner_ty, field.name.as_str(), expr.span)?;
@@ -11478,18 +11454,41 @@ impl TypeChecker {
             })?;
 
         self.require_closed_field_projection(&field_ty, expr.span)?;
-        // Monadic flattening: if field is already Maybe, don't double-wrap
-        let result_ty = if self
-            .protocol_checker
-            .read()
-            .resolve_maybe_protocol(&field_ty)
-            .is_some()
-        {
-            field_ty
-        } else {
-            Type::maybe(field_ty)
-        };
+        let result_ty = self.optional_chain_result_type(field_ty, expr.span)?;
         Ok(InferResult::new(result_ty))
+    }
+
+    /// Optional fields and methods construct the same declared result family.
+    /// A synthetic bare name loses the owner selected by source or metadata.
+    fn optional_chain_result_type(&mut self, result: Type, span: Span) -> Result<Type> {
+        if self.resolve_maybe_carrier(&result)?.is_some() {
+            return Ok(result);
+        }
+        let application = verum_ast::Type::new(verum_ast::TypeKind::Generic {
+            base: Box::new(verum_ast::Type::new(verum_ast::TypeKind::Path(
+                Self::text_to_path(&Text::from(WKT::Maybe.as_str()))), span)),
+            args: List::new(),
+        }, span);
+        let wrapped = self.apply_declared_type_arguments(&application, [result].into_iter().collect())?;
+        if self.resolve_maybe_carrier(&wrapped)?.is_none() {
+            return Err(TypeError::OtherWithCodeSpanned {
+                code: "E405".into(),
+                msg: "optional chaining requires a declared nullable result family".into(),
+                span,
+            });
+        }
+        Ok(wrapped)
+    }
+
+    fn resolve_maybe_carrier(&self, ty: &Type) -> Result<Option<crate::protocol::MaybeResolution>> {
+        let checker = self.protocol_checker.read();
+        if let Some(resolution) = checker.resolve_maybe_protocol(ty) {
+            return Ok(Some(resolution));
+        }
+        // A nominal spelling is not evidence of nullability. Inspect the
+        // selected declaration without losing its identity in the result.
+        let expanded = self.expand_generic_to_variant(ty)?;
+        Ok(checker.resolve_maybe_protocol(&expanded))
     }
 
     fn infer_expr_map_literal(&mut self, expr: &Expr) -> Result<InferResult> {

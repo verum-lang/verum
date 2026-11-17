@@ -322,7 +322,7 @@ impl TypeChecker {
                 )?;
                 // The ordinary nominal/alias/variant constructor is shared;
                 // checked values are passed into it, never synthesized again.
-                self.apply_protocol_argument_slots(annotation, arguments)?
+                self.apply_declared_type_arguments(annotation, arguments)?
             }
             TypeKind::Tuple(elements) => Type::tuple(
                 elements

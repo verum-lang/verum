@@ -1123,7 +1123,9 @@ fn substitute_refinement_binder(
         Ok(Type::Named { path: Self::text_to_path(&name), args: arguments.clone() })
     }
 
-    pub(super) fn apply_protocol_argument_slots(
+    /// Apply already elaborated arguments through the declaration's ordinary
+    /// telescope, bounds and nominal identity, including compiler-produced uses.
+    pub(super) fn apply_declared_type_arguments(
         &mut self, annotation: &verum_ast::Type, arguments: List<Type>,
     ) -> Result<Type> {
         self.elaborate_generic_application(annotation, Some(arguments), ApplicationForm::DeclaredSum)
