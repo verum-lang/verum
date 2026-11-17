@@ -256,20 +256,24 @@ impl Output {
 }
 
 fn object(state: &InterpreterState, value: Value, owner: TypeId) -> InterpreterResult<ObjectCopy> {
+    let source = live_object(state, value)?;
+    if source.owner != owner {
+        return Err(invalid("typed copy nominal owner differs from its declaration"));
+    }
+    Ok(source)
+}
+
+fn live_object(state: &InterpreterState, value: Value) -> InterpreterResult<ObjectCopy> {
     if !value.is_regular_ptr() || value.is_nil() || !state.heap.contains(value.as_ptr()) {
         return Err(invalid("typed copy requires a live owned object"));
     }
     let pointer = value.as_ptr::<heap::ObjectHeader>();
     // SAFETY: exact allocation membership proves this header remains live.
     let header = unsafe { &*pointer };
-    if !header.is_valid() || header.type_id != owner {
-        return Err(invalid(
-            "typed copy nominal owner differs from its declaration",
-        ));
-    }
+    if !header.is_valid() { return Err(invalid("typed copy requires a live owned object")); }
     Ok(ObjectCopy {
         source: pointer.cast(),
-        owner,
+        owner: header.type_id,
         bytes: header.size as usize,
         flags: header.flags,
         field_offset: 0,
@@ -465,6 +469,17 @@ fn inspect<'a>(
                 return Ok((operation, children, allocations, true));
             }
             CopyNode::List { element, .. } | CopyNode::Array { element, .. } => {
+                if let CopyNode::Array { length, packed, .. } = &plan.nodes[node.0] {
+                    let copy = live_object(state, source)?;
+                    if let Some((width, float)) = heap::typed_array_element_spec(copy.owner) {
+                        let actual = crate::array_storage::PackedElement { width, float };
+                        if *packed != Some(actual) || length.checked_mul(width as u64) != Some(copy.bytes as u64) {
+                            return Err(invalid("packed array encoding or extent differs from its declaration"));
+                        }
+                        budget.allocation(copy.bytes)?;
+                        return Ok((Operation::Object(copy), Children::None, 1, false));
+                    }
+                }
                 let shape = list_storage::CopyElements::resolve(state, source)
                     .map_err(preparation_error)?;
                 if let CopyNode::Array { length, .. } = &plan.nodes[node.0] {

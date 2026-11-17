@@ -1845,7 +1845,7 @@ impl<'a, 'ctx> Emitter<'a, 'ctx> {
                 Ok(())
             }
             CopyNode::List { element, .. } => self.list(frame, *element, None, plan),
-            CopyNode::Array { element, length } => self.list(frame, *element, Some(*length), plan),
+            CopyNode::Array { element, length, .. } => self.list(frame, *element, Some(*length), plan),
             CopyNode::Map { owner, .. } => self.container(frame, *owner, true),
             CopyNode::Deque { owner, .. } => self.container(frame, *owner, false),
             CopyNode::Shared {
@@ -1879,7 +1879,7 @@ pub(super) fn lower<'ctx>(
     // its native width instead of passing it through the owned-storage helper's
     // 64-bit slots. The checked plan rejects alias cycles before this walk.
     let mut root = NodeId(0);
-    for _ in 0..plan.nodes.len() {
+    for depth in 0..plan.nodes.len() {
         match &plan.nodes[root.0] {
             CopyNode::Identity => {
                 ctx.clear_callable_producers();
@@ -1890,6 +1890,48 @@ pub(super) fn lower<'ctx>(
                 super::callable_lifecycle::retain(ctx, src)?;
                 return super::lower_mov(ctx, dst, src);
             }
+            CopyNode::Array { length, packed, .. } => match ctx.array_storage_fact(src) {
+                Some(ArrayResultFact::Packed { width, float, count }) => {
+                    if count != *length || *packed != Some(verum_vbc::array_storage::PackedElement { width, float }) {
+                        return Err(LlvmLoweringError::UnprovenArrayStorage(
+                            "packed array encoding or extent differs from its declaration".into(),
+                        ));
+                    }
+                    let bytes = count.checked_mul(width as u64)
+                        .or_internal("packed array copy extent overflow")?;
+                    let limits = ctx.typed_copy_limits;
+                    let failure = if limits.max_work <= depth {
+                        Some(CopyFailure::WorkLimit)
+                    } else if bytes > limits.max_allocation_bytes as u64 {
+                        Some(CopyFailure::AllocationLimit)
+                    } else { None };
+                    if let Some(failure) = failure {
+                        emit_runtime_abort(ctx, failure.message(), "packed_copy_limit")?;
+                        ctx.set_register(dst.0, ctx.types().ptr_type().const_null().into());
+                        return Ok(());
+                    }
+                    // The selected raw producer is a CBGR allocation. Keep
+                    // that ABI so destruction and subsequent indexing agree.
+                    let size = ctx.types().i64_type().const_int(bytes, false);
+                    let module = ctx.get_module();
+                    let allocate = module.get_function("verum_cbgr_allocate")
+                        .or_missing_fn("verum_cbgr_allocate")?;
+                    let copy = ctx.builder().build_call(allocate, &[size.into()], "packed_copy")
+                        .or_llvm_err()?.basic_value_or("packed array allocation")?.into_pointer_value();
+                    if bytes != 0 {
+                        let input = as_ptr(ctx, source, "packed_copy_source")?;
+                        ctx.builder().build_call(RuntimeLowering::new(ctx.llvm_context()).get_or_declare_memcpy(module),
+                            &[copy.into(), input.into(), size.into()], "").or_llvm_err()?;
+                    }
+                    ctx.set_register(dst.0, copy.into());
+                    return Ok(());
+                }
+                Some(ArrayResultFact::List) => break,
+                _ if packed.is_some() => return Err(LlvmLoweringError::UnprovenArrayStorage(
+                    "fixed-array copy needs its selected storage representation".into(),
+                )),
+                _ => break,
+            },
             CopyNode::Alias(next) => root = *next,
             _ => break,
         }

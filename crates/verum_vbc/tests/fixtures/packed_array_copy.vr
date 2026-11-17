@@ -1,0 +1,11 @@
+fn main() -> Int {
+    let mut original: [UInt16; 3] = [32768, 65535, 1];
+    let mut copied = original;
+    original[0] = 3;
+    copied[1] = 5;
+    assert_eq(copied[0], 32768);
+    assert_eq(original[1], 65535);
+    assert_eq(copied[1], 5);
+    assert_eq(copied[2], 1);
+    73
+}

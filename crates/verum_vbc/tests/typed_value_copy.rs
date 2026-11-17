@@ -100,6 +100,11 @@ fn array_elements_have_independent_nested_value_storage() {
 }
 
 #[test]
+fn packed_array_copies_preserve_their_encoding_and_own_their_bytes() {
+    assert_eq!(execute(include_str!("fixtures/packed_array_copy.vr")), 73);
+}
+
+#[test]
 fn copy_wire_preserves_borrowed_qualifiers_and_truncation_is_refused() {
     let instruction = Instruction::CloneTyped {
         dst: Reg(300), src: Reg(301),

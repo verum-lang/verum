@@ -93,7 +93,11 @@ pub enum CopyNode {
     /// A deque owns its initialized ring elements, never the spare capacity.
     Deque { owner: TypeId, element: NodeId },
     /// A fixed-size array owns exactly its declared number of elements.
-    Array { element: NodeId, length: u64 },
+    Array {
+        element: NodeId,
+        length: u64,
+        packed: Option<crate::array_storage::PackedElement>,
+    },
     /// Shared ownership is retained by its exact source Clone implementation.
     Shared {
         owner: TypeId,
@@ -185,6 +189,7 @@ impl Builder<'_> {
                 return Ok(CopyNode::Array {
                     element: self.intern((**element).clone())?,
                     length: *length,
+                    packed: crate::array_storage::PackedElement::for_element(element),
                 });
             }
             _ => return Err("typed copy requires a resolved value declaration".into()),

@@ -355,6 +355,11 @@ fn run_native(source: &str) {
     run_native_module(module(source));
 }
 
+#[test]
+fn native_packed_array_copy_preserves_encoding_and_ownership() {
+    run_native(include_str!("../../verum_vbc/tests/fixtures/packed_array_copy.vr"));
+}
+
 fn run_native_module(mut wire: verum_vbc::VbcModule) {
     let mut graph = verum_vbc::mono::InstantiationGraph::new();
     for function in &mut wire.functions {

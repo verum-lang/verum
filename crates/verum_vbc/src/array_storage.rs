@@ -5,6 +5,28 @@ use crate::instruction::{ArithSubOpcode, Instruction, MemSubOpcode, Reg};
 use crate::types::TypeRef;
 use verum_common::{Map, Maybe};
 
+/// Physical scalar encoding allowed by a fixed array's declared element type.
+/// A compatible allocation or producer must still establish the actual layout.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PackedElement {
+    /// Bytes in an element in this encoding.
+    pub width: usize,
+    /// Floating-point bits require a different decoder from equally wide integers.
+    pub float: bool,
+}
+
+impl PackedElement {
+    /// An inline scalar has no nested ownership and uses a supported VBC width.
+    pub fn for_element(element: &TypeRef) -> Maybe<Self> {
+        let TypeRef::Concrete(id) = element else { return None; };
+        if !(id.is_numeric() || *id == crate::TypeId::BOOL || *id == crate::TypeId::CHAR) {
+            return None;
+        }
+        let width = verum_common::layout::primitive_size_by_name(id.well_known_name()?)?;
+        matches!(width, 1 | 2 | 4 | 8).then_some(Self { width: width as usize, float: id.is_float() })
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 /// Storage or integer constant established by an emitted producer.
 pub enum ArrayResultFact {
@@ -59,6 +81,17 @@ impl ArrayResultFacts {
                 self.forget(*dst);
                 if let Some(fact) = fact {
                     self.values.insert(*dst, fact);
+                }
+            }
+            I::CloneTyped { dst, src, type_ref: TypeRef::Array { element, length } } => {
+                let source = self.get(*src);
+                if let Some(fact @ ArrayResultFact::Packed { width, float, count }) = source
+                    && count == *length
+                    && PackedElement::for_element(element) == Some(PackedElement { width, float }) {
+                    self.values.insert(*dst, fact);
+                } else {
+                    self.clear();
+                    return false;
                 }
             }
             I::CloneTyped { dst, src, type_ref: TypeRef::Concrete(owner) }

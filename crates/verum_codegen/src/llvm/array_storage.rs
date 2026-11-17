@@ -128,7 +128,9 @@ impl ArrayStorage {
     pub(super) fn begin_instruction(&mut self, instruction: &Instruction) {
         self.pending_result = None;
         self.moved_array = match instruction {
-            Instruction::Mov { dst, src } if self.is_array(*src) => Some(*dst),
+            Instruction::Mov { dst, src }
+            | Instruction::CloneTyped { dst, src, type_ref: TypeRef::Array { .. } }
+                if self.is_array(*src) => Some(*dst),
             _ => None,
         };
     }

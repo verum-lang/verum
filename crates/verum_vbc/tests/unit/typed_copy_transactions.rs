@@ -9,6 +9,24 @@ use crate::{
 use verum_ast::{ItemKind, decl::ImplKind};
 use verum_fast_parser::Parser;
 
+#[test]
+fn a_packed_array_requires_its_declared_length_and_scalar_encoding() {
+    let mut vm = Interpreter::new(VbcModule::new("packed_copy".into()).into());
+    let raw = vm.state.heap.alloc(TypeId::U32, 8).unwrap();
+    let value = Value::from_ptr(raw.as_ptr().cast::<u8>());
+    let before = vm.state.heap.stats().total_allocs;
+    for (id, length) in [(TypeId::U32, 3), (TypeId::U16, 4), (TypeId::F32, 2), (TypeId::TEXT, 2)] {
+        let ty = TypeRef::Array { element: Box::new(TypeRef::Concrete(id)), length };
+        let error = copy_declared(&mut vm.state, value, &ty).unwrap_err();
+        assert!(error.to_string().contains("encoding or extent"), "{error}");
+        assert_eq!(vm.state.heap.stats().total_allocs, before);
+    }
+    let ty = TypeRef::Array { element: Box::new(TypeRef::Concrete(TypeId::I32)), length: 2 };
+    let copy = copy_declared(&mut vm.state, value, &ty).unwrap();
+    assert_ne!(copy, value);
+    assert_eq!(vm.state.heap.stats().total_allocs, before + 1);
+}
+
 fn fixture() -> Interpreter {
     let mut protocols = Parser::new(include_str!("../../../../core/base/protocols.vr"))
         .parse_module()
