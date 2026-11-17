@@ -1109,21 +1109,20 @@ impl TypeChecker {
                     }
                 }
             }
-            // Preserve the permission exercised by this invocation alongside
-            // each loan. A shared reborrow never grants exclusive retention.
-            let source_type = match mode {
-                Some(mutable) => Type::reference(mutable, payload.clone()),
-                None => head.clone(),
-            };
+            // Classify the permission once per operand, not once per origin
+            // pair. A shared reborrow never grants exclusive retention.
+            let writable_source = mode.unwrap_or_else(|| self.may_store_writable_reference(&head));
             for origin in &origins {
-                let source = (origin.clone(), source_type.clone());
+                let source = (origin.clone(), writable_source);
                 if !sources.contains(&source) { sources.push(source); }
             }
             let writes_payload = mode == Some(true) && self.carries_stored_loan(payload);
-            let writes_through_value = mode.is_none()
-                && self.may_store_writable_reference(payload)
+            let writes_through_value = mode.is_none() && writable_source
                 && !self.callable_has_closed_environment(argument);
             if writes_payload || writes_through_value {
+                // A known destination needs one bounded layout traversal.
+                // An opaque captured destination remains conservative.
+                let retains_shared = !writes_payload || self.may_retain_shared_loan(payload);
                 if origins.is_empty() {
                     unknown_write = Some(argument.span);
                     // The argument's own opaque payload was actually passed.
@@ -1138,20 +1137,18 @@ impl TypeChecker {
                     }
                 }
                 for origin in origins {
-                    destinations.push((origin, argument.span,
-                        writes_payload.then(|| payload.clone())));
+                    destinations.push((origin, argument.span, retains_shared));
                 }
             }
         }
         if let Some(span) = unknown_write {
             self.ctx.env.invalidate_unknown_referent_write(span);
         }
-        for (destination, span, payload) in destinations {
+        for (destination, span, retains_shared) in destinations {
             self.ctx.env.invalidate_payload_origins(&destination, span);
             let incoming: List<_> = sources.iter()
-                .filter(|(source, source_type)| source.binding != destination.binding
-                    && payload.as_ref().is_none_or(|payload|
-                        self.may_retain_call_loan(payload, source_type)))
+                .filter(|(source, writable)| source.binding != destination.binding
+                    && (*writable || retains_shared))
                 .map(|(source, _)| source.clone()).collect();
             if incoming.is_empty() { continue; }
             self.check_input_storage_retention(&incoming, &destination, span)?;

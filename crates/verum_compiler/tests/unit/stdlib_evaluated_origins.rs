@@ -9,7 +9,9 @@ fn actual_stdlib_value_and_callable_origins_preserve_source_admission() {
     let (registry, phase) = release_stdlib_graph(&session);
     let mut failures = List::new();
     for owner in [
+        "core.action.monads.exception",
         "core.async.diagnostics",
+        "core.async.waker",
         "core.base.glob",
         "core.base.ordering",
         "core.database.sqlite.native.concurrency.pool",
@@ -23,6 +25,7 @@ fn actual_stdlib_value_and_callable_origins_preserve_source_admission() {
         "core.math.bits",
         "core.math.checked",
         "core.mem.cap_audit",
+        "core.metrics.registry",
         "core.net.h3.qpack.huffman",
         "core.net.h3.qpack.instructions",
         "core.net.h3.qpack.integer",
@@ -31,6 +34,7 @@ fn actual_stdlib_value_and_callable_origins_preserve_source_admission() {
         "core.net.tls13.record.plaintext",
         "core.security.aead.aes_gcm",
         "core.security.ecc.x25519",
+        "core.shell.signal",
         "core.sys.init",
         // Preserve the source-admission improvements from the same campaign.
         "core.action.monads.pure",

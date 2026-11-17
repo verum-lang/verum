@@ -151,14 +151,11 @@ fn call_retention_respects_permissions_through_declared_writable_fields() {
     let nested_shared = nominal("owner.Sink", List::from_iter([
         nominal("owner.Shared", List::new()),
     ]));
-    assert!(!checker.may_retain_call_loan(&exclusive_text, &Type::reference(false, Type::Text)));
-    assert!(checker.may_retain_call_loan(&exclusive_text, &Type::reference(true, Type::Text)));
-    assert!(checker.may_retain_call_loan(&nested_shared, &Type::reference(false, Type::Int)));
-    assert!(checker.may_retain_call_loan(&Type::Unknown, &Type::reference(false, Type::Int)));
-    assert!(checker.may_retain_call_loan(&exclusive_text, &Type::Unknown));
-    assert!(!checker.may_retain_call_loan(
+    assert!(!checker.may_retain_shared_loan(&exclusive_text));
+    assert!(checker.may_retain_shared_loan(&nested_shared));
+    assert!(checker.may_retain_shared_loan(&Type::Unknown));
+    assert!(!checker.may_retain_shared_loan(
         &nominal("owner.Phantom", List::from_iter([Type::reference(false, Type::Int)])),
-        &Type::reference(false, Type::Int),
     ));
 }
 

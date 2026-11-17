@@ -169,9 +169,8 @@ impl TypeChecker {
     /// Follow the same declaration-owned layout and its writable referents;
     /// unknown layouts still admit either permission conservatively. This is
     /// only a disjointness proof, not proof that two referent types coincide.
-    pub(super) fn may_retain_call_loan(&self, destination: &Type, source: &Type) -> bool {
-        self.may_store_writable_reference(source)
-            || self.stored_loan_shape(destination, LoanInspection::SharedRetention)
+    pub(super) fn may_retain_shared_loan(&self, destination: &Type) -> bool {
+        self.stored_loan_shape(destination, LoanInspection::SharedRetention)
     }
 
     /// Use the same exact runtime declaration authority as VBC. A short name,
