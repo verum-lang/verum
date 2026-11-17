@@ -3359,57 +3359,17 @@ impl Unifier {
             );
         }
 
-        // Occurs check: var must not appear in ty
+        // A reference changes the type constructor, not the variable identity.
+        // T = &T is an infinite type just like T = fn(T) -> Int; replacing its
+        // referent with a fresh variable would discard the declared equation
+        // and any bounds on T. Source shadowing introduces a separate binding
+        // before reaching this check and needs no exception here.
         if ty.free_vars().contains(&var) {
-            // When the cycle is through a reference or container type (e.g., T = &T,
-            // T = List<T>), break the cycle by replacing the recursive occurrence
-            // with a fresh type variable. This allows type inference to proceed for
-            // common patterns like `let x = &x` or method chains returning &Self.
-            match ty {
-                Type::Reference { inner, mutable } if inner.free_vars().contains(&var) => {
-                    let fresh = Type::Var(TypeVar::fresh());
-                    let broken = Type::Reference {
-                        inner: Box::new(fresh),
-                        mutable: *mutable,
-                    };
-                    let mut subst = Substitution::new();
-                    subst.insert(var, broken);
-                    return Ok(subst);
-                }
-                Type::CheckedReference { inner, mutable } if inner.free_vars().contains(&var) => {
-                    let fresh = Type::Var(TypeVar::fresh());
-                    let broken = Type::CheckedReference {
-                        inner: Box::new(fresh),
-                        mutable: *mutable,
-                    };
-                    let mut subst = Substitution::new();
-                    subst.insert(var, broken);
-                    return Ok(subst);
-                }
-                Type::UnsafeReference { inner, mutable } if inner.free_vars().contains(&var) => {
-                    let fresh = Type::Var(TypeVar::fresh());
-                    let broken = Type::UnsafeReference {
-                        inner: Box::new(fresh),
-                        mutable: *mutable,
-                    };
-                    let mut subst = Substitution::new();
-                    subst.insert(var, broken);
-                    return Ok(subst);
-                }
-                // A var that occurs in a FUNCTION type it is being bound to is a
-                // GENUINE infinite type (`v1 = v1 -> Int`) and MUST fail the
-                // occurs-check. (The former #115 band-aid cycle-broke it into a
-                // fresh-holed function and returned Ok — unsound: it silently
-                // accepts an unrepresentable type. The pattern-binding case that
-                // band-aid worked around is fixed at its source instead.)
-                _ => {
-                    return Err(TypeError::InfiniteType {
-                        var: var.to_text(),
-                        ty: ty.to_text(),
-                        span,
-                    });
-                }
-            }
+            return Err(TypeError::InfiniteType {
+                var: var.to_text(),
+                ty: ty.to_text(),
+                span,
+            });
         }
 
         let mut subst = Substitution::new();
