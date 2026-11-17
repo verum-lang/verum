@@ -231,6 +231,7 @@ jobs:
           (cd verification/external/lean && lake build \
             verum_replay_checker \
             VerumExternalReplay.ReductionScope \
+            VerumExternalReplay.LocalDefinitions \
             VerumExternalReplay.UniverseSemantics \
             VerumExternalReplay.DiagnosticFactorization \
             VerumExternalReplay.ExactTransports \

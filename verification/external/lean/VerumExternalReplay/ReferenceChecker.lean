@@ -96,19 +96,25 @@ inductive CheckError : Type where
   | fuel_exhausted
   deriving Repr
 
-/-- Context = inner-first stack of binder types, identical to
-    `proof_checker::Context`. -/
 inductive Foundation where
   | intensional
   | functionExtensionality
   deriving BEq, Inhabited, Repr
 
+/-- A local definition retains its checked source in the frame where it was introduced. -/
+structure Binding where
+  ty : Term
+  value : Option Term := none
+
 structure Ctx where
-  bindings : List Term := []
+  bindings : List Binding := []
   foundation : Foundation := .intensional
 
 def Ctx.length (ctx : Ctx) : Nat := ctx.bindings.length
-def Ctx.extend (ctx : Ctx) (ty : Term) : Ctx := { ctx with bindings := ty :: ctx.bindings }
+def Ctx.extend (ctx : Ctx) (ty : Term) : Ctx :=
+  { ctx with bindings := ⟨ty, none⟩ :: ctx.bindings }
+def Ctx.define (ctx : Ctx) (ty value : Term) : Ctx :=
+  { ctx with bindings := ⟨ty, some value⟩ :: ctx.bindings }
 
 -- =============================================================================
 -- Level normalisation — mirrors `proof_checker::Level::normalize`
@@ -389,6 +395,22 @@ def subst (target : Nat) (replacement : Term) (t : Term) : Term :=
     else if i > target then .var (i - 1)
     else .var i) target t
 
+/-- Conversion can descend under fresh binders before their types enter the checking context. -/
+structure Conversion where
+  bindings : List Binding := []
+  depth : Nat := 0
+
+def Ctx.conversion (ctx : Ctx) : Conversion := { bindings := ctx.bindings }
+
+def Conversion.under (scope : Conversion) (count : Nat) : Conversion :=
+  { scope with depth := scope.depth + count }
+
+/-- Protect the fresh binders and lift a referenced source into the use-site frame. -/
+def Conversion.definition (scope : Conversion) (i : Nat) : Option Term :=
+  if scope.depth ≤ i then
+    scope.bindings[i - scope.depth]?.bind fun binding => binding.value.map (shiftUp (i + 1) 0)
+  else none
+
 /-- Apply a constructor branch without allocating a zipped field/argument list.
     Recursive hypotheses follow their own field immediately. The reducer checks
     arity first; truncation on malformed input matches `zip` exactly. -/
@@ -410,51 +432,57 @@ def whnfFuelCeiling : Nat := 1 <<< 20
 /-- Structurally fuel-bounded independent reduction. This bounds recursive
 reduction depth, not Rust's cumulative head-step counter. Exhaustion yields no
 term and therefore cannot become a semantic mismatch in either checker. -/
-def whnfFuel (fuel : Nat) (t : Term) : Except CheckError Term :=
+def whnfFuel (fuel : Nat) (t : Term) (definition : Nat → Option Term := fun _ => none) :
+    Except CheckError Term :=
   match fuel with
   | 0 => .error .fuel_exhausted
   | fuel + 1 => do
+    let reduce := fun term => whnfFuel fuel term definition
     match t with
-    | .letE value body => whnfFuel fuel (subst 0 value body)
+    | .var i => match definition i with
+      | some value => reduce value
+      | none => pure (.var i)
+    | .letE value body => reduce (subst 0 value body)
     | .induct value motive cases =>
-      let head ← whnfFuel fuel value
+      let head ← reduce value
       match head with
       | .construct data ctor args =>
-        match ← whnfFuel fuel data with
+        match ← reduce data with
         | .data _ _ _ constructors =>
           match constructors[ctor]?, cases[ctor]? with
           | some fields, some branch =>
             if fields.fields.length == args.length then
-              whnfFuel fuel (applyInductionCase motive cases fields.fields args branch)
+              reduce (applyInductionCase motive cases fields.fields args branch)
             else pure (.induct head motive cases)
           | _, _ => pure (.induct head motive cases)
         | _ => pure (.induct head motive cases)
       | _ => pure (.induct head motive cases)
     | .app f x =>
-      match ← whnfFuel fuel f with
-      | .lam _ body => whnfFuel fuel (subst 0 x body)
+      match ← reduce f with
+      | .lam _ body => reduce (subst 0 x body)
       | other => pure (.app other x)
     | .fst p =>
-      match ← whnfFuel fuel p with
-      | .pair a _ => whnfFuel fuel a
+      match ← reduce p with
+      | .pair a _ => reduce a
       | other => pure (.fst other)
     | .snd p =>
-      match ← whnfFuel fuel p with
-      | .pair _ b => whnfFuel fuel b
+      match ← reduce p with
+      | .pair _ b => reduce b
       | other => pure (.snd other)
     | .transport p h e =>
-      match ← whnfFuel fuel e with
-      | .refl _ => whnfFuel fuel h
+      match ← reduce e with
+      | .refl _ => reduce h
       | other => pure (.transport p h other)
     | .idElim p h e =>
-      match ← whnfFuel fuel e with
-      | .refl _ => whnfFuel fuel h
+      match ← reduce e with
+      | .refl _ => reduce h
       | other => pure (.idElim p h other)
     | other => pure other
 termination_by fuel
 
 /-- Public reduction never exposes an exhausted partial normal form. -/
-def whnf (t : Term) : Except CheckError Term := whnfFuel whnfFuelCeiling t
+def whnf (t : Term) (scope : Conversion := {}) : Except CheckError Term :=
+  whnfFuel whnfFuelCeiling t scope.definition
 
 /-- Is `var target` free in `t`? -/
 def fieldValueType (field : DataField Term) (preceding : Nat) : Option Term :=
@@ -477,9 +505,9 @@ def applyTerms (head : Term) (arguments : List Term) : Term := arguments.foldl T
 def fieldDomain (data : Term) (field : DataField Term) (preceding : Nat) : Term :=
   (fieldValueType field preceding).getD (applyTerms (shiftUp preceding 0 data) ((recursiveIndices field).getD []))
 
-partial def splitFamily (term : Term) (values : List Term := []) : Except CheckError (Option (Term × List Term)) := do
+partial def splitFamily (scope : Conversion) (term : Term) (values : List Term := []) : Except CheckError (Option (Term × List Term)) := do
   match term with
-  | .app head arg => splitFamily (← whnf head) (arg :: values)
+  | .app head arg => splitFamily scope (← whnf head scope) (arg :: values)
   | .data _ _ indices _ => return if indices.length == values.length then some (term, values) else none
   | _ => return none
 
@@ -492,68 +520,66 @@ def allChecked (items : List α) (check : α → Except CheckError Bool) : Excep
 mutual
 
 /-- α + β + η-equality after completed WHNF reduction. -/
-partial def defEq (a b : Term) : Except CheckError Bool := do
-  let aw ← whnf a
-  let bw ← whnf b
-  defEqWhnf aw bw
+partial def defEq (a b : Term) (scope : Conversion := {}) : Except CheckError Bool := do
+  let aw ← whnf a scope
+  let bw ← whnf b scope
+  defEqWhnf scope aw bw
 
-partial def defEqWhnf : Term → Term → Except CheckError Bool
+partial def defEqWhnf (scope : Conversion) : Term → Term → Except CheckError Bool
   | .data an al ai ac, .data bn bl bi bc => do
     unless an == bn && Level.eq al bl do return false
-    unless ← termsDefEq ai bi do return false
+    unless ai.length == bi.length do return false
+    unless ← allChecked (ai.zip bi).zipIdx (fun ((x,y), i) => defEq x y (scope.under i)) do return false
     unless ac.length == bc.length do return false
     allChecked (ac.zip bc) (fun (a,b) => do
       unless a.fields.length == b.fields.length do return false
-      unless ← termsDefEq a.indices b.indices do return false
+      unless ← termsDefEq a.indices b.indices (scope.under a.fields.length) do return false
       allChecked (a.fields.zip b.fields).zipIdx (fun ((x,y), index) =>
         match recursiveIndices x, recursiveIndices y with
-        | some x, some y => termsDefEq x y
+        | some x, some y => termsDefEq x y (scope.under index)
         | none, none => match fieldValueType x index, fieldValueType y index with
-          | some x, some y => defEq x y
+          | some x, some y => defEq x y (scope.under index)
           | _, _ => pure false
         | _, _ => pure false))
   | .construct a ai aa, .construct b bi ba => do
     unless ai == bi do return false
-    unless ← defEq a b do return false
-    termsDefEq aa ba
+    unless ← defEq a b scope do return false
+    termsDefEq aa ba scope
   | .induct a am ac, .induct b bm bc => do
-    unless ← defEq a b do return false
-    unless ← defEq am bm do return false
-    termsDefEq ac bc
+    unless ← defEq a b scope do return false
+    unless ← defEq am bm scope do return false
+    termsDefEq ac bc scope
   | .var i, .var j => pure (i == j)
   | .universe l1, .universe l2 => pure (Level.eq l1 l2)
-  | .pi a b, .pi c d | .lam a b, .lam c d | .app a b, .app c d
-    | .sigma a b, .sigma c d | .pair a b, .pair c d => termsDefEq [a,b] [c,d]
-  | .pair a b, other | other, .pair a b => termsDefEq [a,b] [.fst other,.snd other]
-  | .fst a, .fst b | .snd a, .snd b | .refl a, .refl b => defEq a b
+  | .pi a b, .pi c d | .lam a b, .lam c d | .sigma a b, .sigma c d => do
+    unless ← defEq a c scope do return false
+    defEq b d (scope.under 1)
+  | .app a b, .app c d | .pair a b, .pair c d => termsDefEq [a,b] [c,d] scope
+  | .pair a b, other | other, .pair a b => termsDefEq [a,b] [.fst other,.snd other] scope
+  | .fst a, .fst b | .snd a, .snd b | .refl a, .refl b => defEq a b scope
   | .identity a b c, .identity d e f | .transport a b c, .transport d e f
-    | .idElim a b c, .idElim d e f => termsDefEq [a,b,c] [d,e,f]
-  | .funExt a b c d, .funExt e f g h => termsDefEq [a,b,c,d] [e,f,g,h]
-  | .lam _ body, other | other, .lam _ body => etaMatch body other
+    | .idElim a b c, .idElim d e f => termsDefEq [a,b,c] [d,e,f] scope
+  | .funExt a b c d, .funExt e f g h => termsDefEq [a,b,c,d] [e,f,g,h] scope
+  | .lam _ body, other | other, .lam _ body => etaMatch scope body other
   | _, _ => pure false
 
-partial def termsDefEq (a b : List Term) : Except CheckError Bool := do
+partial def termsDefEq (a b : List Term) (scope : Conversion) : Except CheckError Bool := do
   unless a.length == b.length do return false
-  allChecked (a.zip b) (fun (a,b) => defEq a b)
+  allChecked (a.zip b) (fun (a,b) => defEq a b scope)
 
 /-- Compare in the body context. The outer function is weakened before application. -/
-partial def etaMatch (body other : Term) : Except CheckError Bool :=
-  defEq body (etaBody other)
+partial def etaMatch (scope : Conversion) (body other : Term) : Except CheckError Bool :=
+  defEq body (etaBody other) (scope.under 1)
 
 end
 
 /-- Look up the type of `var i` in `Γ`, shifted to the use-site frame. -/
 def lookupCtx (Γ : Ctx) (i : Nat) : Option Term :=
-  let len := Γ.length
-  if h : i < len then
-    let raw := Γ.bindings[i]
-    some (shiftUp (i + 1) 0 raw)
-  else
-    none
+  Γ.bindings[i]?.map (fun binding => shiftUp (i + 1) 0 binding.ty)
 
 /-- If `t` whnf-reduces to `Universe l`, return the normalised level. -/
-def expectUniverse (t : Term) : Except CheckError (Option Level) := do
-  match ← whnf t with
+def expectUniverse (t : Term) (scope : Conversion) : Except CheckError (Option Level) := do
+  match ← whnf t scope with
   | .universe l => pure (some (Level.normalize l))
   | _ => pure none
 
@@ -585,8 +611,8 @@ partial def infer (Γ : Ctx) (t : Term) : Except CheckError Term :=
   match t with
   | .funExt functionType lhs rhs pointwise => do
     unless Γ.foundation == .functionExtensionality do throw .foundation_required
-    let some _ ← expectUniverse (← infer Γ functionType) | throw (.not_a_type functionType)
-    let .pi domain codomain ← whnf functionType | throw (.not_a_function functionType)
+    let some _ ← expectUniverse (← infer Γ functionType) Γ.conversion | throw (.not_a_type functionType)
+    let .pi domain codomain ← whnf functionType Γ.conversion | throw (.not_a_function functionType)
     checkAgainst Γ lhs functionType
     checkAgainst Γ rhs functionType
     let premise := .pi domain (.identity codomain
@@ -594,13 +620,15 @@ partial def infer (Γ : Ctx) (t : Term) : Except CheckError Term :=
     checkAgainst Γ pointwise premise
     return .identity functionType lhs rhs
   | .letE value body => do
-    let _ ← infer Γ value
-    infer Γ (subst 0 value body)
+    let ty ← infer Γ value
+    -- The body shares its checked definition. Only its resulting type leaves this frame.
+    let bodyType ← infer (Γ.define ty value) body
+    return subst 0 value bodyType
   | .data _ level indices constructors => do
     let mut indexContext := Γ
     for ty in indices do
       let kind ← infer indexContext ty
-      let some _ ← expectUniverse kind | throw (.not_a_type ty)
+      let some _ ← expectUniverse kind indexContext.conversion | throw (.not_a_type ty)
       indexContext := indexContext.extend ty
     for constructor in constructors do
       let mut fieldContext := Γ
@@ -610,7 +638,7 @@ partial def infer (Γ : Ctx) (t : Term) : Except CheckError Term :=
           checkIndices fieldContext indices values index
         else
           let kind ← infer fieldContext domain
-          let some fieldLevel ← expectUniverse kind | throw (.not_a_type domain)
+          let some fieldLevel ← expectUniverse kind fieldContext.conversion | throw (.not_a_type domain)
           unless Level.eq (Level.maxCanonical fieldLevel level) level do
             throw (.invalid_inductive "field exceeds declaration universe")
         fieldContext := fieldContext.extend domain
@@ -618,7 +646,7 @@ partial def infer (Γ : Ctx) (t : Term) : Except CheckError Term :=
     return indices.foldr Term.pi (.universe (Level.normalize level))
   | .construct data ctor args => do
     let _ ← infer Γ data
-    let declaration ← whnf data
+    let declaration ← whnf data Γ.conversion
     let .data _ _ _ constructors := declaration | throw (.invalid_inductive "constructor owner is not a data declaration")
     let some constructor := constructors[ctor]? | throw (.invalid_inductive "unknown constructor")
     unless constructor.fields.length == args.length do throw (.invalid_inductive "constructor field arity mismatch")
@@ -626,21 +654,23 @@ partial def infer (Γ : Ctx) (t : Term) : Except CheckError Term :=
       checkAgainst Γ arg (instantiateFields (fieldDomain declaration field index) (args.take index))
     return applyTerms declaration (constructor.indices.map (fun t => instantiateFields t args))
   | .induct value motive cases => do
-    let actual ← whnf (← infer Γ value)
-    let some (declaration, values) ← splitFamily actual | throw (.invalid_inductive "induction requires a fully applied data family")
+    let actual ← whnf (← infer Γ value) Γ.conversion
+    let some (declaration, values) ← splitFamily Γ.conversion actual | throw (.invalid_inductive "induction requires a fully applied data family")
     let .data _ _ indices constructors := declaration | throw (.invalid_inductive "invalid family head")
     let _ ← infer Γ declaration
     let mut motiveKind ← infer Γ motive
-    for ty in indices do
-      let .pi domain result ← whnf motiveKind | throw (.invalid_inductive "induction motive omits a family index")
-      unless ← defEq domain ty do throw (.invalid_inductive "induction motive index domain mismatch")
+    for (ty, i) in indices.zipIdx do
+      let scope := Γ.conversion.under i
+      let .pi domain result ← whnf motiveKind scope | throw (.invalid_inductive "induction motive omits a family index")
+      unless ← defEq domain ty scope do throw (.invalid_inductive "induction motive index domain mismatch")
       motiveKind := result
-    let .pi domain result ← whnf motiveKind | throw (.invalid_inductive "induction motive is not a family")
+    let scope := Γ.conversion.under indices.length
+    let .pi domain result ← whnf motiveKind scope | throw (.invalid_inductive "induction motive is not a family")
     let references := (List.range indices.length).reverse.map Term.var
     let expectedDomain := applyTerms (shiftUp indices.length 0 declaration) references
-    unless ← defEq domain expectedDomain do
+    unless ← defEq domain expectedDomain scope do
       throw (.invalid_inductive "induction motive domain mismatch")
-    unless (← expectUniverse result).isSome do
+    unless (← expectUniverse result (scope.under 1)).isSome do
       throw (.invalid_inductive "induction motive domain or universe mismatch")
     unless cases.length == constructors.length do throw (.invalid_inductive "induction case count mismatch")
     for ((constructor, branch), index) in (constructors.zip cases).zipIdx do
@@ -652,22 +682,22 @@ partial def infer (Γ : Ctx) (t : Term) : Except CheckError Term :=
     | none   => Except.error (.unbound_variable i)
   | .universe l => .ok (.universe (Level.successor (Level.normalize l)))
   | .pi a b => do
-    let some n ← expectUniverse (← infer Γ a) | throw (.not_a_type a)
-    let some m ← expectUniverse (← infer (Γ.extend a) b) | throw (.not_a_type b)
+    let some n ← expectUniverse (← infer Γ a) Γ.conversion | throw (.not_a_type a)
+    let some m ← expectUniverse (← infer (Γ.extend a) b) (Γ.conversion.under 1) | throw (.not_a_type b)
     return .universe (Level.maxCanonical n m)
   | .lam a body => do
-    let some _ ← expectUniverse (← infer Γ a) | throw (.not_a_type a)
+    let some _ ← expectUniverse (← infer Γ a) Γ.conversion | throw (.not_a_type a)
     return .pi a (← infer (Γ.extend a) body)
   | .app f x => do
     let fTy ← infer Γ f
-    let head ← whnf fTy
+    let head ← whnf fTy Γ.conversion
     let .pi dom codom := head | throw (.not_a_function head)
     checkDomain Γ x dom
     return subst 0 x codom
   -- T-Sigma-Form: Σ(x : A). B : Universe(max(level(A), level(B))).
   | .sigma a b => do
-    let some n ← expectUniverse (← infer Γ a) | throw (.not_a_type a)
-    let some m ← expectUniverse (← infer (Γ.extend a) b) | throw (.not_a_type b)
+    let some n ← expectUniverse (← infer Γ a) Γ.conversion | throw (.not_a_type a)
+    let some m ← expectUniverse (← infer (Γ.extend a) b) (Γ.conversion.under 1) | throw (.not_a_type b)
     return .universe (Level.maxCanonical n m)
   -- T-Pair-Intro: synthesis-mode mirror.  Synthesises the most-
   -- specific non-dependent Σ that fits.
@@ -682,16 +712,16 @@ partial def infer (Γ : Ctx) (t : Term) : Except CheckError Term :=
         .ok (.sigma fstTy body)
   -- T-Fst-Elim: p : Σ(A, B) ⇒ Fst(p) : A.
   | .fst p => do
-    match ← whnf (← infer Γ p) with
+    match ← whnf (← infer Γ p) Γ.conversion with
     | .sigma a _ => pure a
     | other => throw (.not_a_sigma other)
   | .snd p => do
-    match ← whnf (← infer Γ p) with
+    match ← whnf (← infer Γ p) Γ.conversion with
     | .sigma _ b => pure (subst 0 (.fst p) b)
     | other => throw (.not_a_sigma other)
   | .identity a x y => do
     let kind ← infer Γ a
-    let some level ← expectUniverse kind | .error (.not_a_type a)
+    let some level ← expectUniverse kind Γ.conversion | .error (.not_a_type a)
     for endpoint in [x, y] do
       checkDomain Γ endpoint a
     return .universe level
@@ -700,22 +730,22 @@ partial def infer (Γ : Ctx) (t : Term) : Except CheckError Term :=
     return .identity ty x x
   | .transport motive base path => do
     let pathTy ← infer Γ path
-    let head ← whnf pathTy
+    let head ← whnf pathTy Γ.conversion
     let .identity carrier lhs rhs := head | .error (.not_an_identity head)
     let motiveTy ← infer Γ motive
-    let .pi domain codomain ← whnf motiveTy | .error (.not_a_valid_j_motive motive)
-    unless ← defEq domain carrier do throw (.domain_mismatch carrier domain)
-    let some _ ← expectUniverse codomain | .error (.not_a_valid_j_motive motive)
+    let .pi domain codomain ← whnf motiveTy Γ.conversion | .error (.not_a_valid_j_motive motive)
+    unless ← defEq domain carrier Γ.conversion do throw (.domain_mismatch carrier domain)
+    let some _ ← expectUniverse codomain (Γ.conversion.under 1) | .error (.not_a_valid_j_motive motive)
     checkDomain Γ base (.app motive lhs)
     return .app motive rhs
   | .idElim motive base path => do
-    let .identity carrier lhs rhs ← whnf (← infer Γ path) | .error (.not_an_identity path)
-    let .pi domain codomain ← whnf (← infer Γ motive) | .error (.not_a_valid_j_motive motive)
-    unless ← defEq domain carrier do throw (.domain_mismatch carrier domain)
-    let .pi proofDomain resultKind ← whnf codomain | .error (.not_a_valid_j_motive motive)
+    let .identity carrier lhs rhs ← whnf (← infer Γ path) Γ.conversion | .error (.not_an_identity path)
+    let .pi domain codomain ← whnf (← infer Γ motive) Γ.conversion | .error (.not_a_valid_j_motive motive)
+    unless ← defEq domain carrier Γ.conversion do throw (.domain_mismatch carrier domain)
+    let .pi proofDomain resultKind ← whnf codomain (Γ.conversion.under 1) | .error (.not_a_valid_j_motive motive)
     let expectedPath := .identity (shiftUp 1 0 carrier) (shiftUp 1 0 lhs) (.var 0)
-    unless ← defEq proofDomain expectedPath do throw (.domain_mismatch expectedPath proofDomain)
-    let some _ ← expectUniverse resultKind | .error (.not_a_valid_j_motive motive)
+    unless ← defEq proofDomain expectedPath (Γ.conversion.under 1) do throw (.domain_mismatch expectedPath proofDomain)
+    let some _ ← expectUniverse resultKind (Γ.conversion.under 2) | .error (.not_a_valid_j_motive motive)
     checkDomain Γ base (.app (.app motive lhs) (.refl lhs))
     return .app (.app motive rhs) path
 
@@ -723,24 +753,31 @@ partial def infer (Γ : Ctx) (t : Term) : Except CheckError Term :=
 /-- Check introductions using an already formed expected type. -/
 partial def checkAgainst (Γ : Ctx) (t expected : Term) : Except CheckError Unit := do
   if let .letE value body := t then
-    let _ ← infer Γ value
-    return ← checkAgainst Γ (subst 0 value body) expected
-  match t, (← whnf expected) with
+    let ty ← infer Γ value
+    return ← checkAgainst (Γ.define ty value) body (shiftUp 1 0 expected)
+  if let .var i := t then
+    let some ty := lookupCtx Γ i | throw (.unbound_variable i)
+    if ← defEq ty expected Γ.conversion then return ()
+    -- A concrete introduction can check at a more dependent type than it synthesizes.
+    if let some source := Γ.conversion.definition i then
+      return ← checkAgainst Γ source expected
+    throw (.type_mismatch expected ty)
+  match t, (← whnf expected Γ.conversion) with
   | .lam domain body, .pi expectedDomain codomain =>
     let kind ← infer Γ domain
-    let some _ ← expectUniverse kind | throw (.not_a_type domain)
-    unless ← defEq domain expectedDomain do throw (.type_mismatch expectedDomain domain)
+    let some _ ← expectUniverse kind Γ.conversion | throw (.not_a_type domain)
+    unless ← defEq domain expectedDomain Γ.conversion do throw (.type_mismatch expectedDomain domain)
     checkAgainst (Γ.extend domain) body codomain
   | .pair first second, .sigma domain family =>
     checkAgainst Γ first domain
     checkAgainst Γ second (subst 0 first family)
   | .refl value, .identity carrier lhs rhs =>
     checkDomain Γ value carrier
-    unless ← termsDefEq [value,value] [lhs,rhs] do
+    unless ← termsDefEq [value,value] [lhs,rhs] Γ.conversion do
       throw (.type_mismatch expected (.identity carrier value value))
   | _, _ =>
     let inferred ← infer Γ t
-    unless ← defEq inferred expected do throw (.type_mismatch expected inferred)
+    unless ← defEq inferred expected Γ.conversion do throw (.type_mismatch expected inferred)
 
 partial def checkIndices (Γ : Ctx) (telescope arguments : List Term) (ambientShift : Nat) : Except CheckError Unit := do
   unless telescope.length == arguments.length do throw (.invalid_inductive "family index arity mismatch")
@@ -759,7 +796,7 @@ partial def check (Γ : Ctx) (t expected : Term) : Except CheckError Unit := do
   checkScope Γ.length expected
   checkScope Γ.length t
   let kind ← infer Γ expected
-  let some _ ← expectUniverse kind | throw (.not_a_type expected)
+  let some _ ← expectUniverse kind Γ.conversion | throw (.not_a_type expected)
   checkAgainst Γ t expected
 
 /-- Verify a closed `(term, claimed_type)` certificate. -/
@@ -769,7 +806,7 @@ def verifyCertificate (term claimedType : Term)
   checkScope 0 claimedType
   checkScope 0 term
   let kind ← infer ctx claimedType
-  let some _ ← expectUniverse kind | throw (.claimed_type_not_a_type claimedType kind)
+  let some _ ← expectUniverse kind ctx.conversion | throw (.claimed_type_not_a_type claimedType kind)
   checkAgainst ctx term claimedType
 
 end VerumKernel
@@ -784,7 +821,7 @@ open VerumKernel
 /-- Positive smoke assertion: every error, including exhaustion, fails. -/
 def expectInfer (Γ : Ctx) (t expected : Term) : Bool :=
   match infer Γ t with
-  | .ok inferred => match defEq inferred expected with
+  | .ok inferred => match defEq inferred expected Γ.conversion with
     | .ok true => true
     | _ => false
   | _            => false
@@ -812,7 +849,7 @@ def univVar (name : String) : Term := .universe (.var name)
 
 /-- info: true -/
 #guard_msgs in
-#eval! expectInfer { bindings := [univ 0] } (.var 0) (univ 0)
+#eval! expectInfer (({} : Ctx).extend (univ 0)) (.var 0) (univ 0)
   -- T-Var with hypothesis — true
 
 /-- info: true -/

@@ -1,3 +1,7 @@
+#[path = "support/local_definitions.rs"]
+mod local_definitions;
+
+use verum_proof::admission::{ReplayOutcome, classify_check_failure};
 use verum_proof::proof_checker::{Certificate, DataField, Level, Term};
 
 fn witness_type() -> Term {
@@ -428,20 +432,31 @@ fn battery() -> Vec<(&'static str, Certificate, bool)> {
         },
         true,
     ));
+    cases.extend(local_definitions::cases());
     cases
 }
 
 #[test]
 fn expected_families_reach_every_introduction_boundary() {
-    for (name, cert, expected) in battery() {
-        let substitution = cert.verify();
-        assert_eq!(
-            substitution.is_ok(),
-            expected,
-            "substitution {name}: {substitution:?}"
-        );
-        let nbe = verum_proof::proof_checker_nbe::verify_certificate(&cert);
-        assert_eq!(nbe.is_ok(), expected, "NbE {name}: {nbe:?}");
+    for (name, cert, accepted) in battery() {
+        let expected = if accepted {
+            ReplayOutcome::Accepted
+        } else {
+            ReplayOutcome::Rejected
+        };
+        for (checker, result) in [
+            ("substitution", cert.verify()),
+            (
+                "NbE",
+                verum_proof::proof_checker_nbe::verify_certificate(&cert),
+            ),
+        ] {
+            let outcome = result.as_ref().map_or_else(
+                |error| classify_check_failure(error).0,
+                |_| ReplayOutcome::Accepted,
+            );
+            assert_eq!(outcome, expected, "{checker} {name}: {result:?}");
+        }
     }
 }
 
@@ -498,6 +513,15 @@ fn independent_lean_replays_dependent_pairs_and_causal_rejections() {
     for (verdict, (name, _, expected)) in verdicts.iter().zip(cases) {
         assert_eq!(verdict["id"], name);
         assert_eq!(verdict["ok"], expected, "{name}: {verdict}");
+        if !expected {
+            assert!(
+                matches!(
+                    verdict["error"].as_str(),
+                    Some("NotAType" | "DomainMismatch" | "TypeMismatch")
+                ),
+                "{name}: expected a formation, domain or type error, got {verdict}"
+            );
+        }
     }
     std::fs::remove_dir_all(directory).unwrap();
 }
