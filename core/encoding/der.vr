@@ -2,20 +2,17 @@
 // encoding/der.vr — DER reader (ITU-T X.690 §10, with X.509 constraints)
 // =============================================================================
 // Layer: 2 (Encoding)
-// Dependencies: core, security.x509.oid (for Oid type — reverse dependency
-//  is acceptable here because Oid has no DER-side callers
-//  aside from this reader).
+// Dependency: core.collections.list
 // Reference: ITU-T X.690 (07/2002)
 //  RFC 5280 Appendix A (PKIX profile of DER)
 //  RFC 6025 (ASN.1 notes)
 // =============================================================================
 //
 
-// Zero-allocation forward-reading DER parser. Every `read_*` method
-// consumes the next primitive/constructed element from the underlying
-// byte slice and advances the cursor. On mismatch, the reader returns
-// `DerError` with enough context to diagnose malformed certificates at
-// source.
+// DerReader reads DER headers and values in order. Its constructor
+// copies the input slice into an owned List<Byte>. Byte-valued reads
+// such as read_octet_string copy the payload into a new list.
+// A sub-reader clones the buffer and has its own bounded cursor.
 //
 
 // # Strict DER (not BER)
@@ -32,25 +29,6 @@
 //
 
 // Encountering BER-only wire form = `DerError.MalformedDer`.
-//
-
-// # Zero-alloc discipline
-//
-
-// All "value" return types are slice-references into the original
-// input buffer. No List<Byte> allocations on the hot path. A
-// Certificate parses end-to-end producing only one heap allocation
-// per RDN list — and that lives inside the returned Certificate ADT,
-// not inside the reader.
-//
-
-// # Lifetime model
-//
-
-// `DerReader<'a>` borrows the input. Sub-readers (returned by
-// `read_sequence`, `read_set`, `read_explicit`) share the `'a`
-// lifetime of the parent. The outer reader must outlive all
-// sub-readers, enforced by the Verum borrow checker.
 //
 
 // =============================================================================
@@ -102,9 +80,9 @@ public const TAG_BMP_STRING:        UInt32 = 0x1E;
 /// the tag number. For UNIVERSAL tags the number is as above; for
 /// CONTEXT_SPECIFIC it's the `[n]` in ASN.1 notation.
 public type Tag is {
-    class_: TagClass,
-    constructed: Bool,
-    number: UInt32,
+    public class_: TagClass,
+    public constructed: Bool,
+    public number: UInt32,
 };
 
 // =============================================================================
@@ -243,7 +221,7 @@ public type DerTime is {
 // =============================================================================
 
 public type DerReader is {
-    buf: List<Byte>,   // owned slice — caller retains original for lifetime
+    buf: List<Byte>,   // owned input bytes
     pos: Int,          // next byte to read
     end: Int,          // exclusive end of the region this reader operates on
 };
@@ -305,9 +283,7 @@ implement DerReader {
     /// the element. The cursor remains at the pre-call position.
     ///
 
-    /// Implementation: uses a scratch clone of the reader so the
-    /// parse is non-destructive; cheap because `List<Byte>` buffers
-    /// share their backing storage through Verum's arena semantics.
+    /// The probe clones the buffer and advances its own cursor.
     public fn peek_element_span(&self) -> Result<(Tag, Int, Int, Int), DerError> {
         let mut probe = DerReader {
             buf: self.buf.clone(),
@@ -706,9 +682,9 @@ implement DerReader {
         if self.pos >= self.end {
             return Result.Err(err(UnexpectedEndOfInput, self.pos, "peek_tag past end"));
         }
-        // Non-consuming: duplicate a shallow cursor-state, parse, discard.
+        // Parse the header using the probe's own cursor.
         let mut probe = DerReader {
-            buf: self.buf.clone(),    // cheap — List<Byte> reuses arena-backed storage
+            buf: self.buf.clone(),
             pos: self.pos,
             end: self.end,
         };

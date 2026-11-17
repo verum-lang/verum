@@ -11,8 +11,7 @@
 //   * DerErrorKind 10-variant ADT
 //   * Canonical universal-class tag numbers (BOOLEAN / INTEGER / OID etc.)
 //
-// Read/write entry points are deferred behind the byte-array
-// codegen class.
+// Byte-level tests exercise header decoding and canonical key encodings.
 // =============================================================================
 
 mount core.encoding.der.{TagClass, Tag, DerErrorKind, DerReader, encode_oid, encode_bit_octets, encode_sequence};
@@ -123,6 +122,27 @@ fn test_tag_construction_context_specific_explicit() {
     assert(t.class_ is TagClass.ContextSpecific);
     assert_eq(t.constructed, true);
     assert_eq(t.number, 0_u32);
+}
+
+@test
+fn test_decoded_tag_fields_and_reader_position() {
+    let bytes: List<Byte> = [0xBF_u8, 0x81_u8, 0x01_u8, 0_u8, 0x04_u8, 0_u8];
+    let mut reader = DerReader.new(bytes.as_slice());
+    let ahead = reader.peek_tag().unwrap();
+    assert(ahead.class_ is TagClass.ContextSpecific);
+    assert(ahead.constructed);
+    assert_eq(ahead.number, 129_u32);
+    assert_eq(reader.position(), 0);
+
+    let (first, length) = reader.read_tag_length().unwrap();
+    assert_eq(first.number, ahead.number);
+    assert_eq(length, 0);
+    assert_eq(reader.position(), 4);
+    let (second, _) = reader.read_tag_length().unwrap();
+    assert(second.class_ is TagClass.Universal);
+    assert(!second.constructed);
+    assert_eq(second.number, TAG_OCTET_STRING);
+    assert(reader.is_at_end());
 }
 
 // =============================================================================
