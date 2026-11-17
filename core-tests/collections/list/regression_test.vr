@@ -20,8 +20,7 @@ mount core.prelude.*;
 //   constructors — `List.from(array)`, `List.from_elem(value, n)`,
 //   `List.of(value)` — are real public `impl<T> List<T>` static methods
 //   with bodies. They register correctly during stdlib precompile and
-//   work in stdlib-internal code (`core/net/weft/metrics.vr`,
-//   `core/verify/kernel_soundness/rules.vr`), but FAIL with
+//   work in stdlib-internal code (`core/net/weft/metrics.vr`), but FAIL with
 //   `CodegenError.UndefinedFunction("List.from")` at every user-side
 //   call site because the cross-module function-name table propagated
 //   to user-side bytecode misses these IDs.

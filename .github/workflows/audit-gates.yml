@@ -216,7 +216,7 @@ jobs:
         run: cargo build --release --bin verum
 
       - name: Audit execution receipt controls
-        run: cargo test --locked -p verum_cli --test audit_execution
+        run: cargo test --locked -p verum_cli --test audit_execution --test audit_schema_replay --test audit_kernel_soundness
 
       - name: differential-lean-checker (24-cert battery, Rust ↔ Lean unanimity)
         run: |
@@ -239,6 +239,8 @@ jobs:
             VerumExternalReplay.ReadEvidenceControls \
             VerumExternalReplay.CountBankControls \
             VerumExternalReplay.CountBankOwnershipControls)
+          VERUM_LEAN_REPLAY="$GITHUB_WORKSPACE/verification/external/lean/.lake/build/bin/verum_replay_checker" \
+            cargo test --locked -p verum_kernel --test k_smt_authority -- --include-ignored
           VERUM_LEAN_REPLAY="$GITHUB_WORKSPACE/verification/external/lean/.lake/build/bin/verum_replay_checker" \
             cargo test --locked -p verum_proof --test lean_replay --test induction_lean_replay --test universe_lean_replay --test dependent_pairs --test identity_induction --test function_extensionality --test admission -- --include-ignored
           VERUM_LEAN_REPLAY="$GITHUB_WORKSPACE/verification/external/lean/.lake/build/bin/verum_replay_checker" \

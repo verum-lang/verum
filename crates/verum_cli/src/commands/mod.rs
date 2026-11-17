@@ -1,6 +1,7 @@
 pub mod analyze;
 pub mod audit_gate;
 pub mod audit_execution;
+pub mod audit_schema_replay;
 pub mod bench;
 /// `verum benchmark` subcommand — head-to-head comparison surface
 /// (#83). Runs the configured suite against one or more systems

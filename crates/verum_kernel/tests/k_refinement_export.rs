@@ -128,7 +128,7 @@ example : Typing [("P", CoreTerm.PropSort)]
     (CoreTerm.Refine (CoreTerm.Universe 0) "x" (CoreTerm.Var "P"))
     (CoreTerm.Universe 1) := by
   apply K_Refine_sound
-  · exact Typing.t_univ _ 0
+  · exact Typing.t_univ _ 0 (by decide)
   · apply Typing.t_var
     simp
   · simp [mDepth]

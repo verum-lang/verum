@@ -67,10 +67,8 @@ search path, every text-formatting builder. Highest-frequency call sites:
 | `core/base/string_distance.vr:78,79,117` | `let mut <buf>: List<Int> = [];` | DP-table row allocation in edit-distance algorithms. |
 | `core/net/weft/metrics.vr:104` | `let bounds = List.from([5, 15, …]);` | Histogram bucket table. |
 | `core/net/weft/tls.vr:216` | `List.from(["h2", "http/1.1"])` | ALPN protocol list. |
-| `core/verify/kernel_soundness/rules.vr:81-280+` | `List.from([…])` per kernel rule | Inference-rule premise tables. |
 
-The `List.from(...)` call sites in `core/verify/kernel_soundness/rules.vr`
-and `core/net/weft/{metrics,tls}.vr` compile under stdlib-internal mode
+The `List.from(...)` call sites in `core/net/weft/{metrics,tls}.vr` compile under stdlib-internal mode
 but fail with `CodegenError::UndefinedFunction("List.from")` at every
 user-side call site — pinned as regression §A.
 

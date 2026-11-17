@@ -1,22 +1,12 @@
-//! Tests for the kernel-soundness cross-export pipeline.
-//!
-//! Pin coverage:
-//!  - The canonical rule list has exactly 35 entries.
-//!  - The 4 structurally-proved lemmas (K-Var, K-Univ, K-FwAx, K-Pos)
-//!  are marked `Proved`; everything else is `Admitted` with a
-//!  non-empty reason.
-//!  - Coq + Lean backends emit non-empty output for every section
-//!  and every rule; Admitted lemmas carry their reason in a
-//!  comment alongside the `Admitted.` / `sorry`.
-//!  - The drift check fires when the rule list differs from
-//!  `EXPECTED_KERNEL_RULE_COUNT`.
+//! Schema evidence, omission, backend scope and Verum catalogue drift checks.
 
+use super::agda::AgdaBackend;
 use super::coq::CoqBackend;
 use super::isabelle::IsabelleBackend;
 use super::lean::LeanBackend;
 use super::{
-    EXPECTED_KERNEL_RULE_COUNT, LemmaStatus, RuleSpec, SoundnessBackend, SoundnessExporter,
-    canonical_rules,
+    EXPECTED_KERNEL_RULE_COUNT, LemmaStatus, RuleSpec, SchemaEvidence, SoundnessBackend,
+    SoundnessExporter, canonical_rules,
 };
 
 #[test]
@@ -31,51 +21,39 @@ fn canonical_rules_has_expected_count() {
 }
 
 #[test]
-fn proved_lemma_set_full_post_discharge() {
-    // Pin: 4 placeholder + 15 IOU discharges + 10 status-fixes
-    // (rules already structural in the export; mod.rs status now
-    // matches) = 29 proved.  The FV-17 final batch closed the
-    // last open structurally-dischargeable IOU (K_Smt) plus moved
-    // K_Eps_Mu and K_Round_Trip into the DischargedByFramework
-    // bucket — leaving `iou_axiom_specs()` empty.
+fn proved_schema_set_excludes_unsupported_admission() {
     let rules = canonical_rules();
-    let proved: Vec<&str> = rules
+    let proved: Vec<_> = rules
         .iter()
-        .filter(|r| r.status.is_proved())
-        .map(|r| r.rule_name.as_str())
+        .filter(|rule| rule.status.is_proved())
+        .map(|rule| rule.rule_name.as_str())
         .collect();
-
     assert_eq!(
-        proved.len(),
-        29,
-        "expected 29 structurally-proved lemmas, got {}: {:?}",
-        proved.len(),
         proved,
+        [
+            "K_Var",
+            "K_Univ",
+            "K_Path_Ty_Form",
+            "K_Path_Over_Form",
+            "K_Refl_Intro",
+            "K_Transp",
+            "K_Refine",
+            "K_Refine_Intro",
+            "K_Refine_Erase",
+            "K_Quot_Form",
+            "K_Quot_Intro",
+            "K_Quot_Elim",
+            "K_Universe_Ascent",
+            "K_Epsilon_Of",
+            "K_Alpha_Of",
+            "K_Modal_Box",
+            "K_Modal_Diamond",
+            "K_Modal_Big_And",
+            "K_Shape",
+            "K_Flat",
+            "K_Sharp",
+        ]
     );
-
-    for needed in [
-        // 4 placeholder structural rules
-        "K_Var", "K_Univ", "K_FwAx", "K_Pos",
-        // 15 IOU discharges (4 Cubical + 4 Refinement + 2 Inductive
-        // + 1 Universe_Ascent + 3 Diakrisis structural-fragment + 1 SmtAxiom).
-        "K_Quot_Elim", "K_Elim", "K_Universe_Ascent",
-        "K_Refine", "K_Refine_Omega", "K_Refine_Intro", "K_Inductive",
-        "K_Path_Over_Form", "K_HComp", "K_Transp", "K_Glue",
-        "K_Epsilon_Of", "K_Alpha_Of", "K_Modal_Big_And",
-        "K_Smt",
-        // 5 modal/cohesive status-fixes (export was structural since FV-9)
-        "K_Modal_Box", "K_Modal_Diamond",
-        "K_Shape", "K_Flat", "K_Sharp",
-        // 5 more status-fixes (same drift pattern)
-        "K_Path_Ty_Form", "K_Refl_Intro",
-        "K_Refine_Erase", "K_Quot_Form", "K_Quot_Intro",
-    ] {
-        assert!(
-            proved.contains(&needed),
-            "{} must be proved",
-            needed,
-        );
-    }
 }
 
 #[test]
@@ -94,10 +72,10 @@ fn every_admitted_lemma_has_non_empty_reason() {
 }
 
 #[test]
-fn every_discharged_lemma_has_non_empty_citation() {
+fn every_unverified_reference_has_non_empty_citation() {
     let rules = canonical_rules();
     for r in &rules {
-        if let LemmaStatus::DischargedByFramework {
+        if let LemmaStatus::UnverifiedFrameworkReference {
             lemma_path,
             framework,
             citation,
@@ -105,17 +83,17 @@ fn every_discharged_lemma_has_non_empty_citation() {
         {
             assert!(
                 !lemma_path.trim().is_empty(),
-                "rule {} discharged-by-framework but lemma_path is empty",
+                "rule {} unverified_framework_reference but lemma_path is empty",
                 r.rule_name,
             );
             assert!(
                 !framework.trim().is_empty(),
-                "rule {} discharged-by-framework but framework is empty",
+                "rule {} unverified_framework_reference but framework is empty",
                 r.rule_name,
             );
             assert!(
                 !citation.trim().is_empty(),
-                "rule {} discharged-by-framework but citation is empty — \
+                "rule {} unverified_framework_reference but citation is empty — \
                  the audit gate's trust-extension report needs the upstream path",
                 r.rule_name,
             );
@@ -124,18 +102,25 @@ fn every_discharged_lemma_has_non_empty_citation() {
 }
 
 #[test]
-fn discharged_count_reflects_phase_1a() {
-    let rules = canonical_rules();
+fn structural_reference_rows_identify_separate_open_obligations() {
     let exporter = SoundnessExporter::new();
-    let _ = rules.len();
-    // Post-#155 Phase-1A: at least 7 rules discharged by framework
-    // citation (K_Pi_Form, K_Lam_Intro, K_App_Elim, K_Sigma_Form,
-    // K_Pair_Intro, K_Fst_Elim, K_Snd_Elim). This count is a floor;
-    // future Phase-1A advances will increase it.
-    assert!(
-        exporter.discharged_by_framework_count() >= 7,
-        "expected at least 7 framework-discharged rules post-#155 Phase-1A, got {}",
-        exporter.discharged_by_framework_count(),
+    let references: Vec<_> = exporter
+        .rules()
+        .iter()
+        .filter(|r| r.status.is_unverified_framework_reference())
+        .map(|r| r.rule_name.as_str())
+        .collect();
+    assert_eq!(
+        references,
+        [
+            "K_Pi_Form",
+            "K_Lam_Intro",
+            "K_App_Elim",
+            "K_Sigma_Form",
+            "K_Pair_Intro",
+            "K_Fst_Elim",
+            "K_Snd_Elim"
+        ]
     );
 }
 
@@ -186,8 +171,8 @@ fn coq_backend_emits_full_file() {
     assert!(output.contains("Inductive CoreTerm"));
     assert!(output.contains("Inductive CoreType"));
     assert!(output.contains("Inductive KernelRule"));
-    // All 35 rules appear as constructors of KernelRule and as lemmas
-    for r in exporter.rules() {
+    // Every available schema has a corresponding lemma.
+    for r in exporter.rules().iter().filter(|r| r.status.is_supported()) {
         assert!(
             output.contains(&r.rule_name),
             "Coq output missing rule {}",
@@ -208,18 +193,15 @@ fn coq_backend_emits_full_file() {
 }
 
 #[test]
-fn coq_backend_renders_admitted_with_reason_comment() {
+fn coq_references_are_metadata_and_the_proofs_are_closed() {
     let exporter = SoundnessExporter::new();
     let coq = CoqBackend::new();
     let output = exporter.emit(&coq);
 
-    // Pick a discharged lemma and confirm `Admitted.` plus the
-    // citation appear. K_Pi_Form is now discharged-by-framework
-    // citing the substitution-lemma in mathlib4.
-    assert!(output.contains("Admitted."));
+    assert!(!output.contains("Admitted."));
     assert!(
         output.contains("substitution-lemma") || output.contains("Substitution"),
-        "Coq emission must carry the K_Pi_Form discharge citation",
+        "Coq emission must carry the K_Pi_Form unverified citation",
     );
 }
 
@@ -256,7 +238,7 @@ fn lean_backend_emits_full_file() {
     assert!(output.contains("inductive CoreTerm"));
     assert!(output.contains("inductive CoreType"));
     assert!(output.contains("inductive KernelRule"));
-    for r in exporter.rules() {
+    for r in exporter.rules().iter().filter(|r| r.status.is_supported()) {
         assert!(
             output.contains(&r.rule_name),
             "Lean output missing rule {}",
@@ -274,18 +256,18 @@ fn lean_backend_emits_full_file() {
 }
 
 #[test]
-fn lean_backend_renders_admitted_with_reason_comment() {
+fn lean_references_are_metadata_and_the_proofs_are_closed() {
     let exporter = SoundnessExporter::new();
     let lean = LeanBackend::new();
     let output = exporter.emit(&lean);
 
     assert!(
-        output.contains("sorry"),
-        "Lean emission must use `sorry` for admitted/discharged lemmas",
+        !output.contains("sorry"),
+        "Lean emission must not fabricate proofs for unresolved references",
     );
     assert!(
         output.contains("substitution-lemma") || output.contains("Substitution"),
-        "Lean emission must carry the K_Pi_Form discharge citation",
+        "Lean emission must carry the K_Pi_Form unverified citation",
     );
 }
 
@@ -313,7 +295,7 @@ fn drift_check_rejects_short_list() {
 fn trust_extension_report_partitions_corpus() {
     // Pin (FV-18): the trust-extension report's aggregate counts
     // partition the 38-rule corpus exactly across {Proved,
-    // Admitted, DischargedByFramework}.  Post-FV-17 the IOU
+    // Admitted, UnverifiedFrameworkReference}.  Post-FV-17 the IOU
     // registry is empty, so the open-axiom count is `0`.
     let exporter = SoundnessExporter::new();
     let report = exporter.render_trust_extension_report();
@@ -324,9 +306,9 @@ fn trust_extension_report_partitions_corpus() {
         "trust-extension report must enumerate every kernel rule",
     );
     assert_eq!(
-        report.proved_count + report.admitted_count + report.discharged_by_framework_count,
+        report.proved_count + report.admitted_count + report.unverified_framework_reference_count + report.unsupported_count + report.model_unavailable_count,
         report.total_rules,
-        "Proved + Admitted + DischargedByFramework must partition the corpus",
+        "Supported and unsupported statuses must partition the corpus",
     );
     assert_eq!(report.entries.len(), report.total_rules);
 
@@ -353,15 +335,15 @@ fn trust_extension_report_partitions_corpus() {
                     entry,
                 );
             }
-            "discharged-by-framework" => {
+            "unverified_framework_reference" => {
                 assert!(
                     entry.framework_lemma_path.is_some() && entry.framework_name.is_some(),
-                    "DischargedByFramework rule {} must carry citation triple; got: {:?}",
+                    "UnverifiedFrameworkReference rule {} must carry citation triple; got: {:?}",
                     entry.rule_name,
                     entry,
                 );
             }
-            "admitted" => {
+            "admitted" | "unsupported" | "model_unavailable" => {
                 assert!(
                     entry.trust_note.is_some(),
                     "Admitted rule {} must carry a reason; got: {:?}",
@@ -391,8 +373,8 @@ fn trust_extension_report_serialises_to_json() {
     assert_eq!(round_trip.total_rules, report.total_rules);
     assert_eq!(round_trip.proved_count, report.proved_count);
     assert_eq!(
-        round_trip.discharged_by_framework_count,
-        report.discharged_by_framework_count,
+        round_trip.unverified_framework_reference_count,
+        report.unverified_framework_reference_count,
     );
     assert_eq!(round_trip.admitted_count, report.admitted_count);
     assert_eq!(round_trip.open_iou_axioms, report.open_iou_axioms);
@@ -400,51 +382,30 @@ fn trust_extension_report_serialises_to_json() {
 }
 
 #[test]
-fn proved_count_plus_admitted_count_matches_total() {
+fn status_counts_and_backend_derivations_are_distinct() {
     let exporter = SoundnessExporter::new();
-    let proved = exporter.proved_count();
-    let admitted = exporter.admitted_count();
-    let discharged = exporter.discharged_by_framework_count();
-    assert_eq!(
-        proved + admitted + discharged,
-        EXPECTED_KERNEL_RULE_COUNT,
-        "every rule must be either proved, admitted, or discharged-by-framework",
-    );
-    // 4 placeholder + 15 IOU discharges + 10 status-fixes (rules
-    // already structural in export; mod.rs status now matches) =
-    // 29 proved (post-FV-17 final batch — `iou_axiom_specs()` empty).
-    assert_eq!(proved, 29, "expected 29 proved lemmas");
-    assert!(
-        discharged >= 7,
-        "expected at least 7 framework-discharged lemmas post-#155 Phase-1A, got {}",
-        discharged,
-    );
-    assert_eq!(
-        proved + admitted + discharged,
-        EXPECTED_KERNEL_RULE_COUNT,
-        "proved + admitted + discharged must total all rules",
-    );
+    assert_eq!(exporter.proved_count(), 21);
+    assert_eq!(exporter.admitted_count(), 0);
+    assert_eq!(exporter.unverified_framework_reference_count(), 7);
+    assert_eq!(exporter.unsupported_count(), 5);
+    assert_eq!(exporter.model_unavailable_count(), 5);
+    assert_eq!(exporter.schema_derivation_count(&LeanBackend), 28);
+    assert_eq!(exporter.schema_derivation_count(&CoqBackend), 28);
+    assert_eq!(exporter.schema_derivation_count(&IsabelleBackend), 9);
+    assert_eq!(exporter.schema_derivation_count(&AgdaBackend), 0);
 }
 
 #[test]
-fn admitted_iou_list_enumerates_every_admit() {
-    let exporter = SoundnessExporter::new();
-    let ious = exporter.admitted_iou_list();
-    // Includes both `Admitted` (open IOU) and `DischargedByFramework`
-    // (closed IOU with citation) — both contribute to the trust-
-    // extension surface that the audit gate enumerates.
+fn admitted_list_excludes_framework_references() {
+    let mut rules = canonical_rules();
+    rules[0].status = LemmaStatus::Admitted {
+        reason: "missing evidence".into(),
+    };
+    let exporter = SoundnessExporter::with_rules(rules);
     assert_eq!(
-        ious.len(),
-        exporter.admitted_count() + exporter.discharged_by_framework_count(),
-        "the IOU list must enumerate every admitted + discharged-by-framework lemma",
+        exporter.admitted_iou_list(),
+        [("K_Var", "missing evidence")]
     );
-    for (rule_name, reason) in ious {
-        assert!(
-            !reason.is_empty(),
-            "IOU for {} has empty reason/citation",
-            rule_name
-        );
-    }
 }
 
 #[test]
@@ -455,8 +416,8 @@ fn coq_main_theorem_dispatches_to_each_lemma() {
 
     // The main theorem case-analyses on KernelRule and apply each
     // K_<Name>_sound lemma per branch.
-    for r in exporter.rules() {
-        let dispatch = format!("apply ({}", r.lemma_name);
+    for r in exporter.rules().iter().filter(|r| r.status.is_supported()) {
+        let dispatch = format!("  - exact {}.", r.lemma_name);
         assert!(
             output.contains(&dispatch),
             "Coq main theorem must dispatch to {}",
@@ -471,7 +432,7 @@ fn lean_main_theorem_dispatches_to_each_lemma() {
     let lean = LeanBackend::new();
     let output = exporter.emit(&lean);
 
-    for r in exporter.rules() {
+    for r in exporter.rules().iter().filter(|r| r.status.is_supported()) {
         // Lean dispatch shape: `case <RuleName> => exact <LemmaName> ...`
         let dispatch = format!("case {} => exact {}", r.rule_name, r.lemma_name);
         assert!(
@@ -483,133 +444,96 @@ fn lean_main_theorem_dispatches_to_each_lemma() {
 }
 
 #[test]
-fn isabelle_backend_emits_full_file() {
+fn isabelle_derives_exactly_its_structural_fragment() {
     let exporter = SoundnessExporter::new();
-    let isa = IsabelleBackend::new();
+    let isa = IsabelleBackend;
     let output = exporter.emit(&isa);
-
-    assert!(output.contains("KernelSoundness.thy"));
-    assert!(output.contains("theory KernelSoundness"));
-    assert!(output.contains("datatype CoreTerm"));
-    assert!(output.contains("datatype CoreType"));
-    assert!(output.contains("datatype KernelRule"));
-    for r in exporter.rules() {
-        assert!(
-            output.contains(&r.rule_name),
-            "Isabelle output missing rule {}",
-            r.rule_name,
-        );
-        assert!(
-            output.contains(&r.lemma_name),
-            "Isabelle output missing lemma {}",
-            r.lemma_name,
-        );
-    }
-    // Isabelle main theorem is the `lemmas kernel_full_soundness =`
-    // bundle (architectural asymmetry with Lean / Coq — see
-    // `render_main_theorem` in soundness/isabelle.rs for rationale).
-    assert!(
-        output.contains("lemmas kernel_full_soundness ="),
-        "Isabelle output must declare the kernel_full_soundness bundle",
-    );
-    assert!(
-        !output.contains("definition Soundness"),
-        "Isabelle output must NOT emit the case-of `definition Soundness` \
-         shape — its 38-branch elaboration is a non-converging unification \
-         problem.  See render_main_theorem comment.",
-    );
+    let (_, bundle) = output
+        .split_once("lemmas structural_schema_lemmas =")
+        .unwrap();
     assert_eq!(isa.output_filename(), "KernelSoundness.thy");
-}
-
-#[test]
-fn isabelle_backend_renders_admitted_via_axiomatization() {
-    let exporter = SoundnessExporter::new();
-    let isa = IsabelleBackend::new();
-    let output = exporter.emit(&isa);
-
-    // `Admitted` / `DischargedByFramework` rules emit a per-rule
-    // `axiomatization where K_X_sound: "..."` block carrying the
-    // same propositional statement.  This keeps the lemma name
-    // resolvable by `lemmas kernel_full_soundness =` without
-    // requiring `quick_and_dirty` mode (which `sorry` would
-    // demand).
-    assert!(
-        !output.contains("sorry"),
-        "Isabelle emission must NOT use `sorry` (requires \
-         quick_and_dirty mode); use axiomatization instead",
-    );
-    // Find at least one DischargedByFramework rule and verify it
-    // emits as an axiomatization, not a `lemma ... sorry`.
-    let discharged_rule = exporter
-        .rules()
-        .iter()
-        .find(|r| matches!(r.status, super::LemmaStatus::DischargedByFramework { .. }))
-        .expect("registry must have at least one DischargedByFramework rule");
-    let expected = format!(
-        "axiomatization where {}",
-        discharged_rule.lemma_name,
-    );
-    assert!(
-        output.contains(&expected),
-        "DischargedByFramework rule {} must emit as `axiomatization where {} : ...`",
-        discharged_rule.rule_name,
-        discharged_rule.lemma_name,
-    );
-    assert!(
-        output.contains("substitution-lemma") || output.contains("Substitution"),
-        "Isabelle emission must carry the K_Pi_Form discharge citation",
-    );
-}
-
-#[test]
-fn isabelle_main_theorem_lists_every_per_rule_lemma() {
-    // Pin: the `lemmas kernel_full_soundness = ...` bundle must
-    // enumerate every per-rule lemma in the registry.  Auditors
-    // invoke `print_facts kernel_full_soundness` to enumerate
-    // every soundness fact at once — drift between the registry
-    // and the bundle would silently drop rules.
-    let exporter = SoundnessExporter::new();
-    let isa = IsabelleBackend::new();
-    let output = exporter.emit(&isa);
-
-    let bundle_marker = "lemmas kernel_full_soundness =";
-    let bundle_idx = output
-        .find(bundle_marker)
-        .expect("Isabelle output must declare the kernel_full_soundness bundle");
-    let bundle_tail = &output[bundle_idx..];
-
-    for r in exporter.rules() {
+    for marker in [
+        "theory KernelSoundness",
+        "datatype CoreTerm",
+        "datatype CoreType",
+        "datatype KernelRule",
+        "inductive Typing",
+        "Unverified metatheory reference",
+    ] {
+        assert!(output.contains(marker), "{marker}");
+    }
+    for rule in exporter.rules() {
+        let structural = rule.category == super::RuleCategory::Structural;
+        assert_eq!(
+            isa.schema_evidence(rule) == SchemaEvidence::TypingDerivation,
+            structural
+        );
+        assert_eq!(
+            output.contains(&format!("lemma {}:", rule.lemma_name)),
+            structural
+        );
+        assert_eq!(
+            bundle.lines().any(|line| line.trim() == rule.lemma_name),
+            structural
+        );
+    }
+    for forbidden in [
+        "axiomatization",
+        "sorry",
+        "oops",
+        "definition Soundness",
+        "T_refl:",
+    ] {
         assert!(
-            bundle_tail.contains(&r.lemma_name),
-            "kernel_full_soundness bundle must list every per-rule lemma \
-             — missing {}",
-            r.lemma_name,
+            !output.contains(forbidden),
+            "unexpected Isabelle declaration: {forbidden}"
         );
     }
 }
 
 #[test]
-fn isabelle_emit_does_not_use_case_of_aggregate() {
-    // Pin: the Isabelle backend MUST NOT regress to the case-of
-    // `definition Soundness :: KernelRule ⇒ bool` shape — that
-    // form is a non-converging unification problem at universe-
-    // polymorphic free-variable density.  See `render_main_theorem`
-    // in soundness/isabelle.rs for the architectural rationale.
+fn agda_contains_a_safe_rule_inventory_without_postulated_proofs() {
     let exporter = SoundnessExporter::new();
-    let isa = IsabelleBackend::new();
-    let output = exporter.emit(&isa);
-
-    assert!(
-        !output.contains("case rule of"),
-        "Isabelle emission must NOT contain the `case rule of K_X => …` \
-         aggregate — it is the bottleneck this backend was refactored \
-         away from.  See render_main_theorem doc comment.",
-    );
-    assert!(
-        !output.contains("definition Soundness"),
-        "Isabelle emission must NOT contain `definition Soundness` — \
-         the per-rule lemmas are the real propositional content.",
-    );
+    let backend = AgdaBackend;
+    let output = exporter.emit(&backend);
+    assert_eq!(backend.id(), "agda");
+    assert_eq!(backend.output_filename(), "KernelSoundness.agda");
+    for marker in [
+        "--cubical --safe",
+        "module KernelSoundness",
+        "data CoreTerm",
+        "data KernelRule",
+        "PropSort",
+    ] {
+        assert!(output.contains(marker));
+    }
+    for rule in exporter.rules() {
+        assert_eq!(
+            backend.schema_evidence(rule) == SchemaEvidence::CatalogueOnly,
+            rule.status.is_supported()
+        );
+        let name = rule.rule_name.replace('_', "-");
+        assert_eq!(
+            output.contains(&format!("{name} : KernelRule")),
+            rule.status.is_supported()
+        );
+        assert!(
+            output.contains(&rule.rule_name),
+            "missing rule metadata {}",
+            rule.rule_name
+        );
+    }
+    for forbidden in [
+        "postulate",
+        "kernel-soundness :",
+        "Soundness : KernelRule",
+        "-sound-witness",
+    ] {
+        assert!(
+            !output.contains(forbidden),
+            "unverified Agda declaration: {forbidden}"
+        );
+    }
 }
 
 #[test]
@@ -638,133 +562,65 @@ fn rule_categories_partition_the_corpus() {
 // =============================================================================
 
 #[test]
-fn drift_check_passes_at_baseline() {
-    // Pin: in the as-shipped state, drift_check passes — every
-    // mod.rs `Admitted` rule has a corresponding `<Rule>_iou`
-    // axiom in the export, and every `Proved` /
-    // `DischargedByFramework` rule does NOT.
-    let exporter = SoundnessExporter::new();
-    let result = exporter.drift_check();
-    assert!(
-        result.is_ok(),
-        "drift_check must pass at baseline; got: {:?}",
-        result,
-    );
-}
-
-#[test]
-fn drift_check_catches_admitted_without_iou_axiom() {
-    // Pin: a rule that's Admitted in mod.rs but has no IOU axiom
-    // in the export (PR-5g/PR-5h drift pattern) is caught by
-    // drift_check.
-    use crate::soundness::{
-        LemmaStatus, RuleCategory, RuleSpec, SoundnessExporter,
+fn admitted_status_omits_its_constructor_and_theorem() {
+    let mut rules = canonical_rules();
+    let rule = rules
+        .iter_mut()
+        .find(|r| r.rule_name == "K_Quot_Elim")
+        .unwrap();
+    rule.status = LemmaStatus::Admitted {
+        reason: "missing evidence".into(),
     };
-    let mut rules: Vec<RuleSpec> = canonical_rules();
-    // K_Quot_Elim has no IOU axiom (discharged in PR-5).  Flipping
-    // it back to Admitted should trigger a drift error.
-    for r in rules.iter_mut() {
-        if r.rule_name == "K_Quot_Elim" {
-            r.status = LemmaStatus::Admitted {
-                reason: "synthetic drift to test the guard".to_string(),
-            };
+    let exporter = SoundnessExporter::with_rules(rules);
+    exporter.drift_check().unwrap();
+    assert_eq!(
+        exporter.admitted_iou_list(),
+        [("K_Quot_Elim", "missing evidence")]
+    );
+    assert_eq!(exporter.render_trust_extension_report().open_iou_axioms, 0);
+    assert!(super::iou_axiom_rule_names().is_empty());
+    for output in [
+        exporter.emit(&LeanBackend),
+        exporter.emit(&CoqBackend),
+        exporter.emit(&IsabelleBackend),
+        exporter.emit(&AgdaBackend),
+    ] {
+        assert!(output.contains("UNPROVED K_Quot_Elim: missing evidence"));
+        for stale in [
+            "t_quot_elim",
+            "T_quot_elim",
+            "K_Quot_Elim_sound",
+            "K-Quot-Elim : KernelRule",
+        ] {
+            assert!(
+                !output.contains(stale),
+                "stale authority for admitted rule: {stale}"
+            );
         }
     }
-    let _ = RuleCategory::Quotient; // imports
-    let exporter = SoundnessExporter::with_rules(rules);
-    let err = exporter
-        .drift_check()
-        .expect_err("drift_check should reject Admitted-without-axiom");
-    assert!(
-        err.contains("K_Quot_Elim"),
-        "drift error should name K_Quot_Elim; got: {}",
-        err,
-    );
-    assert!(
-        err.contains("no") && err.contains("axiom"),
-        "drift error should name the missing axiom; got: {}",
-        err,
-    );
 }
 
 #[test]
-fn drift_check_catches_admitted_with_missing_iou_axiom() {
-    // Pin: a rule that's Admitted in mod.rs but has NO IOU axiom in
-    // the export (missing-axiom drift) is caught.  Post-FV-17 the
-    // IOU registry is empty by design, so the inverse drift class
-    // (orphan axiom) is structurally unreachable; this regression
-    // guard remains exercisable because Admitted-without-axiom
-    // can still happen if a future change forgets to flip the
-    // status when removing an axiom from the registry.
-    use crate::soundness::{
-        LemmaStatus, RuleSpec, SoundnessExporter,
-    };
-    let mut rules: Vec<RuleSpec> = canonical_rules();
-    // Pick K_Smt as the synthetic Admitted target: it's currently
-    // Proved, so flipping it to Admitted (while the registry stays
-    // empty) creates the missing-axiom drift the check should
-    // catch.
-    for r in rules.iter_mut() {
-        if r.rule_name == "K_Smt" {
-            r.status = LemmaStatus::Admitted {
-                reason: "synthetic test fixture".to_string(),
-            };
-        }
+fn missing_schema_fails_closed_without_a_substitute_proposition() {
+    let mut rules = canonical_rules();
+    rules[0].rule_name = "K_Unknown".into();
+    rules[0].lemma_name = "K_Unknown_sound".into();
+    let exporter = SoundnessExporter::with_rules(rules);
+    assert!(exporter.drift_check().unwrap_err().contains("K_Unknown"));
+    for output in [
+        exporter.emit(&LeanBackend),
+        exporter.emit(&CoqBackend),
+        exporter.emit(&IsabelleBackend),
+    ] {
+        assert!(!output.contains("K_Unknown_sound"));
+        assert!(!output.contains("side_conditions_hold"));
     }
-    let exporter = SoundnessExporter::with_rules(rules);
-    let err = exporter
-        .drift_check()
-        .expect_err("drift_check should reject Admitted-with-missing-axiom");
-    assert!(
-        err.contains("K_Smt"),
-        "drift error should name K_Smt; got: {}",
-        err,
-    );
-    assert!(
-        err.contains("status drift") || err.contains("no") || err.contains("missing"),
-        "drift error should call out the missing axiom; got: {}",
-        err,
-    );
 }
 
 #[test]
-fn iou_axiom_rule_names_count_matches_admitted_count() {
-    // Pin: the IOU-axiom-source-of-truth list is the same length
-    // as the count of Admitted rules in mod.rs.  This is the
-    // partner pin to drift_check: it catches a state where the
-    // two sides have correct membership but a mis-counted total.
-    use crate::soundness::iou_axiom_rule_names;
-    let exporter = SoundnessExporter::new();
-    let admitted_count = exporter.admitted_count();
-    let iou_count = iou_axiom_rule_names().len();
-    assert_eq!(
-        admitted_count, iou_count,
-        "Admitted-count ({}) and IOU-axiom-count ({}) must match — \
-         every Admitted rule contributes one IOU axiom",
-        admitted_count, iou_count,
-    );
-}
-
-#[test]
-fn iou_axiom_rule_names_match_admitted_rule_names() {
-    // Pin: the IOU-axiom rule names match the rule names of every
-    // Admitted lemma — set equality.
-    use crate::soundness::iou_axiom_rule_names;
-    let exporter = SoundnessExporter::new();
-    let admitted_names: std::collections::BTreeSet<String> = exporter
-        .rules()
-        .iter()
-        .filter(|r| matches!(r.status, LemmaStatus::Admitted { .. }))
-        .map(|r| r.rule_name.clone())
-        .collect();
-    let iou_names: std::collections::BTreeSet<String> = iou_axiom_rule_names()
-        .into_iter()
-        .map(|s| s.to_string())
-        .collect();
-    assert_eq!(
-        admitted_names, iou_names,
-        "Admitted rule set must equal IOU-axiom rule set",
-    );
+fn the_export_declares_no_implicit_iou_axioms() {
+    assert!(super::iou_axiom_rule_names().is_empty());
+    assert!(super::iou_axiom_specs().is_empty());
 }
 
 // =============================================================================
@@ -990,7 +846,7 @@ fn extractor_finds_arities_in_lean_constant() {
     // Sanity: arity extractor returns a map whose size matches the
     // current `iou_axiom_specs()` registry length.  Post-FV-17 the
     // registry is empty (every kernel rule is either Proved or
-    // DischargedByFramework with a cited upstream proof) — the
+    // UnverifiedFrameworkReference with a cited upstream proof) — the
     // extractor produces an empty map and that is the architectural
     // endgame for the IOU-discharge sequence.  The test remains as
     // a regression guard: re-introducing an open IOU adds an
@@ -1053,7 +909,7 @@ fn three_foundations_agree_on_iou_axiom_arities() {
     assert_eq!(coq, isa);
     // Sanity: the maps' size matches the registry exactly.  Post-FV-17
     // this is zero by design (every kernel rule is structurally Proved
-    // or DischargedByFramework).
+    // or UnverifiedFrameworkReference).
     let expected = crate::soundness::iou_axiom_specs().len();
     assert_eq!(
         lean.len(),
@@ -1168,7 +1024,7 @@ fn isabelle_constant_arities_match_source_of_truth() {
 // PR-1e closes the loop: parse the .vr file, assert per-rule
 // status agreement with `canonical_rules()`.
 
-/// Status keyword (`Proved` / `Admitted` / `DischargedByFramework`).
+/// Status keyword (`Proved` / `Admitted` / `UnverifiedFrameworkReference`).
 /// Stored as a stable string for lightweight comparison.
 type VrStatusKind = &'static str;
 
@@ -1178,9 +1034,7 @@ type VrStatusKind = &'static str;
 /// to surrounding whitespace and the optional `{ reason: ... }` /
 /// `{ lemma_path: ..., framework: ..., citation: ... }` body
 /// after the status keyword.
-fn parse_vr_lemma_status(
-    text: &str,
-) -> std::collections::BTreeMap<String, VrStatusKind> {
+fn parse_vr_lemma_status(text: &str) -> std::collections::BTreeMap<String, VrStatusKind> {
     let mut result: std::collections::BTreeMap<String, VrStatusKind> =
         std::collections::BTreeMap::new();
     for line in text.lines() {
@@ -1218,9 +1072,11 @@ fn parse_vr_lemma_status(
             .find(|c: char| !c.is_ascii_alphabetic())
             .unwrap_or(status_rest.len());
         let status: VrStatusKind = match &status_rest[..status_end] {
+            "Unsupported" => "Unsupported",
+            "ModelUnavailable" => "ModelUnavailable",
             "Proved" => "Proved",
             "Admitted" => "Admitted",
-            "DischargedByFramework" => "DischargedByFramework",
+            "UnverifiedFrameworkReference" => "UnverifiedFrameworkReference",
             other => panic!(
                 "unexpected LemmaStatus variant '{}' in .vr file",
                 other
@@ -1301,9 +1157,11 @@ fn vr_corpus_status_matches_rust_mod_rs() {
             }
         };
         let rust_status: VrStatusKind = match rule.status {
+            LemmaStatus::Unsupported { .. } => "Unsupported",
+            LemmaStatus::ModelUnavailable { .. } => "ModelUnavailable",
             LemmaStatus::Proved { .. } => "Proved",
             LemmaStatus::Admitted { .. } => "Admitted",
-            LemmaStatus::DischargedByFramework { .. } => "DischargedByFramework",
+            LemmaStatus::UnverifiedFrameworkReference { .. } => "UnverifiedFrameworkReference",
         };
         if rust_status != vr_status {
             errors.push(format!(
@@ -1320,12 +1178,12 @@ fn vr_corpus_status_matches_rust_mod_rs() {
 }
 
 // =============================================================================
-// Citation-parity for DischargedByFramework rules
+// Citation-parity for UnverifiedFrameworkReference rules
 // =============================================================================
 //
 // `vr_corpus_status_matches_rust_mod_rs` checks the status keyword
 // only.  Extend coverage to the citation triple
-// `(lemma_path, framework, citation)` for `DischargedByFramework`
+// `(lemma_path, framework, citation)` for `UnverifiedFrameworkReference`
 // rules — the framework attribution can drift independently of the
 // status keyword.
 
@@ -1337,7 +1195,7 @@ fn normalize_ws(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// Parsed citation triple for a DischargedByFramework rule.
+/// Parsed citation triple for a UnverifiedFrameworkReference rule.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct VrCitation {
     lemma_path: String,
@@ -1399,17 +1257,15 @@ fn extract_text_from_arg(text: &str, key: &str) -> Option<String> {
     None
 }
 
-/// Parse `KernelRule.K<Name> => LemmaStatus.DischargedByFramework
+/// Parse `KernelRule.K<Name> => LemmaStatus.UnverifiedFrameworkReference
 /// { lemma_path: …, framework: …, citation: …, }` blocks from the
 /// .vr file.  Returns a map from .vr-format rule name to parsed
 /// citation triple.
-fn parse_vr_discharged_citations(
-    text: &str,
-) -> std::collections::BTreeMap<String, VrCitation> {
+fn parse_vr_unverified_references(text: &str) -> std::collections::BTreeMap<String, VrCitation> {
     let mut result = std::collections::BTreeMap::new();
-    // Find each `KernelRule.K<Name> => LemmaStatus.DischargedByFramework {`
+// Find each `KernelRule.K<Name> => LemmaStatus.UnverifiedFrameworkReference {`
     // header, then the matching closing `},`.
-    let header_pattern = "=> LemmaStatus.DischargedByFramework {";
+    let header_pattern = "=> LemmaStatus.UnverifiedFrameworkReference {";
     let mut search_start = 0;
     while let Some(header_pos) = text[search_start..].find(header_pattern) {
         let abs_header = search_start + header_pos;
@@ -1493,8 +1349,8 @@ fn extract_text_from_arg_handles_single_line() {
 }
 
 #[test]
-fn vr_corpus_has_nine_discharged_by_framework_entries() {
-    // Pin: theorems.vr declares exactly 9 DischargedByFramework
+fn vr_corpus_has_seven_unverified_framework_references() {
+    // Pin: theorems.vr declares exactly 7 UnverifiedFrameworkReference
     // entries — matches the count of such rules in
     // canonical_rules() after FV-17 added K_Eps_Mu and K_Round_Trip
     // to the bucket: K_Pi_Form / K_Lam_Intro / K_App_Elim /
@@ -1503,11 +1359,11 @@ fn vr_corpus_has_nine_discharged_by_framework_entries() {
     let vr_text = include_str!(
         "../../../../core/verify/kernel_soundness/theorems.vr"
     );
-    let citations = parse_vr_discharged_citations(vr_text);
+    let citations = parse_vr_unverified_references(vr_text);
     assert_eq!(
         citations.len(),
-        9,
-        "expected 9 DischargedByFramework entries in theorems.vr; got {}",
+        7,
+        "expected 7 UnverifiedFrameworkReference entries in theorems.vr; got {}",
         citations.len(),
     );
 }
@@ -1679,26 +1535,26 @@ fn vr_corpus_citation_triples_match_rust_mod_rs() {
     let vr_text = include_str!(
         "../../../../core/verify/kernel_soundness/theorems.vr"
     );
-    let vr_citations = parse_vr_discharged_citations(vr_text);
+    let vr_citations = parse_vr_unverified_references(vr_text);
 
     let exporter = SoundnessExporter::new();
     let mut errors: Vec<String> = Vec::new();
     for rule in exporter.rules() {
         let (rust_lp, rust_fw, rust_cit) = match &rule.status {
-            LemmaStatus::DischargedByFramework {
+            LemmaStatus::UnverifiedFrameworkReference {
                 lemma_path,
                 framework,
                 citation,
             } => (lemma_path, framework, citation),
-            _ => continue, // not DischargedByFramework — skip
+            _ => continue, // not UnverifiedFrameworkReference — skip
         };
         let vr_name = rust_rule_name_to_vr(&rule.rule_name);
         let vr_cite = match vr_citations.get(&vr_name) {
             Some(c) => c,
             None => {
                 errors.push(format!(
-                    "rule {} (vr: {}) is DischargedByFramework in mod.rs but \
-                     has no DischargedByFramework entry in theorems.vr",
+                    "rule {} (vr: {}) is UnverifiedFrameworkReference in mod.rs but \
+                     has no UnverifiedFrameworkReference entry in theorems.vr",
                     rule.rule_name, vr_name,
                 ));
                 continue;

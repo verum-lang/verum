@@ -2163,10 +2163,9 @@ pub fn audit_kernel_soundness() -> Result<()> {
 /// 4. **Honest IOUs** — the report lists every admitted lemma
 /// with its meta-theoretic prerequisite reason verbatim.
 ///
-/// Exits non-zero only on drift; admitted lemmas are accountability
-/// surface, not failures. When the corpus is fully discharged
-/// (admitted_count = 0), the gate flips to `kernel_soundness_holds_unconditionally`
-/// and a future tightening could require zero admits to pass.
+/// Exits non-zero only on drift. This inventories abstract admission schemas;
+/// it neither runs external proof tools nor establishes correspondence with
+/// the Rust checker. Unsupported rules are excluded from the exported model.
 pub fn audit_kernel_soundness_with_format(format: AuditFormat) -> Result<()> {
     use verum_kernel::soundness::coq::CoqBackend;
     use verum_kernel::soundness::lean::LeanBackend;
@@ -2251,6 +2250,25 @@ pub fn audit_kernel_soundness_with_format(format: AuditFormat) -> Result<()> {
     Ok(())
 }
 
+fn kernel_schema_backend_coverage(
+    exporter: &verum_kernel::soundness::SoundnessExporter,
+) -> serde_json::Value {
+    use verum_kernel::soundness::{
+        SoundnessBackend, agda::AgdaBackend, coq::CoqBackend,
+        isabelle::IsabelleBackend, lean::LeanBackend,
+    };
+    let backends: [&dyn SoundnessBackend; 4] =
+        [&CoqBackend::new(), &LeanBackend::new(), &IsabelleBackend::new(), &AgdaBackend::new()];
+    let models: serde_json::Map<_, _> = backends.into_iter().map(|backend| {
+        (backend.id().to_owned(), serde_json::json!({
+            "typing_schema_derivations": exporter.schema_derivation_count(backend),
+            "catalogue_rules": exporter.rules().len(),
+            "implementation_correspondence": "not_established",
+        }))
+    }).collect();
+    serde_json::Value::Object(models)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn print_kernel_soundness_report(
     exporter: &verum_kernel::soundness::SoundnessExporter,
@@ -2266,11 +2284,14 @@ fn print_kernel_soundness_report(
     println!("{}", "Kernel-soundness report".bold());
     println!("{}", "─".repeat(40).dimmed());
     println!(
-        "  Corpus has {} kernel rules ({} expected); {} structurally proved, {} admitted.",
+        "  Corpus has {} kernel rules ({} expected); {} schema-only entries, {} admitted, {} unsupported, {} unverified framework references, {} unavailable models.",
         exporter.rules().len(),
         expected_total,
         proved,
         admitted,
+        exporter.unsupported_count(),
+        exporter.unverified_framework_reference_count(),
+        exporter.model_unavailable_count(),
     );
     println!();
 
@@ -2293,18 +2314,18 @@ fn print_kernel_soundness_report(
         println!();
     }
 
-    if admitted == 0 {
-        println!(
-            "  {} kernel_soundness theorem holds UNCONDITIONALLY in this corpus.",
-            "✓".green(),
-        );
-    } else {
-        println!(
-            "  {} kernel_soundness holds modulo the {} IOUs above.",
-            "ℹ".cyan(),
-            admitted,
-        );
+    for rule in exporter.rules().iter().filter(|rule| !rule.status.is_supported()) {
+        println!("  Unavailable {}: {}", rule.rule_name, rule.status.explanation().unwrap_or(""));
     }
+    println!("  Scope: abstract admission schemas; unsupported rules are excluded.");
+    if let Some(models) = kernel_schema_backend_coverage(exporter).as_object() {
+        for (backend, model) in models {
+            println!("  {backend}: {} typing-schema derivations out of {} catalogue rules.",
+                model["typing_schema_derivations"], model["catalogue_rules"]);
+        }
+    }
+    println!("  Rust checker correspondence is not established by this export.");
+    println!("  External proof tools were not run by this command.");
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2329,21 +2350,15 @@ fn print_kernel_soundness_report_json(
                 "premise_arity": r.premise_arity,
                 "has_side_condition": r.has_side_condition,
                 "status": match &r.status {
+                    verum_kernel::soundness::LemmaStatus::Unsupported { .. } => "Unsupported",
+                    verum_kernel::soundness::LemmaStatus::ModelUnavailable { .. } => "ModelUnavailable",
                     verum_kernel::soundness::LemmaStatus::Proved { .. } => "Proved",
                     verum_kernel::soundness::LemmaStatus::Admitted { .. } => "Admitted",
-                    verum_kernel::soundness::LemmaStatus::DischargedByFramework { .. } => "DischargedByFramework",
+                    verum_kernel::soundness::LemmaStatus::UnverifiedFrameworkReference { .. } => "UnverifiedFrameworkReference",
                 },
-                "admit_reason": match &r.status {
-                    verum_kernel::soundness::LemmaStatus::Proved { .. } => serde_json::Value::Null,
-                    verum_kernel::soundness::LemmaStatus::Admitted { reason } => {
-                        serde_json::Value::String(reason.clone())
-                    }
-                    verum_kernel::soundness::LemmaStatus::DischargedByFramework { citation, .. } => {
-                        serde_json::Value::String(citation.clone())
-                    }
-                },
-                "discharge": match &r.status {
-                    verum_kernel::soundness::LemmaStatus::DischargedByFramework { lemma_path, framework, citation } => {
+                "reason": r.status.explanation(),
+                "framework_reference": match &r.status {
+                    verum_kernel::soundness::LemmaStatus::UnverifiedFrameworkReference { lemma_path, framework, citation } => {
                         serde_json::json!({
                             "lemma_path": lemma_path,
                             "framework": framework,
@@ -2367,13 +2382,19 @@ fn print_kernel_soundness_report_json(
         .collect();
 
     let payload = serde_json::json!({
-        "schema_version": 1,
+        "schema_version": 2,
         "command": "audit-kernel-soundness",
         "expected_rule_count": expected_total,
         "actual_rule_count": exporter.rules().len(),
         "proved_count": proved,
         "admitted_count": admitted,
-        "holds_unconditionally": admitted == 0,
+        "unverified_framework_reference_count": exporter.unverified_framework_reference_count(),
+        "unsupported_count": exporter.unsupported_count(),
+        "model_unavailable_count": exporter.model_unavailable_count(),
+        "scope": "abstract_admission_schemas",
+        "implementation_correspondence": "not_established",
+        "external_replay": "not_run",
+        "backend_models": kernel_schema_backend_coverage(exporter),
         "rules": rules_json,
         "outstanding_ious": ious_json,
         "exports": {
@@ -2439,7 +2460,7 @@ pub fn audit_trust_extension_report_with_format(format: AuditFormat) -> Result<(
         AuditFormat::Json => {
             // Console JSON form mirrors the file content + emit-error list.
             let payload = serde_json::json!({
-                "schema_version": 1,
+                "schema_version": 2,
                 "command": "audit-trust-extension-report",
                 "report": report,
                 "report_path": report_path.display().to_string(),
@@ -2461,25 +2482,20 @@ fn print_trust_extension_report(
     println!("{}", "Trust-extension report".bold());
     println!("{}", "─".repeat(40).dimmed());
     println!(
-        "  Corpus: {} rules — {} proved, {} discharged-by-framework, {} admitted.",
+        "  Corpus: {} rules — {} schema-only entries, {} unverified framework references, {} admitted, {} unsupported, {} unavailable models.",
         report.total_rules,
         report.proved_count,
-        report.discharged_by_framework_count,
+        report.unverified_framework_reference_count,
         report.admitted_count,
+        report.unsupported_count,
+        report.model_unavailable_count,
     );
     println!(
         "  Open IOU axioms (`iou_axiom_specs()` length): {}.",
         report.open_iou_axioms,
     );
-    if report.open_iou_axioms == 0 {
-        println!(
-            "  {}: kernel-soundness corpus carries no open IOUs.  Trust extension surface =",
-            "FV-17 endgame".green().bold(),
-        );
-        println!(
-            "  {{structural premises}} ∪ {{framework citations}}.",
-        );
-    }
+    println!("  Schema derivations do not establish Rust checker correspondence.");
+    println!("  Framework references are unresolved obligations, not proof receipts.");
     println!();
 
     // Per-rule entries grouped by status_kind + category.
@@ -2488,10 +2504,10 @@ fn print_trust_extension_report(
         .iter()
         .filter(|e| e.status_kind == "proved")
         .collect();
-    let discharged: Vec<&verum_kernel::soundness::TrustExtensionEntry> = report
+    let referenced: Vec<&verum_kernel::soundness::TrustExtensionEntry> = report
         .entries
         .iter()
-        .filter(|e| e.status_kind == "discharged-by-framework")
+        .filter(|e| e.status_kind == "unverified_framework_reference")
         .collect();
     let admitted: Vec<&verum_kernel::soundness::TrustExtensionEntry> = report
         .entries
@@ -2499,9 +2515,9 @@ fn print_trust_extension_report(
         .filter(|e| e.status_kind == "admitted")
         .collect();
 
-    if !discharged.is_empty() {
-        println!("{}", "Framework-discharged rules:".bold());
-        for e in &discharged {
+    if !referenced.is_empty() {
+        println!("{}", "Unverified framework references:".bold());
+        for e in &referenced {
             println!(
                 "  • {} ({}, arity {}) — {} via {}",
                 e.rule_name.cyan(),
@@ -2946,7 +2962,8 @@ pub fn audit_differential_lean_checker_with_format(format: AuditFormat) -> Resul
 
 /// Per-backend verdict for `--external-prover-replay`.
 ///
-/// `clean` = backend exited 0 with no diagnostics; `iou_only` = exited 0
+/// `SchemaElaborated` = the tool accepted the scoped schema; this is not an
+/// audit of its axiom dependencies or Rust checker correspondence. `iou_only` = exited 0
 /// with only `sorry` / `Admitted` warnings whose count is consistent
 /// with the corpus IOU list; `hard_error` = backend rejected the export
 /// with a real type/parse/scoping error (load-bearing regression); and
@@ -2954,7 +2971,7 @@ pub fn audit_differential_lean_checker_with_format(format: AuditFormat) -> Resul
 /// unless `--strict`).
 #[derive(Debug, Clone, serde::Serialize)]
 enum ReplayVerdict {
-    Clean,
+    SchemaElaborated,
     IouOnly { sorry_count: usize },
     HardError { error_count: usize, sample: Vec<String> },
     NotAvailable { hint: String },
@@ -2986,6 +3003,20 @@ pub fn audit_external_prover_replay_with_format(
     backend_filter: &[String],
     strict: bool,
 ) -> Result<()> {
+    // A selector must name an executable replay backend. An empty result set
+    // is never a successful verification run.
+    use verum_kernel::soundness::SoundnessBackend;
+    let replay_backend_ids = [
+        verum_kernel::soundness::lean::LeanBackend::new().id(),
+        verum_kernel::soundness::coq::CoqBackend::new().id(),
+        verum_kernel::soundness::isabelle::IsabelleBackend::new().id(),
+    ];
+    if let Some(unknown) = backend_filter.iter()
+        .find(|name| name.as_str() != "all" && !replay_backend_ids.contains(&name.as_str())) {
+        return Err(crate::error::CliError::InvalidArgument(format!(
+            "unsupported replay backend `{unknown}`; available: {}", replay_backend_ids.join(", ")
+        )));
+    }
     if matches!(format, AuditFormat::Plain) {
         ui::step("External-prover replay (Lean 4 + Coq/Rocq + Isabelle/HOL)");
     }
@@ -3015,21 +3046,19 @@ pub fn audit_external_prover_replay_with_format(
                 reason,
             )));
         }
-        std::fs::create_dir_all(&report_dir).ok();
+        std::fs::create_dir_all(&report_dir)?;
         let coq = CoqBackend::new();
         let lean = LeanBackend::new();
         let isabelle = IsabelleBackend::new();
-        std::fs::write(report_dir.join(coq.output_filename()), exporter.emit(&coq)).ok();
+        std::fs::write(report_dir.join(coq.output_filename()), exporter.emit(&coq))?;
         std::fs::write(
             report_dir.join(lean.output_filename()),
             exporter.emit(&lean),
-        )
-        .ok();
+        )?;
         std::fs::write(
             report_dir.join(isabelle.output_filename()),
             exporter.emit(&isabelle),
-        )
-        .ok();
+        )?;
     }
 
     let coq_export = report_dir.join("kernel_soundness.v");
@@ -3059,7 +3088,7 @@ pub fn audit_external_prover_replay_with_format(
  // Step 3 — render report.
     match format {
         AuditFormat::Plain => print_external_prover_replay_plain(&reports, strict),
-        AuditFormat::Json => print_external_prover_replay_json(&reports, strict, &report_dir),
+        AuditFormat::Json => print_external_prover_replay_json(&reports, strict, &report_dir)?,
     }
 
  // Step 4 — exit verdict.
@@ -3194,7 +3223,7 @@ fn replay_lean(manifest_dir: &Path, lean_export: &Path) -> BackendReport {
             } else if total_ious > 0 {
                 ReplayVerdict::IouOnly { sorry_count: total_ious }
             } else {
-                ReplayVerdict::Clean
+                ReplayVerdict::SchemaElaborated
             };
             BackendReport {
                 backend: "lean",
@@ -3328,7 +3357,7 @@ fn replay_coq(manifest_dir: &Path, coq_export: &Path) -> BackendReport {
                     sorry_count: total_ious,
                 }
             } else {
-                ReplayVerdict::Clean
+                ReplayVerdict::SchemaElaborated
             };
             BackendReport {
                 backend: "coq",
@@ -3355,14 +3384,13 @@ fn replay_coq(manifest_dir: &Path, coq_export: &Path) -> BackendReport {
 
 /// Replay the kernel-soundness export through Isabelle/HOL.
 ///
-/// We invoke `isabelle process -T KernelSoundness -d <dir>` which
-/// type-checks the theory file in non-interactive batch mode.  The
+/// A private session names the current generated theory explicitly. Successful
+/// elaboration does not establish an axiom-dependency audit. The
 /// Isabelle binary is auto-discovered from the standard macOS cask
 /// install (`/Applications/Isabelle*.app/bin/isabelle`), the
 /// Linux apt path (`/usr/bin/isabelle`), or `$PATH`.  Absence is
 /// reported as `not_available` (advisory unless `--strict`).
-fn replay_isabelle(manifest_dir: &Path, isabelle_export: &Path) -> BackendReport {
-    use std::process::Command;
+fn replay_isabelle(_manifest_dir: &Path, isabelle_export: &Path) -> BackendReport {
     use std::time::Instant;
 
     // Auto-discovery: Isabelle 2025-2 macOS cask, Homebrew Cellar
@@ -3394,56 +3422,17 @@ fn replay_isabelle(manifest_dir: &Path, isabelle_export: &Path) -> BackendReport
         };
     }
 
-    let isa_dir = find_verification_root(manifest_dir)
-        .map(|v| v.join("external").join("isabelle"))
-        .unwrap_or_else(|| manifest_dir.join("verification").join("external").join("isabelle"));
-    if !isa_dir.exists() {
-        return BackendReport {
-            backend: "isabelle",
-            invocation: format!("{} process -T KernelSoundness", isabelle.display()),
-            duration_ms: 0,
-            verdict: ReplayVerdict::NotAvailable {
-                hint: format!("Isabelle workspace missing at {}", isa_dir.display()),
-            },
-            stdout_tail: String::new(),
-            stderr_tail: String::new(),
-        };
-    }
-
-    // Sync the freshly-emitted .thy file into the Isabelle workspace.
-    let isa_target = isa_dir.join("KernelSoundness.thy");
-    if let Err(e) = std::fs::copy(isabelle_export, &isa_target) {
-        return BackendReport {
-            backend: "isabelle",
-            invocation: format!(
-                "cp {} {}",
-                isabelle_export.display(),
-                isa_target.display()
-            ),
-            duration_ms: 0,
-            verdict: ReplayVerdict::HardError {
-                error_count: 1,
-                sample: vec![format!("sync failed: {}", e)],
-            },
-            stdout_tail: String::new(),
-            stderr_tail: String::new(),
-        };
-    }
-
-    // `isabelle build -d . -v KernelSoundness` re-elaborates the
-    // theory + session in non-interactive batch mode.  Errors surface
-    // on stderr with `*** ` prefix; honest `oops` declarations emit
-    // their `Step "oops" successful` message on stdout.
     let started = Instant::now();
-    let invocation = format!(
-        "{} build -d . -v KernelSoundness (cwd: {})",
-        isabelle.display(),
-        isa_dir.display(),
-    );
-    let output = Command::new(&isabelle)
-        .args(["build", "-d", ".", "-v", "KernelSoundness"])
-        .current_dir(&isa_dir)
-        .output();
+    let invocation = format!("{} build -d . -v KernelSoundness (isolated generated session)", isabelle.display());
+    let output = std::fs::read(isabelle_export).and_then(|input| {
+        let expected = verum_kernel::soundness::SoundnessExporter::new()
+            .emit(&verum_kernel::soundness::isabelle::IsabelleBackend::new());
+        if input != expected.as_bytes() {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData,
+                "Isabelle input differs from the current generated schema"));
+        }
+        super::audit_schema_replay::isabelle(&isabelle, &input)
+    });
     let duration_ms = started.elapsed().as_millis();
 
     match output {
@@ -3452,40 +3441,21 @@ fn replay_isabelle(manifest_dir: &Path, isabelle_export: &Path) -> BackendReport
             let stderr = String::from_utf8_lossy(&out.stderr).to_string();
             let combined = format!("{stdout}\n{stderr}");
             // Isabelle batch-mode prints `*** Error` for hard errors.
-            // We treat any `***` as a hard-error indicator.  Honest
-            // IOUs are `oops` declarations — counted by re-reading the
-            // emitted source.
+            // We treat any `***` as a hard-error indicator. The source and
+            // session are bound by the isolated replay worker.
             let mut hard_errors: Vec<String> = Vec::new();
             for line in combined.lines() {
                 if line.starts_with("***") || line.contains("\n***") {
                     hard_errors.push(line.to_string());
                 }
             }
-            // IOUs in Isabelle: `oops` declarations (legacy shape) +
-            // per-rule `_iou ::` lines inside the `axiomatization`
-            // block (post-FV-9 shape).  Both are counted uniformly.
-            let (oops_count, axiom_iou_count) = std::fs::read_to_string(&isa_target)
-                .map(|s| {
-                    let oops = s.matches("\n  oops").count();
-                    let ax = s
-                        .lines()
-                        .filter(|l| l.contains("_iou ::"))
-                        .count();
-                    (oops, ax)
-                })
-                .unwrap_or((0, 0));
-            let total_ious = oops_count + axiom_iou_count;
             let verdict = if !out.status.success() || !hard_errors.is_empty() {
                 ReplayVerdict::HardError {
                     error_count: hard_errors.len().max(1),
                     sample: hard_errors.into_iter().take(8).collect(),
                 }
-            } else if total_ious > 0 {
-                ReplayVerdict::IouOnly {
-                    sorry_count: total_ious,
-                }
             } else {
-                ReplayVerdict::Clean
+                ReplayVerdict::SchemaElaborated
             };
             BackendReport {
                 backend: "isabelle",
@@ -3555,13 +3525,15 @@ fn print_external_prover_replay_plain(reports: &[BackendReport], strict: bool) {
     println!();
     println!("{}", "External-prover replay".bold());
     println!("{}", "─".repeat(40).dimmed());
+    println!("  Scope: backend-specific schema elaboration; axiom dependencies were not inspected.");
+    println!("  This run does not establish Rust checker correspondence.");
     if reports.is_empty() {
         println!("  (no backends selected)");
         return;
     }
     for r in reports {
         let verdict_label = match &r.verdict {
-            ReplayVerdict::Clean => format!("{}", "clean".green().bold()),
+            ReplayVerdict::SchemaElaborated => format!("{}", "schema elaborated".green().bold()),
             ReplayVerdict::IouOnly { sorry_count } => format!(
                 "{} ({} IOU{})",
                 "iou-only".cyan().bold(),
@@ -3616,6 +3588,8 @@ fn print_external_prover_replay_plain(reports: &[BackendReport], strict: bool) {
             "  {} backend(s) not available, but --strict requires all installed.",
             "!".yellow()
         );
+    } else if reports.iter().all(|r| matches!(r.verdict, ReplayVerdict::NotAvailable { .. })) {
+        println!("  No backend ran; schema elaboration remains unverified.");
     } else {
         println!(
             "  {} all reachable backends accept the export (modulo declared IOUs).",
@@ -3628,7 +3602,7 @@ fn print_external_prover_replay_json(
     reports: &[BackendReport],
     strict: bool,
     report_dir: &Path,
-) {
+) -> Result<()> {
     let any_hard = reports
         .iter()
         .any(|r| matches!(r.verdict, ReplayVerdict::HardError { .. }));
@@ -3636,14 +3610,18 @@ fn print_external_prover_replay_json(
         .iter()
         .any(|r| matches!(r.verdict, ReplayVerdict::NotAvailable { .. }));
     let payload = serde_json::json!({
-        "schema_version": 1,
+        "schema_version": 2,
         "command": "audit-external-prover-replay",
         "strict": strict,
         "backends": reports,
+        "backend_models": kernel_schema_backend_coverage(&verum_kernel::soundness::SoundnessExporter::new()),
+        "axiom_dependencies": "not_inspected",
+        "implementation_correspondence": "not_established",
         "summary": {
             "any_hard_error": any_hard,
             "any_not_available": any_unavail,
-            "passes": !any_hard && !(strict && any_unavail),
+            "execution_passes": reports.iter().any(|r| matches!(r.verdict, ReplayVerdict::SchemaElaborated | ReplayVerdict::IouOnly { .. })) && !any_hard && !(strict && any_unavail),
+            "schema_elaboration_complete": !reports.is_empty() && reports.iter().all(|r| matches!(r.verdict, ReplayVerdict::SchemaElaborated)),
         },
         "exports_dir": report_dir.display().to_string(),
     });
@@ -3653,13 +3631,11 @@ fn print_external_prover_replay_json(
         .map(|p| p.join("external-prover-replay.json"))
         .unwrap_or_else(|| std::path::PathBuf::from("external-prover-replay.json"));
     if let Some(parent) = report_path.parent() {
-        std::fs::create_dir_all(parent).ok();
+        std::fs::create_dir_all(parent)?;
     }
-    let _ = std::fs::write(
-        &report_path,
-        serde_json::to_string_pretty(&payload).unwrap(),
-    );
+    super::audit_execution::publish(&report_path, &payload)?;
     println!("{}", serde_json::to_string_pretty(&payload).unwrap());
+    Ok(())
 }
 
 // =============================================================================
@@ -6085,16 +6061,25 @@ pub fn audit_soundness_iou_with_format(format: AuditFormat) -> Result<()> {
     let exporter = SoundnessExporter::new();
 
  // Group admits by RuleCategory. Within each category sort by
- // rule_name for stable ordering. `DischargedByFramework` rules
- // are tracked separately — they're L4-acceptable but downstream
- // of an external proof.
+ // rule_name for stable ordering. Unverified framework references
+ // remain separate from assumptions and unsupported admission.
     let mut by_category: BTreeMap<&'static str, Vec<&verum_kernel::soundness::RuleSpec>> =
         BTreeMap::new();
     let mut total_proved = 0usize;
     let mut total_admitted = 0usize;
-    let mut total_discharged = 0usize;
+    let mut total_unverified_framework_references = 0usize;
+    let mut total_unsupported = 0usize;
+    let mut total_model_unavailable = 0usize;
     for rule in exporter.rules() {
         match &rule.status {
+            LemmaStatus::Unsupported { .. } => {
+                total_unsupported += 1;
+                by_category.entry(rule.category.tag()).or_default().push(rule);
+            }
+            LemmaStatus::ModelUnavailable { .. } => {
+                total_model_unavailable += 1;
+                by_category.entry(rule.category.tag()).or_default().push(rule);
+            }
             LemmaStatus::Proved { .. } => total_proved += 1,
             LemmaStatus::Admitted { .. } => {
                 total_admitted += 1;
@@ -6103,8 +6088,8 @@ pub fn audit_soundness_iou_with_format(format: AuditFormat) -> Result<()> {
                     .or_default()
                     .push(rule);
             }
-            LemmaStatus::DischargedByFramework { .. } => {
-                total_discharged += 1;
+            LemmaStatus::UnverifiedFrameworkReference { .. } => {
+                total_unverified_framework_references += 1;
                 by_category
                     .entry(rule.category.tag())
                     .or_default()
@@ -6136,12 +6121,14 @@ pub fn audit_soundness_iou_with_format(format: AuditFormat) -> Result<()> {
             .iter()
             .map(|r| {
                 let status_kind = match &r.status {
+                    LemmaStatus::Unsupported { .. } => "Unsupported",
+                    LemmaStatus::ModelUnavailable { .. } => "ModelUnavailable",
                     LemmaStatus::Proved { .. } => "Proved",
                     LemmaStatus::Admitted { .. } => "Admitted",
-                    LemmaStatus::DischargedByFramework { .. } => "DischargedByFramework",
+                    LemmaStatus::UnverifiedFrameworkReference { .. } => "UnverifiedFrameworkReference",
                 };
-                let discharge = match &r.status {
-                    LemmaStatus::DischargedByFramework {
+                let framework_reference = match &r.status {
+                    LemmaStatus::UnverifiedFrameworkReference {
                         lemma_path,
                         framework,
                         citation,
@@ -6158,8 +6145,8 @@ pub fn audit_soundness_iou_with_format(format: AuditFormat) -> Result<()> {
                     "rule_name": r.rule_name,
                     "lemma_name": r.lemma_name,
                     "status": status_kind,
-                    "iou_reason": r.status.admit_reason().unwrap_or(""),
-                    "discharge": discharge,
+                    "reason": r.status.explanation().unwrap_or(""),
+                    "framework_reference": framework_reference,
                     "premise_arity": r.premise_arity,
                     "has_side_condition": r.has_side_condition,
                 })
@@ -6168,19 +6155,23 @@ pub fn audit_soundness_iou_with_format(format: AuditFormat) -> Result<()> {
         category_payloads.insert(
             category_tag.to_string(),
             serde_json::json!({
-                "admit_count": entries.len(),
-                "admits": entries,
+                "unresolved_count": entries.len(),
+                "rules": entries,
             }),
         );
     }
 
     let payload = serde_json::json!({
-        "schema_version": 2,
+        "schema_version": 3,
         "command": "audit-soundness-iou",
         "total_rules": exporter.rules().len(),
         "total_proved": total_proved,
         "total_admitted": total_admitted,
-        "total_discharged_by_framework": total_discharged,
+        "total_unverified_framework_references": total_unverified_framework_references,
+        "total_unsupported": total_unsupported,
+        "total_model_unavailable": total_model_unavailable,
+        "scope": "abstract_admission_schemas",
+        "implementation_correspondence": "not_established",
         "categories": category_payloads,
     });
     let _ = std::fs::write(&json_path, serde_json::to_string_pretty(&payload).unwrap());
@@ -6191,7 +6182,9 @@ pub fn audit_soundness_iou_with_format(format: AuditFormat) -> Result<()> {
                 exporter.rules().len(),
                 total_proved,
                 total_admitted,
-                total_discharged,
+                total_unverified_framework_references,
+                total_unsupported,
+                total_model_unavailable,
                 &by_category,
                 &json_path,
             );
@@ -6208,7 +6201,9 @@ fn print_soundness_iou_plain(
     total_rules: usize,
     total_proved: usize,
     total_admitted: usize,
-    total_discharged: usize,
+    total_unverified_framework_references: usize,
+    total_unsupported: usize,
+    total_model_unavailable: usize,
     by_category: &std::collections::BTreeMap<&'static str, Vec<&verum_kernel::soundness::RuleSpec>>,
     json_path: &std::path::Path,
 ) {
@@ -6217,25 +6212,12 @@ fn print_soundness_iou_plain(
     println!("Kernel-soundness IOU dashboard");
     println!("────────────────────────────────────────");
     println!(
-        "  {} kernel rules total — {} structurally proved, {} admitted with open IOU, {} discharged by framework citation.",
-        total_rules, total_proved, total_admitted, total_discharged,
+        "  {} kernel rules total — {} schema-only entries, {} admitted with open IOU, {} unverified framework references, {} unsupported, {} unavailable models.",
+        total_rules, total_proved, total_admitted, total_unverified_framework_references, total_unsupported, total_model_unavailable,
     );
     println!();
-    if total_admitted == 0 && total_discharged == 0 {
-        println!(
-            "  ✓ Every kernel rule is structurally proved — trusted base reduced to ZFC + 2-inacc + Verum kernel rules."
-        );
-        return;
-    }
-    if total_admitted == 0 {
-        println!(
-            "  ✓ Zero open IOUs — every admitted rule is discharged by upstream framework citation."
-        );
-        println!(
-            "    L4-acceptable: the trust base is ZFC + 2-inacc + cited mathlib4 / Coq stdlib proofs."
-        );
-        println!();
-    }
+    println!("  Scope: abstract admission schemas; unsupported rules are excluded.");
+    println!("  This inventory does not prove Rust checker correspondence.");
 
  // Stable category ordering (matches the JSON output).
     let category_order = [
@@ -6253,13 +6235,13 @@ fn print_soundness_iou_plain(
                 continue;
             }
             println!(
-                "  {} ({} admit{})",
+                "  {} ({} unresolved rule{})",
                 category_tag,
                 rules.len(),
                 if rules.len() == 1 { "" } else { "s" },
             );
             for rule in rules {
-                let reason = rule.status.admit_reason().unwrap_or("");
+                let reason = rule.status.explanation().unwrap_or("");
                 println!("    • {:<28} — {}", rule.rule_name, reason);
             }
             println!();
@@ -6267,9 +6249,7 @@ fn print_soundness_iou_plain(
     }
     println!("  Report: {}", json_path.display());
     println!();
-    println!("  Each admit's IOU is a concrete piece of meta-theory awaiting discharge.");
-    println!("  As discharges land, the admit count drops; the trusted base shrinks; Verum");
-    println!("  approaches \"constructively verified from first principles\" (Phase 1 goal).");
+    println!("  Schema status, cited assumptions and unsupported admission are separate obligations.");
 }
 
 // =============================================================================

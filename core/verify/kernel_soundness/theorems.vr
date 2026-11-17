@@ -1,86 +1,5 @@
-// =============================================================================
-// kernel_soundness.theorems — per-rule soundness lemmas (35 statements)
-// =============================================================================
-//
-
-// One soundness lemma per `KernelRule`. The shape is:
-//
-
-//  lemma K_<Rule>_sound: forall d: Derivation.
-//  d.rule == KernelRule.K<Rule>
-//  /\ premises_well_typed(d)
-//  /\ side_conditions_hold(d)
-//  -> conclusion_well_typed(d)
-//
-
-// **Audit-able TCB principle.** Every lemma is either:
-//
-
-//  * **Proved structurally** in Verum, the proof being a function
-//  consuming the `Derivation` evidence and producing a
-//  `WellTyped(d.conclusion)` witness. The proof is run by
-//  `verum audit --kernel-soundness` so any code drift surfaces
-//  immediately.
-//
-
-//  * **Admitted with a concrete cost annotation** via `Admit { reason }`.
-//  The reason names the missing meta-theory (e.g., "requires
-//  positivity-of-W-types decision procedure" for K-Pos in full
-//  generality) and is preserved verbatim into the Coq `Admitted.`
-//  and Lean `sorry` emissions, so a foreign reviewer sees the
-//  same gap Verum sees. Admits are *not* hand-waves — they are
-//  load-bearing IOUs against future meta-theoretic work, and the
-//  audit gate's report enumerates them so they can never be
-//  forgotten.
-//
-
-// **What's proved / discharged / admitted.**
-//
-
-// Proved (23): K-Var, K-Univ, K-FwAx (Prop side-condition
-//  discharge), K-Pos (Berardi-shape rejection by structural check
-//  on constructor signatures); plus 9 IOUs discharged in
-//  successive passes by folding their content into structural
-//  premises of the corresponding Typing constructor: K-Quot-Elim,
-//  K-Elim, K-Universe-Ascent, K-Refine, K-Refine-Omega,
-//  K-Inductive, K-Epsilon-Of, K-Alpha-Of, K-Modal-Big-And; plus
-//  10 status-fixes (already structural in the Lean / Coq /
-//  Isabelle export since FV-9 with no IOU axiom; .vr LemmaStatus
-//  updated to match): K-Modal-Box, K-Modal-Diamond, K-Shape,
-//  K-Flat, K-Sharp, K-Path-Ty-Form, K-Refl-Intro, K-Refine-Erase,
-//  K-Quot-Form, K-Quot-Intro.
-//
-
-// Discharged-by-framework (7): K-Pi-Form, K-Lam-Intro, K-App-Elim,
-//  K-Sigma-Form, K-Pair-Intro, K-Fst-Elim, K-Snd-Elim.  Each
-//  cites a specific upstream proof in mathlib4 / Coq stdlib /
-//  ZFC-foundational.  Local proof is still admitted but the IOU
-//  is closed.
-//
-
-// Admitted (8): the remaining rules — Cubical (4:
-//  K-Path-Over-Form, K-HComp, K-Transp, K-Glue), Refinement (1:
-//  K-Refine-Intro), SMT (1: K-Smt), Diakrisis (2: K-Eps-Mu,
-//  K-Round-Trip).  Three buckets fully empty: Quotient,
-//  Inductive, Structural.
-//
-
-// IOU trajectory:  27 → 17 → 16 → 14 → 12 → 11 → 8  (pre-FV-9,
-// post-FV-9 structural fragment, post-K_Quot_Elim, post-K_Elim
-// + K_Universe_Ascent, post-K_Refine + K_Refine_Omega,
-// post-K_Inductive, post-K_Epsilon_Of + K_Alpha_Of +
-// K_Modal_Big_And).
-//
-
-// **Cross-export contract.** The Coq emitter walks
-// `lemma_admit_reason` for each lemma; if `Maybe.Some(reason)`, the .v file
-// emits `Admitted.` with `(* reason: <reason> *)`.  For
-// `DischargedByFramework`, the citation appears in the `Admitted.`
-// comment with framework attribution.  If `Maybe.None`, the .v file emits
-// the proof tactics from `coq_proof_text`.  Same for Lean.  This is
-// what makes the cross-export an *honest* foreign re-check rather
-// than a rubber-stamp.
-// =============================================================================
+// Per-rule inventory of the abstract kernel-rule schemas, missing model
+// judgments, executable refusals and unverified framework references.
 
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
@@ -89,69 +8,38 @@
 )
 module core.verify.kernel_soundness.theorems;
 
-mount core.verify.kernel_soundness.model.{CoreTerm, CoreType, UniverseLevel, universe_is_prop};
-mount core.verify.kernel_soundness.judgment.{
-    Context, Judgment, SideCondition, Derivation, KernelRule,
-    context_lookup, kernel_rule_name,
-};
-mount core.verify.kernel_soundness.rules.{
-    PremiseShape, RuleCategory,
-    rule_premises_required, rule_side_conditions_required,
-    rule_conclusion_shape, rule_category,
-};
+mount core.verify.kernel_soundness.judgment.{KernelRule, kernel_rule_name};
 
 // =============================================================================
-// LemmaStatus — proved or admitted (with a concrete reason)
+// LemmaStatus — structural schema, unsupported rule, admission or citation
 // =============================================================================
 
-/// The proof status of a per-rule soundness lemma.
-///
-
-///  * `Proved` — Verum has a structural proof in this corpus. The
-///  audit gate runs the proof and the cross-export emits the
-///  corresponding tactic chain in Coq/Lean.
-///  * `Admitted { reason }` — a concrete IOU. `reason` describes
-///  the meta-theoretic prerequisite; it appears in audit reports
-///  and is preserved into Coq `Admitted.` / Lean `sorry`.
-///  * `DischargedByFramework { lemma_path, framework, citation }` —
-///  a closed IOU.  The lemma is admitted in the local proof
-///  corpus but its premise is discharged by a vetted upstream
-///  proof (mathlib4 / Coq stdlib / ZFC-foundational).  Audit-
-///  acceptable at L4 because the citation pins a specific
-///  upstream artifact the reviewer can independently verify.
-///  Lifecycle (per IOU): `Admitted { reason } →
-///  DischargedByFramework → Proved` once the proof-term replay
-///  lands.
+/// Proved classifies a rule in the abstract schema. Each backend's encoding
+/// determines the assumptions its declaration uses. Unsupported records an
+/// executable refusal. ModelUnavailable identifies a native check outside the
+/// model. Admitted records an unresolved obligation, and UnverifiedFrameworkReference
+/// identifies an upstream citation whose applicability still requires verification.
 public type LemmaStatus is
     | Proved
-    | Admitted { reason: Text }
-    | DischargedByFramework {
-        lemma_path: Text,
-        framework: Text,
-        citation: Text,
+    | Unsupported { public reason: Text }
+    | ModelUnavailable { public reason: Text }
+    | Admitted { public reason: Text }
+    | UnverifiedFrameworkReference {
+        public lemma_path: Text,
+        public framework: Text,
+        public citation: Text,
     };
 
-/// Project the soundness status of a kernel rule. This is the
-/// public accountability surface: every admit is enumerated, every
-/// proof is named, and the cross-export uses the result to decide
-/// whether to emit a tactic chain or an `Admitted` marker.
+/// Classify each rule without conflating unsupported rules with assumptions.
 public pure fn lemma_status(r: KernelRule) -> LemmaStatus {
     match r {
-        // ---------- PROVED structurally in Verum --------------------------
-        // 4 placeholder structural rules + 5 IOUs discharged via
-        // structural premises folded into the corresponding Typing
-        // constructor (K_Quot_Elim / K_Elim / K_Universe_Ascent /
-        // K_Refine / K_Refine_Omega).
+        // These entries concern the abstract rule schemas. A correspondence
+        // proof must also relate the executable checker's decisions to the model.
         KernelRule.KVar => LemmaStatus.Proved,
         KernelRule.KUniv => LemmaStatus.Proved,
-        KernelRule.KFwAx => LemmaStatus.Proved,
-        KernelRule.KPos => LemmaStatus.Proved,
         KernelRule.KQuotElim => LemmaStatus.Proved,
-        KernelRule.KElim => LemmaStatus.Proved,
         KernelRule.KUniverseAscent => LemmaStatus.Proved,
         KernelRule.KRefine => LemmaStatus.Proved,
-        KernelRule.KRefineOmega => LemmaStatus.Proved,
-        KernelRule.KInductive => LemmaStatus.Proved,
         KernelRule.KEpsilonOf => LemmaStatus.Proved,
         KernelRule.KAlphaOf => LemmaStatus.Proved,
         KernelRule.KModalBigAnd => LemmaStatus.Proved,
@@ -162,21 +50,42 @@ public pure fn lemma_status(r: KernelRule) -> LemmaStatus {
         KernelRule.KSharp => LemmaStatus.Proved,
         KernelRule.KPathTyForm => LemmaStatus.Proved,
         KernelRule.KPathOverForm => LemmaStatus.Proved,
-        KernelRule.KHComp => LemmaStatus.Proved,
         KernelRule.KTransp => LemmaStatus.Proved,
-        KernelRule.KGlue => LemmaStatus.Proved,
         KernelRule.KReflIntro => LemmaStatus.Proved,
         KernelRule.KRefineErase => LemmaStatus.Proved,
         KernelRule.KRefineIntro => LemmaStatus.Proved,
         KernelRule.KQuotForm => LemmaStatus.Proved,
         KernelRule.KQuotIntro => LemmaStatus.Proved,
-        KernelRule.KSmt => LemmaStatus.Proved,
 
-        // ---------- DISCHARGED-BY-FRAMEWORK -------------------------------
-        // Closed IOUs with cited upstream proofs in mathlib4 /
-        // Coq stdlib / ZFC.  Audit-acceptable at L4 because the
-        // citation pins a specific upstream file.
-        KernelRule.KPiForm => LemmaStatus.DischargedByFramework {
+        KernelRule.KRefineOmega => LemmaStatus.ModelUnavailable {
+            reason: "The export lacks the ordinal modal-depth inequality checked by the executable omega formation rule",
+        },
+        KernelRule.KInductive => LemmaStatus.ModelUnavailable {
+            reason: "The export lacks the declaration registry, parameter checks and declared universe used for inductive formation",
+        },
+        KernelRule.KPos => LemmaStatus.ModelUnavailable {
+            reason: "The export lacks the checked strict-positivity judgment for constructor argument types",
+        },
+        KernelRule.KElim => LemmaStatus.ModelUnavailable {
+            reason: "The export lacks the registered declaration and the typing judgment for every constructor branch",
+        },
+        KernelRule.KFwAx => LemmaStatus.ModelUnavailable {
+            reason: "The export lacks the authoritative axiom registry lookup and coordinate policy used by the executable kernel",
+        },
+
+        KernelRule.KHComp => LemmaStatus.Unsupported {
+            reason: "The executable kernel refuses composition until partial-element support and boundary coherence are checked",
+        },
+        KernelRule.KGlue => LemmaStatus.Unsupported {
+            reason: "The executable kernel refuses gluing until equivalence and boundary coherence are checked",
+        },
+        KernelRule.KSmt => LemmaStatus.Unsupported {
+            reason: "Opaque SMT envelopes have no checked reconstruction and are refused by the executable kernel",
+        },
+
+        // ---------- UNVERIFIED FRAMEWORK REFERENCES -----------------------
+        // The inventory preserves the cited source for each outstanding obligation.
+        KernelRule.KPiForm => LemmaStatus.UnverifiedFrameworkReference {
             lemma_path: Text.from(
                 "core.verify.kernel_v0.lemmas.subst.subst_preserves_typing"
             ),
@@ -185,14 +94,14 @@ public pure fn lemma_status(r: KernelRule) -> LemmaStatus {
                 "Mathlib.LambdaCalculus.LambdaPi.Substitution.subst_preserves_typing"
             ),
         },
-        KernelRule.KLamIntro => LemmaStatus.DischargedByFramework {
+        KernelRule.KLamIntro => LemmaStatus.UnverifiedFrameworkReference {
             lemma_path: Text.from(
                 "core.verify.kernel_v0.lemmas.cartesian.cartesian_closure_for_pi"
             ),
             framework: Text.from("mathlib4"),
             citation: Text.from("Mathlib.CategoryTheory.Closed.Cartesian"),
         },
-        KernelRule.KAppElim => LemmaStatus.DischargedByFramework {
+        KernelRule.KAppElim => LemmaStatus.UnverifiedFrameworkReference {
             lemma_path: Text.from(
                 "core.verify.kernel_v0.lemmas.subst.subst_preserves_typing + \
                  core.verify.kernel_v0.lemmas.beta.church_rosser_confluence"
@@ -203,7 +112,7 @@ public pure fn lemma_status(r: KernelRule) -> LemmaStatus {
                  Mathlib.Computability.Lambda.ChurchRosser"
             ),
         },
-        KernelRule.KSigmaForm => LemmaStatus.DischargedByFramework {
+        KernelRule.KSigmaForm => LemmaStatus.UnverifiedFrameworkReference {
             lemma_path: Text.from(
                 "core.verify.kernel_v0.lemmas.subst.subst_preserves_typing"
             ),
@@ -213,7 +122,7 @@ public pure fn lemma_status(r: KernelRule) -> LemmaStatus {
                  (Sigma form via duality)"
             ),
         },
-        KernelRule.KPairIntro => LemmaStatus.DischargedByFramework {
+        KernelRule.KPairIntro => LemmaStatus.UnverifiedFrameworkReference {
             lemma_path: Text.from(
                 "core.verify.kernel_v0.lemmas.subst.subst_preserves_typing"
             ),
@@ -222,7 +131,7 @@ public pure fn lemma_status(r: KernelRule) -> LemmaStatus {
                 "Mathlib.LambdaCalculus.LambdaPi.Substitution + dependent-product structure"
             ),
         },
-        KernelRule.KFstElim => LemmaStatus.DischargedByFramework {
+        KernelRule.KFstElim => LemmaStatus.UnverifiedFrameworkReference {
             lemma_path: Text.from(
                 "core.verify.kernel_v0.lemmas.eta.function_extensionality"
             ),
@@ -231,7 +140,7 @@ public pure fn lemma_status(r: KernelRule) -> LemmaStatus {
                 "Sigma-projection eta-rule (fst (a, b) ≡ a) — derivable from extensionality"
             ),
         },
-        KernelRule.KSndElim => LemmaStatus.DischargedByFramework {
+        KernelRule.KSndElim => LemmaStatus.UnverifiedFrameworkReference {
             lemma_path: Text.from(
                 "core.verify.kernel_v0.lemmas.eta.function_extensionality"
             ),
@@ -240,418 +149,59 @@ public pure fn lemma_status(r: KernelRule) -> LemmaStatus {
                 "Sigma-projection eta-rule (snd (a, b) : B[a/x]) — derivable from extensionality + subst"
             ),
         },
-        KernelRule.KEpsMu => LemmaStatus.DischargedByFramework {
-            lemma_path: Text.from(
-                "kernel_v0.lemmas.biadjunction_triangle_identities"
-            ),
-            framework: Text.from("category-theory"),
-            citation: Text.from(
-                "Mac Lane (Categories for the Working Mathematician, 2nd ed., \
-                 Theorem IV.7.3) — every biadjunction satisfies the triangle \
-                 identities; specialised to M ⊣ A in Proposition 5.1 + \
-                 Corollary 5.10 of the Verum Diakrisis paper."
-            ),
+        KernelRule.KEpsMu => LemmaStatus.Unsupported {
+            reason: "No executable rule authorizes assigning an arbitrary articulation the type of an enactment; the biadjunction correspondence remains unverified",
         },
-        KernelRule.KRoundTrip => LemmaStatus.DischargedByFramework {
-            lemma_path: Text.from(
-                "kernel_v0.lemmas.bridge_audit_round_trip"
-            ),
-            framework: Text.from("verum-internal"),
-            citation: Text.from(
-                "Bridge-audit completeness specification \
-                 (docs/architecture/verum-kernel-audit.md \
-                 §bridge-encode-decode-roundtrip): every well-typed \
-                 BridgeAudit trail recovers the original term up to \
-                 normalisation, witnessed by the kernel's internal \
-                 round-trip property test corpus."
-            ),
+        KernelRule.KRoundTrip => LemmaStatus.Unsupported {
+            reason: "No executable rule authorizes assigning an arbitrary term a recovered type; an encoding round-trip requires checked source correspondence",
         },
-        // Cubical — large-step missing for hcomp/transp/glue regularity
-        // (KPathTyForm and KPathOverForm both Proved above —
-        //  structural premises capturing type-formation; the
-        //  dependent-path endpoint relations remain the kernel's
-        //  runtime contract.)
-        // (KReflIntro Proved above — single structural premise
-        // in the export since FV-9.)
-        // (KHComp Proved above — two structural premises capturing
-        //  target-type well-formedness + base-value typing; CCHM
-        //  hcomp regularity + Kan-filling remain the kernel's runtime
-        //  contract.)
-        // (KTransp states ordinary path transport: source and target are
-        //  types, the path connects them, and the value inhabits source.
-        //  Generalized cubical regularity is outside this rule.)
-        // (KGlue Proved above — single structural premise pins the
-        //  carrier type's universe; phi/fiber/equiv compositional
-        //  structure remains the kernel's runtime contract.)
-        // Refinement
-        // (KRefine, KRefineOmega, KRefineIntro, KRefineErase all
-        //  Proved above — predicate typed at Pi x base (Universe 0)
-        //  captures the Bool-valued-predicate intent; the
-        //  predicate-truth-at-introduced-value obligation is the
-        //  kernel's runtime contract, mirroring K_Quot_Elim.)
-        // Quotient
-        // (KQuotForm + KQuotIntro Proved above — structural
-        // premises in the export since FV-9.  The
-        // equivalence-relation properties refl/symm/trans are the
-        // kernel's input contract.)
-        // (KQuotElim Proved above — structural premises mirroring
-        // K_Quot_Form / K_Quot_Intro.)
-
-        // Inductive — fully empty bucket
-        // (KInductive Proved above — premise-free at the export
-        // layer; strict-positivity is the kernel's input contract.
-        // KElim Proved above — same template as K_Quot_Elim.)
-        // SMT
-        // (KSmt Proved above — single structural premise pins the
-        //  target type's universe-form; SMT-cert replay correctness
-        //  is the kernel's runtime contract, mirroring K_FwAx's
-        //  framework-axiom-admission discipline.)
-        // Diakrisis
-        // (KEpsMu DischargedByFramework above — biadjunction
-        //  triangle identities cited from Mac Lane (Categories for
-        //  the Working Mathematician, Theorem IV.7.3); structural
-        //  premise (`enactment : ty`) reflects the coercion shape.)
-        // (KUniverseAscent Proved above — collapses onto t_univ
-        // for u32-bounded universes; the κ-tower-well-foundedness
-        // intent is vacuous at the operational layer.)
-        // (KRoundTrip DischargedByFramework above — bridge-audit
-        //  completeness cited from the kernel's internal
-        //  bridge-audit specification; structural premise
-        //  (`recovered : Universe i`) reflects the coercion shape.)
-        // (KEpsilonOf Proved above — EpsilonOf preserves the
-        // articulation's typing; the M ⊣ A unit law is the
-        // kernel's input contract.)
-        // (KAlphaOf Proved above — counit-law analogue.)
-        // (KModalBox + KModalDiamond Proved above — wrap-preserves-
-        // typing; modal-depth recursion is the kernel's input
-        // contract.  Constructor was structural in Lean / Coq /
-        // Isabelle since FV-9; .vr status now matches.)
-        // (KModalBigAnd Proved above — premise-free; the
-        // homogeneous-typed-components discipline is the kernel's
-        // input contract, mirroring K_Inductive.)
-        // (KShape + KFlat + KSharp Proved above — wrap-preserves-
-        // typing; DCCT cohesive triple-adjunction + Shulman 2018 §3
-        // localisation lemmas are the kernel's input contract.
-        // Constructors were structural in Lean / Coq / Isabelle
-        // since FV-9; .vr status now matches.)
     }
 }
 
-/// Project: is this lemma proved (structurally) in the Verum corpus?
-/// `DischargedByFramework` is *not* counted as proved — the local
-/// proof is still admitted; it's just that the IOU is closed by an
-/// upstream citation rather than left open.
+/// Whether the abstract schema inventory classifies this entry as Proved.
 public pure fn lemma_is_proved(r: KernelRule) -> Bool {
     match lemma_status(r) {
         LemmaStatus.Proved => true,
-        LemmaStatus.Admitted { reason: _ } => false,
-        LemmaStatus.DischargedByFramework {
-            lemma_path: _,
-            framework: _,
-            citation: _,
-        } => false,
+        _ => false,
     }
 }
 
-/// Project: is this lemma's IOU closed by either a local proof or
-/// an upstream-framework citation?  Returns true for both `Proved`
-/// and `DischargedByFramework`.
-public pure fn lemma_is_closed(r: KernelRule) -> Bool {
-    match lemma_status(r) {
-        LemmaStatus.Proved => true,
-        LemmaStatus.Admitted { reason: _ } => false,
-        LemmaStatus.DischargedByFramework {
-            lemma_path: _,
-            framework: _,
-            citation: _,
-        } => true,
-    }
-}
-
-/// Project: get the admit-reason if this lemma is admitted, else Maybe.None.
-/// Cross-export emitters use this to populate the `(* reason: ... *)`
-/// comment on `Admitted.` / `sorry` lines.  For
-/// `DischargedByFramework`, returns the citation string — callers
-/// that audit "what's the trust extension" treat both cases
-/// uniformly.
+/// Return the reason for an explicit admission, excluding citations and refusals.
 public pure fn lemma_admit_reason(r: KernelRule) -> Maybe<Text> {
     match lemma_status(r) {
-        LemmaStatus.Proved => Maybe.None,
         LemmaStatus.Admitted { reason } => Maybe.Some(reason),
-        LemmaStatus.DischargedByFramework {
-            lemma_path: _,
-            framework: _,
-            citation,
-        } => Maybe.Some(citation),
+        _ => Maybe.None,
     }
 }
 
-// =============================================================================
-// Per-rule statement skeletons
-// =============================================================================
-//
+/// Return the citation text of an unverified framework reference.
+public pure fn lemma_framework_reference(r: KernelRule) -> Maybe<Text> {
+    match lemma_status(r) {
+        LemmaStatus.UnverifiedFrameworkReference {
+            lemma_path: _, framework: _, citation,
+        } => Maybe.Some(citation),
+        _ => Maybe.None,
+    }
+}
 
-// `lemma_statement(r)` produces the statement text for the soundness
-// lemma corresponding to rule `r` — pure data, no proof. The cross-
-// export emitter uses this to generate the `Lemma K_<Name>_sound : ...`
-// in Coq / `theorem K_<Name>_sound : ...` in Lean. Every emitted
-// statement carries the same shape:
-//
+/// Unsupported is a refusal, distinct from an admitted assumption.
+public pure fn lemma_unsupported_reason(r: KernelRule) -> Maybe<Text> {
+    match lemma_status(r) {
+        LemmaStatus.Unsupported { reason } => Maybe.Some(reason),
+        _ => Maybe.None,
+    }
+}
 
-//  forall d: Derivation,
-//  d.rule = K<Name> ->
-//  all_premises_well_typed(d) ->
-//  all_side_conditions_hold(d) ->
-//  well_typed(d.conclusion)
-//
+/// Identify the native check missing from the abstract model.
+public pure fn lemma_model_unavailable_reason(r: KernelRule) -> Maybe<Text> {
+    match lemma_status(r) {
+        LemmaStatus.ModelUnavailable { reason } => Maybe.Some(reason),
+        _ => Maybe.None,
+    }
+}
 
-// We render the *uniform* shape rather than per-rule custom text so
-// the foreign-tool import is mechanical. The per-rule meaning is
-// recovered from `rule_premises_required(d)` and
-// `rule_side_conditions_required(d)`, which the emitter walks
-// alongside.
-// =============================================================================
-
-/// Stable lemma-name for kernel rule `r`. Format: `K_<Name>_sound`.
-/// Used by the cross-export emitter as the foreign-tool identifier.
+/// The inventory name for the rule's lemma, including the names of omitted rules.
 public pure fn lemma_name(r: KernelRule) -> Text {
     let rule_text = kernel_rule_name(r);
     rule_text + Text.from("_sound")
-}
-
-// =============================================================================
-// Proof discharge for the structurally-proved lemmas
-// =============================================================================
-//
-
-// For each proved lemma we record:
-//  * `coq_proof_text(r)` — the exact tactic chain the cross-export
-//  should emit between `Proof.` and `Qed.` in the .v file.
-//  * `lean_proof_text(r)` — the exact tactic block for the .lean file.
-//
-
-// The proofs themselves are short because the propositions reduce to
-// inspections of structural data (a context lookup, a universe-level
-// comparison, a structural-positivity scan). Verum's own elaborator
-// would also discharge these — they're admit-free here, and the
-// cross-export ensures Coq + Lean agree.
-// =============================================================================
-
-/// Coq proof tactic for a structurally-proved lemma. Empty string
-/// for admitted lemmas (the emitter will use `Admitted.` instead).
-public pure fn coq_proof_text(r: KernelRule) -> Text {
-    match r {
-        // K-Var: variable lookup is deterministic. In Coq the proof is:
-        //  Proof. intros d Hrule Hctx Hwf. apply ctx_lookup_sound;
-        //  [exact Hrule | exact Hctx | exact Hwf]. Qed.
-        KernelRule.KVar => Text.from(
-            "  intros d Hrule Hwf. apply ctx_lookup_sound; auto."
-        ),
-        // K-Univ: universe stratification is reflexive on the conclusion shape.
-        KernelRule.KUniv => Text.from(
-            "  intros d Hrule. apply universe_form_sound."
-        ),
-        // K-FwAx: side condition `BodyInProp` carries the proof obligation.
-        // Discharge by case-analysis on the side-condition list (which contains
-        // exactly one `BodyInProp` whose witness is the universe-typing of the
-        // axiom body).
-        KernelRule.KFwAx => Text.from(
-            "  intros d Hrule Hpremises Hside.\n\
-            \  destruct Hside as [body_prop _].\n\
-            \  exact (axiom_body_typed_in_prop body_prop)."
-        ),
-        // K-Smt: discharged via T_smt — single structural premise
-        // pins the target type's universe-form; SMT-cert replay
-        // correctness is the kernel's runtime contract.
-        KernelRule.KSmt => Text.from("  exact T_smt."),
-        // K-Pos: strict-positivity rejection is a structural scan. The
-        // side condition produces a `StrictlyPositive` witness; the proof
-        // wraps it.
-        KernelRule.KPos => Text.from(
-            "  intros d Hrule Hside.\n\
-            \  destruct Hside as [strict_pos _].\n\
-            \  exact (strict_positivity_sound strict_pos)."
-        ),
-        // K-Quot-Elim: discharged via t_quot_elim — the soundness lemma
-        // takes structural premises (scrutinee at the quotient, motive
-        // at the dependent universe, case_fn at the dependent product)
-        // and concludes via the corresponding Typing constructor.
-        KernelRule.KQuotElim => Text.from(
-            "  intros; apply T_quot_elim with (base := base) (equiv := equiv) (i := i); assumption."
-        ),
-        // K-Elim: same template as K-Quot-Elim — structural premises,
-        // per-constructor case-typing as the kernel's input contract.
-        KernelRule.KElim => Text.from(
-            "  intros; apply T_elim with (scrutinee_ty := scrutinee_ty) (i := i); assumption."
-        ),
-        // K-Universe-Ascent: collapses onto T_univ for u32-bounded
-        // universes; no transfinite heights are representable.
-        KernelRule.KUniverseAscent => Text.from(
-            "  exact T_universe_ascent."
-        ),
-        // K-Refine: predicate typed at Pi x base (Universe 0)
-        // captures the Bool-valued-predicate intent.
-        KernelRule.KRefine => Text.from(
-            "  exact T_refine."
-        ),
-        // K-Refine-Omega: same shape as K-Refine; finite-universe
-        // bound vacates the ordinal-modal-depth-bound intent.
-        KernelRule.KRefineOmega => Text.from(
-            "  exact T_refine_omega."
-        ),
-        // K-Inductive: premise-free at the export layer; strict-
-        // positivity is the kernel's input contract.
-        KernelRule.KInductive => Text.from(
-            "  exact T_inductive."
-        ),
-        // K-Epsilon-Of: EpsilonOf preserves the articulation's typing.
-        KernelRule.KEpsilonOf => Text.from(
-            "  exact T_epsilon_of."
-        ),
-        // K-Alpha-Of: counit-law analogue of K-Epsilon-Of.
-        KernelRule.KAlphaOf => Text.from(
-            "  exact T_alpha_of."
-        ),
-        // K-Modal-Big-And: premise-free; homogeneous-typed-components
-        // is the kernel's input contract.
-        KernelRule.KModalBigAnd => Text.from(
-            "  exact T_modal_big_and."
-        ),
-        // K-Modal-Box / Diamond / Shape / Flat / Sharp: structural
-        // since FV-9 — wrap-preserves-typing.
-        KernelRule.KModalBox => Text.from("  exact T_modal_box."),
-        KernelRule.KModalDiamond => Text.from("  exact T_modal_diamond."),
-        KernelRule.KShape => Text.from("  exact T_shape."),
-        KernelRule.KFlat => Text.from("  exact T_flat."),
-        KernelRule.KSharp => Text.from("  exact T_sharp."),
-        // K-Path-Ty-Form / K-Refl-Intro / K-Refine-Erase /
-        // K-Quot-Form / K-Quot-Intro: structural since FV-9.
-        KernelRule.KPathTyForm => Text.from("  exact T_path_ty."),
-        KernelRule.KPathOverForm => Text.from("  exact T_path_over."),
-        KernelRule.KHComp => Text.from("  exact T_hcomp."),
-        KernelRule.KTransp => Text.from("  exact T_transp."),
-        KernelRule.KGlue => Text.from("  exact T_glue."),
-        KernelRule.KReflIntro => Text.from("  exact T_refl."),
-        KernelRule.KRefineErase => Text.from("  exact T_refine_erase."),
-        KernelRule.KRefineIntro => Text.from("  exact T_refine_intro."),
-        KernelRule.KQuotForm => Text.from("  exact T_quot_form."),
-        KernelRule.KQuotIntro => Text.from("  exact T_quot_intro."),
-        _ => Text.from(""),
-    }
-}
-
-/// Lean 4 proof tactic for a structurally-proved lemma. Same role as
-/// `coq_proof_text` but in Lean syntax.
-public pure fn lean_proof_text(r: KernelRule) -> Text {
-    match r {
-        KernelRule.KVar => Text.from(
-            "  intros d Hrule Hwf\n\
-            \  exact ctx_lookup_sound Hrule Hwf"
-        ),
-        KernelRule.KUniv => Text.from(
-            "  intros d Hrule\n\
-            \  exact universe_form_sound"
-        ),
-        KernelRule.KFwAx => Text.from(
-            "  intros d Hrule Hpremises Hside\n\
-            \  rcases Hside with ⟨body_prop, _⟩\n\
-            \  exact axiom_body_typed_in_prop body_prop"
-        ),
-        KernelRule.KPos => Text.from(
-            "  intros d Hrule Hside\n\
-            \  rcases Hside with ⟨strict_pos, _⟩\n\
-            \  exact strict_positivity_sound strict_pos"
-        ),
-        // K-Smt: structural-premises discharge via Typing.t_smt.
-        KernelRule.KSmt => Text.from(
-            "  exact @Typing.t_smt _ _ _ _ _"
-        ),
-        // K-Quot-Elim: structural-premises discharge via Typing.t_quot_elim.
-        KernelRule.KQuotElim => Text.from(
-            "  intros; exact (Typing.t_quot_elim ‹_› ‹_› ‹_›)"
-        ),
-        // K-Elim: same template as K-Quot-Elim.
-        KernelRule.KElim => Text.from(
-            "  intros; exact (Typing.t_elim ‹_› ‹_›)"
-        ),
-        // K-Universe-Ascent: collapses onto t_univ.
-        KernelRule.KUniverseAscent => Text.from(
-            "  exact @Typing.t_universe_ascent _ _"
-        ),
-        // K-Refine: structural-premises discharge.
-        KernelRule.KRefine => Text.from(
-            "  exact @Typing.t_refine _ _ _ _ _"
-        ),
-        // K-Refine-Omega: same shape as K-Refine.
-        KernelRule.KRefineOmega => Text.from(
-            "  exact @Typing.t_refine_omega _ _ _ _ _"
-        ),
-        // K-Inductive: premise-free; strict-positivity is the
-        // kernel's input contract.
-        KernelRule.KInductive => Text.from(
-            "  exact @Typing.t_inductive _ _ _ _"
-        ),
-        // K-Epsilon-Of: structural-premises discharge.
-        KernelRule.KEpsilonOf => Text.from(
-            "  exact @Typing.t_epsilon_of _ _ _"
-        ),
-        // K-Alpha-Of: counit-law analogue.
-        KernelRule.KAlphaOf => Text.from(
-            "  exact @Typing.t_alpha_of _ _ _"
-        ),
-        // K-Modal-Big-And: premise-free.
-        KernelRule.KModalBigAnd => Text.from(
-            "  exact @Typing.t_modal_big_and _ _ _"
-        ),
-        // K-Modal-Box / Diamond / Shape / Flat / Sharp: structural
-        // since FV-9 — wrap-preserves-typing.
-        KernelRule.KModalBox => Text.from(
-            "  exact @Typing.t_modal_box _ _ _"
-        ),
-        KernelRule.KModalDiamond => Text.from(
-            "  exact @Typing.t_modal_diamond _ _ _"
-        ),
-        KernelRule.KShape => Text.from(
-            "  exact @Typing.t_shape _ _ _"
-        ),
-        KernelRule.KFlat => Text.from(
-            "  exact @Typing.t_flat _ _ _"
-        ),
-        KernelRule.KSharp => Text.from(
-            "  exact @Typing.t_sharp _ _ _"
-        ),
-        // K-Path-Ty-Form / K-Refl-Intro / K-Refine-Erase /
-        // K-Quot-Form / K-Quot-Intro: structural since FV-9.
-        KernelRule.KPathTyForm => Text.from(
-            "  exact @Typing.t_path_ty _ _ _ _ _"
-        ),
-        KernelRule.KPathOverForm => Text.from(
-            "  exact @Typing.t_path_over _ _ _ _ _ _ _ _ _"
-        ),
-        KernelRule.KHComp => Text.from(
-            "  exact @Typing.t_hcomp _ _ _ _ _ _ _"
-        ),
-        KernelRule.KTransp => Text.from(
-            "  exact @Typing.t_transp"
-        ),
-        KernelRule.KGlue => Text.from(
-            "  exact @Typing.t_glue _ _ _ _ _ _ _"
-        ),
-        KernelRule.KReflIntro => Text.from(
-            "  exact @Typing.t_refl _ _ _"
-        ),
-        KernelRule.KRefineErase => Text.from(
-            "  exact @Typing.t_refine_erase _ _ _ _ _"
-        ),
-        KernelRule.KRefineIntro => Text.from(
-            "  exact @Typing.t_refine_intro _ _ _ _ _ _"
-        ),
-        KernelRule.KQuotForm => Text.from(
-            "  exact @Typing.t_quot_form _ _ _ _"
-        ),
-        KernelRule.KQuotIntro => Text.from(
-            "  exact @Typing.t_quot_intro _ _ _ _"
-        ),
-        _ => Text.from(""),
-    }
 }

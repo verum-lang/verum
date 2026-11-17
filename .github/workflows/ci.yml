@@ -353,7 +353,7 @@ jobs:
 
       - name: Incomplete verification cannot pass regression gates
         timeout-minutes: 5
-        run: cargo test --locked -p verum_kernel --lib --test k_differential_fuzz --test universe_stability_outcomes --test k_refine_depth --test k_refinement_export --test k_exact_universe_levels --test k_meta_certificate_boundary
+        run: cargo test --locked -p verum_kernel --lib --test k_differential_fuzz --test universe_stability_outcomes --test k_refine_depth --test k_refinement_export --test k_exact_universe_levels --test k_meta_certificate_boundary --test k_smt_authority
 
       - name: Portable native proof replay and process isolation
         timeout-minutes: 5
@@ -764,6 +764,7 @@ jobs:
           --test stdlib_cache_alias_archive
           --test theorem_statement_authority
           --test theorem_proof_gate_tests
+          --test ats_v_live_phase_test
 
       - name: Declaration queries and actual standard-library bootstrap
         timeout-minutes: 5
