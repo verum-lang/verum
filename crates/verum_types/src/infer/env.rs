@@ -9250,10 +9250,9 @@ impl TypeChecker {
                     ty
                 ))))
             }
-            _ => Err(TypeError::Other(verum_common::Text::from(format!(
-                "Base expression in record spread must be a record type, found: {}",
-                ty
-            )))),
+            _ => self.resolve_to_record_type(ty).ok_or_else(|| TypeError::Other(format!(
+                "Base expression in record spread must be a record type, found: {ty}"
+            ).into())),
         }
     }
 

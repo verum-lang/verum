@@ -1,5 +1,9 @@
 //! Source signatures retain actual language declarations without borrowing caller aliases.
-use verum_ast::{FileId, ItemKind};
+use verum_ast::{
+    FileId, ItemKind,
+    decl::{FunctionBody, ImplItemKind, ImplKind},
+    ty::TypeKind,
+};
 use verum_common::{List, Text};
 use verum_fast_parser::Parser;
 use verum_modules::{
@@ -29,24 +33,31 @@ fn check(checker: &mut TypeChecker, owner: &str, sources: &[(&str, &str)]) -> Li
     let mut errors: List<Text> = checker
         .prepare_module_declarations(&ast)
         .into_iter()
-        .map(|error| format!("{error:?}").into())
+        .map(|error| format!("{error:?}: {error}").into())
         .collect();
     for item in &ast.items {
         if let Err(error) = checker.check_item(item) {
-            errors.push(format!("{error:?}").into());
+            errors.push(format!("{error:?}: {error}").into());
         }
     }
     errors.extend(
         checker
             .take_deferred_errors()
             .into_iter()
-            .map(|error| Text::from(format!("{error:?}"))),
+            .map(|error| Text::from(format!("{error:?}: {error}"))),
     );
     errors.extend(
         checker
             .diagnostic_sources()
             .iter()
-            .map(|error| Text::from(format!("{error:?}"))),
+            .map(|error| Text::from(format!("{error:?}: {error}"))),
+    );
+    errors.extend(
+        checker
+            .diagnostics()
+            .iter()
+            .filter(|diagnostic| diagnostic.is_error())
+            .map(|diagnostic| Text::from(format!("{diagnostic:?}"))),
     );
     errors
 }
@@ -436,6 +447,246 @@ fn foreign_text_records_remain_distinct_from_the_literal_carrier() {
         );
         assert!(
             errors.iter().any(|e| e.contains("Mismatch")),
+            "{body}: {errors:?}"
+        );
+    }
+}
+
+// Select the unchanged declaration and constructor from the actual source.
+// This checks constructor admission, not the complete Text dependency closure.
+// null_ptr uses the registered builtin signature; no fixture callable replaces it.
+fn actual_text_constructor_source() -> (&'static str, &'static str, &'static str) {
+    let source = include_str!("../../../core/text/text.vr");
+    let ast = Parser::new(source)
+        .parse_module()
+        .expect("actual Text grammar");
+    let declaration = ast.items.iter().find(|item| {
+        matches!(&item.kind, ItemKind::Type(declaration) if declaration.name.as_str() == "Text")
+    }).expect("actual Text declaration");
+    let constructor = ast.items.iter().find_map(|item| {
+        let ItemKind::Impl(implementation) = &item.kind else { return None; };
+        if !matches!(&implementation.kind, ImplKind::Inherent(ty) if matches!(&ty.kind, TypeKind::Text)) {
+            return None;
+        }
+        implementation.items.iter().find(|item| {
+            matches!(&item.kind, ImplItemKind::Function(function) if function.name.as_str() == "new")
+        })
+    }).expect("actual Text.new constructor");
+    let ImplItemKind::Function(function) = &constructor.kind else {
+        unreachable!()
+    };
+    let Some(FunctionBody::Block(body)) = &function.body else {
+        panic!("Text.new block");
+    };
+    assert!(
+        body.stmts.is_empty(),
+        "Text.new must remain a direct record constructor for this gate"
+    );
+    let expression = body.expr.as_ref().expect("Text.new returned value");
+    assert!(
+        matches!(&expression.kind, verum_ast::ExprKind::Record { .. }),
+        "Text.new record value"
+    );
+    // Top-level type spans start at `type`, after attributes and visibility.
+    // Keep the original prefix, then verify the parsed authority survived.
+    let complete_source = |span: verum_ast::Span, attributes: &List<verum_ast::decl::Attribute>| {
+        let start = attributes
+            .iter()
+            .map(|attribute| attribute.span.start)
+            .chain([span.start])
+            .min()
+            .expect("declaration start") as usize;
+        let line_start = source[..start].rfind('\n').map_or(0, |index| index + 1);
+        &source[line_start..span.end as usize]
+    };
+    let declaration_source = complete_source(declaration.span, &declaration.attributes);
+    let constructor_source = complete_source(constructor.span, &constructor.attributes);
+    let copied = Parser::new(declaration_source)
+        .parse_module()
+        .expect("complete Text declaration");
+    let (ItemKind::Type(original_type), ItemKind::Type(copied_type)) =
+        (&declaration.kind, &copied.items[0].kind)
+    else {
+        panic!("Text declaration kinds");
+    };
+    assert_eq!(
+        copied_type.visibility, original_type.visibility,
+        "Text declaration visibility"
+    );
+    assert_eq!(
+        copied.items[0]
+            .attributes
+            .iter()
+            .map(|attribute| &attribute.name)
+            .collect::<List<_>>(),
+        declaration
+            .attributes
+            .iter()
+            .map(|attribute| &attribute.name)
+            .collect::<List<_>>(),
+        "Text declaration attributes"
+    );
+    let copied_source = format!("implement Text {{ {constructor_source} }}");
+    let copied = Parser::new(&copied_source)
+        .parse_module()
+        .expect("complete Text constructor");
+    let ItemKind::Impl(copied_impl) = &copied.items[0].kind else {
+        panic!("Text implementation");
+    };
+    let copied_constructor = &copied_impl.items[0];
+    assert_eq!(
+        copied_constructor.visibility, constructor.visibility,
+        "Text.new visibility"
+    );
+    assert_eq!(
+        copied_constructor
+            .attributes
+            .iter()
+            .map(|attribute| &attribute.name)
+            .collect::<List<_>>(),
+        constructor
+            .attributes
+            .iter()
+            .map(|attribute| &attribute.name)
+            .collect::<List<_>>(),
+        "Text.new attributes"
+    );
+    (
+        declaration_source,
+        constructor_source,
+        &source[expression.span.start as usize..expression.span.end as usize],
+    )
+}
+
+#[test]
+fn canonical_text_record_construction_checks_actual_new() {
+    let (declaration, constructor, _) = actual_text_constructor_source();
+    let source = format!(
+        "@no_implicit_prelude module core.text.text; {declaration} implement Text {{ {constructor} }}"
+    );
+    let mut checker = checker();
+    let errors = check(
+        &mut checker,
+        "core.text.text",
+        &[("core.text.text", &source)],
+    );
+    assert!(errors.is_empty(), "actual Text.new: {errors:?}");
+    assert_eq!(checker.resolved_type("Text"), Some(&Type::Text));
+}
+
+#[test]
+fn canonical_text_record_construction_synthesizes_actual_new_value() {
+    let (declaration, _, expression) = actual_text_constructor_source();
+    let source = format!(
+        "@no_implicit_prelude module core.text.text; {declaration}
+         fn inferred() -> Text {{ let text = {expression}; text }}"
+    );
+    let errors = check(
+        &mut checker(),
+        "core.text.text",
+        &[("core.text.text", &source)],
+    );
+    assert!(errors.is_empty(), "inferred Text.new value: {errors:?}");
+}
+
+#[test]
+fn canonical_text_record_construction_preserves_spread_fields() {
+    let (declaration, _, _) = actual_text_constructor_source();
+    for body in [
+        "Text { len: 0, ..base }",
+        "let text = Text { len: 0, ..base }; text",
+    ] {
+        let source = format!(
+            "@no_implicit_prelude module core.text.text; {declaration}
+             fn copy_prefix(base: Text) -> Text {{ {body} }}"
+        );
+        let errors = check(
+            &mut checker(),
+            "core.text.text",
+            &[("core.text.text", &source)],
+        );
+        assert!(errors.is_empty(), "{body}: {errors:?}");
+    }
+}
+
+#[test]
+fn canonical_text_record_construction_does_not_admit_a_foreign_homonym() {
+    let (declaration, _, expression) = actual_text_constructor_source();
+    for body in [
+        Text::from(expression),
+        Text::from(format!("let text = {expression}; text")),
+    ] {
+        // Same source fields and constructor expression, different declaring owner.
+        let source = format!(
+            "@no_implicit_prelude module foreign; {declaration} fn forge() -> Text {{ {body} }}"
+        );
+        let errors = check(&mut checker(), "foreign", &[("foreign", &source)]);
+        assert!(
+            errors.iter().any(|error| error.contains("Mismatch")),
+            "{body}: {errors:?}"
+        );
+    }
+}
+
+#[test]
+fn canonical_text_record_construction_refuses_missing_and_wrong_fields() {
+    let (declaration, _, _) = actual_text_constructor_source();
+    for (expression, diagnostic, field) in [
+        (
+            "Text { ptr: null_ptr(), len: 0 }",
+            "Missing required field",
+            "cap",
+        ),
+        (
+            "Text { ptr: null_ptr(), len: true, cap: 0 }",
+            "expected 'Int', found 'Bool'",
+            "Bool",
+        ),
+    ] {
+        for body in [
+            Text::from(expression),
+            Text::from(format!("let text = {expression}; text")),
+        ] {
+            let source = format!(
+                "@no_implicit_prelude module core.text.text; {declaration} fn invalid() -> Text {{ {body} }}"
+            );
+            let errors = check(
+                &mut checker(),
+                "core.text.text",
+                &[("core.text.text", &source)],
+            );
+            assert!(
+                errors
+                    .iter()
+                    .any(|error| error.contains(diagnostic) && error.contains(field)),
+                "{body}: {errors:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn canonical_text_record_construction_refuses_private_fields_outside_owner() {
+    let (declaration, _, _) = actual_text_constructor_source();
+    let library = format!("@no_implicit_prelude module core.text.text; {declaration}");
+    let expression = "Words { ptr: null_ptr(), len: 0, cap: 0 }";
+    for body in [
+        Text::from(expression),
+        Text::from(format!("let text = {expression}; text")),
+    ] {
+        let source = format!(
+            "@no_implicit_prelude module consumer; mount core.text.text.Text as Words;
+             fn forge() -> Text {{ {body} }}"
+        );
+        let errors = check(
+            &mut checker(),
+            "consumer",
+            &[("core.text.text", &library), ("consumer", &source)],
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("VisibilityError") && error.contains("core.text.text")),
             "{body}: {errors:?}"
         );
     }

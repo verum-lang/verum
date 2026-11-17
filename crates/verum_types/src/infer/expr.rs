@@ -2338,7 +2338,6 @@ impl TypeChecker {
                                         Maybe::None => String::from("<no enclosing fn>"),
                                     }
                                 );
-                                continue;
                             }
                             return Err(TypeError::Other(verum_common::Text::from(format!(
                                 "Missing required field '{}' of type {} in record construction",
@@ -2415,9 +2414,16 @@ impl TypeChecker {
                 } else {
                     resolved_path
                 };
-                let actual_struct_ty = Type::Named {
-                    path: resolved_path,
-                    args: type_args,
+                // The selected record declaration can supply a language
+                // carrier. Rebuilding it from the literal's spelling would
+                // turn that identity back into an unrelated nominal type.
+                // Field and visibility checks above still govern construction.
+                let actual_struct_ty = if type_args.is_empty()
+                    && declaration_ty.primitive_name().is_some()
+                {
+                    declaration_ty
+                } else {
+                    Type::Named { path: resolved_path, args: type_args }
                 };
                 self.unifier.unify(&actual_struct_ty, record_expected, expr.span)?;
 
@@ -10514,12 +10520,9 @@ impl TypeChecker {
                         }
                     }
                 }
-                _ => {
-                    return Err(TypeError::Other(verum_common::Text::from(format!(
-                        "Expected record type, found: {}",
-                        record_ty
-                    ))));
-                }
+                _ => self.resolve_to_record_type(&record_ty).ok_or_else(|| {
+                    TypeError::Other(format!("Expected record type, found: {record_ty}").into())
+                })?,
             };
 
         // Step 2.5: Instantiate type parameters with fresh type variables

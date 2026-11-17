@@ -14049,6 +14049,18 @@ impl TypeChecker {
         if let Type::Record(fields) = ty {
             return Some(fields.clone());
         }
+        if let Some(name) = ty.primitive_name() {
+            if self.ctx.builtin_type_definition(name) != Some(ty) {
+                return None;
+            }
+            let key = Self::scalar_representation_key(ty)?;
+            // The representation belongs to the registered language carrier's
+            // exact source declaration, never to a same-spelled local record.
+            return match self.ctx.lookup_type(&format!("__struct_fields_{key}")) {
+                Some(Type::Record(fields)) => Some(fields.clone()),
+                _ => None,
+            };
+        }
         let (name, args) = match ty {
             Type::Named { path, args } => (self.path_to_string(path), args),
             Type::Generic { name, args } => (name.clone(), args),
