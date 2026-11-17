@@ -937,14 +937,14 @@ pub(crate) fn execute_pending_task(
 ) -> InterpreterResult<()> {
     let exec_info = state.tasks.take_task_exec_info(task_id);
 
-    if let Some((func_id, args, closure_val, saved_contexts)) = exec_info {
-        // Restore parent's context stack into the child task.
-        // This ensures spawned tasks inherit contexts from their parent.
-        if !saved_contexts.is_empty() {
-            for entry in &saved_contexts {
-                state.context_stack.provide(entry.ctx_type, entry.value, 0);
-            }
+    if let Some((func_id, args, closure_val, mut saved_contexts)) = exec_info {
+        // A task sees its spawn-time snapshot, including an empty snapshot.
+        // Await-time providers belong to the observing task, not the child.
+        let observing_contexts = std::mem::take(&mut state.context_stack);
+        for entry in &mut saved_contexts {
+            entry.stack_depth = 0;
         }
+        state.context_stack.restore_entries(saved_contexts);
 
         let previous_task = state.tasks.begin_diagnostic_task(Some(task_id));
         let result = if let Some(closure) = closure_val {
@@ -953,6 +953,7 @@ pub(crate) fn execute_pending_task(
             call_function_sync(state, func_id, &args)
         };
         state.tasks.begin_diagnostic_task(previous_task);
+        state.context_stack = observing_contexts;
 
         match result {
             Ok(value) => {

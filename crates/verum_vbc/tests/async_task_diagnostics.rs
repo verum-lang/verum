@@ -111,6 +111,176 @@ fn disabled_capture_and_reset_do_not_reuse_observations() {
     assert!(vm.state.tasks.diagnostics_report().is_none());
 }
 
+fn context_fixture(inherit: bool, fail: bool) -> (VbcModule, FunctionId) {
+    let mut module = VbcModule::new("task-contexts".into());
+    let context = module.intern_string("TaskPort").0;
+    let failure = module
+        .intern_string("child failed after reading its context")
+        .0;
+    let wrong_context = module
+        .intern_string("child received the observers context")
+        .0;
+    let mut child = vec![I::CtxGet {
+        dst: Reg(0),
+        ctx_type: context,
+    }];
+    if inherit {
+        child.extend([
+            I::LoadI {
+                dst: Reg(1),
+                value: 11,
+            },
+            I::CmpI {
+                op: verum_vbc::instruction::CompareOp::Eq,
+                dst: Reg(2),
+                a: Reg(0),
+                b: Reg(1),
+            },
+            I::Assert {
+                cond: Reg(2),
+                message_id: wrong_context,
+            },
+        ]);
+    }
+    child.push(if fail {
+        I::Panic {
+            message_id: failure,
+        }
+    } else {
+        I::Ret { value: Reg(0) }
+    });
+    let worker = add(&mut module, "child", &child);
+    let mut parent = vec![];
+    if inherit {
+        parent.extend([
+            I::LoadI {
+                dst: Reg(0),
+                value: 11,
+            },
+            I::CtxProvide {
+                ctx_type: context,
+                value: Reg(0),
+                body_offset: 0,
+            },
+        ]);
+    }
+    parent.push(I::Spawn {
+        dst: Reg(1),
+        func_id: worker.0,
+        args: RegRange::new(Reg(0), 0),
+    });
+    if inherit {
+        parent.push(I::CtxEnd);
+    }
+    parent.extend([
+        I::LoadI {
+            dst: Reg(0),
+            value: 22,
+        },
+        I::CtxProvide {
+            ctx_type: context,
+            value: Reg(0),
+            body_offset: 0,
+        },
+    ]);
+    if inherit && !fail {
+        parent.extend([
+            I::Await {
+                dst: Reg(2),
+                task: Reg(1),
+            },
+            I::LoadI {
+                dst: Reg(0),
+                value: 11,
+            },
+            I::CmpI {
+                op: verum_vbc::instruction::CompareOp::Eq,
+                dst: Reg(2),
+                a: Reg(2),
+                b: Reg(0),
+            },
+            I::Assert {
+                cond: Reg(2),
+                message_id: wrong_context,
+            },
+        ]);
+    } else {
+        parent.push(I::AsyncYield);
+    }
+    parent.extend([
+        I::CtxGet {
+            dst: Reg(0),
+            ctx_type: context,
+        },
+        I::Ret { value: Reg(0) },
+    ]);
+    let entry = add(&mut module, "observer", &parent);
+    (module, entry)
+}
+
+#[test]
+fn deferred_tasks_restore_observer_contexts_after_success_and_failure() {
+    for fail in [false, true] {
+        let (source, entry) = context_fixture(true, fail);
+        let wire = verum_vbc::deserialize::deserialize_module(
+            &verum_vbc::serialize::serialize_module(&source).unwrap(),
+        )
+        .unwrap();
+        for module in [source, wire] {
+            let mut vm = Interpreter::new(Arc::new(module));
+            vm.state.tasks.enable_diagnostics(4).unwrap();
+            assert_eq!(vm.execute_function(entry).unwrap().as_i64(), 22);
+            assert!(
+                vm.state.context_stack.is_empty(),
+                "child context escaped its execution scope"
+            );
+            let report = vm.state.tasks.diagnostics_report().unwrap();
+            assert_eq!(report.rows.len(), 1);
+            assert_eq!(
+                report.rows[0].status,
+                if fail {
+                    AsyncTaskStatus::Failed
+                } else {
+                    AsyncTaskStatus::Completed
+                }
+            );
+            if fail {
+                assert!(
+                    report.rows[0]
+                        .error
+                        .as_deref()
+                        .unwrap()
+                        .contains("child failed after reading its context")
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn an_empty_task_snapshot_cannot_borrow_the_observers_provider() {
+    let (source, entry) = context_fixture(false, false);
+    let wire = verum_vbc::deserialize::deserialize_module(
+        &verum_vbc::serialize::serialize_module(&source).unwrap(),
+    )
+    .unwrap();
+    for module in [source, wire] {
+        let mut vm = Interpreter::new(Arc::new(module));
+        vm.state.tasks.enable_diagnostics(4).unwrap();
+        assert_eq!(vm.execute_function(entry).unwrap().as_i64(), 22);
+        let report = vm.state.tasks.diagnostics_report().unwrap();
+        assert_eq!(report.rows[0].status, AsyncTaskStatus::Failed);
+        assert!(
+            report.rows[0]
+                .error
+                .as_deref()
+                .unwrap()
+                .contains("Context TaskPort not provided")
+        );
+        assert!(vm.state.context_stack.is_empty());
+    }
+}
+
 #[test]
 fn capture_retains_only_recent_tasks_and_reads_current_state() {
     let (mut vm, _) = fixture(false);
