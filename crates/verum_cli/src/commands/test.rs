@@ -42,6 +42,11 @@ use std::time::{Duration, Instant};
 use verum_common::{List, Text};
 use verum_vbc::module::VbcModule;
 
+mod event;
+
+use event::{
+    ProcessDiagnostics, TestEvent, TestResult, process_signal, reported_tests, single_worker_result,
+};
 use crate::config::Manifest;
 use crate::error::{CliError, Result};
 use crate::tier::Tier;
@@ -909,17 +914,20 @@ fn attach_ignore_note(result: TestResult, reason: Option<&str>) -> TestResult {
             stdout,
             stderr,
             exit_code,
+            signal,
             error,
         } => TestResult::Fail {
             duration,
             stdout,
             stderr,
             exit_code,
+            signal,
             error: attach(error),
         },
-        TestResult::CompileError { duration, error } => TestResult::CompileError {
+        TestResult::CompileError { duration, error, process } => TestResult::CompileError {
             duration,
             error: attach(error),
+            process,
         },
         pass => pass,
     }
@@ -964,13 +972,13 @@ fn present_result(
                 error: error.clone(),
             });
         }
-        TestResult::CompileError { error, .. } => {
+        TestResult::CompileError { error, process, .. } => {
             *failed += 1;
             failures.push(TestFailure {
                 name: test.name.clone(),
                 stdout: String::new(),
-                stderr: String::new(),
-                exit_code: None,
+                stderr: process.stderr.clone(),
+                exit_code: process.exit_code,
                 error: format!("compilation failed: {}", error),
             });
         }
@@ -978,25 +986,11 @@ fn present_result(
 }
 
 fn present_json(test: &Test, result: &TestResult) {
-    let (outcome, duration, error): (&str, Duration, Option<&str>) = match result {
-        TestResult::Pass { duration, .. } => ("ok", *duration, None),
-        TestResult::Fail {
-            duration, error, ..
-        } => ("failed", *duration, Some(error.as_str())),
-        TestResult::CompileError { duration, error } => {
-            ("compile-error", *duration, Some(error.as_str()))
-        }
+    let event = TestEvent::Test {
+        name: test.name.as_str(),
+        result,
     };
-    let mut obj = serde_json::json!({
-        "event": "test",
-        "name": test.name.as_str(),
-        "outcome": outcome,
-        "duration_ms": duration.as_millis() as u64,
-    });
-    if let Some(e) = error {
-        obj["error"] = serde_json::Value::String(e.to_string());
-    }
-    println!("{}", obj);
+    println!("{}", serde_json::to_string(&event).expect("test event serialization"));
 }
 
 fn present_terse(result: &TestResult) {
@@ -1132,25 +1126,6 @@ struct TestRunCfg {
     property_seed: Option<crate::commands::property::Seed>,
 }
 
-enum TestResult {
-    Pass {
-        duration: Duration,
-        stdout: String,
-        stderr: String,
-    },
-    Fail {
-        duration: Duration,
-        stdout: String,
-        stderr: String,
-        exit_code: Option<i32>,
-        error: String,
-    },
-    CompileError {
-        duration: Duration,
-        error: String,
-    },
-}
-
 struct TestFailure {
     name: Text,
     stdout: String,
@@ -1170,8 +1145,8 @@ struct TestFailure {
 /// isolated LLVM state; the parent fans these out in parallel for full
 /// throughput with no shared-state race. The child matches exactly one
 /// test, so it runs in-process and does NOT recurse. Pass/fail is read
-/// from the child's exit status; on failure the child's captured output
-/// is surfaced for the failure report.
+/// from its named result and process status. The worker reports the test
+/// streams separately from its own compiler diagnostics.
 fn run_aot_subprocess(test: &Test) -> TestResult {
     let start = Instant::now();
     let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("verum"));
@@ -1184,7 +1159,7 @@ fn run_aot_subprocess(test: &Test) -> TestResult {
         .arg("--filter")
         .arg(test.name.as_str())
         .arg("--format")
-        .arg("terse");
+        .arg("json");
     // T0365: the parent already SELECTED this test; when it is
     // `@ignore`'d (an --ignored / --include-ignored run) the child's
     // own default-mode selection must not re-skip it — pre-fix the
@@ -1198,19 +1173,9 @@ fn run_aot_subprocess(test: &Test) -> TestResult {
         .env("VERUM_TEST_AOT_CHILD", "1")
         .output();
     match out {
-        Ok(o) if o.status.success() => TestResult::Pass {
-            duration: start.elapsed(),
-            stdout: String::new(),
-            stderr: String::new(),
-        },
-        Ok(o) => TestResult::Fail {
-            duration: start.elapsed(),
-            stdout: String::from_utf8_lossy(&o.stdout).into_owned(),
-            stderr: String::from_utf8_lossy(&o.stderr).into_owned(),
-            exit_code: o.status.code(),
-            error: "AOT compile/run failed in isolated subprocess".to_string(),
-        },
+        Ok(output) => single_worker_result(test.name.as_str(), output, start.elapsed()),
         Err(e) => TestResult::CompileError {
+            process: ProcessDiagnostics::default(),
             duration: start.elapsed(),
             error: format!("failed to spawn AOT subprocess: {}", e),
         },
@@ -1304,6 +1269,7 @@ fn run_interp_file_subprocess(
                     (
                         t.name.clone(),
                         TestResult::CompileError {
+                            process: ProcessDiagnostics::default(),
                             duration: start.elapsed(),
                             error: err.clone(),
                         },
@@ -1312,45 +1278,30 @@ fn run_interp_file_subprocess(
                 .collect();
         }
     };
-    // Parse the child's per-test JSON events.
-    let stdout_text = String::from_utf8_lossy(&out.stdout);
-    let mut reported: std::collections::HashMap<String, TestResult> =
-        std::collections::HashMap::new();
-    for line in stdout_text.lines() {
-        let Ok(v) = serde_json::from_str::<serde_json::Value>(line.trim()) else {
-            continue;
-        };
-        if v.get("event").and_then(|e| e.as_str()) != Some("test") {
+    let mut reported = std::collections::HashMap::new();
+    let selected: verum_common::Set<&str> =
+        expected.iter().map(|test| test.name.as_str()).collect();
+    for (name, result) in reported_tests(&out.stdout) {
+        let Some(name) = name else { continue };
+        if !selected.contains(&name.as_str()) {
             continue;
         }
-        let Some(name) = v.get("name").and_then(|n| n.as_str()) else {
-            continue;
+        let result = if reported.contains_key(&name) {
+            event::worker_failure(
+                &out,
+                start.elapsed(),
+                format!("duplicate worker result for `{name}`"),
+            )
+        } else {
+            result.unwrap_or_else(|err| {
+                event::worker_failure(
+                    &out,
+                    start.elapsed(),
+                    format!("invalid worker result for `{name}`: {err}"),
+                )
+            })
         };
-        let duration = Duration::from_millis(
-            v.get("duration_ms").and_then(|d| d.as_u64()).unwrap_or(0),
-        );
-        let error = v
-            .get("error")
-            .and_then(|e| e.as_str())
-            .unwrap_or("")
-            .to_string();
-        let result = match v.get("outcome").and_then(|o| o.as_str()) {
-            Some("ok") => TestResult::Pass {
-                duration,
-                stdout: String::new(),
-                stderr: String::new(),
-            },
-            Some("ignored") => continue, // parent counts ignored itself
-            Some("compile-error") => TestResult::CompileError { duration, error },
-            _ => TestResult::Fail {
-                duration,
-                stdout: String::new(),
-                stderr: String::new(),
-                exit_code: None,
-                error,
-            },
-        };
-        reported.insert(name.to_string(), result);
+        reported.insert(name, result);
     }
     // Attribute the child's death to every unreported test.
     // T0365: `expected` IS the parent's selected set for this file
@@ -1425,6 +1376,7 @@ fn run_interp_file_subprocess(
                         .collect::<Vec<_>>()
                         .join("\n"),
                     exit_code: out.status.code(),
+                    signal: process_signal(out.status),
                     error: crash_note.clone().unwrap_or_else(|| {
                         "interp batch runner reported no outcome for this test".to_string()
                     }),
@@ -1464,79 +1416,13 @@ fn run_interp_single_subprocess(
         Ok(o) => o,
         Err(e) => {
             return TestResult::CompileError {
+                process: ProcessDiagnostics::default(),
                 duration: start.elapsed(),
                 error: format!("failed to spawn per-test retry subprocess: {}", e),
             };
         }
     };
-    let stdout_text = String::from_utf8_lossy(&out.stdout);
-    for line in stdout_text.lines() {
-        let Ok(v) = serde_json::from_str::<serde_json::Value>(line.trim()) else {
-            continue;
-        };
-        if v.get("event").and_then(|e| e.as_str()) != Some("test")
-            || v.get("name").and_then(|n| n.as_str()) != Some(name)
-        {
-            continue;
-        }
-        let duration = Duration::from_millis(
-            v.get("duration_ms").and_then(|d| d.as_u64()).unwrap_or(0),
-        );
-        let error = v
-            .get("error")
-            .and_then(|e| e.as_str())
-            .unwrap_or("")
-            .to_string();
-        return match v.get("outcome").and_then(|o| o.as_str()) {
-            Some("ok") => TestResult::Pass {
-                duration,
-                stdout: String::new(),
-                stderr: String::new(),
-            },
-            Some("ignored") => TestResult::Pass {
-                duration,
-                stdout: String::from("ignored (per-test retry)"),
-                stderr: String::new(),
-            },
-            Some("compile-error") => TestResult::CompileError { duration, error },
-            _ => TestResult::Fail {
-                duration,
-                stdout: String::new(),
-                stderr: String::new(),
-                exit_code: None,
-                error,
-            },
-        };
-    }
-    // No outcome even alone: THIS is the crasher. Report its own death
-    // honestly — signal/exit attached to the one test that owns it.
-    #[cfg(unix)]
-    let sig = {
-        use std::os::unix::process::ExitStatusExt;
-        out.status.signal()
-    };
-    #[cfg(not(unix))]
-    let sig: Option<i32> = None;
-    let error = match (sig, out.status.code()) {
-        (Some(s), _) => format!("test crashed its own process with signal {}", s),
-        (None, Some(c)) => format!("test's own process exited {} without reporting", c),
-        (None, None) => "test's own process vanished without reporting".to_string(),
-    };
-    TestResult::Fail {
-        duration: start.elapsed(),
-        stdout: String::new(),
-        stderr: String::from_utf8_lossy(&out.stderr)
-            .lines()
-            .rev()
-            .take(10)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect::<Vec<_>>()
-            .join("\n"),
-        exit_code: out.status.code(),
-        error,
-    }
+    single_worker_result(name, out, start.elapsed())
 }
 
 fn run_single_test(test: &Test, target_dir: &Path, cfg: &TestRunCfg) -> TestResult {
@@ -1657,6 +1543,7 @@ fn apply_should_panic(test: &Test, outcome: TestResult) -> TestResult {
             stdout,
             stderr,
             exit_code,
+            signal,
             error,
         } => {
             let rendered = format!("{}\n{}\n{}", error, stdout, stderr);
@@ -1666,6 +1553,7 @@ fn apply_should_panic(test: &Test, outcome: TestResult) -> TestResult {
                     stdout,
                     stderr,
                     exit_code,
+                    signal,
                     error: format!(
                         "@should_panic(expected = \"{}\") — it panicked, but the message does \
                          not contain that text. Got: {}",
@@ -1689,6 +1577,7 @@ fn apply_should_panic(test: &Test, outcome: TestResult) -> TestResult {
             stdout,
             stderr,
             exit_code: None,
+            signal: None,
             error: String::from(
                 "@should_panic — the test returned normally; it is marked as expecting a panic",
             ),
@@ -1723,8 +1612,9 @@ fn run_test_differential(test: &Test, target_dir: &Path, cfg: &TestRunCfg) -> Te
     let t0 = run_test_interpret(test, cfg);
     let t0_dur = t0_start.elapsed();
 
-    if let TestResult::CompileError { error, .. } = &t0 {
+    if let TestResult::CompileError { error, process, .. } = t0 {
         return TestResult::CompileError {
+            process,
             duration: t0_dur,
             error: format!("differential[T0=compile-error]: {error}"),
         };
@@ -1809,13 +1699,14 @@ fn combine_differential_outcomes(
         (true, true) => unreachable!("handled above"),
     };
     let error = format!("{header}\n  [T0 interpret] {t0_summary}\n  [T1 aot]       {t1_summary}");
-    let exit_code = match (&t0, &t1) {
-        (TestResult::Fail { exit_code, .. }, _) => *exit_code,
-        (_, TestResult::Fail { exit_code, .. }) => *exit_code,
-        _ => None,
+    let (exit_code, signal) = match (&t0, &t1) {
+        (TestResult::Fail { exit_code, signal, .. }, _)
+        | (_, TestResult::Fail { exit_code, signal, .. }) => (*exit_code, *signal),
+        _ => (None, None),
     };
     TestResult::Fail {
         duration: total_dur,
+        signal,
         stdout: String::new(),
         stderr: String::new(),
         exit_code,
@@ -1870,6 +1761,7 @@ fn run_test_property(
         Ok(m) => m,
         Err(error) => {
             return TestResult::CompileError {
+                process: ProcessDiagnostics::default(),
                 duration: start.elapsed(),
                 error,
             };
@@ -1900,6 +1792,7 @@ fn run_test_property(
                 stdout: String::new(),
                 stderr: String::new(),
                 exit_code: None,
+                signal: None,
                 error: format!(
                     "property failed on replayed seed {}\n  original: ({})\n  shrunk: ({}) [{} shrink steps]\n  error: {}",
                     f.seed.to_hex(),
@@ -1968,6 +1861,7 @@ fn run_test_property(
                 stdout: String::new(),
                 stderr: String::new(),
                 exit_code: None,
+                signal: None,
                 error: format!(
                     "regression replay seed {} still fails: shrunk=({}) :: {}",
                     f.seed.to_hex(),
@@ -2036,6 +1930,7 @@ fn run_test_property(
             stdout: String::new(),
             stderr: String::new(),
             exit_code: None,
+            signal: None,
             error: msg,
         };
     }
@@ -2167,9 +2062,22 @@ fn run_test_aot(test: &Test, target_dir: &Path, cfg: &TestRunCfg) -> TestResult 
     let executable = match pipeline.run_native_compilation() {
         Ok(exe) => exe,
         Err(e) => {
+            let mut error = format!("{e:#}");
+            for diagnostic in session.diagnostics().iter().filter(|d| d.is_error()) {
+                error.push('\n');
+                if let Some(code) = diagnostic.code() {
+                    error.push_str(code);
+                    error.push_str(": ");
+                }
+                error.push_str(diagnostic.message());
+            }
             return TestResult::CompileError {
+                process: ProcessDiagnostics {
+                    stderr: session.format_diagnostics(),
+                    ..Default::default()
+                },
                 duration: start.elapsed(),
-                error: e.to_string(),
+                error,
             };
         }
     };
@@ -2186,11 +2094,13 @@ fn run_test_aot(test: &Test, target_dir: &Path, cfg: &TestRunCfg) -> TestResult 
                 stdout: String::new(),
                 stderr: String::new(),
                 exit_code: None,
+                signal: None,
                 error: format!("spawn failure: {}", e),
             };
         }
     };
 
+    let mut timed_out = false;
     let output = if cfg.timeout_secs == 0 {
         child.wait_with_output()
     } else {
@@ -2201,14 +2111,8 @@ fn run_test_aot(test: &Test, target_dir: &Path, cfg: &TestRunCfg) -> TestResult 
                 Ok(Some(_)) => break child.wait_with_output(),
                 Ok(None) => {
                     if Instant::now() >= deadline {
-                        let _ = child.kill();
-                        return TestResult::Fail {
-                            duration: start.elapsed(),
-                            stdout: String::new(),
-                            stderr: String::new(),
-                            exit_code: None,
-                            error: format!("timed out after {}s", cfg.timeout_secs),
-                        };
+                        timed_out = true;
+                        break child.kill().and_then(|()| child.wait_with_output());
                     }
                     std::thread::sleep(poll);
                 }
@@ -2218,6 +2122,7 @@ fn run_test_aot(test: &Test, target_dir: &Path, cfg: &TestRunCfg) -> TestResult 
                         stdout: String::new(),
                         stderr: String::new(),
                         exit_code: None,
+                        signal: None,
                         error: format!("poll failure: {}", e),
                     };
                 }
@@ -2232,7 +2137,12 @@ fn run_test_aot(test: &Test, target_dir: &Path, cfg: &TestRunCfg) -> TestResult 
                 stdout: String::new(),
                 stderr: String::new(),
                 exit_code: None,
-                error: format!("wait failure: {}", e),
+                signal: None,
+                error: if timed_out {
+                    format!("could not finish timed-out test process: {e}")
+                } else {
+                    format!("wait failure: {e}")
+                },
             };
         }
     };
@@ -2240,7 +2150,7 @@ fn run_test_aot(test: &Test, target_dir: &Path, cfg: &TestRunCfg) -> TestResult 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
     let duration = start.elapsed();
-    if output.status.success() {
+    if output.status.success() && !timed_out {
         TestResult::Pass {
             duration,
             stdout,
@@ -2248,14 +2158,22 @@ fn run_test_aot(test: &Test, target_dir: &Path, cfg: &TestRunCfg) -> TestResult 
         }
     } else {
         let code = output.status.code();
-        let error = code
-            .map(|c| format!("process exited with code {}", c))
-            .unwrap_or_else(|| "process terminated by signal".to_string());
+        let signal = process_signal(output.status);
+        let error = if timed_out {
+            format!("timed out after {}s", cfg.timeout_secs)
+        } else {
+            match (code, signal) {
+                (Some(code), _) => format!("process exited with code {code}"),
+                (_, Some(signal)) => format!("process terminated by signal {signal}"),
+                _ => format!("test process terminated with {}", output.status),
+            }
+        };
         TestResult::Fail {
             duration,
             stdout,
             stderr,
             exit_code: code,
+            signal,
             error,
         }
     }
@@ -2835,6 +2753,7 @@ fn run_test_interpret(test: &Test, _cfg: &TestRunCfg) -> TestResult {
         Ok(m) => m,
         Err(error) => {
             return TestResult::CompileError {
+                process: ProcessDiagnostics::default(),
                 duration: start.elapsed(),
                 error,
             };
@@ -2904,6 +2823,7 @@ fn run_test_interpret(test: &Test, _cfg: &TestRunCfg) -> TestResult {
         Some(id) => id,
         None => {
             return TestResult::CompileError {
+                process: ProcessDiagnostics::default(),
                 duration: start.elapsed(),
                 error: format!("test entry point `{}` or `main` not found", fn_name_tail),
             };
@@ -2942,6 +2862,7 @@ fn run_test_interpret(test: &Test, _cfg: &TestRunCfg) -> TestResult {
             stdout: String::new(),
             stderr: String::new(),
             exit_code: None,
+            signal: None,
             error: format!("global_ctors: {:?}", e),
         };
     }
@@ -2954,6 +2875,7 @@ fn run_test_interpret(test: &Test, _cfg: &TestRunCfg) -> TestResult {
             Ok(vs) => crate::commands::property::call_parametrised(&mut interp, fid, &vs),
             Err(e) => {
                 return TestResult::CompileError {
+                    process: ProcessDiagnostics::default(),
                     duration: start.elapsed(),
                     error: format!("encode @test_case args: {}", e),
                 };
@@ -2979,6 +2901,7 @@ fn run_test_interpret(test: &Test, _cfg: &TestRunCfg) -> TestResult {
                     stdout,
                     stderr: String::new(),
                     exit_code: Some(exit),
+                    signal: None,
                     error: format!("exit code {}", exit),
                 }
             }
@@ -2988,6 +2911,7 @@ fn run_test_interpret(test: &Test, _cfg: &TestRunCfg) -> TestResult {
             stdout,
             stderr: String::new(),
             exit_code: None,
+            signal: None,
             error: format!("runtime: {:?}", e),
         },
     }
@@ -3552,7 +3476,7 @@ fn emit_junit(results: &[(Text, TestResult)], active: &[&Test], ignored: usize, 
             TestResult::Fail {
                 duration, error, ..
             } => (*duration, false, error.clone(), "failure"),
-            TestResult::CompileError { duration, error } => {
+            TestResult::CompileError { duration, error, .. } => {
                 (*duration, false, error.clone(), "error")
             }
         };
@@ -3602,7 +3526,7 @@ fn emit_tap(results: &[(Text, TestResult)], _active: &[&Test], ignored: usize) {
                 }
                 println!("  ...");
             }
-            TestResult::CompileError { duration, error } => {
+            TestResult::CompileError { duration, error, .. } => {
                 println!(
                     "not ok {} - {} # time={:.3}s (compile-error)",
                     i,
@@ -4109,11 +4033,13 @@ fn pinned_drop_me() {
             stdout: String::new(),
             stderr: String::new(),
             exit_code: exit,
+            signal: None,
             error: error.to_string(),
         }
     }
     fn compile_err(msg: &str) -> TestResult {
         TestResult::CompileError {
+            process: ProcessDiagnostics::default(),
             duration: ms(1),
             error: msg.to_string(),
         }
