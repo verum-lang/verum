@@ -110,6 +110,8 @@ impl CallInstantiation {
 enum PatternBindingMode {
     #[default]
     Value,
+    /// The binding reads the scrutinee's slot. The scrutinee still owns it.
+    Observed,
     Borrowed(crate::types::Mutability, CbgrTier),
     Tuple(verum_common::List<PatternBindingMode>),
 }
@@ -117,6 +119,15 @@ enum PatternBindingMode {
 impl PatternBindingMode {
     fn is_borrowed(&self) -> bool {
         matches!(self, Self::Borrowed(..))
+    }
+
+    fn alias(&self) -> Option<super::registers::PatternAlias> {
+        use super::registers::PatternAlias;
+        match self {
+            Self::Observed => Some(PatternAlias::Scrutinee),
+            Self::Borrowed(..) => Some(PatternAlias::Explicit),
+            Self::Value | Self::Tuple(_) => None,
+        }
     }
 }
 
@@ -1488,7 +1499,7 @@ impl VbcCodegen {
             ExprKind::Record { path, fields, base } => {
                 let owner = if self.ctx.expected_value_span == Some(expr.span) {
                     self.ctx.expected_value_type.clone()
-                } else if matches!(demand, ResultDemand::CallableReturn) {
+                } else if demand.is_callable_return() {
                     // The selected signature already retains every type/value
                     // slot; a display name cannot re-create that application.
                     self.ctx.function_return_declaration.clone()
@@ -1761,26 +1772,23 @@ impl VbcCodegen {
                 self.ctx.declared_result_types.insert(expr.span, Some(signature));
             }
         }
-        if demand == ResultDemand::CallableReturn {
-            result.map(|reg| {
-                // A projected value cannot outlive its owner by sharing the
-                // owner's storage. Preserve its exact declaration before
-                // lexical or parameter cleanup destroys that owner.
-                let projection = matches!(Self::normalized_place(expr).kind,
-                    ExprKind::Field { .. } | ExprKind::Index { .. }
-                        | ExprKind::Unary { op: UnOp::Deref, .. });
-                let declared = self.copy_source_type(expr, reg, start, self.ctx.instructions.len());
-                let reg = if projection && self.binds_a_copy_of_a_place(expr, reg, declared.as_ref())? {
-                    let copied = self.ctx.registers.alloc_fresh();
-                    self.ctx.emit(Instruction::CloneTyped { dst: copied, src: reg,
-                        type_ref: declared.or_internal("projected return requires its source declaration")? });
-                    copied
-                } else { reg };
-                self.materialize_list_return(reg)
-            }).transpose()
-        } else {
-            Ok(result)
+        let Some(mut reg) = result else { return Ok(None); };
+        if demand.is_callable_return() {
+            let returned = self.materialize_list_return(reg)?;
+            // A representation conversion already produced independent storage.
+            if returned != reg { return Ok(Some(returned)); }
         }
+        // A leaf supplies ownership once, while its binding is in scope.
+        // Parentheses and control flow forward demand to that leaf.
+        let projection = matches!(expr.kind, ExprKind::Field { .. } | ExprKind::TupleIndex { .. }
+            | ExprKind::Index { .. } | ExprKind::Unary { op: UnOp::Deref, .. });
+        let branch = matches!(demand, ResultDemand::Branch { .. });
+        if (projection && (branch || demand.is_callable_return()))
+            || (branch && matches!(expr.kind, ExprKind::Path(_))) {
+            let declared = self.copy_source_type(expr, reg, start, self.ctx.instructions.len());
+            reg = self.receive_owned_place(expr, reg, declared.as_ref(), demand)?;
+        }
+        Ok(Some(reg))
     }
 
     // ==================== Literals ====================
@@ -18978,7 +18986,7 @@ impl VbcCodegen {
         }
 
         // All conditions passed - compile then branch
-        let then_result = self.compile_block_with_demand(then_branch, demand)?;
+        let then_result = self.compile_block_with_demand(then_branch, demand.for_branch())?;
         if let Some(reg) = then_result {
             self.ctx.emit(Instruction::Mov {
                 dst: result,
@@ -19012,7 +19020,7 @@ impl VbcCodegen {
 
         // Compile else branch
         if let Some(else_expr) = else_branch {
-            let else_result = self.compile_expr_with_demand(else_expr, demand)?;
+            let else_result = self.compile_expr_with_demand(else_expr, demand.for_branch())?;
             if let Some(reg) = else_result {
                 self.ctx.emit(Instruction::Mov {
                     dst: result,
@@ -19986,10 +19994,13 @@ impl VbcCodegen {
         demand: ResultDemand,
         span: verum_ast::Span,
     ) -> CodegenResult<Option<Reg>> {
-        // Evaluate scrutinee
+        let scrutinee_start = self.ctx.instructions.len();
         let scrutinee_reg = self
             .compile_expr(scrutinee)?
             .or_internal("match scrutinee has no value")?;
+        let scrutinee_type = self.declared_expression_result(
+            scrutinee, Some(scrutinee_reg), scrutinee_start, self.ctx.instructions.len(),
+        );
 
         // Record the scrutinee's static type (+ tuple element types, +
         // Heap<T>/Shared<T> unwrap) for the payload-type inference in
@@ -20040,7 +20051,7 @@ impl VbcCodegen {
 
             // Compile arm body
             let arm_start = self.ctx.instructions.len();
-            let arm_result = self.compile_expr_with_demand(&arm.body, demand)?;
+            let arm_result = self.compile_expr_with_demand(&arm.body, demand.for_branch())?;
             let arm_type = self.declared_expression_result(
                 &arm.body, arm_result, arm_start, self.ctx.instructions.len(),
             );
@@ -20094,7 +20105,7 @@ impl VbcCodegen {
         // Restore previous scrutinee type
         self.exit_scrutinee_type_for_bind(bind_prev);
 
-        self.ctx.free_temp(scrutinee_reg);
+        self.retire_observed_operand(scrutinee, scrutinee_reg, scrutinee_type.as_ref());
 
         Ok(Some(result))
     }
@@ -21732,7 +21743,7 @@ impl VbcCodegen {
                 UnOp::RefCheckedMut => {
                     PatternBindingMode::Borrowed(Mutability::Mutable, CbgrTier::Tier1)
                 }
-                _ => PatternBindingMode::Value,
+                _ => PatternBindingMode::Observed,
             },
             _ => {
                 let declaration = if let ExprKind::Path(path) = &expression.kind
@@ -21760,7 +21771,7 @@ impl VbcCodegen {
                     // in the function's declaration registry.
                     PatternBindingMode::Borrowed(Mutability::Immutable, CbgrTier::Tier0)
                 } else {
-                    PatternBindingMode::Value
+                    PatternBindingMode::Observed
                 }
             }
         }
@@ -21780,7 +21791,7 @@ impl VbcCodegen {
             PatternBindingMode::Borrowed(mutability, tier) => crate::types::TypeRef::Reference {
                 inner: Box::new(inner), mutability: *mutability, tier: *tier,
             },
-            PatternBindingMode::Value => inner,
+            PatternBindingMode::Value | PatternBindingMode::Observed => inner,
             PatternBindingMode::Tuple(_) => return,
         };
         let discipline = self.value_resource_discipline(&ty);
@@ -21858,7 +21869,9 @@ impl VbcCodegen {
             } => {
                 let var_reg = self.ctx.define_var(&name.name, *mutable);
                 if let Some(binding) = self.ctx.lookup_var_mut(&name.name) {
-                    binding.is_pattern_alias = *by_ref || mode.is_borrowed() || subpattern.is_some();
+                    binding.pattern_alias = if *by_ref || subpattern.is_some() {
+                        Some(super::registers::PatternAlias::Explicit)
+                    } else { mode.alias() };
                 }
                 let explicit_mode = PatternBindingMode::Borrowed(
                     if *mutable {
@@ -21875,9 +21888,8 @@ impl VbcCodegen {
                 // count. T1615 keys this by binding identity so the outer
                 // declaration's facts survive its temporary shadow.
                 self.ctx.forget_fixed_array_count(&name.name);
-                // Explicit ref bindings and borrowed scrutinees already address
-                // the payload slot. Preserve that address; owned bindings copy
-                // the value instead.
+                // A matched payload stays in its scrutinee until an owning
+                // use receives it. Explicit references carry the slot address.
                 self.ctx.emit(Instruction::Mov {
                     dst: var_reg,
                     src: scrutinee,
@@ -22444,7 +22456,7 @@ impl VbcCodegen {
                                         declaration, &variant_name, field_idx)?;
                                     self.record_pattern_type(var_reg, mode, field_type.as_deref(), field_declaration.as_ref());
                                     if let Some(binding) = self.ctx.lookup_var_mut(&field_name) {
-                                        binding.is_pattern_alias = mode.is_borrowed();
+                                        binding.pattern_alias = mode.alias();
                                     }
                                     self.ctx.emit(Instruction::Mov {
                                         dst: var_reg,
@@ -22660,7 +22672,7 @@ impl VbcCodegen {
                         let var_reg = self.ctx.define_var(&field_name, false);
                         self.record_pattern_type(var_reg, mode, field_type_name.as_deref(), field_declaration.as_ref());
                         if let Some(binding) = self.ctx.lookup_var_mut(&field_name) {
-                            binding.is_pattern_alias = mode.is_borrowed();
+                            binding.pattern_alias = mode.alias();
                         }
                         self.ctx.emit(Instruction::Mov {
                             dst: var_reg,
@@ -27075,7 +27087,7 @@ impl VbcCodegen {
         let expected = if self.ctx.expected_value_span == Some(span) {
             self.ctx.expected_value_type.clone().or_else(|| self.ctx.current_return_type_full.as_ref()
                 .and_then(|name| self.semantic_type_in_current_scope(name)))
-        } else if matches!(demand, ResultDemand::CallableReturn) {
+        } else if demand.is_callable_return() {
             self.ctx.function_return_type_name.as_ref().and_then(|name| self.semantic_type_in_current_scope(name))
         } else { None };
         if let Some(poll) = self.resolve_protocol_poll(inner, expected.as_ref())? {

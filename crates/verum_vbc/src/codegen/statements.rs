@@ -381,8 +381,20 @@ impl VbcCodegen {
             return Ok(false);
         }
         match &Self::normalized_place(init).kind {
-            ExprKind::Path(_) => Ok(Self::named_place_binding(init)
-                .is_some_and(|name| self.copies_from_named_place(name, reg))),
+            ExprKind::Path(_) => {
+                let Some(name) = Self::named_place_binding(init) else { return Ok(false); };
+                if !self.copies_from_named_place(name, reg) { return Ok(false); }
+                if self.ctx.lookup_var(name).is_some_and(|binding| binding.pattern_alias.is_some())
+                    && let Some(ty) = ty
+                    && matches!(self.value_resource_discipline(ty),
+                        verum_common::ResourceDiscipline::Affine | verum_common::ResourceDiscipline::Linear)
+                {
+                    return Err(CodegenError::with_span(super::error::CodegenErrorKind::UnsupportedExpr(
+                        "a pattern binding cannot transfer an exclusive value still owned by the scrutinee".into()
+                    ), init.span));
+                }
+                Ok(true)
+            }
             ExprKind::Field { .. } | ExprKind::TupleIndex { .. } | ExprKind::Index { .. }
                 | ExprKind::Unary { op: UnOp::Deref, .. } => {
                 let Some(ty) = ty else { return Ok(false); };

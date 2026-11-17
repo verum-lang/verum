@@ -319,7 +319,13 @@ impl super::VbcCodegen {
     }
 
     pub(super) fn declared_named_binding_type(&self, name: &str, reg: Reg) -> Maybe<TypeRef> {
-        self.named_binding_fact(name, reg)?.declaration_type.clone()
+        let binding = self.ctx.lookup_var(name)?;
+        if binding.reg != reg || binding.is_cell { return None; }
+        let ty = self.ctx.registers.value_uses.captured_declaration(binding)?;
+        // An observed slot carries its own declaration without transferring
+        // the scrutinee. An explicit alias needs evidence of a reference.
+        (binding.pattern_alias != Some(super::registers::PatternAlias::Explicit)
+            || matches!(ty, TypeRef::Reference { .. })).then_some(ty)
     }
 
     /// An exact type witness, not an object header, decides the generic branch.
@@ -538,7 +544,7 @@ impl super::VbcCodegen {
             let Some((identity, ty)) = self.ctx.registers.parameter_owners.get(&binding.reg).cloned()
                 else { continue };
             if binding.kind != super::RegisterKind::Parameter || identity != binding.binding_id
-                || returned == Some(identity) || binding.is_cell || binding.is_pattern_alias {
+                || returned == Some(identity) || binding.is_cell || binding.pattern_alias.is_some() {
                 continue;
             }
             // Generic parameters carry the selected caller's exact witness.
@@ -624,21 +630,53 @@ impl super::VbcCodegen {
             }
             return Ok(());
         }
-        let received = if let Some(ty) = self.generic_named_place(expr, value) {
+        let received = self.copy_place_if_needed(expr, value, declared)?;
+        self.ctx.emit(store(received));
+        if received != value { self.ctx.free_temp(received); }
+        Ok(())
+    }
+
+    /// Receive a value from a selected result edge before its source scope exits.
+    pub(super) fn receive_owned_place(
+        &mut self, expr: &verum_ast::Expr, value: Reg, declared: Option<&TypeRef>,
+        demand: super::ResultDemand,
+    ) -> super::CodegenResult<Reg> {
+        // The callable exit checks ownership across every live local and defer.
+        // Keep an exclusive source visible to that check. A transfer on one
+        // branch does not certify the whole function's return.
+        if self.consumes_named_place(expr, value) {
+            if demand.is_callable_return() { return Ok(value); }
+            let received = self.ctx.alloc_temp();
+            self.ctx.emit_transferring_value(received, value);
+            return Ok(received);
+        }
+        if demand.is_callable_return() && let Some(ty) = self.generic_named_place(expr, value) {
+            // Only the concrete witness can license a copy. A conditional
+            // return has no unconditional transfer receipt for an exclusive T.
+            return Ok(self.copy_declared_value(value, ty));
+        }
+        self.copy_place_if_needed(expr, value, declared)
+    }
+
+    fn copy_place_if_needed(
+        &mut self, expr: &verum_ast::Expr, value: Reg, declared: Option<&TypeRef>,
+    ) -> super::CodegenResult<Reg> {
+        Ok(if let Some(ty) = self.generic_named_place(expr, value) {
             self.emit_generic_value_handoff(value, ty, true)
         } else if self.binds_a_copy_of_a_place(expr, value, declared)? {
             let ty = declared.cloned().ok_or_else(|| super::CodegenError::with_span(
                 super::CodegenErrorKind::Internal(
-                    "aggregate value copy requires its retained source declaration".into(),
+                    "value copy requires its retained source declaration".into(),
                 ), expr.span,
             ))?;
-            let received = self.ctx.alloc_temp();
-            self.ctx.emit(Instruction::CloneTyped { dst: received, src: value, type_ref: ty });
-            received
-        } else { value };
-        self.ctx.emit(store(received));
-        if received != value { self.ctx.free_temp(received); }
-        Ok(())
+            self.copy_declared_value(value, ty)
+        } else { value })
+    }
+
+    fn copy_declared_value(&mut self, value: Reg, ty: TypeRef) -> Reg {
+        let received = self.ctx.alloc_temp();
+        self.ctx.emit(Instruction::CloneTyped { dst: received, src: value, type_ref: ty });
+        received
     }
 
     /// Overwriting a live place retires its previous owner only after publishing
@@ -676,7 +714,7 @@ impl super::VbcCodegen {
 
     fn named_binding_fact(&self, name: &str, reg: Reg) -> Maybe<&BindingFact> {
         let binding = self.ctx.lookup_var(name)?;
-        if binding.reg != reg || binding.is_cell || binding.is_pattern_alias
+        if binding.reg != reg || binding.is_cell || binding.pattern_alias.is_some()
             || !matches!(binding.kind, super::RegisterKind::Local | super::RegisterKind::Parameter)
             || self.ctx.reference_bindings.contains(name) || self.ctx.is_raw_pointer(reg) {
             return None;
@@ -740,7 +778,7 @@ impl super::VbcCodegen {
                 while let Some((name, binding)) = bindings.next_if(|(_, b)| b.scope_level == level) {
                     if binding.kind == super::RegisterKind::Parameter
                         || !has_owners || preserved == Some(binding.reg) || binding.is_cell
-                        || binding.is_pattern_alias || self.ctx.is_raw_pointer(binding.reg)
+                        || binding.pattern_alias.is_some() || self.ctx.is_raw_pointer(binding.reg)
                         || self.ctx.current_fn_escaping_vars.contains(name.as_str())
                     {
                         continue;
@@ -812,7 +850,8 @@ impl super::VbcCodegen {
             bindings.iter().find_map(|(name, binding)| {
                 if binding.is_cell {
                     Some(format!("captured cell `{name}` has no owned exit contract").into())
-                } else if binding.is_pattern_alias && !self.binding_is_declared_reference(binding) {
+                } else if binding.pattern_alias == Some(super::registers::PatternAlias::Explicit)
+                    && !self.binding_is_declared_reference(binding) {
                     Some(format!("pattern alias `{name}` has no current reference declaration").into())
                 } else if self.ctx.current_fn_escaping_vars.contains(name.as_str()) {
                     Some(format!("escaping binding `{name}` has no proved exit contract").into())

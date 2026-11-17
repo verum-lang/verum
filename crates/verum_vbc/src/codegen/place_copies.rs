@@ -180,13 +180,7 @@ impl VbcCodegen {
                     return self.current_source_substitution.get_value(name)
                         .and_then(|(witness, domain)| witness.semantic.then(|| domain.clone()));
                 };
-                if binding.is_cell { return None; }
-                let fact = self.ctx.registers.value_uses.active.get(&binding.reg)?;
-                let ty = fact.declaration_type.as_ref()?;
-                // A borrowed pattern carries a reference declaration, never
-                // ownership of the payload. Retain that borrow for projections.
-                if binding.is_pattern_alias && !matches!(ty, TypeRef::Reference { .. }) { return None; }
-                (fact.id == binding.binding_id).then(|| ty.clone())
+                self.declared_named_binding_type(name, binding.reg)
             }
             ExprKind::Is { .. } => Some(TypeRef::Concrete(crate::types::TypeId::BOOL)),
             ExprKind::Binary { op, left, right } => {
@@ -369,7 +363,8 @@ impl VbcCodegen {
         let fact = self.ctx.registers.value_uses.active.get(&reg)?;
         self.ctx.registers.all_variable_names().iter().any(|name| {
             self.ctx.lookup_var(name).is_some_and(|binding| binding.reg == reg
-                && binding.binding_id == fact.id && !binding.is_cell && !binding.is_pattern_alias)
+                && binding.binding_id == fact.id && !binding.is_cell
+                && binding.pattern_alias != Some(super::registers::PatternAlias::Explicit))
         }).then(|| fact.declaration_type.clone()).flatten()
     }
 

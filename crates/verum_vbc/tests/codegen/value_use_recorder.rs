@@ -300,7 +300,8 @@ fn a_borrowed_alias_cleanup_fact_requires_the_current_binding_identity() {
     use crate::codegen::{CodegenConfig, VbcCodegen};
     let mut codegen = VbcCodegen::with_config(CodegenConfig::new("borrowed_alias"));
     let reg = codegen.ctx.define_var("alias", false);
-    codegen.ctx.lookup_var_mut("alias").unwrap().is_pattern_alias = true;
+    codegen.ctx.lookup_var_mut("alias").unwrap().pattern_alias =
+        Some(crate::codegen::registers::PatternAlias::Explicit);
     let binding = codegen.ctx.lookup_var("alias").unwrap().clone();
     assert!(!codegen.binding_is_declared_reference(&binding));
     codegen.ctx.registers.value_uses.set_type(reg, TypeRef::reference(

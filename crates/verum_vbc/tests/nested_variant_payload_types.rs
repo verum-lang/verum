@@ -6,6 +6,10 @@ use verum_vbc::codegen::{CodegenConfig, ItemFailurePolicy, VbcCodegen};
 use verum_vbc::interpreter::Interpreter;
 
 fn run(source: &str, result_type: Option<&str>) -> i64 {
+    run_checked(source, result_type, |_| {})
+}
+
+fn run_checked(source: &str, result_type: Option<&str>, check: impl Fn(&Interpreter)) -> i64 {
     let source = format!("mount core.base.result.Result;\ntype Poll<T> is Pending | Ready(T);\n{source}\nfn after_probe() {{}}");
     let ast = Parser::new(&source).parse_module().expect("parse");
     // Constructor tests need the real payload declaration, not the historical
@@ -24,10 +28,9 @@ fn run(source: &str, result_type: Option<&str>) -> i64 {
     codegen.resolve_pending_imports();
     codegen.compile_unit_items(&units, ItemFailurePolicy::Strict).expect("compile");
     let module = codegen.finalize_module().expect("complete module");
-    let module = verum_vbc::deserialize::deserialize_module(
+    let wire = verum_vbc::deserialize::deserialize_module(
         &verum_vbc::serialize::serialize_module(&module).expect("serialize"),
     ).expect("deserialize");
-    verum_vbc::validate::validate_module(&module).expect("valid wire");
     if let Some(expected) = result_type {
         assert_eq!(
             codegen
@@ -48,11 +51,17 @@ fn run(source: &str, result_type: Option<&str>) -> i64 {
         })
         .expect("probe")
         .id;
-    let value = Interpreter::new(Arc::new(module))
-        .execute_function(entry)
-        .expect("execute");
-    assert!(value.is_int(), "expected Int, got {value:?}");
-    value.as_i64()
+    let execute = |module| {
+        verum_vbc::validate::validate_module(&module).expect("valid bytecode");
+        let mut vm = Interpreter::new(Arc::new(module));
+        let value = vm.execute_function(entry).expect("execute");
+        assert!(value.is_int(), "expected Int, got {value:?}");
+        check(&vm);
+        value.as_i64()
+    };
+    let value = execute(module);
+    assert_eq!(execute(wire), value, "serialized match changed its result");
+    value
 }
 
 #[test]
@@ -89,10 +98,83 @@ fn probe() -> Int {
     result.answer
 }
 "#,
-            Some("Answer")
+            Some("nested_payload_pins.Answer")
         ),
         7
     );
+}
+
+#[test]
+fn selected_branch_owns_its_result_and_preserves_the_original_payload() {
+    let source = r#"
+type Cell is { value: Int };
+fn inspect(take: Bool) -> Int {
+    let input: Poll<Result<Cell, Bool>> = Poll.Ready(Result.Ok(Cell { value: 7 }));
+    let mut selected = match input {
+        Poll.Ready(Result.Ok(cell)) if take => { (cell) },
+        _ => Cell { value: 20 },
+    };
+    let before = selected.value;
+    selected.value = 9;
+    let original = match input { Poll.Ready(Result.Ok(cell)) => cell.value, _ => -1 };
+    before * 100 + selected.value * 10 + original
+}
+fn probe() -> Int { inspect(true) * 10000 + inspect(false) }
+"#;
+    assert_eq!(run(source, None), 797 * 10000 + 2097);
+}
+
+#[test]
+fn matching_an_exclusive_payload_does_not_transfer_it_out_of_its_owner() {
+    let ast = Parser::new(r#"
+        type affine Token is { value: Int };
+        type Message is Data(Token) | Empty;
+        fn extract(input: Message) -> Token {
+            match input { Message.Data(token) => token, Message.Empty => Token { value: 0 } }
+        }
+    "#).parse_module().expect("parse");
+    let error = VbcCodegen::with_config(CodegenConfig::new("ownership"))
+        .compile_module(&ast).expect_err("matching the payload leaves its owner intact");
+    assert!(error.to_string().contains("still owned by the scrutinee"), "{error}");
+}
+
+#[test]
+fn a_temporary_scrutinee_and_its_selected_value_have_balanced_lifetimes() {
+    let source = r#"
+type Cell is { value: Int };
+fn make() -> Poll<Cell> { Poll.Ready(Cell { value: 7 }) }
+fn probe() -> Int {
+    let selected = match make() { Poll.Ready(cell) => cell, _ => Cell { value: -1 } };
+    selected.value
+}
+"#;
+    assert_eq!(run_checked(source, None, |vm| {
+        let stats = vm.state.heap.stats();
+        assert!(stats.total_allocs > 0);
+        assert_eq!(stats.total_frees, stats.total_allocs);
+    }), 7);
+}
+
+#[test]
+fn a_generic_branch_returns_an_independently_owned_value() {
+    let source = r#"
+type Cell is { value: Int };
+fn choose<T>(first: Bool, left: T, right: T) -> T {
+    if first { left } else { right }
+}
+fn probe() -> Int {
+    let left = Cell { value: 3 };
+    let right = Cell { value: 7 };
+    let mut selected = choose<Cell>(false, left, right);
+    let before = selected.value;
+    selected.value = 9;
+    before * 100 + left.value * 10 + right.value
+}
+"#;
+    assert_eq!(run_checked(source, None, |vm| {
+        let stats = vm.state.heap.stats();
+        assert_eq!(stats.total_frees, stats.total_allocs);
+    }), 737);
 }
 
 #[test]

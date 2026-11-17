@@ -677,11 +677,26 @@ pub(super) enum ResultDemand {
     /// The value crosses this callable's declared return boundary. Only
     /// value-forwarding syntax carries this demand into nested expressions.
     CallableReturn,
+    /// A selected branch produces one owned result. Its leaf must retain the
+    /// callable ABI demand when this join also crosses a return boundary.
+    Branch { callable_return: bool },
 }
 
 impl ResultDemand {
     fn is_used(self) -> bool {
         self != Self::Discarded
+    }
+
+    fn is_callable_return(self) -> bool {
+        matches!(self, Self::CallableReturn | Self::Branch { callable_return: true })
+    }
+
+    fn for_branch(self) -> Self {
+        if self.is_used() {
+            Self::Branch { callable_return: self.is_callable_return() }
+        } else {
+            Self::Discarded
+        }
     }
 }
 
@@ -20358,7 +20373,7 @@ impl VbcCodegen {
         // known. Deferred code and DropRef remain conservative fact barriers.
         // A newly materialized List is distinct from the packed source local:
         // the ordinary cleanup below must still drop that original binding.
-        if demand == ResultDemand::CallableReturn {
+        if demand.is_callable_return() {
             result = result.map(|reg| self.materialize_list_return(reg)).transpose()?;
         }
 

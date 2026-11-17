@@ -101,9 +101,17 @@ pub struct RegisterInfo {
     /// must go through GetF/SetF at field index 0.
     pub is_cell: bool,
 
-    /// The source pattern exposes an alias (`ref` or `name @ pattern`),
-    /// rather than establishing a simple value binding.
-    pub is_pattern_alias: bool,
+    /// The source of a pattern view, when this binding has no independent owner.
+    pub(super) pattern_alias: Option<PatternAlias>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum PatternAlias {
+    /// An explicit alias or reference pattern.
+    Explicit,
+    /// A value observed in the scrutinee. Its retained declaration describes
+    /// the value, while the enclosing scrutinee keeps the drop obligation.
+    Scrutinee,
 }
 
 /// Kind of register binding.
@@ -196,7 +204,7 @@ impl RegisterAllocator {
                     scope_level: 0,
                     kind: RegisterKind::Parameter,
                     is_cell: false,
-                    is_pattern_alias: false,
+                    pattern_alias: None,
                 },
             );
             regs.push(reg);
@@ -250,7 +258,7 @@ impl RegisterAllocator {
                 scope_level,
                 kind: RegisterKind::Local,
                 is_cell: false,
-                is_pattern_alias: false,
+                pattern_alias: None,
             },
         );
 
