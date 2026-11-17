@@ -1,9 +1,41 @@
 //! Independent executable replay, including malformed equality certificates.
 #[path = "support/dependent_reflexivity.rs"]
 mod dependent_reflexivity;
+#[path = "support/function_eta.rs"]
+mod function_eta;
 
 use std::process::Command;
 use verum_proof::proof_checker::{Certificate, Term};
+
+#[test]
+fn function_eta_preserves_exact_dependency_in_both_native_checkers() {
+    use verum_proof::{
+        admission::{ReplayOutcome, classify_check_failure},
+        proof_checker_nbe,
+    };
+    for (id, term, claimed_type, accepted) in function_eta::cases() {
+        let certificate = Certificate {
+            term,
+            claimed_type,
+            metadata: Default::default(),
+        };
+        let expected = if accepted {
+            ReplayOutcome::Accepted
+        } else {
+            ReplayOutcome::Rejected
+        };
+        for (name, result) in [
+            ("NbE", proof_checker_nbe::verify_certificate(&certificate)),
+            ("substitution", certificate.verify()),
+        ] {
+            let outcome = result.as_ref().map_or_else(
+                |error| classify_check_failure(error).0,
+                |_| ReplayOutcome::Accepted,
+            );
+            assert_eq!(outcome, expected, "{id} / {name}: {result:?}");
+        }
+    }
+}
 
 fn bind(domains: &[Term], body: Term, binder: fn(Term, Term) -> Term) -> Term {
     domains
@@ -104,6 +136,7 @@ fn independent_replay_checks_equality_and_rejects_invalid_proofs() {
     ));
 
     cases.extend(dependent_reflexivity::cases());
+    cases.extend(function_eta::cases());
     let rows: Vec<_> = cases
         .iter()
         .map(|(id, term, claimed_type, expected)| {

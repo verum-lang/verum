@@ -37,6 +37,11 @@ inductive HeadStep : Term → Term → Prop where
       HeadStep a b → HeadStep (.induct (.construct a ctor args) motive cases)
         (.induct (.construct b ctor args) motive cases)
 
+/-- Applying the expanded function recovers the original application in one beta step. -/
+theorem eta_application_step (domain f argument : Term) :
+    HeadStep (.app (.lam domain (etaBody f)) argument) (.app f argument) := by
+  simpa only [instantiate_etaBody] using HeadStep.beta domain (etaBody f) argument
+
 /-- A finite sequence of permitted steps, possibly empty. -/
 inductive HeadSteps : Term → Term → Prop where
   | refl (term : Term) : HeadSteps term term

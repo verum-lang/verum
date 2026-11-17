@@ -422,6 +422,9 @@ theorem mapFields_length (replace : Nat → Nat → Term) (cutoff : Nat)
 def shiftUp (amount cutoff : Nat) (t : Term) : Term :=
   mapVars (fun cutoff i => if i ≥ cutoff then .var (i + amount) else .var i) cutoff t
 
+/-- Apply an outer function to the fresh variable of an extended context. -/
+def etaBody (f : Term) : Term := .app (shiftUp 1 0 f) (.var 0)
+
 /-- Lower variables above the removed interval. Variables inside it are left
     unchanged: this is a total operation, not a scoping validator. -/
 def shiftDown (amount cutoff : Nat) (t : Term) : Term :=
@@ -502,36 +505,6 @@ termination_by fuel
 def whnf (t : Term) : Except CheckError Term := whnfFuel whnfFuelCeiling t
 
 /-- Is `var target` free in `t`? -/
-partial def isFreeIn (target : Nat) (t : Term) : Bool :=
-  match t with
-  | .letE value body => isFreeIn target value || isFreeIn (target+1) body
-  | .data _ _ indices constructors =>
-    indices.zipIdx.any (fun (ty,i) => isFreeIn (target+i) ty) ||
-    constructors.any (fun constructor =>
-      constructor.indices.any (isFreeIn (target + constructor.fields.length)) ||
-      constructor.fields.zipIdx.any (fun (field, index) => match field with
-        | .value ty => isFreeIn target ty
-        | .dependent ty => isFreeIn (target + index) ty
-        | .recursive => false
-        | .recursiveAt indices => indices.any (isFreeIn (target + index))))
-  | .construct data _ args => isFreeIn target data || args.any (isFreeIn target)
-  | .induct value motive cases => isFreeIn target value || isFreeIn target motive || cases.any (isFreeIn target)
-  | .var i        => i = target
-  | .universe _   => false
-  | .pi a b       => isFreeIn target a || isFreeIn (target + 1) b
-  | .lam a body   => isFreeIn target a || isFreeIn (target + 1) body
-  | .app f x      => isFreeIn target f || isFreeIn target x
-  | .sigma a b    => isFreeIn target a || isFreeIn (target + 1) b
-  | .pair a b     => isFreeIn target a || isFreeIn target b
-  | .fst p        => isFreeIn target p
-  | .snd p        => isFreeIn target p
-  | .identity a x y => isFreeIn target a || isFreeIn target x || isFreeIn target y
-  | .refl x => isFreeIn target x
-  | .transport p h e => isFreeIn target p || isFreeIn target h || isFreeIn target e
-  | .idElim p h e => isFreeIn target p || isFreeIn target h || isFreeIn target e
-  | .funExt a b c d => isFreeIn target a || isFreeIn target b || isFreeIn target c || isFreeIn target d
-
-/-- Field domain in the frame of every preceding field. -/
 def fieldValueType (field : DataField Term) (preceding : Nat) : Option Term :=
   match field with
   | .value ty => some (shiftUp preceding 0 ty)
@@ -611,14 +584,9 @@ partial def termsDefEq (a b : List Term) : Except CheckError Bool := do
   unless a.length == b.length do return false
   allChecked (a.zip b) (fun (a,b) => defEq a b)
 
-/-- η-equivalence checks all required reductions before comparing endpoints. -/
-partial def etaMatch (lamBody other : Term) : Except CheckError Bool := do
-  match ← whnf lamBody with
-  | .app f x =>
-    match ← whnf x with
-    | .var 0 => if isFreeIn 0 f then pure false else defEq (shiftDown 1 0 f) other
-    | _ => pure false
-  | _ => pure false
+/-- Compare in the body context. The outer function is weakened before application. -/
+partial def etaMatch (body other : Term) : Except CheckError Bool :=
+  defEq body (etaBody other)
 
 end
 

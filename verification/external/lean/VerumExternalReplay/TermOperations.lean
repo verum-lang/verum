@@ -194,6 +194,18 @@ theorem subst_shiftUp (target : Nat) (replacement t : Term) :
     have below : ¬ i > c := by omega
     simp [bound, mapVars, different, below]
 
+/-- Instantiating the argument introduced by eta comparison recovers ordinary
+application for every open or closed function, including beneath telescopes. -/
+theorem instantiate_etaBody (f argument : Term) :
+    subst 0 argument (etaBody f) = .app f argument := by
+  have fresh : subst 0 argument (.var 0) = argument := by
+    simp [subst, mapVars, shiftUp_zero]
+  have app (g x : Term) : subst 0 argument (.app g x) =
+      .app (subst 0 argument g) (subst 0 argument x) := by
+    unfold subst
+    rw [mapVars]
+  rw [etaBody, app, subst_shiftUp, fresh]
+
 /-- Fuel is an explicit total reduction budget, not a normalization theorem. -/
 theorem whnfFuel_zero (t : Term) : whnfFuel 0 t = .error .fuel_exhausted := by
   simp only [whnfFuel]

@@ -980,7 +980,7 @@ impl Context {
     /// is unchanged for compositionality.
     pub fn extend(&self, ty: Term) -> Self {
         let mut out = self.clone();
-        let closed = !contains_free(&ty, 0, None);
+        let closed = !contains_free_by(&ty, 0, &|_| true);
         out.bindings.push(ContextBinding {
             ty: std::sync::Arc::new(ty),
             closed,
@@ -1654,58 +1654,19 @@ impl Conversion<'_> {
                     && self.def_eq(c, g)?
                     && self.def_eq(d, h)?
             }
-            // η-equivalence — one-sided cases. When one side is a
-            // λx.(f x) and the other is `f`, they're equal iff `x`
-            // does not appear free in `f`. This rule fires AFTER WHNF
-            // reduction so β-redexes are eliminated first; what remains
-            // is purely structural η.
+            // Compare the functions in the same extended binder frame.
             (Term::Lam(_, body), other) => self.eta_match(body, other)?,
             (other, Term::Lam(_, body)) => self.eta_match(body, other)?,
             _ => false,
         })
     }
 
-    /// η-equivalence helper: returns `true` iff `lam_body` (the body of
-    /// a λ at depth 0) reduces to `App(f, x)` where `x` whnf-reduces to
-    /// `Var(0)` and `f` does not contain `Var(0)` free, AND `f` (after
-    /// shifting down) is equal to `other`.
-    ///
-    /// This is the soundness gate for T-Eta-Conv: the bound variable
-    /// must not "leak" into the function part of the application.
-    ///
-    /// **DEFECT-1 fix (kernel-audit-2026-05-08).** Previously the
-    /// argument `x` was matched syntactically against `Var(0)`; this
-    /// missed valid η-redexes whose argument β-reduces to `Var(0)` (e.g.
-    /// `λx. (f ((λy.y) x))`).  We now whnf the argument first.  This is
-    /// safe: `whnf` on a sub-term of a well-typed lambda body terminates
-    /// (CoC strong-normalisation), and any non-`Var(0)` whnf result is
-    /// rejected before the bound-variable-escape check.
-    fn eta_match(&self, lam_body: &Term, other: &Term) -> Result<bool, CheckError> {
-        let app_body = self.under(1).whnf(lam_body.clone())?;
-        let (f, x) = match app_body {
-            Term::App(f, x) => (f, x),
-            _ => return Ok(false),
-        };
-        // The argument must β-reduce to `Var(0)` (the bound variable).
-        // Whnf the sub-term: any redex like `(λ. body) x` collapses, and
-        // after collapse we expect a literal `Var(0)`.  Anything else
-        // means the η-redex is not in canonical form and we conservatively
-        // reject (sound but incomplete here, as in any decidable
-        // η-conversion algorithm — the alternative is full normalisation
-        // which costs more for the same soundness).
-        let x_whnf = self.under(1).whnf(*x)?;
-        if !matches!(x_whnf, Term::Var(0)) {
-            return Ok(false);
-        }
-        // The function part must not reference Var(0) — otherwise the
-        // η-rule is unsound (the variable escapes its binder).
-        if is_free_in(&f, 0) {
-            return Ok(false);
-        }
-        // Shift `f` down by one (since we're removing a binder) and
-        // compare to `other`.
-        let f_shifted = shift_down(*f, 1, 0);
-        self.def_eq(&f_shifted, other)
+    /// Compare a lambda body with the other function at the fresh bound variable.
+    /// Weakening keeps every outer variable distinct from that argument. Ordinary
+    /// conversion can then erase a dependency by beta reduction inside either side.
+    fn eta_match(&self, body: &Term, other: &Term) -> Result<bool, CheckError> {
+        let applied = Term::app(lift_term_one_binder(other.clone()), Term::var(0));
+        self.under(1).def_eq(body, &applied)
     }
 }
 
@@ -1717,27 +1678,7 @@ fn def_eq(a: &Term, b: &Term) -> bool {
         .expect("conversion completed")
 }
 
-/// Check whether de Bruijn index `target` occurs FREE in `term`
-/// (i.e., not captured by an inner binder). Used by the η-rule
-/// to ensure the bound variable doesn't leak into the function
-/// part.
-///
-/// Universe levels never carry term-level variables, so the
-/// `Universe` arm is unconditionally `false` even when the level
-/// expression contains `Var` (those are LEVEL variables, not the
-/// term variable being inspected).
-fn is_free_in(term: &Term, target: usize) -> bool {
-    contains_free(term, 0, Some(target))
-}
-
-/// Detect an ambient variable without allocating or rebuilding the term.
-/// `None` asks whether the term is open at all; `Some` selects one index.
-fn contains_free(term: &Term, depth: usize, wanted: Option<usize>) -> bool {
-    contains_free_by(term, depth, &|index| {
-        wanted.is_none_or(|wanted| index == wanted)
-    })
-}
-
+/// Visit ambient variable indices until the predicate succeeds.
 pub(crate) fn contains_free_by(term: &Term, depth: usize, wanted: &impl Fn(usize) -> bool) -> bool {
     let here = |term| contains_free_by(term, depth, wanted);
     match term {
@@ -1798,88 +1739,6 @@ pub(crate) fn contains_free_by(term: &Term, depth: usize, wanted: &impl Fn(usize
             motive,
             cases,
         } => here(scrutinee) || here(motive) || cases.iter().any(here),
-    }
-}
-
-/// Inverse of `shift_up` — decrement every variable index in `term`
-/// by `amount` if its index is `>= cutoff + amount`, leaving lower
-/// indices alone. Panics in debug if it would produce a negative
-/// index (caller bug).
-fn shift_down(term: Term, amount: usize, cutoff: usize) -> Term {
-    match term {
-        Term::Let { value, body } => Term::Let {
-            value: Box::new(shift_down(*value, amount, cutoff)),
-            body: Box::new(shift_down(*body, amount, cutoff + 1)),
-        },
-        data @ (Term::Data { .. }
-        | Term::Construct { .. }
-        | Term::Induct { .. }
-        | Term::FunExt { .. }) => {
-            data.map_children(|child, binders| shift_down(child, amount, cutoff + binders))
-        }
-        Term::Var(i) => {
-            if i >= cutoff + amount {
-                Term::Var(i - amount)
-            } else if i < cutoff {
-                Term::Var(i)
-            } else {
-                // 0 <= i - cutoff < amount → would underflow.
-                // η-match's `is_free_in` precondition rules this out
-                // for our use case, but defensively return the
-                // unchanged variable so a caller bug is visible
-                // downstream as a type-mismatch rather than a panic.
-                Term::Var(i)
-            }
-        }
-        Term::Universe(level) => Term::Universe(level),
-        Term::Pi(a, b) => Term::Pi(
-            Box::new(shift_down(*a, amount, cutoff)),
-            Box::new(shift_down(*b, amount, cutoff + 1)),
-        ),
-        Term::Lam(a, body) => Term::Lam(
-            Box::new(shift_down(*a, amount, cutoff)),
-            Box::new(shift_down(*body, amount, cutoff + 1)),
-        ),
-        Term::App(f, x) => Term::App(
-            Box::new(shift_down(*f, amount, cutoff)),
-            Box::new(shift_down(*x, amount, cutoff)),
-        ),
-        Term::Sigma(a, b) => Term::Sigma(
-            Box::new(shift_down(*a, amount, cutoff)),
-            Box::new(shift_down(*b, amount, cutoff + 1)),
-        ),
-        Term::Pair(a, b) => Term::Pair(
-            Box::new(shift_down(*a, amount, cutoff)),
-            Box::new(shift_down(*b, amount, cutoff)),
-        ),
-        Term::Fst(p) => Term::Fst(Box::new(shift_down(*p, amount, cutoff))),
-        Term::Snd(p) => Term::Snd(Box::new(shift_down(*p, amount, cutoff))),
-
-        // ---- Identity types ----
-        Term::Id { ty, lhs, rhs } => Term::Id {
-            ty: Box::new(shift_down(*ty, amount, cutoff)),
-            lhs: Box::new(shift_down(*lhs, amount, cutoff)),
-            rhs: Box::new(shift_down(*rhs, amount, cutoff)),
-        },
-        Term::Refl(value) => Term::Refl(Box::new(shift_down(*value, amount, cutoff))),
-        Term::J {
-            motive,
-            base,
-            scrutinee,
-        } => Term::J {
-            motive: Box::new(shift_down(*motive, amount, cutoff)),
-            base: Box::new(shift_down(*base, amount, cutoff)),
-            scrutinee: Box::new(shift_down(*scrutinee, amount, cutoff)),
-        },
-        Term::IdElim {
-            motive,
-            base,
-            scrutinee,
-        } => Term::IdElim {
-            motive: Box::new(shift_down(*motive, amount, cutoff)),
-            base: Box::new(shift_down(*base, amount, cutoff)),
-            scrutinee: Box::new(shift_down(*scrutinee, amount, cutoff)),
-        },
     }
 }
 
@@ -3058,30 +2917,27 @@ mod tests {
     }
 
     #[test]
-    fn is_free_in_handles_binders() {
+    fn free_occurrences_respect_binders() {
         // Var(0) is free in Var(0), but bound in λ(_).Var(0)
-        assert!(is_free_in(&Term::Var(0), 0));
+        assert!(contains_free_by(&Term::Var(0), 0, &|i| i == 0));
         let lam_body_zero = Term::lam(Term::universe(0), Term::Var(0));
         // Lam(_, Var(0)) — the body's Var(0) is the bound var, NOT
         // a free reference to outer Var(0). Querying outer-target=0
         // shifts to inner-target=1 inside the body, which Var(0) is
         // NOT. So the outer Var(0) is NOT free in this term.
-        assert!(!is_free_in(&lam_body_zero, 0));
+        assert!(!contains_free_by(&lam_body_zero, 0, &|i| i == 0));
         // But Var(1) inside the body IS a free reference to OUTER
         // Var(0). The outer-target=0 query shifts to target=1 in
         // the body, which matches Var(1).
         let lam_body_outer = Term::lam(Term::universe(0), Term::Var(1));
-        assert!(is_free_in(&lam_body_outer, 0));
+        assert!(contains_free_by(&lam_body_outer, 0, &|i| i == 0));
     }
 
     #[test]
-    fn shift_down_inverse_of_shift_up() {
-        // shift_down . shift_up = identity on var indices that don't
-        // get clobbered.
+    fn substitution_at_a_fresh_slot_preserves_weakened_open_terms() {
         let original = Term::lam(Term::universe(0), Term::Var(2));
-        let shifted_up = shift_up(original.clone(), 1, 0);
-        let shifted_back = shift_down(shifted_up, 1, 0);
-        assert_eq!(shifted_back, original);
+        let weakened = lift_term_one_binder(original.clone());
+        assert_eq!(subst(weakened, 0, &Term::universe(0)), original);
     }
 
     #[test]

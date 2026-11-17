@@ -3,6 +3,9 @@ use verum_proof::{lean_export::source, proof_checker::Term};
 
 #[path = "support/dependent_reflexivity.rs"]
 mod dependent_reflexivity;
+#[cfg(feature = "process")]
+#[path = "support/function_eta.rs"]
+mod function_eta;
 
 fn wire(term: Term, claim: Term) -> String {
     json!({"profile": "verum-native/1", "statement": &claim,
@@ -95,6 +98,7 @@ fn kernel_accepts_polymorphic_transport_and_rejects_a_changed_endpoint() {
     cases.extend(
         dependent_reflexivity::cases()
             .into_iter()
+            .chain(function_eta::cases())
             .map(|(_, term, claim, valid)| (wire(term, claim), valid)),
     );
     for (wire, valid) in cases {
