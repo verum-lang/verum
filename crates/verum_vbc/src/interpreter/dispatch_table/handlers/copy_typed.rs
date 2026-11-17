@@ -209,6 +209,7 @@ enum Backing {
 }
 enum Operation {
     Identity(Value),
+    Callable { value: Value, owner: heap::CallableOwner },
     Text {
         source: *const u8,
         len: usize,
@@ -434,8 +435,10 @@ fn inspect<'a>(
                 return Ok((operation, Children::None, allocations, false));
             }
             CopyNode::Callable(signature) => {
-                state.heap.validate_empty_callable(&state.module, source, signature)?;
-                return Ok((Operation::Identity(source), Children::None, 0, false));
+                return Ok(match state.heap.validate_callable(&state.module, source, signature)? {
+                    Some(owner) => (Operation::Callable { value: source, owner }, Children::None, 1, false),
+                    None => (Operation::Identity(source), Children::None, 0, false),
+                });
             }
             CopyNode::Record {
                 owner,
@@ -693,6 +696,15 @@ fn preflight(
     plan: &CopyPlan,
     limits: CopyLimits,
 ) -> InterpreterResult<Schedule> {
+    preflight_sources(state, [(source, NodeId(0))], plan, limits)
+}
+
+fn preflight_sources(
+    state: &mut InterpreterState,
+    sources: impl IntoIterator<Item = (Value, NodeId)>,
+    plan: &CopyPlan,
+    limits: CopyLimits,
+) -> InterpreterResult<Schedule> {
     for node in &plan.nodes {
         if let CopyNode::Shared { contract, .. } = node {
             contract.validate(&state.module).map_err(invalid)?;
@@ -708,7 +720,8 @@ fn preflight(
         steps: List::new(),
         allocations: 0,
     };
-    let mut next = Some((source, NodeId(0), Destination::Root));
+    let mut sources = sources.into_iter();
+    let mut next = sources.next().map(|(value, node)| (value, node, Destination::Root));
     loop {
         if let Some((source, node, destination)) = next.take() {
             budget.step()?;
@@ -750,6 +763,10 @@ fn preflight(
             )?;
         }
         let Some(frame) = stack.last_mut() else {
+            if let Some((source, node)) = sources.next() {
+                next = Some((source, node, Destination::Root));
+                continue;
+            }
             break;
         };
         while frame.children.vacant(frame.next) {
@@ -793,6 +810,8 @@ enum Entry {
     Raw(i64),
     Prepared(PreparedRetain),
     Retained(RetainedCopy),
+    CallablePrepared(heap::CallableOwner),
+    CallableRetained(heap::CallableOwner),
     Vacant,
 }
 struct Transaction {
@@ -874,6 +893,11 @@ impl Transaction {
     ) -> InterpreterResult<Output> {
         match operation {
             Operation::Identity(value) => Ok(Output::scalar(*value)),
+            Operation::Callable { value, owner } => {
+                self.room()?;
+                self.entries.push(Entry::CallablePrepared(*owner));
+                Ok(Output::scalar(*value))
+            }
             Operation::Text { source, len, capacity, extent } => {
                 let output = self.managed(state, TypeId::TEXT, heap::TEXT_RECORD_SIZE)?;
                 let pointer = if *extent == 0 {
@@ -985,6 +1009,13 @@ impl Transaction {
         for index in 0..self.entries.len() {
             let entry = std::mem::replace(&mut self.entries[index], Entry::Vacant);
             self.entries[index] = match entry {
+                Entry::CallablePrepared(owner) => {
+                    if let Err(error) = state.heap.retain_callable(owner) {
+                        self.entries[index] = Entry::CallablePrepared(owner);
+                        return Err(error);
+                    }
+                    Entry::CallableRetained(owner)
+                }
                 Entry::Prepared(prepared) => match prepared.retain(state) {
                     Ok(retained) => Entry::Retained(retained),
                     Err((prepared, _error)) => {
@@ -1013,6 +1044,12 @@ impl Transaction {
                         failure = Some(failed(CopyFailure::RollbackFailure));
                     }
                 }
+                Entry::CallableRetained(owner) => {
+                    if state.heap.undo_callable_retain(owner).is_err() && failure.is_none() {
+                        failure = Some(failed(CopyFailure::RollbackFailure));
+                    }
+                }
+                Entry::CallablePrepared(_) => (),
                 Entry::Vacant => (),
             }
         }
@@ -1034,6 +1071,15 @@ fn execute(
     limits: CopyLimits,
 ) -> InterpreterResult<Value> {
     let schedule = preflight(state, source, plan, limits)?;
+    execute_schedule(state, schedule).map(|values| values[0])
+}
+
+fn execute_schedule(state: &mut InterpreterState, schedule: Schedule) -> InterpreterResult<List<Value>> {
+    let root_count = schedule.steps.iter()
+        .filter(|step| matches!(step.destination, Destination::Root)).count();
+    let mut roots = List::new();
+    roots.try_reserve_exact(root_count)
+        .map_err(|_| failed(CopyFailure::AllocationFailure))?;
     let mut outputs: List<Output> = List::new();
     outputs
         .try_reserve_exact(schedule.steps.len())
@@ -1043,7 +1089,7 @@ fn execute(
         for step in &schedule.steps {
             let output = transaction.prepare(state, &step.operation)?;
             let destination = match step.destination {
-                Destination::Root => None,
+                Destination::Root => { roots.push(output.value); None },
                 Destination::Field { parent, index } => Some((outputs[parent].fields, index)),
                 Destination::Element { parent, index } => Some((outputs[parent].elements, index)),
             };
@@ -1057,7 +1103,7 @@ fn execute(
             outputs.push(output);
         }
         transaction.commit(state)?;
-        Ok(outputs[0].value)
+        Ok(roots)
     })();
     match prepared {
         Ok(value) => {
@@ -1071,16 +1117,38 @@ fn execute(
     }
 }
 
+/// Formation copies the declared capture telescope in one transaction and with
+/// one work/allocation budget. No partial environment is published on failure.
+pub(super) fn copy_captures(
+    state: &mut InterpreterState, values: &[Value], types: &[TypeRef],
+) -> InterpreterResult<List<Value>> {
+    if values.len() != types.len() {
+        return Err(invalid("capture values and declarations have different arity"));
+    }
+    let plan = copy_plan::build(&state.module, &TypeRef::Tuple(types.to_vec())).map_err(invalid)?;
+    let Some(CopyNode::Record { fields, .. }) = plan.nodes.first() else {
+        return Err(invalid("capture telescope lacks its structural field plan"));
+    };
+    let sources = values.iter().copied().zip(fields.iter().copied());
+    let schedule = preflight_sources(state, sources, &plan, state.config.typed_copy_limits)?;
+    execute_schedule(state, schedule)
+}
+
 pub(in super::super) fn handle(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let src = read_reg(state)?;
     let declared = read_type_ref(state)?;
     let declared = state.resolve_generic_witness(&declared)?;
-    let plan = copy_plan::build(&state.module, &declared).map_err(invalid)?;
     let source = state.get_reg(src);
-    let result = execute(state, source, &plan, state.config.typed_copy_limits)?;
+    let result = copy_declared(state, source, &declared)?;
     state.set_reg(dst, result);
     Ok(DispatchResult::Continue)
+}
+
+pub(super) fn copy_declared(state: &mut InterpreterState, source: Value, declared: &TypeRef)
+    -> InterpreterResult<Value> {
+    let plan = copy_plan::build(&state.module, declared).map_err(invalid)?;
+    execute(state, source, &plan, state.config.typed_copy_limits)
 }
 
 #[cfg(all(test, feature = "codegen"))]

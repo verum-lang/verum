@@ -246,6 +246,7 @@ fn adapter_preserves_target_calling_convention_and_exposes_slot_convention() {
         lower_instruction(
             &mut ctx,
             &Instruction::NewClosure {
+                owns_captures: false,
                 lexical_types: Vec::new(),
                 dst: Reg(0),
                 func_id: 0,

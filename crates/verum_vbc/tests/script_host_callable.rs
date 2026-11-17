@@ -176,7 +176,8 @@ fn add(module: &mut VbcModule, name: &str, generic: bool, body: &[Instruction]) 
 fn witnessed_host(evidence: bool) -> (Interpreter, Value) {
     let mut module = VbcModule::new("host_lexical".into());
     add(&mut module, "make", false, &[
-        Instruction::NewClosure { dst: Reg(0), func_id: 1, captures: vec![], capture_types: Some(vec![]),
+        Instruction::NewClosure {
+            owns_captures: false, dst: Reg(0), func_id: 1, captures: vec![], capture_types: Some(vec![]),
             lexical_types: if evidence { vec![TypeRef::Concrete(TypeId::INT)] } else { vec![] } },
         Instruction::Ret { value: Reg(0) },
     ]);

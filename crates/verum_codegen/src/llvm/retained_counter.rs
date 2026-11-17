@@ -39,6 +39,7 @@ enum CounterCache<'module, 'ctx> {
 pub(super) struct EmittedCounters<'ctx> {
     retain: FunctionValue<'ctx>,
     release: FunctionValue<'ctx>,
+    owner_release: FunctionValue<'ctx>,
 }
 impl<'module, 'ctx> RetainedCounters<'module, 'ctx> {
     /// Create a cache whose lifetime is bound to one exact module.
@@ -64,14 +65,25 @@ impl<'module, 'ctx> RetainedCounters<'module, 'ctx> {
     /// Obtain the generated retain/release identities. The module is fixed at
     /// construction, never recovered by an address or supplied by a consumer.
     pub fn get(&self) -> Result<(FunctionValue<'ctx>, FunctionValue<'ctx>)> {
+        let owned = self.emitted()?;
+        Ok((owned.retain, owned.release))
+    }
+
+    /// Release one owner, including the last. Returns the previous positive
+    /// count, or zero on refusal. Only a returned one authorizes destruction.
+    pub(super) fn owner_release(&self) -> Result<FunctionValue<'ctx>> {
+        Ok(self.emitted()?.owner_release)
+    }
+
+    fn emitted(&self) -> Result<EmittedCounters<'ctx>> {
         let functions = match &self.functions {
             CounterCache::Owned(functions) => functions,
             CounterCache::Lowering(functions) => functions,
         };
         if let Some(owned) = functions.get() {
-            return Ok((owned.retain, owned.release));
+            return Ok(*owned);
         }
-        for name in ["verum_retain_u32_checked", "verum_release_local_retain_u32"] {
+        for name in ["verum_retain_u32_checked", "verum_release_local_retain_u32", "verum_release_owner_u32"] {
             if self.module.get_function(name).is_some() {
                 return Err(super::error::LlvmLoweringError::internal(
                     "retained counter helper collides with a foreign declaration",
@@ -79,29 +91,36 @@ impl<'module, 'ctx> RetainedCounters<'module, 'ctx> {
             }
         }
         let owned = EmittedCounters {
-            retain: transition(self.module.get_context(), self.module, true)?,
-            release: transition(self.module.get_context(), self.module, false)?,
+            retain: transition(self.module.get_context(), self.module, Transition::Retain)?,
+            release: transition(self.module.get_context(), self.module, Transition::Rollback)?,
+            owner_release: transition(self.module.get_context(), self.module, Transition::ReleaseOwner)?,
         };
         functions.set(owned).map_err(|_| {
             super::error::LlvmLoweringError::internal("retained counter emitter initialized twice")
         })?;
-        Ok((owned.retain, owned.release))
+        Ok(owned)
     }
 }
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Transition { Retain, Rollback, ReleaseOwner }
 
 fn transition<'ctx>(
     c: ContextRef<'ctx>,
     module: &Module<'ctx>,
-    acquire: bool,
+    mode: Transition,
 ) -> Result<FunctionValue<'ctx>> {
-    let name = if acquire {
-        "verum_retain_u32_checked"
-    } else {
-        "verum_release_local_retain_u32"
+    let acquire = mode == Transition::Retain;
+    let final_release = mode == Transition::ReleaseOwner;
+    let name = match mode {
+        Transition::Retain => "verum_retain_u32_checked",
+        Transition::Rollback => "verum_release_local_retain_u32",
+        Transition::ReleaseOwner => "verum_release_owner_u32",
     };
     let ptr = c.ptr_type(Default::default());
     let i32_type = c.i32_type();
-    let signature = c.bool_type().fn_type(&[ptr.into()], false);
+    let result_type = if final_release { i32_type } else { c.bool_type() };
+    let signature = result_type.fn_type(&[ptr.into()], false);
     let function = module.add_function(name, signature, Some(Linkage::Internal));
     let b = c.create_builder();
     let entry = c.append_basic_block(function, "entry");
@@ -139,8 +158,8 @@ fn transition<'ctx>(
         b.build_int_compare(
             IntPredicate::UGT,
             value,
-            i32_type.const_int(1, false),
-            "original_remains",
+            i32_type.const_int(u64::from(!final_release), false),
+            "release_preserves_owners",
         )
         .or_llvm_err()?
     };
@@ -159,7 +178,7 @@ fn transition<'ctx>(
             counter,
             value,
             next,
-            AtomicOrdering::Monotonic,
+            if final_release { AtomicOrdering::AcquireRelease } else { AtomicOrdering::Monotonic },
             AtomicOrdering::Monotonic,
         )
         .or_llvm_err()?;
@@ -175,10 +194,10 @@ fn transition<'ctx>(
     b.build_conditional_branch(success, accepted, probe)
         .or_llvm_err()?;
     b.position_at_end(refused);
-    b.build_return(Some(&c.bool_type().const_zero()))
+    b.build_return(Some(&result_type.const_zero()))
         .or_llvm_err()?;
     b.position_at_end(accepted);
-    b.build_return(Some(&c.bool_type().const_int(1, false)))
+    b.build_return(Some(&if final_release { value } else { result_type.const_int(1, false) }))
         .or_llvm_err()?;
     Ok(function)
 }

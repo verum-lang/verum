@@ -11,6 +11,10 @@ pub(super) fn lower<'ctx>(
         .vbc_module()
         .or_internal("DropTyped requires declaration metadata")?;
     let plan = verum_vbc::drop_plan::build(module, ty);
+    if let Ok(DropPlan::Callable { signature }) = &plan
+        && super::callable_lifecycle::release(ctx, src, signature)? {
+        return Ok(());
+    }
     let value = ctx.get_register(src.0)?;
     if matches!(plan, Ok(DropPlan::Text)) {
         // DropTyped names the consumed register. Comparing independently
@@ -102,7 +106,7 @@ fn retire_fields<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, pointer: PointerValu
         ctx.get_module(), pointer, bytes)
 }
 
-fn emit<'ctx>(
+pub(super) fn emit<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
     value: BasicValueEnum<'ctx>,
     plan: &DropPlan,

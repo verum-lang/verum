@@ -1887,6 +1887,7 @@ pub(super) fn lower<'ctx>(
             }
             CopyNode::Callable(signature) => {
                 ctx.require_callable_copy(src, signature)?;
+                super::callable_lifecycle::retain(ctx, src)?;
                 return super::lower_mov(ctx, dst, src);
             }
             CopyNode::Alias(next) => root = *next,
@@ -1894,8 +1895,39 @@ pub(super) fn lower<'ctx>(
         }
     }
     // A structural copy can invoke declared retain code, whose writes are
-    // outside the local empty-environment producer proof.
+    // outside the local environment producer proof.
     ctx.clear_callable_producers();
+    let values = lower_roots(ctx, &[source], &plan, &[NodeId(0)])?;
+    let value = ctx.builder().build_int_to_ptr(values[0], ctx.types().ptr_type(),
+        "typed_copy_result").or_llvm_err()?;
+    ctx.set_register(dst.0, value.into());
+    if matches!(ty, TypeRef::Concrete(_) | TypeRef::Instantiated { .. }) {
+        mark_register_from_return_type(ctx, dst.0, ty);
+    }
+    if matches!(plan.nodes[root.0], CopyNode::Text) { ctx.mark_text_register(dst.0); }
+    Ok(())
+}
+
+/// The capture telescope uses the same transaction, limits and rollback ledger
+/// as a single typed copy. No synthetic tuple allocation is required.
+pub(super) fn capture_values<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>,
+    sources: &[BasicValueEnum<'ctx>], declarations: &[TypeRef]) -> Result<List<BasicValueEnum<'ctx>>> {
+    if sources.len() != declarations.len() {
+        return Err(LlvmLoweringError::internal("capture telescope arity mismatch"));
+    }
+    if sources.is_empty() { return Ok(List::new()); }
+    let module = ctx.vbc_module().or_internal("capture copy requires declarations")?;
+    let plan = verum_vbc::copy_plan::build(module, &TypeRef::Tuple(declarations.to_vec()))
+        .map_err(LlvmLoweringError::UnprovenCallableEnvironment)?;
+    let Some(CopyNode::Record { fields, .. }) = plan.nodes.first() else {
+        return Err(LlvmLoweringError::internal("capture telescope lacks structural fields"));
+    };
+    Ok(lower_roots(ctx, sources, &plan, fields)?.into_iter().map(Into::into).collect())
+}
+
+fn lower_roots<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>,
+    sources: &[BasicValueEnum<'ctx>], plan: &CopyPlan, roots: &[NodeId]) -> Result<List<IntValue<'ctx>>> {
+    let module = ctx.vbc_module().or_internal("typed copy requires declarations")?;
     let counters = if plan
         .nodes
         .iter()
@@ -1914,11 +1946,12 @@ pub(super) fn lower<'ctx>(
     let llvm_module = ctx.get_module();
     let i64_type = context.i64_type();
     let ptr_type = context.ptr_type(Default::default());
+    let single_root = roots.len() == 1;
     let function = llvm_module.add_function(
         "verum_typed_value_copy",
         context.i32_type().fn_type(
             &[
-                i64_type.into(),
+                if single_root { i64_type.into() } else { ptr_type.into() },
                 ptr_type.into(),
                 i64_type.into(),
                 i64_type.into(),
@@ -1961,7 +1994,7 @@ pub(super) fn lower<'ctx>(
         )
         .or_llvm_err()?;
     let result = builder
-        .build_alloca(i64_type, "copy_result")
+        .build_alloca(i64_type.array_type(roots.len() as u32), "copy_results")
         .or_llvm_err()?;
     let journal = builder
         .build_alloca(i64_type, "copy_journal")
@@ -2013,7 +2046,7 @@ pub(super) fn lower<'ctx>(
     ] {
         e.store(cell, 0, e.integer(0))?;
     }
-    e.store(depth, 0, e.integer(1))?;
+    e.store(depth, 0, e.integer(roots.len() as u64))?;
     e.store(work, 0, max_work)?;
     e.store(
         bytes,
@@ -2028,17 +2061,16 @@ pub(super) fn lower<'ctx>(
         u64::MAX / (FRAME_BYTES.max(JOURNAL_BYTES) * 4),
         "copy_workspace_representable",
     )?;
-    e.workspace(stack, capacity, e.integer(1), FRAME_BYTES, max_work)?;
-    let allocation = e.pointer(e.load(stack, 0)?)?;
-    e.initialize(
-        allocation,
-        function
-            .get_first_param()
-            .or_internal("copy source")?
-            .into_int_value(),
-        result,
-        NodeId(0),
-    )?;
+    e.workspace(stack, capacity, e.integer(roots.len() as u64), FRAME_BYTES, max_work)?;
+    let input = function.get_first_param().or_internal("copy source telescope")?;
+    for (index, root) in roots.iter().enumerate() {
+        e.store(result, index as u64 * 8, e.integer(0))?;
+        let frame = e.frame(e.integer((roots.len() - index - 1) as u64))?;
+        let source = if single_root { input.into_int_value() }
+            else { e.load(input.into_pointer_value(), index as u64 * 8)? };
+        e.initialize(frame, source,
+            e.address(result, e.integer(index as u64 * 8))?, *root)?;
+    }
     e.jump(top)?;
     e.builder.position_at_end(top);
     let index = e
@@ -2102,7 +2134,9 @@ pub(super) fn lower<'ctx>(
         .get_nth_param(1)
         .or_internal("copy output")?
         .into_pointer_value();
-    e.store(output, 0, e.load(result, 0)?)?;
+    for index in 0..roots.len() {
+        e.store(output, index as u64 * 8, e.load(result, index as u64 * 8)?)?;
+    }
     e.workspace_release(active, active_capacity, 8)?;
     e.workspace_release(stack, capacity, FRAME_BYTES)?;
     e.workspace_release(journal, journal_capacity, JOURNAL_BYTES)?;
@@ -2132,22 +2166,26 @@ pub(super) fn lower<'ctx>(
     e.workspace_release(stack, capacity, FRAME_BYTES)?;
     e.workspace_release(journal, journal_capacity, JOURNAL_BYTES)?;
     e.builder.build_return(Some(&failure)).or_llvm_err()?;
-    let pointer = as_ptr(ctx, source, "typed_copy_source")?;
-    let source = ctx
-        .builder()
-        .build_ptr_to_int(pointer, i64_type, "typed_copy_source_word")
-        .or_llvm_err()?;
-    let output = ctx
-        .builder()
-        .build_alloca(i64_type, "typed_copy_output")
-        .or_llvm_err()?;
+    let input = ctx.builder().build_alloca(i64_type.array_type(roots.len() as u32),
+        "typed_copy_sources").or_llvm_err()?;
+    let output = ctx.builder().build_alloca(i64_type.array_type(roots.len() as u32),
+        "typed_copy_outputs").or_llvm_err()?;
+    for (index, value) in sources.iter().enumerate() {
+        // SAFETY: each static slot belongs to the exact alloca telescope.
+        let slot = unsafe { ctx.builder().build_in_bounds_gep(context.i8_type(), input,
+            &[i64_type.const_int(index as u64 * 8, false)], "typed_copy_input_slot").or_llvm_err()? };
+        ctx.builder().build_store(slot, native_slot_value(ctx, *value, "typed_copy_input")?).or_llvm_err()?;
+    }
     let limits = ctx.typed_copy_limits;
+    let source_argument: BasicMetadataValueEnum<'ctx> = if single_root {
+        native_slot_value(ctx, sources[0], "typed_copy_source")?.into()
+    } else { input.into() };
     let success = ctx
         .builder()
         .build_call(
             function,
             &[
-                source.into(),
+                source_argument,
                 output.into(),
                 i64_type.const_int(limits.max_work as u64, false).into(),
                 i64_type
@@ -2200,25 +2238,13 @@ pub(super) fn lower<'ctx>(
     )?;
     ctx.builder().build_unreachable().or_llvm_err()?;
     ctx.builder().position_at_end(done);
-    let value = ctx
-        .builder()
-        .build_load(i64_type, output, "typed_copy_result_word")
-        .or_llvm_err()?
-        .into_int_value();
-    let value = ctx
-        .builder()
-        .build_int_to_ptr(value, ptr_type, "typed_copy_result")
-        .or_llvm_err()?;
-    ctx.set_register(dst.0, value.into());
-    // The checked plan preserves this exact owner application. Publishing only
-    // its spelling would lose generic field layouts after the copied result.
-    if matches!(ty, TypeRef::Concrete(_) | TypeRef::Instantiated { .. }) {
-        mark_register_from_return_type(ctx, dst.0, ty);
+    let mut outputs = List::with_capacity(roots.len());
+    for index in 0..roots.len() {
+        // SAFETY: a successful transaction initialized this exact output slot.
+        let slot = unsafe { ctx.builder().build_in_bounds_gep(context.i8_type(), output,
+            &[i64_type.const_int(index as u64 * 8, false)], "typed_copy_output_slot").or_llvm_err()? };
+        outputs.push(ctx.builder().build_load(i64_type, slot, "typed_copy_result_word")
+            .or_llvm_err()?.into_int_value());
     }
-    // Transparent declarations keep their semantic identity, but the resolved
-    // copy operation owns the actual runtime codec after set_register clears it.
-    if matches!(plan.nodes[root.0], CopyNode::Text) {
-        ctx.mark_text_register(dst.0);
-    }
-    Ok(())
+    Ok(outputs)
 }

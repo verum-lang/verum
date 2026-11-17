@@ -1367,7 +1367,7 @@ fn typed_drop_fields<'a>(state: &InterpreterState, value: Value, plan: &'a crate
             return Ok(None);
         }
         DropPlan::Callable { signature } => {
-            state.heap.validate_empty_callable(&state.module, value, signature)?;
+            state.heap.validate_callable(&state.module, value, signature)?;
             return Ok(None);
         }
         DropPlan::Glue { owner, .. } => (*owner, None, None),
@@ -1410,88 +1410,214 @@ fn typed_drop_fields<'a>(state: &InterpreterState, value: Value, plan: &'a crate
     Ok(Some((unsafe { pointer.cast::<u8>().add(offset).cast() }, fields)))
 }
 
-fn validate_typed_drop(state: &InterpreterState, value: Value, plan: &crate::drop_plan::DropPlan)
+/// Runtime ownership graphs can be deeper than their finite declaration plans.
+/// Both phases traverse them with a bounded work list on the ordinary stack.
+enum DropWork {
+    Value(Value, crate::drop_plan::DropPlan),
+    Field { owner: Value, generation: u32, offset: usize, plan: crate::drop_plan::DropPlan },
+    Free { owner: Value, generation: u32 },
+}
+
+fn live_drop_owner(state: &InterpreterState, owner: Value, generation: u32)
+    -> InterpreterResult<*mut heap::ObjectHeader>
+{
+    let pointer = owner.as_ptr::<heap::ObjectHeader>();
+    if !state.heap.contains(pointer) {
+        return Err(InterpreterError::Panic {
+            message: "typed destruction owner was retired during field cleanup".into(),
+        });
+    }
+    // SAFETY: exact live allocation membership precedes header inspection.
+    let header = unsafe { &*pointer };
+    if !header.is_valid() || header.generation != generation {
+        return Err(InterpreterError::Panic {
+            message: "typed destruction owner changed during field cleanup".into(),
+        });
+    }
+    Ok(pointer)
+}
+
+fn push_drop_work(work: &mut verum_common::List<DropWork>, item: DropWork, budget: &mut usize)
     -> InterpreterResult<()>
 {
-    if let Some(list) = super::list_storage::OwnedElements::resolve(state, value, plan)? {
-        for value in list.values() { validate_typed_drop(state, value, &list.element)?; }
-        return Ok(());
-    }
-    if let Some(entry) = super::flat_map::entry_plans(state, value, plan)? {
-        let table = super::flat_map::FlatMap::checked(state, value)?;
-        let mut occupied = 0;
-        for pair in table.occupied() {
-            for (element, declared) in pair.into_iter().zip(entry.iter()) {
-                validate_typed_drop(state, element, declared)?;
-            }
-            occupied += 1;
-        }
-        if occupied != table.len {
-            return Err(InterpreterError::Panic { message: "Map live entry count disagrees with its backing".into() });
-        }
-        return Ok(());
-    }
-    if let Some((payload, fields)) = typed_drop_fields(state, value, plan)? {
-        for (index, field) in fields.iter().enumerate() {
-            // SAFETY: typed_drop_fields checked the entire declared extent.
-            validate_typed_drop(state, unsafe { *payload.add(index) }, field)?;
-        }
-    }
+    *budget = budget.checked_sub(1).ok_or_else(|| InterpreterError::InvalidOperand {
+        message: "typed destruction exceeds its runtime work budget".into(),
+    })?;
+    work.try_reserve(1).map_err(|_| InterpreterError::InvalidOperand {
+        message: "cannot allocate typed destruction workspace".into(),
+    })?;
+    work.push(item);
     Ok(())
 }
 
-fn execute_typed_drop(state: &mut InterpreterState, value: Value, plan: &crate::drop_plan::DropPlan)
+fn callable_drop_values(state: &InterpreterState, owner: heap::CallableOwner)
+    -> InterpreterResult<verum_common::List<(Value, crate::drop_plan::DropPlan)>>
+{
+    let values = state.heap.callable_capture_values(owner)?;
+    let types = state.heap.callable_capture_types(owner)?;
+    let mut fields = verum_common::List::new();
+    fields.try_reserve_exact(types.len()).map_err(|_| InterpreterError::InvalidOperand {
+        message: "cannot allocate callable destruction workspace".into(),
+    })?;
+    for (value, ty) in values.into_iter().zip(types) {
+        let plan = crate::drop_plan::build(&state.module, ty).map_err(|message| InterpreterError::InvalidOperand {
+            message: message.into_string(),
+        })?;
+        fields.push((value, plan));
+    }
+    Ok(fields)
+}
+
+pub(super) fn validate_typed_drop(state: &InterpreterState, value: Value, plan: &crate::drop_plan::DropPlan)
     -> InterpreterResult<()>
 {
     use crate::drop_plan::DropPlan;
-    if value.is_unit() || matches!(plan, DropPlan::Ignore) { return Ok(()); }
-    if matches!(plan, DropPlan::Text) {
-        if !value.is_small_string() {
-            super::text_storage::TextStorage::checked(state, value)?.destroy(state)?;
+    let mut work = verum_common::List::new();
+    let mut budget = state.config.typed_copy_limits.max_work;
+    let mut callables = verum_common::Set::new();
+    push_drop_work(&mut work, DropWork::Value(value, plan.clone()), &mut budget)?;
+    while let Some(DropWork::Value(value, plan)) = work.pop() {
+        if value.is_unit() || matches!(plan, DropPlan::Ignore) { continue; }
+        if let DropPlan::Callable { signature } = &plan {
+            if let Some(owner) = state.heap.validate_callable(&state.module, value, signature)? {
+                // Multiple handles share one environment. Its capture storage
+                // is checked once; execution releases each handle separately.
+                if callables.insert(owner) {
+                    for (value, plan) in callable_drop_values(state, owner)?.into_iter().rev() {
+                        push_drop_work(&mut work, DropWork::Value(value, plan), &mut budget)?;
+                    }
+                }
+            }
+            continue;
         }
-        return Ok(());
-    }
-    if let Some((plan, elements)) = super::list_storage::take_owned_elements(state, value, plan)? {
-        for value in elements { execute_typed_drop(state, value, &plan)?; }
-        return Ok(());
-    }
-    if let Some(entry) = super::flat_map::entry_plans(state, value, plan)? {
-        let retain = entry.iter().any(|plan| !matches!(plan, DropPlan::Ignore));
-        let entries = super::flat_map::take_entries(state, value, retain)?;
-        for pair in entries {
-            for (element, declared) in pair.into_iter().zip(entry.iter()) {
-                execute_typed_drop(state, element, declared)?;
+        if let Some(list) = super::list_storage::OwnedElements::resolve(state, value, &plan)? {
+            for value in list.values() {
+                push_drop_work(&mut work, DropWork::Value(value, list.element.clone()), &mut budget)?;
+            }
+            continue;
+        }
+        if let Some(entry) = super::flat_map::entry_plans(state, value, &plan)? {
+            let table = super::flat_map::FlatMap::checked(state, value)?;
+            let mut occupied = 0;
+            for pair in table.occupied() {
+                for (element, declared) in pair.into_iter().zip(entry.iter()) {
+                    push_drop_work(&mut work, DropWork::Value(element, declared.clone()), &mut budget)?;
+                }
+                occupied += 1;
+            }
+            if occupied != table.len {
+                return Err(InterpreterError::Panic { message: "Map live entry count disagrees with its backing".into() });
+            }
+            continue;
+        }
+        if let Some((payload, fields)) = typed_drop_fields(state, value, &plan)? {
+            // Execution needs one final owner-release work item in addition to
+            // its field visits. Refuse the same budget before consuming input.
+            budget = budget.checked_sub(1).ok_or_else(|| InterpreterError::InvalidOperand {
+                message: "typed destruction exceeds its runtime work budget".into(),
+            })?;
+            for (index, field) in fields.iter().enumerate().rev() {
+                // SAFETY: typed_drop_fields checked the complete declared extent.
+                let component = unsafe { payload.add(index).read() };
+                push_drop_work(&mut work, DropWork::Value(component, field.clone()), &mut budget)?;
             }
         }
-        return Ok(());
-    }
-    if let DropPlan::Glue { function, type_args, .. } = plan {
-        super::super::call_function_sync_with_witnesses(state, *function, &[value],
-            (!type_args.is_empty()).then(|| type_args.clone().into_boxed_slice()))?;
-    } else if let Some((payload, fields)) = typed_drop_fields(state, value, plan)? {
-        for (index, field) in fields.iter().enumerate() {
-            // SAFETY: the declared extent was checked, and each slot is moved
-            // out before invoking its destructor. Borrowed fields are ignored.
-            let component = unsafe { std::mem::replace(&mut *payload.add(index), Value::unit()) };
-            execute_typed_drop(state, component, field)?;
-        }
-        let owner = value.as_ptr::<heap::ObjectHeader>();
-        if !state.heap.contains(owner) {
-            return Err(InterpreterError::Panic {
-                message: "typed destruction owner was retired during field cleanup".into(),
-            });
-        }
-        // SAFETY: typed_drop_fields established this exact allocation and its
-        // complete declared extent. All owned fields are retired, and fresh
-        // membership excludes a destructor that already released the owner.
-        // Heap::free also revokes outstanding projections of this allocation.
-        let object = unsafe { heap::Object::from_raw(owner) }
-            .expect("a checked live heap allocation is non-null");
-        unsafe { state.heap.free(object); }
     }
     Ok(())
 }
 
+pub(super) fn execute_typed_drop(state: &mut InterpreterState, value: Value, plan: &crate::drop_plan::DropPlan)
+    -> InterpreterResult<()>
+{
+    use crate::drop_plan::DropPlan;
+    let mut work = verum_common::List::new();
+    let mut budget = state.config.typed_copy_limits.max_work;
+    push_drop_work(&mut work, DropWork::Value(value, plan.clone()), &mut budget)?;
+    while let Some(item) = work.pop() {
+        let (value, plan) = match item {
+            DropWork::Value(value, plan) => (value, plan),
+            DropWork::Field { owner, generation, offset, plan } => {
+                let pointer = live_drop_owner(state, owner, generation)?;
+                // SAFETY: the exact generation still owns this header. The
+                // complete field extent is rechecked after preceding callbacks.
+                let bytes = unsafe { (*pointer).size as usize };
+                if offset.checked_add(std::mem::size_of::<Value>()).is_none_or(|end| end > bytes) {
+                    return Err(InterpreterError::Panic {
+                        message: "typed destruction field extent changed during cleanup".into(),
+                    });
+                }
+                let value = unsafe {
+                    let slot = pointer.cast::<u8>().add(heap::OBJECT_HEADER_SIZE + offset).cast::<Value>();
+                    std::mem::replace(&mut *slot, Value::unit())
+                };
+                (value, plan)
+            }
+            DropWork::Free { owner, generation } => {
+                let owner = live_drop_owner(state, owner, generation)?;
+                // SAFETY: exact live allocation membership precedes this free;
+                // all declared owned fields have completed their cleanup.
+                let object = unsafe { heap::Object::from_raw(owner) }.expect("checked live owner");
+                unsafe { state.heap.free(object); }
+                continue;
+            }
+        };
+        if value.is_unit() || matches!(plan, DropPlan::Ignore) { continue; }
+        if matches!(plan, DropPlan::Text) {
+            if !value.is_small_string() {
+                super::text_storage::TextStorage::checked(state, value)?.destroy(state)?;
+            }
+            continue;
+        }
+        if let DropPlan::Callable { signature } = &plan {
+            if let Some(owner) = state.heap.validate_callable(&state.module, value, signature)? {
+                if state.heap.callable_is_last_owner(owner)? {
+                    let fields = callable_drop_values(state, owner)?;
+                    for (value, plan) in fields.into_iter().rev() {
+                        push_drop_work(&mut work, DropWork::Value(value, plan), &mut budget)?;
+                    }
+                }
+                // Captured owners have been transferred to the explicit work
+                // list; retire the final environment before invoking user Drop.
+                state.heap.release_callable(owner)?;
+            }
+            continue;
+        }
+        if let Some((plan, elements)) = super::list_storage::take_owned_elements(state, value, &plan)? {
+            for value in elements.into_iter().rev() {
+                push_drop_work(&mut work, DropWork::Value(value, plan.clone()), &mut budget)?;
+            }
+            continue;
+        }
+        if let Some(entry) = super::flat_map::entry_plans(state, value, &plan)? {
+            let retain = entry.iter().any(|plan| !matches!(plan, DropPlan::Ignore));
+            let entries = super::flat_map::take_entries(state, value, retain)?;
+            for pair in entries.into_iter().rev() {
+                for (element, declared) in pair.into_iter().zip(entry.iter()).rev() {
+                    push_drop_work(&mut work, DropWork::Value(element, declared.clone()), &mut budget)?;
+                }
+            }
+            continue;
+        }
+        if let DropPlan::Glue { function, type_args, .. } = plan {
+            super::super::call_function_sync_with_witnesses(state, function, &[value],
+                (!type_args.is_empty()).then(|| type_args.into_boxed_slice()))?;
+        } else if let Some((payload, fields)) = typed_drop_fields(state, value, &plan)? {
+            let pointer = value.as_ptr::<heap::ObjectHeader>();
+            // SAFETY: typed_drop_fields established this complete live owner.
+            let generation = unsafe { (*pointer).generation };
+            let offset = payload as usize - pointer as usize - heap::OBJECT_HEADER_SIZE;
+            push_drop_work(&mut work, DropWork::Free { owner: value, generation }, &mut budget)?;
+            for (index, field) in fields.iter().enumerate().rev() {
+                // Move a field only when its own destructor starts. Earlier
+                // fields may still observe later siblings through live borrows.
+                push_drop_work(&mut work, DropWork::Field { owner: value, generation,
+                    offset: offset + index * std::mem::size_of::<Value>(), plan: field.clone() }, &mut budget)?;
+            }
+        }
+    }
+    Ok(())
+
+}
 /// DropRef (0x77) - Drop a value/reference.
 ///
 /// If the value has a user-defined Drop implementation, calls the drop method first.
@@ -1527,6 +1653,14 @@ pub(in super::super) fn handle_drop_ref(
             None => return Ok(DispatchResult::Continue),
         };
         // DEBUG: eprintln!("[DEBUG DropRef] Processing pending field drop: {:?}", val);
+    }
+
+    if let Some(signature) = state.heap.owned_callable_signature(&state.module, val)? {
+        let plan = crate::drop_plan::DropPlan::Callable { signature };
+        validate_typed_drop(state, val, &plan)?;
+        retire_typed_slot(state, src);
+        execute_typed_drop(state, val, &plan)?;
+        return Ok(DispatchResult::Continue);
     }
 
     // Check for user-defined Drop implementation on heap objects with ObjectHeader

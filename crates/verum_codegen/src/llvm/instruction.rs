@@ -30,6 +30,7 @@ use verum_common::well_known_types::type_names as tn;
 mod drop_typed;
 mod retain_copy;
 mod copy_typed;
+mod callable_lifecycle;
 mod target_query;
 mod field_carrier;
 
@@ -3625,6 +3626,7 @@ fn lower_instruction_impl<'ctx>(
             dst,
             func_id,
             captures,
+            owns_captures,
             capture_types,
             lexical_types,
         } => {
@@ -3839,11 +3841,33 @@ fn lower_instruction_impl<'ctx>(
                 ctx.get_module(),
                 fn_ptr,
                 &capture_vals,
+                *owns_captures,
             )?;
+            let owned_declarations = if *owns_captures {
+                let declarations = capture_types.as_ref().into_iter().flatten()
+                    .cloned().collect::<Option<verum_common::List<_>>>()
+                    .or_internal("owned closure lost its checked capture telescope")?;
+                let copied = copy_typed::capture_values(ctx, &capture_vals, &declarations)?;
+                let environment = RuntimeLowering::closure_environment(
+                    ctx.llvm_context(), ctx.builder(), closure_ptr)?;
+                for (index, value) in copied.into_iter().enumerate() {
+                    // SAFETY: the unexposed producer owns exactly this capture telescope.
+                    let slot = unsafe { ctx.builder().build_in_bounds_gep(ctx.types().i8_type(), environment,
+                        &[ctx.types().i64_type().const_int(index as u64 * 8, false)], "owned_capture_slot")
+                        .or_llvm_err()? };
+                    ctx.builder().build_store(slot, value).or_llvm_err()?;
+                }
+                ctx.clear_callable_producers();
+                Some(verum_common::Shared::new(declarations))
+            } else { None };
             ctx.set_register(dst.0, closure_ptr.into());
             // Track the closure's return type so CallClosure can mark dst correctly.
             ctx.set_closure_return_type(dst.0, func_desc.return_type.clone());
-            if captures.is_empty() {
+            if owned_declarations.is_some() {
+                ctx.record_callable_producer(*dst, super::context::CallableProducer {
+                    target: func_desc.id, owned_captures: owned_declarations,
+                });
+            } else if captures.is_empty() {
                 ctx.record_selected_callable(*dst, func_desc.id);
             }
             // T0241 facet-2: record each capture's kind from the enclosing fn's
@@ -4463,6 +4487,13 @@ fn lower_instruction_impl<'ctx>(
         } => lower_iter_next(ctx, *dst, *has_next, *iter),
 
         Instruction::Clone { dst, src } => {
+            if ctx.callable_producer(*src).is_some() {
+                let signature = ctx.callable_signature(*src)?;
+                ctx.require_callable_copy(*src, &signature)?;
+                callable_lifecycle::retain(ctx, *src)?;
+                return lower_mov(ctx, *dst, *src);
+            }
+            ctx.clear_callable_producers();
             let value = ctx.get_register(src.0)?;
             // VERUM_TRACE_CLONE=1 reports what this site knows about the
             // register it is copying. A `Clone` that finds no static type
@@ -6634,6 +6665,11 @@ fn lower_instruction_impl<'ctx>(
         }
 
         Instruction::DropRef { src } => {
+            if ctx.callable_producer(*src).is_some_and(|producer| producer.owned_captures.is_some()) {
+                let signature = ctx.callable_signature(*src)?;
+                if callable_lifecycle::release(ctx, *src, &signature)? { return Ok(()); }
+            }
+            ctx.clear_callable_producers();
             // DropRef: release a CBGR reference (bump generation, decrement refcount).
             //
 
@@ -42365,10 +42401,10 @@ fn lower_value_identity<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src
 }
 
 fn lower_mov<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg) -> Result<()> {
-    let callable = ctx.selected_callable_target(src);
+    let callable = ctx.callable_producer(src);
     lower_value_identity(ctx, dst, src)?;
-    if let Some(target) = callable {
-        ctx.record_selected_callable(dst, target);
+    if let Some(producer) = callable {
+        ctx.record_callable_producer(dst, producer);
     }
     // Preserve the producer annotation along a move. Destruction is carried
     // by explicit VBC DropTyped, never inferred from this branch-local fact.

@@ -179,6 +179,14 @@ pub enum CaptureKind {
     Plain,
 }
 
+/// A selected native formation operation, preserved only along proven carrier
+/// moves. The optional telescope belongs to its owned environment producer.
+#[derive(Clone)]
+pub(super) struct CallableProducer {
+    pub target: verum_vbc::module::FunctionId,
+    pub owned_captures: Option<verum_common::Shared<verum_common::List<verum_vbc::TypeRef>>>,
+}
+
 /// Per-function lowering context.
 ///
 /// Manages register values, basic blocks, and statistics for a single
@@ -564,9 +572,9 @@ pub struct FunctionContext<'a, 'ctx> {
     /// Used by CallClosure to mark the dst register with the correct type (List, Text, etc.)
     /// so downstream operations dispatch correctly.
     closure_return_types: HashMap<u16, verum_vbc::types::TypeRef>,
-    /// Exact empty-environment producers in the current basic block. A
+    /// Exact environment producers in the current basic block. A
     /// callable signature alone never establishes this executable identity.
-    selected_callable_targets: verum_common::Map<u16, verum_vbc::module::FunctionId>,
+    selected_callable_targets: verum_common::Map<u16, CallableProducer>,
 
     /// Capture kinds recorded per closure func-id at `NewClosure`, from the
     /// enclosing fn's live register marks. Drained by the lowerer into its
@@ -983,7 +991,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             pending_branch_hint: None,
             vbc_escape_tiers: HashMap::new(),
             signal_runtime: None,
-            retained_counters: None,
+            retained_counters: Some(super::retained_counter::RetainedCounters::new(module)),
             typed_copy_limits: verum_vbc::copy_plan::DEFAULT_COPY_LIMITS,
             permission_policy: None,
             futures_enabled: true,
@@ -1109,7 +1117,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             pending_branch_hint: None,
             vbc_escape_tiers: HashMap::new(),
             signal_runtime: None,
-            retained_counters: None,
+            retained_counters: Some(super::retained_counter::RetainedCounters::new(module)),
             typed_copy_limits: verum_vbc::copy_plan::DEFAULT_COPY_LIMITS,
             permission_policy: None,
             futures_enabled: true,
@@ -1266,28 +1274,39 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
     }
 
     pub(super) fn selected_callable_target(&self, register: Reg) -> Option<verum_vbc::module::FunctionId> {
-        self.selected_callable_targets.get(&register.0).copied()
+        self.selected_callable_targets.get(&register.0).map(|producer| producer.target)
     }
 
-    pub(super) fn require_callable_copy(&self, register: Reg, expected: &verum_vbc::TypeRef) -> Result<()> {
+    pub(super) fn callable_producer(&self, register: Reg) -> Option<CallableProducer> {
+        self.selected_callable_targets.get(&register.0).cloned()
+    }
+
+    pub(super) fn record_callable_producer(&mut self, register: Reg, producer: CallableProducer) {
+        self.selected_callable_targets.insert(register.0, producer);
+    }
+
+    pub(super) fn callable_signature(&self, register: Reg) -> Result<verum_vbc::TypeRef> {
         let declaration = self.selected_callable_target(register)
             .and_then(|target| self.vbc_module.and_then(|module| module.get_function(target)))
             .ok_or_else(|| LlvmLoweringError::unsupported(
-                "native callable copy requires its exact empty-environment producer"))?;
+                "native callable copy requires its exact environment producer"))?;
         let signature = declaration.semantic_callable_signature()
             .ok_or_else(|| LlvmLoweringError::unsupported(
                 "native callable copy producer lacks its semantic signature"))?;
-        // CopyPlan already established that the expected signature is concrete.
-        if &signature != expected {
-            return Err(LlvmLoweringError::unsupported(
-                "native callable copy producer does not match the declared signature"));
-        }
         self.resolve_declared_function(declaration)?;
+        Ok(signature)
+    }
+
+    pub(super) fn require_callable_copy(&self, register: Reg, expected: &verum_vbc::TypeRef) -> Result<()> {
+        let signature = self.callable_signature(register)?;
+        verum_vbc::parameter_convention::validate_callable_contract(&signature, expected)
+            .map_err(|reason| LlvmLoweringError::unsupported(format!(
+                "native callable copy producer does not match the declared signature: {reason}")))?;
         Ok(())
     }
 
     pub(super) fn record_selected_callable(&mut self, register: Reg, target: verum_vbc::module::FunctionId) {
-        self.selected_callable_targets.insert(register.0, target);
+        self.record_callable_producer(register, CallableProducer { target, owned_captures: None });
     }
 
     pub(super) fn clear_callable_producers(&mut self) {
@@ -1300,7 +1319,8 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
     pub(super) fn begin_callable_instruction(&mut self, instruction: &Instruction) {
         if !matches!(instruction,
             Instruction::Mov { .. } | Instruction::NewClosure { .. }
-            | Instruction::CloneTyped { .. }
+            | Instruction::CloneTyped { .. } | Instruction::DropTyped { .. }
+            | Instruction::Clone { .. } | Instruction::DropRef { .. }
             | Instruction::CallClosure { .. } | Instruction::LoadK { .. }
             | Instruction::LoadI { .. } | Instruction::LoadSmallI { .. }
             | Instruction::LoadF { .. } | Instruction::LoadTrue { .. }

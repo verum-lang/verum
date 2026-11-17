@@ -724,7 +724,7 @@ impl VbcCodegen {
 
     /// A constructor may be qualified by its sum or by the module that
     /// declares that sum. The selected scrutinee owns both its tag and fields.
-    fn scrutinee_variant<'d>(
+    pub(super) fn scrutinee_variant<'d>(
         &self, descriptor: &'d crate::types::TypeDescriptor, path: &str,
     ) -> Option<&'d crate::types::VariantDescriptor> {
         let Some((qualifier, name)) = path.rsplit_once('.') else {
@@ -1340,6 +1340,7 @@ impl VbcCodegen {
                 if let Some(info) = self.selected_function_path(expr)?.cloned() {
                     let dest = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::NewClosure {
+                        owns_captures: false,
                         lexical_types: self.named_callable_lexical_types(&info),
                         dst: dest,
                         func_id: info.id.0,
@@ -2521,6 +2522,7 @@ impl VbcCodegen {
                         // but with capture_count = 0.
                         let dest = self.ctx.alloc_temp();
                         self.ctx.emit(Instruction::NewClosure {
+                            owns_captures: false,
                             lexical_types: self.named_callable_lexical_types(&func_info),
                             dst: dest,
                             func_id: func_info.id.0,
@@ -24198,6 +24200,7 @@ impl VbcCodegen {
                     // matches the simple-name path at line ~1072 so HOFs
                     // like `.map_err(IoError.from_os)` work uniformly.
                     self.ctx.emit(Instruction::NewClosure {
+                        owns_captures: false,
                         lexical_types: self.named_callable_lexical_types(&func_info),
                         dst: dest,
                         func_id: func_info.id.0,
@@ -24250,6 +24253,7 @@ impl VbcCodegen {
                     // AOT lowering treats it as a callable, not a pointer
                     // base for `[null + func_id*8]` reads.
                     self.ctx.emit(Instruction::NewClosure {
+                        owns_captures: false,
                         lexical_types: self.named_callable_lexical_types(&func_info),
                         dst: dest,
                         func_id: func_info.id.0,
@@ -24317,6 +24321,7 @@ impl VbcCodegen {
                         });
                     } else {
                         self.ctx.emit(Instruction::NewClosure {
+                            owns_captures: false,
                             lexical_types: self.named_callable_lexical_types(&func_info),
                             dst: dest,
                             func_id: func_info.id.0,
@@ -24736,6 +24741,7 @@ impl VbcCodegen {
                     } else {
                         // #110 — type-alias-resolved HOF reference.
                         self.ctx.emit(Instruction::NewClosure {
+                            owns_captures: false,
                             lexical_types: self.named_callable_lexical_types(&func_info),
                             dst: dest,
                             func_id: func_info.id.0,
@@ -24759,6 +24765,7 @@ impl VbcCodegen {
                     } else {
                         // #110 — simple-name HOF reference.
                         self.ctx.emit(Instruction::NewClosure {
+                            owns_captures: false,
                             lexical_types: self.named_callable_lexical_types(&func_info),
                             dst: dest,
                             func_id: func_info.id.0,
@@ -24840,6 +24847,7 @@ impl VbcCodegen {
                 {
                     let dest = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::NewClosure {
+                        owns_captures: false,
                         lexical_types: self.named_callable_lexical_types(&info),
                         dst: dest,
                         func_id: info.id.0,
@@ -32320,6 +32328,7 @@ impl VbcCodegen {
         // Step 5: Emit NewClosure instruction
         let result = self.ctx.alloc_temp();
         self.ctx.emit(Instruction::NewClosure {
+            owns_captures: captures_with_mut.iter().all(|(_, mutable)| !mutable),
             lexical_types: lexical_param_ids.into_iter().map(crate::types::TypeRef::Generic).collect(),
             dst: result,
             func_id: closure_func_id,

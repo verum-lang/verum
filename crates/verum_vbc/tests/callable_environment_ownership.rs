@@ -335,6 +335,7 @@ fn capture_declarations_remap_with_the_creation_instruction() {
         }
     }
     let mut instruction = Instruction::NewClosure {
+        owns_captures: false,
         lexical_types: Vec::new(),
         dst: Reg(3),
         func_id: 4,
@@ -376,6 +377,20 @@ fn nested_generic_environment_retains_lexical_witnesses() {
 
 #[test]
 fn environment_formation_does_not_invoke_a_declared_target() {
+    for bootstrap in [false, true] {
+        let source = r#"
+            fn probe() -> Int {
+                let value: Int = 7;
+                let call = || -> Int { panic("formation must not run the body"); value };
+                7
+            }
+        "#;
+        assert_eq!(execute(compile(source, bootstrap)).unwrap(), 7);
+    }
+}
+
+#[test]
+fn an_owned_environment_cannot_claim_an_undeclared_target() {
     use verum_vbc::{
         bytecode::{decode_instructions, encode_instructions},
         instruction::Instruction,
@@ -404,12 +419,9 @@ fn environment_formation_does_not_invoke_a_declared_target() {
                 original_length,
                 "keep function offsets unchanged"
             );
-            let result = execute(module);
-            if invoke {
-                assert_eq!(result.unwrap_err(), "Function 127 not found");
-            } else {
-                assert_eq!(result.unwrap(), 7);
-            }
+            let error = execute(module).expect_err("a missing target cannot authorize a lifecycle");
+            assert!(error == "Function 127 not found"
+                || error.contains("callable ownership function identity is not declared"), "{error}");
         }
     }
 }

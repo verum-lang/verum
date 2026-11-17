@@ -51,6 +51,7 @@ use crate::value::Value;
 
 mod projections;
 mod callables;
+pub(crate) use callables::CallableOwner;
 pub(crate) use projections::ProjectionEncoding;
 
 /// Size of object header in bytes.

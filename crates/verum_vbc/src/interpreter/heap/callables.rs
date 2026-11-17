@@ -13,12 +13,35 @@ pub(super) struct CallableReceipt {
     generation: u32,
     capture_types: List<TypeRef>,
     lexical_types: List<TypeRef>,
+    payload_size: u32,
+    owners: Option<u32>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct CallableOwner {
+    address: usize,
+    generation: u32,
 }
 
 fn invalid(message: &str) -> InterpreterError {
     InterpreterError::InvalidOperand {
         message: message.into(),
     }
+}
+
+fn declared_signature(module: &VbcModule, function: FunctionId, captures: usize,
+    witnesses: &[TypeRef]) -> InterpreterResult<TypeRef> {
+    let declaration = module.get_function(function)
+        .ok_or_else(|| invalid("callable ownership function identity is not declared"))?;
+    declaration.validate_closure_environment(captures).map_err(|message| invalid(&message))?;
+    let signature = declaration.semantic_callable_signature()
+        .ok_or_else(|| invalid("callable ownership function lacks its semantic signature"))?;
+    if witnesses.len() != declaration.type_params.len() {
+        return Err(invalid("callable ownership has incomplete lexical witnesses"));
+    }
+    let substitution = crate::mono::TypeSubstitution::new(&declaration.type_params, witnesses);
+    crate::associated_types::instantiate_witness(module, &substitution, &signature)
+        .map_err(|_| invalid("callable ownership cannot instantiate its declared signature"))
 }
 
 impl Heap {
@@ -28,6 +51,7 @@ impl Heap {
         function: FunctionId,
         capture_types: List<TypeRef>,
         lexical_types: List<TypeRef>,
+        owns_captures: bool,
     ) {
         self.callables.insert(
             object.as_ptr() as usize,
@@ -36,21 +60,23 @@ impl Heap {
                 generation: object.generation(),
                 capture_types,
                 lexical_types,
+                payload_size: object.header().size,
+                owners: owns_captures.then_some(1),
             },
         );
     }
 
-    /// Copying or retiring a binding cannot assume ownership of an opaque
-    /// environment. A known function or producer-issued empty closure has no
-    /// captured state to duplicate or destroy. Both operations use this check.
-    pub(crate) fn validate_empty_callable(
+    /// Both lifecycle operations check the actual producer and signature.
+    /// Only explicit ownership evidence authorizes retaining or releasing an
+    /// environment. Legacy nonempty environments remain opaque.
+    pub(crate) fn validate_callable(
         &self,
         module: &VbcModule,
         value: Value,
         expected: &TypeRef,
-    ) -> InterpreterResult<()> {
-        let (function, witnesses) = if value.is_func_ref() {
-            (value.as_func_id(), &[][..])
+    ) -> InterpreterResult<Option<CallableOwner>> {
+        let (function, witnesses, captures, owner) = if value.is_func_ref() {
+            (value.as_func_id(), &[][..], 0, None)
         } else if value.is_regular_ptr() {
             let pointer = value.as_ptr::<ObjectHeader>();
             let receipt = self
@@ -63,7 +89,10 @@ impl Heap {
             // SAFETY: the receipt and exact live allocation membership precede
             // every read; only the canonical closure producer issues receipts.
             let header = unsafe { &*pointer };
-            if !header.is_valid() || header.generation != receipt.generation {
+            if !header.is_valid() || header.generation != receipt.generation
+                || header.size != receipt.payload_size
+                || (header.size as usize) < 8 + receipt.capture_types.len() * std::mem::size_of::<Value>()
+            {
                 return Err(invalid("callable ownership received a retired environment"));
             }
             // SAFETY: the same producer's live allocation owns this header.
@@ -73,43 +102,99 @@ impl Heap {
                     "callable ownership carrier disagrees with its producer receipt",
                 ));
             }
-            if !receipt.capture_types.is_empty() {
+            if receipt.owners.is_none() && !receipt.capture_types.is_empty() {
                 return Err(invalid(
                     "callable ownership of a captured environment requires an owned lifecycle",
                 ));
             }
-            (receipt.function, receipt.lexical_types.as_slice())
+            if receipt.owners == Some(0) {
+                return Err(invalid("callable environment has no live owner"));
+            }
+            (receipt.function, receipt.lexical_types.as_slice(), receipt.capture_types.len(),
+                receipt.owners.map(|_| CallableOwner { address: pointer as usize, generation: receipt.generation }))
         } else {
             return Err(invalid(
                 "callable ownership requires a declared function carrier",
             ));
         };
-        let declaration = module
-            .get_function(function)
-            .ok_or_else(|| invalid("callable ownership function identity is not declared"))?;
-        declaration.validate_closure_environment(0).map_err(|message| invalid(&message))?;
-        let signature = declaration
-            .semantic_callable_signature()
-            .ok_or_else(|| invalid("callable ownership function lacks its semantic signature"))?;
-        if witnesses.len() != declaration.type_params.len() {
-            return Err(invalid("callable ownership has incomplete lexical witnesses"));
-        }
-        let substitution = crate::mono::TypeSubstitution::new(&declaration.type_params, witnesses);
-        let signature = substitution
-            .apply(&signature)
-            .map_err(|_| invalid("callable ownership cannot instantiate its declared signature"))?;
-        // Ownership operations compare the retained callable contract structurally. It
-        // does not grant the separate full computational type-identity query.
-        if !crate::mono::is_concrete_type(&signature) || !crate::mono::is_concrete_type(expected) {
-            return Err(invalid(
-                "callable ownership has an unresolved semantic signature",
-            ));
-        }
-        if &signature != expected {
-            return Err(invalid(
-                "callable ownership producer does not match the parameter signature",
-            ));
-        }
+        let signature = declared_signature(module, function, captures, witnesses)?;
+        crate::parameter_convention::validate_callable_contract(&signature, expected)
+            .map_err(|message| invalid(&message))?;
+        Ok(owner)
+    }
+
+    /// Untyped source operations can use only an actual owned producer receipt,
+    /// never a closure-like tag or a function type guessed from pointer bits.
+    pub(crate) fn owned_callable_signature(&self, module: &VbcModule, value: Value)
+        -> InterpreterResult<Option<TypeRef>> {
+        if !value.is_regular_ptr() { return Ok(None); }
+        let Some(receipt) = self.callables.get(&(value.as_ptr::<u8>() as usize))
+            .filter(|receipt| receipt.owners.is_some()) else { return Ok(None); };
+        let signature = declared_signature(module, receipt.function, receipt.capture_types.len(),
+            &receipt.lexical_types)?;
+        self.validate_callable(module, value, &signature)?;
+        Ok(Some(signature))
+    }
+
+    fn callable_receipt(&self, owner: CallableOwner) -> InterpreterResult<&CallableReceipt> {
+        self.callables.get(&owner.address)
+            .filter(|receipt| receipt.generation == owner.generation && receipt.owners.is_some_and(|count| count != 0))
+            .ok_or_else(|| invalid("callable lifecycle receipt is no longer live"))
+    }
+
+    pub(crate) fn retain_callable(&mut self, owner: CallableOwner) -> InterpreterResult<()> {
+        let receipt = self.callable_receipt(owner)?;
+        let count = receipt.owners.and_then(|count| count.checked_add(1))
+            .ok_or_else(|| invalid("callable owner count overflow"))?;
+        self.callables.get_mut(&owner.address).expect("checked callable receipt").owners = Some(count);
         Ok(())
+    }
+
+    pub(crate) fn undo_callable_retain(&mut self, owner: CallableOwner) -> InterpreterResult<()> {
+        let receipt = self.callable_receipt(owner)?;
+        let count = receipt.owners.filter(|count| *count > 1)
+            .ok_or_else(|| invalid("callable rollback cannot release the original owner"))?;
+        self.callables.get_mut(&owner.address).expect("checked callable receipt").owners = Some(count - 1);
+        Ok(())
+    }
+
+    pub(crate) fn callable_capture_types(&self, owner: CallableOwner) -> InterpreterResult<&[TypeRef]> {
+        Ok(self.callable_receipt(owner)?.capture_types.as_slice())
+    }
+
+    pub(crate) fn callable_is_last_owner(&self, owner: CallableOwner) -> InterpreterResult<bool> {
+        Ok(self.callable_receipt(owner)?.owners == Some(1))
+    }
+
+    pub(crate) fn callable_capture_values(&self, owner: CallableOwner) -> InterpreterResult<List<Value>> {
+        let receipt = self.callable_receipt(owner)?;
+        let mut values = List::new();
+        values.try_reserve_exact(receipt.capture_types.len())
+            .map_err(|_| invalid("cannot allocate callable lifecycle workspace"))?;
+        for index in 0..receipt.capture_types.len() {
+            // SAFETY: the producer's live allocation, generation, capture count
+            // and complete payload extent were checked before issuing owner.
+            values.push(unsafe { super::closure_captures_ptr(owner.address as *const u8, index).read() });
+        }
+        Ok(values)
+    }
+
+    /// The last owner retires the carrier before any captured destructor runs.
+    /// Callers retain the checked capture values and plans in explicit work lists.
+    pub(crate) fn release_callable(&mut self, owner: CallableOwner) -> InterpreterResult<bool> {
+        let count = self.callable_receipt(owner)?.owners.expect("owned receipt");
+        if count > 1 {
+            self.callables.get_mut(&owner.address).expect("checked callable receipt").owners = Some(count - 1);
+            return Ok(false);
+        }
+        let pointer = owner.address as *mut ObjectHeader;
+        if !self.contains(pointer) {
+            return Err(invalid("callable environment was retired before release"));
+        }
+        // SAFETY: an exact live producer receipt owns this allocation; this is
+        // its final owner and captured values have been moved to the work list.
+        let object = unsafe { Object::from_raw(pointer) }.expect("live callable allocation");
+        unsafe { self.free(object); }
+        Ok(true)
     }
 }

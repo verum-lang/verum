@@ -1455,6 +1455,11 @@ impl<'ctx> RuntimeLowering<'ctx> {
     /// Closure struct size: { fn_ptr: ptr, env_ptr: ptr } = 16 bytes.
     pub const CLOSURE_SIZE: u64 = 2 * verum_common::layout::POINTER_SIZE;
 
+    /// An owned producer appends a UInt32 owner count in an aligned value slot;
+    /// its captures follow contiguously in the same allocation.
+    pub(super) const CLOSURE_OWNER_OFFSET: u64 = Self::CLOSURE_SIZE;
+    pub(super) const OWNED_CLOSURE_PREFIX: u64 = Self::CLOSURE_SIZE + VALUE_SIZE;
+
     /// Native closures are headerless pairs, unlike ordinary heap records.
     const CLOSURE_ENV_OFFSET: u64 = verum_common::layout::POINTER_SIZE;
 
@@ -1523,24 +1528,44 @@ impl<'ctx> RuntimeLowering<'ctx> {
         module: &Module<'ctx>,
         fn_ptr: PointerValue<'ctx>,
         captures: &[BasicValueEnum<'ctx>],
+        owns_captures: bool,
     ) -> Result<PointerValue<'ctx>> {
         let i64_type = self.context.i64_type();
         let i8_type = self.context.i8_type();
         let ptr_type = self.context.ptr_type(AddressSpace::default());
 
         // Allocate closure struct: { fn_ptr, env_ptr }
-        let closure_size = i64_type.const_int(Self::CLOSURE_SIZE, false);
+        let bytes = if owns_captures {
+            let bytes = Self::OWNED_CLOSURE_PREFIX + captures.len() as u64 * VALUE_SIZE;
+            super::object_storage::check_extent(bytes)?;
+            bytes
+        } else { Self::CLOSURE_SIZE };
+        let closure_size = i64_type.const_int(bytes, false);
         let closure_ptr = self.emit_checked_malloc(&builder, module, closure_size, "closure")?;
 
         // Store fn_ptr at offset 0
         builder.build_store(closure_ptr, fn_ptr).or_llvm_err()?;
+        if owns_captures {
+            // SAFETY: the producer allocated the complete owned prefix.
+            let counter = unsafe { builder.build_in_bounds_gep(i8_type, closure_ptr,
+                &[i64_type.const_int(Self::CLOSURE_OWNER_OFFSET, false)], "closure_owner_count")
+                .or_llvm_err()? };
+            builder.build_store(counter, self.context.i32_type().const_int(1, false)).or_llvm_err()?;
+        }
 
         // Allocate and populate environment if there are captures
         let env_ptr = if captures.is_empty() {
             ptr_type.const_null()
         } else {
-            let env_size = i64_type.const_int(captures.len() as u64 * VALUE_SIZE, false);
-            let env_ptr = self.emit_checked_malloc(&builder, module, env_size, "closure_env")?;
+            let env_ptr = if owns_captures {
+                // SAFETY: the contiguous environment lies in this exact allocation.
+                unsafe { builder.build_in_bounds_gep(i8_type, closure_ptr,
+                    &[i64_type.const_int(Self::OWNED_CLOSURE_PREFIX, false)], "owned_closure_env")
+                    .or_llvm_err()? }
+            } else {
+                let env_size = i64_type.const_int(captures.len() as u64 * VALUE_SIZE, false);
+                self.emit_checked_malloc(&builder, module, env_size, "closure_env")?
+            };
 
             // Store each captured value
             for (i, cap_val) in captures.iter().enumerate() {

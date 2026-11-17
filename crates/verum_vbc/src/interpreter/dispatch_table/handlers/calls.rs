@@ -1321,10 +1321,12 @@ fn create_closure(state: &mut InterpreterState, typed: bool, witnessed: bool) ->
         capture_regs.push(read_reg(state)?);
     }
 
-    let typed = if witnessed { match read_u8(state)? {
-        0 => false, 1 => true,
-        _ => return Err(InterpreterError::Panic { message: "invalid closure capture declaration presence".into() }),
-    }} else { typed };
+    let flags = if witnessed { read_u8(state)? } else { u8::from(typed) };
+    if flags > 3 {
+        return Err(InterpreterError::Panic { message: "invalid closure capture declaration flags".into() });
+    }
+    let typed = flags & 1 != 0;
+    let owns_captures = flags & 2 != 0;
     let types = if typed {
         let count = read_varint(state)?;
         if count > u16::MAX as u64 {
@@ -1374,6 +1376,16 @@ fn create_closure(state: &mut InterpreterState, typed: bool, witnessed: bool) ->
             .map_err(|message| InterpreterError::InvalidOperand { message: message.into_string() })?;
     }
     let func_id = func_id.0;
+    let capture_types = resolved_types.unwrap_or_default().into_iter()
+        .collect::<Option<verum_common::List<_>>>()
+        .ok_or_else(|| InterpreterError::InvalidBytecode {
+            pc: state.pc() as usize, message: "validated callable lost its capture declarations".into(),
+        })?;
+    let mut captures = verum_common::List::new();
+    captures.try_reserve_exact(capture_count).map_err(|_| InterpreterError::InvalidOperand {
+        message: "cannot allocate closure formation workspace".into(),
+    })?;
+    for register in &capture_regs { captures.push(state.get_reg(*register)); }
 
     // Allocate closure object on heap.
     // Layout: [ObjectHeader][func_id:u32][capture_count:u32][captures:Value...]
@@ -1398,10 +1410,21 @@ fn create_closure(state: &mut InterpreterState, typed: bool, witnessed: bool) ->
     })?;
     state.record_allocation();
 
+    if owns_captures {
+        captures = match super::copy_typed::copy_captures(state, &captures, &capture_types) {
+            Ok(captures) => captures,
+            Err(error) => {
+                // SAFETY: no capture was published; the transaction rolled back
+                // its allocations and retains. This is the fresh empty carrier.
+                unsafe { state.heap.free(obj); }
+                return Err(error);
+            }
+        };
+    }
+
     // Write captured values via the canonical helper.
     let base_ptr = obj.as_ptr() as *mut u8;
-    for (i, cap_reg) in capture_regs.iter().enumerate() {
-        let val = state.get_reg(*cap_reg);
+    for (i, val) in captures.iter().copied().enumerate() {
         // SAFETY: i < capture_count, base_ptr is a freshly allocated
         // closure with `capture_count` slots after the header.
         unsafe {
@@ -1412,12 +1435,7 @@ fn create_closure(state: &mut InterpreterState, typed: bool, witnessed: bool) ->
         }
     }
 
-    let capture_types = resolved_types.unwrap_or_default().into_iter()
-        .collect::<Option<verum_common::List<_>>>()
-        .ok_or_else(|| InterpreterError::InvalidBytecode {
-            pc: state.pc() as usize, message: "validated callable lost its capture declarations".into(),
-        })?;
-    state.heap.record_callable(&obj, FunctionId(func_id), capture_types, lexical_types);
+    state.heap.record_callable(&obj, FunctionId(func_id), capture_types, lexical_types, owns_captures);
     let closure_val = Value::from_ptr(base_ptr);
     state.set_reg(dst, closure_val);
     Ok(DispatchResult::Continue)

@@ -452,7 +452,10 @@ impl VbcCodegen {
                     None => id.is_builtin(),
                 }
             }
-            TypeRef::Tuple(_) | TypeRef::Array { .. } => true,
+            // A callable read from a field or element is still a place. Its
+            // declared signature selects the copy operation; the actual
+            // environment producer supplies the lifecycle permission.
+            TypeRef::Tuple(_) | TypeRef::Array { .. } | TypeRef::Function { .. } => true,
             _ => false,
         }
     }

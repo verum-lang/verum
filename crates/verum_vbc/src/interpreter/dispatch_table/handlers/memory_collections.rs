@@ -2755,6 +2755,10 @@ pub(crate) fn value_copy(
         return Ok(value);
     }
 
+    if let Some(signature) = state.heap.owned_callable_signature(&state.module, value)? {
+        return super::copy_typed::copy_declared(state, value, &signature);
+    }
+
     // SAFETY: `contains` verified `src_ptr` is the head of a tracked
     // heap object whose first `OBJECT_HEADER_SIZE` bytes are a real
     // `ObjectHeader`.

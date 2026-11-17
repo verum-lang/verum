@@ -156,7 +156,10 @@ pub const VERSION_MAJOR: u16 = 2;
 // v2.61: explicit generated closure environment ABI, independent of its name.
 // v2.62: offset zero is the empty string identity, never a real spelling.
 // Ambiguous pre-release string tables require regeneration, not guessed remaps.
-pub const VERSION_MINOR: u16 = 62;
+/// VBC 2.63 carries an explicit owned immutable closure-environment producer.
+/// Older capture declarations alone do not establish environment ownership.
+pub const VERSION_MINOR: u16 = 63;
+pub const OWNED_CLOSURE_ENVIRONMENT_VERSION: u16 = 63;
 
 /// Minor-version floors for sections whose presence readers gate on.  The
 /// register-type-hints section has been written unconditionally since minor 2,

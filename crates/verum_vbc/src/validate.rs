@@ -927,8 +927,16 @@ impl<'a> Validator<'a> {
                 captures,
                 capture_types,
                 lexical_types,
-                ..
+                owns_captures,
             } => {
+                if *owns_captures
+                    && self.module.header.version_minor < crate::format::OWNED_CLOSURE_ENVIRONMENT_VERSION
+                {
+                    self.errors.push(VbcError::InvalidInstructionEncoding {
+                        offset: instr_start,
+                        reason: "owned closure environments require VBC minor 63 or newer".into(),
+                    });
+                }
                 self.call_target(*func_id, function_count);
                 self.check_reg(*dst, max_reg, &func_name);
                 for r in captures {
@@ -1432,6 +1440,7 @@ mod tests {
         // Closure body referencing FunctionId(42) in a 1-function
         // module must be rejected at load time.
         let bad_closure = Instruction::NewClosure {
+            owns_captures: false,
             lexical_types: Vec::new(),
             dst: Reg(0),
             func_id: 42,

@@ -10976,6 +10976,10 @@ pub enum Instruction {    // ===================================================
         func_id: u32,
         /// Registers containing captured values.
         captures: Vec<Reg>,
+        /// The producer copies immutable captures into an owned shared environment.
+        /// Mutable cells require their own declared lifecycle and cannot set this.
+        #[serde(default)]
+        owns_captures: bool,
         /// Original capture declarations in this creation site's generic scope.
         /// None is legacy evidence; only empty legacy environments are shareable.
         capture_types: Option<Vec<Option<TypeRef>>>,

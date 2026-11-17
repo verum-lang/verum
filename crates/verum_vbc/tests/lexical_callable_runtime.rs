@@ -28,7 +28,8 @@ fn add(module: &mut VbcModule, name: &str, ids: &[u16], body: &[Instruction]) {
 fn fixture(args: Vec<TypeRef>, catch: bool) -> VbcModule {
     let mut module = VbcModule::new("lexical_runtime".into());
     add(&mut module, "probe", &[], &[
-        Instruction::NewClosure { dst: Reg(1), func_id: 1, captures: vec![],
+        Instruction::NewClosure {
+            owns_captures: false, dst: Reg(1), func_id: 1, captures: vec![],
             capture_types: Some(vec![]), lexical_types: args },
         if catch { Instruction::Call { dst: Reg(0), func_id: 2,
             args: RegRange::new(Reg(1), 1) } }
@@ -83,14 +84,15 @@ fn missing_extra_and_unresolved_lexical_arguments_refuse() {
 
 #[test]
 fn malformed_lexical_wire_counts_and_markers_refuse() {
-    let instruction = Instruction::NewClosure { dst: Reg(0), func_id: 1, captures: vec![],
+    let instruction = Instruction::NewClosure {
+        owns_captures: false, dst: Reg(0), func_id: 1, captures: vec![],
         capture_types: None, lexical_types: vec![TypeRef::Concrete(TypeId::INT)] };
     let mut bytes = Vec::new();
     encode_instruction(&instruction, &mut bytes);
     assert_eq!(verum_vbc::bytecode::decode_instructions(&bytes).unwrap(), [instruction]);
     // Extended tag, sub-op, dst, function, captures, optional declarations.
     let mut invalid = bytes.clone();
-    invalid[5] = 2;
+    invalid[5] = 4; // Bits 0/1 declare capture types and owned formation; bit 2 is reserved.
     assert!(verum_vbc::bytecode::decode_instructions(&invalid).is_err());
     let mut invalid = bytes[..6].to_vec();
     invalid.extend_from_slice(&[0x80, 0x80, 0x04]); // 65536 witnesses, no payload.

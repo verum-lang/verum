@@ -2257,10 +2257,12 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             dst,
             func_id,
             captures,
+            owns_captures,
             capture_types,
             lexical_types,
         } => {
-            if !lexical_types.is_empty() {
+            let witnessed = *owns_captures || !lexical_types.is_empty();
+            if witnessed {
                 output.push(Opcode::Extended.to_byte());
                 output.push(ExtendedSubOpcode::NewClosureWitnessed.to_byte());
             } else if capture_types.is_some() {
@@ -2272,7 +2274,9 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             encode_reg(*dst, output);
             encode_varint(*func_id as u64, output);
             encode_reg_vec(captures, output);
-            if !lexical_types.is_empty() { output.push(capture_types.is_some() as u8); }
+            if witnessed {
+                output.push(u8::from(capture_types.is_some()) | (u8::from(*owns_captures) << 1));
+            }
             if let Some(types) = capture_types {
                 encode_varint(types.len() as u64, output);
                 for ty in types {
@@ -2280,7 +2284,7 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
                     if let Some(ty) = ty { encode_type_ref(ty, output); }
                 }
             }
-            if !lexical_types.is_empty() {
+            if witnessed {
                 encode_varint(lexical_types.len() as u64, output);
                 for ty in lexical_types { encode_type_ref(ty, output); }
             }
@@ -3857,6 +3861,7 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
             let func_id = decode_varint(data, offset)? as u32;
             let captures = decode_reg_vec(data, offset)?;
             Ok(Instruction::NewClosure {
+                owns_captures: false,
                 lexical_types: Vec::new(),
                 dst,
                 func_id,
@@ -5292,10 +5297,11 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     let func_id = decode_varint(data, offset)? as u32;
                     let captures = decode_reg_vec(data, offset)?;
                     let witnessed = kind == ExtendedSubOpcode::NewClosureWitnessed;
-                    let present = if witnessed { match decode_u8(data, offset)? {
-                        0 => false, 1 => true,
-                        _ => return Err(VbcError::Deserialization("invalid closure capture declaration presence".into())),
-                    }} else { true };
+                    let flags = if witnessed { decode_u8(data, offset)? } else { 1 };
+                    if flags > 3 {
+                        return Err(VbcError::Deserialization("invalid closure capture declaration flags".into()));
+                    }
+                    let present = flags & 1 != 0;
                     let count = if present { decode_varint(data, offset)? } else { 0 };
                     if count > u16::MAX as u64 {
                         return Err(VbcError::Deserialization("excessive closure capture type count".into()));
@@ -5317,7 +5323,8 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                         }
                         for _ in 0..count { lexical_types.push(decode_type_ref(data, offset)?); }
                     }
-                    Ok(Instruction::NewClosure { dst, func_id, captures,
+                    Ok(Instruction::NewClosure {
+                        owns_captures: flags & 2 != 0, dst, func_id, captures,
                         capture_types: present.then_some(types), lexical_types })
                 }
                 Some(ExtendedSubOpcode::TypeResource) => {
@@ -8569,6 +8576,7 @@ mod tests {
     fn test_new_closure_roundtrip() {
         // Empty captures
         test_roundtrip(&Instruction::NewClosure {
+            owns_captures: false,
             lexical_types: Vec::new(),
             dst: Reg(0),
             func_id: 42,
@@ -8578,6 +8586,7 @@ mod tests {
 
         // Single capture
         test_roundtrip(&Instruction::NewClosure {
+            owns_captures: false,
             lexical_types: Vec::new(),
             dst: Reg(0),
             func_id: 100,
@@ -8587,6 +8596,7 @@ mod tests {
 
         // Multiple captures
         test_roundtrip(&Instruction::NewClosure {
+            owns_captures: false,
             lexical_types: Vec::new(),
             dst: Reg(0),
             func_id: 12345,
@@ -8596,6 +8606,7 @@ mod tests {
 
         // Large func_id and many captures
         test_roundtrip(&Instruction::NewClosure {
+            owns_captures: false,
             lexical_types: Vec::new(),
             dst: Reg(255),
             func_id: u32::MAX / 2,
@@ -8639,6 +8650,7 @@ mod tests {
             },
             // Create closure with captured value
             Instruction::NewClosure {
+                owns_captures: false,
                 lexical_types: Vec::new(),
                 dst: Reg(1),
                 func_id: 0,
@@ -8690,6 +8702,7 @@ mod tests {
             },
             // Outer closure captures r0
             Instruction::NewClosure {
+                owns_captures: false,
                 lexical_types: Vec::new(),
                 dst: Reg(10),
                 func_id: 100,
@@ -8698,6 +8711,7 @@ mod tests {
             },
             // Inner closure captures r0, r1
             Instruction::NewClosure {
+                owns_captures: false,
                 lexical_types: Vec::new(),
                 dst: Reg(11),
                 func_id: 101,
@@ -8706,6 +8720,7 @@ mod tests {
             },
             // Combined closure captures all three
             Instruction::NewClosure {
+                owns_captures: false,
                 lexical_types: Vec::new(),
                 dst: Reg(12),
                 func_id: 102,
