@@ -86,8 +86,10 @@ pub struct FieldInfo {
     pub name: Text,
     /// Field type
     pub ty: Type,
-    /// Field index (for positional access)
+    /// Ordinal in the declaration, including for named fields.
     pub index: usize,
+    /// Whether the source field is selected by its tuple index.
+    pub is_positional: bool,
     /// Whether the field is public
     pub is_public: bool,
     /// Whether the field has a default value (optional in @builder)
@@ -108,11 +110,26 @@ impl FieldInfo {
             name: Text::from(field.name.as_str()),
             ty: field.ty.clone(),
             index,
+            is_positional: false,
             is_public: field.visibility == Visibility::Public,
             has_default: field.has_default(),
             default_value: field.default_value.clone(),
             attributes: field.attributes.clone(),
             span: field.span,
+        }
+    }
+
+    fn positional(ty: &Type, index: usize, span: Span) -> Self {
+        Self {
+            name: index.to_string().into(),
+            ty: ty.clone(),
+            index,
+            is_positional: true,
+            is_public: false,
+            has_default: false,
+            default_value: None,
+            attributes: List::new(),
+            span,
         }
     }
 
@@ -152,29 +169,27 @@ impl FieldInfo {
 
     /// Create a field access expression on self
     pub fn access_on_self(&self, span: Span) -> Expr {
-        let self_expr = Expr::new(ExprKind::Path(Path::single(Ident::new("self", span))), span);
-        Expr::new(
-            ExprKind::Field {
-                expr: Box::new(self_expr),
-                field: self.ident(span),
-            },
-            span,
-        )
+        self.project(super::self_ref(span), span)
     }
 
     /// Create a field access expression on other
     pub fn access_on_other(&self, span: Span) -> Expr {
-        let other_expr = Expr::new(
-            ExprKind::Path(Path::single(Ident::new("other", span))),
-            span,
-        );
-        Expr::new(
-            ExprKind::Field {
-                expr: Box::new(other_expr),
-                field: self.ident(span),
-            },
-            span,
-        )
+        self.project(super::ident_expr("other", span), span)
+    }
+
+    fn project(&self, receiver: Expr, span: Span) -> Expr {
+        if self.is_positional {
+            let index = u32::try_from(self.index).expect("tuple fields fit in a source span");
+            Expr::new(
+                ExprKind::TupleIndex {
+                    expr: Box::new(receiver),
+                    index,
+                },
+                span,
+            )
+        } else {
+            super::field_access(receiver, self.name.as_str(), span)
+        }
     }
 }
 
@@ -204,21 +219,7 @@ impl VariantInfo {
                 let field_infos: Vec<FieldInfo> = types
                     .iter()
                     .enumerate()
-                    .map(|(i, ty)| FieldInfo {
-                        name: Text::from(format!("{}", i)),
-                        ty: ty.clone(),
-                        index: i,
-                        is_public: false,
-                        has_default: false,
-                        default_value: verum_common::Maybe::None,
-                        // Synthesized positional fields carry no
-                        // user-written attributes — those only
-                        // apply to record fields with explicit
-                        // names. Pin the empty default so the
-                        // FieldInfo invariant is satisfied.
-                        attributes: List::new(),
-                        span: variant.span,
-                    })
+                    .map(|(i, ty)| FieldInfo::positional(ty, i, variant.span))
                     .collect();
                 (List::from(field_infos), true)
             }
@@ -315,33 +316,16 @@ impl TypeInfo {
                     span,
                 })
             }
-            TypeDeclBody::Newtype(inner_type) => {
-                // Newtype is a single-field struct
-                let field = FieldInfo {
-                    name: Text::from("0"),
-                    ty: inner_type.clone(),
-                    index: 0,
-                    is_public: false,
-                    has_default: false,
-                    default_value: verum_common::Maybe::None,
-                    // Newtype's synthesized field has no attributes
-                    // — the type-level @derive applies to the
-                    // wrapper, not the wrapped field.
-                    attributes: List::new(),
-                    span,
-                };
-
-                Ok(Self {
-                    name,
-                    generics,
-                    fields: List::from(vec![field]),
-                    variants: List::new(),
-                    is_enum: false,
-                    is_newtype: true,
-                    is_refinement: false,
-                    span,
-                })
-            }
+            TypeDeclBody::Newtype(inner_type) => Ok(Self {
+                name,
+                generics,
+                fields: List::from(vec![FieldInfo::positional(inner_type, 0, span)]),
+                variants: List::new(),
+                is_enum: false,
+                is_newtype: true,
+                is_refinement: false,
+                span,
+            }),
             TypeDeclBody::Alias(_) => Err(DeriveError::UnsupportedTypeKind {
                 kind: Text::from("type alias"),
                 hint: Text::from(
@@ -356,23 +340,11 @@ impl TypeInfo {
                 ),
                 span,
             }),
-            TypeDeclBody::Tuple(types) => {
-                // Tuple types are similar to record types with numeric field names
+            TypeDeclBody::Tuple(types) | TypeDeclBody::SigmaTuple(types) => {
                 let field_infos: Vec<FieldInfo> = types
                     .iter()
                     .enumerate()
-                    .map(|(i, ty)| FieldInfo {
-                        name: Text::from(format!("{}", i)),
-                        ty: ty.clone(),
-                        index: i,
-                        is_public: false,
-                        has_default: false,
-                        default_value: verum_common::Maybe::None,
-                        // Tuple types have positional fields with
-                        // no attribute syntax surface.
-                        attributes: List::new(),
-                        span,
-                    })
+                    .map(|(i, ty)| FieldInfo::positional(ty, i, span))
                     .collect();
 
                 Ok(Self {
@@ -396,35 +368,6 @@ impl TypeInfo {
                 is_refinement: false,
                 span,
             }),
-            TypeDeclBody::SigmaTuple(types) => {
-                // Sigma tuple types are similar to regular tuples with numeric field names
-                let field_infos: Vec<FieldInfo> = types
-                    .iter()
-                    .enumerate()
-                    .map(|(i, ty)| FieldInfo {
-                        name: Text::from(format!("{}", i)),
-                        ty: ty.clone(),
-                        index: i,
-                        is_public: false,
-                        has_default: false,
-                        default_value: verum_common::Maybe::None,
-                        // Same as Tuple — no attribute syntax surface.
-                        attributes: List::new(),
-                        span,
-                    })
-                    .collect();
-
-                Ok(Self {
-                    name,
-                    generics,
-                    fields: List::from(field_infos),
-                    variants: List::new(),
-                    is_enum: false,
-                    is_newtype: false,
-                    is_refinement: false,
-                    span,
-                })
-            }
             // Inductive/Coinductive types treated like sum types for derive purposes
             TypeDeclBody::Inductive(variants) => {
                 let variant_infos: Vec<VariantInfo> = variants
@@ -832,6 +775,7 @@ mod tests {
             name: Text::from("x"),
             ty: Type::int(span),
             index: 0,
+            is_positional: false,
             is_public: true,
             has_default: false,
             default_value: verum_common::Maybe::None,
@@ -851,16 +795,7 @@ mod tests {
         let span = Span::default();
         let variant = VariantInfo {
             name: Text::from("Some"),
-            fields: List::from(vec![FieldInfo {
-                name: Text::from("0"),
-                ty: Type::int(span),
-                index: 0,
-                is_public: false,
-                has_default: false,
-                default_value: verum_common::Maybe::None,
-                attributes: List::new(),
-                span,
-            }]),
+            fields: List::from(vec![FieldInfo::positional(&Type::int(span), 0, span)]),
             is_unit: false,
             is_tuple: true,
             index: 0,

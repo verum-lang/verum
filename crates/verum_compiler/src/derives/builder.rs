@@ -932,6 +932,7 @@ mod tests {
             name: Text::from("method"),
             ty: Type::int(span),
             index: 0,
+            is_positional: false,
             is_public: true,
             has_default: false,
             default_value: Maybe::None,
@@ -943,6 +944,7 @@ mod tests {
             name: Text::from("timeout"),
             ty: Type::int(span),
             index: 1,
+            is_positional: false,
             is_public: true,
             has_default: true,
             default_value: Maybe::Some(Expr::new(
