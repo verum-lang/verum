@@ -205,15 +205,13 @@ public fn requires_smt(level: VerificationLevel) -> Bool {
     }
 }
 
-/// True iff the level permits silent fallback to runtime checks on
-/// proof failure. The lax half of the ladder (`Runtime / Static /
-/// Fast`) falls back; the strict half (`Formal / Proof / Thorough /
-/// Reliable / Certified / Synthesize`) hard-fails on failure.
+/// True iff the level permits runtime fallback when proof is unavailable.
+/// Static fallback carries a warning. Fast and all other proof strategies
+/// require a successful proof, matching the compiler's level projection.
 public fn allows_runtime_fallback(level: VerificationLevel) -> Bool {
     match level {
         VerificationLevel.Runtime => true,
         VerificationLevel.Static  => true,
-        VerificationLevel.Fast    => true,
         _                         => false,
     }
 }

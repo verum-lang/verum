@@ -796,3 +796,6 @@ mod configuration_owned_payloads;
 
 #[path = "term_raw_visibility.rs"]
 mod term_raw_visibility;
+
+#[path = "verify_attempt_source.rs"]
+mod verify_attempt_source;

@@ -13,8 +13,10 @@
 )
 module core.verify.attempt;
 
+mount core.verify.level.{VerificationLevel, allows_runtime_fallback};
+
 // The result of an SMT proof attempt.
-type ProofAttempt is
+public type ProofAttempt is
     // The backend returned Unsat on the negated goal — valid.
     | Proven
     // The backend returned Sat / Unknown / Timeout — carries a
@@ -38,77 +40,32 @@ type ProofAttempt is
 //  Proof, Proven → ElideCheck
 //  Proof, Failed(r) → HardFail(r)
 //  Proof, Unattempted → HardFail("no SMT")
-type VerificationOutcome is
+public type VerificationOutcome is
     | ElideCheck
     | EmitRuntimeCheck
     | FallbackWithWarning(Text)
     | HardFail(Text);
 
 // Evaluate the outcome of a proof attempt at the given level.
-//
-
-// This is the user-space mirror of
-// `verum_verification.level.VerificationLevel.evaluate_attempt`
-// extended to the VVA §2.3 nine-strategy ladder.
-//
-
-// The dispatch table:
-//  Runtime → EmitRuntimeCheck
-//  Static / Fast → Elide on Proven; Fallback on Failed/Unattempted
-//  (lax half of ladder — runtime fallback allowed)
-//  Formal → Elide on Proven; HardFail on Failed/Unattempted
-//  (first strict level)
-//  Proof → Elide on Proven; HardFail on Failed/Unattempted
-//  Thorough / Reliable → Same as Formal but with stricter Failed
-//  rationale (requires invariant/cross-solver
-//  agreement)
-//  Certified → Same as Reliable + certificate re-check
-//  Synthesize → Elide on Proven; HardFail with synthesis
-//  rationale on Failed/Unattempted
-//
-
-// User libraries that want "verify if possible, fall back gracefully"
-// semantics should call this exactly — the compiler's enforcement
-// table doesn't accept non-standard policies.
-fn evaluate_attempt(
+// Runtime always emits a check. Static permits fallback with a warning.
+// Every proof strategy, including Fast and the coherent strategies, requires
+// a successful proof. The level module owns the fallback policy shared with
+// the compiler's VerificationLevel projection.
+public fn evaluate_attempt(
     level: VerificationLevel,
     attempt: ProofAttempt,
 ) -> VerificationOutcome {
-    match level {
-        VerificationLevel.Runtime =>
-            VerificationOutcome.EmitRuntimeCheck,
-        VerificationLevel.Static => evaluate_lax(attempt, "static"),
-        VerificationLevel.Fast   => evaluate_lax(attempt, "fast"),
-        VerificationLevel.Formal => evaluate_strict(
-            attempt,
-            "Formal-level obligation requires SMT",
-        ),
-        VerificationLevel.Proof => evaluate_strict(
-            attempt,
-            "Proof-level obligation requires SMT",
-        ),
-        VerificationLevel.Thorough => evaluate_strict(
-            attempt,
-            "Thorough-level obligation requires SMT + invariant/frame/termination obligations",
-        ),
-        VerificationLevel.Reliable => evaluate_strict(
-            attempt,
-            "Reliable-level obligation requires cross-solver agreement (Z3 ∧ CVC5)",
-        ),
-        VerificationLevel.Certified => evaluate_strict(
-            attempt,
-            "Certified-level obligation requires SMT + certificate re-check + export",
-        ),
-        VerificationLevel.Synthesize => evaluate_strict(
-            attempt,
-            "Synthesize-level obligation requires inverse search across 𝔐",
-        ),
+    if level is VerificationLevel.Runtime {
+        return VerificationOutcome.EmitRuntimeCheck;
+    }
+    if allows_runtime_fallback(level) {
+        evaluate_lax(attempt)
+    } else {
+        evaluate_strict(attempt)
     }
 }
 
-// Lax-half evaluator (Static / Fast): runtime fallback on
-// non-Proven outcomes per VVA §2.3.
-fn evaluate_lax(attempt: ProofAttempt, level_name: Text) -> VerificationOutcome {
+fn evaluate_lax(attempt: ProofAttempt) -> VerificationOutcome {
     match attempt {
         ProofAttempt.Proven =>
             VerificationOutcome.ElideCheck,
@@ -116,33 +73,27 @@ fn evaluate_lax(attempt: ProofAttempt, level_name: Text) -> VerificationOutcome 
             VerificationOutcome.FallbackWithWarning(reason),
         ProofAttempt.Unattempted =>
             VerificationOutcome.FallbackWithWarning(
-                Text.from("SMT not attempted (--no-smt or ") +
-                    level_name +
-                    Text.from(" disabled)")
+                "SMT not attempted (e.g. --no-smt)"
             ),
     }
 }
 
-// Strict-half evaluator (Formal / Proof / Thorough / Reliable /
-// Certified / Synthesize): hard-fail on non-Proven outcomes per
-// VVA §2.3.
-fn evaluate_strict(
-    attempt: ProofAttempt,
-    unattempted_reason: Text,
-) -> VerificationOutcome {
+fn evaluate_strict(attempt: ProofAttempt) -> VerificationOutcome {
     match attempt {
         ProofAttempt.Proven =>
             VerificationOutcome.ElideCheck,
         ProofAttempt.Failed(reason) =>
             VerificationOutcome.HardFail(reason),
         ProofAttempt.Unattempted =>
-            VerificationOutcome.HardFail(unattempted_reason),
+            VerificationOutcome.HardFail(
+                "Proof-level obligation requires SMT; none was attempted (is the solver disabled?)"
+            ),
     }
 }
 
 // Predicates for quick shape inspection.
 
-fn requires_runtime_check(outcome: VerificationOutcome) -> Bool {
+public fn requires_runtime_check(outcome: VerificationOutcome) -> Bool {
     match outcome {
         VerificationOutcome.EmitRuntimeCheck => true,
         VerificationOutcome.FallbackWithWarning(_) => true,
@@ -151,14 +102,14 @@ fn requires_runtime_check(outcome: VerificationOutcome) -> Bool {
     }
 }
 
-fn is_hard_failure(outcome: VerificationOutcome) -> Bool {
+public fn is_hard_failure(outcome: VerificationOutcome) -> Bool {
     match outcome {
         VerificationOutcome.HardFail(_) => true,
         _ => false,
     }
 }
 
-fn is_warning(outcome: VerificationOutcome) -> Bool {
+public fn is_warning(outcome: VerificationOutcome) -> Bool {
     match outcome {
         VerificationOutcome.FallbackWithWarning(_) => true,
         _ => false,
