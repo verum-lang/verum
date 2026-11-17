@@ -56,6 +56,20 @@ pub(super) mod index_projection;
 
 type FieldWriteback = (Reg, u32, bool, verum_common::Text);
 
+/// A conversion either borrows its input or creates a separate Text value.
+/// Only the producing operation grants permission to retire that value.
+#[derive(Clone, Copy)]
+enum TextConversion {
+    Borrowed(Reg),
+    Owned(Reg),
+}
+
+impl TextConversion {
+    fn register(self) -> Reg {
+        match self { Self::Borrowed(reg) | Self::Owned(reg) => reg }
+    }
+}
+
 /// An empty slot belongs to the callee. A generic inside a populated slot
 /// is actual source evidence in the caller's binder scope.
 #[derive(Default)]
@@ -1425,7 +1439,7 @@ impl VbcCodegen {
             }
 
             // === Tuples and Arrays ===
-            ExprKind::Tuple(elements) => self.compile_tuple(elements),
+            ExprKind::Tuple(elements) => self.compile_tuple(elements, expr.span),
             ExprKind::Array(array_expr) => self.compile_array(array_expr),
 
             // === Field Access ===
@@ -3039,12 +3053,20 @@ impl VbcCodegen {
         }
 
         // Evaluate operands
+        let left_start = self.ctx.instructions.len();
         let left_reg = self
             .compile_expr(left)?
             .or_internal("binary op left has no value")?;
+        let left_declaration = self.declared_expression_result(
+            left, Some(left_reg), left_start, self.ctx.instructions.len(),
+        );
+        let right_start = self.ctx.instructions.len();
         let right_reg = self
             .compile_expr(right)?
             .or_internal("binary op right has no value")?;
+        let right_declaration = self.declared_expression_result(
+            right, Some(right_reg), right_start, self.ctx.instructions.len(),
+        );
 
         let dest = self.ctx.alloc_temp();
 
@@ -3401,6 +3423,9 @@ impl VbcCodegen {
                         a: left_reg,
                         b: right_reg,
                     });
+                    self.retire_observed_operand(left, left_reg, left_declaration.as_ref());
+                    self.retire_observed_operand(right, right_reg, right_declaration.as_ref());
+                    return Ok(Some(dest));
                 } else if is_float {
                     self.ctx.emit(Instruction::BinaryF {
                         op: BinaryFloatOp::Add,
@@ -4049,23 +4074,22 @@ impl VbcCodegen {
         }.or_internal("assignment value has no value")?;
         let copy_type = copied_pointee.clone().or_else(||
             self.copy_source_type(value, value_reg, copy_start, self.ctx.instructions.len()));
-        let local_destination = match &target.kind {
-            ExprKind::Path(path) => match path.segments.as_slice() {
-                [PathSegment::Name(name)] => self.ctx.lookup_var(&name.name).is_some(),
-                [PathSegment::SelfValue] => self.ctx.lookup_var("self").is_some(),
-                _ => false,
-            },
-            _ => false,
-        };
+        let transfers = copied_pointee.is_none() && self.consumes_named_place(value, value_reg);
+        let generic = copied_pointee.is_none().then(|| self.generic_named_place(value, value_reg)).flatten();
         // A source dereference can also undergo an implicit conversion. Make
         // one copy decision for the final stored value before selecting storage.
         let needs_copy = match &copied_pointee {
             Some(pointee) => self.borrowed_value_needs_copy(pointee, value.span)?,
-            None if local_destination =>
-                self.binds_a_copy_of_a_place(value, value_reg, copy_type.as_ref())?,
-            None => false,
+            None if transfers || generic.is_some() => false,
+            None => self.binds_a_copy_of_a_place(value, value_reg, copy_type.as_ref())?,
         };
-        let value_reg = if needs_copy {
+        let value_reg = if transfers {
+            let received = self.ctx.alloc_temp();
+            self.ctx.emit_transferring_value(received, value_reg);
+            received
+        } else if let Some(ty) = generic {
+            self.emit_generic_value_handoff(value_reg, ty, true)
+        } else if needs_copy {
             let owned = self.ctx.alloc_temp();
             self.ctx.emit(Instruction::CloneTyped { dst: owned, src: value_reg,
                 type_ref: copy_type.clone().or_internal("assignment copy requires its source declaration")? });
@@ -4095,6 +4119,8 @@ impl VbcCodegen {
                     // `true` after the first arm and would otherwise reject the
                     // sibling arm's assignment.
                     let var_is_cell = self.ctx.lookup_var(name).is_some_and(|i| i.is_cell);
+                    let replaces_live_value = self.ctx.lookup_var(name)
+                        .is_some_and(|info| info.is_initialized && !info.declared_uninit);
                     if let Some(info) = self.ctx.lookup_var(name)
                         && !info.is_mutable
                         && info.is_initialized
@@ -4110,7 +4136,15 @@ impl VbcCodegen {
                         info.is_initialized = true;
                     }
 
-                    if var_is_cell {
+                    if replaces_live_value && var_is_cell {
+                        self.emit_declared_replacement(value_reg, destination_declaration.as_ref(),
+                            |dst| Instruction::GetF { dst, obj: target_reg, field_idx: 0 },
+                            |value| Instruction::SetF { obj: target_reg, field_idx: 0, value })?;
+                    } else if replaces_live_value {
+                        self.emit_declared_replacement(value_reg, destination_declaration.as_ref(),
+                            |dst| Instruction::Mov { dst, src: target_reg },
+                            |src| Instruction::Mov { dst: target_reg, src })?;
+                    } else if var_is_cell {
                         // Cell-wrapped mutable capture: store through SetF
                         self.ctx.emit(Instruction::SetF {
                             obj: target_reg,
@@ -4177,7 +4211,10 @@ impl VbcCodegen {
             ExprKind::Field { expr: base, field } => {
                 let (base_reg, owner, ordinal) = self.compile_field_storage(base, &field.name, true)?;
                 self.emit_field_refinement_assert(value_reg, &owner, ordinal)?;
-                self.emit_field_write(base_reg, ordinal, value_reg, false, &field.name);
+                let declared = self.projected_field_declaration(owner, &field.name);
+                self.emit_declared_replacement(value_reg, declared.as_ref(),
+                    |dst| Instruction::GetF { dst, obj: base_reg, field_idx: ordinal },
+                    |value| Instruction::SetF { obj: base_reg, field_idx: ordinal, value })?;
 
                 self.ctx.free_temp(base_reg);
                 self.ctx.free_temp(value_reg);
@@ -4436,11 +4473,9 @@ impl VbcCodegen {
                     .compile_expr(base)?
                     .or_internal("tuple index base has no value")?;
 
-                self.ctx.emit(Instruction::SetF {
-                    obj: base_reg,
-                    field_idx: *index,
-                    value: value_reg,
-                });
+                self.emit_declared_replacement(value_reg, destination_declaration.as_ref(),
+                    |dst| Instruction::GetF { dst, obj: base_reg, field_idx: *index },
+                    |value| Instruction::SetF { obj: base_reg, field_idx: *index, value })?;
 
                 self.ctx.free_temp(base_reg);
                 self.ctx.free_temp(value_reg);
@@ -4589,10 +4624,15 @@ impl VbcCodegen {
                     )));
                 }
 
-                // Evaluate right side
+                let destination = self.projection_operand_declaration(target)
+                    .and_then(|ty| self.expand_declared_alias(ty));
+                // Evaluate right side, retaining its producer before the write.
+                let right_start = self.ctx.instructions.len();
                 let right_reg = self
                     .compile_expr(value)?
                     .or_internal("compound assign value has no value")?;
+                let right_declaration = self.copy_source_type(value, right_reg,
+                    right_start, self.ctx.instructions.len());
 
                 // For cell variables, load current value from cell first
                 let op_reg = if var_is_cell {
@@ -4607,27 +4647,13 @@ impl VbcCodegen {
                     target_reg
                 };
 
-                // TEXT-ADDASSIGN-CONCAT-1: `s += t` on Text operands is
-                // concatenation. This arm always emitted BinaryI{Add} —
-                // Tier-0's polymorphic AddI masked it (small-string/TEXT
-                // receivers concat), Tier-1's honest integer add SUMMED
-                // TWO TEXT POINTERS (tp4: fault at ptrA+ptrB inside the
-                // next verum_text_concat). Same inference surface as
-                // compile_binary's `+`: declared/inferred operand names,
-                // reference spellings normalised.
-                let addassign_is_text = matches!(op, BinOp::AddAssign) && {
-                    let l = self
-                        .extract_expr_type_name(target)
-                        .or_else(|| self.infer_expr_type_name(target));
-                    let r = self
-                        .extract_expr_type_name(value)
-                        .or_else(|| self.infer_expr_type_name(value));
-                    Self::type_name_is_text(l.as_deref())
-                        || Self::type_name_is_text(r.as_deref())
-                };
+                let addassign_is_text = matches!(op, BinOp::AddAssign)
+                    && destination.as_ref().and_then(crate::types::TypeRef::base_type_id)
+                        .is_some_and(|id| self.declared_runtime_carrier(id) == Some(WKT::Text));
 
                 // Perform operation
-                let result_reg = if var_is_cell { op_reg } else { target_reg };
+                let result_reg = if addassign_is_text { self.ctx.alloc_temp() }
+                    else if var_is_cell { op_reg } else { target_reg };
                 if addassign_is_text {
                     self.ctx.emit(Instruction::Concat {
                         dst: result_reg,
@@ -4652,8 +4678,16 @@ impl VbcCodegen {
                     return Err(CodegenError::internal("not a compound assignment"));
                 }
 
-                // For cell variables, store result back to cell
-                if var_is_cell {
+                if addassign_is_text {
+                    self.emit_declared_replacement(result_reg, destination.as_ref(),
+                        |dst| Instruction::Mov { dst, src: op_reg },
+                        |value| if var_is_cell {
+                            Instruction::SetF { obj: target_reg, field_idx: 0, value }
+                        } else { Instruction::Mov { dst: target_reg, src: value } })?;
+                    self.ctx.free_temp(result_reg);
+                    if var_is_cell { self.ctx.free_temp(op_reg); }
+                    self.retire_observed_operand(value, right_reg, right_declaration.as_ref());
+                } else if var_is_cell {
                     self.ctx.emit(Instruction::SetF {
                         obj: target_reg,
                         field_idx: 0,
@@ -4662,7 +4696,7 @@ impl VbcCodegen {
                     self.ctx.free_temp(result_reg);
                 }
 
-                self.ctx.free_temp(right_reg);
+                if !addassign_is_text { self.ctx.free_temp(right_reg); }
 
                 Ok(Some(target_reg))
             }
@@ -4678,10 +4712,13 @@ impl VbcCodegen {
                     self.emit_field_read(current_val, obj_reg, field_idx, idx_guessed, &fname);
                 }
 
-                // Evaluate right side
+                // Evaluate right side before changing the selected field.
+                let right_start = self.ctx.instructions.len();
                 let right_reg = self
                     .compile_expr(value)?
                     .or_internal("compound assign value has no value")?;
+                let right_declaration = self.copy_source_type(value, right_reg,
+                    right_start, self.ctx.instructions.len());
 
                 // Arithmetic and its postcondition inspect the same selected
                 // field declaration, including aliases and owner arguments.
@@ -4745,14 +4782,18 @@ impl VbcCodegen {
                 // the write-back (T1-F parity for compound assignment).
                 self.emit_field_refinement_assert(result, &owner, field_idx)?;
 
-                // Store back to field
-                {
+                if field_is_text {
+                    self.emit_declared_replacement(result, Some(&carrier),
+                        |dst| Instruction::Mov { dst, src: current_val },
+                        |value| Instruction::SetF { obj: obj_reg, field_idx, value })?;
+                    self.retire_observed_operand(value, right_reg, right_declaration.as_ref());
+                } else {
                     let fname = field.name.clone();
                     self.emit_field_write(obj_reg, field_idx, result, idx_guessed, &fname);
                 }
 
                 self.ctx.free_temp(current_val);
-                self.ctx.free_temp(right_reg);
+                if !field_is_text { self.ctx.free_temp(right_reg); }
                 self.ctx.free_temp(obj_reg);
 
                 Ok(Some(result))
@@ -8103,7 +8144,7 @@ impl VbcCodegen {
             // For array element references, compile specially using ArrayToC marshalling
             // For function callbacks, compile using CreateCallback
             let mut arg_results: Vec<Reg> = Vec::with_capacity(args.len());
-            let contexts = self.contextual_call_parameters(&func_info, type_args, args);
+            let contexts = self.contextual_call_parameters(&func_info, type_args, args)?;
             self.stage_selected_closure_parameters(&func_info, args, type_args);
             for (i, arg) in args.iter().enumerate() {
                 // Check if this argument is an array element reference
@@ -8618,6 +8659,9 @@ impl VbcCodegen {
     pub(super) fn compile_call_operand(
         &mut self, argument: &Expr, expected: Option<&crate::types::TypeRef>,
     ) -> CodegenResult<Option<Reg>> {
+        if let Some(slice) = self.compile_borrowed_slice_argument(argument, expected)? {
+            return Ok(Some(slice));
+        }
         let value = Self::normalized_place(argument);
         if !Self::admits_constructor_context(value) {
             return self.compile_expr(argument);
@@ -9726,13 +9770,17 @@ impl VbcCodegen {
                         const_id: const_id.0,
                     });
                     self.ctx.emit(Instruction::DebugPrint { value: empty });
-                    self.ctx.free_temp(empty);
+                    self.retire_text_conversion(TextConversion::Owned(empty));
                 } else {
+                    let start = self.ctx.instructions.len();
                     let arg_reg = self
                         .compile_expr(&args[0])?
                         .or_internal("print arg has no value")?;
+                    let input_type = self.declared_expression_result(
+                        &args[0], Some(arg_reg), start, self.ctx.instructions.len(),
+                    );
                     self.ctx.emit(Instruction::DebugPrint { value: arg_reg });
-                    self.ctx.free_temp(arg_reg);
+                    self.retire_observed_operand(&args[0], arg_reg, input_type.as_ref());
                 }
                 Ok(Some(None))
             }
@@ -9757,12 +9805,15 @@ impl VbcCodegen {
                 let stdlib_fn = self.ctx.lookup_function(name).map(|f| f.id);
                 match (is_text_arg, stdlib_fn) {
                     (false, Some(fn_id)) => {
+                        let start = self.ctx.instructions.len();
                         let arg_reg = self
                             .compile_expr(&args[0])?
                             .or_internal("eprint arg has no value")?;
-                        let text_reg = self.ctx.alloc_temp();
-                        self.emit_value_to_text(&args[0], arg_reg, text_reg)?;
-                        self.ctx.free_temp(arg_reg);
+                        let input_type = self.declared_expression_result(
+                            &args[0], Some(arg_reg), start, self.ctx.instructions.len(),
+                        );
+                        let converted = self.emit_value_to_text(&args[0], arg_reg, input_type.as_ref())?;
+                        let text_reg = converted.register();
                         let dst = self.ctx.alloc_temp();
                         self.ctx.emit(Instruction::Call {
                             dst,
@@ -9772,7 +9823,8 @@ impl VbcCodegen {
                                 count: 1,
                             },
                         });
-                        self.ctx.free_temp(text_reg);
+                        self.retire_text_conversion(converted);
+                        self.retire_observed_operand(&args[0], arg_reg, input_type.as_ref());
                         self.ctx.free_temp(dst);
                         Ok(Some(None))
                     }
@@ -11154,23 +11206,8 @@ impl VbcCodegen {
             self.emit_variant_refinement_assert(value, parent, tag, field)?;
         }
         let copy_type = self.copy_source_type(expr, value, copy_start, self.ctx.instructions.len());
-        let store = Instruction::SetVariantData { variant, field, value };
-        if self.consumes_named_place(expr, value) {
-            self.ctx.emit_transferring_store(store, value);
-        } else if let Some(ty) = self.generic_named_place(expr, value) {
-            let received = self.emit_generic_value_handoff(value, ty, true);
-            self.ctx.emit(Instruction::SetVariantData { variant, field, value: received });
-            self.ctx.free_temp(received);
-        } else if self.binds_a_copy_of_a_place(expr, value, copy_type.as_ref())? {
-            let copied = self.ctx.alloc_temp();
-            self.ctx.emit(Instruction::CloneTyped { dst: copied, src: value,
-                type_ref: copy_type.or_internal("variant payload copy requires its source declaration")? });
-            self.ctx.emit(Instruction::SetVariantData { variant, field, value: copied });
-            self.ctx.free_temp(copied);
-        } else {
-            self.ctx.emit(store);
-        }
-        Ok(())
+        self.emit_declared_value_store(expr, value, copy_type.as_ref(), |value|
+            Instruction::SetVariantData { variant, field, value })
     }
 
     fn emit_variant_refinement_assert(
@@ -11985,6 +12022,18 @@ impl VbcCodegen {
             variant.kind == crate::types::VariantKind::Unit
                 && self.ctx.strings.get(variant.name.0 as usize) == Some(case))
             .then(|| self.type_declaration_identity(sum)).flatten()
+    }
+
+    /// Dotted syntax can construct a fresh value rather than project a place.
+    /// A local binding shadows an unrooted namespace; spelling alone is not
+    /// evidence that its field denotes a variant constructor.
+    pub(super) fn is_declared_unit_constructor_value(&self, expression: &Expr) -> bool {
+        let Some(parts) = self.try_flatten_module_path_resolved(expression) else { return false; };
+        if !self.path_was_rooted_module_path(expression)
+            && parts.first().is_some_and(|head| self.ctx.registers.contains(head)) {
+            return false;
+        }
+        self.declared_unit_constructor_owner(&parts).is_some()
     }
 
     /// Alias targets carry the same selected declaration and generic binders
@@ -13949,7 +13998,7 @@ impl VbcCodegen {
             let selected = self.registered_receiver_method(owner, "new")
                 .and_then(|name| self.ctx.lookup_qualified_function(&name)).cloned();
             let contextual = selected.as_ref()
-                .and_then(|info| self.contextual_call_parameters(info, type_args, args));
+                .map(|info| self.contextual_call_parameters(info, type_args, args)).transpose()?.flatten();
             let expected = contextual.as_ref().and_then(|params| params.first()?.as_ref());
             let inferred = selected.as_ref()
                 .and_then(|info| self.infer_call_instantiation(info.id.0, None, args));
@@ -15362,6 +15411,25 @@ impl VbcCodegen {
         // Handle built-in methods that map to dedicated opcodes
         // BUT only if the receiver doesn't have a user-defined method with the same name
         if method.name == "len" && args.is_empty() {
+            // A borrowed slice retains its structural declaration. Resolve its
+            // operation through the intrinsic registry; an `&[...]` display
+            // name must not misclassify it as a user record.
+            let slice_receiver = match receiver_result_declaration.clone()
+                .and_then(|ty| self.expand_declared_alias(ty))
+            {
+                Some(crate::types::TypeRef::Slice(_)) => true,
+                Some(crate::types::TypeRef::Reference { inner, .. }) =>
+                    matches!(self.expand_declared_alias(*inner), Some(crate::types::TypeRef::Slice(_))),
+                _ => false,
+            };
+            if slice_receiver {
+                let intrinsic = lookup_intrinsic("slice_len")
+                    .or_internal("slice length is absent from the intrinsic registry")?;
+                let result = self.ctx.alloc_temp();
+                self.emit_intrinsic_instructions(&intrinsic, &[receiver_reg], result, 1, None)?;
+                self.ctx.free_temp(receiver_reg);
+                return Ok(Some(result));
+            }
             // T1192 — A PACKED `[T; N]` KNOWS ITS LENGTH ONLY HERE.
             //
             // T1269 widened this from `[Byte; N]` to every fixed-size
@@ -15496,7 +15564,7 @@ impl VbcCodegen {
                     arr: receiver_reg,
                     type_hint: len_type_hint,
                 });
-                self.ctx.free_temp(receiver_reg);
+                self.retire_observed_operand(receiver, receiver_reg, receiver_result_declaration.as_ref());
                 return Ok(Some(result));
             }
             // T1370. `has_user_defined_len` is answered from a
@@ -15520,7 +15588,7 @@ impl VbcCodegen {
                     arr: receiver_reg,
                     type_hint: len_type_hint,
                 });
-                self.ctx.free_temp(receiver_reg);
+                self.retire_observed_operand(receiver, receiver_reg, receiver_result_declaration.as_ref());
                 return Ok(Some(result));
             }
         }
@@ -16656,7 +16724,7 @@ impl VbcCodegen {
         let args_start = if !args.is_empty() {
             let mut arg_vals: Vec<Reg> = Vec::with_capacity(args.len());
             let contexts = resolved_method.as_ref()
-                .and_then(|method| self.contextual_call_parameters(method, type_args, args));
+                .map(|method| self.contextual_call_parameters(method, type_args, args)).transpose()?.flatten();
             for (i, arg) in args.iter().enumerate() {
                 // Skip self (param index 0): callsite `args` already
                 // excludes the receiver — so closure arg at callsite
@@ -18352,7 +18420,7 @@ impl VbcCodegen {
         // Compile arguments
         let args_start = if !args.is_empty() {
             let mut arg_results: Vec<Reg> = Vec::with_capacity(args.len());
-            let contexts = self.contextual_call_parameters(func_info, type_args, args);
+            let contexts = self.contextual_call_parameters(func_info, type_args, args)?;
             self.stage_selected_closure_parameters(func_info, args, type_args);
             for (i, arg) in args.iter().enumerate() {
                 // **Closure expected-return-type plumbing (#26 residual).**
@@ -23088,11 +23156,12 @@ impl VbcCodegen {
         }
     }
 
-    fn compile_tuple(&mut self, elements: &verum_common::List<Expr>) -> CodegenResult<Option<Reg>> {
+    fn compile_tuple(&mut self, elements: &verum_common::List<Expr>, span: verum_ast::Span) -> CodegenResult<Option<Reg>> {
         if elements.is_empty() {
             // Unit type
             let result = self.ctx.alloc_temp();
             self.ctx.emit(Instruction::LoadUnit { dst: result });
+            self.ctx.declared_result_types.insert(span, Some(crate::types::TypeRef::Concrete(crate::types::TypeId::UNIT)));
             return Ok(Some(result));
         }
 
@@ -23116,20 +23185,31 @@ impl VbcCodegen {
             self.ctx.registers.alloc_fresh();
         }
 
+        // Each component's actual producer supplies its declaration, including
+        // calls and interpolations resolved only while compiling that component.
+        let mut component_types = Some(verum_common::List::with_capacity(elements.len()));
         // Now compile all elements and move them to their pre-allocated registers
         for (i, elem) in elements.iter().enumerate() {
+            let start = self.ctx.instructions.len();
             let elem_val = self
                 .compile_expr(elem)?
                 .or_internal("tuple element has no value")?;
+            let declared = self.copy_source_type(elem, elem_val, start, self.ctx.instructions.len());
+            if let (Some(types), Some(ty)) = (&mut component_types, &declared) {
+                types.push(ty.clone());
+            } else {
+                component_types = None;
+            }
             let target_reg = Reg(first_reg.0 + i as u16);
             if elem_val != target_reg {
-                self.ctx.emit(Instruction::Mov {
-                    dst: target_reg,
-                    src: elem_val,
-                });
+                self.emit_declared_value_store(elem, elem_val, declared.as_ref(), |src|
+                    Instruction::Mov { dst: target_reg, src })?;
                 self.ctx.free_temp(elem_val);
             }
         }
+
+        self.ctx.declared_result_types.insert(span,
+            component_types.map(|types| crate::types::TypeRef::Tuple(types.into())));
 
         let result = self.ctx.alloc_temp();
 
@@ -37974,6 +38054,18 @@ impl VbcCodegen {
             }
 
             // Text operations
+            InlineSequenceId::TextAdoptOwned | InlineSequenceId::TextReleaseStorage => {
+                let operation = match seq_id {
+                    InlineSequenceId::TextAdoptOwned => crate::instruction::TextSubOpcode::AdoptOwned,
+                    _ => crate::instruction::TextSubOpcode::ReleaseStorage,
+                };
+                let mut operands = verum_common::List::new().into();
+                Self::write_reg(&mut operands, dest.0);
+                for argument in args {
+                    Self::write_reg(&mut operands, argument.0);
+                }
+                self.ctx.emit(Instruction::TextExtended { sub_op: operation as u8, operands });
+            }
             InlineSequenceId::TextFromStatic => {
                 // Create Text from static string
                 self.emit_intrinsic_library_call("verum_text_from_static", args, dest)?;
@@ -43393,29 +43485,28 @@ impl VbcCodegen {
         &mut self,
         expr: &Expr,
         expr_reg: Reg,
-        str_reg: Reg,
-    ) -> CodegenResult<()> {
+        declared: Option<&crate::types::TypeRef>,
+    ) -> CodegenResult<TextConversion> {
+        if declared == Some(&crate::types::TypeRef::Concrete(crate::types::TypeId::TEXT))
+        {
+            // No Mov: an observation cannot transfer the source binding's owner.
+            return Ok(TextConversion::Borrowed(expr_reg));
+        }
+        let str_reg = self.ctx.alloc_temp();
         let expr_type = self.infer_expr_type_kind(expr);
         let type_name = match &expr_type {
             Some(verum_ast::ty::TypeKind::Char) => "Char",
-            Some(verum_ast::ty::TypeKind::Text) => "Text",
             Some(verum_ast::ty::TypeKind::Float) => "Float",
             Some(verum_ast::ty::TypeKind::Path(path)) => {
                 match path.as_ident().map(|id| id.name.as_str()) {
                     Some("Char") => "Char",
-                    Some("Text") => "Text",
                     Some("Float") | Some("Float64") | Some("Float32") => "Float",
                     _ => "",
                 }
             }
             _ => "",
         };
-        if type_name == "Text" {
-            self.ctx.emit(Instruction::Mov {
-                dst: str_reg,
-                src: expr_reg,
-            });
-        } else if type_name == "Char" {
+        if type_name == "Char" {
             self.ctx.emit(Instruction::CharToStr {
                 dst: str_reg,
                 src: expr_reg,
@@ -43465,7 +43556,24 @@ impl VbcCodegen {
                 src: expr_reg,
             });
         }
-        Ok(())
+        Ok(TextConversion::Owned(str_reg))
+    }
+
+    fn retire_text_conversion(&mut self, converted: TextConversion) {
+        if let TextConversion::Owned(reg) = converted {
+            self.emit_local_drop(reg, Some(&crate::types::TypeRef::Concrete(crate::types::TypeId::TEXT)));
+            self.ctx.free_temp(reg);
+        }
+    }
+
+    /// Concat reads both operands; explicit producer receipts retire only the
+    /// accumulator and a newly converted value after the new result exists.
+    fn append_formatted_text(&mut self, accumulator: Reg, suffix: TextConversion) -> Reg {
+        let result = self.ctx.alloc_temp();
+        self.ctx.emit(Instruction::Concat { dst: result, a: accumulator, b: suffix.register() });
+        self.retire_text_conversion(TextConversion::Owned(accumulator));
+        self.retire_text_conversion(suffix);
+        result
     }
 
     fn compile_interpolated_string(
@@ -43475,7 +43583,7 @@ impl VbcCodegen {
         exprs: &verum_common::List<Expr>,
     ) -> CodegenResult<Option<Reg>> {
         // Build string by concatenating parts and expressions
-        let dest = self.ctx.alloc_temp();
+        let mut dest = self.ctx.alloc_temp();
 
         if parts.is_empty() && exprs.is_empty() {
             // Empty string
@@ -43505,21 +43613,17 @@ impl VbcCodegen {
         // Interleave expressions and parts
         for (i, expr) in exprs.iter().enumerate() {
             // Convert expression to string
+            let start = self.ctx.instructions.len();
             let expr_reg = self
                 .compile_expr(expr)?
                 .or_internal("interpolation expr has no value")?;
 
-            let str_reg = self.ctx.alloc_temp();
-            self.emit_value_to_text(expr, expr_reg, str_reg)?;
-            self.ctx.free_temp(expr_reg);
-
-            // Concatenate
-            self.ctx.emit(Instruction::Concat {
-                dst: dest,
-                a: dest,
-                b: str_reg,
-            });
-            self.ctx.free_temp(str_reg);
+            let input_type = self.declared_expression_result(
+                expr, Some(expr_reg), start, self.ctx.instructions.len(),
+            );
+            let converted = self.emit_value_to_text(expr, expr_reg, input_type.as_ref())?;
+            dest = self.append_formatted_text(dest, converted);
+            self.retire_observed_operand(expr, expr_reg, input_type.as_ref());
 
             // Add next part if available
             if i + 1 < parts.len() {
@@ -43529,12 +43633,7 @@ impl VbcCodegen {
                     dst: part_reg,
                     const_id: const_id.0,
                 });
-                self.ctx.emit(Instruction::Concat {
-                    dst: dest,
-                    a: dest,
-                    b: part_reg,
-                });
-                self.ctx.free_temp(part_reg);
+                dest = self.append_formatted_text(dest, TextConversion::Owned(part_reg));
             }
         }
 

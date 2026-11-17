@@ -377,10 +377,13 @@ impl VbcCodegen {
         &self, init: &verum_ast::Expr, reg: Reg, ty: Option<&crate::types::TypeRef>,
     ) -> CodegenResult<bool> {
         use verum_ast::{ExprKind, UnOp};
+        if self.is_declared_unit_constructor_value(Self::normalized_place(init)) {
+            return Ok(false);
+        }
         match &Self::normalized_place(init).kind {
             ExprKind::Path(_) => Ok(Self::named_place_binding(init)
                 .is_some_and(|name| self.copies_from_named_place(name, reg))),
-            ExprKind::Field { .. } | ExprKind::Index { .. }
+            ExprKind::Field { .. } | ExprKind::TupleIndex { .. } | ExprKind::Index { .. }
                 | ExprKind::Unary { op: UnOp::Deref, .. } => {
                 let Some(ty) = ty else { return Ok(false); };
                 if matches!(ty, crate::types::TypeRef::Reference { .. }) { return Ok(false); }
@@ -421,26 +424,14 @@ impl VbcCodegen {
         {
             return false;
         }
-        // A value that is not a heap object copies as itself, so the
-        // opcode would be a no-op the interpreter still has to fetch
-        // and the AOT still has to lower. `let` on a number is by far
-        // the commonest binding in any program; skipping it where the
-        // discriminator is statically known keeps the bytecode the
-        // size it was.
-        !matches!(
-            self.ctx.get_variable_type(name),
-            VarTypeKind::Int
-                | VarTypeKind::Float
-                | VarTypeKind::Bool
-                | VarTypeKind::Byte
-                | VarTypeKind::Char
-                | VarTypeKind::Unit
-                | VarTypeKind::Int32
-                | VarTypeKind::UInt64
-                // Text is a heap object, but an immutable one: sharing
-                // it is unobservable, so a copy is pure allocation.
-                | VarTypeKind::Text
-        )
+        // Elide an operation only when the declaration's canonical storage
+        // codec is immediate. Display/emission categories do not establish
+        // immutable ownership: a Text place can own a mutable byte buffer.
+        let declared = self.ctx.lookup_var(name)
+            .and_then(|binding| self.ctx.registers.value_uses.captured_declaration(binding))
+            .and_then(|ty| self.expand_declared_alias(ty));
+        !matches!(declared, Some(crate::types::TypeRef::Concrete(id))
+            if id.builtin_value_storage() == Some(crate::types::BuiltinValueStorage::Immediate))
     }
 
     /// Project a declaration onto the names introduced by a binding pattern.

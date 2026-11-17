@@ -1117,7 +1117,10 @@ fn execute_method_call(
                 } else {
                     0
                 };
-                let n = new_len.max(0) as usize;
+                if new_len < 0 {
+                    return Err(InterpreterError::Panic { message: "Text.truncate requires a nonnegative length".into() });
+                }
+                let n = new_len as usize;
                 if n < current_text.len() {
                     // Find prior char boundary at-or-before n.
                     let mut boundary = n;
@@ -1139,7 +1142,7 @@ fn execute_method_call(
             _ => unreachable!(),
         };
         let new_value = alloc_string_value(state, &current_text)?;
-        if !write_through_ref(state, text_target, new_value)? {
+        if !super::text_storage::replace(state, text_receiver, text_target, new_value)? {
             state.registers.set(caller_base, receiver_reg, new_value);
         }
         // Return value depends on method:
@@ -1278,7 +1281,7 @@ fn execute_method_call(
             _ => unreachable!(),
         }
         let new_value = alloc_text_bytes_value(state, &current_bytes)?;
-        if !write_through_ref(state, text_target, new_value)? {
+        if !super::text_storage::replace(state, text_receiver, text_target, new_value)? {
             state.registers.set(caller_base, receiver_reg, new_value);
         }
         state.set_reg(dst, Value::unit());
@@ -1329,7 +1332,7 @@ fn execute_method_call(
         state.record_allocation();
         let new_value = Value::from_ptr(obj.as_ptr() as *mut u8);
         // Replace the original receiver slot, including borrowed record fields.
-        if !write_through_ref(state, text_target, new_value)? {
+        if !super::text_storage::replace(state, text_receiver, text_target, new_value)? {
             state.registers.set(caller_base, receiver_reg, new_value);
         }
         state.set_reg(dst, Value::unit());

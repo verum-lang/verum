@@ -44,6 +44,22 @@ fn text_extended_body(
     let dst = read_reg(state)?;
 
     match sub_op {
+        Some(TextSubOpcode::AdoptOwned) => {
+            let pointer = read_reg(state)?;
+            let len = read_reg(state)?;
+            let capacity = read_reg(state)?;
+            let value = super::text_storage::adopt_owned(state,
+                state.get_reg(pointer), state.get_reg(len), state.get_reg(capacity))?;
+            state.set_reg(dst, value);
+        }
+        Some(TextSubOpcode::ReleaseStorage) => {
+            let receiver = read_reg(state)?;
+            let value = super::cbgr_helpers::resolve_receiver(state, state.get_reg(receiver))?;
+            if !value.is_small_string() {
+                super::text_storage::TextStorage::checked(state, value)?.release_contents(state)?;
+            }
+            state.set_reg(dst, Value::unit());
+        }
         Some(TextSubOpcode::FromStatic) => {
             // FROMSTATIC-ARITY-1 (T0426): the emitter packs `[dst][s]` — ONE
             // source register holding the string argument (uniform intrinsic

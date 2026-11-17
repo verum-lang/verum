@@ -31,7 +31,7 @@
 use super::super::super::error::InterpreterResult;
 use super::super::super::heap;
 use super::super::super::state::InterpreterState;
-use super::cbgr_helpers::{resolve_arg_value, resolve_receiver_place, write_through_ref};
+use super::cbgr_helpers::{resolve_arg_value, resolve_receiver_place};
 use super::heap_helpers::{alloc_record_n_fields, extract_byte_slice, wrap_in_variant};
 use super::string_helpers::alloc_string_value;
 use crate::instruction::Reg;
@@ -167,20 +167,15 @@ pub(in super::super) fn try_intercept_text_static_runtime(
             // heap-string OBJECT header, which record readers misread
             // as a bytes pointer).
             let new_val = alloc_text_capacity_record(state, &bytes, new_cap)?;
-            if !write_through_ref(state, target, new_val)? {
+            if !super::text_storage::replace(state, current_val, target, new_val)? {
                 state.registers.set(caller_base, Reg(args_start_reg), new_val);
             }
             Ok(Some(Value::unit()))
         }
         "from_static" if arg_count == 1 => {
-            // Identity: `from_static(&'static Text)` collapses to
-            // its argument at Tier-0.  No separate static-region
-            // tag — the runtime's small-string + heap-string
-            // discrimination already handles both.
-            match read_arg(state, args_start_reg, 0, caller_base) {
-                Some(v) => Ok(Some(v)),
-                None => Ok(Some(empty_text())),
-            }
+            let value = read_arg(state, args_start_reg, 0, caller_base).unwrap_or_else(empty_text);
+            let bytes = super::string_helpers::extract_text_bytes(&value, state);
+            Ok(Some(super::string_helpers::alloc_text_bytes_value(state, &bytes)?))
         }
         "from_str" if arg_count == 1 => {
             // `Result<Text, Utf8Error>` — Verum `Text` is
@@ -188,7 +183,9 @@ pub(in super::super) fn try_intercept_text_static_runtime(
             // conversion is total — always Ok.
             let v = read_arg(state, args_start_reg, 0, caller_base)
                 .unwrap_or_else(empty_text);
-            Ok(Some(wrap_in_variant(state, "Result", 0, &[v])?))
+            let bytes = super::string_helpers::extract_text_bytes(&v, state);
+            let value = super::string_helpers::alloc_text_bytes_value(state, &bytes)?;
+            Ok(Some(wrap_in_variant(state, "Result", 0, &[value])?))
         }
         "from_utf8" if arg_count == 1 => {
             // `Text.from_utf8(bytes: &[Byte]) -> Result<Text, Utf8Error>`.
@@ -482,7 +479,7 @@ pub(in super::super) fn try_intercept_text_static_runtime(
                 _ => unreachable!(),
             }
             let new_value = alloc_text_bytes_value(state, &current_bytes)?;
-            if !write_through_ref(state, target, new_value)? {
+            if !super::text_storage::replace(state, self_val, target, new_value)? {
                 state.registers.set(caller_base, Reg(args_start_reg), new_value);
             }
             Ok(Some(Value::unit()))

@@ -713,6 +713,9 @@ pub(crate) fn load_constant(
                 small
             } else {
                 let obj = state.heap.alloc_text(text.as_bytes())?;
+                // SAFETY: this exact allocation is retained by literal_cache.
+                // A local binding can borrow it but cannot retire its storage.
+                unsafe { (*obj.as_ptr()).flags.insert(super::heap::ObjectFlags::MODULE_LITERAL); }
                 state.record_allocation();
                 Value::from_ptr(obj.as_ptr())
             }
@@ -1362,11 +1365,17 @@ pub fn dispatch_loop_table_with_entry_depth(
                     else if v.is_int() { format!("int({})", v.as_i64()) }
                     else if v.is_ptr() {
                         let p = v.as_ptr::<u8>();
-                        if !p.is_null() && (p as usize).is_multiple_of(std::mem::align_of::<super::heap::ObjectHeader>()) {
-                            let h = unsafe { super::heap::ObjectHeader::ref_or_stub(p) };
-                            let vtag = unsafe { super::heap::variant_tag(p) };
-                            format!("ptr(@{:#x} tid={} vtag={})", p as usize, h.type_id.0, vtag)
-                        } else { "ptr(?)".to_string() }
+                        if v.is_regular_ptr() && state.heap.contains(p.cast()) {
+                            // SAFETY: exact live membership precedes diagnostic
+                            // reads too; tracing must never inspect retired data.
+                            let h = unsafe { &*p.cast::<super::heap::ObjectHeader>() };
+                            if h.flags.contains(super::heap::ObjectFlags::VARIANT) && h.size >= 8 {
+                                let vtag = unsafe { super::heap::variant_tag(p) };
+                                format!("ptr(@{:#x} tid={} vtag={})", p as usize, h.type_id.0, vtag)
+                            } else {
+                                format!("ptr(@{:#x} tid={})", p as usize, h.type_id.0)
+                            }
+                        } else { format!("ptr(@{:#x} unowned)", p as usize) }
                     }
                     else if v.is_bool() { format!("bool({})", v.as_bool()) }
                     else { "other".to_string() }

@@ -157,8 +157,18 @@ The VM checks live managed or allocator-backed byte extents. Native Text copy
 requires a live flat record and live source byte range from its producer; its
 length, capacity, null and overflow checks do not validate an arbitrary forged
 pointer. Neither tier infers an allocator or exclusive ownership from capacity.
-Full automatic Text cleanup still needs a producer-issued lifetime receipt and
-is not completed by this copy transaction.
+Text producers issue a storage receipt separately from length and capacity.
+Typed destruction releases the backing allocation and descriptor through their
+recorded allocation domains; borrowed or pooled bytes are not freed. Replacing
+an owned descriptor validates both receipts before releasing the old backing.
+The source compiler emits cleanup for owned locals, parameters, aggregate
+components and observed temporaries. Native lowering does not infer cleanup at
+return or register overwrite from a table shared across control-flow branches.
+
+These checks cover the named source and runtime paths below. They do not prove
+complete reclamation for every container, closure, exceptional exit or discarded
+expression. In particular, source cleanup for semantic containers still has
+paths using `DropRef` instead of a fully instantiated element destruction plan.
 
 ## Failure and resource limits
 
@@ -196,6 +206,12 @@ the target runtime. It does not call a project-authored C/C++ copying shim.
   codegen `parameter_convention` checks native convention and callable refusals.
 - `typed_copy_wire`, `retain_forward` and `owned_storage_resources` pin
   declaration identity and rejection boundaries.
+- `text_storage_lifecycle` checks producer receipts, allocation domains and
+  invalid-storage refusal. Compiler `text_source_lifecycle` executes selected
+  unchanged standard-library bodies through serialized VBC and native lowering.
+- `aggregate_storage_lifecycle`, `formatting_storage_lifecycle` and
+  `value_replacement_lifecycle` repeat source and wire execution while checking
+  that retired owners do not accumulate in the interpreter heap.
 
 These gates establish the named producer and runtime paths. They do not
 qualify a fresh full standard-library archive, configuration parsing or

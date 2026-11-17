@@ -90,8 +90,8 @@ fn native_text_builder_vbc_copy(copy_in_place: bool, mutate: bool, transparent: 
 
     // Explicit VBC representation gate, not source admission. The real source
     // owns the descriptor; the fixture initializes the {ptr,len,cap} state
-    // produced by Text.with_capacity + byte writes. Allocation, New(TEXT) and
-    // SetF all use production lowering, without a synthetic host-memory ABI.
+    // produced by Text.with_capacity + byte writes. Allocation and ownership
+    // adoption use production operations, without a synthetic host-memory ABI.
     let mut ast = Parser::new(include_str!("../../../core/text/text.vr"))
         .parse_module().expect("canonical Text source");
     ast.items.retain(|item| matches!(&item.kind, ItemKind::Module(_))
@@ -132,6 +132,10 @@ fn native_text_builder_vbc_copy(copy_in_place: bool, mutate: bool, transparent: 
     for register in [Reg(2), Reg(0), Reg(1)] {
         verum_vbc::encoding::encode_reg(register, &mut allocation_operands);
     }
+    let mut adoption_operands = verum_common::List::<u8>::new().into();
+    for register in [Reg(3), Reg(2), Reg(4), Reg(5)] {
+        verum_vbc::encoding::encode_reg(register, &mut adoption_operands);
+    }
     let copied = if copy_in_place { Reg(3) } else { Reg(6) };
     let mut instructions = verum_common::List::from_iter([
         Instruction::LoadI { dst: Reg(0), value: 17 },
@@ -141,12 +145,11 @@ fn native_text_builder_vbc_copy(copy_in_place: bool, mutate: bool, transparent: 
         Instruction::MemExtended {
             sub_op: MemSubOpcode::AllocZeroed.to_byte(), operands: allocation_operands,
         },
-        Instruction::New { dst: Reg(3), type_id: TypeId::TEXT.0, field_count: 3 },
-        Instruction::SetF { obj: Reg(3), field_idx: 0, value: Reg(2) },
         Instruction::LoadI { dst: Reg(4), value: 9 },
-        Instruction::SetF { obj: Reg(3), field_idx: 1, value: Reg(4) },
         Instruction::LoadI { dst: Reg(5), value: 16 },
-        Instruction::SetF { obj: Reg(3), field_idx: 2, value: Reg(5) },
+        Instruction::TextExtended {
+            sub_op: TextSubOpcode::AdoptOwned as u8, operands: adoption_operands,
+        },
         Instruction::CloneTyped { dst: copied, src: Reg(3), type_ref: copy_type },
     ]);
     if mutate {
@@ -1051,4 +1054,62 @@ fn transparent_field_projection_refuses_unresolved_and_foreign_payload_arguments
             "{error}"
         );
     }
+}
+
+#[test]
+fn native_text_local_replacement_preserves_the_independent_copy() {
+    run_native(r#"
+        fn main() -> Int {
+            let mut value = f"old={7}";
+            let saved = value;
+            let mut index = 0;
+            while index < 8 {
+                value = f"value={index}";
+                index = index + 1;
+            }
+            if saved == "old=7" && value == "value=7" { 73 } else { 1 }
+        }
+    "#);
+}
+
+#[test]
+fn native_text_field_replacement_preserves_the_independent_record() {
+    run_native(r#"
+        type Packet is { text: Text, number: Int };
+        fn main() -> Int {
+            let mut packet = Packet { text: f"old={7}", number: 31 };
+            let saved = packet;
+            packet.text = f"new={8}";
+            if saved.text == "old=7" && packet.text == "new=8"
+                && saved.number == 31 && packet.number == 31 { 73 } else { 1 }
+        }
+    "#);
+}
+
+#[test]
+fn native_text_tuple_replacement_preserves_the_other_owners() {
+    run_native(r#"
+        fn main() -> Int {
+            let mut pair = (f"left={7}", f"right={8}");
+            let saved = pair;
+            let equal_before = pair == saved;
+            pair.0 = f"changed={9}";
+            if equal_before && pair != saved
+                && saved.0 == "left=7" && saved.1 == "right=8"
+                && pair.0 == "changed=9" && pair.1 == "right=8" { 73 } else { 1 }
+        }
+    "#);
+}
+
+#[test]
+fn native_text_append_assignment_preserves_the_independent_copy() {
+    run_native(r#"
+        fn main() -> Int {
+            let mut value = f"left={1}";
+            let saved = value;
+            value += f"|middle={2}";
+            value += "|right";
+            if saved == "left=1" && value == "left=1|middle=2|right" { 73 } else { 1 }
+        }
+    "#);
 }

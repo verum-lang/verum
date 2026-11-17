@@ -63,7 +63,17 @@ impl VbcCodegen {
 
     /// Expand only the selected nominal alias declaration, preserving caller
     /// binders and complete arguments without reparsing a displayed type name.
-    pub(in crate::codegen) fn expand_declared_alias(&self, mut witness: TypeRef) -> Maybe<TypeRef> {
+    pub(in crate::codegen) fn expand_declared_alias(&self, witness: TypeRef) -> Maybe<TypeRef> {
+        self.expand_declared_alias_while(witness, |_| true)
+    }
+
+    /// Consumers with nominal obligations may stop before erasing an alias.
+    /// The selected declaration and substitution still use this one walker.
+    pub(in crate::codegen) fn expand_declared_alias_while(
+        &self,
+        mut witness: TypeRef,
+        mut transparent: impl FnMut(&crate::types::TypeDescriptor) -> bool,
+    ) -> Maybe<TypeRef> {
         let mut seen = Set::new();
         let mut references = smallvec::SmallVec::<[(crate::types::CbgrTier, crate::types::Mutability); 2]>::new();
         loop {
@@ -82,7 +92,8 @@ impl VbcCodegen {
             else {
                 break;
             };
-            if !seen.insert(base) || args.len() != descriptor.type_params.len() {
+            if !transparent(descriptor)
+                || !seen.insert(base) || args.len() != descriptor.type_params.len() {
                 return None;
             }
             witness = crate::mono::TypeSubstitution::new(&descriptor.type_params, args)

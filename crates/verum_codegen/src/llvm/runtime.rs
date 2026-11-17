@@ -73,8 +73,8 @@ pub const LIST_PTR_OFFSET: u64 = verum_common::layout::LIST_PTR_OFFSET;
 pub const LIST_LEN_OFFSET: u64 = verum_common::layout::LIST_LEN_OFFSET;
 pub const LIST_CAP_OFFSET: u64 = verum_common::layout::LIST_CAP_OFFSET;
 
-/// Size of a `Text` value layout (`{ ptr, len, cap }`) in bytes.
-/// `cap == 0` indicates a static/immutable string literal (do not free).
+/// Source-visible size of Text's ptr/len/cap payload. Native descriptors append
+/// the producer's storage receipt; capacity does not establish allocation ownership.
 pub const TEXT_OBJECT_SIZE: u64 = verum_common::layout::TEXT_SIZE;
 
 /// Byte offsets from Text object start to each field. Text is a value
@@ -1430,6 +1430,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
         // Calculate total size: header + fields(8 each)
         let total_size = Self::OBJECT_HEADER_SIZE + (field_count as u64 * VALUE_SIZE);
+        super::object_storage::check_extent(total_size)?;
         let size = i64_type.const_int(total_size, false);
 
         // Allocate object
@@ -1445,6 +1446,8 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 "clear_object",
             )
             .or_llvm_err()?;
+
+        super::object_storage::stamp_os(self.context, builder, obj_ptr, size)?;
 
         Ok(obj_ptr)
     }
@@ -1591,6 +1594,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
         // Calculate total size: header + tag(4) + padding(4) + fields(8 each)
         let total_size = Self::OBJECT_HEADER_SIZE + 8 + (field_count as u64 * VALUE_SIZE);
+        super::object_storage::check_extent(total_size)?;
         let size = i64_type.const_int(total_size, false);
 
         // Allocate variant
@@ -1622,20 +1626,9 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let tag_val = i32_type.const_int(tag as u64, false);
         builder.build_store(tag_ptr, tag_val).or_llvm_err()?;
 
-        // Make the variant SELF-DESCRIBING for structural equality
-        // (`verum_generic_eq`): record the data-region byte count
-        // (`tag(8) + field_count*8` = total_size - OBJECT_HEADER_SIZE)
-        // in the ObjectHeader `size` field @ offset 12 (u32). Without
-        // this, two distinct `Maybe.Some(x)` heap objects compared via
-        // `==` (which lowers to CmpG → verum_generic_eq) fall through to
-        // the identity/Text-only fast paths and report "not equal". A
-        // 0-field `None` is only 32 bytes (no payload slot), so the
-        // comparator MUST bound its read to exactly this many bytes —
-        // hence storing it here. AOT previously left it zero (the
-        // surrounding `memset`), and nothing on the AOT path reads it
-        // (allocation metadata lives in the CBGR header at ptr-32), so
-        // populating it is side-effect-free beyond enabling the compare.
-        let data_size = 8 + (field_count as u64 * VALUE_SIZE);
+        // The common header stores the complete allocation extent. The tag
+        // and payload remain at their existing offsets; copy/equality consumers
+        // derive their data extent by excluding OBJECT_HEADER_SIZE.
         // SAFETY: in-bounds GEP into the ObjectHeader; offset 12 is the
         // `size: u32` field, within the always-present 24-byte header.
         let size_ptr = unsafe {
@@ -1649,14 +1642,16 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 .or_llvm_err()?
         };
         builder
-            .build_store(size_ptr, i32_type.const_int(data_size, false))
+            .build_store(size_ptr, i32_type.const_int(total_size, false))
             .or_llvm_err()?;
+
+        super::object_storage::stamp_os(self.context, builder, variant_ptr, size)?;
 
         Ok(variant_ptr)
     }
 
     /// Stamp a freshly-built variant's ObjectHeader with its type id
-    /// (u32 @0) and data size (u32 @12) — the AOT-XMODULE-VALUESEM-1
+    /// (u32 @0) and complete extent (u32 @12) — the AOT-XMODULE-VALUESEM-1
     /// discipline. A zeroed header makes `verum_generic_eq`'s
     /// `first==0` early-out equate DISTINCT variants (and lets a
     /// zero-header `None` masquerade as an empty Text in the is-text
@@ -2045,6 +2040,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
         // Calculate total size: header + values
         let total_size = Self::OBJECT_HEADER_SIZE + (values.len() as u64 * VALUE_SIZE);
+        super::object_storage::check_extent(total_size)?;
         let size = i64_type.const_int(total_size, false);
 
         // Allocate tuple
@@ -2083,20 +2079,9 @@ impl<'ctx> RuntimeLowering<'ctx> {
             .build_store(tuple_ptr, i32_type.const_int(type_id as u64, false))
             .or_llvm_err()?;
 
-        // PACK-SELF-DESCRIBING-1: record the data-region byte count
-        // (`values.len() * VALUE_SIZE`) in the ObjectHeader `size` field @
-        // offset 12 (u32), mirroring lower_make_variant. `verum_generic_eq`'s
-        // structural path GATES on `size != 0` (and size_a == size_b, matching
-        // TypeId) before element-wise comparing the value slots at
-        // OBJECT_HEADER_SIZE + i*8. A Pack left size@12 == 0 (the header
-        // zeroing above), so every tuple `==` fell straight through to
-        // ret_neq: `(1,2) == (1,2)` was FALSE under AOT (the julian
-        // round-trip's `assert_eq` on a 6-tuple, and every tuple compare).
-        // The slot layout already matches a variant's data region (values
-        // start at offset 24, no tag word), so populating size@12 is all the
-        // comparator needs — recursive verum_generic_eq then handles nested
-        // tuples / Text elements per slot.
-        let data_size = (values.len() as u64) * VALUE_SIZE;
+        // New, CloneTyped and Pack share one complete header extent. This is
+        // distinct from the allocator receipt: external borrowed record views
+        // still validate their declared shape without claiming allocation ownership.
         // SAFETY: in-bounds GEP into the always-present 24-byte header; offset
         // 12 is the `size: u32` field.
         let size_ptr = unsafe {
@@ -2110,8 +2095,10 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 .or_llvm_err()?
         };
         builder
-            .build_store(size_ptr, i32_type.const_int(data_size, false))
+            .build_store(size_ptr, i32_type.const_int(total_size, false))
             .or_llvm_err()?;
+
+        super::object_storage::stamp_os(self.context, builder, tuple_ptr, size)?;
 
         // Store each value
         for (i, value) in values.iter().enumerate() {
@@ -4326,130 +4313,9 @@ impl<'ctx> RuntimeLowering<'ctx> {
     // **Removed `emit_verum_text_from_cstr`** — dead duplicate of canonical `define_text_ir_helpers` emitter; see comment above (#91 perf cleanup).
     // **Removed `emit_verum_text_concat`** — dead duplicate of canonical `define_text_ir_helpers` emitter; see comment above (#91 perf cleanup).
 
-    /// verum_text_free(text_obj: i64) -> void
-    /// Frees an owned Text object: null-check, free backing buffer, free header.
-    /// Outlined as a function to avoid creating 4 basic blocks per free site.
+    /// Release native Text storage using the receipt issued by its producer.
     fn emit_verum_text_free(&self, module: &Module<'ctx>) -> Result<()> {
-        if let Some(f) = module.get_function("verum_text_free") {
-            if f.count_basic_blocks() > 0 {
-                return Ok(());
-            }
-        }
-
-        let ctx = self.context;
-        let ptr_type = ctx.ptr_type(AddressSpace::default());
-        let i64_type = ctx.i64_type();
-        let void_type = ctx.void_type();
-
-        let fn_type = void_type.fn_type(&[i64_type.into()], false);
-        let func = super::error::get_or_declare_function(module, "verum_text_free", fn_type);
-
-        // Must not be inlined — inlining re-introduces the block explosion problem.
-        let noinline_id = verum_llvm::attributes::Attribute::get_named_enum_kind_id("noinline");
-        if noinline_id != 0 {
-            func.add_attribute(
-                verum_llvm::attributes::AttributeLoc::Function,
-                ctx.create_enum_attribute(noinline_id, 0),
-            );
-        }
-
-        let entry = ctx.append_basic_block(func, "entry");
-        let do_free = ctx.append_basic_block(func, "do_free");
-        let free_buf = ctx.append_basic_block(func, "free_buf");
-        let free_hdr = ctx.append_basic_block(func, "free_hdr");
-        let done = ctx.append_basic_block(func, "done");
-
-        let builder = ctx.create_builder();
-        let text_i64 = func
-            .get_nth_param(0)
-            .or_internal("missing param 0")?
-            .into_int_value();
-        let zero = i64_type.const_zero();
-
-        // Declare free() if not present
-        let ft = void_type.fn_type(&[ptr_type.into()], false);
-        let free_fn = super::error::get_or_declare_function(module, "verum_internal_free", ft);
-
-        // entry: pointer-plausibility check (same contract as the
-        // runtime-type-switch guard). A Text object is ALWAYS a heap
-        // pointer; a small/unaligned value here is a register whose
-        // owned-text mark outlived a scalar reuse (task #22 leg 3:
-        // Ret-site frees called verum_text_free(1) — a Bool true —
-        // and the header load faulted at 0x1). Skipping the free for
-        // implausible values is exact: they can never be Text allocs.
-        builder.position_at_end(entry);
-        // Use the ONE canonical heap-floor authority (#48) — target-aware:
-        // 0x1_0000_0000 on darwin, 0x1_0000 elsewhere — the SAME floor every
-        // pointer-plausibility gate uses. The old hardcoded 0x1_0000 was far
-        // below darwin's real malloc range, so a stale owned-text mark on a
-        // register later reused for a scalar (e.g. a Duration nanos / Bool /
-        // format temp with value 0x42000000) passed the check and the header
-        // load faulted (SIGSEGV in verum_text_free — task #26,
-        // `parse().unwrap()+parse().unwrap()` under format pressure). Real Text
-        // objects are always heap-allocated ABOVE this floor, so raising it is
-        // safe (never skips a genuine free) and coherent with the dispatch guards.
-        let floor = i64_type.const_int(super::target_triple::heap_floor(module), false);
-        let below_floor = builder
-            .build_int_compare(verum_llvm::IntPredicate::ULT, text_i64, floor, "below_floor")
-            .or_llvm_err()?;
-        let align_bits = builder
-            .build_and(text_i64, i64_type.const_int(7, false), "align_bits")
-            .or_llvm_err()?;
-        let misaligned = builder
-            .build_int_compare(
-                verum_llvm::IntPredicate::NE,
-                align_bits,
-                zero,
-                "misaligned",
-            )
-            .or_llvm_err()?;
-        let implausible = builder
-            .build_or(below_floor, misaligned, "implausible")
-            .or_llvm_err()?;
-        builder
-            .build_conditional_branch(implausible, done, do_free)
-            .or_llvm_err()?;
-
-        // do_free: load backing buffer ptr from header[0]
-        builder.position_at_end(do_free);
-        let hdr_ptr = builder
-            .build_int_to_ptr(text_i64, ptr_type, "hdr_ptr")
-            .or_llvm_err()?;
-        let buf_i64 = builder
-            .build_load(i64_type, hdr_ptr, "buf_i64")
-            .or_llvm_err()?
-            .into_int_value();
-        let buf_nonnull = builder
-            .build_int_compare(verum_llvm::IntPredicate::NE, buf_i64, zero, "buf_nonnull")
-            .or_llvm_err()?;
-        builder
-            .build_conditional_branch(buf_nonnull, free_buf, free_hdr)
-            .or_llvm_err()?;
-
-        // free_buf: free backing buffer then fall through to free header
-        builder.position_at_end(free_buf);
-        let buf_ptr = builder
-            .build_int_to_ptr(buf_i64, ptr_type, "buf_ptr")
-            .or_llvm_err()?;
-        builder
-            .build_call(free_fn, &[buf_ptr.into()], "")
-            .or_llvm_err()?;
-        builder.build_unconditional_branch(free_hdr).or_llvm_err()?;
-
-        // free_hdr: free the 24-byte header
-        builder.position_at_end(free_hdr);
-        let hdr_ptr2 = builder
-            .build_int_to_ptr(text_i64, ptr_type, "hdr_ptr2")
-            .or_llvm_err()?;
-        builder
-            .build_call(free_fn, &[hdr_ptr2.into()], "")
-            .or_llvm_err()?;
-        builder.build_unconditional_branch(done).or_llvm_err()?;
-
-        // done: return void
-        builder.position_at_end(done);
-        builder.build_return(None).or_llvm_err()?;
-        Ok(())
+        super::text_storage::define_release_functions(self.context, module)
     }
 
     /// verum_generic_len(obj: i64) -> i64
@@ -4929,19 +4795,30 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // type_id @ 0 (u32)
         let a_tid = builder.build_load(i32_type, a_obj, "a_tid").or_llvm_err()?.into_int_value();
         let b_tid = builder.build_load(i32_type, b_obj, "b_tid").or_llvm_err()?.into_int_value();
-        // Guards: size!=0 && size<=4096 && size_a==size_b && tid_a==tid_b.
-        let sz_nz = builder.build_int_compare(verum_llvm::IntPredicate::NE, a_size, i64_type.const_zero(), "sz_nz").or_llvm_err()?;
+        // The header carries the complete extent. Refuse a truncated or
+        // non-slot-shaped payload before the structural loop reads any field.
+        let header_size = i64_type.const_int(Self::OBJECT_HEADER_SIZE, false);
+        let slot_size = i64_type.const_int(VALUE_SIZE, false);
+        let sz_min = builder.build_int_compare(verum_llvm::IntPredicate::UGE, a_size, header_size, "sz_min").or_llvm_err()?;
+        let remainder = builder.build_int_unsigned_rem(a_size, slot_size, "extent_remainder").or_llvm_err()?;
+        let header_remainder = i64_type.const_int(Self::OBJECT_HEADER_SIZE % VALUE_SIZE, false);
+        let sz_aligned = builder.build_int_compare(verum_llvm::IntPredicate::EQ, remainder, header_remainder, "sz_aligned").or_llvm_err()?;
+        let sz_valid = builder.build_and(sz_min, sz_aligned, "sz_valid").or_llvm_err()?;
         let sz_bnd = builder.build_int_compare(verum_llvm::IntPredicate::ULE, a_size, i64_type.const_int(4096, false), "sz_bnd").or_llvm_err()?;
         let sz_eq = builder.build_int_compare(verum_llvm::IntPredicate::EQ, a_size, b_size, "sz_eq").or_llvm_err()?;
         let tid_eq = builder.build_int_compare(verum_llvm::IntPredicate::EQ, a_tid, b_tid, "tid_eq").or_llvm_err()?;
-        let g1 = builder.build_and(sz_nz, sz_bnd, "g1").or_llvm_err()?;
+        let g1 = builder.build_and(sz_valid, sz_bnd, "g1").or_llvm_err()?;
         let g2 = builder.build_and(sz_eq, tid_eq, "g2").or_llvm_err()?;
         let shape_ok = builder.build_and(g1, g2, "shape_ok").or_llvm_err()?;
+        let shape_ready = ctx.append_basic_block(func, "variant_shape_ready");
+        builder.build_conditional_branch(shape_ok, shape_ready, ret_neq).or_llvm_err()?;
+        builder.position_at_end(shape_ready);
+        let payload_size = builder.build_int_sub(a_size, header_size, "payload_size").or_llvm_err()?;
+        let n_slots = builder.build_int_unsigned_div(payload_size, slot_size, "n_slots").or_llvm_err()?;
         // Loop counter on the stack (mem2reg lifts it).
         let i_slot = builder.build_alloca(i64_type, "i_slot").or_llvm_err()?;
         builder.build_store(i_slot, i64_type.const_zero()).or_llvm_err()?;
-        let n_slots = builder.build_right_shift(a_size, i64_type.const_int(3, false), false, "n_slots").or_llvm_err()?;
-        builder.build_conditional_branch(shape_ok, loop_header, ret_neq).or_llvm_err()?;
+        builder.build_unconditional_branch(loop_header).or_llvm_err()?;
 
         // loop_header: i >= n_slots ? all-equal : compare next slot.
         builder.position_at_end(loop_header);
@@ -5265,7 +5142,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let len_plus1 = builder
             .build_int_add(len, i64_type.const_int(1, false), "len1")
             .or_llvm_err()?;
-        let new_buf = self.emit_checked_malloc(&builder, module, len_plus1, "newbuf")?;
+        let new_buf = super::text_storage::allocate_bytes(ctx, &builder, module, len_plus1, "newbuf")?;
 
         // memcpy(new_buf, buf, len) — copy the digits we wrote.
         let memcpy_fn = self.get_or_declare_memcpy(module);
@@ -5350,7 +5227,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let len_plus1 = builder
             .build_int_add(len, i64_type.const_int(1, false), "len1")
             .or_llvm_err()?;
-        let new_buf = self.emit_checked_malloc(&builder, module, len_plus1, "newbuf")?;
+        let new_buf = super::text_storage::allocate_bytes(ctx, &builder, module, len_plus1, "newbuf")?;
 
         // memcpy(new_buf, buf, len) — copy the digits we wrote.
         let memcpy_fn = self.get_or_declare_memcpy(module);
@@ -5401,7 +5278,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let len_plus1 = builder
             .build_int_add(len, i64_type.const_int(1, false), "len1")
             .or_llvm_err()?;
-        let new_buf = self.emit_checked_malloc(builder, module, len_plus1, "newbuf")?;
+        let new_buf = super::text_storage::allocate_bytes(ctx, builder, module, len_plus1, "newbuf")?;
         let memcpy_fn = self.get_or_declare_memcpy(module);
         builder
             .build_call(memcpy_fn, &[new_buf.into(), buf.into(), len.into()], "")
@@ -5649,7 +5526,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let len_plus1 = builder
             .build_int_add(len, i64_type.const_int(1, false), "len1")
             .or_llvm_err()?;
-        let new_buf = self.emit_checked_malloc(&builder, module, len_plus1, "newbuf")?;
+        let new_buf = super::text_storage::allocate_bytes(ctx, &builder, module, len_plus1, "newbuf")?;
 
         // memcpy(new_buf, buf, len) — only the digit bytes; NUL
         // gets stamped explicitly below (helper does NOT NUL-stamp).
@@ -6892,6 +6769,8 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // Also need verum_text_from_cstr and verum_text_get_ptr (already in module from text IR)
         let ft = i64_type.fn_type(&[ptr_type.into()], false);
         let text_from_cstr_fn = super::error::get_or_declare_function(module, "verum_text_from_cstr", ft);
+        let text_alloc_fn = super::error::get_or_declare_function(module, "verum_text_alloc",
+            i64_type.fn_type(&[ptr_type.into(), i64_type.into(), i64_type.into()], false));
         let ft = ptr_type.fn_type(&[i64_type.into()], false);
         let text_get_ptr_fn = super::error::get_or_declare_function(module, "verum_text_get_ptr", ft);
 
@@ -7671,7 +7550,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 let buf_size = builder
                     .build_int_add(size, i64_type.const_int(1, false), "buf_size")
                     .or_llvm_err()?;
-                let buf = self.emit_checked_malloc(&builder, module, buf_size, "buf")?;
+                let buf = super::text_storage::allocate_bytes(self.context, &builder, module, buf_size, "buf")?;
                 let buf_ok_bb = builder
                     .get_insert_block()
                     .or_internal("no block after buf malloc")?;
@@ -7753,7 +7632,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                     .build_call(file_close_fn, &[fd.into()], "")
                     .or_llvm_err()?;
                 let result = builder
-                    .build_call(text_from_cstr_fn, &[buf.into()], "result")
+                    .build_call(text_alloc_fn, &[buf.into(), final_len.into(), size.into()], "result")
                     .or_llvm_err()?
             .basic_value_or("call returned void")?
                     .into_int_value();
@@ -7823,7 +7702,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 let buf_size = builder
                     .build_int_add(max_len, i64_type.const_int(1, false), "buf_size")
                     .or_llvm_err()?;
-                let buf = self.emit_checked_malloc(&builder, module, buf_size, "buf")?;
+                let buf = super::text_storage::allocate_bytes(self.context, &builder, module, buf_size, "buf")?;
                 builder.build_unconditional_branch(read_bb).or_llvm_err()?;
 
                 builder.position_at_end(read_bb);
@@ -7853,18 +7732,9 @@ impl<'ctx> RuntimeLowering<'ctx> {
                     .or_llvm_err()?;
 
                 builder.position_at_end(free_empty_bb);
-                // Free the read buffer before returning empty (prevent memory leak)
-                let free_fn = module
-                    .get_function("verum_internal_free")
-                    .unwrap_or_else(|| {
-                        let void_type = self.context.void_type();
-                        let ptr_type = self.context.ptr_type(verum_llvm::AddressSpace::default());
-                        module.add_function(
-                            "verum_internal_free",
-                            void_type.fn_type(&[ptr_type.into()], false),
-                            None,
-                        )
-                    });
+                // The failed read still owns the buffer allocated above.
+                let free_fn = super::error::get_or_declare_function(module, "verum_cbgr_deallocate",
+                    self.context.void_type().fn_type(&[ptr_type.into()], false));
                 builder
                     .build_call(free_fn, &[buf.into()], "")
                     .or_llvm_err()?;
@@ -7881,7 +7751,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                     .build_store(term_ptr, self.context.i8_type().const_zero())
                     .or_llvm_err()?;
                 let result = builder
-                    .build_call(text_from_cstr_fn, &[buf.into()], "result")
+                    .build_call(text_alloc_fn, &[buf.into(), n.into(), max_len.into()], "result")
                     .or_llvm_err()?
             .basic_value_or("call returned void")?
                     .into_int_value();
@@ -11911,54 +11781,61 @@ pub fn define_text_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
         builder.build_return(Some(&len)).or_llvm_err()?;
     }
 
-    // --- verum_text_alloc(ptr: ptr, len: i64, cap: i64) -> i64 ---
-    // Allocates a 24-byte Text object {ptr, len, cap}
-    if module.get_function("verum_text_alloc").is_none() {
-        let fn_type = i64_type.fn_type(&[ptr_type.into(), i64_type.into(), i64_type.into()], false);
-        let func = super::error::get_or_declare_function(module, "verum_text_alloc", fn_type);
+    // Mutable descriptors preserve the byte allocator independently of capacity.
+    for (name, receipt, owned) in [
+        ("verum_text_alloc", super::text_storage::Receipt::ArenaCbgr, true),
+        ("verum_text_borrow", super::text_storage::Receipt::ArenaBorrowed, false),
+    ] {
+        let params = [ptr_type.into(), i64_type.into(), i64_type.into()];
+        let fn_type = i64_type.fn_type(&params[..if owned { 3 } else { 2 }], false);
+        let func = super::error::get_or_declare_function(module, name, fn_type);
+        if func.count_basic_blocks() > 0 {
+            continue;
+        }
         func.set_linkage(verum_llvm::module::Linkage::Internal);
         let entry = context.append_basic_block(func, "entry");
         let builder = context.create_builder();
         builder.position_at_end(entry);
-        let data_ptr = func
-            .get_nth_param(0)
-            .or_internal("missing param 0")?
-            .into_pointer_value();
-        let len = func
-            .get_nth_param(1)
-            .or_internal("missing param 1")?
-            .into_int_value();
-        let cap = func
-            .get_nth_param(2)
-            .or_internal("missing param 2")?
-            .into_int_value();
-        let size = i64_type.const_int(TEXT_OBJECT_SIZE, false);
+        let data_ptr = func.get_nth_param(0).or_internal("missing Text data")?.into_pointer_value();
+        let len = func.get_nth_param(1).or_internal("missing Text length")?.into_int_value();
+        let cap = if owned {
+            func.get_nth_param(2).or_internal("missing Text capacity")?.into_int_value()
+        } else {
+            i64_type.const_zero()
+        };
+        super::text_storage::validate_shape(context, &builder, module, data_ptr, len,
+            if owned { Some(cap) } else { None })?;
+        let size = i64_type.const_int(super::text_storage::DESCRIPTOR_SIZE, false);
         let obj = checked_malloc(context, &builder, module, size, "text_obj")?;
-        // Store ptr at offset 0
-        let ptr_as_i64 = builder
-            .build_ptr_to_int(data_ptr, i64_type, "ptr_i64")
-            .or_llvm_err()?;
+        if owned {
+            let initialize = context.append_basic_block(func, "text_terminate_owned_bytes");
+            let ready = context.append_basic_block(func, "text_owned_bytes_ready");
+            let empty = builder.build_is_null(data_ptr, "text_null_storage").or_llvm_err()?;
+            builder.build_conditional_branch(empty, ready, initialize).or_llvm_err()?;
+            builder.position_at_end(initialize);
+            // SAFETY: the owned producer supplies capacity+1 writable bytes;
+            // validate_shape established 0 <= len <= capacity before allocation.
+            let terminator = unsafe {
+                builder.build_in_bounds_gep(i8_type, data_ptr, &[len], "text_terminator").or_llvm_err()?
+            };
+            builder.build_store(terminator, i8_type.const_zero()).or_llvm_err()?;
+            builder.build_unconditional_branch(ready).or_llvm_err()?;
+            builder.position_at_end(ready);
+        }
+        let ptr_as_i64 = builder.build_ptr_to_int(data_ptr, i64_type, "ptr_i64").or_llvm_err()?;
         builder.build_store(obj, ptr_as_i64).or_llvm_err()?;
-        // Store len at offset 8
-        // SAFETY: GEP at offset 1 within a struct of known layout; the offset is within the allocation
+        // SAFETY: both source fields lie within the newly allocated descriptor.
         let len_ptr = unsafe {
-            builder
-                .build_gep(i64_type, obj, &[i64_type.const_int(1, false)], "len_ptr")
-                .or_llvm_err()?
+            builder.build_gep(i64_type, obj, &[i64_type.const_int(1, false)], "len_ptr").or_llvm_err()?
         };
         builder.build_store(len_ptr, len).or_llvm_err()?;
-        // Store cap at offset 16
-        // SAFETY: GEP at offset 2 within a struct of known layout; the offset is within the allocation
+        // SAFETY: the capacity word is part of the descriptor's source payload.
         let cap_ptr = unsafe {
-            builder
-                .build_gep(i64_type, obj, &[i64_type.const_int(2, false)], "cap_ptr")
-                .or_llvm_err()?
+            builder.build_gep(i64_type, obj, &[i64_type.const_int(2, false)], "cap_ptr").or_llvm_err()?
         };
         builder.build_store(cap_ptr, cap).or_llvm_err()?;
-        // Return as i64
-        let result = builder
-            .build_ptr_to_int(obj, i64_type, "result")
-            .or_llvm_err()?;
+        super::text_storage::stamp(context, &builder, obj, receipt)?;
+        let result = builder.build_ptr_to_int(obj, i64_type, "result").or_llvm_err()?;
         builder.build_return(Some(&result)).or_llvm_err()?;
     }
 
@@ -12000,12 +11877,13 @@ pub fn define_text_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
             .get_nth_param(2)
             .or_internal("missing param 2")?
             .into_int_value();
+        super::text_storage::validate_shape(context, &builder, module, data, len, None)?;
         // Fresh packed backing: len + 1 (NUL terminator).
         let alloc_size = builder
             .build_int_add(len, i64_type.const_int(1, false), "buf_size")
             .or_llvm_err()?;
-        let buf = checked_malloc(context, &builder, module, alloc_size, "stride_buf")?;
-        // checked_malloc SPLITS `entry` (inserting an OOM-check) and leaves the
+        let buf = super::text_storage::allocate_bytes(context, &builder, module, alloc_size, "stride_buf")?;
+        // allocate_bytes SPLITS `entry` (validating its extent and allocation) and leaves the
         // builder in its success block — that block, not `entry`, is the real
         // predecessor edge into loop_head. A PHI incoming from `entry` (which no
         // longer branches here) is malformed IR that SIGSEGVs LLVM's loop
@@ -12226,8 +12104,11 @@ pub fn define_text_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
             .or_llvm_err()?
             .basic_value_or("call returned void")?
             .into_int_value();
+        // Foreign C bytes retain their caller's lifetime. Copy before returning.
+        let copy = super::error::get_or_declare_function(module, "verum_text_from_static",
+            i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false));
         let result = builder
-            .build_call(text_alloc_fn, &[s.into(), len.into(), len.into()], "text")
+            .build_call(copy, &[s.into(), len.into()], "text")
             .or_llvm_err()?
             .basic_value_or("call returned void")?;
         builder.build_return(Some(&result)).or_llvm_err()?;
@@ -12235,7 +12116,7 @@ pub fn define_text_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
 
     // --- verum_text_from_static(ptr: ptr, len: i64) -> i64 ---
     // Create Text from static string data (copies to new buffer)
-    if module.get_function("verum_text_from_static").is_none() {
+    if module.get_function("verum_text_from_static").is_none_or(|function| function.count_basic_blocks() == 0) {
         let fn_type = i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
         let func = super::error::get_or_declare_function(module, "verum_text_from_static", fn_type);
         func.set_linkage(verum_llvm::module::Linkage::Internal);
@@ -12251,7 +12132,8 @@ pub fn define_text_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
             .get_nth_param(1)
             .or_internal("missing param 1")?
             .into_int_value();
-        // malloc(len + 1), memcpy, null-terminate
+        super::text_storage::validate_shape(context, &builder, module, src_ptr, len, None)?;
+        // Allocate CBGR bytes, copy, and terminate.
         let memcpy_fn = module
             .get_function("llvm.memcpy.p0.p0.i64")
             .unwrap_or_else(|| {
@@ -12269,7 +12151,7 @@ pub fn define_text_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
         let alloc_size = builder
             .build_int_add(len, i64_type.const_int(1, false), "alloc_size")
             .or_llvm_err()?;
-        let buf = checked_malloc(context, &builder, module, alloc_size, "buf")?;
+        let buf = super::text_storage::allocate_bytes(context, &builder, module, alloc_size, "buf")?;
         builder
             .build_call(
                 memcpy_fn,
@@ -12355,6 +12237,10 @@ pub fn define_text_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
             .basic_value_or("call returned void")?
             .into_int_value();
 
+        // Bound each input before addition, so total + 1 cannot wrap into a
+        // small accepted allocation when the dimensions are invalid.
+        super::text_storage::validate_shape(context, &builder, module, a_ptr, a_len, None)?;
+        super::text_storage::validate_shape(context, &builder, module, b_ptr, b_len, None)?;
         let total = builder.build_int_add(a_len, b_len, "total").or_llvm_err()?;
         let alloc_size = builder
             .build_int_add(total, i64_type.const_int(1, false), "alloc_size")
@@ -12374,7 +12260,7 @@ pub fn define_text_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
                 module.add_function("llvm.memcpy.p0.p0.i64", fn_ty, None)
             });
         let is_volatile_false = context.bool_type().const_int(0, false);
-        let buf = checked_malloc(context, &builder, module, alloc_size, "buf")?;
+        let buf = super::text_storage::allocate_bytes(context, &builder, module, alloc_size, "buf")?;
         // memcpy(buf, a_ptr, a_len)
         builder
             .build_call(
@@ -12543,7 +12429,7 @@ pub fn define_text_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
             .or_internal("missing param 0")?
             .into_int_value();
         // Simple: allocate 5 bytes, encode UTF-8, create Text
-        let buf = checked_malloc(
+        let buf = super::text_storage::allocate_bytes(
             context,
             &builder,
             module,
@@ -12574,7 +12460,7 @@ pub fn define_text_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
                 &[
                     buf.into(),
                     i64_type.const_int(1, false).into(),
-                    i64_type.const_int(1, false).into(),
+                    i64_type.const_int(4, false).into(),
                 ],
                 "text",
             )

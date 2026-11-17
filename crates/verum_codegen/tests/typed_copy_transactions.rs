@@ -629,7 +629,9 @@ fn native_text_copy_owns_its_record_and_initialized_byte_prefix() {
                 let source = object(owner(wire, "TextOwner"), &[text.as_ptr() as u64]);
                 let mut output = 0;
                 // Exactly two graph nodes, independent of byte count/capacity.
-                assert_eq!(copy(source.as_ptr() as u64, &mut output, 2, 8 + 24 + 9 + 1), 0);
+                // The physical descriptor includes one storage-receipt word.
+                let descriptor_bytes = verum_common::layout::TEXT_SIZE + verum_common::layout::POINTER_SIZE;
+                assert_eq!(copy(source.as_ptr() as u64, &mut output, 2, 8 + descriptor_bytes + 9 + 1), 0);
                 let outer = output as *mut u64;
                 let result = *outer.add(3) as *mut u64;
                 let data = *result as *mut u8;
@@ -644,7 +646,7 @@ fn native_text_copy_owns_its_record_and_initialized_byte_prefix() {
                 assert_eq!(*data.add(bytes.len()), 0);
                 assert_eq!(text[1], 3);
                 deallocate(data);
-                release(result.cast(), 24);
+                release(result.cast(), descriptor_bytes);
                 release(outer.cast(), 32);
             }
         }

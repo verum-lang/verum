@@ -492,9 +492,15 @@ impl super::VbcCodegen {
         }
         let copy = self.binds_a_copy_of_a_place(argument, source, actual)?;
         if copy {
+            let type_ref = actual.cloned().ok_or_else(|| super::CodegenError::with_span(
+                super::CodegenErrorKind::Internal(format!(
+                    "call argument `{}` requires its retained source type for value copying",
+                    Self::named_place_binding(argument).unwrap_or("<projection>"),
+                )), argument.span,
+            ))?;
             let received = self.ctx.registers.alloc_fresh();
             self.ctx.emit(Instruction::CloneTyped { dst: received, src: source,
-                type_ref: actual.cloned().or_internal("call argument copy requires its source declaration")? });
+                type_ref });
             return Ok(received);
         }
         Ok(source)
@@ -539,9 +545,19 @@ impl super::VbcCodegen {
     /// Instantiated destructor bodies receive the lexical type arguments used
     /// at construction. Semantic IDs retain their native runtime cleanup.
     /// An erased heap header only identifies the declaration.
+    fn local_drop_declaration(&self, declared: &TypeRef) -> TypeRef {
+        self.expand_declared_alias_while(declared.clone(), |alias| {
+            alias.drop_fn.is_none()
+                && alias.resource_discipline == ResourceDiscipline::Unrestricted
+        }).unwrap_or_else(|| declared.clone())
+    }
+
     pub(super) fn emit_local_drop(&mut self, src: Reg, declared: Option<&TypeRef>) {
-        if let Some(ty) = declared
+        let declared = declared.map(|ty| self.local_drop_declaration(ty));
+        if let Some(ty) = declared.as_ref()
             && (matches!(ty, TypeRef::Reference { .. } | TypeRef::Tuple(_) | TypeRef::Generic(_))
+                || matches!(ty, TypeRef::Concrete(base)
+                    if crate::drop_plan::builtin_drop_plan(*base).is_some())
                 || matches!(ty, TypeRef::Concrete(base) | TypeRef::Instantiated { base, .. }
                     if !base.is_builtin() && !base.is_semantic_type()
                     && self.type_by_id(*base).is_some()))
@@ -554,6 +570,92 @@ impl super::VbcCodegen {
         } else {
             self.ctx.emit(Instruction::DropRef { src });
         }
+    }
+
+    /// A read-only operation borrows places. A separately evaluated temporary
+    /// retains cleanup from its captured source declaration after the read.
+    /// Register recycling alone neither transfers nor retires that ownership.
+    pub(super) fn retire_observed_operand(
+        &mut self, expr: &verum_ast::Expr, reg: Reg, declared: Option<&TypeRef>,
+    ) {
+        use verum_ast::{ExprKind, UnOp};
+        let named = Self::named_place_binding(expr)
+            .is_some_and(|name| self.ctx.lookup_var(name).is_some());
+        let projection = !self.is_declared_unit_constructor_value(Self::normalized_place(expr))
+            && matches!(&Self::normalized_place(expr).kind,
+            ExprKind::Field { .. } | ExprKind::TupleIndex { .. } | ExprKind::Index { .. }
+                | ExprKind::Unary { op: UnOp::Deref, .. });
+        if !named && !projection && let Some(declared) = declared {
+            self.emit_local_drop(reg, Some(declared));
+        }
+        self.ctx.free_temp(reg);
+    }
+
+    /// Every aggregate takes a declared value: places copy, exclusive names
+    /// transfer, and fresh values already own their storage. The concrete store
+    /// only chooses a destination; it cannot change that ownership contract.
+    pub(super) fn emit_declared_value_store(
+        &mut self,
+        expr: &verum_ast::Expr,
+        value: Reg,
+        declared: Option<&TypeRef>,
+        store: impl FnOnce(Reg) -> Instruction,
+    ) -> super::CodegenResult<()> {
+        if self.consumes_named_place(expr, value) {
+            match store(value) {
+                Instruction::Mov { dst, src } => self.ctx.emit_transferring_value(dst, src),
+                instruction => self.ctx.emit_transferring_store(instruction, value),
+            }
+            return Ok(());
+        }
+        let received = if let Some(ty) = self.generic_named_place(expr, value) {
+            self.emit_generic_value_handoff(value, ty, true)
+        } else if self.binds_a_copy_of_a_place(expr, value, declared)? {
+            let ty = declared.cloned().ok_or_else(|| super::CodegenError::with_span(
+                super::CodegenErrorKind::Internal(
+                    "aggregate value copy requires its retained source declaration".into(),
+                ), expr.span,
+            ))?;
+            let received = self.ctx.alloc_temp();
+            self.ctx.emit(Instruction::CloneTyped { dst: received, src: value, type_ref: ty });
+            received
+        } else { value };
+        self.ctx.emit(store(received));
+        if received != value { self.ctx.free_temp(received); }
+        Ok(())
+    }
+
+    /// Overwriting a live place retires its previous owner only after publishing
+    /// the prepared replacement. The declaration selects cleanup; the destination
+    /// operations supply storage, never an inferred allocator or runtime type.
+    pub(super) fn emit_declared_replacement(
+        &mut self,
+        value: Reg,
+        declared: Option<&TypeRef>,
+        read: impl FnOnce(Reg) -> Instruction,
+        write: impl FnOnce(Reg) -> Instruction,
+    ) -> super::CodegenResult<()> {
+        let declared = declared.map(|ty| self.local_drop_declaration(ty))
+            .ok_or_else(|| super::CodegenError::new(
+                super::CodegenErrorKind::InvalidSourceSignature(
+                    "replacement requires its destination declaration".into(),
+                ),
+            ))?;
+        let trivial = matches!(declared, TypeRef::Reference { .. })
+            || matches!(declared, TypeRef::Concrete(owner)
+                if matches!(crate::drop_plan::builtin_drop_plan(owner),
+                    Some(crate::drop_plan::DropPlan::Ignore)));
+        let previous = if trivial { None } else {
+            let previous = self.ctx.alloc_temp();
+            self.ctx.emit(read(previous));
+            Some(previous)
+        };
+        self.ctx.emit(write(value));
+        if let Some(previous) = previous {
+            self.emit_local_drop(previous, Some(&declared));
+            self.ctx.free_temp(previous);
+        }
+        Ok(())
     }
 
     fn named_binding_fact(&self, name: &str, reg: Reg) -> Maybe<&BindingFact> {

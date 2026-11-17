@@ -61,6 +61,7 @@ mod mount_filesystem;
 pub use source_mounts::SourceExports;
 mod expressions;
 mod array_coercions;
+mod slice_arguments;
 mod array_elements;
 mod parsed_field_types;
 mod associated_types;
@@ -19508,13 +19509,12 @@ impl VbcCodegen {
         // (`mount core.sys.bitfield; ... bitfield.test_bit(v, 7)`)
         // misses the user-side function registry.
         //
-        // Mirrors the equivalent promotion already in place at
-        // `register_constant_with_value` (inlinable-const stub) and
-        // `compile_pending_constants` (body-compiled-const) — the
-        // function-body path is the third sibling.  Impl methods
-        // (`lookup_name = "Type.method"`, already qualified) and
-        // nested-function names (with `$` separators) are left alone.
-        // Closes audit task #121's function-side gap.
+        // The registered declaration owns the linkage of an impl method too:
+        // `Type.method` is a backend lookup key, not evidence that its module
+        // is already present. Reuse that declaration's exact owner instead of
+        // reconstructing an owner from the punctuation in the lookup key.
+        // Anonymous/main and nested callable spellings retain their existing
+        // entry/lexical naming convention.
         let effective_module = self
             .ctx
             .current_source_module
@@ -19522,10 +19522,17 @@ impl VbcCodegen {
             .unwrap_or(&self.config.module_name);
         let descriptor_name = if !effective_module.is_empty()
             && effective_module != "main"
-            && !lookup_name.contains('.')
             && !lookup_name.contains('$')
         {
-            format!("{}.{}", effective_module, lookup_name)
+            self.declared_callable_name(func_info.id)
+                .map(Text::into_string)
+                .unwrap_or_else(|| {
+                    if lookup_name.contains('.') {
+                        lookup_name.clone()
+                    } else {
+                        format!("{}.{}", effective_module, lookup_name)
+                    }
+                })
         } else {
             lookup_name.clone()
         };

@@ -276,6 +276,57 @@ fn a_named_affine_argument_is_transferred_before_parameter_cleanup() {
 }
 
 #[test]
+fn a_named_affine_replacement_retires_only_the_replaced_owner() {
+    run(r#"
+        fn probe() -> Int {
+            let mut count = Count { value: 0 };
+            {
+                let mut selected = Ticket { counter: &mut count };
+                let incoming = Ticket { counter: &mut count };
+                selected = incoming;
+                if count.value != 1 { return 11; }
+            }
+            if count.value == 2 { 73 } else { 12 }
+        }
+    "#);
+}
+
+#[test]
+fn a_generic_replacement_uses_the_actual_copy_or_transfer_discipline() {
+    run(r#"
+        fn replace<T>(first: T, second: T) {
+            let mut selected = first;
+            selected = second;
+        }
+        fn probe() -> Int {
+            let mut count = Count { value: 0 };
+            {
+                let first = Ticket { counter: &mut count };
+                let second = Ticket { counter: &mut count };
+                replace(first, second);
+                if count.value != 2 { return 11; }
+            }
+            if count.value == 2 { 73 } else { 12 }
+        }
+    "#);
+}
+
+#[test]
+fn a_tuple_takes_a_named_affine_element_once() {
+    run(r#"
+        fn probe() -> Int {
+            let mut count = Count { value: 0 };
+            {
+                let ticket = Ticket { counter: &mut count };
+                let pair = (ticket, 73);
+                if pair.1 != 73 || count.value != 0 { return 11; }
+            }
+            if count.value == 1 { 73 } else { 12 }
+        }
+    "#);
+}
+
+#[test]
 fn generic_callable_bounds_keep_the_argument_contract() {
     run(r#"
         fn invoke<F: fn(Ticket)>(selected: F, value: Ticket) { selected(value); }

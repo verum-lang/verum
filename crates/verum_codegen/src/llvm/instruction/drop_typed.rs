@@ -12,6 +12,11 @@ pub(super) fn lower<'ctx>(
         .or_internal("DropTyped requires declaration metadata")?;
     let plan = verum_vbc::drop_plan::build(module, ty);
     let value = ctx.get_register(src.0)?;
+    if matches!(plan, Ok(DropPlan::Text)) {
+        // DropTyped names the consumed register. Comparing independently
+        // emitted LLVM loads cannot identify its lifetime in alloca mode.
+        ctx.unmark_owned_text_register(src.0);
+    }
     // Consume before invoking any user code, as in the interpreter.
     ctx.set_register(src.0, ctx.types().i64_type().const_zero().into());
     match plan {
@@ -72,12 +77,47 @@ fn fields<'ctx>(
     Ok(())
 }
 
+fn require_storage<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>,
+    valid: IntValue<'ctx>) -> Result<()> {
+    let accepted = ctx.llvm_context().append_basic_block(ctx.function(), "drop_storage_valid");
+    let refused = ctx.llvm_context().append_basic_block(ctx.function(), "drop_storage_refused");
+    ctx.builder().build_conditional_branch(valid, accepted, refused).or_llvm_err()?;
+    ctx.builder().position_at_end(refused);
+    emit_runtime_abort(ctx, "typed destruction requires its exact producer-issued object receipt",
+        "drop_object_receipt")?;
+    ctx.builder().build_unreachable().or_llvm_err()?;
+    ctx.builder().position_at_end(accepted);
+    Ok(())
+}
+
+fn retire_fields<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, pointer: PointerValue<'ctx>,
+    offset: u64, declared: &[DropPlan]) -> Result<()> {
+    let bytes = offset + declared.len() as u64 * verum_common::layout::VALUE_SLOT_SIZE;
+    let valid = super::super::object_storage::matches_os(
+        ctx.llvm_context(), ctx.builder(), pointer, bytes)?;
+    require_storage(ctx, valid)?;
+    super::super::object_storage::consume(ctx.llvm_context(), ctx.builder(), pointer)?;
+    fields(ctx, pointer, offset, declared)?;
+    super::super::object_storage::release_os(ctx.llvm_context(), ctx.builder(),
+        ctx.get_module(), pointer, bytes)
+}
+
 fn emit<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
     value: BasicValueEnum<'ctx>,
     plan: &DropPlan,
 ) -> Result<()> {
     if matches!(plan, DropPlan::Ignore) {
+        return Ok(());
+    }
+    if matches!(plan, DropPlan::Text) {
+        let word = as_i64(ctx, value, "drop_text_value")?;
+        let release = super::super::error::get_or_declare_function(
+            ctx.get_module(),
+            "verum_text_free",
+            ctx.types().void_type().fn_type(&[ctx.types().i64_type().into()], false),
+        );
+        ctx.builder().build_call(release, &[word.into()], "").or_llvm_err()?;
         return Ok(());
     }
     let pointer = as_ptr(ctx, value, "drop_owner")?;
@@ -110,7 +150,7 @@ fn emit<'ctx>(
         DropPlan::Glue { owner, .. }
         | DropPlan::Record { owner, .. }
         | DropPlan::Sum { owner, .. } => *owner,
-        DropPlan::Ignore | DropPlan::Callable { .. } => unreachable!(),
+        DropPlan::Ignore | DropPlan::Text | DropPlan::Callable { .. } => unreachable!(),
     };
     let actual = ctx
         .builder()
@@ -146,7 +186,7 @@ fn emit<'ctx>(
     ctx.builder().build_unreachable().or_llvm_err()?;
     ctx.builder().position_at_end(valid);
     match plan {
-        DropPlan::Ignore | DropPlan::Callable { .. } => unreachable!(),
+        DropPlan::Ignore | DropPlan::Text | DropPlan::Callable { .. } => unreachable!(),
         DropPlan::Glue {
             function,
             type_args,
@@ -182,8 +222,11 @@ fn emit<'ctx>(
         }
         DropPlan::Record {
             fields: declared, ..
-        } => fields(ctx, pointer, RuntimeLowering::OBJECT_HEADER_SIZE, declared)?,
+        } => retire_fields(ctx, pointer, RuntimeLowering::OBJECT_HEADER_SIZE, declared)?,
         DropPlan::Sum { variants, .. } => {
+            let valid = super::super::object_storage::has_os_extent(ctx.llvm_context(),
+                ctx.builder(), pointer, RuntimeLowering::OBJECT_HEADER_SIZE + 8)?;
+            require_storage(ctx, valid)?;
             let tag_slot = slot(ctx, pointer, RuntimeLowering::OBJECT_HEADER_SIZE)?;
             let tag = ctx
                 .builder()
@@ -210,7 +253,7 @@ fn emit<'ctx>(
                 .or_llvm_err()?;
             for ((_, declared), (_, block)) in variants.iter().zip(&branches) {
                 ctx.builder().position_at_end(*block);
-                fields(
+                retire_fields(
                     ctx,
                     pointer,
                     RuntimeLowering::OBJECT_HEADER_SIZE + 8,

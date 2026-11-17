@@ -554,6 +554,10 @@ pub enum InlineSequenceId {
     SliceSplitAt,
     /// text_from_static: create Text from static string
     TextFromStatic,
+    /// Transfer an owned CBGR byte buffer into a Text descriptor.
+    TextAdoptOwned,
+    /// Release Text contents through its actual storage receipt.
+    TextReleaseStorage,
     /// utf8_decode_char: decode UTF-8 character
     Utf8DecodeChar,
     /// text_parse_int: parse integer from text
@@ -2334,6 +2338,26 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     // =========================================================================
     // Text Intrinsics
     // =========================================================================
+    Intrinsic {
+        name: "text_adopt_owned",
+        category: IntrinsicCategory::Memory,
+        hints: &[],
+        param_count: 3,
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::TextAdoptOwned),
+        mlir_op: Some("verum.text.adopt_owned"),
+        doc: "Transfer an owned CBGR byte allocation into Text",
+    },
+    Intrinsic {
+        name: "text_release_storage",
+        category: IntrinsicCategory::Memory,
+        hints: &[],
+        param_count: 1,
+        return_count: 0,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::TextReleaseStorage),
+        mlir_op: Some("verum.text.release_storage"),
+        doc: "Release Text contents, retaining its empty descriptor",
+    },
     Intrinsic {
         name: "text_from_static",
         category: IntrinsicCategory::Memory,

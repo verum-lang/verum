@@ -14,6 +14,8 @@ pub enum DropPlan {
     /// No implicit cleanup operation. Built-in lifecycle limitations are
     /// recorded by `builtin_drop_plan`; this is not identity-copy permission.
     Ignore,
+    /// The canonical Text codec, with storage authority issued by its producer.
+    Text,
     /// A callable handle whose actual producer and empty environment must be
     /// proved before the binding can be retired. This is never a blanket no-op.
     Callable {
@@ -114,10 +116,7 @@ impl DropPlan {
 pub fn builtin_drop_plan(owner: TypeId) -> Option<DropPlan> {
     Some(match owner.builtin_value_storage()? {
         BuiltinValueStorage::Immediate => DropPlan::Ignore,
-        // Text is not a uniform source-record layout. Automatic cleanup still
-        // lacks a producer-issued lifetime receipt; the current no-op does not
-        // establish a complete lifecycle or permission to copy by identity.
-        BuiltinValueStorage::Text => DropPlan::Ignore,
+        BuiltinValueStorage::Text => DropPlan::Text,
     })
 }
 

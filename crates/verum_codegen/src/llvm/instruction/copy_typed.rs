@@ -380,6 +380,7 @@ impl<'a, 'ctx> Emitter<'a, 'ctx> {
                 size,
             )
             .or_llvm_err()?;
+        super::super::object_storage::stamp_os(self.context, &self.builder, pointer, bytes)?;
         Ok(pointer)
     }
     fn flat(&self, bytes: IntValue<'ctx>) -> Result<PointerValue<'ctx>> {
@@ -1069,6 +1070,9 @@ impl<'a, 'ctx> Emitter<'a, 'ctx> {
         let source = self.owned(frame, owner)?;
         let slots = fields.len();
         let bytes = RuntimeLowering::OBJECT_HEADER_SIZE + offset + slots as u64 * 8;
+        super::super::object_storage::check_extent(bytes)?;
+        // Copy borrows the input view; only its newly allocated output acquires
+        // a destruction receipt. The input can be external live record storage.
         self.shape(source, bytes)?;
         let output = self.duplicate(source, self.integer(bytes))?;
         self.entered(
@@ -1710,7 +1714,8 @@ impl<'a, 'ctx> Emitter<'a, 'ctx> {
         self.jump(self.finish)
     }
     fn text(&self, frame: PointerValue<'ctx>) -> Result<()> {
-        use super::super::runtime::{TEXT_CAP_OFFSET, TEXT_LEN_OFFSET, TEXT_OBJECT_SIZE, TEXT_PTR_OFFSET};
+        use super::super::runtime::{TEXT_CAP_OFFSET, TEXT_LEN_OFFSET, TEXT_PTR_OFFSET};
+        use super::super::text_storage::{self, Receipt};
 
         let source_word = self.load(frame, 0)?;
         let empty = self.block("copy_null_text");
@@ -1751,7 +1756,8 @@ impl<'a, 'ctx> Emitter<'a, 'ctx> {
         self.guard(self.builder.build_int_compare(IntPredicate::ULE, data, last_start, "copy_text_range").or_llvm_err()?,
             "copy_text_range_valid")?;
 
-        let output = self.flat(self.integer(TEXT_OBJECT_SIZE))?;
+        let output = self.flat(self.integer(text_storage::DESCRIPTOR_SIZE))?;
+        text_storage::stamp(self.context, &self.builder, output, Receipt::OsCbgr)?;
         self.store(output, TEXT_PTR_OFFSET, self.integer(0))?;
         self.store(output, TEXT_LEN_OFFSET, len)?;
         self.store(output, TEXT_CAP_OFFSET, capacity)?;

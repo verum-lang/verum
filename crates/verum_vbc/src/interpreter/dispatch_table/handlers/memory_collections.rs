@@ -23,6 +23,12 @@ pub(in super::super) fn handle_new(
     let type_id = TypeId(type_id_val);
     let field_count = read_varint(state)? as usize;
 
+    if type_id == TypeId::TEXT {
+        return Err(InterpreterError::InvalidOperand {
+            message: "Text storage must be constructed by its owning intrinsic".into(),
+        });
+    }
+
     // Allocate enough space for all fields
     let size = field_count.max(1) * std::mem::size_of::<Value>();
     let obj = state.heap.alloc(type_id, size)?;
@@ -1963,6 +1969,12 @@ pub(in super::super) fn handle_new_generic(
     let type_id = TypeId(type_id_val);
     let field_count = read_varint(state)? as usize;
     let type_param_count = read_varint(state)? as usize;
+
+    if type_id == TypeId::TEXT {
+        return Err(InterpreterError::InvalidOperand {
+            message: "Text storage must be constructed by its owning intrinsic".into(),
+        });
+    }
 
     // Skip type parameter registers (type erasure in interpreter)
     for _ in 0..type_param_count {

@@ -2400,32 +2400,6 @@ fn build_fptosi_sat_i64<'ctx>(
     Ok(result)
 }
 
-/// Lower a single VBC instruction to LLVM IR.
-/// Emit a call to verum_text_free(text_obj) to free an owned Text object.
-/// Frees both the character buffer and the 24-byte header.
-///
-/// Uses a single call to an outlined helper function rather than inlining
-/// 4 basic blocks per free. This prevents block explosion when many owned
-/// text registers are freed at function exit (Ret/RetV).
-fn emit_text_free<'ctx>(
-    ctx: &FunctionContext<'_, 'ctx>,
-    text_val: BasicValueEnum<'ctx>,
-) -> Result<()> {
-    let i64_type = ctx.types().i64_type();
-    let text_i64 = as_i64(ctx, text_val, "text_free_val")?;
-
-    // Get or declare the outlined verum_text_free(i64) -> void helper
-    let module = ctx.get_module();
-    let void_type = ctx.types().context().void_type();
-    let fn_type = void_type.fn_type(&[i64_type.into()], false);
-    let free_fn = super::error::get_or_declare_function(module, "verum_text_free", fn_type);
-
-    ctx.builder()
-        .build_call(free_fn, &[text_i64.into()], "")
-        .or_llvm_err()?;
-    Ok(())
-}
-
 pub fn lower_instruction<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
     instr: &Instruction,
@@ -3452,78 +3426,9 @@ fn lower_instruction_impl<'ctx>(
             // strictly less work but does NOT close the alloca-escape
             // soundness gap on its own.
             //
-            // Free all owned text registers except the one being returned
-            // — and except any register that ALIASES the return register.
-            //
-
-            // Aliasing happens naturally in VBC: when the source returns a
-            // heap-Text from one if/else/match branch and a static literal
-            // from another, the merge point MOV-chains the value through
-            // several temporary registers before the Ret reads it. All of
-            // those registers hold the same LLVM SSA value (BasicValueEnum
-            // is Copy+Eq over LLVMValueRef), so they alias the live buffer
-            // that ownership of the return value refers to. Comparing by
-            // register number alone would free the alias and hand the
-            // caller a dangling pointer. This is how classify() returning
-            // `f"{n}"` in the else-branch ended up printing empty strings
-            // under AOT while the interpreter printed "7" — the MOV chain
-            // inside the branch kept `r4` (owned by Concat) live after
-            // `r6` (the return register) received the same pointer.
-            let ret_val_early = ctx.get_register(value.0)?;
-            let ret_reg = value.0;
-            let owned_regs: Vec<u16> = ctx.owned_text_registers();
-            for reg in owned_regs {
-                if reg == ret_reg {
-                    continue;
-                }
-                let Ok(val) = ctx.get_register(reg) else {
-                    continue;
-                };
-                if val == ret_val_early {
-                    // Alias of the return register — ownership transfers
-                    // with the return value; no free here.
-                    ctx.unmark_owned_text_register(reg);
-                    continue;
-                }
-                let _ = emit_text_free(ctx, val);
-                ctx.unmark_owned_text_register(reg);
-            }
-
-            // Drop protocol: free Heap<T> allocations before return.
-            // Return value register excluded — ownership transfers to caller.
-            // Same aliasing logic as above.
-            {
-                let ret_exclude = value.0;
-                let heap_regs: Vec<u16> = ctx.heap_alloc_registers();
-                for hreg in heap_regs {
-                    if hreg == ret_exclude {
-                        continue;
-                    }
-                    let Ok(hval) = ctx.get_register(hreg) else {
-                        continue;
-                    };
-                    if hval == ret_val_early {
-                        continue;
-                    }
-                    let _ptr_ty = ctx.types().ptr_type();
-                    let _i64_ty = ctx.types().i64_type();
-                    let _void_ty = ctx.llvm_context().void_type();
-                    let _mod = ctx.get_module();
-                    let ft = _void_ty.fn_type(&[_ptr_ty.into(), _i64_ty.into()], false);
-        let dealloc = super::error::get_or_declare_function(_mod, "verum_dealloc", ft);
-                    if let Ok(ptr) =
-                        ctx.builder()
-                            .build_int_to_ptr(hval.into_int_value(), _ptr_ty, "drop_ptr")
-                    {
-                        let _ = ctx.builder().build_call(
-                            dealloc,
-                            &[ptr.into(), _i64_ty.const_int(8, false).into()],
-                            "",
-                        );
-                    }
-                }
-            }
-
+            // Source lifetimes emit DropTyped before this transfer. A native
+            // register-mark scan is branch-global and cannot prove that a value
+            // was produced on the returning path (or still owns its storage).
             let ret_val = ctx.get_register(value.0)?;
             let fn_ret_type = ctx.function().get_type().get_return_type();
 
@@ -3546,46 +3451,10 @@ fn lower_instruction_impl<'ctx>(
         }
 
         Instruction::RetV => {
-            // Free all owned text registers before void return.
-            let owned_regs: Vec<u16> = ctx.owned_text_registers();
-            for reg in owned_regs {
-                if let Ok(val) = ctx.get_register(reg) {
-                    let _ = emit_text_free(ctx, val);
-                    ctx.unmark_owned_text_register(reg);
-                }
-            }
-
-            // Drop protocol: free ALL Heap<T> allocations before void return.
-            {
-                let heap_regs: Vec<u16> = ctx.heap_alloc_registers();
-                for hreg in heap_regs {
-                    if let Ok(hval) = ctx.get_register(hreg) {
-                        let _ptr_ty = ctx.types().ptr_type();
-                        let _i64_ty = ctx.types().i64_type();
-                        let _void_ty = ctx.llvm_context().void_type();
-                        let _mod = ctx.get_module();
-                        let ft = _void_ty.fn_type(&[_ptr_ty.into(), _i64_ty.into()], false);
-        let dealloc = super::error::get_or_declare_function(_mod, "verum_dealloc", ft);
-                        if let Ok(ptr) = ctx.builder().build_int_to_ptr(
-                            hval.into_int_value(),
-                            _ptr_ty,
-                            "drop_ptr_v",
-                        ) {
-                            let _ = ctx.builder().build_call(
-                                dealloc,
-                                &[ptr.into(), _i64_ty.const_int(8, false).into()],
-                                "",
-                            );
-                        }
-                    }
-                }
-            }
-
-            // Check if function is declared as void or non-void
+            // Destruction is explicit VBC, shared with the interpreter.
             let fn_ret_type = ctx.function().get_type().get_return_type();
             match fn_ret_type {
                 None => {
-                    // Truly void function
                     ctx.builder()
                         .build_return(None)
                         .or_llvm_err()?;
@@ -4009,44 +3878,11 @@ fn lower_instruction_impl<'ctx>(
         } => {
             // Check if this is a Text type — use flat layout (no header)
             let tid = TypeId(*type_id);
-            let is_text_type = tid == TypeId::TEXT || {
-                if let Some(vbc_mod) = ctx.vbc_module() {
-                    let type_name = vbc_mod.get_type_name(tid).unwrap_or_default();
-                    WKT::Text.matches(&type_name)
-                } else {
-                    false
-                }
-            };
+            let is_text_type = tid == TypeId::TEXT;
 
             if is_text_type {
-                // Text objects use flat layout {ptr, len, cap} — no object header.
-                // This matches verum_text_alloc in C runtime.
-                let i64_type = ctx.types().i64_type();
-                let i8_type = ctx.types().i8_type();
-                let bool_type = ctx.types().bool_type();
-                let void_type = ctx.types().void_type();
-                let ptr_type = ctx.types().ptr_type();
-                // Libc-free: route zero-init through llvm.memset.p0.i64 intrinsic.
-                let ft = void_type.fn_type(
-                    &[ptr_type.into(), i8_type.into(), i64_type.into(), bool_type.into()],
-                    false,
-                );
-                let memset_fn = super::error::get_or_declare_function(ctx.get_module(), "llvm.memset.p0.i64", ft);
-                let size = i64_type.const_int(24, false); // 3 fields * 8 bytes, no header
-                let module = ctx.get_module();
-                let obj = checked_malloc_instr(ctx, module, size, "text_flat")?;
-                let _ = ctx.builder().build_call(
-                    memset_fn,
-                    &[
-                        obj.into(),
-                        i8_type.const_zero().into(),
-                        size.into(),
-                        bool_type.const_zero().into(),
-                    ],
-                    "clear_text",
-                );
-                ctx.set_register(dst.0, obj.into());
-                ctx.mark_text_register(dst.0);
+                return Err(LlvmLoweringError::unsupported(
+                    "Text storage must be constructed by its owning intrinsic"));
             } else {
                 let runtime = RuntimeLowering::new(ctx.llvm_context());
                 let obj_ptr =
@@ -4147,39 +3983,13 @@ fn lower_instruction_impl<'ctx>(
             let (field_count, is_text_type) = if let Some(vbc_mod) = ctx.vbc_module() {
                 let fc = vbc_mod.get_type_field_count(tid_g).unwrap_or(8);
                 let type_name = vbc_mod.get_type_name(tid_g).unwrap_or_default();
-                (fc, tid_g == TypeId::TEXT || WKT::Text.matches(&type_name))
+                (fc, tid_g == TypeId::TEXT)
             } else {
                 (8, tid_g == TypeId::TEXT)
             };
             if is_text_type {
-                // Text objects use flat layout {ptr, len, cap} — no object header.
-                // This matches verum_text_alloc in C runtime.
-                let i64_type = ctx.types().i64_type();
-                let i8_type = ctx.types().i8_type();
-                let bool_type = ctx.types().bool_type();
-                let void_type = ctx.types().void_type();
-                let ptr_type = ctx.types().ptr_type();
-                // Libc-free: route zero-init through llvm.memset.p0.i64 intrinsic.
-                let ft = void_type.fn_type(
-                    &[ptr_type.into(), i8_type.into(), i64_type.into(), bool_type.into()],
-                    false,
-                );
-                let memset_fn = super::error::get_or_declare_function(ctx.get_module(), "llvm.memset.p0.i64", ft);
-                let size = i64_type.const_int(24, false); // 3 fields * 8 bytes, no header
-                let module = ctx.get_module();
-                let obj = checked_malloc_instr(ctx, module, size, "text_flat")?;
-                let _ = ctx.builder().build_call(
-                    memset_fn,
-                    &[
-                        obj.into(),
-                        i8_type.const_zero().into(),
-                        size.into(),
-                        bool_type.const_zero().into(),
-                    ],
-                    "clear_text",
-                );
-                ctx.set_register(dst.0, obj.into());
-                ctx.mark_text_register(dst.0);
+                return Err(LlvmLoweringError::unsupported(
+                    "Text storage must be constructed by its owning intrinsic"));
             } else {
                 let runtime = RuntimeLowering::new(ctx.llvm_context());
                 let obj_ptr =
@@ -5099,6 +4909,9 @@ fn lower_instruction_impl<'ctx>(
             };
             let runtime = RuntimeLowering::new(ctx.llvm_context());
             runtime.lower_set_variant_data(ctx.builder(), variant_ptr, *field, val)?;
+            // Payload installation transfers the local value to the sum owner.
+            // Source place copies have already emitted CloneTyped when needed.
+            ctx.unmark_owned_text_register(value.0);
             // Track float fields so GetVariantData can mark extracted values as float
             if ctx.is_float_register(value.0) || matches!(raw_val, BasicValueEnum::FloatValue(_)) {
                 ctx.mark_variant_float_field(variant.0, *field);
@@ -5650,6 +5463,11 @@ fn lower_instruction_impl<'ctx>(
                 elem_types.push(elem_type);
             }
             let tuple_ptr = runtime.lower_pack(ctx.builder(), ctx.get_module(), &values)?;
+            // Pack consumes its prepared element values, just as SetF does.
+            // Their lifetime now belongs to the declared tuple's DropTyped.
+            for index in 0..*count {
+                ctx.unmark_owned_text_register(src_start.0 + index as u16);
+            }
             ctx.set_register(dst.0, tuple_ptr.into());
             // Track tuple element types for later Unpack
             let has_non_int = elem_types.iter().any(|t| {
@@ -6782,54 +6600,18 @@ fn lower_instruction_impl<'ctx>(
                 untag_slot_ptr(ctx, ref_val, "ref_ptr")?
             };
 
-            // DEREF-MUT-TEXT-COPY-1: `*self = new_text` inside a
-            // `&mut self` Text method. The AOT Text ABI is a headerless
-            // flat 24-byte record and the CALLER keeps its own pointer to
-            // that record — a single word store through the ref would
-            // overwrite the record's DATA-POINTER word with the address
-            // of the freshly built Text OBJECT (caller then reads len=OLD
-            // and bytes = the pointer's raw bytes: Text.insert produced
-            // len=5/b0=0xE0 garbage; the whole `*self = ...` rewrite
-            // family — insert/insert_str/remove/make_ascii_* — was
-            // corrupted). The honest write is a STRUCTURAL copy of all
-            // three words {data,len,cap} into the caller's record, which
-            // is exactly how Tier-0 observes it (the slot's Text VALUE is
-            // replaced wholesale).
+            // A mutable reference preserves the destination descriptor's
+            // identity. The storage receipt transfers only the source bytes;
+            // each descriptor still retires through its issuing allocator.
             if ctx.is_text_register(value.0) || ctx.is_string_register(value.0) {
-                let i64_ty = ctx.types().i64_type();
-                let src_i = as_i64(ctx, store_val, "dm_text_src")?;
-                let src_ptr = ctx
-                    .builder()
-                    .build_int_to_ptr(src_i, ctx.types().ptr_type(), "dm_text_src_ptr")
-                    .or_llvm_err()?;
-                let i8_ty = ctx.types().i8_type();
-                for w in 0..3u64 {
-                    let s_slot = unsafe {
-                        ctx.builder()
-                            .build_in_bounds_gep(
-                                i8_ty,
-                                src_ptr,
-                                &[i64_ty.const_int(w * 8, false)],
-                                &format!("dm_ts{}", w),
-                            )
-                            .or_llvm_err()?
-                    };
-                    let word = ctx
-                        .builder()
-                        .build_load(i64_ty, s_slot, &format!("dm_tw{}", w))
-                        .or_llvm_err()?;
-                    let d_slot = unsafe {
-                        ctx.builder()
-                            .build_in_bounds_gep(
-                                i8_ty,
-                                ptr,
-                                &[i64_ty.const_int(w * 8, false)],
-                                &format!("dm_td{}", w),
-                            )
-                            .or_llvm_err()?
-                    };
-                    ctx.builder().build_store(d_slot, word).or_llvm_err()?;
-                }
+                let word = ctx.types().i64_type();
+                let source = as_i64(ctx, store_val, "replacement_text_source")?;
+                let destination = ctx.builder().build_ptr_to_int(ptr, word, "replacement_text_destination").or_llvm_err()?;
+                let replace = super::error::get_or_declare_function(ctx.get_module(), "verum_text_replace",
+                    ctx.types().void_type().fn_type(&[word.into(), word.into()], false));
+                ctx.builder().build_call(replace, &[destination.into(), source.into()], "").or_llvm_err()?;
+                ctx.unmark_owned_text_register(value.0);
+                ctx.set_register(value.0, word.const_zero().into());
                 return Ok(());
             }
 
@@ -7127,9 +6909,9 @@ fn lower_instruction_impl<'ctx>(
         Instruction::Concat { dst, a, b } => {
             let a_val = ctx.get_register(a.0)?;
             let b_val = ctx.get_register(b.0)?;
-            // Snapshot ownership status BEFORE get_register (which doesn't mutate).
-            let a_owned = ctx.is_owned_text_register(a.0);
-            let b_owned = ctx.is_owned_text_register(b.0);
+            // Concat only reads operands and produces a new value. Source
+            // lowering emits explicit DropTyped for consumed temporaries and
+            // replaced bindings; branch-global register marks cannot free them.
             let module = ctx.get_module();
             let i64_type = ctx.types().i64_type();
 
@@ -7150,17 +6932,6 @@ fn lower_instruction_impl<'ctx>(
                     "text_concat_result",
                 )
                 .or_llvm_err()?;
-
-            // Free owned operands that were temporaries (e.g., from prior ToString/Concat).
-            // The concat result is a NEW allocation, so the operands are no longer needed.
-            if a_owned && a.0 != dst.0 {
-                emit_text_free(ctx, a_val)?;
-                ctx.unmark_owned_text_register(a.0);
-            }
-            if b_owned && b.0 != dst.0 {
-                emit_text_free(ctx, b_val)?;
-                ctx.unmark_owned_text_register(b.0);
-            }
 
             if let Some(ret_val) = result.try_as_basic_value().basic() {
                 ctx.set_register(dst.0, ret_val);
@@ -15348,6 +15119,30 @@ fn lower_call_method<'ctx>(
         .unwrap_or("")
         .to_string();
 
+    // An exact source-owned instance declaration is already a dispatch result.
+    // Its body must run before any legacy name-based runtime interception. The
+    // declaration, not a suffix or a register-layout guess, owns this choice.
+    let source_target = vbc_mod.find_function_by_name(&method_name_str)
+        .and_then(|id| vbc_mod.get_function(id))
+        .filter(|target| {
+            vbc_mod.get_string(target.name) == Some(method_name_str.as_str())
+                && target.has_source_body
+                && target.source_receiver.is_some()
+                && target.source_signature.is_some()
+                && !target.is_generic
+                && target.type_params.is_empty()
+                && target.params.len() == usize::from(args.count) + 1
+                && target.params.first().is_some_and(|parameter| {
+                    vbc_mod.get_string(parameter.name) == Some("self")
+                })
+        });
+    if let Some(target) = source_target {
+        return lower_selected_method(
+            ctx, dst, receiver, args, &method_name_str, Some(target),
+            Some(target.return_type.clone()), call_witness.as_deref(), false,
+        );
+    }
+
     // SLICE-PREFIX-NORMALISE (T1447) — the AOT mirror of
     // `crates/verum_vbc/src/interpreter/dispatch_table/handlers/
     //  method_dispatch.rs`, which normalises here for exactly this reason
@@ -21330,10 +21125,31 @@ fn lower_call_method<'ctx>(
         }
     }
 
-    let llvm_fn = ctx
-        .get_module()
-        .get_function(&func_name)
-        .or_missing_fn(&func_name)?;
+    lower_selected_method(
+        ctx, dst, receiver, args, &func_name, None, resolved_return_type,
+        call_witness.as_deref(), needs_maybe_unwrap,
+    )
+}
+
+/// Emit the selected method through the same argument/result ABI whether the
+/// source declaration selected it directly or legacy dispatch resolved it.
+fn lower_selected_method<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    dst: Reg,
+    receiver: Reg,
+    args: &verum_vbc::instruction::RegRange,
+    func_name: &str,
+    declaration: Option<&verum_vbc::module::FunctionDescriptor>,
+    resolved_return_type: Option<TypeRef>,
+    call_witness: Option<&[TypeRef]>,
+    needs_maybe_unwrap: bool,
+) -> Result<()> {
+    let bare_method = func_name.rsplit('.').next().unwrap_or(func_name);
+    let bare_method_early = bare_method;
+    let llvm_fn = match declaration {
+        Some(declaration) => ctx.resolve_declared_function(declaration)?,
+        None => ctx.get_module().get_function(func_name).or_missing_fn(func_name)?,
+    };
 
     // Build argument list, handling static vs instance methods:
     // - Instance method: LLVM fn expects (self, arg0, arg1, ...)
@@ -21925,7 +21741,7 @@ fn lower_call_method<'ctx>(
                         a.len() == 1 && !matches!(a[0], TypeRef::Generic(_))
                     });
                     if let Some(concrete_args) = witness_args {
-                        ctx.set_generic_type_args(dst.0, concrete_args.clone());
+                        ctx.set_generic_type_args(dst.0, concrete_args.to_vec());
                     } else if let Some(concrete_args) = recv_args {
                         ctx.set_generic_type_args(dst.0, concrete_args);
                     } else if ctx.is_string_list_register(receiver.0) {
@@ -22020,6 +21836,20 @@ fn read_reg_varlen(operands: &[u8], pos: &mut usize) -> Result<u16> {
 /// `operands[i] as u16` indexing which read only the first byte
 /// of varint-encoded register numbers ≥128 — silently miscompiling
 /// any function with 128+ live registers.
+#[inline]
+fn exact_operand_registers<const N: usize>(operands: &[u8]) -> Result<[Reg; N]> {
+    let mut registers = [Reg(0); N];
+    let mut offset = 0;
+    for register in &mut registers {
+        *register = verum_vbc::encoding::decode_reg(operands, &mut offset)
+            .map_err(|error| LlvmLoweringError::unsupported(format!("invalid register operand: {error}")))?;
+    }
+    if offset != operands.len() {
+        return Err(LlvmLoweringError::unsupported("unexpected trailing register operands"));
+    }
+    Ok(registers)
+}
+
 #[inline]
 fn op_reg(operands: &[u8], idx: usize) -> u16 {
     let mut pos = 0usize;
@@ -24160,6 +23990,29 @@ fn lower_text_extended<'ctx>(
     // Sub-opcodes: ParseInt(0x10), ParseFloat(0x11), IntToText(0x20), FloatToText(0x21),
     //  ByteLen(0x30), CharLen(0x31), IsEmpty(0x32)
     match sub_op {
+        code if code == verum_vbc::instruction::TextSubOpcode::AdoptOwned as u8 => {
+            let [destination, pointer, len, capacity] = exact_operand_registers(operands)?;
+            let pointer = as_ptr(ctx, ctx.get_register(pointer.0)?, "adopt_text_bytes")?;
+            let len = as_i64(ctx, ctx.get_register(len.0)?, "adopt_text_len")?;
+            let capacity = as_i64(ctx, ctx.get_register(capacity.0)?, "adopt_text_capacity")?;
+            let word = ctx.types().i64_type();
+            let adopt = super::error::get_or_declare_function(ctx.get_module(), "verum_text_alloc",
+                word.fn_type(&[ctx.types().ptr_type().into(), word.into(), word.into()], false));
+            let result = ctx.builder().build_call(adopt, &[pointer.into(), len.into(), capacity.into()], "owned_text")
+                .or_llvm_err()?.basic_value_or("Text adoption result")?;
+            ctx.set_register(destination.0, result);
+            ctx.mark_text_register(destination.0);
+            Ok(())
+        }
+        code if code == verum_vbc::instruction::TextSubOpcode::ReleaseStorage as u8 => {
+            let [destination, receiver] = exact_operand_registers(operands)?;
+            let receiver = as_i64(ctx, ctx.get_register(receiver.0)?, "release_text_receiver")?;
+            let release = super::error::get_or_declare_function(ctx.get_module(), "verum_text_release_storage",
+                ctx.llvm_context().void_type().fn_type(&[ctx.types().i64_type().into()], false));
+            ctx.builder().build_call(release, &[receiver.into()], "").or_llvm_err()?;
+            ctx.set_register(destination.0, ctx.types().i64_type().const_zero().into());
+            Ok(())
+        }
         0x10 => {
             // ParseInt — the VBC emits (dst, text_ref); the pre-fix arm
             // expected (dst, ptr, len) and bailed on the 2-operand form,
@@ -42505,14 +42358,8 @@ fn lower_mov<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg) -> R
     if let Some(target) = callable {
         ctx.record_selected_callable(dst, target);
     }
-    // Ownership transfer for heap-owned text: MOV is a move, not a copy.
-    // If src holds an owned Text buffer (from Concat/ToString/CharToStr),
-    // transfer ownership to dst so the Ret-time free-loop frees exactly
-    // one register at the tail of the move chain. Without this, a chain
-    // like Concat → MOV → MOV → Ret ends up with the original Concat
-    // register still marked owned while a copy of the same pointer
-    // leaves the function, and the Ret handler frees the buffer the
-    // caller is about to use.
+    // Preserve the producer annotation along a move. Destruction is carried
+    // by explicit VBC DropTyped, never inferred from this branch-local fact.
     if src.0 != dst.0 && ctx.is_owned_text_register(src.0) {
         ctx.mark_owned_text_register(dst.0);
         ctx.unmark_owned_text_register(src.0);
@@ -42729,31 +42576,22 @@ fn propagate_value_type_facts<'ctx>(
     }
 }
 
-/// Static Text uses the same immutable descriptor as a pooled source literal.
-/// The caller supplies a collision-checked module-local key.
+/// Each Text value owns a mutable descriptor over shared immutable literal bytes.
+/// Its receipt preserves the pool's ownership without copying the byte buffer.
 fn static_text<'ctx>(ctx: &FunctionContext<'_, 'ctx>, text: &str, key: &str) -> Result<IntValue<'ctx>> {
     let i64_type = ctx.types().i64_type();
     let module = ctx.get_module();
-    let global_name = format!("verum_text_{key}");
+    let global_name = format!("verum_text_data_{key}");
     let pointer = if let Some(existing) = module.get_global(&global_name) {
         existing.as_pointer_value()
     } else {
-        let data = ctx.builder().build_global_string_ptr(text, &format!("verum_text_data_{key}")).or_llvm_err()?;
-        let descriptor = ctx.llvm_context().const_struct(&[
-            data.as_pointer_value().const_to_int(i64_type).into(),
-            i64_type.const_int(text.len() as u64, false).into(),
-            i64_type.const_zero().into(),
-        ], false);
-        let global = module.add_global(descriptor.get_type(), None, &global_name);
-        global.set_initializer(&descriptor);
-        global.set_constant(true);
-        global.set_linkage(verum_llvm::module::Linkage::Private);
-        global.set_unnamed_addr(true);
-        // Static and heap Text descriptors obey the same structural equality ABI.
-        global.set_alignment(16);
-        global.as_pointer_value()
+        ctx.builder().build_global_string_ptr(text, &global_name).or_llvm_err()?.as_pointer_value()
     };
-    Ok(pointer.const_to_int(i64_type))
+    let borrow = super::error::get_or_declare_function(module, "verum_text_borrow",
+        i64_type.fn_type(&[ctx.types().ptr_type().into(), i64_type.into()], false));
+    Ok(ctx.builder().build_call(borrow,
+        &[pointer.into(), i64_type.const_int(text.len() as u64, false).into()], "literal_text")
+        .or_llvm_err()?.basic_value_or("Text literal descriptor")?.into_int_value())
 }
 
 fn lower_type_inspection<'ctx>(
@@ -44245,7 +44083,7 @@ fn lower_set_field<'ctx>(
                     .unwrap_or(new_val),
                 _ => new_val,
             };
-            let _ = ctx.builder().build_store(field_ptr, store_val);
+            ctx.builder().build_store(field_ptr, store_val).or_llvm_err()?;
         }
         BasicValueEnum::IntValue(iv) if iv.get_type().get_bit_width() == 64 => {
             // i64 that is actually a heap pointer (from function return coercion)
@@ -44275,12 +44113,17 @@ fn lower_set_field<'ctx>(
                     .or_llvm_err()?
             };
             let store_val = as_i64(ctx, new_val, "setf_val")?;
-            let _ = ctx.builder().build_store(field_ptr, store_val);
+            ctx.builder().build_store(field_ptr, store_val).or_llvm_err()?;
         }
         _ => {
-            // Fallback: no-op for non-object types
+            return Err(LlvmLoweringError::type_lowering(
+                "SetF requires an object storage destination",
+            ));
         }
     }
+    // The successful store installs the value in the aggregate. Ret must not
+    // release the same descriptor while the returned aggregate still owns it.
+    ctx.unmark_owned_text_register(value.0);
     // Track field types for GetF propagation
     if ctx.is_list_register(value.0) {
         ctx.mark_struct_list_field(obj.0, field_idx);
@@ -46180,23 +46023,19 @@ fn lower_to_string<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg
     let ptr_type = ctx.types().ptr_type();
     let f64_type = ctx.types().f64_type();
 
-    // If src is already a text/string register, it's already a Text* — pass through.
+    // ToString produces a separate value even when the input is already Text,
+    // matching the interpreter's operation contract. Borrowing optimizations
+    // belong to the source conversion producer and emit no ToString at all.
     if ctx.is_text_register(src.0) || ctx.is_string_register(src.0) {
-        ctx.set_register(dst.0, val);
-        ctx.mark_text_register(dst.0);
-        // Preserve ownership if src was owned (identity transform).
-        if ctx.is_owned_text_register(src.0) && src.0 != dst.0 {
-            ctx.unmark_owned_text_register(src.0);
-            ctx.mark_owned_text_register(dst.0);
-        }
+        copy_typed::lower(ctx, dst, src, &TypeRef::Concrete(TypeId::TEXT))?;
+        ctx.mark_owned_text_register(dst.0);
         return Ok(());
     }
 
-    // For PointerValue (e.g. Text that wasn't tracked), treat as Text*.
-    if let BasicValueEnum::PointerValue(_) = val {
-        ctx.set_register(dst.0, val);
-        ctx.mark_text_register(dst.0);
-        return Ok(());
+    if val.is_pointer_value() {
+        return Err(LlvmLoweringError::unsupported(
+            "ToString requires its input's declared formatting representation",
+        ));
     }
 
     // Float → Text: use verum_float_to_text and its internal f64 formatter.
@@ -46245,79 +46084,20 @@ fn lower_to_string<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg
         return Ok(());
     }
 
-    // Bool → Text: format as "true"/"false" instead of "1"/"0"
-    if ctx.is_bool_register(src.0) {
-        // Create global string constants for "true" and "false"
-        let true_str = ctx
-            .builder()
-            .build_global_string_ptr("true", "bool_true_str")
-            .or_llvm_err()?;
-        let false_str = ctx
-            .builder()
-            .build_global_string_ptr("false", "bool_false_str")
-            .or_llvm_err()?;
-
-        // Allocate Text objects for both
-        let fn_type = i64_type.fn_type(&[ptr_type.into(), i64_type.into(), i64_type.into()], false);
-        let text_alloc_fn = module
-            .get_function("verum_text_alloc")
-            .unwrap_or_else(|| module.add_function("verum_text_alloc", fn_type, None));
-        let cap_zero = i64_type.const_zero();
-
-        let true_text = ctx
-            .builder()
-            .build_call(
-                text_alloc_fn,
-                &[
-                    true_str.as_pointer_value().into(),
-                    i64_type.const_int(4, false).into(),
-                    cap_zero.into(),
-                ],
-                "true_text",
-            )
-            .or_llvm_err()?;
-        let false_text = ctx
-            .builder()
-            .build_call(
-                text_alloc_fn,
-                &[
-                    false_str.as_pointer_value().into(),
-                    i64_type.const_int(5, false).into(),
-                    cap_zero.into(),
-                ],
-                "false_text",
-            )
-            .or_llvm_err()?;
-
-        let true_val = true_text
-            .try_as_basic_value()
-            .basic()
-            .unwrap_or_else(|| i64_type.const_zero().into());
-        let false_val = false_text
-            .try_as_basic_value()
-            .basic()
-            .unwrap_or_else(|| i64_type.const_zero().into());
-
-        // Select based on bool value
-        let bool_val = match val {
-            BasicValueEnum::IntValue(v) => v,
-            _ => i64_type.const_zero(),
-        };
-        // Truncate to i1 for select
-        let i1_type = ctx.types().bool_type();
-        let cond = ctx
-            .builder()
-            .build_int_truncate(bool_val, i1_type, "bool_cond")
-            .or_llvm_err()?;
-        let result_val = ctx
-            .builder()
-            .build_select(cond, true_val, false_val, "bool_text")
-            .or_llvm_err()?;
-
-        ctx.set_register(dst.0, result_val.into_int_value().into());
-        ctx.mark_text_register(dst.0);
-        return Ok(());
-    }
+// Select borrowed literal bytes before allocating the one owned descriptor.
+if ctx.is_bool_register(src.0) {
+    let yes = ctx.builder().build_global_string_ptr("true", "bool_true_str").or_llvm_err()?;
+    let no = ctx.builder().build_global_string_ptr("false", "bool_false_str").or_llvm_err()?;
+    let bits = as_i64(ctx, val, "bool_text_bits")?;
+    let condition = ctx.builder().build_int_compare(IntPredicate::NE, bits, i64_type.const_zero(), "bool_text_condition").or_llvm_err()?;
+    let data = ctx.builder().build_select(condition, yes.as_pointer_value(), no.as_pointer_value(), "bool_text_bytes").or_llvm_err()?;
+    let len = ctx.builder().build_select(condition, i64_type.const_int(4, false), i64_type.const_int(5, false), "bool_text_len").or_llvm_err()?;
+    let borrow = super::error::get_or_declare_function(module, "verum_text_borrow", i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false));
+    let result = ctx.builder().build_call(borrow, &[data.into(), len.into()], "bool_text").or_llvm_err()?.basic_value_or("Boolean Text descriptor")?;
+    ctx.set_register(dst.0, result);
+    ctx.mark_text_register(dst.0);
+    return Ok(());
+}
 
     // Integer → Text: use verum_int_to_text and its internal decimal formatter.
     // The compiled Text.from_int from text.vr has broken push_byte in AOT,

@@ -1360,6 +1360,12 @@ fn typed_drop_fields<'a>(state: &InterpreterState, value: Value, plan: &'a crate
     if value.is_unit() || matches!(plan, DropPlan::Ignore) { return Ok(None); }
     let (owner, record, variants) = match plan {
         DropPlan::Ignore => return Ok(None),
+        DropPlan::Text => {
+            if !value.is_small_string() {
+                super::text_storage::TextStorage::checked(state, value)?.validate_release(state)?;
+            }
+            return Ok(None);
+        }
         DropPlan::Callable { signature } => {
             state.heap.validate_empty_callable(&state.module, value, signature)?;
             return Ok(None);
@@ -1439,6 +1445,12 @@ fn execute_typed_drop(state: &mut InterpreterState, value: Value, plan: &crate::
 {
     use crate::drop_plan::DropPlan;
     if value.is_unit() || matches!(plan, DropPlan::Ignore) { return Ok(()); }
+    if matches!(plan, DropPlan::Text) {
+        if !value.is_small_string() {
+            super::text_storage::TextStorage::checked(state, value)?.destroy(state)?;
+        }
+        return Ok(());
+    }
     if let Some((plan, elements)) = super::list_storage::take_owned_elements(state, value, plan)? {
         for value in elements { execute_typed_drop(state, value, &plan)?; }
         return Ok(());
@@ -1463,6 +1475,19 @@ fn execute_typed_drop(state: &mut InterpreterState, value: Value, plan: &crate::
             let component = unsafe { std::mem::replace(&mut *payload.add(index), Value::unit()) };
             execute_typed_drop(state, component, field)?;
         }
+        let owner = value.as_ptr::<heap::ObjectHeader>();
+        if !state.heap.contains(owner) {
+            return Err(InterpreterError::Panic {
+                message: "typed destruction owner was retired during field cleanup".into(),
+            });
+        }
+        // SAFETY: typed_drop_fields established this exact allocation and its
+        // complete declared extent. All owned fields are retired, and fresh
+        // membership excludes a destructor that already released the owner.
+        // Heap::free also revokes outstanding projections of this allocation.
+        let object = unsafe { heap::Object::from_raw(owner) }
+            .expect("a checked live heap allocation is non-null");
+        unsafe { state.heap.free(object); }
     }
     Ok(())
 }

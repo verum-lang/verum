@@ -283,44 +283,9 @@ fn text(
     if source.is_small_string() {
         return Ok((Operation::Identity(source), 0));
     }
-    let record = object(state, source, TypeId::TEXT)?;
-    if record.bytes < heap::TEXT_RECORD_SIZE {
-        return Err(invalid("Text copy requires the complete record"));
-    }
-    // SAFETY: exact live membership and the complete record extent precede all
-    // field reads. Reject negative lengths before the codec's tolerant reader.
-    let (data, len, capacity) = unsafe {
-        let fields = record.source.add(heap::OBJECT_HEADER_SIZE).cast::<Value>();
-        let len = nonnegative(fields.add(1).read_unaligned())?;
-        let capacity = usize::try_from(heap::text_record_cap(record.source))
-            .map_err(|_| invalid("Text capacity is negative"))?;
-        let (data, _) = heap::text_record_payload(record.source)
-            .ok_or_else(|| invalid("Text copy requires its byte-buffer codec"))?;
-        (data, len, capacity)
-    };
-    if capacity != 0 && len > capacity {
-        return Err(invalid("Text length exceeds its capacity"));
-    }
-    let readable = if capacity == 0 {
-        len
-    } else {
-        capacity.checked_add(1).ok_or_else(|| invalid("Text extent overflow"))?
-    };
-    if readable != 0 {
-        let address = data as usize;
-        let inline_start = record.source as usize + heap::OBJECT_HEADER_SIZE + heap::TEXT_RECORD_SIZE;
-        let inline_end = record.source as usize + heap::OBJECT_HEADER_SIZE + record.bytes;
-        let inline = address >= inline_start
-            && address.checked_add(readable).is_some_and(|end| end <= inline_end);
-        let backing = state.heap.backing_view(data.cast_mut());
-        let managed = backing.data == data.cast_mut()
-            && backing.payload_size.is_some_and(|size| readable <= size);
-        let raw = super::cbgr::bridge_extent_room(state, address)
-            .is_some_and(|size| readable <= size);
-        if !inline && !managed && !raw {
-            return Err(invalid("Text byte buffer exceeds its live allocation"));
-        }
-    }
+    let storage = super::text_storage::TextStorage::checked(state, source)
+        .map_err(preparation_error)?;
+    let (data, len) = (storage.data, storage.len);
     // Capacity is a reservation, not Text's value. Like its declared Clone,
     // copy only the initialized bytes, without duplicating unused reservation.
     let capacity = len;
@@ -930,6 +895,8 @@ impl Transaction {
                     output.fields.write(pointer);
                     output.fields.add(1).write(Value::from_i64(*len as i64));
                     output.fields.add(2).write(Value::from_i64(*capacity as i64));
+                    (*output.value.as_ptr::<heap::ObjectHeader>()).flags
+                        .insert(heap::ObjectFlags::TEXT_OWNED_BUFFER);
                 }
                 Ok(output)
             }

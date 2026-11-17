@@ -4185,16 +4185,10 @@ impl<'ctx> PlatformIR<'ctx> {
         }
 
         // Ensure helpers are declared
-        let alloc_fn = self.get_or_declare_fn(
-            module,
-            "verum_alloc",
-            ptr_type.fn_type(&[i64_type.into()], false),
-        );
         let dealloc_fn = self.get_or_declare_fn(
             module,
-            "verum_dealloc",
-            ctx.void_type()
-                .fn_type(&[ptr_type.into(), i64_type.into()], false),
+            "verum_cbgr_deallocate",
+            ctx.void_type().fn_type(&[ptr_type.into()], false),
         );
         let text_alloc_fn = self.get_or_declare_fn(
             module,
@@ -4210,8 +4204,6 @@ impl<'ctx> PlatformIR<'ctx> {
 
         let builder = ctx.create_builder();
         let entry = ctx.append_basic_block(func, "entry");
-        let read_ok = ctx.append_basic_block(func, "read_ok");
-        let read_fail = ctx.append_basic_block(func, "read_fail");
         let read_done = ctx.append_basic_block(func, "read_done");
 
         builder.position_at_end(entry);
@@ -4233,32 +4225,15 @@ impl<'ctx> PlatformIR<'ctx> {
             .or_llvm_err()?
             .into_int_value();
 
-        // buf = verum_alloc(buf_size)
-        let buf = builder
-            .build_call(alloc_fn, &[buf_size.into()], "buf")
-            .or_llvm_err()?
-            .basic_value_or("expected basic value")?
-            .into_pointer_value();
-        let buf_null = builder.build_is_null(buf, "buf_null").or_llvm_err()?;
-        builder
-            .build_conditional_branch(buf_null, read_fail, read_ok)
+        // Reserve a terminator in addition to the requested payload capacity.
+        let alloc_size = builder
+            .build_int_add(buf_size, i64_type.const_int(1, false), "alloc_size")
             .or_llvm_err()?;
+        let buf = super::text_storage::allocate_bytes(
+            ctx, &builder, module, alloc_size, "buf",
+        )?;
 
-        // read_fail: return empty text
-        builder.position_at_end(read_fail);
-        let empty_str = builder.build_global_string_ptr("", "empty").or_llvm_err()?;
-        let empty_text = builder
-            .build_call(
-                text_from_cstr_fn,
-                &[empty_str.as_pointer_value().into()],
-                "et",
-            )
-            .or_llvm_err()?
-            .basic_value_or("expected basic value")?;
-        builder.build_return(Some(&empty_text)).or_llvm_err()?;
-
-        // read_ok: n = read(fd, buf, buf_size)
-        builder.position_at_end(read_ok);
+        // n = read(fd, buf, buf_size)
         let fd32 = fd; // i64 Verum ABI — no truncation needed
         let n = builder
             .build_call(read_fn, &[fd32.into(), buf.into(), buf_size.into()], "n")
@@ -4276,7 +4251,7 @@ impl<'ctx> PlatformIR<'ctx> {
         // read_fail_dealloc: free buf then return empty
         builder.position_at_end(read_fail_dealloc);
         builder
-            .build_call(dealloc_fn, &[buf.into(), buf_size.into()], "")
+            .build_call(dealloc_fn, &[buf.into()], "")
             .or_llvm_err()?;
         let empty_str2 = builder
             .build_global_string_ptr("", "empty2")
@@ -4291,37 +4266,16 @@ impl<'ctx> PlatformIR<'ctx> {
             .basic_value_or("expected basic value")?;
         builder.build_return(Some(&empty_text2)).or_llvm_err()?;
 
-        // read_done: null-terminate, create Text, free buf
+        // The read length is at most the payload capacity. Its terminator
+        // occupies the separately reserved final byte, even for a full read.
         builder.position_at_end(read_done);
-        // Null-terminate if n < buf_size
-        let in_bounds = builder
-            .build_int_compare(IntPredicate::SLT, n, buf_size, "ib")
-            .or_llvm_err()?;
-        let null_idx = builder
-            .build_select(
-                in_bounds,
-                n,
-                builder
-                    .build_int_sub(buf_size, i64_type.const_int(1, false), "bm1")
-                    .or_llvm_err()?,
-                "ni",
-            )
-            .or_llvm_err()?
-            .into_int_value();
-        // SAFETY: GEP into the read buffer to write a null terminator; index is clamped to min(n, buf_size-1)
-        let null_ptr = unsafe {
-            builder
-                .build_gep(i8_type, buf, &[null_idx], "np")
-                .or_llvm_err()?
-        };
+        // SAFETY: read writes at most buf_size bytes; allocation is buf_size + 1.
+        let null_ptr = unsafe { builder.build_gep(i8_type, buf, &[n], "np").or_llvm_err()? };
         builder
             .build_store(null_ptr, i8_type.const_zero())
             .or_llvm_err()?;
 
-        // NET-RECV-TEXT-UAF-1 (file_read_text leg): `verum_text_alloc`
-        // aliases the buffer — no copy. text_alloc + dealloc returned
-        // a Text over freed memory. Transfer buffer ownership into the
-        // Text (cap = true allocation size), no dealloc.
+        // Transfer the CBGR buffer to Text. Capacity excludes the terminator.
         let text = builder
             .build_call(
                 text_alloc_fn,
@@ -5402,16 +5356,10 @@ impl<'ctx> PlatformIR<'ctx> {
             return Ok(());
         }
 
-        let alloc_fn = self.get_or_declare_fn(
-            module,
-            "verum_alloc",
-            ptr_type.fn_type(&[i64_type.into()], false),
-        );
         let dealloc_fn = self.get_or_declare_fn(
             module,
-            "verum_dealloc",
-            ctx.void_type()
-                .fn_type(&[ptr_type.into(), i64_type.into()], false),
+            "verum_cbgr_deallocate",
+            ctx.void_type().fn_type(&[ptr_type.into()], false),
         );
         let text_alloc_fn = self.get_or_declare_fn(
             module,
@@ -5451,11 +5399,9 @@ impl<'ctx> PlatformIR<'ctx> {
             .build_int_add(buf_size, i64_type.const_int(1, false), "as")
             .or_llvm_err()?;
 
-        let buf = builder
-            .build_call(alloc_fn, &[alloc_size.into()], "buf")
-            .or_llvm_err()?
-            .basic_value_or("expected basic value")?
-            .into_pointer_value();
+        let buf = super::text_storage::allocate_bytes(
+            ctx, &builder, module, alloc_size, "buf",
+        )?;
 
         let n = self.call_native_i64(
             &builder,
@@ -5477,7 +5423,7 @@ impl<'ctx> PlatformIR<'ctx> {
 
         builder.position_at_end(ret_empty);
         builder
-            .build_call(dealloc_fn, &[buf.into(), alloc_size.into()], "")
+            .build_call(dealloc_fn, &[buf.into()], "")
             .or_llvm_err()?;
         let empty_str = builder.build_global_string_ptr("", "e").or_llvm_err()?;
         let empty_text = builder
@@ -5497,17 +5443,11 @@ impl<'ctx> PlatformIR<'ctx> {
         builder
             .build_store(term_ptr, i8_type.const_zero())
             .or_llvm_err()?;
-        // NET-RECV-TEXT-UAF-1: `verum_text_alloc` does NOT copy — the
-        // Text object ALIASES the given buffer ({ptr,len,cap} header
-        // over caller memory). The previous `text_alloc(buf, n, n)`
-        // followed by `dealloc(buf)` returned a Text whose data
-        // pointer was already freed (recv'd payload read back empty).
-        // Transfer OWNERSHIP of the recv buffer into the Text instead:
-        // cap records the true allocation size, and no dealloc here.
+        // Transfer the CBGR buffer to Text. Capacity excludes the terminator.
         let text = builder
             .build_call(
                 text_alloc_fn,
-                &[buf.into(), n.into(), alloc_size.into()],
+                &[buf.into(), n.into(), buf_size.into()],
                 "text",
             )
             .or_llvm_err()?
@@ -6286,16 +6226,10 @@ impl<'ctx> PlatformIR<'ctx> {
             return Ok(());
         }
 
-        let alloc_fn = self.get_or_declare_fn(
-            module,
-            "verum_alloc",
-            ptr_type.fn_type(&[i64_type.into()], false),
-        );
         let dealloc_fn = self.get_or_declare_fn(
             module,
-            "verum_dealloc",
-            ctx.void_type()
-                .fn_type(&[ptr_type.into(), i64_type.into()], false),
+            "verum_cbgr_deallocate",
+            ctx.void_type().fn_type(&[ptr_type.into()], false),
         );
         let text_alloc_fn = self.get_or_declare_fn(
             module,
@@ -6335,11 +6269,9 @@ impl<'ctx> PlatformIR<'ctx> {
             .build_int_add(buf_size, i64_type.const_int(1, false), "as")
             .or_llvm_err()?;
 
-        let buf = builder
-            .build_call(alloc_fn, &[alloc_size.into()], "buf")
-            .or_llvm_err()?
-            .basic_value_or("expected basic value")?
-            .into_pointer_value();
+        let buf = super::text_storage::allocate_bytes(
+            ctx, &builder, module, alloc_size, "buf",
+        )?;
 
         let n = self.call_native_i64(
             &builder,
@@ -6363,7 +6295,7 @@ impl<'ctx> PlatformIR<'ctx> {
 
         builder.position_at_end(ret_empty);
         builder
-            .build_call(dealloc_fn, &[buf.into(), alloc_size.into()], "")
+            .build_call(dealloc_fn, &[buf.into()], "")
             .or_llvm_err()?;
         let empty_str = builder.build_global_string_ptr("", "e").or_llvm_err()?;
         let empty_text = builder
@@ -6382,16 +6314,11 @@ impl<'ctx> PlatformIR<'ctx> {
         builder
             .build_store(term_ptr, i8_type.const_zero())
             .or_llvm_err()?;
-        // NET-RECV-TEXT-UAF-1: `verum_text_alloc` aliases the buffer —
-        // no copy. The old `text_alloc(buf, n, n)` + `dealloc(buf)`
-        // handed back a Text over FREED memory (UDP probe: recvfrom
-        // returned 4 with "ping" in the buffer, the printed Text was
-        // empty). Transfer buffer ownership into the Text: cap =
-        // alloc_size, no dealloc on this path.
+        // Transfer the CBGR buffer to Text. Capacity excludes the terminator.
         let text = builder
             .build_call(
                 text_alloc_fn,
-                &[buf.into(), n.into(), alloc_size.into()],
+                &[buf.into(), n.into(), buf_size.into()],
                 "text",
             )
             .or_llvm_err()?

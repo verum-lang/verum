@@ -22,7 +22,8 @@
 // - Always valid UTF-8
 // - Flat layout: {ptr, len, cap} — 24 bytes
 // - Null-terminated for C interop
-// - cap == 0 indicates static/immutable string literal
+// - cap == 0 grants no writable spare capacity
+// - buffer ownership is carried by the allocating operation, not by cap
 //
 
 // =============================================================================
@@ -49,6 +50,7 @@ mount core.intrinsics.runtime.text.{
     char_to_uppercase, char_to_lowercase,
     text_byte_len,
     text_as_bytes,
+    text_adopt_owned, text_release_storage,
 };
 
 // =============================================================================
@@ -281,11 +283,7 @@ implement Text {
 
     /// Create an empty text.
     public fn new() -> Text {
-        Text {
-            ptr: null_ptr(),
-            len: 0,
-            cap: 0,
-        }
+        unsafe { text_adopt_owned(null_ptr(), 0, 0) }
     }
 
     /// Inherent static-method form of the `From<&str> for Text`
@@ -317,11 +315,7 @@ implement Text {
             if is_null(ptr) {
                 panic(f"Text.with_capacity: allocator returned null for {cap + 1} bytes");
             }
-            Text {
-                ptr: ptr,
-                len: 0,
-                cap: cap,
-            }
+            unsafe { text_adopt_owned(ptr, 0, cap) }
         }
     }
 
@@ -340,11 +334,7 @@ implement Text {
         if is_null(raw) {
             return Result.Err(AllocError.OutOfMemory { requested: cap + 1 });
         }
-        Result.Ok(Text {
-            ptr: raw,
-            len: 0,
-            cap: cap,
-        })
+        Result.Ok(unsafe { text_adopt_owned(raw, 0, cap) })
     }
 
     /// Create text from a byte slice (must be valid UTF-8).
@@ -522,11 +512,7 @@ implement Text {
             i = i + 1;
         }
         memset_addr(ptr_offset(ptr, len) as Int, 0 as Byte, 1);
-        Text {
-            ptr: ptr,
-            len: len,
-            cap: len,
-        }
+        text_adopt_owned(ptr, len, len)
     }
 
     /// Create text from a static string literal.
@@ -1182,15 +1168,10 @@ implement Text {
             unsafe {
                 memcpy_addr(new_ptr, self.ptr, self.len);
             }
-            // Free old allocation if it was heap-allocated (cap > 0)
-            if self.cap > 0 {
-                unsafe {
-                    dealloc(self.ptr, self.cap + 1, 1);
-                }
-            }
         }
-        self.ptr = new_ptr;
-        self.cap = new_cap;
+        // Replacement uses ordinary owned-value cleanup. The new allocation's
+        // producer supplies its lifetime authority; capacity is only a bound.
+        *self = unsafe { text_adopt_owned(new_ptr, self.len, new_cap) };
     }
 
     /// Convert to uppercase (full Unicode).
@@ -2816,7 +2797,9 @@ implement Text {
     /// Truncate text to at most `new_len` bytes.
     /// If `new_len` falls within a multi-byte character, truncates to the
     /// previous character boundary.
+    /// Panics when `new_len` is negative.
     public fn truncate(&mut self, new_len: Int) {
+        assert(new_len >= 0);
         if new_len >= self.len {
             return;
         }
@@ -2825,6 +2808,12 @@ implement Text {
         let bytes = self.as_bytes();
         while boundary > 0 && !is_utf8_char_boundary(bytes[boundary]) {
             boundary = boundary - 1;
+        }
+        if self.cap == 0 {
+            // Frozen bytes can be shared by other values or the module pool.
+            // Reuse the owned slicing path before changing bytes or metadata.
+            *self = self.slice(0, boundary);
+            return;
         }
         self.len = boundary;
         // Maintain null terminator via `memset` (single-byte write).
@@ -3744,12 +3733,7 @@ implement Clone for Text {
 
 implement Drop for Text {
     fn drop(&mut self) {
-        // Only free heap-allocated text (cap > 0). Static strings have cap == 0.
-        if self.cap > 0 && !is_null(self.ptr) {
-            unsafe {
-                dealloc(self.ptr, self.cap + 1, 1);
-            }
-        }
+        text_release_storage(self);
     }
 }
 

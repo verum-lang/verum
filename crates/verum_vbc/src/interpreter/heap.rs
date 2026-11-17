@@ -628,6 +628,17 @@ bitflags! {
         const HASH_BUCKETS = 0b10_0000_0000;
         /// Cursor state allocated by the VM's native iterator producers.
         const NATIVE_ITERATOR = 0b100_0000_0000;
+        /// The storage producer placed Text bytes inside this allocation.
+        const TEXT_INLINE = 1 << 11;
+        /// The storage producer transferred a complete CBGR byte allocation.
+        const TEXT_OWNED_BUFFER = 1 << 12;
+        /// The descriptor borrows storage retained by a different owner.
+        const TEXT_BORROWED = 1 << 13;
+        /// Storage retained by the module literal cache, not a local binding.
+        const MODULE_LITERAL = 1 << 14;
+        /// Mutually exclusive producer-issued Text storage receipts.
+        const TEXT_STORAGE = Self::TEXT_INLINE.bits() | Self::TEXT_OWNED_BUFFER.bits()
+            | Self::TEXT_BORROWED.bits();
     }
 }
 
@@ -1351,6 +1362,7 @@ impl Heap {
         // bytes: three 8-byte record slots followed by `len` bytes of
         // UTF-8 storage.  All writes below are within that region.
         unsafe {
+            (*obj.as_ptr()).flags.insert(ObjectFlags::TEXT_INLINE);
             let data = base.add(OBJECT_HEADER_SIZE);
             let bytes_dst = data.add(TEXT_RECORD_SIZE);
             let ptr_v = if len == 0 {
@@ -1394,6 +1406,7 @@ impl Heap {
         // zero-fills, so the `[len, cap]` tail (incl. the NUL slot)
         // is already zeroed.
         unsafe {
+            (*obj.as_ptr()).flags.insert(ObjectFlags::TEXT_INLINE);
             let data = base.add(OBJECT_HEADER_SIZE);
             let bytes_dst = data.add(TEXT_RECORD_SIZE);
             let slots = data as *mut Value;

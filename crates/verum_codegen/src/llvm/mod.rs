@@ -94,6 +94,8 @@ pub mod target_settings;
 mod native_call;
 mod linux_signal;
 mod array_storage;
+mod object_storage;
+pub(crate) mod text_storage;
 mod return_representation;
 
 // Unified register type tracking (replacing 40+ HashSets)

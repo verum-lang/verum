@@ -440,31 +440,40 @@ impl VbcCodegen {
             ExprKind::Call { .. } | ExprKind::MethodCall { .. } | ExprKind::Record { .. })
     }
 
-    /// A call's expected result can bind its own parameters. Only arguments
-    /// fixed by that substitution can supply context to a nested expression.
+    /// A call's expected result can bind its own parameters. Fully bound
+    /// parameters supply both constructor context and argument adaptations.
     pub(super) fn contextual_call_parameters(
         &self, info: &FunctionInfo, explicit: &[verum_ast::ty::GenericArg], operands: &[Expr],
-    ) -> Option<Vec<Option<TypeRef>>> {
-        if !operands.iter().any(Self::admits_constructor_context) {
-            return None;
-        }
-        let TypeRef::Function { params, return_type, .. } = info.callable_signature.as_ref()? else {
-            return None;
+    ) -> CodegenResult<Option<Vec<Option<TypeRef>>>> {
+        let Some(TypeRef::Function { params, return_type, .. }) = info.callable_signature.as_ref() else {
+            return Ok(None);
         };
         let mut bindings = TypeSubstitution::empty();
-        self.bind_source_type_arguments(info, explicit, &mut bindings)?;
-        if let Some(expected) = self.ctx.expected_value_type.as_ref()
-            && !self.bind_source_declaration(return_type, expected, &mut bindings)
-        {
-            return None;
+        if self.bind_source_type_arguments(info, explicit, &mut bindings).is_none() { return Ok(None); }
+        if let Some(expected) = self.ctx.expected_value_type.as_ref() {
+            let mut result_bindings = bindings.clone();
+            if self.bind_source_declaration(return_type, expected, &mut result_bindings) {
+                bindings = result_bindings;
+            }
         }
-        params.iter().map(|formal| {
+        let offset = usize::from(info.param_names.first().is_some_and(|name| name == "self")
+            && params.len() == operands.len() + 1);
+        for (index, (formal, argument)) in params.iter().skip(offset).zip(operands).enumerate() {
+            if !formal.is_generic() || self.slice_parameter_element(formal).is_none() { continue; }
+            let invalid = |message: &str| CodegenError::with_span(
+                CodegenErrorKind::InvalidSourceSignature(message.into()), argument.span);
+            let actual = self.source_expression_declaration(argument, None, 0)
+                .ok_or_else(|| invalid("generic slice argument requires its source element declaration"))?;
+            self.bind_declared_operand(info, index + offset, formal, &actual, &mut bindings)
+                .ok_or_else(|| invalid("generic slice argument cannot satisfy its selected parameter declaration"))?;
+        }
+        Ok(params.iter().map(|formal| {
             if fully_bound(formal, &bindings) {
                 Some(Some(bindings.apply(formal).ok()?))
             } else {
                 Some(None)
             }
-        }).collect()
+        }).collect())
     }
 
     /// A projected field belongs to its instantiated record, so its free
@@ -541,6 +550,10 @@ impl VbcCodegen {
 
     pub(super) fn bind_declared_operand(&self, function: &FunctionInfo, index: usize, formal: &TypeRef,
         actual: &TypeRef, bindings: &mut TypeSubstitution) -> Option<()> {
+        let slice = self.declared_slice_argument_type(formal, actual);
+        let slice_formal = slice.as_ref().and_then(|_| self.expand_declared_alias(formal.clone()));
+        let formal = slice_formal.as_ref().unwrap_or(formal);
+        let actual = slice.as_ref().unwrap_or(actual);
         // A selected owned alias can be passed to its exact unrefined base.
         // Keep a Generic formal's nominal witness and every nested argument
         // unchanged; writable reference carriers remain invariant below.

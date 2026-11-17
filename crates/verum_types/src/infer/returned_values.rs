@@ -1098,7 +1098,8 @@ impl TypeChecker {
             // A cleanup footprint describes the operation actually executed,
             // independently of whether copying needs fresh owned storage.
             if primitive.and_then(verum_vbc::drop_plan::builtin_drop_plan)
-                .is_some_and(|plan| matches!(plan, verum_vbc::drop_plan::DropPlan::Ignore))
+                .is_some_and(|plan| matches!(plan,
+                    verum_vbc::drop_plan::DropPlan::Ignore | verum_vbc::drop_plan::DropPlan::Text))
             { continue; }
             match ty {
                 Type::Named { .. } | Type::Generic { .. } => {

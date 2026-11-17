@@ -9431,6 +9431,12 @@ pub enum TextSubOpcode {
     /// was stale relative to both the intrinsic registry and the emitter —
     /// it made the handler over-read one register and desync `pc` (T0426).
     FromStatic = 0x00,
+    /// Transfer a complete CBGR allocation into Text: dst, ptr, len, capacity.
+    /// The unsafe caller owns capacity+1 bytes (or null for empty storage).
+    AdoptOwned = 0x01,
+    /// Release the contents of an exclusively borrowed Text: dst(Unit), text.
+    /// Its descriptor remains live and empty for a later automatic destruction.
+    ReleaseStorage = 0x02,
 
     /// Parse integer from Text.
     ///
@@ -9563,6 +9569,8 @@ impl TextSubOpcode {
     pub fn from_byte(byte: u8) -> Option<Self> {
         match byte {
             0x00 => Some(Self::FromStatic),
+            0x01 => Some(Self::AdoptOwned),
+            0x02 => Some(Self::ReleaseStorage),
             0x10 => Some(Self::ParseInt),
             0x11 => Some(Self::ParseFloat),
             0x20 => Some(Self::IntToText),
@@ -9599,6 +9607,8 @@ impl TextSubOpcode {
         match self {
             // ===== Construction (0x00-0x0F) =====
             Self::FromStatic   => m!("TEXT_FROM_STATIC",    Construction,   rtext=true,  parse=false),
+            Self::AdoptOwned => m!("TEXT_ADOPT_OWNED", Construction, rtext=true, parse=false),
+            Self::ReleaseStorage => m!("TEXT_RELEASE_STORAGE", Manipulation, rtext=false, parse=false),
 
             // ===== Parse from Text (0x10-0x1F) =====
             Self::ParseInt     => m!("TEXT_PARSE_INT",      ParseFromText,  rtext=false, parse=true),
@@ -13803,6 +13813,36 @@ pub enum Instruction {    // ===================================================
 // Supporting Enums for Instructions
 // ============================================================================
 
+impl Instruction {
+    /// Results whose semantic type is fixed by the VBC operation itself.
+    /// Numeric loads and arithmetic carry several source types through the same
+    /// representation and therefore cannot establish a declaration here.
+    pub fn intrinsic_result_type(&self) -> Option<(Reg, TypeRef)> {
+        let (destination, ty) = match self {
+            Self::Len { dst, .. } => (*dst, crate::types::TypeId::I64),
+            Self::CbgrExtended { sub_op, operands }
+                if CbgrSubOpcode::from_byte(*sub_op) == Some(CbgrSubOpcode::SliceLen) =>
+            {
+                let mut cursor = 0;
+                let destination = crate::encoding::decode_reg(operands, &mut cursor).ok()?;
+                crate::encoding::decode_reg(operands, &mut cursor).ok()?;
+                if cursor != operands.len() {
+                    return None;
+                }
+                (destination, crate::types::TypeId::I64)
+            }
+            Self::ToString { dst, .. } | Self::Concat { dst, .. } => {
+                (*dst, crate::types::TypeId::TEXT)
+            }
+            Self::CmpI { dst, .. } | Self::CmpF { dst, .. } | Self::CmpU { dst, .. } => {
+                (*dst, crate::types::TypeId::BOOL)
+            }
+            _ => return None,
+        };
+        Some((destination, TypeRef::Concrete(ty)))
+    }
+}
+
 /// Binary integer operations.
 ///
 /// Add/Sub/Mul wrap identically under signed and unsigned semantics
@@ -17823,23 +17863,46 @@ mod tests {
         }
     }
 
+    const TEXT_WIRE_SUB_OPS: [(TextSubOpcode, u8); 13] = [
+        (TextSubOpcode::FromStatic, 0x00),
+        (TextSubOpcode::AdoptOwned, 0x01),
+        (TextSubOpcode::ReleaseStorage, 0x02),
+        (TextSubOpcode::ParseInt, 0x10),
+        (TextSubOpcode::ParseFloat, 0x11),
+        (TextSubOpcode::IntToText, 0x20),
+        (TextSubOpcode::FloatToText, 0x21),
+        (TextSubOpcode::UIntToText, 0x22),
+        (TextSubOpcode::ByteLen, 0x30),
+        (TextSubOpcode::CharLen, 0x31),
+        (TextSubOpcode::IsEmpty, 0x32),
+        (TextSubOpcode::IsUtf8, 0x33),
+        (TextSubOpcode::AsBytes, 0x34),
+    ];
+
     #[test]
-    fn text_meta_count_pinned_at_ten() {
-        let mut count = 0;
-        for_every_text_sub_opcode(|_| count += 1);
-        assert_eq!(count, 11,
-            "TextSubOpcode variant count drift: expected 11, got {}", count);
+    fn text_meta_wire_codes_and_reserved_bytes_are_pinned() {
+        for (op, byte) in TEXT_WIRE_SUB_OPS {
+            assert_eq!(op.to_byte(), byte, "wire identity changed for {op:?}");
+        }
+        for byte in 0u8..=0xFF {
+            let expected = TEXT_WIRE_SUB_OPS.iter()
+                .find_map(|(op, assigned)| (*assigned == byte).then_some(*op));
+            assert_eq!(TextSubOpcode::from_byte(byte), expected,
+                "assigned/reserved Text sub-opcode changed at {byte:#04x}");
+        }
     }
 
     #[test]
-    fn text_meta_category_matches_byte_range_band() {
+    fn text_meta_category_follows_operation_contract() {
         for_every_text_sub_opcode(|op| {
-            let expected = match op.to_byte() {
-                0x00..=0x0F => TextCategory::Construction,
-                0x10..=0x1F => TextCategory::ParseFromText,
-                0x20..=0x2F => TextCategory::ConvertToText,
-                0x30..=0x3F => TextCategory::Manipulation,
-                _ => unreachable!("undefined byte {:#04x}", op.to_byte()),
+            let expected = match op {
+                TextSubOpcode::FromStatic | TextSubOpcode::AdoptOwned => TextCategory::Construction,
+                TextSubOpcode::ParseInt | TextSubOpcode::ParseFloat => TextCategory::ParseFromText,
+                TextSubOpcode::IntToText | TextSubOpcode::FloatToText | TextSubOpcode::UIntToText => TextCategory::ConvertToText,
+                // Releasing storage returns Unit and leaves an empty live
+                // descriptor; its wire slot does not make it a constructor.
+                TextSubOpcode::ReleaseStorage | TextSubOpcode::ByteLen | TextSubOpcode::CharLen
+                | TextSubOpcode::IsEmpty | TextSubOpcode::IsUtf8 | TextSubOpcode::AsBytes => TextCategory::Manipulation,
             };
             assert_eq!(op.meta().category, expected);
             assert_eq!(op.category(), expected.as_str());
@@ -17879,7 +17942,7 @@ mod tests {
 
     #[test]
     fn text_meta_mnemonic_uniqueness_and_prefix() {
-        let mut seen: Vec<&'static str> = Vec::with_capacity(10);
+        let mut seen = verum_common::List::with_capacity(TEXT_WIRE_SUB_OPS.len());
         for_every_text_sub_opcode(|op| {
             let m = op.mnemonic();
             assert!(m.starts_with("TEXT_"),
@@ -17887,6 +17950,6 @@ mod tests {
             assert!(!seen.contains(&m), "duplicate mnemonic {:?}", m);
             seen.push(m);
         });
-        assert_eq!(seen.len(), 11);
+        assert_eq!(seen.len(), TEXT_WIRE_SUB_OPS.len());
     }
 }

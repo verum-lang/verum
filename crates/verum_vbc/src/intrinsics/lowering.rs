@@ -1781,6 +1781,18 @@ impl IntrinsicLowering {
                     region: None,
                 })
             }
+            InlineSequenceId::TextAdoptOwned | InlineSequenceId::TextReleaseStorage => self.emit(MlirOp {
+                name: match seq_id {
+                    InlineSequenceId::TextAdoptOwned => "verum.text.adopt_owned",
+                    _ => "verum.text.release_storage",
+                }.into(),
+                attrs: vec![],
+                result_types: if matches!(seq_id, InlineSequenceId::TextAdoptOwned) {
+                    vec![MlirType::I64]
+                } else { vec![] },
+                operands: operands.to_vec(),
+                region: None,
+            }),
             InlineSequenceId::Utf8DecodeChar => {
                 self.emit(MlirOp {
                     name: "llvm.call".to_string(),

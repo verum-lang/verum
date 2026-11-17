@@ -97,9 +97,23 @@ impl VbcCodegen {
             && let Some(id) = crate::types::TypeId::from_well_known_scalar_name(&name) {
             return Some(TypeRef::Concrete(id.declared_scalar_identity(&name)));
         }
+        // A selected intrinsic has the same semantic result at every syntax
+        // boundary. Inspect its actual producer, never the method's spelling or
+        // a register's machine representation. This also covers formatted Text.
+        if let Some((reg, start, end)) = emitted
+            && let Some((_, producer)) = self.copy_result_producer(reg, start, end)
+        {
+            if let Some((_, result)) = producer.intrinsic_result_type() {
+                return Some(result);
+            }
+            if let Instruction::MakeVariantTyped { type_id, tag, field_count: 0, .. } = producer {
+                return self.selected_variant_declaration(
+                    crate::types::TypeId(*type_id), *tag, &[], None);
+            }
+        }
         // Both call syntaxes retain the selected producer's declaration.
-        // A dotted sum constructor must not lose its owner merely because
-        // the parser represents it as a method call.
+        // An intrinsic's actual result above is stronger than an unresolved
+        // source-method entry; physical register width never supplies a type.
         if matches!(expr.kind, ExprKind::Call { .. } | ExprKind::MethodCall { .. })
             && let Some(result) = self.ctx.declared_result_types.get(&expr.span) {
             return result.clone();
@@ -125,8 +139,16 @@ impl VbcCodegen {
                 let length = u64::try_from(self.const_eval_i64(count).ok()??).ok()?;
                 Some(TypeRef::Array { element: Box::new(nested(value, None)?), length })
             }
-            ExprKind::Tuple(elements) => Some(TypeRef::Tuple(elements.iter()
-                .map(|element| nested(element, None)).collect::<Option<_>>()?)),
+            ExprKind::Tuple(elements) => {
+                if let Some(declared) = self.ctx.declared_result_types.get(&expr.span) {
+                    return declared.clone();
+                }
+                if elements.is_empty() {
+                    return Some(TypeRef::Concrete(crate::types::TypeId::UNIT));
+                }
+                Some(TypeRef::Tuple(elements.iter()
+                    .map(|element| nested(element, None)).collect::<Option<_>>()?))
+            }
             ExprKind::Return(_) | ExprKind::Break { .. } | ExprKind::Continue { .. } =>
                 Some(TypeRef::Concrete(crate::types::TypeId::NEVER)),
             ExprKind::Block(block) | ExprKind::Unsafe(block) =>
@@ -203,6 +225,18 @@ impl VbcCodegen {
                 // supply its ownership or replace missing archive evidence.
                 self.projected_field_declaration(nested(receiver, None)?, &field.name)
             }
+            ExprKind::TupleIndex { expr: receiver, index } => {
+                let mut owner = nested(receiver, None)?;
+                for _ in depth..64 {
+                    owner = self.expand_declared_alias(owner)?;
+                    match owner {
+                        TypeRef::Reference { inner, .. } => owner = *inner,
+                        TypeRef::Tuple(parts) => return parts.get(*index as usize).cloned(),
+                        _ => return None,
+                    }
+                }
+                None
+            }
             ExprKind::Index { expr: base, index } => self.indexed_element_declaration(base, index),
             ExprKind::Unary { op: UnOp::Deref, expr: inner } => {
                 let input = emitted.and_then(|(reg, start, end)| {
@@ -278,7 +312,8 @@ impl VbcCodegen {
     }
 
     /// Recognize only an uninterrupted result flow within the captured interval.
-    /// Every other instruction (including branches and unknown writes) ends proof.
+    /// Retiring a different operand preserves this register. Branches and
+    /// unknown writes still end the proof instead of guessing a prior producer.
     fn copy_result_producer(&self, mut reg: Reg, start: usize, end: usize) -> Maybe<(usize, &Instruction)> {
         let instructions = self.ctx.instructions.get(start..end)?;
         if self.ctx.has_label_in_instruction_range(start, end) { return None; }
@@ -286,8 +321,14 @@ impl VbcCodegen {
             match instruction {
                 Instruction::Mov { dst, src } if *dst == reg => reg = *src,
                 Instruction::ChkRef { ref_reg } if *ref_reg == reg => {},
+                Instruction::DropTyped { src, .. } | Instruction::DropRef { src }
+                    if *src != reg => {},
+                _ if instruction.intrinsic_result_type().is_some_and(|(dst, _)| dst == reg) =>
+                    return Some((start + offset, instruction)),
                 Instruction::Call { dst, .. } | Instruction::CallG { dst, .. }
-                    | Instruction::Deref { dst, .. } if *dst == reg => return Some((start + offset, instruction)),
+                    | Instruction::Deref { dst, .. }
+                    | Instruction::MakeVariantTyped { dst, .. }
+                    if *dst == reg => return Some((start + offset, instruction)),
                 _ => return None,
             }
         }

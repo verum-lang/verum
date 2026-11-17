@@ -1,7 +1,7 @@
 //! Source signatures retain actual language declarations without borrowing caller aliases.
 use verum_ast::{
     FileId, ItemKind,
-    decl::{FunctionBody, ImplItemKind, ImplKind},
+    decl::{ImplItemKind, ImplKind},
     ty::TypeKind,
 };
 use verum_common::{List, Text};
@@ -472,21 +472,6 @@ fn actual_text_constructor_source() -> (&'static str, &'static str, &'static str
             matches!(&item.kind, ImplItemKind::Function(function) if function.name.as_str() == "new")
         })
     }).expect("actual Text.new constructor");
-    let ImplItemKind::Function(function) = &constructor.kind else {
-        unreachable!()
-    };
-    let Some(FunctionBody::Block(body)) = &function.body else {
-        panic!("Text.new block");
-    };
-    assert!(
-        body.stmts.is_empty(),
-        "Text.new must remain a direct record constructor for this gate"
-    );
-    let expression = body.expr.as_ref().expect("Text.new returned value");
-    assert!(
-        matches!(&expression.kind, verum_ast::ExprKind::Record { .. }),
-        "Text.new record value"
-    );
     // Top-level type spans start at `type`, after attributes and visibility.
     // Keep the original prefix, then verify the parsed authority survived.
     let complete_source = |span: verum_ast::Span, attributes: &List<verum_ast::decl::Attribute>| {
@@ -554,7 +539,10 @@ fn actual_text_constructor_source() -> (&'static str, &'static str, &'static str
     (
         declaration_source,
         constructor_source,
-        &source[expression.span.start as usize..expression.span.end as usize],
+        // Record admission is separate from runtime storage construction.
+        // Retain the same field/shape probes even when Text.new uses an owning
+        // intrinsic; these checker-only tests do not claim executable storage.
+        "Text { ptr: null_ptr(), len: 0, cap: 0 }",
     )
 }
 
@@ -562,20 +550,32 @@ fn actual_text_constructor_source() -> (&'static str, &'static str, &'static str
 fn canonical_text_record_construction_checks_actual_new() {
     let (declaration, constructor, _) = actual_text_constructor_source();
     let source = format!(
-        "@no_implicit_prelude module core.text.text; {declaration} implement Text {{ {constructor} }}"
+        "@no_implicit_prelude module core.text.text;
+         mount core.intrinsics.runtime.text.text_adopt_owned;
+         {declaration} implement Text {{ {constructor} }}"
     );
+    let intrinsic_source = include_str!("../../../core/intrinsics/runtime/text.vr");
+    let intrinsic_ast = Parser::new(intrinsic_source).parse_module().unwrap();
+    let intrinsic = intrinsic_ast.items.iter().find(|item|
+        matches!(&item.kind, ItemKind::Function(function) if function.name.as_str() == "text_adopt_owned"))
+        .expect("actual owning intrinsic declaration");
+    let start = intrinsic.attributes.iter().map(|attribute| attribute.span.start)
+        .chain([intrinsic.span.start]).min().unwrap() as usize;
+    let start = intrinsic_source[..start].rfind('\n').map_or(0, |index| index + 1);
+    let intrinsic = format!("@no_implicit_prelude module core.intrinsics.runtime.text; {}",
+        &intrinsic_source[start..intrinsic.span.end as usize]);
     let mut checker = checker();
     let errors = check(
         &mut checker,
         "core.text.text",
-        &[("core.text.text", &source)],
+        &[("core.text.text", &source), ("core.intrinsics.runtime.text", &intrinsic)],
     );
     assert!(errors.is_empty(), "actual Text.new: {errors:?}");
     assert_eq!(checker.resolved_type("Text"), Some(&Type::Text));
 }
 
 #[test]
-fn canonical_text_record_construction_synthesizes_actual_new_value() {
+fn canonical_text_record_construction_synthesizes_declared_fields() {
     let (declaration, _, expression) = actual_text_constructor_source();
     let source = format!(
         "@no_implicit_prelude module core.text.text; {declaration}
@@ -586,7 +586,7 @@ fn canonical_text_record_construction_synthesizes_actual_new_value() {
         "core.text.text",
         &[("core.text.text", &source)],
     );
-    assert!(errors.is_empty(), "inferred Text.new value: {errors:?}");
+    assert!(errors.is_empty(), "inferred Text record value: {errors:?}");
 }
 
 #[test]

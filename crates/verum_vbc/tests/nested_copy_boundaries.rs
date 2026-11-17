@@ -52,6 +52,36 @@ fn a_nested_sum_payload_survives_destruction_of_its_original() {
 }
 
 #[test]
+fn text_payload_copies_survive_the_original_parameter_cleanup() {
+    for forward in [
+        "Choice.Value(text)",
+        "{ let saved = text; Choice.Value(saved) }",
+        "{ let record = Message { payload: text }; Choice.Value(record.payload) }",
+        "Choice.Value(identity(text))",
+    ] {
+        run(&format!(r#"
+            type Message is {{ payload: Text }};
+            type Choice is Empty | Value(Text);
+            fn identity(value: Text) -> Text {{ value }}
+            fn forward(value: Choice) -> Choice {{
+                match value {{ Choice.Value(text) => {forward}, _ => Choice.Empty }}
+            }}
+            fn probe() -> Int {{
+                let original = Choice.Value("independent owned payload");
+                let result = forward(original);
+                let retained = match original {{
+                    Choice.Value(text) => text == "independent owned payload", _ => false
+                }};
+                match result {{
+                    Choice.Value(text) => if retained && text == "independent owned payload" {{73}} else {{0}},
+                    _ => 0,
+                }}
+            }}
+        "#));
+    }
+}
+
+#[test]
 fn assignment_preserves_nested_ownership() {
     run(r#"
         type Leaf is { value: Int };
