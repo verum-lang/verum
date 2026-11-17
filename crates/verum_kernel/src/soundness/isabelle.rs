@@ -67,6 +67,7 @@ impl SoundnessBackend for IsabelleBackend {
          datatype CoreTerm =\n  \
              Var string\n  \
            | Universe nat\n  \
+           | PropSort\n  \
            | Pi string CoreTerm CoreTerm\n  \
            | Lam string CoreTerm CoreTerm\n  \
            | App CoreTerm CoreTerm\n  \
@@ -141,6 +142,8 @@ impl SoundnessBackend for IsabelleBackend {
              consts side_conditions_hold :: \"bool\"\n\n",
         );
 
+        out.push_str(REFINEMENT_DEPTH_ISABELLE);
+        out.push_str("\n");
         out.push_str(iou_axioms_isabelle());
         out.push_str("\n\n");
         out.push_str(TYPING_INDUCTIVE_ISA);
@@ -339,6 +342,42 @@ pub(crate) fn iou_axioms_isabelle() -> &'static str {
 // directly), so this is a structural simplification that doesn't
 // remove any used capability.
 
+const REFINEMENT_DEPTH_ISABELLE: &str = r#"(* Finite-universe M-depth equations; modal depth and Rust correspondence are separate. *)
+fun m_depth :: "CoreTerm \<Rightarrow> nat" where
+  "m_depth (Var name) = 0"
+| "m_depth (Universe level) = level"
+| "m_depth PropSort = 0"
+| "m_depth (Pi binder a b) = (max (m_depth a) (m_depth b))"
+| "m_depth (Lam binder a b) = (max (m_depth a) (m_depth b))"
+| "m_depth (App a b) = (max (m_depth a) (m_depth b))"
+| "m_depth (Sigma binder a b) = (max (m_depth a) (m_depth b))"
+| "m_depth (Pair a b) = (max (m_depth a) (m_depth b))"
+| "m_depth (Fst a) = (m_depth a)"
+| "m_depth (Snd a) = (m_depth a)"
+| "m_depth (PathTy a b c) = (max (max (m_depth a) (m_depth b)) (m_depth c))"
+| "m_depth (PathOver a b c d) = (max (max (max (m_depth a) (m_depth b)) (m_depth c)) (m_depth d))"
+| "m_depth (Refl a) = (m_depth a)"
+| "m_depth (HComp a b c) = (max (max (m_depth a) (m_depth b)) (m_depth c))"
+| "m_depth (Transport a b) = (max (m_depth a) (m_depth b))"
+| "m_depth (Glue a b c d) = (max (max (max (m_depth a) (m_depth b)) (m_depth c)) (m_depth d))"
+| "m_depth (Refine a binder b) = (max (m_depth a) (m_depth b))"
+| "m_depth (Quotient a b) = (max (m_depth a) (m_depth b))"
+| "m_depth (QuotIntro a b c) = (max (max (m_depth a) (m_depth b)) (m_depth c))"
+| "m_depth (QuotElim a b c d) = (max (max (max (m_depth a) (m_depth b)) (m_depth c)) (m_depth d))"
+| "m_depth (InductiveT name args) = (1 + (fold max (map m_depth args) 0))"
+| "m_depth (Elim a b args) = (max (max (m_depth a) (m_depth b)) (fold max (map m_depth args) 0))"
+| "m_depth (SmtProof name) = 0"
+| "m_depth (AxiomT name a framework) = (m_depth a)"
+| "m_depth (EpsilonOf a) = (m_depth a)"
+| "m_depth (AlphaOf a) = (m_depth a)"
+| "m_depth (ModalBox a) = (m_depth a)"
+| "m_depth (ModalDiamond a) = (m_depth a)"
+| "m_depth (ModalBigAnd args) = (fold max (map m_depth args) 0)"
+| "m_depth (Shape a) = (m_depth a)"
+| "m_depth (Flat a) = (m_depth a)"
+| "m_depth (Sharp a) = (m_depth a)"
+"#;
+
 const TYPING_INDUCTIVE_ISA: &str = "\
 (* The reflective typing relation — structural-fragment introduction      *)\n\
 (* rules only (9 of 38).  See `axiomatization` block below for the        *)\n\
@@ -351,6 +390,7 @@ inductive Typing :: \"Ctx \\<Rightarrow> CoreTerm \\<Rightarrow> CoreTerm \\<Rig
 where\n\
   T_var:    \"(x, T) \\<in> set \\<Gamma> \\<Longrightarrow> \\<Gamma> \\<turnstile> Var x : T\"\n\
 | T_univ:   \"\\<Gamma> \\<turnstile> Universe i : Universe (Suc i)\"\n\
+| T_prop:   \"\\<Gamma> \\<turnstile> PropSort : Universe 0\"\n\
 | T_pi:     \"\\<lbrakk>\\<Gamma> \\<turnstile> A : Universe i; ((x, A) # \\<Gamma>) \\<turnstile> B : Universe i\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> Pi x A B : Universe i\"\n\
 | T_lam:    \"\\<lbrakk>\\<Gamma> \\<turnstile> A : Universe i; ((x, A) # \\<Gamma>) \\<turnstile> b : B\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> Lam x A b : Pi x A B\"\n\
 | T_app:    \"\\<lbrakk>\\<Gamma> \\<turnstile> f : Pi x A B; \\<Gamma> \\<turnstile> a : A\\<rbrakk> \\<Longrightarrow> \\<Gamma> \\<turnstile> App f a : subst x a B\"\n\
@@ -737,24 +777,28 @@ fn rule_signature_isabelle(rule_name: &str) -> Option<String> {
               using assms by (rule T_refine_erase)",
         ),
         "K_Refine" => Some(
-            "lemma K_Refine_sound:\n  \
-              assumes \"\\<Gamma> \\<turnstile> base : Universe i\"\n  \
-              and \"\\<Gamma> \\<turnstile> predicate : Pi x base (Universe 0)\"\n  \
-              shows \"\\<Gamma> \\<turnstile> Refine base x predicate : Universe i\"\n  \
-              using assms by (rule T_refine)",
+            r#"lemma K_Refine_sound:
+assumes "\<Gamma> \<turnstile> base : Universe i"
+    and "((x, base) # \<Gamma>) \<turnstile> predicate : PropSort"
+    and "m_depth predicate \<le> m_depth base"
+shows "\<Gamma> \<turnstile> Refine base x predicate : Universe i"
+using assms by (rule T_refine)"#,
         ),
         "K_Refine_Omega" => Some(
-            "lemma K_Refine_Omega_sound:\n  \
-              assumes \"\\<Gamma> \\<turnstile> base : Universe i\"\n  \
-              and \"\\<Gamma> \\<turnstile> predicate : Pi x base (Universe 0)\"\n  \
-              shows \"\\<Gamma> \\<turnstile> Refine base x predicate : Universe i\"\n  \
-              using assms by (rule T_refine_omega)",
+            r#"lemma K_Refine_Omega_sound:
+assumes "\<Gamma> \<turnstile> base : Universe i"
+    and "((x, base) # \<Gamma>) \<turnstile> predicate : PropSort"
+    and "m_depth predicate \<le> m_depth base"
+shows "\<Gamma> \<turnstile> Refine base x predicate : Universe i"
+using assms by (rule T_refine_omega)"#,
         ),
         "K_Refine_Intro" => Some(
-            "lemma K_Refine_Intro_sound:\n  \
-              assumes \"\\<Gamma> \\<turnstile> a : base\" and \"\\<Gamma> \\<turnstile> base : Universe i\" and \"\\<Gamma> \\<turnstile> predicate : Pi x base (Universe 0)\"\n  \
-              shows \"\\<Gamma> \\<turnstile> a : Refine base x predicate\"\n  \
-              using assms by (rule T_refine_intro)",
+            r#"lemma K_Refine_Intro_sound:
+assumes "\<Gamma> \<turnstile> Refine base x predicate : Universe i"
+    and "\<Gamma> \<turnstile> a : base"
+    and "\<Gamma> \<turnstile> witness : subst x a predicate"
+shows "\<Gamma> \<turnstile> a : Refine base x predicate"
+using assms by (rule T_refine_intro)"#,
         ),
         // Quotient (3)
         "K_Quot_Form" => Some(

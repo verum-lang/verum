@@ -24,6 +24,7 @@ Open Scope string_scope.
 Inductive CoreTerm : Type :=
   | Var (name : string)
   | Universe (level : nat)
+  | PropSort
   | Pi (binder : string) (domain codomain : CoreTerm)
   | Lam (binder : string) (domain body : CoreTerm)
   | App (head arg : CoreTerm)
@@ -116,6 +117,42 @@ forall term, In term terms -> forall value, subst name value term = term.
 
 Parameter side_conditions_hold : Prop.
 
+(* Finite-universe M-depth equations; modal depth and Rust correspondence are separate. *)
+Fixpoint m_depth (term : CoreTerm) : nat := match term with
+  | Var name => 0
+  | Universe level => level
+  | PropSort => 0
+  | Pi binder a b => (Nat.max (m_depth a) (m_depth b))
+  | Lam binder a b => (Nat.max (m_depth a) (m_depth b))
+  | App a b => (Nat.max (m_depth a) (m_depth b))
+  | Sigma binder a b => (Nat.max (m_depth a) (m_depth b))
+  | Pair a b => (Nat.max (m_depth a) (m_depth b))
+  | Fst a => (m_depth a)
+  | Snd a => (m_depth a)
+  | PathTy a b c => (Nat.max (Nat.max (m_depth a) (m_depth b)) (m_depth c))
+  | PathOver a b c d => (Nat.max (Nat.max (Nat.max (m_depth a) (m_depth b)) (m_depth c)) (m_depth d))
+  | Refl a => (m_depth a)
+  | HComp a b c => (Nat.max (Nat.max (m_depth a) (m_depth b)) (m_depth c))
+  | Transport a b => (Nat.max (m_depth a) (m_depth b))
+  | Glue a b c d => (Nat.max (Nat.max (Nat.max (m_depth a) (m_depth b)) (m_depth c)) (m_depth d))
+  | Refine a binder b => (Nat.max (m_depth a) (m_depth b))
+  | Quotient a b => (Nat.max (m_depth a) (m_depth b))
+  | QuotIntro a b c => (Nat.max (Nat.max (m_depth a) (m_depth b)) (m_depth c))
+  | QuotElim a b c d => (Nat.max (Nat.max (Nat.max (m_depth a) (m_depth b)) (m_depth c)) (m_depth d))
+  | Inductive_ name args => (1 + (fold_right Nat.max 0 (map m_depth args)))
+  | Elim a b args => (Nat.max (Nat.max (m_depth a) (m_depth b)) (fold_right Nat.max 0 (map m_depth args)))
+  | SmtProof name => 0
+  | Axiom_ name a framework => (m_depth a)
+  | EpsilonOf a => (m_depth a)
+  | AlphaOf a => (m_depth a)
+  | ModalBox a => (m_depth a)
+  | ModalDiamond a => (m_depth a)
+  | ModalBigAnd args => (fold_right Nat.max 0 (map m_depth args))
+  | Shape a => (m_depth a)
+  | Flat a => (m_depth a)
+  | Sharp a => (m_depth a)
+end.
+
 (* ====== Per-rule IOU axioms (0 total) ====== *)
 
 
@@ -130,6 +167,7 @@ Inductive Typing : Ctx -> CoreTerm -> CoreTerm -> Prop :=
   | T_univ :
       forall (Gamma : Ctx) (i : nat),
         Typing Gamma (Universe i) (Universe (S i))
+  | T_prop : forall (Gamma : Ctx), Typing Gamma PropSort (Universe 0)
   | T_pi :
       forall (Gamma : Ctx) (x : string) (A B : CoreTerm) (i : nat),
         Typing Gamma A (Universe i) ->
@@ -203,20 +241,22 @@ Typing Gamma (Transport path value) target
   | T_refine :
       forall (Gamma : Ctx) (base predicate : CoreTerm) (x : string) (i : nat),
         Typing Gamma base (Universe i) ->
-        Typing Gamma predicate (Pi x base (Universe 0)) ->
+        Typing ((x, base) :: Gamma) predicate PropSort ->
+        m_depth predicate <= m_depth base ->
         Typing Gamma (Refine base x predicate) (Universe i)
   | T_refine_omega :
       forall (Gamma : Ctx) (base predicate : CoreTerm) (x : string) (i : nat),
         Typing Gamma base (Universe i) ->
-        Typing Gamma predicate (Pi x base (Universe 0)) ->
+        Typing ((x, base) :: Gamma) predicate PropSort ->
+        m_depth predicate <= m_depth base ->
         Typing Gamma (Refine base x predicate) (Universe i)
   | T_refine_intro :
-      forall (Gamma : Ctx) (a base predicate : CoreTerm) (x : string) (i : nat),
-        Typing Gamma a base ->
-        Typing Gamma base (Universe i) ->
-        Typing Gamma predicate (Pi x base (Universe 0)) ->
-        Typing Gamma a (Refine base x predicate)
-  (* ===== Quotient (3) ===== *)
+forall (Gamma : Ctx) (a base predicate witness : CoreTerm) (x : string) (i : nat),
+Typing Gamma (Refine base x predicate) (Universe i) ->
+Typing Gamma a base ->
+Typing Gamma witness (subst x a predicate) ->
+Typing Gamma a (Refine base x predicate)
+(* ===== Quotient (3) ===== *)
   | T_quot_form :
 forall (Gamma : Ctx) (base equiv : CoreTerm) (i j : nat),
 QuotientFresh "x" [base] ->
@@ -439,28 +479,30 @@ Lemma K_Glue_sound :
     Typing Gamma (Glue carrier phi fiber equiv) (Universe i).
 Proof. exact T_glue. Qed.
 
-(* K_Refine — category Refinement — premise arity 2 — side-condition: false *)
+(* K_Refine — category Refinement — premise arity 3 — side-condition: true *)
 Lemma K_Refine_sound :
   forall (Gamma : Ctx) (base predicate : CoreTerm) (x : string) (i : nat),
     Typing Gamma base (Universe i) ->
-    Typing Gamma predicate (Pi x base (Universe 0)) ->
+    Typing ((x, base) :: Gamma) predicate PropSort ->
+        m_depth predicate <= m_depth base ->
     Typing Gamma (Refine base x predicate) (Universe i).
 Proof. exact T_refine. Qed.
 
-(* K_Refine_Omega — category Refinement — premise arity 2 — side-condition: true *)
+(* K_Refine_Omega — category Refinement — premise arity 3 — side-condition: true *)
 Lemma K_Refine_Omega_sound :
   forall (Gamma : Ctx) (base predicate : CoreTerm) (x : string) (i : nat),
     Typing Gamma base (Universe i) ->
-    Typing Gamma predicate (Pi x base (Universe 0)) ->
+    Typing ((x, base) :: Gamma) predicate PropSort ->
+        m_depth predicate <= m_depth base ->
     Typing Gamma (Refine base x predicate) (Universe i).
 Proof. exact T_refine_omega. Qed.
 
 (* K_Refine_Intro — category Refinement — premise arity 3 — side-condition: false *)
 Lemma K_Refine_Intro_sound :
-  forall (Gamma : Ctx) (a base predicate : CoreTerm) (x : string) (i : nat),
+  forall (Gamma : Ctx) (a base predicate witness : CoreTerm) (x : string) (i : nat),
+    Typing Gamma (Refine base x predicate) (Universe i) ->
     Typing Gamma a base ->
-    Typing Gamma base (Universe i) ->
-    Typing Gamma predicate (Pi x base (Universe 0)) ->
+    Typing Gamma witness (subst x a predicate) ->
     Typing Gamma a (Refine base x predicate).
 Proof. exact T_refine_intro. Qed.
 
@@ -637,9 +679,9 @@ Definition Soundness (rule : KernelRule) : Prop :=
   | K_HComp => forall (Gamma : Ctx) (phi walls base T : CoreTerm) (i : nat), Typing Gamma T (Universe i) -> Typing Gamma base T -> Typing Gamma (HComp phi walls base) T
   | K_Transp => forall (Gamma : Ctx) (path value source target : CoreTerm) (i : nat),     Typing Gamma source (Universe i) ->     Typing Gamma target (Universe i) ->     Typing Gamma path (PathTy (Universe i) source target) ->     Typing Gamma value source ->     Typing Gamma (Transport path value) target
   | K_Glue => forall (Gamma : Ctx) (carrier phi fiber equiv : CoreTerm) (i : nat), Typing Gamma carrier (Universe i) -> Typing Gamma (Glue carrier phi fiber equiv) (Universe i)
-  | K_Refine => forall (Gamma : Ctx) (base predicate : CoreTerm) (x : string) (i : nat), Typing Gamma base (Universe i) -> Typing Gamma predicate (Pi x base (Universe 0)) -> Typing Gamma (Refine base x predicate) (Universe i)
-  | K_Refine_Omega => forall (Gamma : Ctx) (base predicate : CoreTerm) (x : string) (i : nat), Typing Gamma base (Universe i) -> Typing Gamma predicate (Pi x base (Universe 0)) -> Typing Gamma (Refine base x predicate) (Universe i)
-  | K_Refine_Intro => forall (Gamma : Ctx) (a base predicate : CoreTerm) (x : string) (i : nat), Typing Gamma a base -> Typing Gamma base (Universe i) -> Typing Gamma predicate (Pi x base (Universe 0)) -> Typing Gamma a (Refine base x predicate)
+  | K_Refine => forall (Gamma : Ctx) (base predicate : CoreTerm) (x : string) (i : nat), Typing Gamma base (Universe i) -> Typing ((x, base) :: Gamma) predicate PropSort ->     m_depth predicate <= m_depth base -> Typing Gamma (Refine base x predicate) (Universe i)
+  | K_Refine_Omega => forall (Gamma : Ctx) (base predicate : CoreTerm) (x : string) (i : nat), Typing Gamma base (Universe i) -> Typing ((x, base) :: Gamma) predicate PropSort ->     m_depth predicate <= m_depth base -> Typing Gamma (Refine base x predicate) (Universe i)
+  | K_Refine_Intro => forall (Gamma : Ctx) (a base predicate witness : CoreTerm) (x : string) (i : nat), Typing Gamma (Refine base x predicate) (Universe i) -> Typing Gamma a base -> Typing Gamma witness (subst x a predicate) -> Typing Gamma a (Refine base x predicate)
   | K_Refine_Erase => forall (Gamma : Ctx) (a base : CoreTerm) (x : string) (predicate : CoreTerm), Typing Gamma a (Refine base x predicate) -> Typing Gamma a base
   | K_Quot_Form => forall (Gamma : Ctx) (base equiv : CoreTerm) (i j : nat),     QuotientFresh "x" [base] ->     Typing Gamma base (Universe i) ->     Typing Gamma equiv (Pi "x" base (Pi "y" base (Universe j))) ->     Typing Gamma (Quotient base equiv) (Universe (Nat.max i j))
   | K_Quot_Intro => forall (Gamma : Ctx) (value base equiv : CoreTerm) (i : nat),     Typing Gamma (Quotient base equiv) (Universe i) ->     Typing Gamma value base ->     Typing Gamma (QuotIntro value base equiv) (Quotient base equiv)

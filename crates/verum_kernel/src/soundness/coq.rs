@@ -64,6 +64,7 @@ impl SoundnessBackend for CoqBackend {
          Inductive CoreTerm : Type :=\n  \
            | Var (name : string)\n  \
            | Universe (level : nat)\n  \
+           | PropSort\n  \
            | Pi (binder : string) (domain codomain : CoreTerm)\n  \
            | Lam (binder : string) (domain body : CoreTerm)\n  \
            | App (head arg : CoreTerm)\n  \
@@ -130,6 +131,8 @@ impl SoundnessBackend for CoqBackend {
              Parameter side_conditions_hold : Prop.\n\n",
         );
 
+        out.push_str(REFINEMENT_DEPTH_COQ);
+        out.push_str("\n");
         out.push_str(iou_axioms_coq());
         out.push_str("\n\n");
         out.push_str(TYPING_INDUCTIVE_COQ);
@@ -279,9 +282,9 @@ impl SoundnessBackend for CoqBackend {
 //   * K_Elim            — same template, with per-constructor case-typing
 //                         remaining the kernel's input contract.
 //   * K_Universe_Ascent — collapses onto T_univ for u32-bounded universes.
-//   * K_Refine          — predicate typed at Pi x base (Universe 0).
-//   * K_Refine_Omega    — same shape; finite-universe bound makes the
-//                         ordinal-modal-depth-bound vacuous.
+//   * K_Refine          — open proposition and finite M-depth premises.
+//   * K_Refine_Omega    — ordinary formation only; ordinal modal-depth
+//                         correctness is not established by this schema.
 // ============================================================================
 
 /// The IOU axiom block as a `&'static str`, generated once on first
@@ -301,6 +304,43 @@ pub(crate) fn iou_axioms_coq() -> &'static str {
 // The Typing inductive — 38 constructors covering every kernel rule.
 // ============================================================================
 
+const REFINEMENT_DEPTH_COQ: &str = r#"(* Finite-universe M-depth equations; modal depth and Rust correspondence are separate. *)
+Fixpoint m_depth (term : CoreTerm) : nat := match term with
+  | Var name => 0
+  | Universe level => level
+  | PropSort => 0
+  | Pi binder a b => (Nat.max (m_depth a) (m_depth b))
+  | Lam binder a b => (Nat.max (m_depth a) (m_depth b))
+  | App a b => (Nat.max (m_depth a) (m_depth b))
+  | Sigma binder a b => (Nat.max (m_depth a) (m_depth b))
+  | Pair a b => (Nat.max (m_depth a) (m_depth b))
+  | Fst a => (m_depth a)
+  | Snd a => (m_depth a)
+  | PathTy a b c => (Nat.max (Nat.max (m_depth a) (m_depth b)) (m_depth c))
+  | PathOver a b c d => (Nat.max (Nat.max (Nat.max (m_depth a) (m_depth b)) (m_depth c)) (m_depth d))
+  | Refl a => (m_depth a)
+  | HComp a b c => (Nat.max (Nat.max (m_depth a) (m_depth b)) (m_depth c))
+  | Transport a b => (Nat.max (m_depth a) (m_depth b))
+  | Glue a b c d => (Nat.max (Nat.max (Nat.max (m_depth a) (m_depth b)) (m_depth c)) (m_depth d))
+  | Refine a binder b => (Nat.max (m_depth a) (m_depth b))
+  | Quotient a b => (Nat.max (m_depth a) (m_depth b))
+  | QuotIntro a b c => (Nat.max (Nat.max (m_depth a) (m_depth b)) (m_depth c))
+  | QuotElim a b c d => (Nat.max (Nat.max (Nat.max (m_depth a) (m_depth b)) (m_depth c)) (m_depth d))
+  | Inductive_ name args => (1 + (fold_right Nat.max 0 (map m_depth args)))
+  | Elim a b args => (Nat.max (Nat.max (m_depth a) (m_depth b)) (fold_right Nat.max 0 (map m_depth args)))
+  | SmtProof name => 0
+  | Axiom_ name a framework => (m_depth a)
+  | EpsilonOf a => (m_depth a)
+  | AlphaOf a => (m_depth a)
+  | ModalBox a => (m_depth a)
+  | ModalDiamond a => (m_depth a)
+  | ModalBigAnd args => (fold_right Nat.max 0 (map m_depth args))
+  | Shape a => (m_depth a)
+  | Flat a => (m_depth a)
+  | Sharp a => (m_depth a)
+end.
+"#;
+
 const TYPING_INDUCTIVE_COQ: &str = "\
 (* The reflective typing relation. 38 constructors. *)\n\
 Reserved Notation \"Gamma '|-' t ':' T\" (at level 90, t at next level).\n\
@@ -313,6 +353,7 @@ Inductive Typing : Ctx -> CoreTerm -> CoreTerm -> Prop :=\n  \
   | T_univ :\n      \
       forall (Gamma : Ctx) (i : nat),\n        \
         Typing Gamma (Universe i) (Universe (S i))\n  \
+  | T_prop : forall (Gamma : Ctx), Typing Gamma PropSort (Universe 0)\n  \
   | T_pi :\n      \
       forall (Gamma : Ctx) (x : string) (A B : CoreTerm) (i : nat),\n        \
         Typing Gamma A (Universe i) ->\n        \
@@ -386,19 +427,19 @@ Inductive Typing : Ctx -> CoreTerm -> CoreTerm -> Prop :=\n  \
   | T_refine :\n      \
       forall (Gamma : Ctx) (base predicate : CoreTerm) (x : string) (i : nat),\n        \
         Typing Gamma base (Universe i) ->\n        \
-        Typing Gamma predicate (Pi x base (Universe 0)) ->\n        \
+        Typing ((x, base) :: Gamma) predicate PropSort ->\n        m_depth predicate <= m_depth base ->\n        \
         Typing Gamma (Refine base x predicate) (Universe i)\n  \
   | T_refine_omega :\n      \
       forall (Gamma : Ctx) (base predicate : CoreTerm) (x : string) (i : nat),\n        \
         Typing Gamma base (Universe i) ->\n        \
-        Typing Gamma predicate (Pi x base (Universe 0)) ->\n        \
+        Typing ((x, base) :: Gamma) predicate PropSort ->\n        m_depth predicate <= m_depth base ->\n        \
         Typing Gamma (Refine base x predicate) (Universe i)\n  \
-  | T_refine_intro :\n      \
-      forall (Gamma : Ctx) (a base predicate : CoreTerm) (x : string) (i : nat),\n        \
-        Typing Gamma a base ->\n        \
-        Typing Gamma base (Universe i) ->\n        \
-        Typing Gamma predicate (Pi x base (Universe 0)) ->\n        \
-        Typing Gamma a (Refine base x predicate)\n  \
+  | T_refine_intro :\n\
+    forall (Gamma : Ctx) (a base predicate witness : CoreTerm) (x : string) (i : nat),\n\
+      Typing Gamma (Refine base x predicate) (Universe i) ->\n\
+      Typing Gamma a base ->\n\
+      Typing Gamma witness (subst x a predicate) ->\n\
+      Typing Gamma a (Refine base x predicate)\n\
   (* ===== Quotient (3) ===== *)\n  \
   | T_quot_form :\n\
       forall (Gamma : Ctx) (base equiv : CoreTerm) (i j : nat),\n\
@@ -679,7 +720,7 @@ Proof. exact T_transp. Qed."#,
             "Lemma K_Refine_sound :\n  \
               forall (Gamma : Ctx) (base predicate : CoreTerm) (x : string) (i : nat),\n    \
                 Typing Gamma base (Universe i) ->\n    \
-                Typing Gamma predicate (Pi x base (Universe 0)) ->\n    \
+                Typing ((x, base) :: Gamma) predicate PropSort ->\n        m_depth predicate <= m_depth base ->\n    \
                 Typing Gamma (Refine base x predicate) (Universe i).\n\
               Proof. exact T_refine. Qed.",
         ),
@@ -687,18 +728,18 @@ Proof. exact T_transp. Qed."#,
             "Lemma K_Refine_Omega_sound :\n  \
               forall (Gamma : Ctx) (base predicate : CoreTerm) (x : string) (i : nat),\n    \
                 Typing Gamma base (Universe i) ->\n    \
-                Typing Gamma predicate (Pi x base (Universe 0)) ->\n    \
+                Typing ((x, base) :: Gamma) predicate PropSort ->\n        m_depth predicate <= m_depth base ->\n    \
                 Typing Gamma (Refine base x predicate) (Universe i).\n\
               Proof. exact T_refine_omega. Qed.",
         ),
         "K_Refine_Intro" => Some(
-            "Lemma K_Refine_Intro_sound :\n  \
-              forall (Gamma : Ctx) (a base predicate : CoreTerm) (x : string) (i : nat),\n    \
-                Typing Gamma a base ->\n    \
-                Typing Gamma base (Universe i) ->\n    \
-                Typing Gamma predicate (Pi x base (Universe 0)) ->\n    \
-                Typing Gamma a (Refine base x predicate).\n\
-              Proof. exact T_refine_intro. Qed.",
+            r#"Lemma K_Refine_Intro_sound :
+  forall (Gamma : Ctx) (a base predicate witness : CoreTerm) (x : string) (i : nat),
+    Typing Gamma (Refine base x predicate) (Universe i) ->
+    Typing Gamma a base ->
+    Typing Gamma witness (subst x a predicate) ->
+    Typing Gamma a (Refine base x predicate).
+Proof. exact T_refine_intro. Qed."#,
         ),
         // ===== Quotient (3) =====
         "K_Quot_Form" => Some(

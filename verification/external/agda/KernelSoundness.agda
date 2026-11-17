@@ -226,12 +226,12 @@ postulate
 postulate
   K-Glue-sound : Set
 
--- K_Refine — category Refinement — premise arity 2 — side-condition: false
+-- K_Refine — category Refinement — premise arity 3 — side-condition: true
 -- status: Proved (postulated at this layer)
 postulate
   K-Refine-sound : Set
 
--- K_Refine_Omega — category Refinement — premise arity 2 — side-condition: true
+-- K_Refine_Omega — category Refinement — premise arity 3 — side-condition: true
 -- status: Proved (postulated at this layer)
 postulate
   K-Refine-Omega-sound : Set

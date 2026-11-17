@@ -225,6 +225,7 @@ jobs:
 
       - name: Reference term laws and native certificate replay
         run: |
+          cargo test --locked -p verum_kernel --test k_refinement_export -- --include-ignored
           python3 -m unittest discover -s verification/certificates -p 'test_*.py'
           python3 -m unittest discover -s verification/external/lean -p test_reference_reduction.py
           (cd verification/external/lean && lake build \

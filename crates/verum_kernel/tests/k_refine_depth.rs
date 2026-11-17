@@ -22,7 +22,7 @@ fn tvar(name: &str) -> CoreTerm {
     CoreTerm::Var(Text::from(name))
 }
 
-fn ind(path: &str, args: Vec<CoreTerm>) -> CoreTerm {
+fn ind(path: &str, args: impl IntoIterator<Item = CoreTerm>) -> CoreTerm {
     CoreTerm::Inductive {
         path: Text::from(path),
         args: List::from_iter(args),
@@ -66,15 +66,15 @@ fn m_depth_of_concrete_universe_is_its_level() {
 #[test]
 fn m_depth_of_inductive_is_one_plus_args() {
     // Int: depth 1 (a named schema speaks about its zero-depth args).
-    let int_ty = ind("Int", vec![]);
+    let int_ty = ind("Int", []);
     assert_eq!(m_depth(&int_ty), 1);
 
     // List<Int>: depth 2 = 1 + dp(Int) = 1 + 1.
-    let list_int = ind("List", vec![int_ty.clone()]);
+    let list_int = ind("List", [int_ty.clone()]);
     assert_eq!(m_depth(&list_int), 2);
 
     // List<List<Int>>: depth 3.
-    let list_list_int = ind("List", vec![list_int]);
+    let list_list_int = ind("List", [list_int]);
     assert_eq!(m_depth(&list_list_int), 3);
 }
 
@@ -85,7 +85,7 @@ fn m_depth_of_axiom_is_same_as_its_type() {
     // a witness sits at the same M-stratum as its asserted type.
     // The "+1 for framework axioms" is reserved for the declaration-
     // time path (AxiomRegistry::register), not the invocation site.
-    let stmt = ind("Bool", vec![]);
+    let stmt = ind("Bool", []);
     let ax = axiom("yoneda", stmt);
     assert_eq!(m_depth(&ax), 1); // dp(Bool) = 1.
 }
@@ -95,7 +95,7 @@ fn m_depth_of_refine_is_max_of_components() {
     // {n : Int | n == n}: predicate depth 0 (variable comparison),
     // base depth 1 (Inductive("Int")) — max = 1.
     let t = refine(
-        ind("Int", vec![]),
+        ind("Int", []),
         "n",
         CoreTerm::App(Heap::new(tvar("n")), Heap::new(tvar("n"))),
     );
@@ -109,7 +109,7 @@ fn m_depth_of_refine_is_max_of_components() {
 #[test]
 fn k_refine_accepts_a_proposition_without_claiming_it_is_inhabited() {
     let ctx = Context::new().extend(Text::from("P"), prop());
-    let t = refine(ind("Int", vec![]), "n", tvar("P"));
+    let t = refine(ind("Int", []), "n", tvar("P"));
     assert_eq!(
         infer_fixture(&ctx, &t, &AxiomRegistry::new()).unwrap(),
         CoreTerm::Universe(UniverseLevel::Concrete(0))
@@ -130,10 +130,10 @@ fn pi(binder: &str, domain: CoreTerm, codomain: CoreTerm) -> CoreTerm {
 
 #[test]
 fn k_refine_checks_dependent_predicates_in_the_shadowing_binder_context() {
-    let int = ind("Int", vec![]);
+    let int = ind("Int", []);
     let ctx = Context::new()
         .extend(Text::from("P"), pi("item", int.clone(), prop()))
-        .extend(Text::from("n"), ind("Bool", vec![]));
+        .extend(Text::from("n"), ind("Bool", []));
     let predicate = CoreTerm::App(Heap::new(tvar("P")), Heap::new(tvar("n")));
     assert_eq!(
         infer_fixture(&ctx, &refine(int, "n", predicate), &AxiomRegistry::new()).unwrap(),
@@ -143,11 +143,11 @@ fn k_refine_checks_dependent_predicates_in_the_shadowing_binder_context() {
 
 #[test]
 fn k_refine_rejects_data_values_types_proofs_and_unapplied_predicates() {
-    let int = ind("Int", vec![]);
+    let int = ind("Int", []);
     let ctx = Context::new()
         .extend(Text::from("P"), prop())
         .extend(Text::from("proof"), tvar("P"))
-        .extend(Text::from("flag"), ind("Bool", vec![]))
+        .extend(Text::from("flag"), ind("Bool", []))
         .extend(Text::from("family"), pi("n", int.clone(), prop()));
     for predicate in [
         tvar("n"),
@@ -168,7 +168,7 @@ fn k_refine_rejects_data_values_types_proofs_and_unapplied_predicates() {
             "non-proposition {predicate:?}: {result:?}"
         );
     }
-    let list = ind("List", vec![int]);
+    let list = ind("List", [int]);
     assert!(matches!(
         infer_fixture(&ctx, &refine(list, "l", tvar("l")), &AxiomRegistry::new()),
         Err(KernelError::InvalidRefinementPredicate { .. })
@@ -177,12 +177,12 @@ fn k_refine_rejects_data_values_types_proofs_and_unapplied_predicates() {
 
 #[test]
 fn k_refine_preserves_dependent_argument_and_unbound_variable_errors() {
-    let ctx = Context::new().extend(Text::from("P"), pi("b", ind("Bool", vec![]), prop()));
+    let ctx = Context::new().extend(Text::from("P"), pi("b", ind("Bool", []), prop()));
     let invalid = CoreTerm::App(Heap::new(tvar("P")), Heap::new(tvar("n")));
     assert!(matches!(
         infer_fixture(
             &ctx,
-            &refine(ind("Int", vec![]), "n", invalid),
+            &refine(ind("Int", []), "n", invalid),
             &AxiomRegistry::new()
         ),
         Err(KernelError::TypeMismatch { .. })
@@ -190,7 +190,7 @@ fn k_refine_preserves_dependent_argument_and_unbound_variable_errors() {
     assert!(matches!(
         infer_fixture(
             &ctx,
-            &refine(ind("Int", vec![]), "n", tvar("missing")),
+            &refine(ind("Int", []), "n", tvar("missing")),
             &AxiomRegistry::new()
         ),
         Err(KernelError::UnboundVariable(_))
@@ -205,13 +205,13 @@ fn k_refine_normalizes_predicate_sort_without_recognizing_type_names() {
             domain: Heap::new(CoreTerm::Universe(UniverseLevel::Concrete(0))),
             body: Heap::new(prop()),
         }),
-        Heap::new(ind("Unit", vec![])),
+        Heap::new(ind("Unit", [])),
     );
     let ctx = Context::new().extend(Text::from("P"), kind);
     assert!(
         infer_fixture(
             &ctx,
-            &refine(ind("Int", vec![]), "n", tvar("P")),
+            &refine(ind("Int", []), "n", tvar("P")),
             &AxiomRegistry::new()
         )
         .is_ok()
@@ -230,6 +230,59 @@ fn k_refine_preserves_the_carriers_universe() {
     }
 }
 
+#[test]
+fn k_refine_forms_closed_declared_propositions_but_not_their_witnesses() {
+    use verum_kernel::{
+        ConstructorSig, RegisteredInductive, infer_with_inductives, verify_with_inductives,
+    };
+    let mut declarations = declarations();
+    // No term axioms or assumed proposition variables: these are explicit
+    // inductive declarations, including an empty proposition.
+    for (name, constructors) in [
+        (
+            "Holds",
+            List::from_iter([ConstructorSig {
+                name: Text::from("Witness"),
+                arg_types: List::new(),
+            }]),
+        ),
+        ("Impossible", List::new()),
+    ] {
+        declarations
+            .register(
+                RegisteredInductive::new(Text::from(name), List::new(), constructors)
+                    .with_universe(UniverseLevel::Prop),
+            )
+            .unwrap();
+        let refined = refine(ind("Int", []), "n", ind(name, []));
+        let ctx = Context::new().extend(Text::from("value"), ind("Int", []));
+        let axioms = AxiomRegistry::new();
+        assert_eq!(
+            infer_with_inductives(&ctx, &refined, &axioms, &declarations).unwrap(),
+            CoreTerm::Universe(UniverseLevel::Concrete(0))
+        );
+        // Formation alone cannot cast an arbitrary carrier into the subtype.
+        assert!(
+            verify_with_inductives(&ctx, &tvar("value"), &refined, &axioms, &declarations).is_err()
+        );
+    }
+    let witness = CoreTerm::Constructor {
+        inductive: Text::from("Holds"),
+        name: Text::from("Witness"),
+        params: List::new(),
+        args: List::new(),
+    };
+    assert!(matches!(
+        infer_with_inductives(
+            &Context::new(),
+            &refine(ind("Int", []), "n", witness),
+            &AxiomRegistry::new(),
+            &declarations
+        ),
+        Err(KernelError::InvalidRefinementPredicate { .. })
+    ));
+}
+
 // -----------------------------------------------------------------------------
 // K-Refine — depth violations (MUST be rejected)
 // -----------------------------------------------------------------------------
@@ -242,9 +295,9 @@ fn k_refine_rejects_schema_referencing_its_own_instantiation() {
     // Base depth + 1 = 2. 3 >= 2 — violation. This is the exact
     // cartesian-closed-context diagonal `α: Y → T^Y` that T-2f*
     // blocks at comprehension time.
-    let base = ind("Int", vec![]);
-    let one_up = ind("List", vec![base.clone()]); // depth 2
-    let pred = ind("P", vec![one_up]); // depth 3
+    let base = ind("Int", []);
+    let one_up = ind("List", [base.clone()]); // depth 2
+    let pred = ind("P", [one_up]); // depth 3
     let t = refine(base, "n", pred);
 
     let result = infer_fixture(&Context::new(), &t, &AxiomRegistry::new());
@@ -266,11 +319,8 @@ fn k_refine_rejects_schema_referencing_its_own_instantiation() {
 fn k_refine_rejects_predicate_two_strata_deeper_than_base() {
     // Base Int (depth 1), predicate = List<List<List<Int>>> (depth 4).
     // 4 >= 1+1 — violation.
-    let base = ind("Int", vec![]);
-    let pred = ind(
-        "List",
-        vec![ind("List", vec![ind("List", vec![base.clone()])])],
-    );
+    let base = ind("Int", []);
+    let pred = ind("List", [ind("List", [ind("List", [base.clone()])])]);
     let t = refine(base, "n", pred);
 
     match infer_fixture(&Context::new(), &t, &AxiomRegistry::new()) {

@@ -425,49 +425,35 @@ pub fn canonical_rules() -> Vec<RuleSpec> {
             proved("exact T_glue.", "  exact @Typing.t_glue _ _ _ _ _ _ _"),
         ),
         // ---- Refinement (4) -------------------------------------------------
+        // These exports prove closure of an abstract typing schema. They are
+        // not implementation-soundness proofs for the Rust checker. PropSort
+        // represents Universe(Prop), and predicates are open under the binder.
         spec(
             "K_Refine",
             Refinement,
-            2,
-            false,
-            // Discharged: predicate typed at `Pi x base (Universe 0)`
-            // captures the Bool-valued-predicate intent of the IOU
-            // ("predicates over base types are themselves Bool-valued
-            // at Type 0").  Universe(0) is the universe at which
-            // Bool-shaped predicates live in CIC.
-            proved("exact T_refine.", "  exact @Typing.t_refine _ _ _ _ _"),
+            3,
+            true,
+            proved("exact T_refine.", "  exact @Typing.t_refine"),
         ),
         spec(
             "K_Refine_Omega",
             Refinement,
-            2,
+            3,
             true,
-            // Discharged: same shape as K_Refine.  The "ordinal
-            // modal-depth bound" intent (Definition 136.D1, Lemma
-            // 136.L0) is vacuous at the operational layer because
-            // `i : Nat` is finite-bounded; modal-depth ω can't
-            // exceed the finite universe ladder.
-            proved(
-                "exact T_refine_omega.",
-                "  exact @Typing.t_refine_omega _ _ _ _ _",
-            ),
+            // Only the ordinary formation premises are exported here. The
+            // ordinal-modal-depth implementation requires separate verification;
+            // finite universe levels do not make its obligation vacuous.
+            proved("exact T_refine_omega.", "  exact @Typing.t_refine_omega"),
         ),
         spec(
             "K_Refine_Intro",
             Refinement,
             3,
             false,
-            // Discharged: structural premises mirror K_Refine_Form's
-            // discipline.  The introduced value's well-formedness at
-            // base, base's universe-form, and predicate's well-form-
-            // edness at Bool-level are sufficient to type the
-            // introduction term.  The propositional `predicate(a)`
-            // truth obligation is the kernel's runtime contract,
-            // verified at certificate construction time.
-            proved(
-                "exact T_refine_intro.",
-                "  exact @Typing.t_refine_intro _ _ _ _ _ _",
-            ),
+            // Formation, base membership and a witness for the instantiated
+            // predicate are all necessary. Predicate well-formedness alone
+            // cannot establish truth at the introduced value.
+            proved("exact T_refine_intro.", "  exact @Typing.t_refine_intro"),
         ),
         spec(
             "K_Refine_Erase",
