@@ -43,13 +43,18 @@ fn compile(body: &str, bootstrap: bool) -> Result<VbcModule, Text> {
 }
 fn run(body: &str, bootstrap: bool) -> i64 {
     let module = compile(body, bootstrap).expect("source lowering");
-    let probe = module
-        .find_function_by_name("return_transfer.probe")
-        .unwrap();
-    Interpreter::new(Arc::new(module))
-        .execute_function(probe)
-        .expect("execution")
-        .as_i64()
+    let wire = verum_vbc::deserialize::deserialize_module_validated(
+        &verum_vbc::serialize::serialize_module(&module).unwrap(),
+    ).unwrap();
+    let mut answer = None;
+    for module in [module, wire] {
+        let probe = module.find_function_by_name("return_transfer.probe").unwrap();
+        let result = Interpreter::new(Arc::new(module))
+            .execute_function(probe).expect("execution").as_i64();
+        if let Some(answer) = answer { assert_eq!(result, answer, "wire result"); }
+        answer = Some(result);
+    }
+    answer.unwrap()
 }
 
 #[test]
@@ -197,7 +202,6 @@ fn probe() -> Int {
 #[test]
 fn unsupported_affine_result_origins_refuse_in_both_source_routes() {
     for body in [
-        "fn make(value: Watch) -> Watch { return value; }",
         "fn make(counter: &mut Count) -> Watch { let value: Watch = Watch { counter, digit: 1 }; defer { counter.value = 99; } return value; }",
         "fn make(a: Watch, b: Watch, flag: Bool) -> Watch { return if flag { a } else { b }; }",
         "fn make(value: Watch) -> Watch { let ref borrowed = value; return borrowed; }",
@@ -213,6 +217,48 @@ fn unsupported_affine_result_origins_refuse_in_both_source_routes() {
             );
         }
     }
+}
+
+#[test]
+fn an_owned_parameter_is_transferred_to_the_returned_slot_exactly_once() {
+    let source = r#"
+fn forward(value: Watch) -> Watch { return value; }
+fn probe() -> Int {
+    let mut counter = Count { value: 0 };
+    {
+        let original = Watch { counter: &mut counter, digit: 7 };
+        let received = forward(original);
+        if counter.value != 0 { return 99; }
+        drop(received);
+    }
+    counter.value
+}
+"#;
+    for bootstrap in [false, true] {
+        assert_eq!(run(source, bootstrap), 7);
+    }
+}
+
+#[test]
+fn unrestricted_owned_values_are_cleaned_on_early_and_normal_returns() {
+    let source = r#"
+type Payload is { counter: &mut Count };
+implement Drop for Payload {
+    fn drop(&mut self) { self.counter.value = self.counter.value * 10 + 3; }
+}
+fn release(counter: &mut Count, early: Bool) -> Bool {
+    let payload = Payload { counter };
+    if early { return true; }
+    false
+}
+fn probe() -> Int {
+    let mut counter = Count { value: 0 };
+    release(&mut counter, true);
+    release(&mut counter, false);
+    counter.value
+}
+"#;
+    for bootstrap in [false, true] { assert_eq!(run(source, bootstrap), 33); }
 }
 
 #[test]

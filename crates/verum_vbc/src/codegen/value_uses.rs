@@ -691,6 +691,18 @@ impl super::VbcCodegen {
         self.named_binding_fact(name, reg).is_some_and(|fact| matches!(fact.discipline,
             ResourceDiscipline::Affine | ResourceDiscipline::Linear))
     }
+
+    /// Duplication discipline does not describe storage lifetime: an ordinary
+    /// copyable value may own Text or invoke Drop. Only the shared primitive
+    /// storage plan and an explicit reference establish trivial cleanup here.
+    fn declaration_requires_drop(&self, declaration: &TypeRef) -> bool {
+        match self.local_drop_declaration(declaration) {
+            TypeRef::Reference { .. } => false,
+            TypeRef::Concrete(owner) => !matches!(crate::drop_plan::builtin_drop_plan(owner),
+                Some(crate::drop_plan::DropPlan::Ignore)),
+            _ => true,
+        }
+    }
     /// Emit the exit edge without popping compile-time scopes shared with
     /// the untaken path. A result must survive deferred code that changes a local.
     pub(super) fn emit_lexical_return(
@@ -706,7 +718,7 @@ impl super::VbcCodegen {
             })
         } else { value };
         let has_owners = independent && self.ctx.registers.value_uses.active.values().any(|fact| {
-            matches!(fact.discipline, ResourceDiscipline::Affine | ResourceDiscipline::Linear)
+            fact.declaration_type.as_ref().is_some_and(|ty| self.declaration_requires_drop(ty))
         });
         if has_defers || has_owners {
             let mut bindings = self.ctx.registers.function_exit_bindings().into_iter().peekable();
@@ -726,8 +738,8 @@ impl super::VbcCodegen {
                     }
                     if let Some(fact) = self.ctx.registers.value_uses.active.get(&binding.reg)
                         && fact.id == binding.binding_id
-                        && matches!(fact.discipline, ResourceDiscipline::Affine | ResourceDiscipline::Linear)
                         && let Some(ty) = fact.declaration_type.clone()
+                        && self.declaration_requires_drop(&ty)
                     {
                         self.emit_local_drop(binding.reg, Some(&ty));
                     }
