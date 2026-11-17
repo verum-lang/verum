@@ -196,10 +196,13 @@ fn a_nominal_value_with_cleanup_is_not_a_primitive_scalar_write() {
         declaration,
         "fn preserve(input:&Int)->Cell { let mut cell=Cell{pointer:input,value:0}; let mut other=Cell{pointer:input,value:0}; {let local=4;let guard=Deferred{target:&mut cell,source:&local};update(&mut other,guard);} cell }",
     );
+    // The guard keeps its exclusive loan of cell through the unknown cleanup
+    // call. Reading cell is rejected at that borrow boundary, before a payload
+    // lifetime could be reused. Do not require the later E312 diagnostic.
     assert!(
         found
             .iter()
-            .any(|e| e.contains("cell") && e.contains("cannot establish the lifetime")),
+            .any(|e| e.contains("cannot borrow `cell`") && e.contains("conflicting borrows")),
         "{found:?}"
     );
 }

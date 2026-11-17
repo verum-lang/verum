@@ -143,3 +143,40 @@ fn contextual_borrowing_keeps_the_source_place_loan() {
 fn mutually_exclusive_argument_loans_still_conflict_before_invocation() {
     lifetime_rejected("fn selected(left:&mut Int,right:&Int)->Int {*left+*right} fn run()->Int {let mut value=7; selected(&mut value,&value)}");
 }
+
+#[test]
+fn invoking_an_unknown_callback_does_not_rewrite_its_binding_slot() {
+    accepted("fn invoke(action:fn()->Int)->Int {let first=action(); first+action()}");
+    accepted("fn invoke(action:fn()->Int)->Int {action()} fn twice(action:fn()->Int)->Int {invoke(action)+invoke(action)}");
+    accepted("fn calculate(input:Int)->Int {fn spread(mut value:Int)->Int {value=value*2; value} spread(input)+spread(input)}");
+}
+
+#[test]
+fn unknown_environments_cannot_reach_unpassed_fresh_local_slots() {
+    accepted(&format!("{PAYLOAD} fn receive(input:&Int,action:fn())->Payload {{let value=Payload{{ptr:input,marker:7}}; action(); value}}"));
+    // A copied payload is stable even when the unknown environment can reach
+    // its old input storage. The environment cannot rewrite this fresh slot.
+    accepted(&format!("{PAYLOAD} fn receive(input:&Payload,action:fn())->Payload {{let value=Payload{{ptr:input.ptr,marker:7}}; action(); value}}"));
+}
+
+#[test]
+fn unknown_environments_still_invalidate_reachable_incoming_referents() {
+    lifetime_rejected(&format!("{PAYLOAD} fn receive(input:&mut Payload,action:fn())->&Int {{action(); input.ptr}}"));
+    lifetime_rejected(&format!("{PAYLOAD} fn receive(input:&mut Payload,action:fn(&mut Payload))->&Int {{action(input); input.ptr}}"));
+}
+
+#[test]
+fn shared_inputs_cannot_be_retained_in_exclusively_borrowed_slots() {
+    for exclusive in ["&mut Text", "&checked mut Text", "&unsafe mut Text"] {
+        let prefix = format!("type Sink is {{public buffer:{exclusive}}}; type SinkRef = &mut Sink;");
+        accepted(&format!("{prefix} fn render(target:SinkRef,write:fn(SinkRef,&Text)) {{let text=\"literal\"; write(target,&text);}}"));
+    }
+    lifetime_rejected("type Sink is {public buffer:&Text}; fn render(target:&mut Sink,write:fn(&mut Sink,&Text)) {let text=\"literal\"; write(target,&text);}");
+    lifetime_rejected("type Sink is {public buffer:&mut Text}; fn render(target:&mut Sink,write:fn(&mut Sink,&mut Text)) {let mut text=\"literal\"; write(target,&mut text);}");
+}
+
+#[test]
+fn exclusive_carriers_still_expose_nested_shared_reference_slots() {
+    lifetime_rejected("type Cell is {public pointer:&Int}; type Sink is {public target:&mut Cell}; fn render(target:&mut Sink,write:fn(&mut Sink,&Int)) {let local=7; write(target,&local);}");
+    lifetime_rejected("type Cell is {public pointer:&Int}; type Sink<T> is {public target:&mut T}; fn render(target:&mut Sink<Cell>,write:fn(&mut Sink<Cell>,&Int)) {let local=7; write(target,&local);}");
+}

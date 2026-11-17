@@ -40,6 +40,7 @@ enum LoanInspection {
     Stored,
     Exposable,
     Writable,
+    SharedRetention,
 }
 
 fn immediate(ty: &Type, inspection: LoanInspection) -> Option<bool> {
@@ -47,11 +48,17 @@ fn immediate(ty: &Type, inspection: LoanInspection) -> Option<bool> {
         Type::Reference { mutable, .. }
         | Type::CheckedReference { mutable, .. }
         | Type::UnsafeReference { mutable, .. } => {
-            Some(inspection != LoanInspection::Writable || *mutable)
+            if inspection == LoanInspection::SharedRetention && *mutable {
+                // An exclusive slot cannot hold a shared loan. Its referent
+                // may itself have writable fields that can hold one, however.
+                None
+            } else {
+                Some(inspection != LoanInspection::Writable || *mutable)
+            }
         }
         Type::GenRef { .. } => Some(true),
         Type::Pointer { mutable, .. } | Type::VolatilePointer { mutable, .. }
-            if inspection == LoanInspection::Writable =>
+            if matches!(inspection, LoanInspection::Writable | LoanInspection::SharedRetention) =>
         {
             Some(*mutable)
         }
@@ -158,6 +165,15 @@ impl TypeChecker {
         self.stored_loan_shape(ty, LoanInspection::Writable)
     }
 
+    /// A shared loan cannot be installed in an exclusively borrowed slot.
+    /// Follow the same declaration-owned layout and its writable referents;
+    /// unknown layouts still admit either permission conservatively. This is
+    /// only a disjointness proof, not proof that two referent types coincide.
+    pub(super) fn may_retain_call_loan(&self, destination: &Type, source: &Type) -> bool {
+        self.may_store_writable_reference(source)
+            || self.stored_loan_shape(destination, LoanInspection::SharedRetention)
+    }
+
     /// Use the same exact runtime declaration authority as VBC. A short name,
     /// archive bundle name or unresolved forward declaration owns no storage.
     pub(super) fn declared_runtime_storage_carrier(
@@ -218,6 +234,13 @@ impl TypeChecker {
                 scope: node.scope,
             };
             match node.ty {
+                Type::Reference { mutable: true, inner }
+                | Type::CheckedReference { mutable: true, inner }
+                | Type::UnsafeReference { mutable: true, inner }
+                    if inspection == LoanInspection::SharedRetention =>
+                {
+                    pending.push(child(inner));
+                }
                 Type::Tuple(parts) => {
                     if !queue(&mut pending, parts, node.scope, remaining) {
                         return true;

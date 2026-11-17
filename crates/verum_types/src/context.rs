@@ -1754,15 +1754,16 @@ impl TypeEnv {
         }
     }
 
-    /// A value with unknown captured storage can reach any live lexical place.
-    /// Keep the call valid while withdrawing payload facts that cannot survive
-    /// that write. A later dominating assignment establishes fresh facts.
-    pub(crate) fn invalidate_unknown_payload_write(&mut self, span: Span) {
+    /// An unknown incoming environment may alias incoming referents. It cannot
+    /// name a fresh local slot merely because that slot is in lexical scope.
+    /// Explicit arguments and known captures are invalidated by their actual
+    /// origins separately, including payloads of copied owned arguments.
+    pub(crate) fn invalidate_unknown_referent_write(&mut self, span: Span) {
         let mut scope = self;
         while scope.parent.is_some() {
-            for name in scope.bindings.keys() {
-                if !scope.type_parameter_mirrors.contains(name) {
-                    scope.record_places.entry(name.clone()).or_default().unverified_write = Some(span);
+            for place in scope.record_places.values_mut() {
+                if matches!(place.reference, Some(ReferenceOrigin::Parameter)) {
+                    place.unverified_write = Some(span);
                 }
             }
             scope = scope.parent.as_deref_mut().expect("lexical parent");

@@ -1066,11 +1066,11 @@ impl TypeChecker {
         let mut sources = List::new();
         let mut destinations = List::new();
         let mut unknown_write = None;
-        for (argument, receiver_mode, declared) in receiver.into_iter()
-            .map(|(value, mode, ty)| (value, Some(mode), ty))
-            .chain(callable.into_iter().map(|value| (value, None, None)))
+        for (argument, receiver_mode, declared, is_callee) in receiver.into_iter()
+            .map(|(value, mode, ty)| (value, Some(mode), ty, false))
+            .chain(callable.into_iter().map(|value| (value, None, None, true)))
             .chain(args.iter().enumerate().map(|(index, value)|
-                (value, None, params.and_then(|params| params.get(index)))))
+                (value, None, params.and_then(|params| params.get(index)), false)))
         {
             let observed = self.observed_operand_type(argument)
                 .or_else(|| self.type_registry.lookup_expr(argument.span).cloned());
@@ -1109,8 +1109,15 @@ impl TypeChecker {
                     }
                 }
             }
+            // Preserve the permission exercised by this invocation alongside
+            // each loan. A shared reborrow never grants exclusive retention.
+            let source_type = match mode {
+                Some(mutable) => Type::reference(mutable, payload.clone()),
+                None => head.clone(),
+            };
             for origin in &origins {
-                if !sources.contains(origin) { sources.push(origin.clone()); }
+                let source = (origin.clone(), source_type.clone());
+                if !sources.contains(&source) { sources.push(source); }
             }
             let writes_payload = mode == Some(true) && self.carries_stored_loan(payload);
             let writes_through_value = mode.is_none()
@@ -1119,19 +1126,33 @@ impl TypeChecker {
             if writes_payload || writes_through_value {
                 if origins.is_empty() {
                     unknown_write = Some(argument.span);
+                    // The argument's own opaque payload was actually passed.
+                    // It may share writable backing storage after ordinary
+                    // value-copy. A callable's environment is separate from
+                    // the slot holding the callable value, though: invoking or
+                    // passing it does not rewrite that producer binding.
+                    if !is_callee && !matches!(payload, Type::Function { .. })
+                        && let Some((source, _)) = self.call_input_place(argument)
+                    {
+                        self.ctx.env.invalidate_payload_origins(&source, argument.span);
+                    }
                 }
                 for origin in origins {
-                    destinations.push((origin, argument.span));
+                    destinations.push((origin, argument.span,
+                        writes_payload.then(|| payload.clone())));
                 }
             }
         }
         if let Some(span) = unknown_write {
-            self.ctx.env.invalidate_unknown_payload_write(span);
+            self.ctx.env.invalidate_unknown_referent_write(span);
         }
-        for (destination, span) in destinations {
+        for (destination, span, payload) in destinations {
             self.ctx.env.invalidate_payload_origins(&destination, span);
             let incoming: List<_> = sources.iter()
-                .filter(|source| source.binding != destination.binding).cloned().collect();
+                .filter(|(source, source_type)| source.binding != destination.binding
+                    && payload.as_ref().is_none_or(|payload|
+                        self.may_retain_call_loan(payload, source_type)))
+                .map(|(source, _)| source.clone()).collect();
             if incoming.is_empty() { continue; }
             self.check_input_storage_retention(&incoming, &destination, span)?;
             let region = self.ctx.env.storage_loan_region(destination.binding)

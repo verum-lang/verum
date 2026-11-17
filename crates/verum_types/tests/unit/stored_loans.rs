@@ -136,6 +136,33 @@ fn declared_tuple_payloads_bind_only_stored_parameters() {
 }
 
 #[test]
+fn call_retention_respects_permissions_through_declared_writable_fields() {
+    let module = verum_fast_parser::Parser::new(
+        "type Sink<T> is { target:&mut T }; type Shared is { pointer:&Int }; type Phantom<T> is ();"
+    ).parse_module().unwrap();
+    let mut checker = TypeChecker::with_minimal_context();
+    checker.register_primitives();
+    checker.set_current_module_path("owner");
+    assert!(checker.prepare_module_declarations(&module).is_empty());
+    let nominal = |name: &str, args| Type::Named {
+        path: TypeChecker::text_to_path(&name.into()), args,
+    };
+    let exclusive_text = nominal("owner.Sink", List::from_iter([Type::Text]));
+    let nested_shared = nominal("owner.Sink", List::from_iter([
+        nominal("owner.Shared", List::new()),
+    ]));
+    assert!(!checker.may_retain_call_loan(&exclusive_text, &Type::reference(false, Type::Text)));
+    assert!(checker.may_retain_call_loan(&exclusive_text, &Type::reference(true, Type::Text)));
+    assert!(checker.may_retain_call_loan(&nested_shared, &Type::reference(false, Type::Int)));
+    assert!(checker.may_retain_call_loan(&Type::Unknown, &Type::reference(false, Type::Int)));
+    assert!(checker.may_retain_call_loan(&exclusive_text, &Type::Unknown));
+    assert!(!checker.may_retain_call_loan(
+        &nominal("owner.Phantom", List::from_iter([Type::reference(false, Type::Int)])),
+        &Type::reference(false, Type::Int),
+    ));
+}
+
+#[test]
 fn scalar_storage_requires_the_exact_registered_language_declaration() {
     let mut checker = TypeChecker::with_minimal_context();
     let scalar = Type::i64_refined(0);
