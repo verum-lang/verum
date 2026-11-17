@@ -428,14 +428,22 @@ impl super::VbcCodegen {
         }
         let parameter = self.ctx.semantic_fn_params.get(&callable.id)
             .and_then(|params| params.get(index)).cloned().flatten();
-        let written = parameter.is_none().then(|| callable.param_type_names.get(index)
-            .and_then(|source| verum_fast_parser::Parser::new(source).parse_type().ok())).flatten();
+        // The name registry may contain a forward declaration or a flattened
+        // overload key. Only the selected callable's retained source signature
+        // can establish a raw parameter when no semantic TypeRef exists.
+        let written = self.declared_callable_descriptors.get(&callable.id)
+            .and_then(|declaration| declaration.source_signature.as_ref())
+            .and_then(|signature| signature.params.get(index))
+            .and_then(|parameter| match &parameter.kind {
+                verum_ast::FunctionParamKind::Regular { ty, .. } => Some(ty),
+                _ => None,
+            });
         if !self.ctx.registers.emits_owned_parameter_calls {
             // Async and synthetic bodies keep their existing handoff. A new
             // argument copy would silently change an unflagged caller's ABI.
             let owns = (callable.has_source_body || self.functions.iter().any(|function|
                 function.descriptor.id == callable.id && function.descriptor.has_source_body))
-                && self.parameter_ownership(parameter.as_ref(), written.as_ref())
+                && self.parameter_ownership(parameter.as_ref(), written)
                     .is_ok_and(|ownership| ownership == ParameterOwnership::Value);
             if !owns { return Ok(source); }
             if let Some(ty) = self.generic_named_place(argument, source) {
@@ -450,7 +458,7 @@ impl super::VbcCodegen {
             }
             return Ok(source);
         }
-        if self.parameter_ownership(parameter.as_ref(), written.as_ref())? != ParameterOwnership::Value {
+        if self.parameter_ownership(parameter.as_ref(), written)? != ParameterOwnership::Value {
             return Ok(source);
         }
         self.emit_declared_call_argument(parameter.as_ref(), argument, source, actual)
