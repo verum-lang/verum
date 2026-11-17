@@ -26,6 +26,14 @@ const BETA: &str = r#"
     }
 "#;
 const OWNERS: [&str; 2] = ["core.field_alpha", "core.field_beta"];
+const DECLARED_DEREF: &str = r#"
+    type Deref is protocol { type Target; fn deref(&self) -> &Self.Target; };
+    type Carrier<Noise, Item> is { noise: Noise, payload: Item };
+    implement<Noise, Item> Deref for Carrier<Noise, Item> {
+        type Target = Item;
+        fn deref(&self) -> &Item { &self.payload }
+    }
+"#;
 
 #[derive(Clone, Copy, Debug)]
 enum Input {
@@ -99,20 +107,6 @@ fn check_in_module(owner: &str, consumer: &str, input: Input, reverse: bool, loc
         }
     };
     checker.register_primitives();
-    if consumer.contains("Heap<") {
-        // Register the existing bare smart-pointer carrier form. A record
-        // declared in consumer would instead be nominal consumer.Heap.
-        let ast = FastParser::new()
-            .parse_module_str("type Heap<T> is { payload: T };", FileId::new(90))
-            .expect("pointer grammar");
-        for item in &ast.items {
-            if let ItemKind::Type(declaration) = &item.kind {
-                checker
-                    .register_type_declaration(declaration)
-                    .expect("pointer declaration");
-            }
-        }
-    }
     checker.set_current_module_path(owner);
     let mut registry = ModuleRegistry::new();
     let mut declarations = [(OWNERS[0], ALPHA), (OWNERS[1], BETA)];
@@ -424,7 +418,9 @@ fn auto_dereference_keeps_private_owner() {
         Input::Metadata { eager: false },
         Input::Metadata { eager: true },
     ] {
-        assert_private(input, "fn probe(value: &Heap<A>) -> Int { value.body }");
+        assert_private(input, &format!(
+            "{DECLARED_DEREF} fn probe(value: &Carrier<Bool, A>) -> Int {{ value.body }}"
+        ));
     }
 }
 
@@ -436,9 +432,9 @@ fn generic_aliases_and_auto_dereference_keep_public_fields() {
         Input::Metadata { eager: true },
     ] {
         for reverse in [false, true] {
-            for alias in ["Identity<B>", "Identity<Identity<B>>", "Heap<B>"] {
+            for alias in ["Identity<B>", "Identity<Identity<B>>", "Carrier<Int, B>"] {
                 let source = format!(
-                    "mount core.field_alpha.{{Packet as A}}; mount core.field_beta.{{Packet as B}}; type Identity<T> is T; fn probe(value: &{alias}) -> Bool {{ value.body }}"
+                    "mount core.field_alpha.{{Packet as A}}; mount core.field_beta.{{Packet as B}}; {DECLARED_DEREF} type Identity<T> is T; fn probe(value: &{alias}) -> Bool {{ value.body }}"
                 );
                 let (_, errors) = check(&source, input, reverse, false);
                 assert!(
@@ -446,6 +442,24 @@ fn generic_aliases_and_auto_dereference_keep_public_fields() {
                     "{input:?}, reverse={reverse}, {alias}: {errors:?}"
                 );
             }
+        }
+    }
+}
+
+#[test]
+fn pointer_spellings_do_not_grant_undeclared_field_delegation() {
+    for input in [Input::Source, Input::Metadata { eager: false }, Input::Metadata { eager: true }] {
+        for name in ["Heap", "Shared", "Unique", "Rc", "Arc", "Envelope"] {
+            let source = format!(
+                "mount core.field_beta.{{Packet as B}};
+                type {name}<T> is {{ payload: T }};
+                fn probe(value: &{name}<B>) -> Bool {{ value.body }}"
+            );
+            let (_, errors) = check(&source, input, false, false);
+            assert!(errors.iter().any(|error| error.contains("UnknownField")
+                && error.contains(&format!("consumer.{name}"))
+                && error.contains("field: Text { inner: \"body\" }")),
+                "{input:?}, {name}: {errors:?}");
         }
     }
 }

@@ -36,7 +36,7 @@ use crate::{Result, TypeCheckMetrics, TypeError};
 use super::{
     DeferredConstraint, DeferredVerificationGoal, FunctionContract, GeneratorContext,
     GlobalDepthGuard, InferMode, InferResult, TypeChecker,
-    WKT_HEAP, WKT_RESULT, WKT_SHARED,
+    WKT_RESULT,
     DEREF_COERCION_DEPTH, GLOBAL_CALL_DEPTH, NORMALIZE_DEPTH,
     TYPE_RESOLUTION_STACK, NORMALIZE_TYPE_STACK, AST_TO_TYPE_DEPTH,
     span_to_line_col,
@@ -13502,42 +13502,18 @@ impl TypeChecker {
         self.resolve_value_annotation(path, span)
     }
 
-    /// Unwrap reference and heap types to get the inner type.
-    /// Recursively unwraps Reference, CheckedReference, UnsafeReference, and Heap<T> types.
-    /// This is needed for field access on reference types like `&Point` and heap types like `Heap<Node>`.
-    /// CBGR implementation: epoch-based generation tracking, acquire-release memory ordering, lock-free ABA-protected maps, ThinRef 16 bytes, FatRef 24 bytes — #auto-dereference
+    /// Peel only language reference carriers. A nominal wrapper must establish
+    /// its target through the selected Deref/Ref implementation; its spelling
+    /// and generic argument positions cannot authorize field delegation.
     pub(crate) fn unwrap_reference_type<'a>(&self, ty: &'a Type) -> &'a Type {
-        match ty {
-            Type::Reference { inner, .. }
+        let mut current = ty;
+        while let Type::Reference { inner, .. }
             | Type::CheckedReference { inner, .. }
-            | Type::UnsafeReference { inner, .. } => {
-                // Recursively unwrap nested references
-                self.unwrap_reference_type(inner)
-            }
-            // Also unwrap smart pointers (Heap<T>, Shared<T>, etc.) to T for field access
-            // This enables field access like: let node: Heap<Node> = ...; node.value
-            Type::Generic { name, args }
-                if args.len() == 1
-                    && matches!(
-                        name.as_str(),
-                        WKT_HEAP | WKT_SHARED | "Unique" | "Rc" | "Arc"
-                    ) =>
-            {
-                self.unwrap_reference_type(&args[0])
-            }
-            Type::Named { path, args } if args.len() == 1 => {
-                if let Some(ident) = path.as_ident() {
-                    if matches!(
-                        ident.name.as_str(),
-                        WKT_HEAP | WKT_SHARED | "Unique" | "Rc" | "Arc"
-                    ) {
-                        return self.unwrap_reference_type(&args[0]);
-                    }
-                }
-                ty
-            }
-            _ => ty,
+            | Type::UnsafeReference { inner, .. } = current
+        {
+            current = inner;
         }
+        current
     }
 
     /// Look up a field type on a record or named type.
