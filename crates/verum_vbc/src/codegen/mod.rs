@@ -610,6 +610,7 @@ struct MountedSourceFiles {
     filesystem: mount_filesystem::MountFilesystem,
     modules: Vec<Module>,
     owners: std::collections::HashMap<verum_ast::FileId, String>,
+    inline_globs: Set<Text>,
     root: Option<(std::path::PathBuf, String)>,
     entry_id: verum_ast::FileId,
     next_id: u32,
@@ -622,7 +623,7 @@ impl MountedSourceFiles {
             let module = verum_fast_parser::Parser::new(&source).parse_module().ok()?;
             VbcCodegen::extract_source_module_name(&module).map(|name| (path, name))
         });
-        Self { filesystem: Default::default(), modules: Vec::new(), owners: Default::default(), root, entry_id, next_id: 0 }
+        Self { filesystem: Default::default(), modules: Vec::new(), owners: Default::default(), inline_globs: Set::new(), root, entry_id, next_id: 0 }
     }
 
     fn parent_for(&mut self, file: &str) -> Option<String> {
@@ -8919,15 +8920,9 @@ impl VbcCodegen {
         result
     }
 
-    /// Resolve a glob over a module that exists INLINE in its parent's
-    /// file rather than on disk (`mount core.prelude.*` — the prelude
-    /// is `public module prelude { ... }` inside core/mod.vr). Parses
-    /// the parent's mod.vr / file, locates the inline module by its
-    /// last path segment, and recurses on the mount declarations that
-    /// module contains, with the PARENT file as the source context so
-    /// its dot-relative re-exports resolve against the parent's
-    /// directory. A miss stays silent: the glob may name a registry
-    /// module this file-based resolver legitimately cannot see.
+    /// Resolve a file or nested inline module using its actual declaration
+    /// owner. A containing file is evidence for an inline path, never a reason
+    /// to traverse the file's parent directory.
     #[cfg(feature = "codegen")]
     fn resolve_inline_module_glob(
         &mut self,
@@ -8936,72 +8931,61 @@ impl VbcCodegen {
         core_root: &str,
         resolved_files: &mut std::collections::HashSet<String>,
         imported: &mut MountedSourceFiles,
+        consumer: &str,
     ) -> CodegenResult<()> {
-        let Some((inline_name, parent_segments)) = module_path.split_last() else {
-            return Ok(());
-        };
-        let parent_path: Vec<String> = if parent_segments.is_empty() {
-            return Ok(());
-        } else {
-            parent_segments.to_vec()
-        };
-        let parent_candidates =
-            Self::module_path_to_file_candidates(&parent_path, source_path, core_root);
-        for candidate in parent_candidates {
+        let root_owner = imported.root.as_ref().map(|(_, owner)| owner.clone()).unwrap_or_default();
+        let Some((_, candidates)) = Self::module_path_to_source_candidates(
+            module_path, source_path, core_root, &root_owner,
+        ) else { return Ok(()) };
+        let written = module_path.join(".");
+        let target = if root_owner.is_empty() || written == root_owner
+            || written.starts_with(&format!("{root_owner}."))
+        { written } else { format!("{root_owner}.{written}") };
+        for candidate in candidates {
             if imported.filesystem.canonicalize(&candidate).is_none() {
                 continue;
             }
-            let Ok(source) = std::fs::read_to_string(&candidate) else {
-                continue;
-            };
-            let mut parser = verum_fast_parser::Parser::new(&source);
-            let Ok(parent_module) = parser.parse_module() else {
-                continue;
-            };
-            let inline = parent_module.items.iter().find_map(|item| {
-                if let ItemKind::Module(m) = &item.kind
-                    && m.name.name.as_str() == inline_name.as_str()
-                {
-                    Some(m)
-                } else {
-                    None
-                }
-            });
-            let Some(inline) = inline else { continue };
-            let verum_common::Maybe::Some(inline_items) = &inline.items else {
-                return Ok(());
-            };
-            // The dependency files carry the targets. The inline module owns
-            // the public export edges that make those targets visible here.
-            let parent_scope = imported.parent_for(&candidate).unwrap_or_else(|| parent_path.join("."));
-            let parent = Self::source_file_module_path(
-                &parent_scope, std::path::Path::new(&candidate), &parent_module,
+            let source = std::fs::read_to_string(&candidate).map_err(|error|
+                CodegenError::internal(format!("reading mounted file {candidate}: {error}")))?;
+            let parent_module = verum_fast_parser::Parser::new(&source).parse_module().map_err(|error|
+                CodegenError::internal(format!("parsing mounted file {candidate}: {error:?}")))?;
+            let parent = imported.parent_for(&candidate).unwrap_or_else(|| root_owner.clone());
+            let mut owner = Self::source_file_module_path(
+                &parent, std::path::Path::new(&candidate), &parent_module,
             );
-            let owner = crate::module::qualify_module_name(&parent, inline_name);
-            self.source_module_owners.declare(&owner);
-            self.collect_callable_exports(&owner, inline_items);
-            // A synthetic module holding just the inline module's mount
-            // declarations — resolve_mounts_recursive does the rest.
-            let mut mounts: verum_common::List<verum_ast::Item> = verum_common::List::new();
-            for item in inline_items.iter() {
-                if matches!(item.kind, ItemKind::Mount(_)) {
-                    mounts.push(item.clone());
+            if !self.selected_source_owner(&parent_module, &owner)? { return Ok(()); }
+            if target == owner {
+                // The ordinary file pass already queued this exact module.
+                return Ok(());
+            }
+            let Some(remaining) = target.strip_prefix(&format!("{owner}.")) else { continue };
+            let mut items = parent_module.items.as_slice();
+            for segment in remaining.split('.') {
+                let Some(item) = items.iter().find(|item|
+                    matches!(&item.kind, ItemKind::Module(module) if module.name.name == segment))
+                else { return Ok(()) };
+                if !self.should_compile_item(item) { return Ok(()); }
+                let ItemKind::Module(module) = &item.kind else { unreachable!() };
+                if !module.visibility.resolve_declared_scope(&owner).is_ok_and(|policy|
+                    policy.visible_from(owner.split('.'), consumer.split('.')))
+                {
+                    return Err(CodegenError::with_span(CodegenErrorKind::InvalidSourceMount(vec![
+                        format!("module `{owner}.{segment}` is inaccessible from `{consumer}`"),
+                    ]), item.span));
                 }
+                let Some(children) = &module.items else { return Ok(()) };
+                owner = crate::module::qualify_module_name(&owner, segment);
+                items = children.as_slice();
             }
-            if !mounts.is_empty() {
-                let synthetic = verum_ast::Module::new(
-                    mounts,
-                    parent_module.file_id,
-                    parent_module.span,
-                );
-                self.resolve_mounts_recursive(
-                    &synthetic,
-                    &candidate,
-                    core_root,
-                    resolved_files,
-                    imported,
-                )?;
-            }
+            if !imported.inline_globs.insert(owner.clone().into()) { return Ok(()); }
+            self.source_module_owners.declare(&owner);
+            self.collect_callable_exports(&owner, items);
+            let mounts = items.iter().filter(|item| matches!(&item.kind, ItemKind::Mount(_)))
+                .cloned().collect();
+            let id = imported.register()?;
+            imported.owners.insert(id, owner);
+            let synthetic = verum_ast::Module::new(mounts, id, parent_module.span);
+            self.resolve_mounts_recursive(&synthetic, &candidate, core_root, resolved_files, imported)?;
             return Ok(());
         }
         Ok(())
@@ -9037,6 +9021,13 @@ impl VbcCodegen {
         };
         if !selected { return Ok(()); }
 
+        let source_owner = imported.owners.get(&module.file_id).cloned()
+            .or_else(|| imported.parent_for(source_path).map(|parent|
+                Self::source_file_module_path(&parent, std::path::Path::new(source_path), module)))
+            .or_else(|| self.source_file_owner(module, &self.config.module_name))
+            .unwrap_or_else(|| self.config.module_name.clone());
+        let root_owner = imported.root.as_ref().map(|(_, owner)| owner.clone()).unwrap_or_default();
+
         // Collect all files to parse (avoid borrow issues with recursive calls)
         let mut to_parse: Vec<String> = Vec::new();
 
@@ -9055,82 +9046,54 @@ impl VbcCodegen {
             if let ItemKind::Mount(mount_decl) = &item.kind {
                 let paths = Self::extract_mount_file_paths(&mount_decl.tree, &[]);
                 for module_path in paths {
-                    let file_candidates =
-                        Self::module_path_to_file_candidates(&module_path, source_path, core_root);
+                    let selected = self.select_source_mount_path(&module_path.join("."), &source_owner);
+                    let module_path = selected.as_str().split('.').filter(|part| !part.is_empty()).map(str::to_owned).collect::<Vec<_>>();
+                    let Some((_, file_candidates)) = Self::module_path_to_source_candidates(
+                        &module_path, source_path, core_root, &root_owner,
+                    ) else { continue };
                     for candidate in file_candidates {
                         let canonical = match imported.filesystem.canonicalize(&candidate) {
                             Some(c) => c,
                             None => continue, // File doesn't exist
                         };
                         if resolved_files.contains(&canonical) {
-                            continue;
+                            break; // The selected source stays selected when already loaded.
                         }
                         resolved_files.insert(canonical);
                         to_parse.push(candidate);
                         break; // Found a valid file, stop trying candidates
                     }
                 }
-                // Glob-mount expansion: `mount core.*` / `mount core.text.*`
-                // — when the mount tree is a glob, walk every `.vr` file
-                // under the resolved directory.  Without this, the
-                // stdlib-internal compile harness can't see cross-module
-                // static methods (`Text.from_utf8_lossy`, `List.of`)
-                // because `mount core.*` previously degenerated into a
-                // single `core/mod.vr` candidate (which holds no mounts).
+                // Only the addressed module's directory authorizes a tree
+                // walk. Parent files are candidates for inline declarations;
+                // their directories are not alternative glob targets.
                 let globs = Self::extract_glob_mount_paths(&mount_decl.tree);
                 for module_path in globs {
-                    let mut glob_resolved = false;
-                    let file_candidates =
-                        Self::module_path_to_file_candidates(&module_path, source_path, core_root);
-                    for candidate in file_candidates {
-                        // The glob's "file" candidate is typically a
-                        // module file path; strip the `.vr` extension /
-                        // `mod.vr` suffix and walk the resolved
-                        // directory.  A single glob may contribute many
-                        // files via the recursive walk below.
-                        let dir = std::path::Path::new(&candidate);
-                        let walk_root: std::path::PathBuf = if candidate.ends_with("/mod.vr") {
-                            dir.parent().unwrap_or(dir).to_path_buf()
-                        } else if dir.extension().and_then(|s| s.to_str()) == Some("vr") {
-                            dir.with_extension("").to_path_buf()
-                        } else {
-                            dir.to_path_buf()
-                        };
-                        if imported.filesystem.canonicalize(&walk_root).is_some() && walk_root.is_dir() {
-                            for vr_file in imported.filesystem.walk_vr_files(&walk_root).iter() {
-                                let canonical = match imported.filesystem.canonicalize(vr_file) {
-                                    Some(c) => c,
-                                    None => continue,
-                                };
-                                if resolved_files.contains(&canonical) {
-                                    continue;
-                                }
-                                resolved_files.insert(canonical);
-                                to_parse.push(vr_file.clone());
+                    let selected = self.select_source_mount_path(&module_path.join("."), &source_owner);
+                    let module_path = selected.as_str().split('.').filter(|part| !part.is_empty()).map(str::to_owned).collect::<Vec<_>>();
+                    let Some((walk_root, _)) = Self::module_path_to_source_candidates(
+                        &module_path, source_path, core_root, &root_owner,
+                    ) else { continue };
+                    if imported.filesystem.canonicalize(&walk_root).is_some() && walk_root.is_dir() {
+                        for vr_file in imported.filesystem.walk_vr_files(&walk_root).iter() {
+                            let canonical = match imported.filesystem.canonicalize(vr_file) {
+                                Some(c) => c,
+                                None => continue,
+                            };
+                            if resolved_files.contains(&canonical) {
+                                continue;
                             }
-                            glob_resolved = true;
-                            break; // Walked one valid root, done with this glob
+                            resolved_files.insert(canonical);
+                            to_parse.push(vr_file.clone());
                         }
-                    }
-                    if !glob_resolved {
-                        // No file or directory answers to this path: the
-                        // module may be INLINE in its parent's mod.vr —
-                        // `mount core.prelude.*` names `public module
-                        // prelude { ... }` inside core/mod.vr, a module
-                        // that exists in the language and not on disk.
-                        // Resolve by parsing the parent file, finding the
-                        // inline module, and recursing on ITS mount
-                        // declarations with the parent file as the source
-                        // context (so its dot-relative re-exports resolve
-                        // against the parent's directory) — the glob
-                        // expands to exactly what the inline module
-                        // re-exports, never to a whole-tree walk.
+                    } else {
                         self.resolve_inline_module_glob(
                             &module_path,
                             source_path,
                             core_root,
                             resolved_files,
                             imported,
+                            &source_owner,
                         )?;
                     }
                 }
@@ -9260,45 +9223,32 @@ impl VbcCodegen {
         results
     }
 
-    /// Converts a module path like `["core", "base", "protocols"]` to candidate file paths.
-    ///
-    /// Tries multiple resolution strategies:
-    /// 1. Direct: `core/base/protocols.vr`
-    /// 2. Module dir: `core/base/protocols/mod.vr`
-    /// 3. Parent module: `core/base.vr` (if protocols is an item name, not a file)
-    /// 4. Relative: resolve `.` and `super` relative to source file
-    fn module_path_to_file_candidates(
+    /// Keep the addressed directory separate from files which may declare an
+    /// inline suffix. Namespace roots come from the mounted source manifest.
+    fn module_path_to_source_candidates(
         module_path: &[String],
         source_path: &str,
         core_root: &str,
-    ) -> Vec<String> {
-        // Path normalization is independent from discovery: every normalized
-        // module can be a file, a directory module, or a parent's exported item.
-        fn candidates(root: &std::path::Path, segments: &[String]) -> Vec<String> {
+        root_owner: &str,
+    ) -> Option<(std::path::PathBuf, Vec<String>)> {
+        fn candidates(root: &std::path::Path, segments: &[String]) -> (std::path::PathBuf, Vec<String>) {
             let mut result = Vec::new();
             let mut add = |path: std::path::PathBuf| {
                 let path = path.to_string_lossy().to_string();
                 if !result.contains(&path) { result.push(path); }
             };
-            if segments.is_empty() {
-                add(root.join("mod.vr"));
-                return result;
+            // Each containing source can own the remaining inline segments.
+            // Searching those files never promotes an ancestor to a glob root.
+            for depth in (0..=segments.len()).rev() {
+                let prefix = root.join(segments[..depth].join("/"));
+                if depth != 0 { add(prefix.with_extension("vr")); }
+                add(prefix.join("mod.vr"));
             }
-            let selected = root.join(segments.join("/"));
-            add(selected.with_extension("vr"));
-            let parent = root.join(segments[..segments.len() - 1].join("/"));
-            if segments.len() > 1 {
-                add(parent.with_extension("vr"));
-            }
-            add(selected.join("mod.vr"));
-            // A single remaining item belongs to the normalized root itself.
-            // Requiring a second segment loses parent-facade imports.
-            add(parent.join("mod.vr"));
-            result
+            (root.join(segments.join("/")), result)
         }
 
         if module_path.is_empty() {
-            return Vec::new();
+            return None;
         }
         let source_dir = std::path::Path::new(source_path)
             .parent()
@@ -9323,13 +9273,14 @@ impl VbcCodegen {
                     _ => break,
                 }
             }
-            return candidates(&base, &module_path[start_idx..]);
+            return Some(candidates(&base, &module_path[start_idx..]));
         }
 
-        // Preserve the language's standard-library root interpretation. The
-        // candidate builder above does not depend on any module or item name.
-        let segments = if module_path[0] == "core" { &module_path[1..] } else { module_path };
-        candidates(std::path::Path::new(core_root), segments)
+        let root_segments: Vec<_> = root_owner.split('.').filter(|part| !part.is_empty()).collect();
+        let rooted = module_path.len() >= root_segments.len()
+            && module_path.iter().zip(&root_segments).all(|(actual, root)| actual == root);
+        let segments = if rooted { &module_path[root_segments.len()..] } else { module_path };
+        Some(candidates(std::path::Path::new(core_root), segments))
     }
 
     /// Compiles function bodies only, assuming declarations are already registered.
