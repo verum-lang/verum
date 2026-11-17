@@ -164,21 +164,18 @@ impl VbcCodegen {
             return None;
         }
         let expr = Self::normalized_place(expr);
-        let (owner_name, arguments) = match &expr.kind {
+        let (owner, arguments) = match &expr.kind {
             ExprKind::Record {
                 path,
                 fields,
                 base: None,
             } => {
-                let name = path.to_string();
-                let id = self.semantic_type_in_current_scope(&name)?.base_type_id()?;
-                let declaration = self.type_by_id(id)?;
-                if declaration.kind != TypeKind::Record || declaration.fields.len() != fields.len()
-                {
+                let (owner, declared_fields) = self.named_constructor_fields(path, expected)?;
+                if declared_fields.len() != fields.len() {
                     return None;
                 }
                 let mut arguments = Vec::new();
-                for field in &declaration.fields {
+                for field in declared_fields {
                     let name = self.ctx.strings.get(field.name.0 as usize)?;
                     let value = fields
                         .iter()
@@ -188,7 +185,7 @@ impl VbcCodegen {
                     });
                     arguments.push((field.declaration_type.as_ref()?, value));
                 }
-                (name, arguments)
+                (owner, arguments)
             }
             ExprKind::MethodCall {
                 receiver,
@@ -222,7 +219,7 @@ impl VbcCodegen {
                         Some((field.declaration_type.as_ref()?, Cow::Borrowed(argument)))
                     })
                     .collect::<Option<Vec<_>>>()?;
-                (name, arguments)
+                (id, arguments)
             }
             ExprKind::Field {
                 expr: receiver,
@@ -243,14 +240,43 @@ impl VbcCodegen {
                 if !variant.fields.is_empty() || variant.arity != 0 {
                     return None;
                 }
-                (name, Vec::new())
+                (id, Vec::new())
             }
             _ => return None,
         };
-        let owner = self
-            .semantic_type_in_current_scope(&owner_name)?
-            .base_type_id()?;
         self.instantiate_constructor_fields(owner, arguments.into(), expected, output, depth)
+    }
+
+    /// Named records and named sum payloads use the same field telescope.
+    /// The constructor's selected owner supplies its generic parameters; the
+    /// payload is not an independent nominal type with an erased application.
+    fn named_constructor_fields(
+        &self, path: &verum_ast::Path, expected: Option<&TypeRef>,
+    ) -> Option<(TypeId, &[crate::types::FieldDescriptor])> {
+        let name = path.to_string();
+        if let Some(record) = self.semantic_type_in_current_scope(&name)
+            .and_then(|ty| ty.base_type_id()).and_then(|id| self.type_by_id(id))
+            .filter(|declaration| declaration.kind == TypeKind::Record)
+        {
+            return Some((record.id, &record.fields));
+        }
+        let name = self.resolve_variant_path_alias(&name.replace("::", "."));
+        let owner = name.rsplit_once('.')
+            .and_then(|(qualifier, _)| self.declared_sum_descriptor(qualifier))
+            .or_else(|| {
+                let selected = if name.contains('.') {
+                    self.ctx.lookup_qualified_function(&name)
+                } else {
+                    self.ctx.lookup_function_in_scope(&name)
+                }?;
+                selected.variant_tag?;
+                self.type_by_id(selected.return_type.as_ref()?.base_type_id()?)
+            })
+            .or_else(|| expected.and_then(TypeRef::base_type_id).and_then(|id| self.type_by_id(id)))?;
+        if owner.kind != TypeKind::Sum { return None; }
+        let variant = self.scrutinee_variant(owner, &name)?;
+        if variant.kind != crate::types::VariantKind::Record { return None; }
+        Some((owner.id, &variant.fields))
     }
 
     /// A selected constructor supplies its exact nominal owner and payload

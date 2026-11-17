@@ -113,6 +113,25 @@ fn caller_parameter_order_does_not_replace_the_record_telescope() {
 }
 
 #[test]
+fn named_sum_payloads_use_the_same_declared_field_inference_as_records() {
+    run(r#"
+        type Slot<Noise, Item> is Empty | Named { item: Item, noise: Noise };
+        type Envelope<T> is { slot: Slot<Bool, T> };
+        fn build<T>(item: T) -> Envelope<T> {
+            let slot = Slot.Named { noise: true, item };
+            Envelope { slot }
+        }
+        fn probe() -> Int {
+            let result = build(73);
+            match result.slot {
+                Slot.Named { noise, item } => if noise { item } else { 0 },
+                Slot.Empty => 0,
+            }
+        }
+    "#);
+}
+
+#[test]
 fn conflicting_fields_and_unconstrained_parameters_remain_refused() {
     refuse(r#"
         type Inner<T> is { fixed: UInt32, left: T, right: T };

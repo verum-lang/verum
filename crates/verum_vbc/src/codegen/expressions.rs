@@ -12015,7 +12015,7 @@ impl VbcCodegen {
 
     /// Alias targets carry the same selected declaration and generic binders
     /// as field and method lowering. Do not recover their owner from a leaf name.
-    fn declared_sum_descriptor(&self, qualifier: &str) -> Option<&crate::types::TypeDescriptor> {
+    pub(super) fn declared_sum_descriptor(&self, qualifier: &str) -> Option<&crate::types::TypeDescriptor> {
         let declared = self.nominal_type_id(qualifier).and_then(|id| self.type_by_id(id))?;
         let selected = if declared.kind == crate::types::TypeKind::Alias {
             self.expand_declared_alias(declared.alias_target.clone()?)?.base_type_id()?
