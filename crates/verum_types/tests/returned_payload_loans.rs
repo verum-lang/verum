@@ -287,6 +287,85 @@ fn owned_arguments_carry_mutable_storage_into_implicit_cleanup() {
 }
 
 #[test]
+fn whole_parameter_transfer_preserves_payload_provenance() {
+    let declarations = "fn forward<T>(value:T)->T {value}";
+    let errors = diagnostics(
+        declarations,
+        "fn receive(input:&Int)->Payload {
+            let container=Payload{ptr:input,marker:2}; forward(container)
+        }",
+    );
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn whole_parameter_transfer_does_not_erase_a_local_payload_loan() {
+    for (declarations, call) in [
+        ("fn forward<T>(value:T)->T {value}", "forward(container)"),
+        (
+            "implement Payload {fn forward(&self,value:Payload)->Payload {value}}",
+            "container.forward(container)",
+        ),
+    ] {
+        assert!(diagnostics(declarations, "").is_empty());
+        let errors = diagnostics(
+            declarations,
+            &format!("fn receive()->Payload {{
+                let local=3; let container=Payload{{ptr:&local,marker:2}};
+                {call}
+            }}"),
+        );
+        assert!(
+            errors.iter().any(|error|
+                error.contains("local") && error.contains("does not live long enough")),
+            "{call}: {errors:?}"
+        );
+    }
+}
+
+#[test]
+fn transferred_parameter_does_not_erase_another_parameters_cleanup() {
+    let declarations = "type Drop is protocol {fn drop(&mut self);};
+        type affine DeferredWrite is {target:&mut Payload,source:&Int};
+        implement Drop for DeferredWrite {fn drop(&mut self) {self.target.ptr=self.source;}}
+        fn forward_with_cleanup<T>(value:T,pending:DeferredWrite)->T {value}";
+    assert!(diagnostics(declarations, "").is_empty());
+    let errors = diagnostics(
+        declarations,
+        "fn receive(input:&Int)->Payload {let mut container=Payload{ptr:input,marker:2};
+         {let local=3; forward_with_cleanup(7,DeferredWrite{target:&mut container,source:&local});}
+         Payload{ptr:container.ptr,marker:container.marker}}",
+    );
+    assert!(
+        errors.iter().any(|error| error.contains("does not live long enough")
+            || error.contains("cannot establish the lifetime")),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn transferred_parameter_does_not_erase_local_cleanup() {
+    let declarations = "type Drop is protocol {fn drop(&mut self);};
+        type affine DeferredWrite is {target:&mut Payload,source:&Int};
+        implement Drop for DeferredWrite {fn drop(&mut self) {self.target.ptr=self.source;}}
+        fn forward_with_cleanup<T>(value:T,target:&mut Payload,source:&Int)->T {
+            let pending=DeferredWrite{target,source}; value
+        }";
+    assert!(diagnostics(declarations, "").is_empty());
+    let errors = diagnostics(
+        declarations,
+        "fn receive(input:&Int)->Payload {let mut container=Payload{ptr:input,marker:2};
+         {let local=3; forward_with_cleanup(7,&mut container,&local);}
+         Payload{ptr:container.ptr,marker:container.marker}}",
+    );
+    assert!(
+        errors.iter().any(|error| error.contains("does not live long enough")
+            || error.contains("cannot establish the lifetime")),
+        "{errors:?}"
+    );
+}
+
+#[test]
 fn reference_and_scalar_locals_have_closed_cleanup() {
     let errors = diagnostics(
         "fn selected(source:&mut Payload,key:&Int)->Payload {

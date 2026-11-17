@@ -655,6 +655,13 @@ impl TypeChecker {
                 return None;
             }
         }
+        // A synchronous owned parameter returned as a whole transfers its
+        // cleanup obligation to the result. Other inputs and local values
+        // still need their own cleanup proof. A field or copied local is not
+        // this calling-convention boundary.
+        let transferred = derivation.forwarded_parameter()
+            .filter(|index| params.get(*index).is_some_and(|parameter|
+                self.types_equivalent(parameter, &return_type)));
 
         // Only result dependencies carry origins out of this invocation.
         // The complete typed graph and every write were checked above; all
@@ -690,9 +697,10 @@ impl TypeChecker {
             let ty = facts.nodes.get(index)?;
             let origins = match node {
                 ReturnedValueNode::Parameter(parameter) => {
-                    self.closed_call_input_origins(args.get(*parameter)?, ty)?
+                    self.closed_call_input_origins(args.get(*parameter)?, ty,
+                        transferred == Some(*parameter))?
                 }
-                ReturnedValueNode::Receiver => self.closed_call_input_origins(receiver?, ty)?,
+                ReturnedValueNode::Receiver => self.closed_call_input_origins(receiver?, ty, false)?,
                 ReturnedValueNode::Literal(_) | ReturnedValueNode::Compound { .. }
                 | ReturnedValueNode::ScalarBinary { .. } | ReturnedValueNode::Condition(_)
                 | ReturnedValueNode::Index { .. } | ReturnedValueNode::SelectedCall { .. } => List::new(),
@@ -1131,9 +1139,11 @@ impl TypeChecker {
         &mut self,
         argument: &Expr,
         ty: &Type,
+        transferred: bool,
     ) -> Option<List<RecordReceiver>> {
-        // Even unused owned parameters may execute user cleanup.
-        if !self.return_value_has_trivial_cleanup(ty)
+        // Unused owned parameters still execute cleanup; the one whole
+        // parameter transferred to the result does not.
+        if (!transferred && !self.return_value_has_trivial_cleanup(ty))
             || self.deref_adjustments.contains_key(&argument.span)
         {
             return None;
@@ -1163,6 +1173,10 @@ impl TypeChecker {
             .is_some()
         {
             origins.push(self.reference_result_origin(argument)?);
+        } else if transferred {
+            // Transfer preserves payload loans; it does not prove that an
+            // owned value is independent of its input storage.
+            origins = self.aggregate_origins(argument, &actual);
         }
         Some(origins)
     }
