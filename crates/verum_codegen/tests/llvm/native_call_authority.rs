@@ -6,7 +6,7 @@ use crate::llvm::{
 };
 
 use verum_fast_parser::Parser;
-use verum_llvm::{context::Context, module::Linkage, values::AnyValue};
+use verum_llvm::{context::Context, module::Linkage, values::{AnyValue, BasicValue}};
 use verum_vbc::{codegen::VbcCodegen, module::VbcModule};
 
 fn compile(source: &str) -> VbcModule {
@@ -206,7 +206,7 @@ fn pending_source_bodies_survive_native_arity_collisions_in_both_orders() {
 }
 
 #[test]
-fn an_early_runtime_replacement_has_no_source_body_receipt() {
+fn a_source_method_named_like_a_runtime_operation_keeps_its_body_receipt() {
     let vbc = compile(
         "type Boxed is { value: Int }; implement Boxed { fn hash_value(&self) -> Int { 37 } } fn probe(value: &Boxed) -> Int { value.hash_value() }",
     );
@@ -222,11 +222,48 @@ fn an_early_runtime_replacement_has_no_source_body_receipt() {
         .unwrap()
         .print_to_string();
     assert!(
-        body.to_str().unwrap().contains("verum_generic_hash"),
-        "control must exercise existing replacement: {body}"
+        body.to_str().unwrap().contains("@Boxed.hash_value("),
+        "the selected source declaration owns this call: {body}"
     );
+    assert!(!body.to_str().unwrap().contains("@verum_generic_hash("));
     let facts = lower.native_calls.resolve(lower.module());
-    assert!(facts.get(&id(&vbc, "probe")).unwrap().is_empty());
+    let calls = facts.get(&id(&vbc, "probe")).unwrap();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].0, id(&vbc, "Boxed.hash_value"));
+    assert_eq!(calls[0].1.arguments.len(), 1);
+    assert_eq!(calls[0].1.result_view, ResultView::Word);
+    lower.module().verify().unwrap();
+}
+
+#[test]
+fn a_registered_runtime_intrinsic_has_no_source_body_receipt() {
+    for call in ["processor_count()", "{ let operation = processor_count; operation() }"] {
+        let vbc = compile(&format!(
+            "@intrinsic(\"num_cpus\") fn processor_count() -> Int; fn probe() -> Int {{ {call} }}",
+        ));
+        let intrinsic_id = id(&vbc, "processor_count");
+        let descriptor = vbc
+            .get_function(verum_vbc::module::FunctionId(intrinsic_id))
+            .unwrap();
+        assert!(descriptor.requires_intrinsic_implementation());
+        assert!(!descriptor.has_source_body);
+        let context = Context::create();
+        let mut lower = VbcToLlvmLowering::new(
+            &context,
+            LoweringConfig::debug("runtime-authority").with_debug_info(false),
+        );
+        lower.lower_module(&vbc).unwrap();
+        let implementation = lower.functions.get(&intrinsic_id).unwrap();
+        assert!(implementation.count_basic_blocks() > 0);
+        assert!(
+            implementation.print_to_string().to_str().unwrap().contains("@verum_num_cpus("),
+            "the actual registered runtime implementation must be selected",
+        );
+        let facts = lower.native_calls.resolve(lower.module());
+        assert!(!facts.contains_key(&intrinsic_id));
+        assert!(facts.get(&id(&vbc, "probe")).unwrap().is_empty());
+        lower.module().verify().unwrap();
+    }
 }
 
 #[test]
@@ -432,41 +469,80 @@ fn retained_abi_attributes_do_not_claim_a_transparent_parameter_or_result_adapte
 
 
 #[test]
-fn only_unused_bodyless_wrong_arity_declarations_are_replaceable() {
-    for state in ["unused", "referenced", "defined"] {
-        let vbc = compile("fn choose(value: Int) -> Int { value + 1 }");
-        let context = Context::create();
-        let mut lower = VbcToLlvmLowering::new(&context,
-            LoweringConfig::debug("forward-arity").with_debug_info(false));
-        let ty = context.i64_type();
-        let existing = lower.module().add_function("choose", ty.fn_type(&[], false), None);
-        let builder = context.create_builder();
-        if state == "referenced" {
-            let caller = lower.module().add_function("existing_caller", ty.fn_type(&[], false), None);
-            builder.position_at_end(context.append_basic_block(caller, "entry"));
-            let value = builder.build_call(existing, &[], "old_call").unwrap()
-                .try_as_basic_value().basic().unwrap();
-            builder.build_return(Some(&value)).unwrap();
-        } else if state == "defined" {
-            builder.position_at_end(context.append_basic_block(existing, "entry"));
-            builder.build_return(Some(&ty.const_int(19, false))).unwrap();
-        }
-        assert_eq!(vbc.entry_main(), verum_vbc::module::EntryMain::None);
-        lower.declare_functions(&vbc, None).unwrap();
-        let selected = lower.functions.get(&id(&vbc, "choose")).unwrap();
-        assert_eq!(selected.count_params(), 1);
-        let primary = lower.module().get_function("choose").unwrap();
-        if state == "unused" {
-            assert_eq!(*selected, primary);
-            assert!(!lower.has_arity_collisions);
-        } else {
+fn preexisting_native_declarations_are_not_source_forward_stubs() {
+    for native_arity in [0, 1] {
+        for state in ["unused", "referenced", "defined"] {
+            let vbc = compile("fn choose(value: Int) -> Int { value + 1 }");
+            let context = Context::create();
+            let mut lower = VbcToLlvmLowering::new(&context,
+                LoweringConfig::debug("forward-arity").with_debug_info(false));
+            let ty = context.i64_type();
+            let parameters = verum_common::List::from_iter((0..native_arity).map(|_| ty.into()));
+            let existing = lower.module().add_function("choose", ty.fn_type(&parameters, false), None);
+            let builder = context.create_builder();
+            if state == "referenced" {
+                let caller = lower.module().add_function("existing_caller", ty.fn_type(&[], false), None);
+                builder.position_at_end(context.append_basic_block(caller, "entry"));
+                let arguments = verum_common::List::from_iter(
+                    (0..native_arity).map(|_| ty.const_int(7, false).into()),
+                );
+                let value = builder.build_call(existing, &arguments, "old_call").unwrap()
+                    .try_as_basic_value().basic().unwrap();
+                builder.build_return(Some(&value)).unwrap();
+            } else if state == "defined" {
+                builder.position_at_end(context.append_basic_block(existing, "entry"));
+                builder.build_return(Some(&ty.const_int(19, false))).unwrap();
+            }
+            assert_eq!(vbc.entry_main(), verum_vbc::module::EntryMain::None);
+            lower.declare_functions(&vbc, None).unwrap();
+            let selected = lower.functions.get(&id(&vbc, "choose")).unwrap();
+            assert_eq!(selected.count_params(), 1);
+            let primary = lower.module().get_function("choose").unwrap();
+            // A preexisting native ABI symbol is never a source forward stub,
+            // including an unused declaration with an identical physical ABI.
             assert_eq!(primary, existing);
             assert_ne!(*selected, primary);
-            assert_eq!(primary.count_params(), 0);
-            assert!(lower.has_arity_collisions);
+            assert_eq!(primary.count_params(), native_arity);
+            assert_eq!(primary.count_basic_blocks(), u32::from(state == "defined"));
+            assert_eq!(
+                primary.as_global_value().as_pointer_value().get_first_use().is_some(),
+                state == "referenced",
+            );
+            assert!(!lower.has_arity_collisions);
+            lower.module().verify().unwrap();
         }
-        lower.module().verify().unwrap();
     }
+}
+
+#[test]
+fn unused_in_pass_source_forward_stubs_are_replaced_without_dangling_ids() {
+    use verum_vbc::{module::{FunctionDescriptor, FunctionId}, types::{TypeId, TypeRef}};
+    let mut vbc = compile("fn choose(value: Int) -> Int { value + 1 }");
+    let selected_id = id(&vbc, "choose");
+    let stub_id = vbc.functions.iter().map(|function| function.id.0).max().unwrap() + 1;
+    let name = vbc.strings.intern("choose");
+    // This declaration-phase gate supplies a genuinely bodyless source stub
+    // before the actual source descriptor, not an existing native ABI symbol.
+    // It makes no claim about executing an incomplete source declaration.
+    vbc.functions.insert(0, FunctionDescriptor {
+        id: FunctionId(stub_id),
+        name,
+        return_type: TypeRef::Concrete(TypeId::INT),
+        ..FunctionDescriptor::default()
+    });
+    let context = Context::create();
+    let mut lower = VbcToLlvmLowering::new(
+        &context,
+        LoweringConfig::debug("source-forward-arity").with_debug_info(false),
+    );
+    lower.declare_functions(&vbc, None).unwrap();
+    let selected = lower.functions.get(&selected_id).unwrap();
+    assert_eq!(selected.count_params(), 1);
+    assert_eq!(*selected, lower.module().get_function("choose").unwrap());
+    assert!(!lower.functions.contains_key(&stub_id));
+    assert_eq!(lower.functions.len(), 1);
+    assert!(!lower.has_arity_collisions);
+    lower.module().verify().unwrap();
 }
 
 #[test]
