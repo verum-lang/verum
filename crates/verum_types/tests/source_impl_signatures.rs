@@ -2,8 +2,12 @@
 use verum_fast_parser::Parser;
 use verum_types::TypeChecker;
 fn errors(source: &str) -> Vec<String> {
+    errors_with_family_policy(source, false)
+}
+fn errors_with_family_policy(source: &str, enabled: bool) -> Vec<String> {
     let mut checker = TypeChecker::new();
     checker.register_primitives();
+    checker.set_generic_associated_types_enabled(enabled);
     errors_in(&mut checker, source)
 }
 fn errors_in(checker: &mut TypeChecker, source: &str) -> Vec<String> {
@@ -200,15 +204,19 @@ fn same_receiver_other_protocol_projection_is_not_own_assignment() {
 
 #[test]
 fn associated_family_result() {
-    accepts(
+    let errors = errors_with_family_policy(
         "module core.owned; type F is protocol {type C<T>; fn pass<U>(x:Self.C<U>)->Self.C<U>;}; type Model is {x:()}; implement F for Model {type C<T> =(T,Bool);fn pass<V>(x:(V,Bool))->(V,Bool){x}}",
+        true,
     );
+    assert!(errors.is_empty(), "{errors:?}");
 }
 #[test]
 fn wrong_associated_family_result() {
-    rejects(
+    let errors = errors_with_family_policy(
         "module core.owned; type F is protocol {type C<T>; fn pass<U>(x:Self.C<U>)->Self.C<U>;}; type Model is {x:()}; implement F for Model {type C<T> =(T,Bool);fn pass<V>(x:(V,Int))->(V,Int){x}}",
+        true,
     );
+    assert!(errors.iter().any(|error| error.contains("E427")), "{errors:?}");
 }
 #[test]
 fn method_protocol_bounds_can_rename_local_binder() {
