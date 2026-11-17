@@ -166,7 +166,7 @@ fn write_args(b: &mut TextBuilder, cmd: &CommandSpec, style: &HelpStyle) {
         match &a.refinement {
             Maybe.Some(r) => {
                 b.push("  [");
-                b.push(&r.expression);
+                b.push(r.expression());
                 b.push("]");
             },
             Maybe.None => {},
@@ -203,7 +203,7 @@ fn write_flags(b: &mut TextBuilder, cmd: &CommandSpec, style: &HelpStyle) {
         match &f.refinement {
             Maybe.Some(r) => {
                 b.push("  [");
-                b.push(&r.expression);
+                b.push(r.expression());
                 b.push("]");
             },
             Maybe.None => {},

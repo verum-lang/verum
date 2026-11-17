@@ -358,7 +358,7 @@ fn handle_long(
     if name.starts_with(&no_prefix) {
         let positive_name = name.slice(3, name.len());
         match cmd.find_flag_long(&positive_name) {
-            Maybe.Some(f) => if f.negatable {
+            Maybe.Some(f) => if f.is_negatable() {
                 let key = flag_key(f);
                 let cap = CapturedFlag {
                     name: key.clone(),
@@ -510,7 +510,7 @@ fn capture_flag(
     let already = outcome.flags.get(&key);
     match already {
         Maybe.Some(prev) => {
-            if !f.repeated && !f.counter {
+            if !f.is_repeated() && !f.is_counter() {
                 return Result.Err(ParseError.duplicate_flag(key));
             }
             // append + increment occurrences

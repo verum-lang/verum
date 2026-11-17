@@ -193,7 +193,7 @@ fn write_options(b: &mut TextBuilder, cmd: &CommandSpec) {
             Maybe.Some(r) => {
                 b.push(".RS\n");
                 b.push("Constraint: ");
-                b.push(&r.expression);
+                b.push(r.expression());
                 b.push(".\n.RE\n");
             },
             Maybe.None => {},

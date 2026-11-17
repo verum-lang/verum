@@ -109,11 +109,11 @@ implement Arity {
 /// rather than a panic.
 public type ArgGroup is {
     /// ArgGroup identifier — used in error messages and `requires`/`conflicts_with`.
-    name: Text,
+    public(in core.cli) name: Text,
     /// Flag long-names that participate in this group.
-    members: List<Text>,
+    public(in core.cli) members: List<Text>,
     /// ArgGroup kind (mutex / required / etc).
-    kind: GroupKind,
+    public(in core.cli) kind: GroupKind,
     /// Optional help line; rendered above the group in `--help`.
     help: Maybe<Text>,
 };
@@ -210,13 +210,13 @@ public type CommandSettings is {
     args_override_self:        Bool,    // последний `--x` побеждает (default true)
     propagate_version:         Bool,    // подкоманды наследуют --version
     args_negate_required:      Bool,    // `--no-foo` снимает required-ость `--foo`
-    disable_help_flag:         Bool,
+    public(in core.cli) disable_help_flag:         Bool,
     disable_help_subcommand:   Bool,
-    disable_version_flag:      Bool,
+    public(in core.cli) disable_version_flag:      Bool,
     arg_required_else_help:    Bool,    // пустой запуск показывает help
-    subcommand_required:       Bool,    // обязательно выбрать подкоманду
+    public(in core.cli) subcommand_required:       Bool,    // обязательно выбрать подкоманду
     allow_external_subcommands: Bool,   // git-style: `tool foo` → exec `tool-foo`
-    allow_negative_numbers:    Bool,    // `-1` парсится как число, не как флаг
+    public(in core.cli) allow_negative_numbers:    Bool,    // `-1` парсится как число, не как флаг
     next_line_help:            Bool,    // help в новой строке (узкий терминал)
     color:                     ColorChoice,
     error_format:              ErrorFormat,
@@ -224,8 +224,8 @@ public type CommandSettings is {
     invocation_style:          InvocationStyle,
 };
 
-implement Default for CommandSettings {
-    fn default() -> CommandSettings {
+implement CommandSettings {
+    fn standard() -> CommandSettings {
         CommandSettings {
             args_override_self: true,
             propagate_version: true,
@@ -246,14 +246,18 @@ implement Default for CommandSettings {
     }
 }
 
+implement Default for CommandSettings {
+    fn default() -> CommandSettings { CommandSettings.standard() }
+}
+
 // =============================================================================
 // Examples / deprecation metadata
 // =============================================================================
 
 /// A help-line example: pair of `command line` and `description`.
 public type Example is {
-    command:     Text,
-    description: Text,
+    public(in core.cli) command:     Text,
+    public(in core.cli) description: Text,
 };
 
 implement Example {
@@ -286,6 +290,14 @@ public type RefinementHandle is {
     upper: Maybe<Text>,
 };
 
+implement RefinementHandle {
+    public(in core.cli) fn from_expression(expression: Text) -> RefinementHandle {
+        RefinementHandle { expression: expression, lower: Maybe.None, upper: Maybe.None }
+    }
+
+    public(in core.cli) fn expression(&self) -> &Text { &self.expression }
+}
+
 // =============================================================================
 // Handler reference
 // =============================================================================
@@ -308,20 +320,20 @@ implement Default for HandlerRef {
 
 /// A positional argument descriptor.
 public type ArgSpec is {
-    name:           Text,           // имя поля (для help / диагностики)
-    arity:          Arity,
-    placeholder:    Maybe<Text>,    // имя в usage (default: name UPPER)
-    help:           Text,
-    long_help:      Maybe<Text>,
-    default_text:   Maybe<Text>,    // текстовое представление дефолта (для help)
-    env_fallback:   Maybe<Text>,
-    config_path:    Maybe<Text>,
-    refinement:     Maybe<RefinementHandle>,
-    completion:     CompletionSource,
-    interactive:    InteractivePolicy,
-    hidden:         Bool,
+    public(in core.cli) name:           Text,           // имя поля (для help / диагностики)
+    public(in core.cli) arity:          Arity,
+    public(in core.cli) placeholder:    Maybe<Text>,    // имя в usage (default: name UPPER)
+    public(in core.cli) help:           Text,
+    public(in core.cli) long_help:      Maybe<Text>,
+    public(in core.cli) default_text:   Maybe<Text>,    // текстовое представление дефолта (для help)
+    public(in core.cli) env_fallback:   Maybe<Text>,
+    public(in core.cli) config_path:    Maybe<Text>,
+    public(in core.cli) refinement:     Maybe<RefinementHandle>,
+    public(in core.cli) completion:     CompletionSource,
+    public(in core.cli) interactive:    InteractivePolicy,
+    public(in core.cli) hidden:         Bool,
     /// Тип-маркер от FromArg.arg_kind() для default-completion / placeholder.
-    kind_hint:      Text,           // "Path" | "Hostname" | "Generic" | ...
+    public(in core.cli) kind_hint:      Text,           // "Path" | "Hostname" | "Generic" | ...
 };
 
 implement ArgSpec {
@@ -365,26 +377,26 @@ implement ArgSpec {
 
 /// A named flag descriptor.
 public type FlagSpec is {
-    long:            Maybe<Text>,
-    short:           Maybe<Char>,
-    arity:           Arity,
-    placeholder:     Maybe<Text>,
-    help:            Text,
-    long_help:       Maybe<Text>,
-    default_text:    Maybe<Text>,
-    env_fallback:    Maybe<Text>,
-    config_path:     Maybe<Text>,
-    refinement:      Maybe<RefinementHandle>,
-    completion:      CompletionSource,
-    interactive:     InteractivePolicy,
+    public(in core.cli) long:            Maybe<Text>,
+    public(in core.cli) short:           Maybe<Char>,
+    public(in core.cli) arity:           Arity,
+    public(in core.cli) placeholder:     Maybe<Text>,
+    public(in core.cli) help:            Text,
+    public(in core.cli) long_help:       Maybe<Text>,
+    public(in core.cli) default_text:    Maybe<Text>,
+    public(in core.cli) env_fallback:    Maybe<Text>,
+    public(in core.cli) config_path:     Maybe<Text>,
+    public(in core.cli) refinement:      Maybe<RefinementHandle>,
+    public(in core.cli) completion:      CompletionSource,
+    public(in core.cli) interactive:     InteractivePolicy,
     persistent:      Bool,         // наследуется в подкомандах
     repeated:        Bool,         // повторение → List<T>
     counter:         Bool,         // -vvv → Int
     negatable:       Bool,         // --foo / --no-foo
-    hidden:          Bool,
-    requires:        List<Text>,
-    conflicts_with:  List<Text>,
-    kind_hint:       Text,
+    public(in core.cli) hidden:          Bool,
+    public(in core.cli) requires:        List<Text>,
+    public(in core.cli) conflicts_with:  List<Text>,
+    public(in core.cli) kind_hint:       Text,
 };
 
 implement FlagSpec {
@@ -444,6 +456,11 @@ implement FlagSpec {
         self
     }
 
+    public(in core.cli) fn is_counter(&self) -> Bool { self.counter }
+    public(in core.cli) fn is_repeated(&self) -> Bool { self.repeated }
+    public(in core.cli) fn is_negatable(&self) -> Bool { self.negatable }
+    public(in core.cli) fn is_persistent(&self) -> Bool { self.persistent }
+
     /// Mark as repeatable (each occurrence appends).
     public fn repeated(mut self) -> FlagSpec {
         self.repeated = true;
@@ -469,22 +486,22 @@ implement FlagSpec {
 
 /// Root or subcommand descriptor.
 public type CommandSpec is {
-    name:        Text,
-    version:     Maybe<Text>,
-    about:       Text,
-    long_about:  Maybe<Text>,
-    author:      Maybe<Text>,
-    args:        List<ArgSpec>,
-    flags:       List<FlagSpec>,
-    subcommands: List<CommandSpec>,
-    groups:      List<ArgGroup>,
-    examples:    List<Example>,
-    aliases:     List<Text>,
-    hidden:      Bool,
+    public(in core.cli) name:        Text,
+    public(in core.cli) version:     Maybe<Text>,
+    public(in core.cli) about:       Text,
+    public(in core.cli) long_about:  Maybe<Text>,
+    public(in core.cli) author:      Maybe<Text>,
+    public(in core.cli) args:        List<ArgSpec>,
+    public(in core.cli) flags:       List<FlagSpec>,
+    public(in core.cli) subcommands: List<CommandSpec>,
+    public(in core.cli) groups:      List<ArgGroup>,
+    public(in core.cli) examples:    List<Example>,
+    public(in core.cli) aliases:     List<Text>,
+    public(in core.cli) hidden:      Bool,
     deprecated:  Maybe<DeprecationNote>,
-    after_help:  Maybe<Text>,
-    settings:    CommandSettings,
-    handler:     HandlerRef,
+    public(in core.cli) after_help:  Maybe<Text>,
+    public(in core.cli) settings:    CommandSettings,
+    public(in core.cli) handler:     HandlerRef,
 };
 
 implement CommandSpec {
@@ -505,7 +522,7 @@ implement CommandSpec {
             hidden: false,
             deprecated: Maybe.None,
             after_help: Maybe.None,
-            settings: Default.default(),
+            settings: CommandSettings.standard(),
             handler: HandlerRef.NoHandler,
         }
     }

@@ -89,7 +89,7 @@ public fn validate_value(
                     Result.Err(_reason) => Result.Err(ParseError.refinement_failed(
                         field_name.clone(),
                         value.clone(),
-                        r.expression.clone(),
+                        r.expression().clone(),
                     )),
                 },
                 Maybe.None => {

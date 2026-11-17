@@ -109,7 +109,7 @@ fn write_args(b: &mut TextBuilder, args: &List<ArgSpec>, depth: Int) {
             Maybe.None => {},
         }
         match &a.refinement {
-            Maybe.Some(r) => { b.push(", \"refinement\": "); write_quoted(b, &r.expression); },
+            Maybe.Some(r) => { b.push(", \"refinement\": "); write_quoted(b, r.expression()); },
             Maybe.None => {},
         }
         match &a.env_fallback {
@@ -153,12 +153,12 @@ fn write_flags(b: &mut TextBuilder, flags: &List<FlagSpec>, depth: Int) {
         b.push(", \"help\": "); write_quoted(b, &f.help);
         b.push(", \"arity\": "); write_arity(b, &f.arity);
         b.push(", \"kind\": "); write_quoted(b, &f.kind_hint);
-        b.push(", \"persistent\": "); b.push(if f.persistent { "true" } else { "false" });
-        b.push(", \"counter\": "); b.push(if f.counter { "true" } else { "false" });
-        b.push(", \"repeated\": "); b.push(if f.repeated { "true" } else { "false" });
-        b.push(", \"negatable\": "); b.push(if f.negatable { "true" } else { "false" });
+        b.push(", \"persistent\": "); b.push(if f.is_persistent() { "true" } else { "false" });
+        b.push(", \"counter\": "); b.push(if f.is_counter() { "true" } else { "false" });
+        b.push(", \"repeated\": "); b.push(if f.is_repeated() { "true" } else { "false" });
+        b.push(", \"negatable\": "); b.push(if f.is_negatable() { "true" } else { "false" });
         match &f.refinement {
-            Maybe.Some(r) => { b.push(", \"refinement\": "); write_quoted(b, &r.expression); },
+            Maybe.Some(r) => { b.push(", \"refinement\": "); write_quoted(b, r.expression()); },
             Maybe.None => {},
         }
         match &f.env_fallback {

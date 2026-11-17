@@ -51,7 +51,7 @@ implement AppBuilder {
 
     /// Set the version string (printed via `--version`).
     public fn version(mut self, v: Text) -> AppBuilder {
-        self.spec.version = Maybe.Some(v);
+        self.spec = self.spec.with_version(v);
         self
     }
 
@@ -75,31 +75,31 @@ implement AppBuilder {
 
     /// Add a positional argument (use `ArgBuilder` for richer config).
     public fn arg(mut self, a: ArgSpec) -> AppBuilder {
-        self.spec.args.push(a);
+        self.spec = self.spec.add_arg(a);
         self
     }
 
     /// Add a flag (use `FlagBuilder` for richer config).
     public fn flag(mut self, f: FlagSpec) -> AppBuilder {
-        self.spec.flags.push(f);
+        self.spec = self.spec.add_flag(f);
         self
     }
 
     /// Add a subcommand built via `AppBuilder.build`.
     public fn subcommand(mut self, sc: CommandSpec) -> AppBuilder {
-        self.spec.subcommands.push(sc);
+        self.spec = self.spec.add_subcommand(sc);
         self
     }
 
     /// Add an argument group.
     public fn group(mut self, g: ArgGroup) -> AppBuilder {
-        self.spec.groups.push(g);
+        self.spec = self.spec.add_group(g);
         self
     }
 
     /// Add a usage example.
     public fn example(mut self, ex: Example) -> AppBuilder {
-        self.spec.examples.push(ex);
+        self.spec = self.spec.add_example(ex);
         self
     }
 
@@ -190,11 +190,7 @@ implement ArgBuilder {
     }
 
     public fn refinement(mut self, expr: Text) -> ArgBuilder {
-        self.spec.refinement = Maybe.Some(RefinementHandle {
-            expression: expr,
-            lower: Maybe.None,
-            upper: Maybe.None,
-        });
+        self.spec.refinement = Maybe.Some(RefinementHandle.from_expression(expr));
         self
     }
 
@@ -239,7 +235,7 @@ implement FlagBuilder {
     }
 
     public fn short(mut self, c: Char) -> FlagBuilder {
-        self.spec.short = Maybe.Some(c);
+        self.spec = self.spec.short(c);
         self
     }
 
@@ -264,7 +260,7 @@ implement FlagBuilder {
     }
 
     public fn env(mut self, name: Text) -> FlagBuilder {
-        self.spec.env_fallback = Maybe.Some(name);
+        self.spec = self.spec.env(name);
         self
     }
 
@@ -274,11 +270,7 @@ implement FlagBuilder {
     }
 
     public fn refinement(mut self, expr: Text) -> FlagBuilder {
-        self.spec.refinement = Maybe.Some(RefinementHandle {
-            expression: expr,
-            lower: Maybe.None,
-            upper: Maybe.None,
-        });
+        self.spec.refinement = Maybe.Some(RefinementHandle.from_expression(expr));
         self
     }
 
@@ -293,25 +285,22 @@ implement FlagBuilder {
     }
 
     public fn persistent(mut self) -> FlagBuilder {
-        self.spec.persistent = true;
+        self.spec = self.spec.persistent();
         self
     }
 
     public fn repeated(mut self) -> FlagBuilder {
-        self.spec.repeated = true;
+        self.spec = self.spec.repeated();
         self
     }
 
     public fn counter(mut self) -> FlagBuilder {
-        self.spec.counter = true;
-        self.spec.repeated = true;
-        self.spec.arity = Arity.Exactly(0);
-        self.spec.kind_hint = "Int".to_text();
+        self.spec = self.spec.counter();
         self
     }
 
     public fn negatable(mut self) -> FlagBuilder {
-        self.spec.negatable = true;
+        self.spec = self.spec.negatable();
         self
     }
 

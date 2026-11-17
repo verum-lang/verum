@@ -148,7 +148,7 @@ fn absorb_persistent(
     let mut i: Int = 0;
     while i < cmd.flags.len() {
         let f = &cmd.flags[i];
-        if f.persistent {
+        if f.is_persistent() {
             match &f.long {
                 Maybe.Some(l) => match outcome.flags.get(l.clone()) {
                     Maybe.Some(c) => { g.flags.insert(l.clone(), c); },

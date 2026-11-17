@@ -1,0 +1,25 @@
+mount core.cli.spec.{CommandSpec, FlagSpec};
+mount core.cli.parser.parse_argv;
+mount core.collections.List;
+mount core.text.Text;
+mount core.base.result.Result;
+
+@test
+fn test_nested_command_counter_accepts_repeated_switches() {
+    let flag = FlagSpec.value("verbose", "Increase verbosity").short('v').counter();
+    let inspect = CommandSpec.new("inspect", "Inspect inputs").add_flag(flag);
+    let report = CommandSpec.new("report", "Report commands").add_subcommand(inspect);
+
+    let mut argv: List<Text> = List.new();
+    argv.push("report".to_text());
+    argv.push("inspect".to_text());
+    argv.push("-vv".to_text());
+    argv.push("--verbose".to_text());
+    assert(parse_argv(&report, argv) is Result.Ok);
+
+    let mut invalid_argv: List<Text> = List.new();
+    invalid_argv.push("report".to_text());
+    invalid_argv.push("inspect".to_text());
+    invalid_argv.push("--other".to_text());
+    assert(parse_argv(&report, invalid_argv) is Result.Err);
+}
