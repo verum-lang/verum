@@ -346,7 +346,7 @@ implement JsonValue {
     /// Extract the string payload, `Maybe.None` if not `JsonString`.
     public fn as_string(&self) -> Maybe<Text> {
         match self {
-            JsonValue.JsonString(ref s) => Maybe.Some(s.clone()),
+            JsonValue.JsonString(value) => Maybe.Some(value.clone()),
             _ => Maybe.None,
         }
     }

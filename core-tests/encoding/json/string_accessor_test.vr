@@ -1,0 +1,11 @@
+mount core.encoding.json.JsonValue;
+
+@test
+fn test_string_accessor_clones_the_payload() {
+    let source = JsonValue.JsonString("configuration π".to_text());
+    let mut copy = source.as_string().unwrap();
+    copy.push_str(" altered");
+    assert_eq(copy, "configuration π altered");
+    assert_eq(source.as_string().unwrap(), "configuration π");
+    assert(JsonValue.JsonInt(73).as_string().is_none());
+}
