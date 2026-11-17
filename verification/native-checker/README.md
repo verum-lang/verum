@@ -1,15 +1,16 @@
-# Native checker binding lookup
+# Native checker rules
+
+`check.py` compiles the production `verum_proof` library with the workspace
+lockfile. Charon extracts the call graphs rooted at `lookup_binding` and
+`universe_successor`. Aeneas translates both to Lean. The runner compares
+the fresh translation byte for byte, then checks the translation and both
+proofs. [Generated code](VerumProof.lean)
+
+## Variable lookup
 
 Both native checkers infer the type of a de Bruijn variable by looking up its
 context entry. Their context lookup methods call `lookup_binding` in
 [`binders.rs`](../../crates/verum_proof/src/binders.rs).
-
-`check.py` compiles the production `verum_proof` library with the workspace
-lockfile. Charon extracts the call graph rooted at `lookup_binding`. Aeneas
-translates the two Rust functions, including both machine subtractions and
-the checked slice read. The runner compares the fresh translation with
-[`VerumProof.lean`](VerumProof.lean) byte for byte and invokes Lean on it
-and on [the proofs](BindingSlot.lean).
 
 For every representable `usize` depth and index, returning a slot is equivalent
 to `slot + index + 1 = depth` in natural-number arithmetic. The function returns
@@ -17,16 +18,33 @@ to `slot + index + 1 = depth` in natural-number arithmetic. The function returns
 the mapping. For every slice and every element type, the shared Rust lookup
 returns the optional element at that index in the reversed list. This equality
 includes termination and successful bounds checks in the extracted model.
-Lean checks the transitive axiom dependencies of each theorem against
+[Variable lookup proofs](BindingSlot.lean)
+
+## Universe successor
+
+Both native T-Universe branches normalize the input level and pass the result
+to `universe_successor`. For every input level and every valuation of its
+parameters in the natural numbers, the returned level denotes precisely the
+input value plus one. The underlying `level_with_offset` proof covers every
+`u128` shift. It proves that the chunk loop terminates, all checked machine
+operations succeed, and the result denotes the input value plus the shift.
+This includes concrete and symbolic levels above the `u32` wire maximum.
+[Rust implementation](../../crates/verum_proof/src/proof_checker/universe_offset.rs),
+[universe proofs](UniverseOffset.lean)
+
+## Correspondence
+
+Lean checks the transitive axiom dependencies of the theorems against
 `propext`, `Classical.choice` and `Quot.sound`.
 
 The correspondence trusts the pinned Rust compiler, Charon, Aeneas and its
-models of machine words, borrowed slices and checked indexing. It concerns
-the contents of the returned binding. The substitution checker subsequently
-clones or weakens its type, and the normalization-by-evaluation checker reads
-the referenced semantic type. Those steps and whole-certificate acceptance
-remain outside this proof. Extracting the complete checkers currently stops
-at the Rust coroutine in each inference routine.
+models of machine words, borrowed slices and checked indexing. After binding
+lookup, the substitution checker clones or weakens the binding type, and the
+normalization-by-evaluation checker reads the referenced semantic type.
+The preceding native universe normalization, these binding operations,
+allocation limits and whole-certificate acceptance remain outside these proofs.
+Extracting the complete checkers currently stops at the Rust coroutine in
+each inference routine.
 
 ## Replay
 

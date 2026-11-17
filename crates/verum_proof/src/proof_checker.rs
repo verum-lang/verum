@@ -16,6 +16,10 @@ use crate::derivation::{Children, Input, WorkStack, copy_child};
 use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, future::Future, rc::Rc};
 
+mod universe_offset;
+use universe_offset::level_with_offset;
+pub(crate) use universe_offset::universe_successor;
+
 // =============================================================================
 // Universe levels — polymorphic over level variables
 // =============================================================================
@@ -99,13 +103,7 @@ impl Level {
     /// Exact successor. The concrete wire integer is a compact representation,
     /// not a bound on the universe hierarchy; larger levels retain successor syntax.
     pub fn successor(&self) -> Self {
-        match self {
-            Level::Concrete(n) => match n.checked_add(1) {
-                Some(next) => Level::Concrete(next),
-                None => Level::Succ(Box::new(self.clone())),
-            },
-            other => Level::Succ(Box::new(other.clone())),
-        }
+        universe_successor(self.clone())
     }
 
     /// Form the exact maximum of two levels.
@@ -254,27 +252,6 @@ impl LevelProfile<'_> {
         }
         let (base, amount) = terms.pop().expect("a level has at least one atom");
         level_with_offset(base, amount)
-    }
-}
-
-/// Reify a path sum in bounded wire chunks. The loop runs at most once per
-/// input offset on that path. It never iterates once per successor value.
-fn level_with_offset(mut base: Level, mut amount: u128) -> Level {
-    const CHUNK: u128 = u32::MAX as u128;
-    if let Level::Concrete(n) = base {
-        amount += u128::from(n);
-        let literal = amount.min(CHUNK);
-        base = Level::Concrete(literal as u32);
-        amount -= literal;
-    }
-    while amount >= CHUNK {
-        base = Level::Offset(Box::new(base), u32::MAX);
-        amount -= CHUNK;
-    }
-    match amount as u32 {
-        0 => base,
-        1 => Level::Succ(Box::new(base)),
-        remainder => Level::Offset(Box::new(base), remainder),
     }
 }
 
@@ -1986,7 +1963,7 @@ async fn infer_term<'a, 'source>(
         Term::Var(i) => ctx.lookup(*i).ok_or(CheckError::UnboundVariable(*i)),
 
         // T-Univ: universe levels have exact successors beyond the wire width.
-        Term::Universe(level) => Ok(Term::Universe(level.clone().normalize().successor())),
+        Term::Universe(level) => Ok(Term::Universe(universe_successor(level.clone().normalize()))),
 
         // T-Pi-Form.  Π(x : A). B : Universe(max(level(A), level(B)))
         // where `level(T)` is the universe carrier of T's own type.

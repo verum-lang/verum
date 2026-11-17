@@ -43,4 +43,96 @@ def binders.lookup_binding
   | some slot => let t ← Slice.index_usize entries slot
                  ok (some t)
 
+/-- [verum_proof::proof_checker::Level]
+    Source: 'crates/verum_proof/src/proof_checker.rs', lines 35:0-53:1
+    Visibility: public -/
+@[discriminant isize]
+inductive proof_checker.Level where
+| Concrete : Std.U32 → proof_checker.Level
+| Var : String → proof_checker.Level
+| Succ : proof_checker.Level → proof_checker.Level
+| Max : proof_checker.Level → proof_checker.Level → proof_checker.Level
+| Offset : proof_checker.Level → Std.U32 → proof_checker.Level
+
+/-- [verum_proof::proof_checker::universe_offset::append_wire_chunks::CHUNK]
+    Source: 'crates/verum_proof/src/proof_checker/universe_offset.rs', lines 19:4-19:41 -/
+@[global_simps, irreducible]
+def proof_checker.universe_offset.append_wire_chunks.CHUNK : Result Std.U128 :=
+  ok (UScalar.cast .U128 core.num.U32.MAX)
+
+/-- [verum_proof::proof_checker::universe_offset::append_wire_chunks]: loop body 0:
+    Source: 'crates/verum_proof/src/proof_checker/universe_offset.rs', lines 20:4-23:5 -/
+@[rust_loop_body]
+def proof_checker.universe_offset.append_wire_chunks_loop.body
+  (base : proof_checker.Level) (amount : Std.U128) :
+  Result (ControlFlow (proof_checker.Level × Std.U128) (proof_checker.Level ×
+    Std.U128))
+  := do
+  let i ← proof_checker.universe_offset.append_wire_chunks.CHUNK
+  if amount > i
+  then
+    let amount1 ← amount - i
+    ok (cont (proof_checker.Level.Offset base core.num.U32.MAX, amount1))
+  else ok (done (base, amount))
+
+/-- [verum_proof::proof_checker::universe_offset::append_wire_chunks]: loop 0:
+    Source: 'crates/verum_proof/src/proof_checker/universe_offset.rs', lines 20:4-23:5 -/
+@[rust_loop]
+def proof_checker.universe_offset.append_wire_chunks_loop
+  (base : proof_checker.Level) (amount : Std.U128) :
+  Result (proof_checker.Level × Std.U128)
+  := do
+  loop
+    (fun (base1, amount1) =>
+      proof_checker.universe_offset.append_wire_chunks_loop.body base1 amount1)
+    (base, amount)
+
+/-- [verum_proof::proof_checker::universe_offset::append_wire_chunks]:
+    Source: 'crates/verum_proof/src/proof_checker/universe_offset.rs', lines 18:0-29:1 -/
+def proof_checker.universe_offset.append_wire_chunks
+  (base : proof_checker.Level) (amount : Std.U128) :
+  Result proof_checker.Level
+  := do
+  let (base1, amount1) ←
+    proof_checker.universe_offset.append_wire_chunks_loop base amount
+  let remainder ← lift (UScalar.cast .U32 amount1)
+  match remainder with
+  | 0#uscalar => ok base1
+  | 1#uscalar => ok (proof_checker.Level.Succ base1)
+  | _ => ok (proof_checker.Level.Offset base1 remainder)
+
+/-- [verum_proof::proof_checker::universe_offset::level_with_offset]:
+    Source: 'crates/verum_proof/src/proof_checker/universe_offset.rs', lines 4:0-16:1 -/
+def proof_checker.universe_offset.level_with_offset
+  (base : proof_checker.Level) (amount : Std.U128) :
+  Result proof_checker.Level
+  := do
+  match base with
+  | proof_checker.Level.Concrete n =>
+    let i ← core.num.U32.MAX - n
+    let capacity ← lift (UScalar.cast .U128 i)
+    if amount <= capacity
+    then
+      let i1 ← lift (UScalar.cast .U32 amount)
+      let i2 ← n + i1
+      ok (proof_checker.Level.Concrete i2)
+    else
+      let i1 ← amount - capacity
+      proof_checker.universe_offset.append_wire_chunks
+        (proof_checker.Level.Concrete core.num.U32.MAX) i1
+  | proof_checker.Level.Var _ =>
+    proof_checker.universe_offset.append_wire_chunks base amount
+  | proof_checker.Level.Succ _ =>
+    proof_checker.universe_offset.append_wire_chunks base amount
+  | proof_checker.Level.Max _ _ =>
+    proof_checker.universe_offset.append_wire_chunks base amount
+  | proof_checker.Level.Offset _ _ =>
+    proof_checker.universe_offset.append_wire_chunks base amount
+
+/-- [verum_proof::proof_checker::universe_offset::universe_successor]:
+    Source: 'crates/verum_proof/src/proof_checker/universe_offset.rs', lines 32:0-34:1 -/
+def proof_checker.universe_offset.universe_successor
+  (base : proof_checker.Level) : Result proof_checker.Level := do
+  proof_checker.universe_offset.level_with_offset base 1#u128
+
 end verum_proof

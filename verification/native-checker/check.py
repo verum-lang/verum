@@ -1,4 +1,4 @@
-"""Extract the production binding operation and recheck its Lean theorems."""
+"""Extract native binding lookup and universe successor, then check their Lean proofs."""
 
 import argparse
 import json
@@ -49,7 +49,7 @@ def check(args):
     if not (backend / build_lib / "Aeneas.olean").is_file():
         raise SystemExit("Build the pinned Aeneas Lean library before replay")
 
-    with tempfile.TemporaryDirectory(prefix="verum-binding-", dir=args.scratch) as temp:
+    with tempfile.TemporaryDirectory(prefix="verum-native-checker-", dir=args.scratch) as temp:
         work = Path(temp).resolve()
         env = {
             **os.environ,
@@ -60,7 +60,9 @@ def check(args):
         subprocess.run(
             [
                 charon, "cargo", "--sysroot", "default", "--preset=aeneas", "--abort-on-error",
-                "--start-from", "crate::binders::lookup_binding", "--dest-file", llbc,
+                "--start-from", "crate::binders::lookup_binding",
+                "--start-from", "crate::proof_checker::universe_offset::universe_successor",
+                "--dest-file", llbc,
                 "--", "--locked", "--lib",
             ],
             cwd=PROOF_CRATE, env=env, check=True,
@@ -80,9 +82,10 @@ def check(args):
             [lean, "-DwarningAsError=true", "-o", "VerumProof.olean", generated.name],
             cwd=work, env=env, check=True,
         )
-        proof = shutil.copy2(HERE / "BindingSlot.lean", work)
-        subprocess.run([lean, "-DwarningAsError=true", Path(proof).name], cwd=work, env=env, check=True)
-    print("Verified the production binding lookup and its Lean theorems.")
+        for filename in ("BindingSlot.lean", "UniverseOffset.lean"):
+            shutil.copy2(HERE / filename, work)
+            subprocess.run([lean, "-DwarningAsError=true", filename], cwd=work, env=env, check=True)
+    print("Verified native binding lookup and universe successor against the extracted Rust.")
 
 
 if __name__ == "__main__":

@@ -1479,7 +1479,9 @@ async fn infer_term<'a, 'source>(
             .ok_or(CheckError::UnboundVariable(*i)),
 
         // The same exact level algebra; the wire width does not cap universes.
-        Term::Universe(level) => Ok(Value::VUniverse(level.clone().normalize().successor())),
+        Term::Universe(level) => Ok(Value::VUniverse(crate::proof_checker::universe_successor(
+            level.clone().normalize(),
+        ))),
 
         Term::Pi(a, b) => {
             let a_ty = request_infer(&work, ctx.clone(), child(a)).await?;

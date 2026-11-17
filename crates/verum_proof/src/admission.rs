@@ -140,6 +140,7 @@ pub fn checker_identity() -> String {
         include_str!("main.rs"),
         include_str!("derivation.rs"),
         include_str!("proof_checker.rs"),
+        include_str!("proof_checker/universe_offset.rs"),
         include_str!("proof_checker_nbe.rs"),
     ] {
         h.update(&(part.len() as u64).to_le_bytes());
