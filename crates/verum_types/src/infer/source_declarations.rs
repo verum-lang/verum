@@ -380,6 +380,7 @@ impl TypeChecker {
             && !descriptor.is_public && declared_owner != self.current_module_path
         {
             return Err(TypeError::VisibilityError {
+                declaration_span: None,
                 name: declared_name, visibility: "Private".into(),
                 module_path: declared_owner, span,
             });
@@ -498,6 +499,7 @@ impl TypeChecker {
             .ok_or_else(|| TypeError::TypeNotFound { name: path.clone(), span })?;
         if !descriptor.is_public {
             return Err(TypeError::VisibilityError {
+                declaration_span: None,
                 name: declared, visibility: "Private".into(), module_path: owner, span,
             });
         }
@@ -632,6 +634,7 @@ impl TypeChecker {
         }).ok_or_else(|| TypeError::TypeNotFound { name: qualified.clone(), span })?;
         if !is_public && module_owner != self.current_module_path {
             return Err(TypeError::VisibilityError {
+                declaration_span: None,
                 name: type_name.into(), visibility: "Private".into(),
                 module_path: module_owner, span,
             });
@@ -661,6 +664,7 @@ impl TypeChecker {
                 let declaration = SourceTypeDeclaration::Registered { module: module.clone(), item };
                 let visibility = declaration.visibility.resolve_declared_scope(owner.as_str())
                     .map_err(|message| TypeError::VisibilityError {
+                        declaration_span: Some(declaration.name.span),
                         name: type_name.into(), visibility: message,
                         module_path: owner.clone(), span,
                     })?;
@@ -669,6 +673,7 @@ impl TypeChecker {
                     &ModulePath::from_str(self.current_module_path.as_str()),
                 ) {
                     return Err(TypeError::VisibilityError {
+                        declaration_span: Some(declaration.name.span),
                         name: type_name.into(), visibility: format!("{visibility:?}").into(),
                         module_path: owner, span,
                     });
@@ -778,6 +783,12 @@ impl TypeChecker {
     ) -> Option<(Shared<ModuleInfo>, SourceTypeDeclaration)> {
         let key = self.get_type_name(receiver)?;
         let (owner, name) = key.rsplit_once('.')?;
+        self.registered_type_declaration(owner, name)
+    }
+
+    pub(super) fn registered_type_declaration(
+        &self, owner: &str, name: &str,
+    ) -> Option<(Shared<ModuleInfo>, SourceTypeDeclaration)> {
         let registry = self.module_registry.read();
         let module = self.get_module_with_path_aliases(owner, &registry)?;
         if module.path.to_string() != owner {

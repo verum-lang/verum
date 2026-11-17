@@ -685,6 +685,8 @@ pub enum TypeError {
         visibility: Text,
         module_path: Text,
         span: verum_ast::span::Span,
+        /// Identifier in the selected live declaration, when its source is available.
+        declaration_span: Option<verum_ast::Span>,
     },
 
     /// Ambiguous name error - the same name is imported from multiple modules
@@ -3563,6 +3565,7 @@ impl TypeError {
                 visibility,
                 module_path,
                 span,
+                declaration_span,
             } => {
                 let mut builder = DiagnosticBuilder::error().code("E202")
                 .message(format!(
@@ -3571,6 +3574,12 @@ impl TypeError {
                 ));
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
+                }
+                if let Some(declared) = declaration_span
+                    .filter(|declared| declared != span && declared.start < declared.end)
+                    .and_then(related_span)
+                {
+                    builder = builder.secondary_span(declared, "visibility declared here");
                 }
                 builder.build()
             }

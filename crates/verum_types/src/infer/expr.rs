@@ -9069,7 +9069,7 @@ impl TypeChecker {
         // When we have `Wrapper<τ59>` and τ59 was unified with Text, we need to
         // resolve to `Wrapper<Text>` so field access gets the correct field type.
         let resolved_ty = self.unifier.apply(&obj_result.ty);
-        self.check_record_field_visibility(&resolved_ty, field.name.as_str(), expr.span)?;
+        self.check_record_field_visibility(&resolved_ty, field.name.as_str(), field.span)?;
         if let Some(ty) = self.dependent_field_type(obj, &resolved_ty, &field.name, false, expr.span)? {
             return Ok(InferResult::new(ty));
         }
@@ -11470,7 +11470,7 @@ impl TypeChecker {
             if let (_, Some(try_resolution)) = self.resolve_try_carrier(obj_result.ty.clone(), obj.span)? {
                 // This is `result?.field` inside try-recover — unwrap to success type
                 let success_ty = try_resolution.output;
-                self.check_record_field_visibility(&success_ty, field.name.as_str(), expr.span)?;
+                self.check_record_field_visibility(&success_ty, field.name.as_str(), field.span)?;
                 let dereferenced_ty = self.unwrap_reference_type(&success_ty);
                 let field_ty = self
                     .lookup_field_type(dereferenced_ty, field.name.as_str())
@@ -11489,7 +11489,7 @@ impl TypeChecker {
             .map_or_else(|| obj_result.ty.clone(), |resolution| resolution.inner);
 
         // Unwrap reference types before field access (Maybe<&Point>?.field)
-        self.check_record_field_visibility(&inner_ty, field.name.as_str(), expr.span)?;
+        self.check_record_field_visibility(&inner_ty, field.name.as_str(), field.span)?;
         let dereferenced_ty = self.unwrap_reference_type(&inner_ty);
 
         // Look up field on the inner type

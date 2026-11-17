@@ -140,6 +140,26 @@ fn test_span_line_extraction() {
 }
 
 #[test]
+fn diagnostic_columns_count_unicode_scalars_at_both_ends_of_a_span() {
+    let id = FileId::new(7);
+    let source = "α📦first\r\n🧭e\u{301}end";
+    let file = SourceFile::new(id, "provider.vr".into(), source.into());
+    let start = source.find("first").unwrap() as u32;
+    let end = source.len() as u32;
+    assert_eq!(file.line_col(start), (0, 6));
+    let span = file.span_to_line_col(Span::new(start, end, id)).unwrap();
+    assert_eq!(
+        (span.line, span.column, span.end_line, span.end_column),
+        (1, 3, Some(2), 7)
+    );
+    assert!(file.span_to_line_col(Span::new(1, end, id)).is_none());
+    assert!(
+        file.span_to_line_col(Span::new(start, end + 1, id))
+            .is_none()
+    );
+}
+
+#[test]
 fn test_offset_conversions() {
     let source = "line 1\nline 2\nline 3";
 

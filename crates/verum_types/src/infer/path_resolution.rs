@@ -581,6 +581,7 @@ impl TypeChecker {
         {
             if !descriptor.is_public && owner != self.current_module_path.as_str() {
                 return Err(TypeError::VisibilityError {
+                    declaration_span: None,
                     name: name.into(), visibility: "Private".into(), module_path: owner.into(), span,
                 });
             }
@@ -1053,6 +1054,7 @@ impl TypeChecker {
                             if is_last {
                                 self.check_declared_member_visibility(
                                     &owner, &func.name.name, &Some(func.visibility.clone()), span,
+                                    || Some(func.name.span),
                                 )?;
                                 return self.scheme_from_source_function(func, &owner);
                             } else {
@@ -1074,6 +1076,7 @@ impl TypeChecker {
                                     verum_ast::decl::Visibility::Public
                                 ) {
                                     return Err(TypeError::VisibilityError {
+                                        declaration_span: Some(type_decl.name.span),
                                         name: verum_common::Text::from(segment_name),
                                         visibility: verum_common::Text::from(format!(
                                             "{:?}",
@@ -1114,6 +1117,7 @@ impl TypeChecker {
                                     verum_ast::decl::Visibility::Public
                                 ) {
                                     return Err(TypeError::VisibilityError {
+                                        declaration_span: Some(const_decl.name.span),
                                         name: verum_common::Text::from(segment_name),
                                         visibility: verum_common::Text::from(format!(
                                             "{:?}",
@@ -1573,10 +1577,14 @@ impl TypeChecker {
             }))
         {
             let visibility = declaration.visibility.resolve_declared_scope(module_name)
-                .map_err(|message| TypeError::VisibilityError { name: type_name.into(), visibility: message,
+                .map_err(|message| TypeError::VisibilityError {
+                    declaration_span: Some(declaration.name.span),
+                    name: type_name.into(), visibility: message,
                     module_path: module_name.into(), span })?;
             if !VisibilityChecker::new().is_visible(visibility.clone(), &ModulePath::from_str(module_name), &owner_scope) {
-                return Err(TypeError::VisibilityError { name: type_name.into(), visibility: format!("{visibility:?}").into(),
+                return Err(TypeError::VisibilityError {
+                    declaration_span: Some(declaration.name.span),
+                    name: type_name.into(), visibility: format!("{visibility:?}").into(),
                     module_path: module_name.into(), span });
             }
         }

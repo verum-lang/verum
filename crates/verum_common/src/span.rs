@@ -507,8 +507,7 @@ impl SourceFile {
 
     /// Get the line and column for a byte offset.
     ///
-    /// Returns (line, column) both 0-indexed for internal use.
-    /// Add 1 to each for human-readable 1-indexed positions.
+    /// Returns the zero-based line and byte column for internal use.
     pub fn line_col(&self, offset: u32) -> (u32, u32) {
         // Binary search for the line
         let line = match self.line_starts.binary_search(&offset) {
@@ -523,29 +522,26 @@ impl SourceFile {
 
     /// Convert a byte-offset Span to a LineColSpan.
     ///
-    /// Lines and columns in the result are 1-indexed.
+    /// Lines and Unicode scalar columns in the result are 1-indexed.
     pub fn span_to_line_col(&self, span: Span) -> Option<LineColSpan> {
-        if span.file_id != self.id {
+        if span.file_id != self.id || span.start > span.end {
             return None;
         }
 
-        let (start_line, start_col) = self.line_col(span.start);
-        let (end_line, end_col) = self.line_col(span.end);
+        let position = |offset| {
+            let (line, byte_column) = self.line_col(offset);
+            let line_start = (offset - byte_column) as usize;
+            let prefix = self.source.get(line_start..offset as usize)?;
+            Some((line as usize + 1, prefix.chars().count() + 1))
+        };
+        let (start_line, start_col) = position(span.start)?;
+        let (end_line, end_col) = position(span.end)?;
 
         Some(if start_line == end_line {
-            LineColSpan::new(
-                self.name.clone(),
-                (start_line + 1) as usize,
-                (start_col + 1) as usize,
-                (end_col + 1) as usize,
-            )
+            LineColSpan::new(self.name.clone(), start_line, start_col, end_col)
         } else {
             LineColSpan::new_multiline(
-                self.name.clone(),
-                (start_line + 1) as usize,
-                (start_col + 1) as usize,
-                (end_line + 1) as usize,
-                (end_col + 1) as usize,
+                self.name.clone(), start_line, start_col, end_line, end_col,
             )
         })
     }

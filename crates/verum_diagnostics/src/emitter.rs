@@ -253,6 +253,7 @@ impl Emitter {
             spans: diagnostic
                 .primary_labels()
                 .iter()
+                .chain(diagnostic.secondary_labels())
                 .map(|l| JsonSpan {
                     location: SourceLocation::from(&l.span),
                     label: l.message.clone(),

@@ -3,14 +3,29 @@
 use super::TypeChecker;
 use crate::core_metadata::{TypeDescriptor, TypeDescriptorKind, VariantPayload};
 use crate::{Result, Type, TypeError};
-use verum_ast::{Span, Visibility, decl::{TypeDeclBody, VariantData, Variant}};
+use verum_ast::{Span, Visibility, decl::{RecordField, TypeDeclBody, VariantData, Variant}};
 use verum_common::{List, Maybe, Text};
 use verum_modules::{ModulePath, VisibilityChecker};
 
 #[derive(Clone, Debug)]
 pub(super) struct RecordVisibility {
     owner: Text,
+    type_name: Text,
     fields: List<(Text, Maybe<Visibility>)>,
+}
+
+fn declared_fields<'a>(body: &'a TypeDeclBody, variant: Option<&str>) -> Option<&'a [RecordField]> {
+    match (body, variant) {
+        (TypeDeclBody::Record(fields), None) => Some(fields),
+        (TypeDeclBody::Variant(cases), Some(name)) => {
+            let case = cases.iter().find(|case| case.name.name.as_str() == name)?;
+            match &case.data {
+                Some(VariantData::Record(fields)) => Some(fields),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
 }
 
 impl TypeChecker {
@@ -23,6 +38,7 @@ impl TypeChecker {
             Self::field_policy_key(&self.declared_type_key(name), None),
             RecordVisibility {
                 owner: self.current_module_path.clone(),
+                type_name: name.into(),
                 fields: fields
                     .iter()
                     .map(|field| (field.name.name.clone(), Some(field.visibility.clone())))
@@ -47,7 +63,7 @@ impl TypeChecker {
             };
             self.source_record_field_visibility.insert(
                 Self::field_policy_key(&owner, Some(variant.name.name.as_str())),
-                RecordVisibility { owner: self.current_module_path.clone(), fields },
+                RecordVisibility { owner: self.current_module_path.clone(), type_name: name.into(), fields },
             );
         }
     }
@@ -80,6 +96,7 @@ impl TypeChecker {
             .filter(|owner| !owner.is_empty()).unwrap_or(&descriptor.module_path);
         Some(RecordVisibility {
             owner: owner.clone(),
+            type_name: descriptor.name.clone(),
             fields: fields.iter().map(|field| {
                 (field.name.clone(), field.declared_visibility.clone())
             }).collect(),
@@ -95,6 +112,7 @@ impl TypeChecker {
                 .map(|(owner, _)| Text::from(owner))
                 .unwrap_or_else(|| self.current_module_path.clone()),
             span,
+            declaration_span: None,
         }
     }
 
@@ -187,26 +205,15 @@ impl TypeChecker {
                 }
             }
             if let Some((module, declaration)) = self.source_receiver_declaration(&current) {
-                let fields = match (&declaration.body, variant) {
-                    (TypeDeclBody::Record(fields), None) => Some(fields.as_slice()),
-                    (TypeDeclBody::Variant(cases), Some(name)) => {
-                        cases.iter().find(|case| case.name.name.as_str() == name)
-                            .and_then(|case| match &case.data {
-                                Some(VariantData::Record(fields)) => Some(fields.as_slice()),
-                                _ => None,
-                            })
-                    }
-                    (TypeDeclBody::Alias(_), _) => {
-                        return Err(self.unknown_record_visibility(&key, member, span));
-                    }
-                    _ => None,
-                };
-                return Ok(fields.map(|fields| RecordVisibility {
-                            owner: module.path.to_string().into(),
-                            fields: fields
-                                .into_iter()
-                                .map(|field| (field.name.name.clone(), Some(field.visibility.clone())))
-                                .collect(),
+                if matches!(declaration.body, TypeDeclBody::Alias(_)) {
+                    return Err(self.unknown_record_visibility(&key, member, span));
+                }
+                return Ok(declared_fields(&declaration.body, variant).map(|fields| RecordVisibility {
+                    owner: module.path.to_string().into(),
+                    type_name: declaration.name.name.clone(),
+                    fields: fields.iter()
+                        .map(|field| (field.name.name.clone(), Some(field.visibility.clone())))
+                        .collect(),
                 }));
             }
             if let Some(metadata) = &self.core_metadata
@@ -261,6 +268,7 @@ impl TypeChecker {
         field: &Text,
         visibility: &Maybe<Visibility>,
         span: Span,
+        declaration_span: impl Fn() -> Option<Span>,
     ) -> Result<()> {
         if owner == &self.current_module_path {
             return Ok(());
@@ -271,6 +279,7 @@ impl TypeChecker {
                 visibility: "of unknown archived visibility; rebuild the declaring cog".into(),
                 module_path: owner.clone(),
                 span,
+                declaration_span: None,
             });
         };
         let visibility = visibility
@@ -280,6 +289,7 @@ impl TypeChecker {
                 visibility: message,
                 module_path: owner.clone(),
                 span,
+                declaration_span: declaration_span(),
             })?;
         if VisibilityChecker::new().is_visible(
             visibility.clone(),
@@ -293,8 +303,26 @@ impl TypeChecker {
                 visibility: format!("{visibility:?}").into(),
                 module_path: owner.clone(),
                 span,
+                declaration_span: declaration_span(),
             })
         }
+    }
+
+    fn check_field_policy(
+        &self, record: &RecordVisibility, variant: Option<&str>, name: &Text,
+        visibility: &Maybe<Visibility>, span: Span,
+    ) -> Result<()> {
+        self.check_declared_member_visibility(&record.owner, name, visibility, span, || {
+            // Archived syntax can carry a FileId allocated to an unrelated editor buffer.
+            // Only the selected declaration in the current source snapshot owns this location.
+            let (module, declaration) = self.registered_type_declaration(&record.owner, &record.type_name)?;
+            let field = declared_fields(&declaration.body, variant)?.iter().find(|field|
+                field.name.name == *name && Some(&field.visibility) == visibility.as_ref())?;
+            let location = field.name.span;
+            let bytes = location.start as usize..location.end as usize;
+            (location.file_id == module.file_id && module.source.get(bytes) == Some(name.as_str()))
+                .then_some(location)
+        })
     }
 
     /// Inspect a conversion without expanding a declared record into its field
@@ -620,7 +648,7 @@ impl TypeChecker {
                 .iter()
                 .find(|(name, _)| name.as_str() == field)
         {
-            self.check_declared_member_visibility(&record.owner, name, visibility, span)?;
+            self.check_field_policy(&record, None, name, visibility, span)?;
         }
         Ok(())
     }
@@ -633,7 +661,7 @@ impl TypeChecker {
         if let Some(record) = self.declared_field_visibility(receiver, Some(variant), field, span)?
             && let Some((name, visibility)) = record.fields.iter().find(|(name, _)| name.as_str() == field)
         {
-            self.check_declared_member_visibility(&record.owner, name, visibility, span)?;
+            self.check_field_policy(&record, Some(variant), name, visibility, span)?;
         }
         Ok(())
     }
@@ -644,7 +672,7 @@ impl TypeChecker {
     ) -> Result<()> {
         if let Some(record) = self.declared_field_visibility(receiver, Some(variant), "variant construction", span)? {
             for (name, visibility) in &record.fields {
-                self.check_declared_member_visibility(&record.owner, name, visibility, span)?;
+                self.check_field_policy(&record, Some(variant), name, visibility, span)?;
             }
         }
         Ok(())
@@ -659,7 +687,7 @@ impl TypeChecker {
     ) -> Result<()> {
         if let Some(record) = self.declared_field_visibility(receiver, None, "record construction", span)? {
             for (name, visibility) in &record.fields {
-                self.check_declared_member_visibility(&record.owner, name, visibility, span)?;
+                self.check_field_policy(&record, None, name, visibility, span)?;
             }
         }
         Ok(())

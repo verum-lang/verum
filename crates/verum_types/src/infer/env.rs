@@ -2415,7 +2415,7 @@ impl TypeChecker {
             ExprKind::Field { expr: obj, field } => {
                 // Get the object type without init checking
                 let obj_result = self.synth_expr_for_field_access(obj)?;
-                self.check_record_field_visibility(&obj_result.ty, field.name.as_str(), expr.span)?;
+                self.check_record_field_visibility(&obj_result.ty, field.name.as_str(), field.span)?;
                 if let Some(ty) = self.dependent_field_type(obj, &obj_result.ty, &field.name, true, expr.span)? {
                     return Ok(InferResult::new(ty));
                 }
@@ -2443,7 +2443,7 @@ impl TypeChecker {
                         match self.find_deref_target_type(&normalized_ty, expr.span)? {
                             Some(target) => {
                                 self.require_mutable_deref(&normalized_ty, expr.span)?;
-                                self.check_record_field_visibility(&target, field.name.as_str(), expr.span)?;
+                                self.check_record_field_visibility(&target, field.name.as_str(), field.span)?;
                                 let unwrapped = self.unwrap_reference_type(&target);
                                 normalized_ty = self.normalize_type(unwrapped);
                                 hops += 1;

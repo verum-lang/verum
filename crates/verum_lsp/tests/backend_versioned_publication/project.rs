@@ -69,6 +69,39 @@ const MAIN: &str =
     "mount dependency.{Token, answer};\nfn read(value: Token) -> Int { value.id + answer() }";
 
 #[tokio::test]
+async fn private_field_diagnostic_links_to_the_selected_declaration_in_the_open_revision() {
+    let project = Project::new();
+    let initial = "public type Packet is { public secret: Int };";
+    let dependency = project.open("provider.vr", initial);
+    project.file("decoy.vr", "public type Packet is { secret: Bool };");
+    let source = "mount provider.{Packet as Selected};\nfn read(p: Selected) -> Int { /* 🧭 */ p.secret }";
+    let main = project.open("main.vr", source);
+    assert!(errors(&project.snapshot(&main).await).is_empty());
+
+    let edited = "public type Packet is {\n    /* 📦 */ secret: Int\n};";
+    let backend = project.service.inner();
+    backend.documents.try_update(&dependency, edited.into(), 2).unwrap();
+    let pulled = backend.diagnostic(DocumentDiagnosticParams {
+        text_document: TextDocumentIdentifier { uri: main },
+        identifier: None, previous_result_id: None,
+        work_done_progress_params: Default::default(), partial_result_params: Default::default(),
+    }).await.unwrap();
+    let report = serde_json::to_value(pulled).unwrap();
+    let diagnostic = report["items"].as_array().unwrap().iter()
+        .find(|item| item["code"] == "E202").unwrap_or_else(|| panic!("{report:#}"));
+    let field_range = |source: &str| {
+        let line = source.lines().nth(1).unwrap();
+        let start = line.split_once("secret").unwrap().0.encode_utf16().count();
+        json!({"start":{"line":1,"character":start}, "end":{"line":1,"character":start + 6}})
+    };
+    assert_eq!(diagnostic["range"], field_range(source));
+    let related = diagnostic["relatedInformation"].as_array().unwrap();
+    assert_eq!(related.len(), 1);
+    assert_eq!(related[0]["location"], json!({"uri":dependency, "range":field_range(edited)}));
+    assert_eq!(std::fs::read_to_string(dependency.to_file_path().unwrap()).unwrap(), initial);
+}
+
+#[tokio::test]
 async fn contextual_sum_policy_follows_the_current_unsaved_mount() {
     let project = Project::new();
     project.file("public_payload.vr", "public type Envelope<T> is Empty | Ready(T);");
@@ -646,9 +679,10 @@ fn nominal_library_fixture(target: &str) -> std::sync::Arc<crate::library_metada
     for (owner, source) in [
         ("portable.levels", "public type Level is { public value: Type(1) };"),
         ("foreign.levels", "public type Level is { public value: Type(1) };"),
-        ("portable.api", "public type Carrier is { public value: Type(1), public nested: PrivateLevel };"),
+        ("portable.api", "public type Carrier is { public value: Type(1), public nested: PrivateLevel, secret: Int };"),
     ] {
-        let ast = verum_parser::Parser::new(source).parse_module().unwrap();
+        // An archive's parser can assign the same FileId as a later editor session.
+        let ast = crate::source_parsing::parse(source, verum_ast::FileId::new(1)).unwrap();
         let verum_ast::ItemKind::Type(decl) = &ast.items[0].kind else { panic!("type") };
         let verum_ast::TypeDeclBody::Record(fields) = &decl.body else { panic!("record") };
         let key: verum_common::Text = format!("{owner}.{}", decl.name.name).into();
@@ -658,8 +692,8 @@ fn nominal_library_fixture(target: &str) -> std::sync::Arc<crate::library_metada
             name: decl.name.name.clone(), module_path: owner.into(), origin_module_path: None,
             generic_params: Default::default(),
             kind: TypeDescriptorKind::Record { fields: fields.iter().map(|field| FieldDescriptor {
-                name: field.name.name.clone(), ty: "__opaque_src".into(), is_public: true,
-                declared_visibility: Some(verum_ast::Visibility::Public),
+                name: field.name.name.clone(), ty: "__opaque_src".into(), is_public: field.visibility.is_public(),
+                declared_visibility: Some(field.visibility.clone()),
             }).collect() },
             size: None, alignment: None, methods: Default::default(), implements: Default::default(),
             decl_span: None, is_public: true, is_transparent_wrapper: false,
@@ -670,6 +704,29 @@ fn nominal_library_fixture(target: &str) -> std::sync::Arc<crate::library_metada
     bindings.insert("PrivateLevel".into(), Some(target.into()));
     metadata.declaration_type_bindings.insert("portable.api".into(), bindings);
     crate::library_metadata::LibraryMetadata::decode(&encode_metadata(&metadata).unwrap()).unwrap()
+}
+
+#[tokio::test]
+async fn archive_only_private_field_diagnostic_cannot_link_into_the_consumer() {
+    let library = nominal_library_fixture("portable.levels.Level");
+    let carrier = library.metadata().types.get(&verum_common::Text::from("portable.api.Carrier")).unwrap();
+    let declaration = carrier.source_declaration.as_ref().unwrap();
+    let verum_ast::TypeDeclBody::Record(fields) = &declaration.body else { panic!("expected record") };
+    let archived = fields.iter().find(|field| field.name.name.as_str() == "secret").unwrap().name.span;
+    let project = Project::with_library(Some(library));
+    let source = "mount portable.api.Carrier;\nfn read(x: Carrier) -> Int { /* archive offsets can land here */ x.secret }";
+    let uri = project.open("main.vr", source);
+    let id = project.service.inner().documents.with_document(&uri, |doc| doc.file_id).unwrap();
+    assert_eq!(id, archived.file_id);
+    let unrelated = source.get(archived.start as usize..archived.end as usize).unwrap();
+    assert_ne!(unrelated, "secret");
+    let snapshot = project.snapshot(&uri).await;
+    let error = errors(&snapshot).into_iter().find(|item| item["code"] == "E202")
+        .unwrap_or_else(|| panic!("{snapshot:#}"));
+    assert!(error["relatedInformation"].is_null(), "{error:#}");
+    let start = source.lines().nth(1).unwrap().find("secret").unwrap();
+    assert_eq!(error["range"], json!({"start":{"line":1,"character":start},
+        "end":{"line":1,"character":start + 6}}));
 }
 
 #[tokio::test]

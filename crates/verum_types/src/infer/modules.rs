@@ -2865,6 +2865,7 @@ impl TypeChecker {
             )
         {
             return Err(TypeError::VisibilityError {
+                declaration_span: None,
                 name: name.clone(), visibility: item.visibility.as_str().into(),
                 module_path: module.path.to_string().into(), span: span.unwrap_or(item.span),
             });
@@ -3930,11 +3931,13 @@ impl TypeChecker {
             if let Some(declaration) = declaration {
                 let visibility = declaration.visibility.resolve_declared_scope(parent)
                     .map_err(|reason| TypeError::VisibilityError {
+                        declaration_span: Some(declaration.name.span),
                         name: name.into(), visibility: reason,
                         module_path: parent.into(), span,
                     })?;
                 if !visibility.visible_from(parent.split('.'), self.current_module_path.as_str().split('.')) {
                     return Err(TypeError::VisibilityError {
+                        declaration_span: Some(declaration.name.span),
                         name: name.into(), visibility: visibility.as_str().into(),
                         module_path: parent.into(), span,
                     });
@@ -6660,6 +6663,7 @@ impl TypeChecker {
                         if !visible(&export.visibility, scope.owner.as_str()) {
                             if scope.reject_inaccessible {
                                 return Err(TypeError::VisibilityError {
+                                    declaration_span: None,
                                     name: scope.name, visibility: export.visibility.as_str().into(),
                                     module_path: scope.owner, span: export.span,
                                 });
@@ -6700,6 +6704,7 @@ impl TypeChecker {
                         // placeholder or selecting another same-named declaration.
                         if scope.reject_inaccessible {
                             return Err(TypeError::VisibilityError {
+                                declaration_span: Some(declaration.name.span),
                                 name: declaration.name.name.clone(),
                                 visibility: declaration.visibility.as_str().into(),
                                 module_path: scope.owner, span: declaration.span,
@@ -6766,6 +6771,7 @@ impl TypeChecker {
                 }
                 Work::DeniedMount { name, visibility, owner, span } => {
                     return Err(TypeError::VisibilityError {
+                        declaration_span: None,
                         name, visibility, module_path: owner, span,
                     });
                 }
@@ -6794,6 +6800,7 @@ impl TypeChecker {
                             }
                             if reject_inaccessible {
                                 return Err(TypeError::VisibilityError {
+                                    declaration_span: Some(declaration.name.span),
                                     name: declaration.name.name.clone(),
                                     visibility: declaration.visibility.as_str().into(),
                                     module_path: owner, span: declaration.span,
@@ -21386,7 +21393,7 @@ impl TypeChecker {
                 {
                     // Only this fallback selects a field. A public inherent
                     // method with the same spelling has already had priority.
-                    self.check_record_field_visibility(declaration_receiver, method.name.as_str(), span)?;
+                    self.check_record_field_visibility(declaration_receiver, method.name.as_str(), method.span)?;
                     // Field access to function: treat as method call
                     if let Type::Function {
                         params,
@@ -23051,6 +23058,7 @@ impl TypeChecker {
                 {
                     self.check_declared_member_visibility(
                         &module.path.to_string().into(), &written_path, &Some(function.visibility.clone()), span,
+                        || Some(function.name.span),
                     )?;
                 }
                 return Err(TypeError::UnboundVariable { name: written_path.clone(), span });
@@ -24044,6 +24052,7 @@ impl TypeChecker {
                         .filter(|module| !module.is_empty()).unwrap_or(&descriptor.module_path);
                     if owner != &self.current_module_path {
                         return Err(TypeError::VisibilityError {
+                            declaration_span: None,
                             name: Text::from(type_name),
                             visibility: "private".into(),
                             module_path: owner.clone(),

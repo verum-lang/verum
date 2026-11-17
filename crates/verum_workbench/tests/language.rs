@@ -13,6 +13,37 @@ fn studio(root: &std::path::Path) -> Studio {
 }
 
 #[tokio::test]
+async fn private_field_diagnostic_points_to_its_provider_and_accepts_its_public_peer() {
+    let root = tempfile::tempdir().unwrap();
+    let provider = root.path().join("provider.vr");
+    let field_line = "    /* 📦 */ stored: Int, public exposed: Int";
+    std::fs::write(&provider, format!("public type Boxed is {{\n{field_line}\n}};")).unwrap();
+    let studio = studio(root.path());
+    for field in ["stored", "exposed"] {
+        let prefix = "fn read(x: Boxed) -> Int { /* 🧭 */ x.";
+        let source = format!("mount provider.Boxed;\n{prefix}{field} }}");
+        let reply = studio.call("language.request", json!({"path":"main.vr", "source":source})).await.unwrap();
+        let errors: Vec<_> = reply["result"]["diagnostics"].as_array().unwrap().iter()
+            .filter(|item| item["severity"] == 1).collect();
+        if field == "exposed" {
+            assert!(errors.is_empty(), "{reply:#}");
+            continue;
+        }
+        assert_eq!(errors.len(), 1, "{reply:#}");
+        assert_eq!(errors[0]["code"], "E202");
+        let range = |start| json!({
+            "start":{"line":1,"character":start}, "end":{"line":1,"character":start + field.len()}
+        });
+        assert_eq!(errors[0]["range"], range(prefix.encode_utf16().count()));
+        let related = errors[0]["relatedInformation"].as_array().unwrap();
+        assert_eq!(related.len(), 1);
+        let uri = tower_lsp::lsp_types::Url::from_file_path(provider.canonicalize().unwrap()).unwrap();
+        assert_eq!(related[0]["location"]["uri"], uri.as_str());
+        assert_eq!(related[0]["location"]["range"], range(field_line.split_once(field).unwrap().0.encode_utf16().count()));
+    }
+}
+
+#[tokio::test]
 async fn explicit_source_mode_drives_shared_analysis_and_invalidates_same_text() {
     let root = tempfile::tempdir().unwrap();
     let studio = studio(root.path());

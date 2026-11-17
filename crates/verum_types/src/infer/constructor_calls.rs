@@ -84,11 +84,12 @@ impl TypeChecker {
         if declaration.visibility.is_public() || !cases.iter().any(|declared| declared.name.name == case) {
             return Ok(());
         }
-        let Some((owner, _)) = key.rsplit_once('.') else {
+        let Some((owner, type_name)) = key.rsplit_once('.') else {
             return Ok(());
         };
         self.check_declared_member_visibility(
             &owner.into(), &case.into(), &Some(declaration.visibility.clone()), span,
+            || self.registered_type_declaration(owner, type_name).map(|(_, source)| source.name.span),
         )
     }
 

@@ -169,7 +169,7 @@ impl TypeChecker {
         if let Some(declaration) = &scheme.value_declaration {
             self.check_declared_member_visibility(
                 &declaration.owner, &declaration.name,
-                &Some(declaration.visibility.clone()), span,
+                &Some(declaration.visibility.clone()), span, || None,
             )?;
             if let Some(owner) = &declaration.constructor_owner {
                 self.check_variant_construction_visibility(
