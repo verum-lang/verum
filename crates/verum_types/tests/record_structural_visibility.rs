@@ -466,9 +466,12 @@ macro_rules! conversion_controls {
                 ] {
                     for reverse in [false, true] {
                         let errors = check($input, reverse, body);
+                        // An async-capable callable cannot satisfy a contract
+                        // excluding Async. Mutable references must satisfy
+                        // both directions, so that same obligation fails there.
                         assert!(errors.mismatches.iter().any(|(actual, expected)|
-                            (actual.contains("async fn") && expected.contains("fn("))
-                                || (actual.contains("fn(") && expected.contains("async fn"))),
+                            actual.as_str() == "fn() -> Int [bound: unrestricted; observed: unknown]"
+                                && expected.as_str() == "fn() -> Int [bound: excludes {Async}; observed: unknown]"),
                             "{:?}, reverse={reverse}: callback contract was lost: {body}\n{errors:?}", $input);
                     }
                 }
