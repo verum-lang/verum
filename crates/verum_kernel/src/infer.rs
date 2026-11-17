@@ -46,9 +46,8 @@ use crate::{Context, CoreTerm, CoreType, KernelError, UniverseLevel};
 ///  into the second component's binder.
 /// * `PathTy` — carrier in universe, lhs/rhs check at carrier.
 /// * `Refl` — `x : A ⇒ refl(x) : Path<A>(x, x)`.
-/// * `Refine` — base in universe, predicate well-typed under
-///  extended ctx (full `predicate : Bool` gate lands once the Bool
-///  primitive is canonically registered).
+/// * `Refine` — base in a universe, predicate a proposition under the
+///   extended context, with the independent depth constraint enforced.
 /// * `Inductive` — requires an explicitly registered declaration and checks
 ///   its parameters against the declared universe.
 /// * `HComp` / `Glue` — refused pending typed cubical boundary judgments.
@@ -526,29 +525,20 @@ impl Inference<'_> {
                 operation: Text::from("Glue"),
             }),
 
-            // Refine: {x : base | predicate}. base must inhabit a universe,
-            // predicate must check under the extended ctx (bound to Bool at
-            // full-rule closure; shape-level at bring-up).
-            //
-
-            // K-Refine (/ §4.4 / Diakrisis T-2f*): the predicate's
-            // M-iteration depth MUST be strictly less than base's depth + 1.
-            // Per Yanofsky 2003 this closes every self-referential paradox
-            // schema in a cartesian-closed setting by blocking the exact
-            // equality `dp(α) = dp(T^α)` that Russell/Curry/Gödel-type
-            // diagonals require. Enforced BEFORE well-typedness inference
-            // of the predicate so a depth-violating term is rejected early
-            // with a precise diagnostic.
+            // Spec: Verum Verification Architecture §2.4 — refinement formation.
+            // Predicate formation and the depth constraint are independent
+            // premises. Neither a well-typed value nor a depth check proves
+            // that the predicate is a proposition. Boolean source predicates
+            // require a checked reflection into Prop before this boundary.
             CoreTerm::Refine {
                 base,
                 binder,
                 predicate,
             } => {
                 let base_univ = self.infer(ctx, base)?;
-                let base_level = universe_level(&base_univ)?;
+                let base_level = universe_level(&normalize_in(&base_univ, axioms, inductives))?;
 
-                // K-Refine depth check — the single load-bearing Diakrisis
-                // rule in the Verum kernel.
+                // Preserve the separate syntactic depth restriction.
                 let base_depth = m_depth(base);
                 let pred_depth = m_depth(predicate);
                 if pred_depth > base_depth {
@@ -560,11 +550,14 @@ impl Inference<'_> {
                 }
 
                 let extended = ctx.extend(binder.clone(), (**base).clone());
-                // Predicate must be well-typed under the extended context;
-                // we don't yet enforce its type is Bool because Bool is a
-                // primitive Inductive that lands via the stdlib bridge, so
-                // for bring-up we only require the predicate be well-typed.
-                let _ = self.infer(&extended, predicate)?;
+                let predicate_type = self.infer(&extended, predicate)?;
+                let predicate_type = normalize_in(&predicate_type, axioms, inductives);
+                if predicate_type != CoreTerm::Universe(UniverseLevel::Prop) {
+                    return Err(KernelError::InvalidRefinementPredicate {
+                        binder: binder.clone(),
+                        actual: shape_of(&predicate_type),
+                    });
+                }
                 Ok(CoreTerm::Universe(base_level))
             }
 

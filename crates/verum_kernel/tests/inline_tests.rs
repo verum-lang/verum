@@ -828,17 +828,17 @@ fn refl_produces_path_type_with_identical_endpoints() {
 // Refinement / cubical / Elim — bring-up rules
 // -----------------------------------------------------------------
 
-/// `{x : Unit | tt} : Type(0)` — refinement formation.
+/// `{x : Unit | P} : Type(0)` for `P : Prop` — formation does not prove P.
 #[test]
 fn refine_formation_returns_base_universe() {
-    let mut reg = AxiomRegistry::new();
-    let tt = tt_axiom(&mut reg);
+    let reg = AxiomRegistry::new();
+    let ctx = Context::new().extend(Text::from("P"), CoreTerm::Universe(UniverseLevel::Prop));
     let refined = CoreTerm::Refine {
         base: Heap::new(unit_ty()),
         binder: Text::from("x"),
-        predicate: Heap::new(tt),
+        predicate: Heap::new(var("P")),
     };
-    let ty = infer_fixture(&Context::new(), &refined, &reg).unwrap();
+    let ty = infer_fixture(&ctx, &refined, &reg).unwrap();
     assert_eq!(ty, CoreTerm::Universe(UniverseLevel::Concrete(0)));
 }
 

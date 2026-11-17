@@ -63,6 +63,15 @@ pub enum KernelError {
         actual: CoreType,
     },
 
+    /// A refinement body must denote a proposition in the binder's context.
+    #[error("refinement predicate under '{binder}' must have type Prop, got {actual:?}")]
+    InvalidRefinementPredicate {
+        /// The variable bound by the refinement.
+        binder: Text,
+        /// Normalized inferred type of the rejected predicate.
+        actual: CoreType,
+    },
+
     /// Reference to an inductive type that has not been declared.
     #[error("unknown inductive type: {0}")]
     UnknownInductive(Text),

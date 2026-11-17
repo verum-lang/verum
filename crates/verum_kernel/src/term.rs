@@ -189,14 +189,14 @@ pub enum CoreTerm {
 
     /// Refinement type: `{ x : base | predicate(x) }`.
     ///
-    /// The kernel records the predicate but delegates decidability to
-    /// the SMT backend via [`CoreTerm::SmtProof`].
+    /// Formation checks that the open predicate inhabits `Prop` in the
+    /// extended context. This does not establish a witness or decidability.
     Refine {
         /// Base type.
         base: Heap<CoreTerm>,
         /// Bound variable inside the predicate.
         binder: Text,
-        /// Predicate term — must have type `Bool`.
+        /// Proposition under the bound variable — must have type `Prop`.
         predicate: Heap<CoreTerm>,
     },
 

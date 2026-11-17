@@ -1,12 +1,8 @@
 //! K-Refine depth-check integration tests (/ §4.4).
 //!
-//! Diakrisis axiom T-2f* ported to the Verum kernel: a refinement type
-//! `{ x : base | P(x) }` is well-formed only when the predicate's
-//! M-iteration depth is strictly less than the base's depth + 1.
-//! Yanofsky 2003 establishes that this closes every self-referential
-//! paradox schema in a cartesian-closed setting by blocking the exact
-//! equality `dp(α) = dp(T^α)` that Russell / Curry / Gödel-type
-//! diagonals require.
+//! Refinement formation checks both predicate sort and the independent
+//! M-iteration depth restriction. These tests establish those admission
+//! boundaries, not a general consistency or paradox-immunity theorem.
 //!
 //! This file exercises the kernel rule end-to-end — both the valid
 //! refinement paths that must keep type-checking cleanly AND the
@@ -111,27 +107,127 @@ fn m_depth_of_refine_is_max_of_components() {
 // -----------------------------------------------------------------------------
 
 #[test]
-fn k_refine_accepts_trivial_predicate_over_inductive_base() {
-    // {n : Int | True} — predicate is a variable reference, depth 0;
-    // base Int has depth 1; 0 < 1 + 1 = 2. Valid.
-    let t = refine(ind("Int", vec![]), "n", tvar("n"));
-    let result = infer_fixture(&Context::new(), &t, &AxiomRegistry::new());
-    assert!(
-        result.is_ok(),
-        "expected valid refinement to type-check, got {result:?}"
+fn k_refine_accepts_a_proposition_without_claiming_it_is_inhabited() {
+    let ctx = Context::new().extend(Text::from("P"), prop());
+    let t = refine(ind("Int", vec![]), "n", tvar("P"));
+    assert_eq!(
+        infer_fixture(&ctx, &t, &AxiomRegistry::new()).unwrap(),
+        CoreTerm::Universe(UniverseLevel::Concrete(0))
+    );
+}
+
+fn prop() -> CoreTerm {
+    CoreTerm::Universe(UniverseLevel::Prop)
+}
+
+fn pi(binder: &str, domain: CoreTerm, codomain: CoreTerm) -> CoreTerm {
+    CoreTerm::Pi {
+        binder: Text::from(binder),
+        domain: Heap::new(domain),
+        codomain: Heap::new(codomain),
+    }
+}
+
+#[test]
+fn k_refine_checks_dependent_predicates_in_the_shadowing_binder_context() {
+    let int = ind("Int", vec![]);
+    let ctx = Context::new()
+        .extend(Text::from("P"), pi("item", int.clone(), prop()))
+        .extend(Text::from("n"), ind("Bool", vec![]));
+    let predicate = CoreTerm::App(Heap::new(tvar("P")), Heap::new(tvar("n")));
+    assert_eq!(
+        infer_fixture(&ctx, &refine(int, "n", predicate), &AxiomRegistry::new()).unwrap(),
+        CoreTerm::Universe(UniverseLevel::Concrete(0))
     );
 }
 
 #[test]
-fn k_refine_accepts_predicate_equal_to_base_depth() {
-    // {l : List<Int> | l} — predicate depth 0 (just the bound var);
-    // base List<Int> depth 2; 0 < 2 + 1 = 3. Valid.
-    let t = refine(ind("List", vec![ind("Int", vec![])]), "l", tvar("l"));
-    let result = infer_fixture(&Context::new(), &t, &AxiomRegistry::new());
-    assert!(
-        result.is_ok(),
-        "expected nested-Inductive refinement to type-check, got {result:?}"
+fn k_refine_rejects_data_values_types_proofs_and_unapplied_predicates() {
+    let int = ind("Int", vec![]);
+    let ctx = Context::new()
+        .extend(Text::from("P"), prop())
+        .extend(Text::from("proof"), tvar("P"))
+        .extend(Text::from("flag"), ind("Bool", vec![]))
+        .extend(Text::from("family"), pi("n", int.clone(), prop()));
+    for predicate in [
+        tvar("n"),
+        int.clone(),
+        prop(),
+        CoreTerm::Universe(UniverseLevel::Concrete(0)),
+        tvar("proof"),
+        tvar("flag"),
+        tvar("family"),
+    ] {
+        let result = infer_fixture(
+            &ctx,
+            &refine(int.clone(), "n", predicate.clone()),
+            &AxiomRegistry::new(),
+        );
+        assert!(
+            matches!(result, Err(KernelError::InvalidRefinementPredicate { ref binder, .. }) if binder.as_str() == "n"),
+            "non-proposition {predicate:?}: {result:?}"
+        );
+    }
+    let list = ind("List", vec![int]);
+    assert!(matches!(
+        infer_fixture(&ctx, &refine(list, "l", tvar("l")), &AxiomRegistry::new()),
+        Err(KernelError::InvalidRefinementPredicate { .. })
+    ));
+}
+
+#[test]
+fn k_refine_preserves_dependent_argument_and_unbound_variable_errors() {
+    let ctx = Context::new().extend(Text::from("P"), pi("b", ind("Bool", vec![]), prop()));
+    let invalid = CoreTerm::App(Heap::new(tvar("P")), Heap::new(tvar("n")));
+    assert!(matches!(
+        infer_fixture(
+            &ctx,
+            &refine(ind("Int", vec![]), "n", invalid),
+            &AxiomRegistry::new()
+        ),
+        Err(KernelError::TypeMismatch { .. })
+    ));
+    assert!(matches!(
+        infer_fixture(
+            &ctx,
+            &refine(ind("Int", vec![]), "n", tvar("missing")),
+            &AxiomRegistry::new()
+        ),
+        Err(KernelError::UnboundVariable(_))
+    ));
+}
+
+#[test]
+fn k_refine_normalizes_predicate_sort_without_recognizing_type_names() {
+    let kind = CoreTerm::App(
+        Heap::new(CoreTerm::Lam {
+            binder: Text::from("A"),
+            domain: Heap::new(CoreTerm::Universe(UniverseLevel::Concrete(0))),
+            body: Heap::new(prop()),
+        }),
+        Heap::new(ind("Unit", vec![])),
     );
+    let ctx = Context::new().extend(Text::from("P"), kind);
+    assert!(
+        infer_fixture(
+            &ctx,
+            &refine(ind("Int", vec![]), "n", tvar("P")),
+            &AxiomRegistry::new()
+        )
+        .is_ok()
+    );
+}
+
+#[test]
+fn k_refine_preserves_the_carriers_universe() {
+    let ctx = Context::new().extend(Text::from("P"), prop());
+    for level in [0, 2, 17] {
+        let base = CoreTerm::Universe(UniverseLevel::Concrete(level));
+        assert_eq!(
+            infer_fixture(&ctx, &refine(base, "T", tvar("P")), &AxiomRegistry::new()).unwrap(),
+            CoreTerm::Universe(UniverseLevel::Concrete(level + 1))
+        );
+    }
 }
 
 // -----------------------------------------------------------------------------

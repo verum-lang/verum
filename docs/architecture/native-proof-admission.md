@@ -8,6 +8,16 @@ A `verum-native/1` artifact carries an independently supplied statement and a ce
 
 The kernel profile includes dependent functions and pairs, universes and identity elimination. It is not the entire Verum source language. Acceptance proves neither faithful elaboration of an arbitrary source program nor alignment of a natural-language theorem. An imported report is data, not authority; the host must replay the actual artifact and bind the result to its revision.
 
+The separate named calculus forms `CoreTerm::Refine` only when its base
+inhabits a universe and its open predicate has type `Prop` under the bound
+variable. The predicate's inferred type is normalized before comparison.
+The existing depth constraint remains a separate premise. Data values,
+Boolean values, types and proof witnesses cannot substitute for a proposition;
+source Boolean predicates need checked reflection before this boundary.
+Formation establishes a type, not an inhabitant or a decision procedure.
+`k_refine_depth` checks these boundaries in the pure-tier CI job. This rule
+does not extend the portable native artifact's supported logical profile.
+
 The portable crate retains the existing native Rust/wire types. It sits below the compiler's `verum_common` layer: pulling in the latter would introduce its nightly compiler feature into otherwise stable embedded consumers. It has no LLVM, solver, interpreter or compiler dependencies. The process feature adds only host supervision; it does not change rules or generated AOT programs.
 
 ## Resource boundary
