@@ -160,9 +160,8 @@ fn parse_equality(ts: &mut SqlTokenStream) -> Result<Expr, SqlParseError> {
                 }
 
                 if ts.accept_keyword(KwIn) {
-                    left = match parse_in_rhs(ts, left, negated) {
-                        Result.Ok(e)  => e, Result.Err(e) => { return Result.Err(e); }
-                    };
+                    let items = parse_in_items(ts)?;
+                    left = EIn(Heap.new(left), items, negated);
                     continue;
                 }
 
@@ -194,11 +193,7 @@ fn detect_equality_op(ts: &mut SqlTokenStream) -> Maybe<BinOp> {
     Maybe.None
 }
 
-fn parse_in_rhs(
-    ts: &mut SqlTokenStream,
-    left: Expr,
-    negated: Bool,
-) -> Result<Expr, SqlParseError> {
+fn parse_in_items(ts: &mut SqlTokenStream) -> Result<List<Expr>, SqlParseError> {
     match ts.expect_punct(PLParen) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
     let mut items: List<Expr> = List.new();
     if !ts.check_punct(PRParen) {
@@ -211,7 +206,7 @@ fn parse_in_rhs(
         }
     }
     match ts.expect_punct(PRParen) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
-    Result.Ok(EIn(Heap.new(left), items, negated))
+    Result.Ok(items)
 }
 
 // -----------------------------------------------------------------------------

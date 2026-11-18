@@ -81,15 +81,17 @@ implement SqlTokenStream {
     /// the cursor is past the end (defensive — lex() always terminates
     /// with TEof, so this is mostly a belt-and-braces guard).
     public fn peek(&self) -> SqlToken {
-        if self.pos >= self.tokens.len() { return TEof; }
-        clone_token(&self.tokens[self.pos])
+        self.peek_n(0)
     }
 
     /// Peek `n` tokens ahead (0 = current).
     public fn peek_n(&self, n: Int) -> SqlToken {
         let idx = self.pos + n;
         if idx >= self.tokens.len() { return TEof; }
-        clone_token(&self.tokens[idx])
+        match self.tokens[idx] {
+            SqlToken.TSoftKeyword(_, ref spelling) => SqlToken.TIdent(spelling.clone()),
+            _ => clone_token(&self.tokens[idx]),
+        }
     }
 
     /// Consume and return the current token.
@@ -110,8 +112,10 @@ implement SqlTokenStream {
 
     /// True if the current token is `kw`. Does NOT advance.
     public fn check_keyword(&self, kw: SqlKeyword) -> Bool {
-        match self.peek() {
+        if self.pos >= self.tokens.len() { return false; }
+        match self.tokens[self.pos] {
             TKeyword(k) => keyword_eq(k, kw),
+            SqlToken.TSoftKeyword(k, _) => keyword_eq(k, kw),
             _ => false,
         }
     }
@@ -221,6 +225,7 @@ fn clone_token_list(xs: &List<SqlToken>) -> List<SqlToken> {
 fn clone_token(t: &SqlToken) -> SqlToken {
     match t {
         TKeyword(k)     => TKeyword(k),
+        SqlToken.TSoftKeyword(k, s) => SqlToken.TSoftKeyword(k, s.clone()),
         TIdent(s)       => TIdent(s.clone()),
         TStringLit(s)   => TStringLit(s.clone()),
         TBlobLit(b)     => TBlobLit(clone_bytes(&b)),
@@ -357,6 +362,8 @@ fn keyword_eq(a: SqlKeyword, b: SqlKeyword) -> Bool {
         (KwWithout, KwWithout) => true,
         (KwRowid, KwRowid) => true,
         (KwConflict, KwConflict) => true,
+        (SqlKeyword.KwDo, SqlKeyword.KwDo) => true,
+        (SqlKeyword.KwNothing, SqlKeyword.KwNothing) => true,
         (KwAbort, KwAbort) => true,
         (KwFail, KwFail) => true,
         (KwIgnore, KwIgnore) => true,

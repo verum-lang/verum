@@ -77,9 +77,10 @@ public fn parse_select(ts: &mut SqlTokenStream) -> Result<SelectStmt, SqlParseEr
                 let rhs = match parse_simple(ts) {
                     Result.Ok(s)  => s, Result.Err(e) => { return Result.Err(e); }
                 };
-                let lhs_wrapped = SelectStmt { kind: kind, order_by: List.new(), limit: Maybe.None };
                 let rhs_wrapped = SelectStmt { kind: SkSimple(rhs), order_by: List.new(), limit: Maybe.None };
-                kind = SkCompound(op, Heap.new(lhs_wrapped), Heap.new(rhs_wrapped));
+                kind = SkCompound(op,
+                    Heap.new(SelectStmt { kind, order_by: List.new(), limit: Maybe.None }),
+                    Heap.new(rhs_wrapped));
             }
             Maybe.None => break,
         }
@@ -404,7 +405,7 @@ fn try_parse_join_kind(ts: &mut SqlTokenStream) -> Result<Maybe<SqlJoinKind>, Sq
 // ORDER BY terms
 // -----------------------------------------------------------------------------
 
-fn parse_order_term(ts: &mut SqlTokenStream) -> Result<OrderTerm, SqlParseError> {
+public(in core.database.sqlite.native.l5_sql.parser) fn parse_order_term(ts: &mut SqlTokenStream) -> Result<OrderTerm, SqlParseError> {
     let e = match parse_expr(ts) {
         Result.Ok(x)  => x, Result.Err(err) => { return Result.Err(err); }
     };

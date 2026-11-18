@@ -1,5 +1,7 @@
-mount core.database.sqlite.native.l5_sql.compile.compile_raw;
+mount core.database.sqlite.native.l5_sql.compile.{CompileError, compile_raw, compile_with_schema};
 mount core.database.sqlite.native.l4_vdbe.program.{VdbeProgram, ConstantEntry};
+mount core.database.sqlite.native.l6_session.schema_cache.schema_cache_new;
+mount core.base.result.Result;
 
 @test
 fn test_compiled_literal_retains_the_constant_referenced_by_its_opcode() {
@@ -17,6 +19,25 @@ fn test_compiled_write_retains_its_cursor_declaration() {
     let program = compile_raw(&"INSERT INTO sample (value) VALUES (17)").unwrap();
     assert_eq(program.cursor_count(), 1);
     assert(program.get_cursor_decl(0).is_some());
+}
+
+@test
+fn test_upsert_requires_a_catalog_to_resolve_its_conflict_target() {
+    let sql = "INSERT INTO ledger VALUES(1) ON CONFLICT(version) DO UPDATE SET version=excluded.version";
+    match compile_raw(&sql) {
+        Result.Err(CompileError.CePlan(_)) => {},
+        _ => panic("UPSERT without a catalog must fail during planning"),
+    }
+}
+
+@test
+fn test_upsert_on_an_unknown_table_cannot_compile_to_a_plain_insert() {
+    let sql = "INSERT INTO missing VALUES(1) ON CONFLICT DO NOTHING";
+    let schema = schema_cache_new();
+    match compile_with_schema(&sql, &schema) {
+        Result.Err(CompileError.CePlan(_)) => {},
+        _ => panic("UPSERT requires a known target table"),
+    }
 }
 
 fn main() {}

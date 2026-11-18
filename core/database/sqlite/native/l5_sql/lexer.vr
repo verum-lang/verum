@@ -62,7 +62,7 @@ public type SqlKeyword is
     | KwAbort | KwFail | KwIgnore
     | KwBefore | KwAfter | KwInstead | KwOf | KwEach | KwFor
     | KwIndexed
-    | KwCast | KwFilter;
+    | KwCast | KwFilter | KwDo | KwNothing;
 
 /// Operator tokens that aren't single punctuation.
 public type Operator is
@@ -99,11 +99,12 @@ public type SqlToken is
     | TOp(Operator)
     | TVariable(VariableKind)
     | TComment(Text)
-    | TEof;
+    | TEof
+    | TSoftKeyword(SqlKeyword, Text);   // may also serve as an identifier
 
 public type SqlLexError is {
-    message: Text,
-    position: Int,
+    public(in core.database.sqlite.native) message: Text,
+    public(in core.database.sqlite.native) position: Int,
 };
 
 implement Display for SqlLexError {
@@ -278,6 +279,8 @@ fn lookup_folded(b: &List<Byte>) -> Maybe<SqlKeyword> {
     if eq_literal(b, "always")     { return Maybe.Some(KwAlways); }
     if eq_literal(b, "stored")     { return Maybe.Some(KwStored); }
     if eq_literal(b, "conflict")   { return Maybe.Some(KwConflict); }
+    if eq_literal(b, "do")         { return Maybe.Some(SqlKeyword.KwDo); }
+    if eq_literal(b, "nothing")    { return Maybe.Some(SqlKeyword.KwNothing); }
     if eq_literal(b, "abort")      { return Maybe.Some(KwAbort); }
     if eq_literal(b, "fail")       { return Maybe.Some(KwFail); }
     if eq_literal(b, "ignore")     { return Maybe.Some(KwIgnore); }
@@ -706,6 +709,7 @@ fn lex_identifier(st: &mut LexerState) -> SqlToken {
     }
     let t = Text.from_utf8(raw.as_slice()).unwrap_or("".clone());
     match lookup_keyword(&t) {
+        Maybe.Some(SqlKeyword.KwDo) => SqlToken.TSoftKeyword(SqlKeyword.KwDo, t),
         Maybe.Some(kw) => TKeyword(kw),
         Maybe.None     => TIdent(t),
     }

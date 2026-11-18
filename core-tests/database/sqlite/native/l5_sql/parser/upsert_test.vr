@@ -1,0 +1,128 @@
+module core.database.sqlite.native.tests.upsert_parsing;
+
+mount core.base.result.Result;
+mount core.base.maybe.Maybe;
+mount core.database.sqlite.native.l5_sql.ast.{
+    Expr, InsertSource, InsertStmt, OrderDirection, SqlLiteral, SqlOnConflict,
+    SqlStatement, SqlUpsertAction,
+};
+mount core.database.sqlite.native.l5_sql.parser.stmt.parse_one;
+
+fn parsed_insert(sql: &Text) -> InsertStmt {
+    match parse_one(sql).unwrap() {
+        SqlStatement.SInsert(ins) => ins,
+        _ => panic("expected INSERT"),
+    }
+}
+
+fn assert_column(expr: &Expr, table: &Text, column: &Text) {
+    match expr {
+        Expr.EColumn(t, name) => {
+            assert_eq(t.name, table.clone());
+            assert_eq(name.clone(), column.clone());
+        }
+        _ => panic("expected a column reference"),
+    }
+}
+
+@test
+fn test_journal_upsert_keeps_the_target_and_every_excluded_column() {
+    let ins = parsed_insert(&"INSERT INTO \"journal\" (version,name,status,applied_at,error,checksum) VALUES (2,'O''Brien','applied',17,NULL,42) ON CONFLICT(version) DO UPDATE SET name=excluded.name,status=excluded.status,applied_at=excluded.applied_at,error=excluded.error,checksum=excluded.checksum");
+    assert_eq(ins.table.name, "journal");
+    assert_eq(ins.columns.len(), 6);
+    match ins.source {
+        InsertSource.IsValues(rows) => {
+            assert_eq(rows.len(), 1);
+            assert(rows[0][0] is Expr.ELit(SqlLiteral.LInt(2)));
+            assert(rows[0][1] is Expr.ELit(SqlLiteral.LText("O'Brien")));
+        }
+        _ => panic("expected VALUES"),
+    }
+    assert_eq(ins.upserts.len(), 1);
+    let clause = &ins.upserts[0];
+    let target = clause.target.as_ref().unwrap();
+    assert_eq(target.terms.len(), 1);
+    assert_column(&target.terms[0].expr, &"", &"version");
+    assert(target.predicate.is_none());
+    match &clause.action {
+        SqlUpsertAction.SuUpdate(assignments, Maybe.None) => {
+            assert_eq(assignments.len(), 5);
+            let mut i = 0;
+            while i < assignments.len() {
+                let column = &ins.columns[i + 1];
+                assert_eq(assignments[i].column, column.clone());
+                assert_column(&assignments[i].value, &"excluded", column);
+                i = i + 1;
+            }
+        }
+        _ => panic("expected DO UPDATE"),
+    }
+}
+
+@test
+fn test_ordered_targets_predicates_and_insert_conflict_policy_are_distinct() {
+    let ins = parsed_insert(&"INSERT OR IGNORE INTO t VALUES (1,2),(3,4) ON CONFLICT(a DESC,b) WHERE active DO UPDATE SET b=excluded.b WHERE writable ON CONFLICT DO NOTHING RETURNING a");
+    assert(ins.on_conflict is Maybe.Some(SqlOnConflict.OcIgnore));
+    assert_eq(ins.upserts.len(), 2);
+    assert_eq(ins.returning.len(), 1);
+    let first = &ins.upserts[0];
+    let target = first.target.as_ref().unwrap();
+    assert_eq(target.terms.len(), 2);
+    assert(target.terms[0].direction is OrderDirection.OdDesc);
+    assert_column(&target.terms[0].expr, &"", &"a");
+    assert_column(&target.terms[1].expr, &"", &"b");
+    assert_column(target.predicate.as_ref().unwrap(), &"", &"active");
+    match &first.action {
+        SqlUpsertAction.SuUpdate(_, Maybe.Some(e)) => assert_column(e, &"", &"writable"),
+        _ => panic("expected DO UPDATE"),
+    }
+    assert(ins.upserts[1].target.is_none());
+    assert(&ins.upserts[1].action is SqlUpsertAction.SuNothing);
+}
+
+@test
+fn test_do_keeps_identifier_spelling_and_quoted_words_stay_identifiers() {
+    let ins = parsed_insert(&"INSERT INTO Do(\"nothing\",Do) VALUES (1,2) ON CONFLICT(Do) dO noTHing");
+    assert_eq(ins.table.name, "Do");
+    assert_eq(ins.columns[0], "nothing");
+    assert_eq(ins.columns[1], "Do");
+    assert_column(&ins.upserts[0].target.as_ref().unwrap().terms[0].expr, &"", &"Do");
+    assert(parse_one(&"INSERT INTO t VALUES(1) ON CONFLICT \"DO\" NOTHING").is_err());
+    assert(parse_one(&"INSERT INTO t VALUES(1) ON CONFLICT DO \"NOTHING\"").is_err());
+}
+
+@test
+fn test_malformed_clauses_cannot_be_accepted_as_plain_inserts() {
+    assert(parse_one(&"INSERT INTO t DEFAULT VALUES ON CONFLICT DO NOTHING").is_err());
+    assert(parse_one(&"INSERT INTO t VALUES(1) ON CONFLICT() DO NOTHING").is_err());
+    assert(parse_one(&"INSERT INTO t VALUES(1) ON CONFLICT(a,) DO NOTHING").is_err());
+    assert(parse_one(&"INSERT INTO t VALUES(1) ON CONFLICT(a) UPDATE SET a=2").is_err());
+    assert(parse_one(&"INSERT INTO t VALUES(1) ON CONFLICT(a) DO UPDATE SET a=").is_err());
+    assert(parse_one(&"INSERT INTO t VALUES(1) ON CONFLICT DO NOTHING ON CONFLICT(a) DO NOTHING").is_err());
+    assert(parsed_insert(&"INSERT OR REPLACE INTO t VALUES(1)").upserts.is_empty());
+}
+
+@test
+fn test_select_source_and_ordinary_update_share_the_expression_grammar() {
+    assert(parse_one(&"INSERT INTO archive SELECT 1 UNION ALL SELECT 2 ON CONFLICT DO NOTHING").is_ok());
+    let ins = parsed_insert(&"INSERT INTO archive SELECT id FROM live WHERE 1 ON CONFLICT(id COLLATE binary) DO NOTHING");
+    assert(ins.source is InsertSource.IsSelect(_));
+    let target = ins.upserts[0].target.as_ref().unwrap();
+    assert(&target.terms[0].expr is Expr.ECollate(_, "binary"));
+    match parse_one(&"UPDATE t SET a=other.a,b=3 WHERE writable NOT IN(0,2) RETURNING b").unwrap() {
+        SqlStatement.SUpdate(upd) => {
+            assert_eq(upd.assignments.len(), 2);
+            assert_column(&upd.assignments[0].value, &"other", &"a");
+            match &upd.where_clause {
+                Maybe.Some(Expr.EIn(left, items, true)) => {
+                    assert_column(left.as_ref(), &"", &"writable");
+                    assert_eq(items.len(), 2);
+                }
+                _ => panic("expected NOT IN"),
+            }
+            assert_eq(upd.returning.len(), 1);
+        }
+        _ => panic("expected UPDATE"),
+    }
+    assert(parse_one(&"UPDATE t SET a= WHERE writable").is_err());
+}

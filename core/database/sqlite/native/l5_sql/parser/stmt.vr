@@ -121,7 +121,7 @@ public fn parse_statement(ts: &mut SqlTokenStream) -> Result<SqlStatement, SqlPa
 public fn parse_batch(src: &Text) -> Result<List<SqlStatement>, SqlParseError> {
     let toks = match lex(src) {
         Result.Ok(t)  => t,
-        Result.Err(e) => { return Result.Err(SqlParseError { message: e.message, position: e.position }); }
+        Result.Err(e) => { return Result.Err(parse_error(e.message, e.position)); }
     };
     let mut ts = stream_new(toks);
     let mut out: List<SqlStatement> = List.new();
@@ -154,10 +154,10 @@ public fn parse_one(src: &Text) -> Result<SqlStatement, SqlParseError> {
         Result.Err(e) => { return Result.Err(e); }
     };
     if batch.len() == 0 {
-        return Result.Err(SqlParseError { message: "no statement".clone(), position: 0 });
+        return Result.Err(parse_error("no statement", 0));
     }
     if batch.len() > 1 {
-        return Result.Err(SqlParseError { message: "expected exactly one statement".clone(), position: 0 });
+        return Result.Err(parse_error("expected exactly one statement", 0));
     }
     Result.Ok(batch[0])
 }

@@ -96,10 +96,10 @@ public type SqlJoinKind is
       JInner | JLeftOuter | JRightOuter | JFullOuter | JCross;
 
 public type JoinClause is {
-    kind: SqlJoinKind,
-    right: Heap<FromItem>,
-    on: Maybe<Expr>,
-    using_cols: List<Text>,
+    public(in core.database.sqlite.native) kind: SqlJoinKind,
+    public(in core.database.sqlite.native) right: Heap<FromItem>,
+    public(in core.database.sqlite.native) on: Maybe<Expr>,
+    public(in core.database.sqlite.native) using_cols: List<Text>,
 };
 
 public type FromItem is
@@ -110,14 +110,14 @@ public type FromItem is
 public type OrderDirection is OdAsc | OdDesc;
 
 public type OrderTerm is {
-    expr: Expr,
-    direction: OrderDirection,
-    nulls_first: Maybe<Bool>,
+    public(in core.database.sqlite.native) expr: Expr,
+    public(in core.database.sqlite.native) direction: OrderDirection,
+    public(in core.database.sqlite.native) nulls_first: Maybe<Bool>,
 };
 
 public type LimitClause is {
-    limit: Expr,
-    offset: Maybe<Expr>,
+    public(in core.database.sqlite.native) limit: Expr,
+    public(in core.database.sqlite.native) offset: Maybe<Expr>,
 };
 
 public type SelectKind is
@@ -127,18 +127,18 @@ public type SelectKind is
 public type CompoundOp is CoUnion | CoUnionAll | CoIntersect | CoExcept;
 
 public type SimpleSelect is {
-    distinct: Bool,
-    result_columns: List<ResultColumnItem>,
-    from: Maybe<FromItem>,
-    where_clause: Maybe<Expr>,
-    group_by: List<Expr>,
-    having: Maybe<Expr>,
+    public(in core.database.sqlite.native) distinct: Bool,
+    public(in core.database.sqlite.native) result_columns: List<ResultColumnItem>,
+    public(in core.database.sqlite.native) from: Maybe<FromItem>,
+    public(in core.database.sqlite.native) where_clause: Maybe<Expr>,
+    public(in core.database.sqlite.native) group_by: List<Expr>,
+    public(in core.database.sqlite.native) having: Maybe<Expr>,
 };
 
 public type SelectStmt is {
-    kind: SelectKind,
-    order_by: List<OrderTerm>,
-    limit: Maybe<LimitClause>,
+    public(in core.database.sqlite.native) kind: SelectKind,
+    public(in core.database.sqlite.native) order_by: List<OrderTerm>,
+    public(in core.database.sqlite.native) limit: Maybe<LimitClause>,
 };
 
 // -----------------------------------------------------------------------------
@@ -153,34 +153,49 @@ public type InsertSource is
     | IsDefault;                                   // `DEFAULT VALUES`
 
 public type InsertStmt is {
-    table: TableRef,
-    columns: List<Text>,                           // empty → all columns
-    source: InsertSource,
-    on_conflict: Maybe<SqlOnConflict>,
-    returning: List<ResultColumnItem>,
+    public(in core.database.sqlite.native) table: TableRef,
+    public(in core.database.sqlite.native) columns: List<Text>,   // empty → all columns
+    public(in core.database.sqlite.native) source: InsertSource,
+    public(in core.database.sqlite.native) on_conflict: Maybe<SqlOnConflict>, // INSERT OR ...
+    public(in core.database.sqlite.native) returning: List<ResultColumnItem>,
+    public(in core.database.sqlite.native) upserts: List<SqlUpsertClause> = [],
 };
 
+public type SqlUpsertClause is {
+    public(in core.database.sqlite.native) target: Maybe<SqlConflictTarget>,
+    public(in core.database.sqlite.native) action: SqlUpsertAction,
+};
+
+public type SqlConflictTarget is {
+    public(in core.database.sqlite.native) terms: List<OrderTerm>,
+    public(in core.database.sqlite.native) predicate: Maybe<Expr>,
+};
+
+public type SqlUpsertAction is
+      SuNothing
+    | SuUpdate(List<UpdateAssignment>, Maybe<Expr>);
+
 public type UpdateAssignment is {
-    column: Text,
+    public(in core.database.sqlite.native) column: Text,
     // Column index in the table (resolved by the planner against the
     // schema cache). -1 = unresolved; codegen errors out on this.
-    col_idx: Int,
-    value: Expr,
+    public(in core.database.sqlite.native) col_idx: Int,
+    public(in core.database.sqlite.native) value: Expr,
 };
 
 public type UpdateStmt is {
-    table: TableRef,
-    assignments: List<UpdateAssignment>,
-    from: Maybe<FromItem>,
-    where_clause: Maybe<Expr>,
-    on_conflict: Maybe<SqlOnConflict>,
-    returning: List<ResultColumnItem>,
+    public(in core.database.sqlite.native) table: TableRef,
+    public(in core.database.sqlite.native) assignments: List<UpdateAssignment>,
+    public(in core.database.sqlite.native) from: Maybe<FromItem>,
+    public(in core.database.sqlite.native) where_clause: Maybe<Expr>,
+    public(in core.database.sqlite.native) on_conflict: Maybe<SqlOnConflict>,
+    public(in core.database.sqlite.native) returning: List<ResultColumnItem>,
 };
 
 public type DeleteStmt is {
-    table: TableRef,
-    where_clause: Maybe<Expr>,
-    returning: List<ResultColumnItem>,
+    public(in core.database.sqlite.native) table: TableRef,
+    public(in core.database.sqlite.native) where_clause: Maybe<Expr>,
+    public(in core.database.sqlite.native) returning: List<ResultColumnItem>,
 };
 
 // -----------------------------------------------------------------------------

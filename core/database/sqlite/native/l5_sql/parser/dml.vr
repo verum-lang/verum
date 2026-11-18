@@ -21,6 +21,8 @@ module core.database.sqlite.native.l5_sql.parser.dml;
 //  ( VALUES ( expr {, expr} ) {, ( expr ... )}
 //  | select-stmt
 //  | DEFAULT VALUES )
+//  { ON CONFLICT [ ( indexed-column {, indexed-column} ) [WHERE expr] ]
+//    DO ( NOTHING | UPDATE SET assignments [WHERE expr] ) }
 //  [ RETURNING result-col {, result-col} ]
 //
 
@@ -42,8 +44,8 @@ mount core.database.sqlite.native.l5_sql.lexer.{
     SqlKeyword, Operator, Punct,
 };
 mount core.database.sqlite.native.l5_sql.ast.{
-    Expr, ResultColumnItem, TableRef,
-    InsertStmt, InsertSource, SqlOnConflict,
+    Expr, OrderTerm, ResultColumnItem, TableRef,
+    InsertStmt, InsertSource, SqlOnConflict, SqlUpsertClause, SqlConflictTarget, SqlUpsertAction,
     UpdateStmt, UpdateAssignment,
     DeleteStmt,
 };
@@ -51,7 +53,7 @@ mount core.database.sqlite.native.l5_sql.parser.token_stream.{
     SqlTokenStream, SqlParseError, parse_error,
 };
 mount core.database.sqlite.native.l5_sql.parser.expr.parse_expr;
-mount core.database.sqlite.native.l5_sql.parser.select.parse_select;
+mount core.database.sqlite.native.l5_sql.parser.select.{parse_select, parse_order_term};
 
 // -----------------------------------------------------------------------------
 // INSERT
@@ -98,7 +100,7 @@ public fn parse_insert(ts: &mut SqlTokenStream) -> Result<InsertStmt, SqlParseEr
         Result.Ok(s)  => s, Result.Err(e) => { return Result.Err(e); }
     };
 
-    // Optional RETURNING.
+    let upserts = parse_upsert_clauses(ts)?;
     let returning = match parse_returning(ts) {
         Result.Ok(v)  => v, Result.Err(e) => { return Result.Err(e); }
     };
@@ -109,12 +111,45 @@ public fn parse_insert(ts: &mut SqlTokenStream) -> Result<InsertStmt, SqlParseEr
         source: source,
         on_conflict: conflict,
         returning: returning,
+        upserts: upserts,
     })
+}
+
+fn parse_upsert_clauses(ts: &mut SqlTokenStream) -> Result<List<SqlUpsertClause>, SqlParseError> {
+    let mut clauses: List<SqlUpsertClause> = List.new();
+    while ts.accept_keyword(KwOn) {
+        ts.expect_keyword(KwConflict)?;
+        let target: Maybe<SqlConflictTarget> = if ts.accept_punct(PLParen) {
+            let mut terms: List<OrderTerm> = [parse_order_term(ts)?];
+            while ts.accept_punct(PComma) { terms.push(parse_order_term(ts)?); }
+            ts.expect_punct(PRParen)?;
+            Maybe.Some(SqlConflictTarget { terms, predicate: parse_where(ts)? })
+        } else {
+            Maybe.None
+        };
+        ts.expect_keyword(SqlKeyword.KwDo)?;
+        let action = if ts.accept_keyword(SqlKeyword.KwNothing) {
+            SqlUpsertAction.SuNothing
+        } else {
+            ts.expect_keyword(KwUpdate)?;
+            ts.expect_keyword(KwSet)?;
+            let assignments = parse_assignments(ts)?;
+            SqlUpsertAction.SuUpdate(assignments, parse_where(ts)?)
+        };
+        if target.is_none() && ts.check_keyword(KwOn) {
+            return Result.Err(parse_error("only the last ON CONFLICT may omit its target", ts.position()));
+        }
+        clauses.push(SqlUpsertClause { target, action });
+    }
+    Result.Ok(clauses)
 }
 
 fn parse_insert_source(ts: &mut SqlTokenStream) -> Result<InsertSource, SqlParseError> {
     if ts.accept_keyword(KwDefault) {
         match ts.expect_keyword(KwValues) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
+        if ts.check_keyword(KwOn) {
+            return Result.Err(parse_error("DEFAULT VALUES cannot have an UPSERT clause", ts.position()));
+        }
         return Result.Ok(IsDefault);
     }
     if ts.accept_keyword(KwValues) {
@@ -175,6 +210,21 @@ public fn parse_update(ts: &mut SqlTokenStream) -> Result<UpdateStmt, SqlParseEr
 
     match ts.expect_keyword(KwSet) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
 
+    let assignments = parse_assignments(ts)?;
+    let where_clause = parse_where(ts)?;
+    let returning = parse_returning(ts)?;
+
+    Result.Ok(UpdateStmt {
+        table: table,
+        assignments: assignments,
+        from: Maybe.None,      // UPDATE ... FROM lands with subquery support
+        where_clause: where_clause,
+        on_conflict: conflict,
+        returning: returning,
+    })
+}
+
+fn parse_assignments(ts: &mut SqlTokenStream) -> Result<List<UpdateAssignment>, SqlParseError> {
     let mut assignments: List<UpdateAssignment> = List.new();
     loop {
         let col = match ts.expect_ident() {
@@ -189,27 +239,14 @@ public fn parse_update(ts: &mut SqlTokenStream) -> Result<UpdateStmt, SqlParseEr
         assignments.push(UpdateAssignment { column: col, col_idx: -1, value: value });
         if !ts.accept_punct(PComma) { break; }
     }
+    Result.Ok(assignments)
+}
 
-    let mut where_clause: Maybe<Expr> = Maybe.None;
+fn parse_where(ts: &mut SqlTokenStream) -> Result<Maybe<Expr>, SqlParseError> {
     if ts.accept_keyword(KwWhere) {
-        let e = match parse_expr(ts) {
-            Result.Ok(x)  => x, Result.Err(err) => { return Result.Err(err); }
-        };
-        where_clause = Maybe.Some(e);
+        return Result.Ok(Maybe.Some(parse_expr(ts)?));
     }
-
-    let returning = match parse_returning(ts) {
-        Result.Ok(v)  => v, Result.Err(e) => { return Result.Err(e); }
-    };
-
-    Result.Ok(UpdateStmt {
-        table: table,
-        assignments: assignments,
-        from: Maybe.None,      // `UPDATE ... FROM ...` lands with subquery support
-        where_clause: where_clause,
-        on_conflict: conflict,
-        returning: returning,
-    })
+    Result.Ok(Maybe.None)
 }
 
 // -----------------------------------------------------------------------------
@@ -224,13 +261,7 @@ public fn parse_delete(ts: &mut SqlTokenStream) -> Result<DeleteStmt, SqlParseEr
         Result.Ok(t)  => t, Result.Err(e) => { return Result.Err(e); }
     };
 
-    let mut where_clause: Maybe<Expr> = Maybe.None;
-    if ts.accept_keyword(KwWhere) {
-        let e = match parse_expr(ts) {
-            Result.Ok(x)  => x, Result.Err(err) => { return Result.Err(err); }
-        };
-        where_clause = Maybe.Some(e);
-    }
+    let where_clause = parse_where(ts)?;
 
     let returning = match parse_returning(ts) {
         Result.Ok(v)  => v, Result.Err(e) => { return Result.Err(e); }

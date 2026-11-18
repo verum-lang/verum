@@ -317,6 +317,9 @@ fn plan_from_item(fi: &FromItem, cursor_id: Int) -> Result<PlanNode, PlanError> 
 // -----------------------------------------------------------------------------
 
 fn plan_insert(ins: &InsertStmt) -> Result<PlanNode, PlanError> {
+    if !ins.upserts.is_empty() {
+        return Result.Err(plan_error("UPSERT requires schema-aware uniqueness enforcement"));
+    }
     let source = match ins.source {
         IsValues(ref rows) => {
             let cloned = clone_rows(rows);
@@ -633,6 +636,9 @@ fn plan_insert_with_schema(
     ins: &InsertStmt,
     schema: &SchemaCache,
 ) -> Result<PlanNode, PlanError> {
+    if !ins.upserts.is_empty() {
+        return Result.Err(plan_error("UPSERT conflict actions cannot yet be lowered to VDBE"));
+    }
     let source = match ins.source {
         IsValues(ref rows) => {
             let cloned = clone_rows(rows);
