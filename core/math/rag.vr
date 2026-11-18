@@ -558,7 +558,7 @@ implement TextChunker {
     // Split text into chunks
     public fn chunk(&self, text: &Text) -> List<Text> {
         let mut chunks = List.new();
-        let paragraphs: List<_> = text.split(&self.separator).collect();
+        let paragraphs = text.split(&self.separator);
 
         let mut current_chunk = "".to_text();
 

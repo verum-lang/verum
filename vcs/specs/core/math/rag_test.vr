@@ -507,6 +507,16 @@ fn test_text_chunker_chunk_short_text() {
 }
 
 @test
+fn split_outputs_every_paragraph_in_order() {
+    let chunker = TextChunker.with_separator(5, 0, "|".to_text());
+    let chunks = chunker.chunk(&"alpha|beta|gamma".to_text());
+    assert_eq(chunks.len(), 3);
+    assert_eq(chunks[0], "alpha".to_text());
+    assert_eq(chunks[1], "beta".to_text());
+    assert_eq(chunks[2], "gamma".to_text());
+}
+
+@test
 fn test_text_chunker_chunk_returns_list() {
     let chunker = TextChunker.new(50 as USize, 10 as USize);
     let text = "First paragraph.\n\nSecond paragraph.\n\nThird paragraph.";
