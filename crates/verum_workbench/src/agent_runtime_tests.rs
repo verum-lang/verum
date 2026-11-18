@@ -141,6 +141,7 @@ async fn cancelled_approval_waiting_for_workspace_cannot_write_or_spawn() {
     for wire in ["run", "write"] {
         let (root, studio) = fixture().await;
         let review = approval(&studio, wire).await;
+        let review_id = review["reviewId"].clone();
         let locked = studio.workspace.lock().await;
         let responder = {
             let studio = studio.clone();
@@ -154,7 +155,7 @@ async fn cancelled_approval_waiting_for_workspace_cannot_write_or_spawn() {
                     .call("agent.events", json!({"threadId":"author"}))
                     .await
                     .unwrap();
-                if events["pendingReviews"].as_array().unwrap().len() == 1 {
+                if !events["pendingReviews"].as_array().unwrap().contains(&review_id) {
                     break;
                 }
                 tokio::task::yield_now().await;
