@@ -1,3 +1,4 @@
+mount core.base.protocols.{Send, Sync};
 mount core.configuration.format.ConfigFormat;
 mount core.configuration.toml.{TomlValue, parse_table, toml_format};
 
@@ -32,4 +33,13 @@ fn test_toml_parser_preserves_mixed_array_elements() {
         _ => panic("the items key must hold an array"),
     };
     assert(parse_table(&"items = [1, true, \"two\"\n").is_err());
+}
+
+fn shared_adapter_name<T: ConfigFormat + Send + Sync>(adapter: &T) -> Text {
+    adapter.display_name()
+}
+
+@test
+fn test_shared_toml_adapter_keeps_its_format_identity() {
+    assert_eq(shared_adapter_name(&toml_format()), "TOML 1.0.0");
 }

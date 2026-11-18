@@ -68,6 +68,7 @@ module core.configuration.toml;
 
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Maybe, Some, None, Text};
+mount core.base.protocols.{Send, Sync};
 mount time.rfc3339.{Rfc3339Time};
 mount time.rfc3339.{parse as rfc3339_parse, format_with_offset as rfc3339_format_with_offset};
 mount configuration.value.{ConfigValue};
@@ -1528,6 +1529,9 @@ fn unsupported(feature: &Text) -> ConfigError {
 // The TOML adapter — singleton type implementing `ConfigFormat`. Registered
 // in the built-in format registry by `register(reg)` at module init.
 public type TomlFormat is {};
+
+implement Send for TomlFormat {}
+implement Sync for TomlFormat {}
 
 public fn toml_format() -> TomlFormat { TomlFormat {} }
 
