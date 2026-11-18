@@ -56,7 +56,7 @@ public type Kind is
 public fn k_type() -> Kind { Kind.KType }
 public fn k_constraint() -> Kind { Kind.KConstraint }
 public fn k_arrow(a: Kind, b: Kind) -> Kind {
-    Kind.KArrow { domain: Heap(a), codomain: Heap(b) }
+    Kind.KArrow { domain: Heap.new(a), codomain: Heap.new(b) }
 }
 public fn k_var(name: Text) -> Kind { Kind.KVar { name } }
 

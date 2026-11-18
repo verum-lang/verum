@@ -78,8 +78,8 @@ public fn introduce_lam(
 ) -> Maybe<Derivation> {
     return Maybe.Some(Derivation.LamIntro {
         context: ctx,
-        domain_well_typed: Heap(domain_d),
-        body_derivation:   Heap(body_d),
+        domain_well_typed: Heap.new(domain_d),
+        body_derivation:   Heap.new(body_d),
         result_type:       result_type,
     });
 }

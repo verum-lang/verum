@@ -105,7 +105,7 @@ public fn introduce_sub(
     }
     return Maybe.Some(Derivation.Sub {
         context: ctx,
-        original:   Heap(original),
+        original:   Heap.new(original),
         from_level: from_level,
         to_level:   to_level,
         new_type:   CoreTerm.Universe { level: to_level },

@@ -82,7 +82,7 @@ public fn meta_quote(payload: Text) -> MetaTerm {
 }
 
 public fn meta_splice(inner: MetaTerm) -> MetaTerm {
-    MetaTerm.Splice { inner: Heap(inner) }
+    MetaTerm.Splice { inner: Heap.new(inner) }
 }
 
 public fn meta_reflect(goal_name: Text) -> MetaTerm {
@@ -90,11 +90,11 @@ public fn meta_reflect(goal_name: Text) -> MetaTerm {
 }
 
 public fn meta_custom(name: Text, arg: MetaTerm) -> MetaTerm {
-    MetaTerm.Custom { name, arg: Heap(arg) }
+    MetaTerm.Custom { name, arg: Heap.new(arg) }
 }
 
 public fn meta_seq(first: MetaTerm, second: MetaTerm) -> MetaTerm {
-    MetaTerm.Seq { first: Heap(first), second: Heap(second) }
+    MetaTerm.Seq { first: Heap.new(first), second: Heap.new(second) }
 }
 
 public fn meta_const(payload: Text) -> MetaTerm {
@@ -108,6 +108,10 @@ public fn meta_const(payload: Text) -> MetaTerm {
 /// Is this term in normal form? Quotes and constants are values
 /// that don't reduce further at the outermost level.
 public fn is_meta_value(t: MetaTerm) -> Bool {
+    meta_term_is_value(&t)
+}
+
+fn meta_term_is_value(t: &MetaTerm) -> Bool {
     match t {
         MetaTerm.Quote { payload: _ } => true,
         MetaTerm.Const { payload: _ } => true,
@@ -143,24 +147,7 @@ public fn beta_cancel(t: MetaTerm) -> MetaTerm {
         MetaTerm.Splice { inner } => {
             match *inner {
                 MetaTerm.Quote { payload } => MetaTerm.Quote { payload },
-                other => MetaTerm.Splice { inner: Heap(other) },
-            }
-        },
-        other => other,
-    }
-}
-
-/// Drop the first half of a `Seq` when it has reached a value.
-/// The metalanguage's `;` is "discard the result of the first
-/// computation, return the second" — once the first is in normal
-/// form, the sequence reduces to the second.
-fn seq_eliminate(t: MetaTerm) -> MetaTerm {
-    match t {
-        MetaTerm.Seq { first, second } => {
-            if is_meta_value(*first) {
-                *second
-            } else {
-                MetaTerm.Seq { first, second }
+                other => MetaTerm.Splice { inner: Heap.new(other) },
             }
         },
         other => other,
@@ -189,19 +176,20 @@ public fn meta_normalise(t: MetaTerm) -> MetaTerm {
         MetaTerm.Reflect { goal_name } => MetaTerm.Reflect { goal_name },
         MetaTerm.Splice { inner } => {
             let inner_n = meta_normalise(*inner);
-            beta_cancel(MetaTerm.Splice { inner: Heap(inner_n) })
+            beta_cancel(MetaTerm.Splice { inner: Heap.new(inner_n) })
         },
         MetaTerm.Custom { name, arg } => {
             let arg_n = meta_normalise(*arg);
-            MetaTerm.Custom { name, arg: Heap(arg_n) }
+            MetaTerm.Custom { name, arg: Heap.new(arg_n) }
         },
         MetaTerm.Seq { first, second } => {
             let first_n = meta_normalise(*first);
             let second_n = meta_normalise(*second);
-            seq_eliminate(MetaTerm.Seq {
-                first: Heap(first_n),
-                second: Heap(second_n),
-            })
+            if meta_term_is_value(&first_n) {
+                second_n
+            } else {
+                meta_seq(first_n, second_n)
+            }
         },
     }
 }
@@ -222,7 +210,7 @@ public fn meta_is_normal(t: MetaTerm) -> Bool {
             }
         },
         MetaTerm.Seq { first, second } => {
-            if is_meta_value(*first) {
+            if meta_term_is_value(first.as_ref()) {
                 false
             } else {
                 meta_is_normal(*first) && meta_is_normal(*second)

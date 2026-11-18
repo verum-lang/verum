@@ -101,7 +101,7 @@ implement MenuState {
     /// Open the submenu for the currently selected item.
     public fn open_submenu(&mut self) {
         self.submenu_open = Maybe.Some(self.selected);
-        self.submenu_state = Maybe.Some(Heap(MenuState.new()));
+        self.submenu_state = Maybe.Some(Heap.new(MenuState.new()));
     }
 
     /// Close the currently open submenu.

@@ -471,7 +471,7 @@ implement GuardrailChain {
 
     // Add a guardrail to the chain
     public fn add<G: Guardrail>(&mut self, guardrail: G) -> &mut Self {
-        self.guardrails.push(Heap(guardrail));
+        self.guardrails.push(Heap.new(guardrail));
         self
     }
 
@@ -1003,7 +1003,7 @@ implement GuardrailBuilder {
 
     // Add content classifier
     public fn with_classifier(mut self, classifier: ContentClassifier) -> Self {
-        self.chain.guardrails.push(Heap(ClassifierGuardrail { classifier }));
+        self.chain.guardrails.push(Heap.new(ClassifierGuardrail { classifier }));
         self
     }
 

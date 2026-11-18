@@ -75,22 +75,22 @@ public type Protocol is
 
 /// Build a `Send` step.
 public fn send(payload: Text, rest: Protocol) -> Protocol {
-    Protocol.Send { payload, rest: Heap(rest) }
+    Protocol.Send { payload, rest: Heap.new(rest) }
 }
 
 /// Build a `Recv` step.
 public fn recv(payload: Text, rest: Protocol) -> Protocol {
-    Protocol.Recv { payload, rest: Heap(rest) }
+    Protocol.Recv { payload, rest: Heap.new(rest) }
 }
 
 /// Build an `Offer` (external choice).
 public fn offer(left: Protocol, right: Protocol) -> Protocol {
-    Protocol.Offer { left: Heap(left), right: Heap(right) }
+    Protocol.Offer { left: Heap.new(left), right: Heap.new(right) }
 }
 
 /// Build a `Select` (internal choice).
 public fn select(left: Protocol, right: Protocol) -> Protocol {
-    Protocol.Select { left: Heap(left), right: Heap(right) }
+    Protocol.Select { left: Heap.new(left), right: Heap.new(right) }
 }
 
 /// Terminated protocol.
@@ -108,19 +108,19 @@ public fn dual(p: Protocol) -> Protocol {
     match p {
         Protocol.Send { payload, rest } => Protocol.Recv {
             payload,
-            rest: Heap(dual(*rest)),
+            rest: Heap.new(dual(*rest)),
         },
         Protocol.Recv { payload, rest } => Protocol.Send {
             payload,
-            rest: Heap(dual(*rest)),
+            rest: Heap.new(dual(*rest)),
         },
         Protocol.Offer { left, right } => Protocol.Select {
-            left: Heap(dual(*left)),
-            right: Heap(dual(*right)),
+            left: Heap.new(dual(*left)),
+            right: Heap.new(dual(*right)),
         },
         Protocol.Select { left, right } => Protocol.Offer {
-            left: Heap(dual(*left)),
-            right: Heap(dual(*right)),
+            left: Heap.new(dual(*left)),
+            right: Heap.new(dual(*right)),
         },
         Protocol.End => Protocol.End,
     }
@@ -170,16 +170,16 @@ implement PartialEq for Protocol {
         match (self, other) {
             (Protocol.Send { payload: pa, rest: ra },
              Protocol.Send { payload: pb, rest: rb }) =>
-                pa == pb && **ra == **rb,
+                pa == pb && ra.as_ref().eq(rb.as_ref()),
             (Protocol.Recv { payload: pa, rest: ra },
              Protocol.Recv { payload: pb, rest: rb }) =>
-                pa == pb && **ra == **rb,
+                pa == pb && ra.as_ref().eq(rb.as_ref()),
             (Protocol.Offer { left: la, right: ra },
              Protocol.Offer { left: lb, right: rb }) =>
-                **la == **lb && **ra == **rb,
+                la.as_ref().eq(lb.as_ref()) && ra.as_ref().eq(rb.as_ref()),
             (Protocol.Select { left: la, right: ra },
              Protocol.Select { left: lb, right: rb }) =>
-                **la == **lb && **ra == **rb,
+                la.as_ref().eq(lb.as_ref()) && ra.as_ref().eq(rb.as_ref()),
             (Protocol.End, Protocol.End) => true,
             _ => false,
         }

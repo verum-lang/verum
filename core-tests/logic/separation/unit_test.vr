@@ -2,10 +2,10 @@
 // core-tests/logic/separation/unit_test.vr
 // =============================================================================
 //
-// `core/logic/separation.vr` — separation-logic Capability ADT.
+// `core/logic/separation.vr` — separation-logic predicates and capabilities.
 // =============================================================================
 
-mount core.logic.separation.{Capability, can_read};
+mount core.logic.separation.{Capability, HeapPredicate, can_read, heap_and, is_pure, points_to};
 mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 
@@ -97,6 +97,15 @@ fn test_can_read_own_returns_true() {
 @test
 fn test_can_read_no_cap_returns_false() {
     assert_eq(can_read(Capability.NoCap), false);
+}
+
+@test
+fn test_is_pure_recurses_into_both_conjuncts() {
+    let lhs = HeapPredicate.Pure { prop: "left" };
+    let rhs = heap_and(HeapPredicate.Pure { prop: "middle" }, HeapPredicate.Pure { prop: "right" });
+    assert(is_pure(heap_and(lhs, rhs)));
+    assert(!is_pure(heap_and(HeapPredicate.Pure { prop: "left" }, points_to("p", "v"))));
+    assert(!is_pure(heap_and(points_to("p", "v"), HeapPredicate.Pure { prop: "right" })));
 }
 
 fn main() {}

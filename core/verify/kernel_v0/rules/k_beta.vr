@@ -88,8 +88,8 @@ public fn introduce_beta(
 ) -> Maybe<Derivation> {
     return Maybe.Some(Derivation.BetaConv {
         context: ctx,
-        original:         Heap(original),
-        equality_witness: Heap(equality_witness),
+        original:         Heap.new(original),
+        equality_witness: Heap.new(equality_witness),
         new_type:         new_type,
     });
 }

@@ -105,7 +105,7 @@ public fn parse_statement(ts: &mut SqlTokenStream) -> Result<SqlStatement, SqlPa
             let inner = match parse_statement(ts) {
                 Result.Ok(s)  => s, Result.Err(e) => { return Result.Err(e); }
             };
-            Result.Ok(SExplain(Heap(inner), query_plan))
+            Result.Ok(SExplain(Heap.new(inner), query_plan))
         }
         _ => Result.Err(parse_error("expected statement".clone(), ts.position())),
     }

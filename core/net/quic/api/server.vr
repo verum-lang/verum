@@ -88,7 +88,7 @@ implement QuicServerOptions {
                 CipherSuite.TlsChaCha20Poly1305Sha256,
                 CipherSuite.TlsAes256GcmSha384,
             ],
-            dhe_pool:         Heap(LocalDhePool.new()) as Heap<dyn DhePool>,
+            dhe_pool:         Heap.new(LocalDhePool.new()) as Heap<dyn DhePool>,
             params:           params,
             idle_timeout:     Duration.from_secs(30),
             max_connections:  0_u64,

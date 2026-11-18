@@ -219,20 +219,20 @@ public fn term_of(d: &Derivation) -> CoreTerm {
         Derivation.Univ { level, .. } => CoreTerm.Universe { level: level },
         Derivation.PiForm { domain_derivation, codomain_derivation, .. } => {
             CoreTerm.Pi {
-                domain: Heap(term_of(&*domain_derivation)),
-                body:   Heap(term_of(&*codomain_derivation)),
+                domain: Heap.new(term_of(&*domain_derivation)),
+                body:   Heap.new(term_of(&*codomain_derivation)),
             }
         },
         Derivation.LamIntro { domain_well_typed, body_derivation, .. } => {
             CoreTerm.Lam {
-                domain: Heap(term_of(&*domain_well_typed)),
-                body:   Heap(term_of(&*body_derivation)),
+                domain: Heap.new(term_of(&*domain_well_typed)),
+                body:   Heap.new(term_of(&*body_derivation)),
             }
         },
         Derivation.AppElim { function_derivation, argument_derivation, .. } => {
             CoreTerm.App {
-                function: Heap(term_of(&*function_derivation)),
-                argument: Heap(term_of(&*argument_derivation)),
+                function: Heap.new(term_of(&*function_derivation)),
+                argument: Heap.new(term_of(&*argument_derivation)),
             }
         },
         Derivation.BetaConv { original, .. } => term_of(&*original),

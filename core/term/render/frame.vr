@@ -75,7 +75,7 @@ implement Terminal {
         let h = size.rows;
 
         Result.Ok(Terminal {
-            backend: Heap(backend),
+            backend: Heap.new(backend),
             front_buffer: Buffer.new(w, h),
             back_buffer: Buffer.new(w, h),
             viewport: Viewport.Fullscreen,

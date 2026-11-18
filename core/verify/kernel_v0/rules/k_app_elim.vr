@@ -80,8 +80,8 @@ public fn introduce_app(
 ) -> Maybe<Derivation> {
     return Maybe.Some(Derivation.AppElim {
         context: ctx,
-        function_derivation: Heap(fn_d),
-        argument_derivation: Heap(arg_d),
+        function_derivation: Heap.new(fn_d),
+        argument_derivation: Heap.new(arg_d),
         result_type:         result_type,
     });
 }

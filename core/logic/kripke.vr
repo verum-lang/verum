@@ -219,27 +219,27 @@ public fn modal_atom(name: Text) -> ModalForm {
 }
 
 public fn modal_not(inner: ModalForm) -> ModalForm {
-    ModalForm.Not { inner: Heap(inner) }
+    ModalForm.Not { inner: Heap.new(inner) }
 }
 
 public fn modal_and(a: ModalForm, b: ModalForm) -> ModalForm {
-    ModalForm.And { left: Heap(a), right: Heap(b) }
+    ModalForm.And { left: Heap.new(a), right: Heap.new(b) }
 }
 
 public fn modal_or(a: ModalForm, b: ModalForm) -> ModalForm {
-    ModalForm.Or { left: Heap(a), right: Heap(b) }
+    ModalForm.Or { left: Heap.new(a), right: Heap.new(b) }
 }
 
 public fn modal_implies(a: ModalForm, b: ModalForm) -> ModalForm {
-    ModalForm.Implies { left: Heap(a), right: Heap(b) }
+    ModalForm.Implies { left: Heap.new(a), right: Heap.new(b) }
 }
 
 public fn modal_box(inner: ModalForm) -> ModalForm {
-    ModalForm.Box { inner: Heap(inner) }
+    ModalForm.Box { inner: Heap.new(inner) }
 }
 
 public fn modal_diamond(inner: ModalForm) -> ModalForm {
-    ModalForm.Diamond { inner: Heap(inner) }
+    ModalForm.Diamond { inner: Heap.new(inner) }
 }
 
 // =============================================================================

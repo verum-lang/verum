@@ -156,13 +156,13 @@ public fn points_to(addr: Text, value: Text) -> HeapPredicate {
 /// parts; `P` holds in one, `Q` in the other. Builds the
 /// `HeapPredicate.Sep` node.
 public fn sep_conj(lhs: HeapPredicate, rhs: HeapPredicate) -> HeapPredicate {
-    HeapPredicate.Sep { lhs: Heap(lhs), rhs: Heap(rhs) }
+    HeapPredicate.Sep { lhs: Heap.new(lhs), rhs: Heap.new(rhs) }
 }
 
 /// `P ∧ Q` — ordinary heap-stable conjunction. Both `P` and `Q`
 /// hold at the same heap.
 public fn heap_and(lhs: HeapPredicate, rhs: HeapPredicate) -> HeapPredicate {
-    HeapPredicate.And { lhs: Heap(lhs), rhs: Heap(rhs) }
+    HeapPredicate.And { lhs: Heap.new(lhs), rhs: Heap.new(rhs) }
 }
 
 /// Lift a Bool-valued proposition into the heap-predicate language.
@@ -195,10 +195,14 @@ public fn is_emp(p: HeapPredicate) -> Bool {
 /// canonical heap-stable form; ordinary conjunction of heap-stable
 /// predicates is heap-stable too.
 public fn is_pure(p: HeapPredicate) -> Bool {
+    predicate_is_pure(&p)
+}
+
+fn predicate_is_pure(p: &HeapPredicate) -> Bool {
     match p {
         HeapPredicate.Pure { .. } => true,
         HeapPredicate.And { lhs, rhs } => {
-            is_pure(lhs.deref()) && is_pure(rhs.deref())
+            predicate_is_pure(lhs.as_ref()) && predicate_is_pure(rhs.as_ref())
         },
         _ => false,
     }

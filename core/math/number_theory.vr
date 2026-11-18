@@ -43,7 +43,7 @@ implement Nat {
         if n <= 0 {
             Zero
         } else {
-            Succ(Heap(Nat.from_int(n - 1)))
+            Succ(Heap.new(Nat.from_int(n - 1)))
         }
     }
 
@@ -52,7 +52,7 @@ implement Nat {
     public fn plus(&self, other: &Nat) -> Nat {
         match self {
             Zero => other.clone(),
-            Succ(n) => Succ(Heap(n.plus(other))),
+            Succ(n) => Succ(Heap.new(n.plus(other))),
         }
     }
 
@@ -78,7 +78,7 @@ implement Nat {
     public fn clone(&self) -> Nat {
         match self {
             Zero => Zero,
-            Succ(n) => Succ(Heap(n.clone())),
+            Succ(n) => Succ(Heap.new(n.clone())),
         }
     }
 }

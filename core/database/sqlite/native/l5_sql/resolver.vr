@@ -199,7 +199,7 @@ public fn resolve_expr(
             let r = match resolve_expr(inner, scopes) {
                 Result.Ok(x)  => x, Result.Err(err) => { return Result.Err(err); }
             };
-            Result.Ok(EUnary(op, Heap(r)))
+            Result.Ok(EUnary(op, Heap.new(r)))
         }
         EBinary(op, ref a, ref b) => {
             let ra = match resolve_expr(a, scopes) {
@@ -208,7 +208,7 @@ public fn resolve_expr(
             let rb = match resolve_expr(b, scopes) {
                 Result.Ok(x)  => x, Result.Err(err) => { return Result.Err(err); }
             };
-            Result.Ok(EBinary(op, Heap(ra), Heap(rb)))
+            Result.Ok(EBinary(op, Heap.new(ra), Heap.new(rb)))
         }
         EFunc(ref n, ref args, d) => {
             let mut out: List<Expr> = List.new();
@@ -226,7 +226,7 @@ public fn resolve_expr(
             let rx  = match resolve_expr(x, scopes)  { Result.Ok(r) => r, Result.Err(e) => { return Result.Err(e); } };
             let rlo = match resolve_expr(lo, scopes) { Result.Ok(r) => r, Result.Err(e) => { return Result.Err(e); } };
             let rhi = match resolve_expr(hi, scopes) { Result.Ok(r) => r, Result.Err(e) => { return Result.Err(e); } };
-            Result.Ok(EBetween(Heap(rx), Heap(rlo), Heap(rhi), neg))
+            Result.Ok(EBetween(Heap.new(rx), Heap.new(rlo), Heap.new(rhi), neg))
         }
         ELike(ref s, ref p, ref esc, neg) => {
             let rs = match resolve_expr(s, scopes) { Result.Ok(r) => r, Result.Err(e) => { return Result.Err(e); } };
@@ -234,19 +234,19 @@ public fn resolve_expr(
             let resc: Maybe<Heap<Expr>> = match esc {
                 Maybe.Some(ref x) => {
                     let r = match resolve_expr(x, scopes) { Result.Ok(r) => r, Result.Err(e) => { return Result.Err(e); } };
-                    Maybe.Some(Heap(r))
+                    Maybe.Some(Heap.new(r))
                 }
                 Maybe.None => Maybe.None,
             };
-            Result.Ok(ELike(Heap(rs), Heap(rp), resc, neg))
+            Result.Ok(ELike(Heap.new(rs), Heap.new(rp), resc, neg))
         }
         ECast(ref x, ref t) => {
             let r = match resolve_expr(x, scopes) { Result.Ok(r) => r, Result.Err(e) => { return Result.Err(e); } };
-            Result.Ok(ECast(Heap(r), t.clone()))
+            Result.Ok(ECast(Heap.new(r), t.clone()))
         }
         ECollate(ref x, ref n) => {
             let r = match resolve_expr(x, scopes) { Result.Ok(r) => r, Result.Err(e) => { return Result.Err(e); } };
-            Result.Ok(ECollate(Heap(r), n.clone()))
+            Result.Ok(ECollate(Heap.new(r), n.clone()))
         }
         EIn(ref x, ref xs, neg) => {
             let rx = match resolve_expr(x, scopes) { Result.Ok(r) => r, Result.Err(e) => { return Result.Err(e); } };
@@ -257,12 +257,12 @@ public fn resolve_expr(
                 rxs.push(r);
                 i = i + 1;
             }
-            Result.Ok(EIn(Heap(rx), rxs, neg))
+            Result.Ok(EIn(Heap.new(rx), rxs, neg))
         }
         ENullIf(ref a, ref b) => {
             let ra = match resolve_expr(a, scopes) { Result.Ok(r) => r, Result.Err(e) => { return Result.Err(e); } };
             let rb = match resolve_expr(b, scopes) { Result.Ok(r) => r, Result.Err(e) => { return Result.Err(e); } };
-            Result.Ok(ENullIf(Heap(ra), Heap(rb)))
+            Result.Ok(ENullIf(Heap.new(ra), Heap.new(rb)))
         }
         ECoalesce(ref xs) => {
             let mut rxs: List<Expr> = List.new();
@@ -283,7 +283,7 @@ public fn resolve_expr(
             let rscrut: Maybe<Heap<Expr>> = match scrut {
                 Maybe.Some(ref x) => {
                     let r = match resolve_expr(x, scopes) { Result.Ok(r) => r, Result.Err(e) => { return Result.Err(e); } };
-                    Maybe.Some(Heap(r))
+                    Maybe.Some(Heap.new(r))
                 }
                 Maybe.None => Maybe.None,
             };
@@ -298,7 +298,7 @@ public fn resolve_expr(
             let relse: Maybe<Heap<Expr>> = match else_ {
                 Maybe.Some(ref x) => {
                     let r = match resolve_expr(x, scopes) { Result.Ok(r) => r, Result.Err(e) => { return Result.Err(e); } };
-                    Maybe.Some(Heap(r))
+                    Maybe.Some(Heap.new(r))
                 }
                 Maybe.None => Maybe.None,
             };

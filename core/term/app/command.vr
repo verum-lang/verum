@@ -60,7 +60,7 @@ public fn perform<Msg>(f: fn() -> Msg) -> Command<Msg> {
 /// Spawn a future on the async runtime. When the future resolves, its output
 /// is routed to `update` as a Msg.
 public fn task<Msg, F: Future<Output = Msg>>(fut: F) -> Command<Msg> {
-    Command.Async(Heap(fut))
+    Command.Async(Heap.new(fut))
 }
 
 /// Run `cmds` in parallel (fan-out). No ordering guarantees among them.

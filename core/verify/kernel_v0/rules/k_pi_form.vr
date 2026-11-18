@@ -88,8 +88,8 @@ public fn introduce_pi_form(
     let max_level = if n >= m { n } else { m };
     return Maybe.Some(Derivation.PiForm {
         context: ctx,
-        domain_derivation:   Heap(domain_d),
-        codomain_derivation: Heap(codomain_d),
+        domain_derivation:   Heap.new(domain_d),
+        codomain_derivation: Heap.new(codomain_d),
         result_type:         CoreTerm.Universe { level: max_level },
     });
 }

@@ -78,19 +78,19 @@ public fn cc_var(name: Text) -> CcTerm {
 }
 
 public fn cc_lam(param: Text, body: CcTerm) -> CcTerm {
-    CcTerm.Lam { param, body: Heap(body) }
+    CcTerm.Lam { param, body: Heap.new(body) }
 }
 
 public fn cc_app(f: CcTerm, x: CcTerm) -> CcTerm {
-    CcTerm.App { func: Heap(f), arg: Heap(x) }
+    CcTerm.App { func: Heap.new(f), arg: Heap.new(x) }
 }
 
 public fn cc_reset(m: CcTerm) -> CcTerm {
-    CcTerm.Reset { inner: Heap(m) }
+    CcTerm.Reset { inner: Heap.new(m) }
 }
 
 public fn cc_shift(binder: Text, body: CcTerm) -> CcTerm {
-    CcTerm.Shift { binder, body: Heap(body) }
+    CcTerm.Shift { binder, body: Heap.new(body) }
 }
 
 // =============================================================================

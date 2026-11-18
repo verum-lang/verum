@@ -444,9 +444,9 @@ Measured against that, the first session of use produced:
 | three example files | `verum run a.vr` executes another file's `main` (T0979) |
 | a three-tier reference | `&unsafe T` loses the receiver's type and guesses the field (T0978) |
 | an `async fn` | produces a value, not a Future — `block_on` panics on an `Int` (T0734, pre-existing, sharpened) |
-| a recursive tree | `Heap(x)`, the form AGENTS.md documents, is refused (T0944) |
+| a recursive tree | The documented allocator is `Heap.new(x)`. The stdlib's former `Heap(x)` calls failed source admission (T0944). |
 
-Eight, of which two are closed. None of them was worked around in the
+Eight were found and two were closed during that session. None of them was worked around in the
 registry's own source; each is filed with a repro small enough to run
 in seconds.
 

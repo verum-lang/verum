@@ -82,27 +82,27 @@ public fn proc_zero() -> Process {
 
 @inline(always)
 public fn proc_par(p: Process, q: Process) -> Process {
-    Process.Par { left: Heap(p), right: Heap(q) }
+    Process.Par { left: Heap.new(p), right: Heap.new(q) }
 }
 
 @inline(always)
 public fn proc_restrict(name: Text, body: Process) -> Process {
-    Process.Restrict { name, body: Heap(body) }
+    Process.Restrict { name, body: Heap.new(body) }
 }
 
 @inline(always)
 public fn proc_send(channel: Text, message: Text, cont: Process) -> Process {
-    Process.Send { channel, message, cont: Heap(cont) }
+    Process.Send { channel, message, cont: Heap.new(cont) }
 }
 
 @inline(always)
 public fn proc_recv(channel: Text, binder: Text, cont: Process) -> Process {
-    Process.Recv { channel, binder, cont: Heap(cont) }
+    Process.Recv { channel, binder, cont: Heap.new(cont) }
 }
 
 @inline(always)
 public fn proc_replicate(inner: Process) -> Process {
-    Process.Replicate { inner: Heap(inner) }
+    Process.Replicate { inner: Heap.new(inner) }
 }
 
 // =============================================================================

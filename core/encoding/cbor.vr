@@ -404,7 +404,7 @@ fn decode_item(bytes: &[Byte], pos: &mut Int, depth: Int) -> Result<CborValue, C
         6_u8 => {
             let tag = read_arg(bytes, pos, minor)?;
             let inner = decode_item(bytes, pos, depth + 1)?;
-            Result.Ok(CborValue.CborTag { tag: tag, value: Heap(inner) })
+            Result.Ok(CborValue.CborTag { tag: tag, value: Heap.new(inner) })
         },
         7_u8 => decode_simple_or_float(bytes, pos, minor),
         _ => Result.Err(CborError.InvalidHeader(first)),
@@ -703,7 +703,7 @@ fn clone_value(v: &CborValue) -> CborValue {
             CborValue.CborMap(out)
         },
         CborValue.CborTag { tag, value } => CborValue.CborTag {
-            tag: *tag, value: Heap(clone_value(&*value)),
+            tag: *tag, value: Heap.new(clone_value(&*value)),
         },
         CborValue.CborBool(b) => CborValue.CborBool(*b),
         CborValue.CborNull => CborValue.CborNull,

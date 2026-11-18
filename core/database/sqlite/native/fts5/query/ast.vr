@@ -43,11 +43,11 @@ public fn phrase(words: List<Text>) -> MatchAst { MaPhrase(words) }
 
 public fn near(t1: Text, t2: Text, n: Int) -> MatchAst { MaNear(t1, t2, n) }
 
-public fn and_op(l: MatchAst, r: MatchAst) -> MatchAst { MaAnd(Heap(l), Heap(r)) }
+public fn and_op(l: MatchAst, r: MatchAst) -> MatchAst { MaAnd(Heap.new(l), Heap.new(r)) }
 
-public fn or_op(l: MatchAst, r: MatchAst) -> MatchAst { MaOr(Heap(l), Heap(r)) }
+public fn or_op(l: MatchAst, r: MatchAst) -> MatchAst { MaOr(Heap.new(l), Heap.new(r)) }
 
-public fn not_op(inner: MatchAst) -> MatchAst { MaNot(Heap(inner)) }
+public fn not_op(inner: MatchAst) -> MatchAst { MaNot(Heap.new(inner)) }
 
 // -----------------------------------------------------------------------------
 // Term collector — used by the executor to know which terms to look up
@@ -70,8 +70,8 @@ fn visit(a: &MatchAst, out: &mut List<Text>) {
             out.push(t1.clone());
             out.push(t2.clone());
         }
-        MaAnd(l, r)       => { visit(l, out); visit(r, out); }
-        MaOr(l, r)        => { visit(l, out); visit(r, out); }
-        MaNot(inner)      => visit(inner, out),
+        MaAnd(l, r)       => { visit(l.as_ref(), out); visit(r.as_ref(), out); }
+        MaOr(l, r)        => { visit(l.as_ref(), out); visit(r.as_ref(), out); }
+        MaNot(inner)      => visit(inner.as_ref(), out),
     }
 }

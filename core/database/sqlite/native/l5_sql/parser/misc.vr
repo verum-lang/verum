@@ -100,7 +100,7 @@ public fn parse_explain(
     let body = match inner(ts) {
         Result.Ok(s)  => s, Result.Err(e) => { return Result.Err(e); }
     };
-    Result.Ok(SExplain(Heap(body), query_plan))
+    Result.Ok(SExplain(Heap.new(body), query_plan))
 }
 
 // -----------------------------------------------------------------------------

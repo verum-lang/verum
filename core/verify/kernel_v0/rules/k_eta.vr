@@ -90,8 +90,8 @@ public fn introduce_eta(
 ) -> Maybe<Derivation> {
     return Maybe.Some(Derivation.EtaConv {
         context: ctx,
-        original:         Heap(original),
-        equality_witness: Heap(equality_witness),
+        original:         Heap.new(original),
+        equality_witness: Heap.new(equality_witness),
         new_type:         new_type,
     });
 }

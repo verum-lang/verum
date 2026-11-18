@@ -261,10 +261,23 @@ fn test_meta_normalise_splice_of_quote_collapses() {
 
 @test
 fn test_meta_normalise_seq_after_value_reduces_to_second() {
-    // seq(quote(a), const(b)) — first is value → reduces to const(b)
-    let s = meta_seq(meta_quote(Text.from("a")), meta_const(Text.from("b")));
-    let n = meta_normalise(s);
-    assert(n is MetaTerm.Const);
+    let s = meta_seq(meta_const("discard"), meta_const("keep"));
+    match meta_normalise(s) {
+        MetaTerm.Const { payload } => assert_eq(payload, "keep"),
+        _ => panic("sequence did not reduce to the second constant"),
+    }
+}
+
+@test
+fn test_meta_normalise_retains_stuck_sequence() {
+    let s = meta_seq(meta_reflect("goal"), meta_const("keep"));
+    match meta_normalise(s) {
+        MetaTerm.Seq { first, second } => {
+            assert(first.as_ref() is MetaTerm.Reflect);
+            assert(second.as_ref() is MetaTerm.Const);
+        },
+        _ => panic("sequence lost its unresolved first term"),
+    }
 }
 
 @test

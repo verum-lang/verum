@@ -96,31 +96,31 @@ public fn lin_atom(name: Text) -> LinForm {
 }
 
 public fn lin_tensor(a: LinForm, b: LinForm) -> LinForm {
-    LinForm.MTensor { left: Heap(a), right: Heap(b) }
+    LinForm.MTensor { left: Heap.new(a), right: Heap.new(b) }
 }
 
 public fn lin_par(a: LinForm, b: LinForm) -> LinForm {
-    LinForm.Par { left: Heap(a), right: Heap(b) }
+    LinForm.Par { left: Heap.new(a), right: Heap.new(b) }
 }
 
 public fn lin_with(a: LinForm, b: LinForm) -> LinForm {
-    LinForm.With { left: Heap(a), right: Heap(b) }
+    LinForm.With { left: Heap.new(a), right: Heap.new(b) }
 }
 
 public fn lin_plus(a: LinForm, b: LinForm) -> LinForm {
-    LinForm.Plus { left: Heap(a), right: Heap(b) }
+    LinForm.Plus { left: Heap.new(a), right: Heap.new(b) }
 }
 
 public fn lin_of_course(a: LinForm) -> LinForm {
-    LinForm.OfCourse { inner: Heap(a) }
+    LinForm.OfCourse { inner: Heap.new(a) }
 }
 
 public fn lin_why_not(a: LinForm) -> LinForm {
-    LinForm.WhyNot { inner: Heap(a) }
+    LinForm.WhyNot { inner: Heap.new(a) }
 }
 
 public fn lin_dual(a: LinForm) -> LinForm {
-    LinForm.Dual { inner: Heap(a) }
+    LinForm.Dual { inner: Heap.new(a) }
 }
 
 /// Linear implication `A ⊸ B := A^⊥ ⅋ B`.
@@ -201,7 +201,7 @@ public fn is_weakenable(f: LinForm) -> Bool {
 /// ```
 fn lin_negate(f: LinForm) -> LinForm {
     match f {
-        LinForm.Atom { name } => LinForm.Dual { inner: Heap(LinForm.Atom { name }) },
+        LinForm.Atom { name } => LinForm.Dual { inner: Heap.new(LinForm.Atom { name }) },
         LinForm.MTensor { left, right } =>
             lin_par(lin_negate(*left), lin_negate(*right)),
         LinForm.Par { left, right } =>
@@ -392,29 +392,29 @@ implement PartialEq for LinForm {
              LinForm.Atom { name: b }) => a == b,
             (LinForm.MTensor { left: la, right: ra },
              LinForm.MTensor { left: lb, right: rb }) =>
-                **la == **lb && **ra == **rb,
+                la.as_ref().eq(lb.as_ref()) && ra.as_ref().eq(rb.as_ref()),
             (LinForm.Par { left: la, right: ra },
              LinForm.Par { left: lb, right: rb }) =>
-                **la == **lb && **ra == **rb,
+                la.as_ref().eq(lb.as_ref()) && ra.as_ref().eq(rb.as_ref()),
             (LinForm.With { left: la, right: ra },
              LinForm.With { left: lb, right: rb }) =>
-                **la == **lb && **ra == **rb,
+                la.as_ref().eq(lb.as_ref()) && ra.as_ref().eq(rb.as_ref()),
             (LinForm.Plus { left: la, right: ra },
              LinForm.Plus { left: lb, right: rb }) =>
-                **la == **lb && **ra == **rb,
+                la.as_ref().eq(lb.as_ref()) && ra.as_ref().eq(rb.as_ref()),
             (LinForm.OfCourse { inner: a },
              LinForm.OfCourse { inner: b }) =>
-                **a == **b,
+                a.as_ref().eq(b.as_ref()),
             (LinForm.WhyNot { inner: a },
              LinForm.WhyNot { inner: b }) =>
-                **a == **b,
+                a.as_ref().eq(b.as_ref()),
             (LinForm.One,    LinForm.One)    => true,
             (LinForm.Bottom, LinForm.Bottom) => true,
             (LinForm.Top,    LinForm.Top)    => true,
             (LinForm.Zero,   LinForm.Zero)   => true,
             (LinForm.Dual { inner: a },
              LinForm.Dual { inner: b }) =>
-                **a == **b,
+                a.as_ref().eq(b.as_ref()),
             _ => false,
         }
     }

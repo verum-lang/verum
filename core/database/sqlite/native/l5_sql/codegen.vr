@@ -1763,8 +1763,8 @@ fn clone_expr_local(e: &Expr) -> Expr {
             }
             EFunc(name.clone(), out_args, d)
         }
-        EBinary(op, ref a, ref b) => EBinary(op, Heap(clone_expr_local(a)), Heap(clone_expr_local(b))),
-        EUnary(op, ref inner) => EUnary(op, Heap(clone_expr_local(inner))),
+        EBinary(op, ref a, ref b) => EBinary(op, Heap.new(clone_expr_local(a)), Heap.new(clone_expr_local(b))),
+        EUnary(op, ref inner) => EUnary(op, Heap.new(clone_expr_local(inner))),
         _ => ELit(LNull),
     }
 }

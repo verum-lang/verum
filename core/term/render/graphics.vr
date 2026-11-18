@@ -400,13 +400,13 @@ public fn create_graphics_renderer(
     w: &mut (dyn EscapeWriter),
 ) -> Heap<dyn GraphicsRenderer> {
     if caps.has_kitty_graphics {
-        Heap(KittyGraphics.new(w))
+        Heap.new(KittyGraphics.new(w))
     } else if caps.has_sixel {
-        Heap(SixelGraphics.new(w))
+        Heap.new(SixelGraphics.new(w))
     } else if caps.has_iterm_images {
-        Heap(ItermGraphics.new(w))
+        Heap.new(ItermGraphics.new(w))
     } else {
-        Heap(BrailleGraphics.new(w))
+        Heap.new(BrailleGraphics.new(w))
     }
 }
 

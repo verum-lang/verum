@@ -187,7 +187,7 @@ implement ServerListener {
         let local = transport.local_addr();
         let (tx, rx) = unbounded_channel();
         Result.Ok(ServerListener {
-            transport:       Heap(transport) as Heap<dyn UdpTransport>,
+            transport:       Heap.new(transport) as Heap<dyn UdpTransport>,
             local_addr:      local,
             tls_config:      Shared.new(tls_config),
             transport_params: transport_params,

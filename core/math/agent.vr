@@ -586,7 +586,7 @@ where
 
     // Register a tool for the agent to use
     public fn register_tool<T: Tool>(&mut self, tool: T) {
-        self.tools.insert(tool.name(), Heap(tool));
+        self.tools.insert(tool.name(), Heap.new(tool));
     }
 
     // Set maximum generation tokens
@@ -1523,7 +1523,7 @@ implement JsonSchema {
             description: Maybe.None,
             properties: Maybe.None,
             required: Maybe.None,
-            items: Maybe.Some(Heap(items)),
+            items: Maybe.Some(Heap.new(items)),
             enum_values: Maybe.None,
         }
     }
@@ -1731,7 +1731,7 @@ where
 
     // Register a tool
     public fn register_tool<T: ExecutableTool>(&mut self, tool: T) {
-        self.tools.insert(tool.schema().name.clone(), Heap(tool));
+        self.tools.insert(tool.schema().name.clone(), Heap.new(tool));
     }
 
     // Set maximum tool calls per generation

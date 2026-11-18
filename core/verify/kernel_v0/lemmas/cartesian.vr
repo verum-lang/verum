@@ -105,14 +105,14 @@ public fn typed_in_extended(
 
 public fn lam(domain: &CoreTerm, body: &CoreTerm) -> CoreTerm {
     return CoreTerm.Lam {
-        domain: Heap(domain.clone()),
-        body:   Heap(body.clone()),
+        domain: Heap.new(domain.clone()),
+        body:   Heap.new(body.clone()),
     };
 }
 
 public fn pi(domain: &CoreTerm, body: &CoreTerm) -> CoreTerm {
     return CoreTerm.Pi {
-        domain: Heap(domain.clone()),
-        body:   Heap(body.clone()),
+        domain: Heap.new(domain.clone()),
+        body:   Heap.new(body.clone()),
     };
 }

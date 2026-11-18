@@ -98,27 +98,27 @@ public fn cbpv_var(name: Text) -> CbpvTerm {
 }
 
 public fn cbpv_lam(param: Text, body: CbpvTerm) -> CbpvTerm {
-    CbpvTerm.Lam { param, body: Heap(body) }
+    CbpvTerm.Lam { param, body: Heap.new(body) }
 }
 
 public fn cbpv_thunk(c: CbpvTerm) -> CbpvTerm {
-    CbpvTerm.Thunk { inner: Heap(c) }
+    CbpvTerm.Thunk { inner: Heap.new(c) }
 }
 
 public fn cbpv_return(v: CbpvTerm) -> CbpvTerm {
-    CbpvTerm.Return { value: Heap(v) }
+    CbpvTerm.Return { value: Heap.new(v) }
 }
 
 public fn cbpv_seq_to(producer: CbpvTerm, binder: Text, body: CbpvTerm) -> CbpvTerm {
-    CbpvTerm.SeqTo { producer: Heap(producer), binder, body: Heap(body) }
+    CbpvTerm.SeqTo { producer: Heap.new(producer), binder, body: Heap.new(body) }
 }
 
 public fn cbpv_force(v: CbpvTerm) -> CbpvTerm {
-    CbpvTerm.Force { value: Heap(v) }
+    CbpvTerm.Force { value: Heap.new(v) }
 }
 
 public fn cbpv_app(f: CbpvTerm, x: CbpvTerm) -> CbpvTerm {
-    CbpvTerm.App { func: Heap(f), arg: Heap(x) }
+    CbpvTerm.App { func: Heap.new(f), arg: Heap.new(x) }
 }
 
 // =============================================================================
@@ -230,7 +230,7 @@ public fn cbpv_substitute(t: CbpvTerm, from: Text, to: CbpvTerm) -> CbpvTerm {
             if binder == from {
                 // `from` is shadowed inside the body.
                 CbpvTerm.SeqTo {
-                    producer: Heap(new_producer),
+                    producer: Heap.new(new_producer),
                     binder,
                     body,
                 }

@@ -96,7 +96,7 @@ implement ServerOptions {
                 CipherSuite.TlsChaCha20Poly1305Sha256,
                 CipherSuite.TlsAes256GcmSha384,
             ],
-            dhe_pool:      Heap(LocalDhePool.new()) as Heap<dyn DhePool>,
+            dhe_pool:      Heap.new(LocalDhePool.new()) as Heap<dyn DhePool>,
             idle_timeout:  Duration.from_secs(30),
             max_concurrent_requests: 100,
             max_field_section_size:  0xFFFFFFFFFFFFFFFF_u64,

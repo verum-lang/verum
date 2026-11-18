@@ -182,7 +182,7 @@ public fn introduce_pos(
     }
     return Maybe.Some(Derivation.Pos {
         context: ctx,
-        constructor_types: Heap(constructor_types.map(|ct| ct.clone())),
+        constructor_types: Heap.new(constructor_types.map(|ct| ct.clone())),
         result_type: result_type,
     });
 }
