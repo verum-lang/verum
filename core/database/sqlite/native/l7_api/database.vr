@@ -332,14 +332,7 @@ implement Database {
         let stmt_ast = match parse_one(sql) {
             Result.Ok(s)  => s,
             Result.Err(e) => {
-                // Let the regular prepare path surface the parse error
-                // with the richer CompileError wrapping.
-                let _ = e;
-                let mut stmt = match self.prepare(sql) {
-                    Result.Ok(s)  => s, Result.Err(err) => { return Result.Err(err); }
-                };
-                let _ = stmt;
-                return Result.Err(DbMisuse("unreachable — parse failed after re-parse succeeded".clone()));
+                return Result.Err(DbStmtError(StmtError.StmtCompile(CompileError.CeParse(e))));
             }
         };
 

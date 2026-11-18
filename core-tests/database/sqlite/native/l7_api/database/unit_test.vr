@@ -1,5 +1,22 @@
-mount core.database.sqlite.native.l7_api.database.{db_error_from_conn, SqliteApiDbError};
-mount core.database.sqlite.native.l6_session.connection.ConnectionError;
+mount core.database.sqlite.native.l7_api.database.{open_admin, db_error_from_conn, SqliteApiDbError};
+mount core.database.sqlite.native.l6_session.{ConnectionError, StmtError};
+mount core.database.sqlite.native.l5_sql.{parse_one, CompileError};
+
+@test
+fn test_execute_preserves_the_parser_error_and_database_state() {
+    let mut db = open_admin().unwrap();
+    let sql = "CREATE TABLE".to_text();
+    let parse_error = match parse_one(&sql) {
+        Result.Err(cause) => cause,
+        Result.Ok(_) => panic("the parser accepted an incomplete CREATE TABLE"),
+    };
+    let generation = db.schema_generation();
+    let error = db.execute(&sql).unwrap_err();
+    assert_eq(error, SqliteApiDbError.DbStmtError(StmtError.StmtCompile(CompileError.CeParse(parse_error))));
+    assert_eq(db.schema_generation(), generation);
+    assert(!db.is_in_tx());
+    db.close();
+}
 
 @test
 fn test_connection_io_failure_retains_its_payload_and_category() {
