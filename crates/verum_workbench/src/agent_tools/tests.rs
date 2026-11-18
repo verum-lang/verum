@@ -154,8 +154,12 @@ while IFS= read -r line; do
             printf '%s\n' '{"id":"run","method":"item/tool/call","params":{"threadId":"critic","turnId":"B","tool":"verum_run","arguments":{"path":"main.vr","source":"fn example() {}"}}}'
             printf '%s\n' '{"id":"experiment","method":"item/tool/call","params":{"threadId":"author","turnId":"A","tool":"verum_run","arguments":{"path":"main.vr","source":"fn main() -> Int { 42 }","runtime_diagnostics":true}}}'
             printf '%s\n' '{"id":"invalid","method":"item/tool/call","params":{"threadId":"author","turnId":"A","tool":"verum_check","arguments":{"path":"main.vr","source":"","timeout_ms":0}}}'
+            printf '%s\n' '{"id":"rejected","method":"item/tool/call","params":{"threadId":"author","turnId":"A","tool":"verum_check","arguments":{"path":"main.vr","source":"fn main() {}"}}}'
+            printf '%s\n' '{"id":"empty-proof","method":"item/tool/call","params":{"threadId":"author","turnId":"A","tool":"verum_proof","arguments":{"path":"main.vr","source":"fn main() {}","declaration":"main"}}}'
             printf '%s\n' '{"id":"stale","method":"item/tool/call","params":{"threadId":"author","turnId":"A","tool":"verum_propose","arguments":{"path":"forbidden.vr","source":"fn example() {}","expected_hash":null}}}'
             printf '%s\n' '{"id":4,"result":{}}' ;;
+        *'"id":"rejected"'*) printf '%s\n' "$line" > .provider-rejected ;;
+        *'"id":"empty-proof"'*) printf '%s\n' "$line" > .provider-empty-proof ;;
     esac
 done
 "#).unwrap();
@@ -168,8 +172,8 @@ done
     let studio = Studio::open(Config {
         workspace: root.path().into(),
         codex: executable.clone(),
-        verum: "unused".into(),
-        proof: "unused".into(),
+        verum: "/usr/bin/false".into(),
+        proof: "/usr/bin/true".into(),
         port: 0,
     })
     .unwrap();
@@ -298,16 +302,33 @@ done
         true
     );
     assert!(root.path().join("accepted.vr").is_file());
+    assert_eq!(studio.call("operation.list", json!({})).await.unwrap(), json!([]));
+    let mut observed = verum_common::List::new();
+    for (wire, status) in [("rejected", "failed"), ("empty-proof", "inconclusive")] {
+        let response = review(&studio, "author", wire).await.unwrap();
+        let receipt = &response["tool_result"];
+        assert_eq!(receipt["status"], status, "{response}");
+        assert_eq!(response["delivered"], true);
+        assert_eq!(response["success"], false);
+        let lookup = json!({"tool":"verum_receipt","arguments":{"id":receipt["id"]}});
+        assert_eq!(studio.tool_owned(&lookup, None).await.unwrap(), (true, receipt.clone()));
+        observed.push((wire, receipt.clone()));
+    }
     assert!(
         studio.call("agent.request", author).await.is_err(),
         "recycled ID"
     );
     assert!(review(&studio, "author", "stale").await.is_err());
     assert!(!root.path().join("forbidden.vr").exists());
-    assert_eq!(
-        studio.call("operation.list", json!({})).await.unwrap(),
-        json!([])
-    );
+    // The final thread/start reply follows both tool responses on the same pipe.
+    for (wire, receipt) in observed {
+        let packet: Value = serde_json::from_slice(
+            &fs::read(root.path().join(format!(".provider-{wire}"))).unwrap()
+        ).unwrap();
+        assert_eq!(packet["result"]["success"], false);
+        let content = packet["result"]["contentItems"][0]["text"].as_str().unwrap();
+        assert_eq!(serde_json::from_str::<Value>(content).unwrap(), receipt);
+    }
 }
 
 #[tokio::test]

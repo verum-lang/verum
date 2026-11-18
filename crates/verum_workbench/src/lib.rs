@@ -211,10 +211,7 @@ impl Studio {
                 None => Err(anyhow::anyhow!("Agent operation has no live turn owner")),
             }
         };
-        let (success, tool_result) = match result {
-            Ok(value) => (true, value),
-            Err(error) => (false, json!({"error":error.to_string()})),
-        };
+        let (success, tool_result) = result.unwrap_or_else(|error| (false, json!({"error":error.to_string()})));
         let content = tool_result.to_string();
         // Keep the provider's wire ID reserved until its response is written.
         let mut events = provider.events.lock().await;
@@ -228,9 +225,9 @@ impl Studio {
     }
     #[cfg(test)]
     async fn tool(&self, params: &Value) -> Result<Value> {
-        self.tool_owned(params, None).await
+        Ok(self.tool_owned(params, None).await?.1)
     }
-    async fn tool_owned(&self, params: &Value, owner: Option<&agent_runtime::Scope>) -> Result<Value> {
+    async fn tool_owned(&self, params: &Value, owner: Option<&agent_runtime::Scope>) -> Result<(bool, Value)> {
         let (method, args) = agent_tools::operation(params)?;
         if let Some(owner) = owner { owner.admit(|| Ok(()))?; }
         let operation = self.workspace_operation_owned(method, args, owner);
@@ -242,13 +239,13 @@ impl Studio {
             }
         } else { operation.await? };
         if method != "operation.start" {
-            return Ok(result);
+            return Ok((true, result));
         }
         loop {
             let receipt = self.jobs.lock().await.read(&result["id"]).await
                 .context("Operation receipt is unavailable")?;
             if receipt.status != "running" {
-                return Ok(serde_json::to_value(receipt)?);
+                return Ok((receipt.status == "succeeded", serde_json::to_value(receipt)?));
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
