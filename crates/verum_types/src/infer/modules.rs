@@ -6718,12 +6718,12 @@ impl TypeChecker {
                     let mut glob_targets = List::new();
                     let mut denied_mount = None;
                     for item in items {
-                        if !self.cfg_evaluator.should_include(&item.attributes) {
-                            continue;
-                        }
                         let ItemKind::Mount(mount) = &item.kind else {
                             continue;
                         };
+                        if !self.cfg_evaluator.should_include(&item.attributes) {
+                            continue;
+                        }
                         let accessible = scope.allow_local_mounts
                             || visible(&mount.visibility, scope.owner.as_str());
                         let mut denied_binding = false;

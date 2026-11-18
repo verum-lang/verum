@@ -161,10 +161,10 @@ impl TypeChecker {
         &self, items: &[verum_ast::Item], name: &str, allow_private: bool,
     ) -> Option<usize> {
         items.iter().position(|item| {
-            self.cfg_evaluator.should_include_item(item)
-                && matches!(&item.kind, verum_ast::ItemKind::Type(declaration)
-                    if declaration.name.name.as_str() == name
-                        && (allow_private || declaration.visibility == verum_ast::Visibility::Public))
+            matches!(&item.kind, verum_ast::ItemKind::Type(declaration)
+                if declaration.name.name.as_str() == name
+                    && (allow_private || declaration.visibility == verum_ast::Visibility::Public))
+                && self.cfg_evaluator.should_include_item(item)
         })
     }
 
@@ -404,10 +404,9 @@ impl TypeChecker {
         let mut implicit_globs = Vec::new();
         self.with_declaring_source_items(&self.current_module_path, |items| {
             for item in items {
-                if !self.cfg_evaluator.should_include_item(item) {
-                    continue;
-                }
-                if let verum_ast::ItemKind::Mount(mount) = &item.kind {
+                if let verum_ast::ItemKind::Mount(mount) = &item.kind
+                    && self.cfg_evaluator.should_include_item(item)
+                {
                     source_mount_targets(mount, &owner, head, |path, kind| match kind {
                         MountTargetKind::Named => {
                             targets.insert(path);
@@ -557,10 +556,12 @@ impl TypeChecker {
             if self.source_items_bind_type_name(items, name) { return None; }
             let (parent, leaf) = owner.rsplit_once('.')?;
             let declaring_parent = self.with_declaring_source_items(parent, |items| {
-                items.iter().any(|item| self.cfg_evaluator.should_include_item(item)
-                    && matches!(&item.kind, verum_ast::ItemKind::Module(declaration)
+                items.iter().any(|item| {
+                    matches!(&item.kind, verum_ast::ItemKind::Module(declaration)
                         if declaration.name.name == leaf && declaration.span == inline.span
-                            && declaration.items.is_some()))
+                            && declaration.items.is_some())
+                        && self.cfg_evaluator.should_include_item(item)
+                })
             }).unwrap_or(false);
             if !declaring_parent { break; }
             owner = parent.into();
@@ -600,10 +601,11 @@ impl TypeChecker {
 
     /// An unresolved explicit mount still shadows any enclosing declaration or prelude.
     fn source_items_bind_type_name(&self, items: &[verum_ast::Item], name: &str) -> bool {
-        items.iter().filter(|item| self.cfg_evaluator.should_include_item(item)).any(|item| {
+        items.iter().any(|item| {
             matches!(&item.kind, verum_ast::ItemKind::Mount(mount)
-                if mount.alias.as_ref().is_some_and(|alias| alias.name.as_str() == name)
-                    || source_mount_binds_name(&mount.tree, name))
+                if self.cfg_evaluator.should_include_item(item)
+                    && (mount.alias.as_ref().is_some_and(|alias| alias.name.as_str() == name)
+                        || source_mount_binds_name(&mount.tree, name)))
         })
     }
 
@@ -687,11 +689,10 @@ impl TypeChecker {
                     true, owner == self.current_module_path,
                 )
             };
-            if declaration.is_none() && module.ast.items.iter()
-                .filter(|item| self.cfg_evaluator.should_include_item(item))
-                .any(|item| {
+            if declaration.is_none() && module.ast.items.iter().any(|item| {
                 matches!(&item.kind, verum_ast::ItemKind::Mount(mount)
-                    if source_mount_binds_name(&mount.tree, type_name))
+                    if self.cfg_evaluator.should_include_item(item)
+                        && source_mount_binds_name(&mount.tree, type_name))
             }) {
                 // Private, missing and cyclic source routes do not authorize
                 // substituting an unrelated archived declaration of this name.
