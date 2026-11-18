@@ -347,3 +347,63 @@ fn canonical_raw_owner_recovery_retains_declared_call_witnesses() {
         );
     }
 }
+
+#[test]
+fn declared_calls_keep_their_identity_alongside_allocation_types() {
+    use verum_vbc::{Instruction, bytecode::decode_instructions};
+
+    let memory = canonical_allocation_declarations();
+    let source = r#"
+        module calls;
+        mount core.base.memory.{Heap, Shared};
+        type Event is Idle | Heap(Int) | Shared(Int);
+        fn make_heap() -> Event { Event.Heap(17) }
+        fn make_shared() -> Event { Event.Shared(23) }
+        fn invoke(Heap: fn(Int) -> Int) -> Int { Heap(7) }
+        fn increment(x: Int) -> Int { x + 1 }
+        fn read(event: Event) -> Int {
+            match event {
+                Event.Heap(n) => 100 + n,
+                Event.Shared(n) => 200 + n,
+                Event.Idle => 0,
+            }
+        }
+        fn probe() -> Int { read(make_heap()) + read(make_shared()) + invoke(increment) }
+    "#;
+    let consumer = Parser::new(source).parse_module().unwrap();
+    let mut codegen = VbcCodegen::with_config(CodegenConfig::new("calls"));
+    codegen
+        .collect_unit_declarations(&[&memory, &consumer])
+        .unwrap();
+    codegen.resolve_pending_imports();
+    codegen
+        .compile_unit_items(&[&consumer], ItemFailurePolicy::Strict)
+        .unwrap();
+    let module = codegen.finalize_module_from_state().unwrap();
+    let event = module
+        .types
+        .iter()
+        .find(|ty| {
+            module
+                .get_string(ty.name)
+                .is_some_and(|name| name.rsplit('.').next() == Some("Event"))
+        })
+        .unwrap();
+    for (name, tag) in [("make_heap", 1), ("make_shared", 2)] {
+        let id = module
+            .find_function_by_name(&format!("calls.{name}"))
+            .unwrap();
+        let descriptor = module.get_function(id).unwrap();
+        let start = descriptor.bytecode_offset as usize;
+        let end = start + descriptor.bytecode_length as usize;
+        let body = decode_instructions(&module.bytecode[start..end]).unwrap();
+        assert!(body.iter().any(|op| matches!(op,
+            Instruction::MakeVariantTyped { type_id, tag: actual, .. } if *type_id == event.id.0 && *actual == tag
+        )), "{name}: {body:?}");
+    }
+    let probe = module.find_function_by_name("calls.probe").unwrap();
+    let result = Interpreter::new(Arc::new(module))
+        .execute_function(probe)
+        .unwrap();
+    assert_eq!(result.try_as_i64(), Some(348));
+}

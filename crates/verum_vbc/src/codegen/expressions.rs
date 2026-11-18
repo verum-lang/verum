@@ -10274,52 +10274,6 @@ impl VbcCodegen {
                 Ok(Some(Some(dest)))
             }
 
-            // Heap(x) — heap-allocate a value with CBGR tracking.
-            // This uses WellKnownType matching rather than a hardcoded string so
-            // that well-known type resolution stays centralized in verum_common.
-            // Heap is a runtime primitive (memory allocation), not a regular stdlib
-            // type, so it requires special codegen that emits CallM with method "new".
-            _ if self.is_allocating_wrapper(name) && args.len() == 1 && name == "Heap" => {
-                let inner = self
-                    .compile_expr(&args[0])?
-                    .or_internal("Heap arg has no value")?;
-
-                // Load "Heap" as receiver (small string recognized by interpreter)
-                let receiver_reg = self.ctx.alloc_temp();
-                let heap_const = self.ctx.add_const_string("Heap");
-                self.ctx.emit(Instruction::LoadK {
-                    dst: receiver_reg,
-                    const_id: heap_const.0,
-                });
-
-                // Place inner value in a consecutive arg register
-                let arg_reg = self.ctx.registers.alloc_fresh();
-                if inner != arg_reg {
-                    self.ctx.emit(Instruction::Mov {
-                        dst: arg_reg,
-                        src: inner,
-                    });
-                    self.ctx.free_temp(inner);
-                }
-
-                // Emit CallM { receiver: "Heap", method: "new", args: [inner] }
-                let result = self.ctx.alloc_temp();
-                // `name` IS the receiver type here — the arm matched on
-                // `name == "Heap"` — so the qualifier is free (T0753).
-                let method_id = self.call_method_id(Some(name), "new");
-                self.ctx.emit(Instruction::CallM {
-                    dst: result,
-                    receiver: receiver_reg,
-                    method_id,
-                    args: crate::instruction::RegRange {
-                        start: arg_reg,
-                        count: 1,
-                    },
-                });
-                self.ctx.free_temp(receiver_reg);
-                Ok(Some(Some(result)))
-            }
-
             "assert_eq" | "assert_ne" => {
                 if args.len() < 2 {
                     return Err(CodegenError::new(CodegenErrorKind::WrongArgumentCount {
@@ -12166,12 +12120,6 @@ impl VbcCodegen {
         args: &verum_common::List<Expr>,
         explicit_parent: Option<&str>,
     ) -> CodegenResult<Option<Reg>> {
-        // Heap(x) / Shared(x): transparent wrapper — just pass through inner value.
-        // This matches the LLVM lowering behavior where Heap.new(x) is transparent.
-        if self.is_allocating_wrapper(name) && args.len() == 1 {
-            return self.compile_expr(&args[0]);
-        }
-
         // Look up the variant tag from the registered FunctionInfo.
         // Tags are assigned as declaration-order indices when the type is registered.
         //
@@ -29448,37 +29396,14 @@ impl VbcCodegen {
                 // Try to infer element type from first element for List<T> tracking
                 use verum_ast::expr::ArrayExpr;
 
-                // Helper: detect if expression is Heap(x) or Shared(x) wrapper
-                let wrap_if_heap = |elem: &Expr, elem_type: String| -> String {
-                    if let ExprKind::Call { func, args, .. } = &elem.kind
-                        && args.len() == 1
-                        && let ExprKind::Path(path) = &func.kind
-                        && path.segments.len() == 1
-                        && let PathSegment::Name(ident) = &path.segments[0]
-                        && self.is_allocating_wrapper(ident.name.as_str())
-                    {
-                        return format!("{}<{}>", ident.name, elem_type);
-                    }
-                    elem_type
+                let element = match array_expr {
+                    ArrayExpr::List(elements) => elements.first(),
+                    ArrayExpr::Repeat { value, .. } => Some(value.as_ref()),
                 };
-
-                match array_expr {
-                    ArrayExpr::List(elements) => {
-                        if let Some(first_elem) = elements.first()
-                            && let Some(elem_type) = self.extract_expr_type_name(first_elem)
-                        {
-                            let elem_type = wrap_if_heap(first_elem, elem_type);
-                            return Some(format!("List<{}>", elem_type));
-                        }
-                    }
-                    ArrayExpr::Repeat { value, .. } => {
-                        if let Some(elem_type) = self.extract_expr_type_name(value) {
-                            let elem_type = wrap_if_heap(value, elem_type);
-                            return Some(format!("List<{}>", elem_type));
-                        }
-                    }
-                }
-                Some("List".to_string())
+                Some(match element.and_then(|expr| self.extract_expr_type_name(expr)) {
+                    Some(ty) => format!("List<{ty}>"),
+                    None => "List".to_owned(),
+                })
             }
             // Parenthesized expression: (expr)
             ExprKind::Paren(inner) => self.extract_expr_type_name(inner),
@@ -29810,15 +29735,6 @@ impl VbcCodegen {
                                 }
                                 return Some(ret_type.clone());
                             }
-                        }
-                        // Heap(x) / Shared(x): return inner type, not "Heap"/"Shared"
-                        // This ensures field access and method calls on Heap-wrapped
-                        // structs resolve T's field positions and methods.
-                        if self.is_allocating_wrapper(name.as_str())
-                            && args.len() == 1
-                            && let Some(inner_type) = self.extract_expr_type_name(&args[0])
-                        {
-                            return Some(inner_type);
                         }
                         // **Closure expected-return-type plumbing (#26 residual).**
                         //

@@ -350,3 +350,33 @@ fn mounted_variant_values_do_not_acquire_primitive_type_properties() {
         assert!(checker.context_mut().env.is_bound_value("i32"));
     }
 }
+
+#[test]
+fn an_associated_factory_cannot_override_the_lexical_callee() {
+    for name in ["Container", "Heap", "Shared"] {
+        let mut checker = TypeChecker::new();
+        checker.register_primitives();
+        checker.context_mut().env.insert_value(
+            format!("{name}.new"),
+            TypeScheme::mono(Type::function(List::from_single(Type::int()), Type::bool())),
+        );
+
+        let valid = parse(
+            &format!("fn apply({name}: fn(Int) -> Int) -> Int {{ {name}(7) }}"),
+            0,
+        );
+        checker
+            .check_item(&valid.items[0])
+            .unwrap_or_else(|error| panic!("{name}: {error}"));
+
+        let invalid = parse(
+            &format!("fn reject({name}: Int) -> Bool {{ {name}(7) }}"),
+            1,
+        );
+        let error = checker.check_item(&invalid.items[0]).expect_err(name);
+        assert!(
+            error.to_string().contains("not a function"),
+            "{name}: {error}"
+        );
+    }
+}
