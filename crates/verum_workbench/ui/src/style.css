@@ -1260,6 +1260,8 @@ dialog:has(.change-review) h2 { font-size: 15px; overflow-wrap: anywhere; }
 .event-log summary {
   cursor: pointer;
 }
+#agent-sequence p { margin-block-start: var(--space-1); }
+#agent-sequence[data-status=violated] summary { color: var(--warning); }
 .event-log pre {
   max-height: 170px;
   overflow: auto;

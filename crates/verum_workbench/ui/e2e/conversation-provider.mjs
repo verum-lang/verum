@@ -18,7 +18,9 @@ function requestExecution() {
 const checks = ['fn main() -> Int { 42 }', 'fn main() -> Int { missing_receipt_value }'];
 function requestCheck() {
   if (!checks.length) {
-    send({method: 'turn/completed', params: {threadId: '4', turn: {id: 'T-4', status: 'completed'}}});
+    send({id: 'inspect-order', method: 'item/tool/call', params: {
+      threadId: '4', turnId: 'T-4', tool: 'verum_action_sequence', arguments: {},
+    }});
     return;
   }
   send({id: 'check', method: 'item/tool/call', params: {
@@ -44,6 +46,8 @@ for await (const line of createInterface({input: process.stdin})) {
     send({method: 'turn/started', params: {...params, turn}});
     send({method: 'item/agentMessage/delta', params: {...params, itemId: 'shared', delta: role + ' response'}});
     if (role === 'reviewer') {
+      // Provider prose and provider-shaped assertions have no standing in the host action check.
+      send({method: 'studio/actionSequence', params: {...params, status: 'checked', succeeded: 999}});
       send({id: 'read', method: 'item/tool/call', params: {...params, tool: 'verum_read', arguments: {path: 'experiment.vr'}}});
     }
     if (threadId === execution.threadId) {
@@ -63,4 +67,7 @@ for await (const line of createInterface({input: process.stdin})) {
   }
   if (method === undefined && id === 'operation' && operations.length) requestExecution();
   if (method === undefined && id === 'check') requestCheck();
+  if (method === undefined && id === 'inspect-order') {
+    send({method: 'turn/completed', params: {threadId: '4', turn: {id: 'T-4', status: 'completed'}}});
+  }
 }

@@ -1,5 +1,7 @@
 // Every provider operation captures this object before its first await. The
 // selected conversation controls presentation only, never protocol routing.
+import type { ActionSequence } from './sequence-view';
+
 export class Conversation {
   readonly log = document.createElement('div');
   readonly option = document.createElement('option');
@@ -10,6 +12,7 @@ export class Conversation {
   eventLength = 0;
   truncated = false;
   cursor = 0;
+  actionSequence: ActionSequence | null = null;
   thread: string | null = null;
   turn: string | null = null;
   sending = false;

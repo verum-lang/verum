@@ -97,10 +97,12 @@ try {
   await wait("transcript().includes('Turn interrupted')");
   await evaluate('choose(1)');
   assert.match(await evaluate('transcript()'), /reviewer response/);
+  await wait("byId('agent-sequence').dataset.status === 'incomplete' && byId('agent-sequence').textContent.includes('Awaiting a decision: 1')");
   assert.doesNotMatch(await evaluate('transcript()'), /author response|Turn interrupted/);
   assert.equal(await evaluate("byId('agent-role').value"), 'reviewer');
   await evaluate("byId('agent-messages').querySelector('.approval .primary').click()");
   await wait("transcript().includes('Tool completed') && byId('agent-stop').hidden");
+  await wait("byId('agent-sequence').dataset.status === 'checked' && byId('agent-sequence').textContent.includes('Succeeded: 1 · failed: 0')");
   assert.match(await evaluate("byId('agent-messages').querySelector('.approval details:last-of-type').textContent"), /fn main\(\) -> Int/);
   await evaluate('choose(0)');
   assert.equal(await evaluate("byId('agent-input').value"), 'author draft');
@@ -109,13 +111,14 @@ try {
   await evaluate(`window.card = i => document.querySelectorAll('#agent-messages > div:not([hidden]) > .approval')[i];
     window.fields = el => Object.fromEntries([...el.querySelectorAll('dt')].map(dt => [dt.textContent, dt.nextElementSibling.textContent]));
     window.language = value => { byId('language').value = value; byId('language').dispatchEvent(new Event('change')); };
-    window.previews = []; window.receiptReads = [];
+    window.previews = []; window.receiptReads = []; window.checkReviews = [];
     const send = window.fetch.bind(window);
     let journalReady;
     const recovery = new Promise(resolve => { journalReady = resolve; });
     window.fetch = async (url, options) => {
       const {method, params} = JSON.parse(options.body);
       if (method === 'operation.read') receiptReads.push(params.id);
+      if (method === 'agent.respond' && params.threadId === '4') checkReviews.push(params.reviewId);
       const scopedPoll = method === 'agent.events' && params.threadId === '3';
       if (scopedPoll) await recovery;
       const response = await send(url, options);
@@ -160,6 +163,7 @@ try {
   await wait("card(2).textContent.includes('This review is no longer pending.')");
   await evaluate('releasePreview()');
   await wait('window.polledAfterReturn');
+  await wait("byId('agent-sequence').dataset.status === 'checked' && byId('agent-sequence').textContent.includes('declined: 2')");
   assert.equal(await evaluate("card(2).querySelector('.primary, .approval-plan')"), null);
   assert.equal(await evaluate("card(2).querySelector('button').disabled"), true);
   assert.equal(await evaluate('new Set(previews.map(p => p.reviewId)).size'), 3);
@@ -174,9 +178,25 @@ try {
     assert.equal(result.status, index ? 'failed' : 'succeeded', result.error || result.stderr);
     assert.equal(await evaluate(`card(${index}).querySelector('.approval-actions button').textContent`), 'Open operation receipt');
   }
+  await wait("card(2)?.querySelector('.primary') && byId('agent-sequence').dataset.status === 'incomplete'");
+  assert.equal(await evaluate("card(2).querySelector('.primary').textContent"), 'Allow inspection');
+  await evaluate("card(2).querySelector('.primary').click()");
+  await wait("card(2)?.querySelector('[data-key=\"response\"] pre')");
+  const inspection = await evaluate("JSON.parse(card(2).querySelector('[data-key=\"response\"] pre').textContent)");
+  assert.equal(inspection.success, true);
+  assert.equal(inspection.tool_result.threadId, '4');
+  assert.equal(inspection.tool_result.actionSequence.status, 'checked');
+  assert.deepEqual([inspection.tool_result.actionSequence.succeeded, inspection.tool_result.actionSequence.failed,
+    inspection.tool_result.actionSequence.retained], [1, 1, 6]);
+  const answered = await evaluate('checkReviews');
+  assert.equal(new Set(answered).size, 3);
+  assert.equal(inspection.tool_result.actionSequence.inspecting_review, answered[2]);
+  // The browser's next observation includes the completed inspection itself.
+  await wait("byId('agent-sequence').dataset.status === 'checked' && byId('agent-sequence').textContent.includes('Succeeded: 2 · failed: 1')");
   await evaluate(`window.receipt = () => JSON.parse(byId('result-detail').querySelector('[data-key="receipt"] pre')?.textContent || 'null');
     window.fromCard = i => JSON.parse(card(i).querySelector('[data-key="response"] pre').textContent).tool_result;
     language('ru');`);
+  assert.equal(await evaluate("byId('sequence-status').textContent"), 'Порядок действий · проверено');
   for (const index of [1, 0]) {
     assert.equal(await evaluate(`card(${index}).querySelector('.approval-actions button').textContent`), 'Открыть отчёт об операции');
     await evaluate(`card(${index}).querySelector('.approval-actions button').click()`);
@@ -185,7 +205,7 @@ try {
     assert.equal(await evaluate('receipt().status'), index ? 'failed' : 'succeeded');
     assert.equal(await evaluate('receipt().agent.review_id'), await evaluate(`previews[${index + 3}].reviewId`));
   }
-  console.log('Passed concurrent conversations, owner-bound read and interrupt, recovered execution review, decline after preview failure, expired preview delivery and exact history links for successful and failed Verum checks.');
+  console.log('Passed concurrent conversations, scoped reviews, execution previews, exact receipt navigation, and host action-order checks through both the browser and the reviewed agent tool.');
 } finally {
   await Promise.all(children.map(async child => {
     if (child.exitCode !== null || child.signalCode !== null) return;

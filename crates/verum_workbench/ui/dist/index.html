@@ -87,6 +87,7 @@
       <div id="agent-messages" class="agent-messages" role="log" aria-label="Agent conversation" aria-live="polite" aria-relevant="additions text"><div id="agent-welcome" class="agent-welcome"><span data-icon="agent"></span><h3>Work with your agent</h3><p>Discuss the project, review proposed edits and approve execution here.</p><button id="agent-suggestion" class="suggestion">Explain this source and suggest one useful experiment <span data-icon="chevronRight"></span></button></div></div>
       <div id="agent-progress" class="agent-progress" role="status"></div>
       <form id="agent-form" class="agent-composer"><label class="sr-only" for="agent-input">Message the agent</label><textarea id="agent-input" placeholder="Explore an idea with Codex…" rows="3" disabled></textarea><div class="composer-footer"><span id="agent-context-info" title="The current editor source is included with each message">↳ <span id="agent-context">experiment.vr</span></span><div class="button-row"><button id="agent-stop" class="quiet-button" type="button" hidden>Stop</button><button id="agent-send" class="button primary" type="submit" disabled><span>Send</span><span data-icon="chevronRight"></span></button></div></div></form>
+      <details id="agent-sequence" class="event-log" hidden><summary id="sequence-status"></summary><div></div></details>
       <details class="event-log"><summary>Session events <span id="event-count" class="count">0</span></summary><pre id="event-content"></pre></details></div>
     </aside>
   </main>

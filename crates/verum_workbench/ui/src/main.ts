@@ -1,4 +1,5 @@
 import { Conversation } from './conversation';
+import { renderSequence, type ActionSequence } from './sequence-view';
 import { continueSourcePage, projectSourceIndex, workspaceFilePath, type SourcePage } from './project-tree';
 import './style.css';
 import { runtimeSourceLine, runtimeSourceRange } from './runtime';
@@ -1135,6 +1136,7 @@ function selectConversation(conversation: Conversation) {
   $<HTMLSelectElement>('agent-model').value = selected.model;
   $('agent-messages').scrollTop = selected.scroll;
   renderEvents(selected);
+  renderSequence($<HTMLDetailsElement>('agent-sequence'), selected.actionSequence);
   agentState();
 }
 function addMessage(role: 'user' | 'agent' | 'system', text: Content, id?: string, conversation = selected) {
@@ -1291,13 +1293,18 @@ async function pollEvents() {
 async function pollConversation(c: Conversation) {
   const owner = c.thread, connection = agentConnection;
   const live = () => agentConnection === connection && connected && owner === c.thread && conversations.has(c);
-  const result = await api<{ connectionId: string; cursor: number; events: AgentEvent[]; gap: boolean; pendingReviews: string[]; recoveredReviews: AgentEvent[] }>('agent.events', { after: c.cursor, threadId: owner });
+  const result = await api<{ connectionId: string; cursor: number; events: AgentEvent[]; gap: boolean; pendingReviews: string[]; recoveredReviews: AgentEvent[]; actionSequence?: ActionSequence | null }>('agent.events', { after: c.cursor, threadId: owner });
   if (!live()) return;
   if (result.connectionId !== connection) {
     connected = false; authenticated = false; agentConnection = null;
     resetAgentConversation(); agentState(); return;
   }
   const pending = new Set(result.pendingReviews);
+  const sequence = result.actionSequence ?? null;
+  if (JSON.stringify(c.actionSequence) !== JSON.stringify(sequence)) {
+    c.actionSequence = sequence;
+    if (c === selected) renderSequence($<HTMLDetailsElement>('agent-sequence'), sequence);
+  }
   for (const [id, expire] of c.reviews) if (!pending.has(id)) expire();
   if (result.gap && owner) addMessage('system', m('Some session events are no longer available. This conversation history is incomplete; inspect source and results before continuing.'), undefined, c);
   for (const event of [...result.recoveredReviews, ...result.events]) {
@@ -1352,9 +1359,13 @@ async function showApproval(c: Conversation, reviewId: string, method: string, p
   if (owner !== null && owner !== c.thread) return;
   const connection = agentConnection;
   const kind = approvalKind(method, hostKind);
+  const readHeading = params.tool === 'verum_action_sequence' ? m('Review action-order inspection') :
+    params.tool === 'verum_analyze' ? m('Review language analysis') : m('Review a workspace read');
+  const readAction = params.tool === 'verum_action_sequence' ? m('Allow inspection') :
+    params.tool === 'verum_analyze' ? m('Allow analysis') : m('Allow read');
   const args = kind === 'execution' ? {} : parseArguments(params.arguments);
   const card = node('section', 'approval'); setAttribute(card, 'aria-label', m('Agent request awaiting review'));
-  card.append(node('div', 'approval-heading', kind === 'source' ? m('Review a source proposal') : kind === 'execution' ? m('Review a Verum operation') : kind === 'read' ? params.tool === 'verum_analyze' ? m('Review language analysis') : m('Review a workspace read') : m('Unsupported agent request')));
+  card.append(node('div', 'approval-heading', kind === 'source' ? m('Review a source proposal') : kind === 'execution' ? m('Review a Verum operation') : kind === 'read' ? readHeading : m('Unsupported agent request')));
   const content = node('div', 'approval-content');
   let reviewAvailable = owner !== null && kind !== 'execution' && kind !== 'unsupported';
   if (kind === 'execution') {
@@ -1421,7 +1432,7 @@ async function showApproval(c: Conversation, reviewId: string, method: string, p
       await refreshOperations();
     } catch (error) { status.append(node('p', '', m('Refresh unavailable: {error}', { error: errorText(error) }))); }
   }
-  const approve = button(kind === 'source' ? m('Accept edit') : kind === 'read' ? params.tool === 'verum_analyze' ? m('Allow analysis') : m('Allow read') : m('Approve operation'), () => respond(true), 'button primary');
+  const approve = button(kind === 'source' ? m('Accept edit') : kind === 'read' ? readAction : m('Approve operation'), () => respond(true), 'button primary');
   actions.append(button(m('Decline'), () => respond(false)));
   if (reviewAvailable) actions.append(approve);
   if (!current()) return;
