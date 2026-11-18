@@ -13,10 +13,11 @@ async fn main() -> Result<()> {
     };
     let mut args = std::env::args().skip(1);
     let mut library = None;
+    let mut agy = PathBuf::from("agy");
     while let Some(arg) = args.next() {
         if matches!(arg.as_str(), "--help" | "-h") {
             println!(
-                "Verum Studio\nverum-studio [--workspace DIR] [--verum EXE] [--proof EXE] [--codex EXE] [--port PORT] [--stdlib-metadata FILE]\nUse the .core_metadata artifact from the matching Verum release for library analysis.\nOpen the printed local URL. Codex uses its own Studio ChatGPT sign-in. No API key is requested."
+                "Verum Studio\nverum-studio [--workspace DIR] [--verum EXE] [--proof EXE] [--codex EXE] [--agy EXE] [--port PORT] [--stdlib-metadata FILE]\nUse the .core_metadata artifact from the matching Verum release for library analysis.\nOpen the printed local URL. Connect Codex or Antigravity CLI using the provider’s Studio sign-in."
             );
             return Ok(());
         }
@@ -26,6 +27,7 @@ async fn main() -> Result<()> {
             "--verum" => config.verum = value.into(),
             "--proof" => config.proof = value.into(),
             "--codex" => config.codex = value.into(),
+            "--agy" => agy = value.into(),
             "--port" => config.port = value.parse()?,
             "--stdlib-metadata" => {
                 library = Some(verum_lsp::library_metadata::LibraryMetadata::load(
@@ -35,5 +37,5 @@ async fn main() -> Result<()> {
             _ => bail!("Unknown option {arg}"),
         }
     }
-    verum_workbench::server::serve_with_library(config, library).await
+    verum_workbench::server::serve_with_providers(config, library, agy).await
 }

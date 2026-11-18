@@ -446,7 +446,7 @@ fn persist(receipt: &Receipt) -> Result<()> {
     file.persist(receipt.evidence_path.join("receipt.json"))?;
     Ok(())
 }
-struct ProcessGroup(Option<u32>);
+pub(crate) struct ProcessGroup(pub(crate) Option<u32>);
 impl Drop for ProcessGroup {
     fn drop(&mut self) {
         #[cfg(unix)]

@@ -90,7 +90,7 @@ impl Events {
         self.roles.get(thread).copied().flatten()
     }
 
-    fn push(&mut self, message: Value) -> Result<()> {
+    pub(crate) fn push(&mut self, message: Value) -> Result<()> {
         let params = &message["params"];
         if message["method"] == "serverRequest/resolved" {
             let key: Text = params["requestId"].to_string().into();
@@ -167,6 +167,14 @@ impl Events {
         }
         self.messages.push_back(entry);
         Ok(())
+    }
+
+    pub(crate) fn disconnect(&mut self, reason: &str) {
+        self.turns.disconnect();
+        self.requests.clear();
+        self.scopes.clear();
+        self.executing.clear();
+        let _ = self.push(json!({"method":"studio/disconnected","params":{"message":reason}}));
     }
 
     pub fn read(&self, after: u64, thread: Option<&str>) -> Value {
@@ -298,7 +306,7 @@ impl Drop for Codex {
 }
 impl Codex {
     pub async fn connect(executable: &Path, root: &Path) -> Result<Self> {
-        let data = dirs::data_local_dir().context("OS application-data directory unavailable")?;
+        let data = crate::data_home().context("OS application-data directory unavailable")?;
         std::fs::create_dir_all(&data)?;
         let home = crate::workspace::private_dir(&data, &["VerumStudio", "codex"])?;
         Self::connect_with_storage(executable, root, &home).await
@@ -417,11 +425,7 @@ impl Codex {
             }
             responses.lock().await.clear();
             let mut events = notifications.lock().await;
-            events.turns.disconnect();
-            events.requests.clear();
-            events.scopes.clear();
-            events.executing.clear();
-            let _ = events.push(json!({"method":"studio/disconnected","params":{"message":"Codex disconnected. Check CLI version and reconnect."}}));
+            events.disconnect("Codex disconnected. Check CLI version and reconnect.");
         });
         let stderr_task = tokio::spawn(async move {
             // Drain without persisting provider diagnostics, which may contain account data.

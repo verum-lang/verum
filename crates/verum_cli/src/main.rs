@@ -817,6 +817,9 @@ enum Commands {
         /// Codex CLI with app-server support
         #[clap(long, default_value = "codex")]
         codex: PathBuf,
+        /// Antigravity CLI with Agent Client Protocol support
+        #[clap(long, default_value = "agy")]
+        agy: PathBuf,
         /// Isolated Verum source proof worker
         #[clap(long, default_value = "verum-source-replay")]
         proof: PathBuf,
@@ -3590,12 +3593,12 @@ fn run_command(cli: Cli) -> Result<()> {
             feature_overrides::install(feature_overrides);
             commands::file::repl(preload.as_ref().map(|s| s.as_str()), skip_verify)
         }
-        Commands::Studio { workspace, port, codex, proof } => {
+        Commands::Studio { workspace, port, codex, agy, proof } => {
             let runtime = tokio::runtime::Runtime::new().map_err(|e| CliError::Custom(e.to_string()))?;
             let verum = std::env::current_exe().map_err(|e| CliError::Custom(e.to_string()))?;
-            runtime.block_on(verum_workbench::server::serve_with_library(verum_workbench::Config {
+            runtime.block_on(verum_workbench::server::serve_with_providers(verum_workbench::Config {
                 workspace, port, codex, proof, verum,
-            }, commands::lsp::release_library()?)).map_err(|e| CliError::Custom(e.to_string()))
+            }, commands::lsp::release_library()?, agy)).map_err(|e| CliError::Custom(e.to_string()))
         },
         Commands::Version { verbose } => commands::version::execute(verbose),
         Commands::VbcVersion { archive, raw, dump_fn, string } => match (dump_fn, string) {

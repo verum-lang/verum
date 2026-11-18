@@ -1,4 +1,6 @@
 //! Verum Studio: one local operation service, with browser and provider adapters.
+mod acp;
+mod antigravity;
 mod action_order;
 pub mod agent_tools;
 pub mod agent_runtime;
@@ -9,6 +11,7 @@ pub mod jobs;
 pub mod language;
 pub mod project_files;
 pub mod project_git;
+mod providers;
 pub mod server;
 pub mod runtime_diagnostics;
 pub mod workspace;
@@ -19,6 +22,10 @@ use serde_json::{Value, json};
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use tokio::sync::Mutex;
 use verum_common::{List, Text};
+
+pub(crate) fn data_home() -> Option<PathBuf> {
+    std::env::var_os("VERUM_STUDIO_DATA_HOME").map(PathBuf::from).or_else(dirs::data_local_dir)
+}
 
 pub struct Config {
     pub workspace: PathBuf,
@@ -32,7 +39,20 @@ pub struct Studio {
     pub jobs: Mutex<jobs::Jobs>,
     language: language::Language,
     agent: Mutex<Option<Arc<codex::Codex>>>,
+    agy: Mutex<Option<Arc<acp::Acp>>>,
+    agy_executable: PathBuf,
     pub config: Config,
+}
+
+enum Connection {
+    Codex(Arc<codex::Codex>),
+    Antigravity(Arc<acp::Acp>),
+}
+
+impl Connection {
+    fn events(&self) -> Arc<Mutex<codex::Events>> {
+        match self { Self::Codex(p) => p.events.clone(), Self::Antigravity(p) => p.events.clone() }
+    }
 }
 
 #[derive(Debug)]
@@ -49,10 +69,18 @@ impl Studio {
         Self::open_with_library(config, None)
     }
     pub fn open_with_library(
-        mut config: Config,
+        config: Config,
         library: Option<Arc<verum_lsp::library_metadata::LibraryMetadata>>,
     ) -> Result<Self> {
-        for executable in [&mut config.verum, &mut config.proof, &mut config.codex] {
+        Self::open_with_providers(config, library, PathBuf::from("agy"))
+    }
+
+    pub fn open_with_providers(
+        mut config: Config,
+        library: Option<Arc<verum_lsp::library_metadata::LibraryMetadata>>,
+        mut agy_executable: PathBuf,
+    ) -> Result<Self> {
+        for executable in [&mut config.verum, &mut config.proof, &mut config.codex, &mut agy_executable] {
             if executable.is_relative() && executable.components().count() > 1 {
                 *executable = std::env::current_dir()?.join(&*executable);
             }
@@ -75,105 +103,133 @@ impl Studio {
             workspace: Mutex::new(workspace),
             jobs: Mutex::new(jobs),
             agent: Mutex::new(None),
+            agy: Mutex::new(None),
+            agy_executable,
             config,
         })
     }
-    async fn provider(&self) -> Result<Arc<codex::Codex>> {
-        self.agent
-            .lock()
-            .await
-            .clone()
-            .context("Connect Codex first")
+    async fn connection(&self, id: Option<uuid::Uuid>, journal_only: bool) -> Result<Connection> {
+        if let Some(codex) = self.agent.lock().await.clone()
+            && (journal_only || codex.connected())
+            && (id.is_none() || id == Some(codex.events.lock().await.connection()))
+        { return Ok(Connection::Codex(codex)); }
+        if let Some(expected) = id
+            && let Some(agent) = self.agy.lock().await.clone()
+            && (journal_only || agent.connected()) && agent.events.lock().await.connection() == expected
+        { return Ok(Connection::Antigravity(agent)); }
+        bail!("Provider connection changed or disconnected; reconnect first")
     }
+
+    async fn connection_events(&self, id: uuid::Uuid) -> Result<Arc<Mutex<codex::Events>>> {
+        Ok(self.connection(Some(id), false).await?.events())
+    }
+
+    async fn connect_agent(&self, params:&Value) -> Result<Value> {
+        let driver: providers::Driver = params.get("provider")
+            .map(|value| serde_json::from_value(value.clone())).transpose().context("Unknown provider")?
+            .unwrap_or_default();
+        let (mut account, events) = match driver {
+            providers::Driver::Codex => {
+                let mut slot = self.agent.lock().await;
+                if slot.as_ref().is_none_or(|p| !p.connected()) {
+                    *slot = Some(Arc::new(codex::Codex::connect(&self.config.codex, &self.config.workspace).await?));
+                }
+                let provider = slot.as_ref().context("Codex unavailable")?;
+                (provider.request("account/read", json!({"refreshToken":false})).await?, provider.events.clone())
+            }
+            providers::Driver::Antigravity => {
+                let mut slot = self.agy.lock().await;
+                if slot.as_ref().is_none_or(|p| !p.connected()) {
+                    *slot = Some(Arc::new(acp::Acp::connect(&self.agy_executable).await?));
+                }
+                let provider = slot.as_ref().context("Antigravity unavailable")?;
+                (provider.account().await?, provider.events.clone())
+            }
+        };
+        account["connectionId"] = json!(events.lock().await.connection());
+        account["provider"] = json!(driver);
+        Ok(account)
+    }
+
     pub async fn call(&self, method: &str, params: Value) -> Result<Value> {
         match method {
+            "agent.providers" => Ok(self.provider_catalog().await),
             "agent.tools" => Ok(agent_tools::catalog()),
-            "agent.connect" => {
-                // A new connection never borrows another application's auth files.
-                let mut provider = self.agent.lock().await;
-                if provider.as_ref().is_none_or(|p| !p.connected()) {
-                    *provider = Some(Arc::new(
-                        codex::Codex::connect(&self.config.codex, &self.config.workspace).await?,
-                    ));
+            "agent.connect" => self.connect_agent(&params).await,
+            "agent.login" | "agent.request" | "agent.events" | "agent.respond" | "agent.preview" => {
+                let id = params.get("connectionId").map(|value| serde_json::from_value(value.clone())).transpose()
+                    .context("Provider connection changed or has an invalid ID; reconnect first")?;
+                let provider = self.connection(id, method == "agent.events").await?;
+                if method == "agent.events" {
+                    return Ok(provider.events().lock().await.read(params["after"].as_u64().unwrap_or(0), params["threadId"].as_str()));
                 }
-                let provider = provider.as_ref().context("Codex")?;
-                let mut account = provider.request("account/read", json!({"refreshToken":false})).await?;
-                account["connectionId"] = json!(provider.events.lock().await.connection().to_string());
-                Ok(account)
-            }
-            "agent.login" => {
-                self.provider()
-                    .await?
-                    .request("account/login/start", json!({"type":"chatgpt"}))
-                    .await
-            }
-            "agent.events" => Ok(self
-                .provider()
-                .await?
-                .events
-                .lock()
-                .await
-                .read(params["after"].as_u64().unwrap_or(0), params["threadId"].as_str())),
-            "agent.request" => {
-                let method = field(&params, "method")?;
-                let mut args = params["params"].clone();
-                ensure!(args.is_object(), "Agent params must be an object");
-                ensure!(
-                    matches!(
-                        method,
-                        "thread/start"
-                            | "turn/start"
-                            | "turn/interrupt"
-                            | "model/list"
-                            | "account/read"
-                    ),
-                    "Unsupported agent operation"
-                );
-                let provider = self.provider().await?;
-                if let Some(expected) = params.get("connectionId") {
-                    ensure!(
-                        expected == &json!(provider.events.lock().await.connection().to_string()),
-                        "Provider connection changed; reconnect before sending a request"
-                    );
-                }
-                if method == "thread/start" {
-                    let role: agent_tools::Role = params.get("role").map(|value| serde_json::from_value(value.clone()))
-                        .transpose().context("Expected author or reviewer role")?.unwrap_or_default();
-                    let instructions = match role {
-                        agent_tools::Role::Author => "You are the Verum Studio research assistant. Work only in Verum. Use verum_analyze for revision-bound diagnostics, declarations and context requirements from the same language service as the editor. Read the reported analysis_scope and library_metadata identity: captured dependency declarations and available release metadata inform open-document checks; unopened dependency bodies are not whole-program verification. Use verum_read and propose complete .vr edits through verum_propose for human review. Execute and check only through verum_run, verum_check and verum_proof. Never substitute Python, Rust, JavaScript, a shell, or another language for a Verum experiment. Never treat passing tests as a theorem or logical proof as runtime implementation correspondence. Cite source hashes and exact evidence, and preserve rejected/exhausted/inconclusive outcomes. Read files before proposing changes. Ask the user to select a file if no path is known. Tools require human approval.",
-                        agent_tools::Role::Reviewer => "Independently review Verum source and explicitly identified Studio receipts using only the available read tools. Check the source hash, analysis scope and proof outcome. Distinguish a verified theorem from implementation correspondence and a passing execution. Report reproducible findings and missing evidence. Request the relevant paths and receipt IDs from the user when needed.",
-                    };
-                    let model = args.get("model").cloned();
-                    args = json!({"cwd":self.config.workspace,"sandbox":"read-only","approvalPolicy":"untrusted",
-                        "baseInstructions":instructions,
-                        "dynamicTools":role.catalog()});
-                    if let Some(model) = model {
-                        args["model"] = model;
+                match provider {
+                    Connection::Antigravity(agy) => match method {
+                        "agent.login" => agy.login().await,
+                        "agent.request" => agy.request(field(&params,"method")?, &params["params"], params.get("role")).await,
+                        _ => bail!("Antigravity text conversations have no Studio tool reviews"),
+                    },
+                    Connection::Codex(codex) => match method {
+                        "agent.login" => codex.request("account/login/start", json!({"type":"chatgpt"})).await,
+                        "agent.preview" => self.preview_execution(&codex,params).await,
+                        "agent.respond" => self.respond(&codex,params).await,
+                        _ => self.codex_request(&codex,params).await,
                     }
-                    return provider.start_thread(role, args).await;
                 }
-                ensure!(params.get("role").is_none(), "Conversation role is fixed at creation");
-                if matches!(method, "turn/start" | "turn/interrupt") {
-                    ensure!(provider.events.lock().await.role(field(&args, "threadId")?).is_some(), "Unknown or retired conversation");
-                }
-                if method == "turn/start" {
-                    // Client controls conversation input, not sandbox or execution policy.
-                    args = json!({"threadId":args["threadId"],"input":args["input"]});
-                }
-                if method == "turn/interrupt" {
-                    // Revoke local authority before waiting for a provider acknowledgement.
-                    provider.events.lock().await.end_turn(
-                        field(&args, "threadId")?, field(&args, "turnId")?, agent_runtime::End::Interrupted,
-                    )?;
-                }
-                provider.request(method, args).await
             }
-            "agent.preview" => self.preview_execution(params).await,
-            "agent.respond" => self.respond(params).await,
             _ => self.workspace_operation(method, params).await,
         }
     }
-    async fn preview_execution(&self, params: Value) -> Result<Value> {
+
+    async fn codex_request(&self, provider:&codex::Codex, params:Value) -> Result<Value> {
+        let method = field(&params, "method")?;
+        let mut args = params["params"].clone();
+        ensure!(args.is_object(), "Agent params must be an object");
+        ensure!(
+            matches!(
+                method,
+                "thread/start"
+                    | "turn/start"
+                    | "turn/interrupt"
+                    | "model/list"
+                    | "account/read"
+            ),
+            "Unsupported agent operation"
+        );
+        if method == "thread/start" {
+            let role: agent_tools::Role = params.get("role").map(|value| serde_json::from_value(value.clone()))
+                .transpose().context("Expected author or reviewer role")?.unwrap_or_default();
+            let instructions = match role {
+                agent_tools::Role::Author => "You are the Verum Studio research assistant. Work only in Verum. Use verum_analyze for revision-bound diagnostics, declarations and context requirements from the same language service as the editor. Read the reported analysis_scope and library_metadata identity: captured dependency declarations and available release metadata inform open-document checks; unopened dependency bodies are not whole-program verification. Use verum_read and propose complete .vr edits through verum_propose for human review. Execute and check only through verum_run, verum_check and verum_proof. Never substitute Python, Rust, JavaScript, a shell, or another language for a Verum experiment. Never treat passing tests as a theorem or logical proof as runtime implementation correspondence. Cite source hashes and exact evidence, and preserve rejected/exhausted/inconclusive outcomes. Read files before proposing changes. Ask the user to select a file if no path is known. Tools require human approval.",
+                agent_tools::Role::Reviewer => "Independently review Verum source and explicitly identified Studio receipts using only the available read tools. Check the source hash, analysis scope and proof outcome. Distinguish a verified theorem from implementation correspondence and a passing execution. Report reproducible findings and missing evidence. Request the relevant paths and receipt IDs from the user when needed.",
+            };
+            let model = args.get("model").cloned();
+            args = json!({"cwd":self.config.workspace,"sandbox":"read-only","approvalPolicy":"untrusted",
+                "baseInstructions":instructions,
+                "dynamicTools":role.catalog()});
+            if let Some(model) = model {
+                args["model"] = model;
+            }
+            return provider.start_thread(role, args).await;
+        }
+        ensure!(params.get("role").is_none(), "Conversation role is fixed at creation");
+        if matches!(method, "turn/start" | "turn/interrupt") {
+            ensure!(provider.events.lock().await.role(field(&args, "threadId")?).is_some(), "Unknown or retired conversation");
+        }
+        if method == "turn/start" {
+            // Client controls conversation input, not sandbox or execution policy.
+            args = json!({"threadId":args["threadId"],"input":args["input"]});
+        }
+        if method == "turn/interrupt" {
+            // Revoke local authority before waiting for a provider acknowledgement.
+            provider.events.lock().await.end_turn(
+                field(&args, "threadId")?, field(&args, "turnId")?, agent_runtime::End::Interrupted,
+            )?;
+        }
+        provider.request(method, args).await
+    }
+    async fn preview_execution(&self, provider:&codex::Codex, mut params: Value) -> Result<Value> {
+        if let Some(obj) = params.as_object_mut() { obj.remove("connectionId"); }
         #[derive(serde::Deserialize)]
         #[serde(rename_all = "camelCase", deny_unknown_fields)]
         struct Review {
@@ -181,7 +237,6 @@ impl Studio {
             thread_id: Text,
         }
         let review: Review = serde_json::from_value(params)?;
-        let provider = self.provider().await?;
         let mut args = {
             let events = provider.events.lock().await;
             let request = events.pending_execution(&review.review_id, &review.thread_id)?;
@@ -198,8 +253,7 @@ impl Studio {
         self.jobs.lock().await.plan(params)
     }
 
-    async fn respond(&self, params: Value) -> Result<Value> {
-        let provider = self.provider().await?;
+    async fn respond(&self, provider:&codex::Codex, params: Value) -> Result<Value> {
         let thread = params["threadId"].as_str();
         let approved = params["result"]["approved"].as_bool() == Some(true);
         let (request, role, scope) = {
@@ -298,9 +352,8 @@ impl Studio {
         match method {
             "agent.action_sequence" => {
                 let review = owner.context("Sequence inspection requires a reviewed agent call")?.review_origin()?;
-                let provider = self.provider().await?;
-                let events = provider.events.lock().await;
-                ensure!(events.connection().to_string() == review.owner.connection.as_str(), "Provider connection changed");
+                let instance = self.connection_events(uuid::Uuid::parse_str(&review.owner.connection)?).await?;
+                let events = instance.lock().await;
                 Ok(json!({"connectionId":review.owner.connection,"threadId":review.owner.conversation,
                     "actionSequence":events.action_sequence(&review.owner.conversation, review.review_id)}))
             }

@@ -20,8 +20,16 @@ pub async fn serve_with_library(
     config: Config,
     library: Option<Arc<verum_lsp::library_metadata::LibraryMetadata>>,
 ) -> Result<()> {
+    serve_with_providers(config, library, "agy".into()).await
+}
+
+pub async fn serve_with_providers(
+    config: Config,
+    library: Option<Arc<verum_lsp::library_metadata::LibraryMetadata>>,
+    agy: std::path::PathBuf,
+) -> Result<()> {
     let port = config.port;
-    let studio = Arc::new(Studio::open_with_library(config, library)?);
+    let studio = Arc::new(Studio::open_with_providers(config, library, agy)?);
     let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port)).await?;
     let host: Text = listener.local_addr()?.to_string().into();
     let token: Text = uuid::Uuid::new_v4().to_string().into();
