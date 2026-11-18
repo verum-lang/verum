@@ -1,5 +1,5 @@
 // =============================================================================
-// security/sigstore/rekor.vr — Rekor v2 transparency log client
+// security/sigstore/rekor.vr — Rekor v1 transparency log client
 // =============================================================================
 // Layer: 2 (Security primitives)
 // Dependencies: core, base, collections, encoding/{json, base64, hex, jcs},
@@ -8,17 +8,15 @@
 // =============================================================================
 //
 // **Purpose.** Submit + fetch + verify entries on rekor.sigstore.dev
-// (or self-hosted Rekor instances) v2 API. The protocol surface is
+// (or self-hosted Rekor instances) v1 API. The protocol surface is
 // JSON-over-HTTP; the cryptographic guarantees ride on top via the
 // SET (Signed Entry Timestamp).
 //
-// **Endpoints (Rekor v2 API).**
+// **Implemented endpoints (Rekor v1 API).**
 //
-//   POST /api/v2/log/entries                      — submit entry
-//   GET  /api/v2/log/entries/{uuid}                — fetch by UUID
-//   GET  /api/v2/log/entries?logIndex=N            — fetch by index
-//   GET  /api/v2/log/checkpoint                    — latest checkpoint
-//   GET  /api/v2/log/proofs?firstSize=A&lastSize=B — consistency
+//   POST /api/v1/log/entries           — submit entry
+//   GET  /api/v1/log/entries/{uuid}     — fetch by UUID
+//   GET  /api/v1/log/entries?logIndex=N — fetch by index
 //
 // **SET verification (RFC-style note tooling).**
 //
@@ -66,13 +64,14 @@ mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount collections.{List, Map};
 mount core.encoding.json.{
     JsonValue, JsonMap, json_object, json_string, json_number,
-    json_array, decode, encode,
+    json_array, decode, decode_bytes_strict, encode,
 };
 mount core.encoding.base64.{
     decode,
 };
 mount core.encoding.hex.{encode as hex_encode, decode as hex_decode};
 mount core.encoding.jcs.{canonicalize};
+mount core.security.sigstore.entry_id.{RekorEntryId, RekorEntryBodyError, RekorEnvelopeError, take_response_entry};
 mount core.net.http.{HttpClient, Request, Response, StatusCode, HttpError};
 mount core.security.ecc.p256.{P256, P256PublicKey, P256Signature};
 mount core.hash.crypto.sha256.{Sha256, digest};
@@ -162,13 +161,13 @@ public async fn submit_entry<C: HttpClient>(
     api_ver: &ApiVersion,
     spec:    &JsonValue,
 ) -> Result<LogEntry, RekorError> {
-    let url = compose_url(&config.base_url, "/api/v2/log/entries");
+    let url = compose_url(&config.base_url, "/api/v1/log/entries");
     let req = Request.post(url)
         .header(&"accept", &CONTENT_TYPE_JSON)
         .header(&"user-agent", &"verum-rekor/0.1")
         .body_json(encode_submit_body(kind, api_ver, spec));
     let body = send_entry_request(client, req).await?;
-    parse_verified_entry(&body, config)
+    parse_verified_entry(&body, config, Maybe.None)
 }
 
 fn encode_submit_body(kind: &EntryKind, api_ver: &ApiVersion, spec: &JsonValue) -> Text {
@@ -187,8 +186,12 @@ public async fn fetch_entry_by_uuid<C: HttpClient>(
     config: &RekorClientConfig,
     uuid:   &Text,
 ) -> Result<LogEntry, RekorError> {
-    let url = compose_url(&config.base_url, &f"/api/v2/log/entries/{uuid}");
-    fetch_entry_at_url(client, config, &url).await
+    let requested = match RekorEntryId.parse(uuid) {
+        Maybe.Some(id) => id,
+        Maybe.None => return Result.Err(RekorError.InvalidEntry("expected a hexadecimal entry UUID")),
+    };
+    let url = compose_url(&config.base_url, &f"/api/v1/log/entries/{uuid}");
+    fetch_entry_at_url(client, config, &url, Maybe.Some(requested)).await
 }
 
 public async fn fetch_entry_by_log_index<C: HttpClient>(
@@ -198,21 +201,22 @@ public async fn fetch_entry_by_log_index<C: HttpClient>(
 ) -> Result<LogEntry, RekorError> {
     let url = compose_url(
         &config.base_url,
-        &f"/api/v2/log/entries?logIndex={log_index}",
+        &f"/api/v1/log/entries?logIndex={log_index}",
     );
-    fetch_entry_at_url(client, config, &url).await
+    fetch_entry_at_url(client, config, &url, Maybe.None).await
 }
 
 async fn fetch_entry_at_url<C: HttpClient>(
     client: &C,
     config: &RekorClientConfig,
     url: &Text,
+    requested: Maybe<RekorEntryId>,
 ) -> Result<LogEntry, RekorError> {
     let req = Request.get(url.clone())
         .header(&"accept", &CONTENT_TYPE_JSON)
         .header(&"user-agent", &"verum-rekor/0.1");
     let body = send_entry_request(client, req).await?;
-    parse_verified_entry(&body, config)
+    parse_verified_entry(&body, config, requested)
 }
 
 async fn send_entry_request<C: HttpClient>(
@@ -235,8 +239,8 @@ async fn send_entry_request<C: HttpClient>(
     Result.Ok(body)
 }
 
-fn parse_verified_entry(body: &List<Byte>, config: &RekorClientConfig) -> Result<LogEntry, RekorError> {
-    let entry = parse_log_entry_response(body)?;
+fn parse_verified_entry(body: &List<Byte>, config: &RekorClientConfig, requested: Maybe<RekorEntryId>) -> Result<LogEntry, RekorError> {
+    let entry = parse_matching_response(body, requested)?;
     verify_entry_set(&entry, config)?;
     Result.Ok(entry)
 }
@@ -370,21 +374,27 @@ fn ct_eq(a: &Text, b: &Text) -> Bool {
 // Response parsing
 // =============================================================================
 
-fn parse_log_entry_response(bytes: &List<Byte>) -> Result<LogEntry, RekorError> {
-    let value = encoding.json.decode(bytes.as_slice())
-        .map_err(|e| InvalidJson(f"{e}"))?;
-    let obj = value.as_object()
-        .ok_or_else(|| InvalidJson("response not an object".to_text()))?;
-    // Rekor returns `{ "<uuid>": { ... } }` — a single-entry map.
-    let mut iter = obj.iter();
-    let (uuid_text, entry_value) = match iter.next() {
-        Maybe.Some(pair) => pair,
-        Maybe.None       => return Result.Err(InvalidJson("response empty".to_text())),
-    };
-    parse_log_entry(uuid_text.clone(), entry_value)
+/// Decode a single log response. This does not verify its SET or checkpoint.
+public fn parse_log_entry_response(bytes: &List<Byte>) -> Result<LogEntry, RekorError> {
+    parse_matching_response(bytes, Maybe.None)
 }
 
-fn parse_log_entry(uuid: Text, value: &JsonValue) -> Result<LogEntry, RekorError> {
+fn parse_matching_response(bytes: &List<Byte>, requested: Maybe<RekorEntryId>) -> Result<LogEntry, RekorError> {
+    let value = match decode_bytes_strict(bytes.as_slice(), MAX_ENTRY_RESPONSE_BYTES) {
+        Result.Ok(value) => value,
+        Result.Err(error) => return Result.Err(RekorError.InvalidJson(f"{error}")),
+    };
+    let (uuid, id, entry) = match take_response_entry(value, requested) {
+        Result.Ok(parts) => parts,
+        Result.Err(RekorEnvelopeError.NotAnObject) => return Result.Err(RekorError.InvalidJson("response not an object")),
+        Result.Err(RekorEnvelopeError.WrongEntryCount) => return Result.Err(RekorError.InvalidJson("expected exactly one log entry")),
+        Result.Err(RekorEnvelopeError.InvalidId) => return Result.Err(RekorError.InvalidEntry("invalid response UUID")),
+        Result.Err(RekorEnvelopeError.MismatchedId) => return Result.Err(RekorError.InvalidEntry("response UUID differs from request")),
+    };
+    parse_log_entry(uuid, &id, &entry)
+}
+
+fn parse_log_entry(uuid: Text, id: &RekorEntryId, value: &JsonValue) -> Result<LogEntry, RekorError> {
     let obj = value.as_object()
         .ok_or_else(|| InvalidJson(f"entry {uuid} not an object".to_text()))?;
     let body_b64 = obj.get("body").and_then(|v| v.as_string())
@@ -404,10 +414,15 @@ fn parse_log_entry(uuid: Text, value: &JsonValue) -> Result<LogEntry, RekorError
         Maybe.None     => Maybe.None,
     };
 
-    let body_bytes = core.encoding.base64.decode(&body_b64)
-        .map_err(|e| InvalidBase64(f"body: {e}"))?;
-    let body_value = encoding.json.decode(body_bytes.as_slice())
-        .map_err(|e| InvalidJson(f"body json: {e}"))?;
+    let body_bytes = match id.decode_body(&body_b64) {
+        Result.Ok(bytes) => bytes,
+        Result.Err(RekorEntryBodyError.InvalidBase64(error)) => return Result.Err(RekorError.InvalidBase64(f"body: {error}")),
+        Result.Err(RekorEntryBodyError.LeafMismatch) => return Result.Err(RekorError.InvalidEntry("UUID does not identify the returned body")),
+    };
+    let body_value = match decode_bytes_strict(body_bytes.as_slice(), MAX_ENTRY_RESPONSE_BYTES) {
+        Result.Ok(value) => value,
+        Result.Err(error) => return Result.Err(RekorError.InvalidJson(f"body json: {error}")),
+    };
     let body = decode_entry_body(&body_value)?;
 
     Result.Ok(LogEntry {

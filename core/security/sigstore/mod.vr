@@ -53,6 +53,7 @@
 module core.security.sigstore;
 
 public module types;
+public module entry_id;
 public module attestation;
 public module rekor;
 public module fulcio;

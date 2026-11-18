@@ -1,0 +1,83 @@
+/// Rekor v1 entry identifiers contain the RFC 6962 leaf hash and may carry
+/// an eight-byte tree identifier before it.
+module core.security.sigstore.entry_id;
+
+mount core.encoding.hex.{decode};
+mount core.encoding.base64.{decode as decode_base64, Base64Error};
+mount core.encoding.json.{JsonValue};
+mount core.security.merkle.{leaf_hash};
+
+public type RekorEntryId is { bytes: List<Byte> };
+
+public type RekorEntryBodyError is InvalidBase64(Base64Error) | LeafMismatch;
+
+public type RekorEnvelopeError is NotAnObject | WrongEntryCount | InvalidId | MismatchedId;
+
+/// Open a single-entry response and retain the original key spelling. A
+/// lookup by UUID must identify the requested entry before the body is used.
+public fn take_response_entry(
+    value: JsonValue,
+    requested: Maybe<RekorEntryId>,
+) -> Result<(Text, RekorEntryId, JsonValue), RekorEnvelopeError> {
+    let entries = match value {
+        JsonValue.JsonObject(entries) => entries,
+        _ => return Result.Err(RekorEnvelopeError.NotAnObject),
+    };
+    if entries.len() != 1 { return Result.Err(RekorEnvelopeError.WrongEntryCount); }
+    for (key, entry) in entries.iter() {
+        let id = match RekorEntryId.parse(&key) {
+            Maybe.Some(id) => id,
+            Maybe.None => return Result.Err(RekorEnvelopeError.InvalidId),
+        };
+        if let Maybe.Some(expected) = requested {
+            if !expected.matches_response(&id) { return Result.Err(RekorEnvelopeError.MismatchedId); }
+        }
+        return Result.Ok((key, id, entry));
+    }
+    Result.Err(RekorEnvelopeError.WrongEntryCount)
+}
+
+implement Debug for RekorEntryBodyError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            RekorEntryBodyError.InvalidBase64(error) => f.write_str(f"invalid Rekor body encoding: {error}".as_str()),
+            RekorEntryBodyError.LeafMismatch => f.write_str("Rekor identifier and body hash differ"),
+        }
+    }
+}
+
+implement RekorEntryId {
+    public fn parse(text: &Text) -> Maybe<RekorEntryId> {
+        if text.len() != 64 && text.len() != 80 { return Maybe.None; }
+        match decode(text) {
+            Result.Ok(bytes) => Maybe.Some(RekorEntryId { bytes }),
+            Result.Err(_) => Maybe.None,
+        }
+    }
+
+    /// An unprefixed request can match a response from any tree. A request
+    /// naming a tree requires the response to name that same tree.
+    public fn matches_response(&self, returned: &RekorEntryId) -> Bool {
+        let offset = returned.bytes.len() - self.bytes.len();
+        if offset < 0 { return false; }
+        for i in 0..self.bytes.len() {
+            if self.bytes[i] != returned.bytes[offset + i] { return false; }
+        }
+        true
+    }
+
+    /// Return the exact body covered by the response identifier. Rekor hashes
+    /// the decoded bytes, including any JSON whitespace.
+    public fn decode_body(&self, encoded: &Text) -> Result<List<Byte>, RekorEntryBodyError> {
+        let body = match decode_base64(encoded) {
+            Result.Ok(bytes) => bytes,
+            Result.Err(error) => return Result.Err(RekorEntryBodyError.InvalidBase64(error)),
+        };
+        let leaf = leaf_hash(body.as_slice());
+        let offset = self.bytes.len() - 32;
+        for i in 0..32 {
+            if self.bytes[offset + i] != leaf[i] { return Result.Err(RekorEntryBodyError.LeafMismatch); }
+        }
+        Result.Ok(body)
+    }
+}

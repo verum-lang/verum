@@ -1,0 +1,67 @@
+mount core.security.sigstore.entry_id.{RekorEntryId, RekorEntryBodyError, RekorEnvelopeError, take_response_entry};
+mount core.encoding.json.{JsonMap, JsonValue, json_object, json_int};
+
+// RFC 6962 leaf hash of the empty byte string.
+const LEAF: Text = "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d";
+
+fn response(keys: List<Text>) -> JsonValue {
+    let mut map: JsonMap = JsonMap.new();
+    for key in keys { map.insert(key, json_int(17)); }
+    json_object(map)
+}
+
+@test
+fn test_rekor_response_requires_one_matching_identifier() {
+    let id = RekorEntryId.parse(&LEAF).unwrap();
+    let shard = f"0102030405060708{LEAF}";
+    match take_response_entry(response([shard.clone()]), Maybe.Some(id)) {
+        Result.Ok((key, parsed, value)) => {
+            assert_eq(key, shard);
+            assert(parsed.decode_body(&"").unwrap().is_empty());
+            assert_eq(value.as_int().unwrap(), 17);
+        }
+        Result.Err(_) => panic("valid sharded response refused"),
+    }
+    assert(take_response_entry(json_int(0), Maybe.None) is Result.Err(RekorEnvelopeError.NotAnObject));
+    assert(take_response_entry(response([]), Maybe.None) is Result.Err(RekorEnvelopeError.WrongEntryCount));
+    assert(take_response_entry(response([LEAF, shard]), Maybe.None) is Result.Err(RekorEnvelopeError.WrongEntryCount));
+    assert(take_response_entry(response(["bad"]), Maybe.None) is Result.Err(RekorEnvelopeError.InvalidId));
+    let requested = RekorEntryId.parse(&f"ffffffffffffffff{LEAF}").unwrap();
+    assert(take_response_entry(response([LEAF]), Maybe.Some(requested)) is Result.Err(RekorEnvelopeError.MismatchedId));
+}
+
+@test
+fn test_rekor_id_matches_the_requested_tree_when_present() {
+    let plain = RekorEntryId.parse(&LEAF).unwrap();
+    let tree = RekorEntryId.parse(&f"0123456789ABCDEF{LEAF}").unwrap();
+    let same_tree = RekorEntryId.parse(&f"0123456789abcdef{LEAF}").unwrap();
+    let other_tree = RekorEntryId.parse(&f"0000000000000000{LEAF}").unwrap();
+    assert(plain.matches_response(&plain));
+    assert(plain.matches_response(&tree));
+    assert(tree.matches_response(&same_tree));
+    assert(!tree.matches_response(&plain));
+    assert(!tree.matches_response(&other_tree));
+}
+
+@test
+fn test_rekor_id_binds_exact_decoded_bytes() {
+    let plain = RekorEntryId.parse(&LEAF).unwrap();
+    let tree = RekorEntryId.parse(&f"0000000000000000{LEAF}").unwrap();
+    let other = RekorEntryId.parse(&"6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa010").unwrap();
+    assert(plain.decode_body(&"").unwrap().is_empty());
+    assert(tree.decode_body(&"").unwrap().is_empty());
+    assert(plain.decode_body(&"IA==").unwrap_err() is RekorEntryBodyError.LeafMismatch);
+    assert(other.decode_body(&"").unwrap_err() is RekorEntryBodyError.LeafMismatch);
+    assert(plain.decode_body(&"!").unwrap_err() is RekorEntryBodyError.InvalidBase64);
+    assert(!plain.matches_response(&other));
+}
+
+@test
+fn test_rekor_id_rejects_invalid_width_and_nonhex_characters() {
+    assert(RekorEntryId.parse(&"").is_none());
+    assert(RekorEntryId.parse(&f"00{LEAF}").is_none());
+    assert(RekorEntryId.parse(&f"00000000000000000{LEAF}").is_none());
+    assert(RekorEntryId.parse(&f"000000000000000z{LEAF}").is_none());
+}
+
+fn main() {}
