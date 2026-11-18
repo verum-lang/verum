@@ -89,7 +89,6 @@ mount core.security.x509.ocsp.{
     parse_ocsp_response, find_single_response,
 };
 mount core.security.x509.oid.{Oid};
-mount core.security.x509.chain.{verify_signature, ChainError};
 mount core.hash.legacy.sha1.{Sha1};
 mount core.hash.crypto.sha256.{Sha256};
 mount net.http.{HttpClient, Request, Response, Method, StatusCode, HttpError,
@@ -598,10 +597,8 @@ fn verify_response_signature(
     // surface this constraint in the docs as a v0.1 limitation).
     let _ = basic;
     let _ = issuer;
-    // TODO once parse_ocsp_response is real: do the actual verify
-    // via `core.security.x509.chain.verify_signature` against
-    // basic.raw_tbs_response_data + basic.signature using either
-    // issuer.tbs.spki or a delegated responder cert's SPKI.
+    // Verify the exact DER of tbsResponseData using either the issuer's
+    // SPKI or the authorized delegated responder's SPKI once it is retained.
     Result.Ok(false)
 }
 

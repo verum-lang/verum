@@ -401,7 +401,7 @@ implement ChainError {
     }
 }
 
-fn verify_signature(cert: &X509Certificate, issuer_spki: &Spki) -> Result<(), ChainError> {
+public(in core.security.x509) fn verify_signature(cert: &X509Certificate, issuer_spki: &Spki) -> Result<(), ChainError> {
     match &cert.signature_alg {
         SignatureAlg.Sha256WithRsa => verify_rsa_pkcs1(
             &issuer_spki.public_key, RsaHash.Sha256_,
