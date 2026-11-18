@@ -11957,11 +11957,7 @@ impl VbcCodegen {
         }
         let mut owners = verum_common::List::new();
         let mut local = Vec::new();
-        let mut mounted = Vec::new();
         let mut mounted_owners = Vec::new();
-        let mount = self
-            .mounted_type_path(name)
-            .and_then(|path| path.rsplit_once('.'));
         for key in self.ctx.functions.qualified_suffix_candidates(name) {
             let Some(owner) = key.rsplit_once('.').map(|(owner, _)| owner) else {
                 continue;
@@ -11975,15 +11971,6 @@ impl VbcCodegen {
             {
                 local.push(info);
             }
-            if let Some((prefix, original)) = mount
-                && original == name
-                && (owner == prefix
-                    || owner
-                        .rsplit_once('.')
-                        .is_some_and(|(module, _)| module == prefix))
-            {
-                mounted.push(info);
-            }
             if let Some((_, leaf)) = owner.rsplit_once('.')
                 && self.mounted_type_path(leaf) == Some(owner)
             {
@@ -11991,15 +11978,33 @@ impl VbcCodegen {
             }
             owners.push(verum_common::Text::from(owner));
         }
-        // A named constructor import is more specific than importing its sum.
-        // Only fully qualified owners are candidates in the latter tier: the
-        // bootstrap's bare mirror does not constitute another declaration.
-        for candidates in [&local, &mounted, &mounted_owners] {
-            if let [info] = candidates.as_slice() {
-                return Ok(Some(*info));
+        if let [info] = local.as_slice() {
+            return Ok(Some(*info));
+        }
+        if local.is_empty() {
+            // The module exports a variant in the value namespace. Its public
+            // name may be renamed or re-exported independently of its sum.
+            if let Some(selected) = self.source_mounted_value(name).transpose()? {
+                let function = selected.function;
+                if function.variant_tag.is_none() {
+                    return Ok(None);
+                }
+                if let Some(found) = arity
+                    && found != function.param_count
+                {
+                    return Err(CodegenError::with_span(
+                        CodegenErrorKind::WrongArgumentCount {
+                            expected: function.param_count,
+                            found,
+                            function: name.to_owned(),
+                        },
+                        span,
+                    ));
+                }
+                return Ok(Some(function));
             }
-            if !candidates.is_empty() {
-                break;
+            if let [info] = mounted_owners.as_slice() {
+                return Ok(Some(*info));
             }
         }
         if owners.len() < 2 {
