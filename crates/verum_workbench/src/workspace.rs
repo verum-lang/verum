@@ -17,16 +17,12 @@ pub fn private_dir(root: &Path, components: &[&str]) -> Result<PathBuf> {
     let mut path = root.to_path_buf();
     for name in components {
         path.push(name);
-        match std::fs::symlink_metadata(&path) {
-            Ok(meta) => ensure!(
-                meta.is_dir() && !meta.file_type().is_symlink(),
-                "Studio storage must be a regular directory"
-            ),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                std::fs::create_dir(&path)?;
-            }
+        match std::fs::create_dir(&path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
             Err(e) => return Err(e.into()),
         }
+        ensure!(std::fs::symlink_metadata(&path)?.is_dir(), "Studio storage must be a regular directory");
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;

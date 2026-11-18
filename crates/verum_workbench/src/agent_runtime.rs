@@ -50,6 +50,7 @@ impl End {
 
 struct State {
     ended: Option<End>,
+    observed_start: bool,
     children: List<Weak<Inner>>,
 }
 struct Inner {
@@ -69,6 +70,7 @@ impl Scope {
             journal,
             state: Mutex::new(State {
                 ended: None,
+                observed_start: false,
                 children: List::new(),
             }),
             ended: watch::channel(None).0,
@@ -169,6 +171,25 @@ pub(crate) struct Turns {
     pub(crate) journal: Journal,
 }
 impl Turns {
+    pub(crate) fn connected(&self) -> bool {
+        !self.registry.lock().unwrap_or_else(|e| e.into_inner()).closed
+    }
+
+    pub(crate) fn observe_start(&self, conversation: &str, turn: &str) -> Result<()> {
+        let scope = self.get(conversation, turn)?;
+        let mut state = scope.0.state.lock().unwrap_or_else(|e| e.into_inner());
+        if state.ended.is_none() { state.observed_start = true; }
+        Ok(())
+    }
+
+    pub(crate) fn observed_active(&self, conversation: &str, turn: &str) -> bool {
+        let registry = self.registry.lock().unwrap_or_else(|e| e.into_inner());
+        !registry.closed && registry.turns.get(&(conversation.into(), turn.into())).is_some_and(|scope| {
+            let state = scope.0.state.lock().unwrap_or_else(|e| e.into_inner());
+            state.observed_start && state.ended.is_none()
+        })
+    }
+
     pub(crate) fn new(connection: uuid::Uuid) -> Self {
         Self {
             connection: connection.to_string().into(),

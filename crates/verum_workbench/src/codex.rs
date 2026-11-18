@@ -90,8 +90,36 @@ impl Events {
         self.roles.get(thread).copied().flatten()
     }
 
+    pub(crate) fn live_thread(&self, thread: &str) -> bool {
+        self.turns.connected() && self.role(thread).is_some()
+    }
+
+    pub(crate) fn completed_message(&self, thread: &str, seq: u64) -> Result<&Value> {
+        ensure!(self.live_thread(thread), "Conversation is no longer active");
+        let event = self.messages.iter().find(|e| e["seq"] == seq)
+            .context("Conversation event is no longer retained")?;
+        let params = &event["message"]["params"];
+        ensure!(event["handoffSource"] == true && params["threadId"] == thread,
+            "Expected a completed agent message from the selected conversation");
+        Ok(params)
+    }
+
+    pub(crate) fn recent_messages(&self, thread: &str) -> Vec<Value> {
+        self.messages.iter().rev().filter(|event| event["handoffSource"] == true
+            && event["message"]["params"]["threadId"] == thread).take(16)
+            .map(|event| {
+                let params = &event["message"]["params"];
+                json!({"seq":event["seq"], "turnId":params["turnId"], "itemId":params["item"]["id"]})
+            }).collect()
+    }
+
     pub(crate) fn push(&mut self, message: Value) -> Result<()> {
         let params = &message["params"];
+        if message.get("id").is_none() && message["method"] == "turn/started"
+            && let (Some(thread), Some(turn)) = (params["threadId"].as_str(), params["turn"]["id"].as_str())
+            && self.live_thread(thread) {
+            self.turns.observe_start(thread, turn)?;
+        }
         if message["method"] == "serverRequest/resolved" {
             let key: Text = params["requestId"].to_string().into();
             if let Some(pending) = self.requests.get(&key)
@@ -114,6 +142,15 @@ impl Events {
         }
         let seq = self.next + 1;
         let mut entry = json!({"seq":seq,"message":message});
+        if message.get("id").is_none() && message["method"] == "item/completed"
+            && params["item"]["type"] == "agentMessage"
+            && let (Some(thread), Some(turn)) = (params["threadId"].as_str(), params["turnId"].as_str())
+            && self.live_thread(thread) && self.turns.observed_active(thread, turn)
+            && params["item"]["id"].as_str().is_some_and(|s| !s.is_empty() && s.len() <= 1024)
+            && params["item"]["text"].as_str().is_some_and(crate::handoffs::shareable_text)
+        {
+            entry["handoffSource"] = json!(true);
+        }
         if let Some(id) = message.get("id") {
             ensure!(
                 id.is_string() || id.is_i64() || id.is_u64(),

@@ -6,6 +6,7 @@ pub mod agent_tools;
 pub mod agent_runtime;
 pub mod codex;
 mod evidence;
+mod handoffs;
 pub mod execution;
 pub mod jobs;
 pub mod language;
@@ -38,6 +39,7 @@ pub struct Studio {
     pub workspace: Mutex<workspace::Workspace>,
     pub jobs: Mutex<jobs::Jobs>,
     language: language::Language,
+    handoffs: handoffs::Handoffs,
     agent: Mutex<Option<Arc<codex::Codex>>>,
     agy: Mutex<Option<Arc<acp::Acp>>>,
     agy_executable: PathBuf,
@@ -95,6 +97,7 @@ impl Studio {
         };
         jobs.restore()?;
         Ok(Self {
+            handoffs: handoffs::Handoffs::for_workspace(&config.workspace),
             language: language::Language::start_with_library(
                 workspace.root.clone(),
                 library,
@@ -154,6 +157,10 @@ impl Studio {
     pub async fn call(&self, method: &str, params: Value) -> Result<Value> {
         match method {
             "agent.providers" => Ok(self.provider_catalog().await),
+            "agent.handoff.preview" => self.preview_handoff(params).await,
+            "agent.handoff.send" => self.send_handoff(params).await,
+            "agent.handoff.history" => self.handoff_history(params).await,
+            "agent.handoff.list" => self.list_handoffs(params, None).await,
             "agent.tools" => Ok(agent_tools::catalog()),
             "agent.connect" => self.connect_agent(&params).await,
             "agent.login" | "agent.request" | "agent.events" | "agent.respond" | "agent.preview" => {
@@ -350,6 +357,11 @@ impl Studio {
     }
     async fn workspace_operation_owned(&self, method: &str, params: Value, owner: Option<&agent_runtime::Scope>) -> Result<Value> {
         match method {
+            "agent.inbox" => {
+                let review = owner.context("Inbox access requires a reviewed agent call")?.review_origin()?;
+                self.list_handoffs(params, Some(&review.owner)).await
+            }
+            "agent.deliver_message" => self.deliver_reviewed_handoff(params, owner.context("Agent delivery requires an individual review")?).await,
             "agent.action_sequence" => {
                 let review = owner.context("Sequence inspection requires a reviewed agent call")?.review_origin()?;
                 let instance = self.connection_events(uuid::Uuid::parse_str(&review.owner.connection)?).await?;

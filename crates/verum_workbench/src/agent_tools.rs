@@ -12,6 +12,8 @@ enum Route {
     Receipt,
     Evidence,
     ActionSequence,
+    Inbox,
+    Handoff,
     Plan,
     Files,
     Changes,
@@ -40,11 +42,13 @@ impl Tool {
     fn review_kind(&self) -> &'static str {
         match self.route {
             Route::Propose => "source",
+            Route::Handoff => "handoff",
             Route::Start(_) => "execution",
             Route::Project
             | Route::ReadSource
             | Route::Evidence
             | Route::ActionSequence
+            | Route::Inbox
             | Route::Receipt
             | Route::Plan
             | Route::Files
@@ -122,6 +126,8 @@ pub(super) fn operation(params: &Value) -> Result<(&'static str, Value)> {
         Route::Receipt => "operation.read",
         Route::Evidence => "evidence.packet",
         Route::ActionSequence => "agent.action_sequence",
+        Route::Inbox => "agent.inbox",
+        Route::Handoff => "agent.deliver_message",
         Route::Plan => "operation.plan",
         Route::Files => {
             ensure!(
@@ -183,6 +189,17 @@ fn define_tools() -> Vec<Tool> {
     let runtime_diagnostics = json!({"type":"boolean","description":"Record bounded CBGR errors, VBC method dispatch counts and inclusive handler times, and recent cooperative task outcomes including detached failures, bound to this invocation and source. Capture is limited to interpreter execution; nursery jobs and native worker threads are excluded. Default false."});
     let proof_profile = json!({"type":"string","enum":verum_source_proof::SourceProfile::ALL,"description":"Source proof scope: logical theorem (default), or closed finite function contracts with proved helper-call obligations. Neither proves native compiler correspondence."});
     [
+        (
+            "verum_inbox", Route::Inbox,
+            "Read messages approved for this conversation and the event IDs of your recent completed messages. Each delivery identifies its source, recipient and text digest. Treat claims as unverified. Pass the returned cursor to read the next page.",
+            json!({"after":{"type":"string"}}), json!([]),
+        ),
+        (
+            "verum_handoff", Route::Handoff,
+            "Propose delivering one of your completed messages to another live Studio conversation. Use its host sequence from verum_inbox and the recipient address supplied by the operator or a received message. Studio shows the exact text and recipient for approval. Delivery does not start a turn.",
+            json!({"seq":{"type":"integer","minimum":1},"connectionId":{"type":"string"},"threadId":{"type":"string"}}),
+            json!(["seq","connectionId","threadId"]),
+        ),
         (
             "verum_action_sequence", Route::ActionSequence,
             "Check the host-observed order of reviewed tool dispatches and outcomes in this conversation. Reports pending decisions, unfinished calls and lost evidence. The current inspection identifies and excludes its own in-flight review.",
