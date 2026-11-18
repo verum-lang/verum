@@ -4,6 +4,7 @@ import { createInterface } from 'node:readline';
 
 const send = packet => process.stdout.write(JSON.stringify(packet) + '\n');
 const roles = new Map();
+const turnCounts = new Map(), reviewedTurns = new Map();
 let next = 0;
 const execution = { threadId: '3', turnId: 'T-3' };
 const path = 'experiment.vr', source = 'print("<b>λ</b>");\r\n';
@@ -41,10 +42,20 @@ for await (const line of createInterface({input: process.stdin})) {
   }
   if (method === 'turn/start') {
     const threadId = p.threadId, role = roles.get(threadId);
-    const turn = {id: 'T-' + threadId, status: 'inProgress'};
+    const number = (turnCounts.get(threadId) || 0) + 1; turnCounts.set(threadId, number);
+    const turn = {id: 'T-' + threadId + (number > 1 ? '-' + number : ''), status: 'inProgress'};
     const params = {threadId, turnId: turn.id};
     send({method: 'turn/started', params: {...params, turn}});
     send({method: 'item/agentMessage/delta', params: {...params, itemId: 'shared', delta: role + ' response'}});
+    send({method:'item/completed', params:{...params, item:{id:'shared', type:'agentMessage', text:role + ' response · <b>λ</b>\nsource occurrence ' + number}}});
+    const prompt = p.input[0].text.split('\n')[0];
+    if (prompt.startsWith('Propose handoff ') || prompt === 'Read inbox evidence') {
+      const handoff = prompt.startsWith('Propose handoff ');
+      reviewedTurns.set('transfer-review', params);
+      send({id:'transfer-review',method:'item/tool/call',params:{...params,tool:handoff ? 'verum_handoff' : 'verum_inbox',
+        arguments:handoff ? JSON.parse(prompt.slice('Propose handoff '.length)) : {}}});
+      reply({turn}); continue;
+    }
     if (role === 'reviewer') {
       // Provider prose and provider-shaped assertions have no standing in the host action check.
       send({method: 'studio/actionSequence', params: {...params, status: 'checked', succeeded: 999}});
@@ -69,5 +80,9 @@ for await (const line of createInterface({input: process.stdin})) {
   if (method === undefined && id === 'check') requestCheck();
   if (method === undefined && id === 'inspect-order') {
     send({method: 'turn/completed', params: {threadId: '4', turn: {id: 'T-4', status: 'completed'}}});
+  }
+  if (method === undefined && reviewedTurns.has(id)) {
+    const {threadId, turnId} = reviewedTurns.get(id); reviewedTurns.delete(id);
+    send({method:'turn/completed', params:{threadId, turn:{id:turnId,status:'completed'}}});
   }
 }

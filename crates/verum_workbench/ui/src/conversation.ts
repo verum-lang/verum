@@ -1,8 +1,10 @@
 // Every provider operation captures this object before its first await. The
 // selected conversation controls presentation only, never protocol routing.
 import type { ActionSequence } from './sequence-view';
+import type { Handoff } from './handoff';
 
 export class Conversation {
+  constructor(public provider: string, public connectionId: string | null = null) {}
   readonly log = document.createElement('div');
   readonly option = document.createElement('option');
   readonly messageBodies = new Map<string, HTMLElement>();
@@ -13,6 +15,10 @@ export class Conversation {
   truncated = false;
   cursor = 0;
   actionSequence: ActionSequence | null = null;
+  sharedMessages: Handoff[] = [];
+  nextShared: string | null = null;
+  mailboxRequest = 0;
+  mailboxLoaded = false;
   thread: string | null = null;
   turn: string | null = null;
   sending = false;

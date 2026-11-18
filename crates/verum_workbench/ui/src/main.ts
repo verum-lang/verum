@@ -1,4 +1,6 @@
 import { Conversation } from './conversation';
+import { providerCatalog, type Provider } from './providers';
+import { verifiedHandoff, quotedHandoff, sameAddress, type ConversationAddress, type Handoff } from './handoff';
 import { renderSequence, type ActionSequence } from './sequence-view';
 import { continueSourcePage, projectSourceIndex, workspaceFilePath, type SourcePage } from './project-tree';
 import './style.css';
@@ -1102,16 +1104,40 @@ function appendDetails(parent: HTMLElement, label: Content, value: unknown, key:
   details.append(summary, node('pre', '', pretty(value))); parent.append(details);
 }
 
-let connected = false;
-let authenticated = false;
-let agentConnection: string | null = null;
+type AgentModel = { id?: string; model?: string; displayName?: string };
+type ProviderSession = { id: string; account: unknown; authenticated: boolean; models: AgentModel[]; accountCursor: number };
+const providers = new Map<string, Provider>();
+const providerSessions = new Map<string, ProviderSession>();
+const connecting = new Set<string>();
+const retiredReviewTargets = new Set<(id: string) => void>();
+const archive = { sharedMessages:[] as Handoff[], nextShared:null as string | null, mailboxLoaded:false, mailboxRequest:0 };
+let mailboxScope = 'conversation';
 let eventBusy = false;
-let accountCursor = 0;
 const conversations = new Set<Conversation>();
 const picker = $<HTMLSelectElement>('agent-conversation');
 const composer = $<HTMLTextAreaElement>('agent-input');
-function createConversation() {
-  const conversation = new Conversation();
+const providerName = (provider: string) => providers.get(provider)?.name ?? provider;
+async function loadProviders() {
+  const known = new Map(providerSessions);
+  const catalog = providerCatalog(await api('agent.providers'));
+  providers.clear();
+  const select = $<HTMLSelectElement>('agent-provider'); select.replaceChildren();
+  for (const provider of catalog) { providers.set(provider.id, provider); select.add(new Option(provider.name, provider.id)); }
+  for (const [id, previous] of known) {
+    if (previous === providerSessions.get(id) && providers.get(id)?.connectionId !== previous.id) retireProvider(id, previous.id);
+  }
+  if (!selected.thread && !providers.has(selected.provider)) selected.provider = catalog[0]?.id ?? '';
+  select.value = selected.provider; agentState();
+}
+function sessionFor(c: Conversation) {
+  const session = providerSessions.get(c.provider);
+  return session && c.connectionId === session.id ? session : null;
+}
+function addressOf(c: Conversation): ConversationAddress | null {
+  return c.thread && c.connectionId && sessionFor(c) ? { connectionId: c.connectionId, threadId: c.thread } : null;
+}
+function createConversation(provider = '') {
+  const conversation = new Conversation(provider, providerSessions.get(provider)?.id ?? null);
   conversations.add(conversation);
   picker.add(conversation.option);
   $('agent-messages').append(conversation.log);
@@ -1132,17 +1158,20 @@ function selectConversation(conversation: Conversation) {
   selected.option.selected = true;
   selected.log.hidden = false;
   composer.value = selected.draft;
+  $<HTMLSelectElement>('agent-provider').value = selected.provider;
   $<HTMLSelectElement>('agent-role').value = selected.role;
-  $<HTMLSelectElement>('agent-model').value = selected.model;
+  renderModels();
   $('agent-messages').scrollTop = selected.scroll;
   renderEvents(selected);
   renderSequence($<HTMLDetailsElement>('agent-sequence'), selected.actionSequence);
+  renderMailbox(selected);
+  if ($<HTMLDetailsElement>('agent-mailbox').open) void loadMailbox(selected);
   agentState();
 }
 function addMessage(role: 'user' | 'agent' | 'system', text: Content, id?: string, conversation = selected) {
   const container = $('agent-messages');
   const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 90;
-  const message = node('div', `message ${role}`); message.append(node('div', 'message-label', role === 'agent' ? m('Codex') : role === 'user' ? m('You') : m('Studio')));
+  const message = node('div', `message ${role}`); message.append(node('div', 'message-label', role === 'agent' ? providerName(conversation.provider) : role === 'user' ? m('You') : m('Studio')));
   const body = node('div', 'message-body', text); message.append(body); conversation.log.append(message);
   if (role === 'user' && !conversation.title && typeof text === 'string') conversation.title = text.split('\n')[0].slice(0, 60);
   if (id) conversation.messageBodies.set(id, body);
@@ -1154,96 +1183,137 @@ function addMessage(role: 'user' | 'agent' | 'system', text: Content, id?: strin
 }
 function agentState() {
   let totalReviews = 0, anyBusy = false;
+  const session = sessionFor(selected);
+  const driver = providers.get(selected.provider), caps = driver?.capabilities;
+  const live = [...conversations].filter(c => addressOf(c));
   for (const c of conversations) {
     totalReviews += c.reviews.size;
     anyBusy ||= c.busy;
     const title = c.title || t(m('New conversation'));
     const role = t(c.role === 'reviewer' ? m('Reviewer') : m('Author'));
     const state = c.reviews.size ? t(m('Awaiting review: {count}', {count: c.reviews.size})) : c.busy ? t(m('Working')) : '';
-    const label = [role, title, state].filter(Boolean).join(' · ');
+    const label = [providerName(c.provider), providers.get(c.provider)?.capabilities.reviewedTools ? role : '', title, state].filter(Boolean).join(' · ');
     if (c.option.text !== label) c.option.text = label;
+    c.log.toggleAttribute('data-can-forward', live.includes(c) && live.length > 1);
   }
   const busy = selected.busy, pending = selected.reviews.size;
   $('conversation-switcher').hidden = conversations.size < 2;
   $('agent-welcome').hidden = selected.log.childElementCount !== 0;
-  $<HTMLButtonElement>('agent-send').disabled = !connected || !authenticated || busy;
-  composer.disabled = !connected || !authenticated;
-  $<HTMLButtonElement>('new-thread').disabled = !connected || !authenticated;
+  $<HTMLButtonElement>('agent-send').disabled = !session?.authenticated || busy;
+  composer.disabled = !session?.authenticated;
+  $<HTMLButtonElement>('new-thread').disabled = !session?.authenticated;
+  $('agent-controls').hidden = !session;
+  $('agent-role').hidden = !caps?.reviewedTools;
+  $('agent-model').hidden = !caps?.modelSelection;
+  $('agent-context-info').hidden = !caps?.workspaceContext;
+  $('agent-suggestion').hidden = !caps?.workspaceContext;
+  const scopeSelect = $<HTMLSelectElement>('mailbox-scope');
+  scopeSelect.options[0].disabled = !addressOf(selected);
+  if (scopeSelect.value !== visibleMailboxScope(selected)) {
+    renderMailbox(selected);
+    if ($<HTMLDetailsElement>('agent-mailbox').open) void loadMailbox(selected);
+  }
+  $('agent-login').hidden = !session || session.authenticated;
+  const control = $<HTMLButtonElement>('agent-connect');
+  control.disabled = connecting.has(selected.provider);
+  setText(control, control.disabled ? m('Connecting…') : session ? m('Refresh') : m('Connect'));
+  setText($('agent-account'), session ? accountLabel(session.account, selected.provider) : driver && !driver.executableAvailable ?
+    m('Executable unavailable for {provider}', {provider:driver.name}) : m('Your account, your workspace'));
   $<HTMLSelectElement>('agent-role').disabled = selected.thread !== null || busy;
   $<HTMLSelectElement>('agent-model').disabled = selected.thread !== null || busy;
   setAttribute($('agent-model'), 'title', selected.thread ? m('Model is fixed for this conversation. Start a new conversation to choose another model.') : m('Choose the model for a new conversation'));
   setAttribute($('agent-context-info'), 'title', selected.role === 'reviewer' ? m('Only the selected path and saved revision accompany the review task.') : m('The current editor source is included with each message'));
   $('agent-stop').hidden = !busy;
-  setText($('agent-progress'), pending ? m('Awaiting review: {count}', { count: pending }) : totalReviews > pending ? m('Other conversations awaiting review: {count}', {count: totalReviews - pending}) : busy ? m('Codex is working…') : connected ? authenticated ? m('Connected · edits and tools require review') : m('Local provider ready · sign in to start a conversation') : '');
+  setText($('agent-progress'), pending ? m('Awaiting review: {count}', { count: pending }) : totalReviews > pending ? m('Other conversations awaiting review: {count}', {count: totalReviews - pending}) : busy ? m('{provider} is working…', {provider:providerName(selected.provider)}) : session ? session.authenticated ? caps?.reviewedTools ? m('Connected · edits and tools require review') : m('Connected · text only') : m('Local provider ready · sign in to start a conversation') : '');
   setText($('approval-count'), totalReviews ? String(totalReviews) : '');
-  setText($('agent-rail-status'), totalReviews ? m('{count} review', { count: totalReviews }) : anyBusy ? m('Working') : authenticated ? m('Ready') : connected ? m('Sign in') : m('Offline'));
+  setText($('agent-rail-status'), totalReviews ? m('{count} review', { count: totalReviews }) : anyBusy ? m('Working') : session?.authenticated ? m('Ready') : session ? m('Sign in') : m('Offline'));
   $('agent-rail').dataset.attention = String(totalReviews > 0);
 }
 picker.addEventListener('change', () => {
   const conversation = [...conversations].find(c => c.option.selected);
   if (conversation) selectConversation(conversation);
 });
-document.addEventListener('studio:language', () => { renderEvents(selected); agentState(); });
-function accountLabel(value: unknown): Content {
+document.addEventListener('studio:language', () => { renderEvents(selected); renderMailbox(selected); agentState(); });
+function accountLabel(value: unknown, provider: string): Content {
   const record = parseArguments(value);
   const account = parseArguments(record.account ?? record);
   const email = typeof account.email === 'string' ? account.email : '';
   const plan = typeof account.planType === 'string' ? account.planType : '';
   if (email || plan) return [email, plan].filter(Boolean).join(' · ');
-  return record.requiresOpenaiAuth === true || record.account === null ? m('Sign in to your Codex account') : m('Local Codex session connected');
+  return record.requiresOpenaiAuth === true || record.account === null ? m('Sign in to {provider}', {provider:providerName(provider)}) :
+    m('{provider} session connected', {provider:providerName(provider)});
 }
 async function connectAgent() {
-  const control = $<HTMLButtonElement>('agent-connect'); control.disabled = true; setText(control, m('Connecting…'));
+  if (!providers.has(selected.provider)) await loadProviders();
+  const provider = selected.provider;
+  if (!providers.has(provider) || connecting.has(provider)) return;
+  connecting.add(provider); agentState();
   try {
-    const account = await api('agent.connect');
+    const account = await api('agent.connect', { provider });
     const data = parseArguments(account);
-    if (typeof data.connectionId !== 'string') throw new Error(t(m('Missing provider connection identity.')));
-    if (agentConnection !== data.connectionId) resetAgentConversation();
-    agentConnection = data.connectionId; connected = true;
-    authenticated = data.account != null || data.requiresOpenaiAuth === false;
-    setText($('agent-account'), accountLabel(account)); $('agent-controls').hidden = false;
-    setText(control, m('Refresh')); agentState();
-    await loadModels();
-  } finally { control.disabled = false; if (!connected) setText(control, m('Connect')); }
+    if (typeof data.connectionId !== 'string' || data.provider !== provider) throw new Error(t(m('Missing provider connection identity.')));
+    const old = providerSessions.get(provider);
+    if (old && old.id !== data.connectionId) retireProvider(provider, old.id);
+    const session = providerSessions.get(provider) ?? { id:data.connectionId, account, authenticated:false, models:[], accountCursor:0 };
+    session.account = account; session.authenticated = data.account != null || data.requiresOpenaiAuth === false;
+    providerSessions.set(provider, session);
+    for (const c of conversations) if (c.provider === provider && !c.thread && !c.connectionId) c.connectionId = session.id;
+    agentState();
+    if (providers.get(provider)?.capabilities.modelSelection) await loadModels(provider, session);
+  } finally { connecting.delete(provider); agentState(); }
 }
-async function loadModels() {
+function renderModels() {
+  const select = $<HTMLSelectElement>('agent-model');
+  const defaultOption = new Option('', ''); setText(defaultOption, m('Account default model')); select.replaceChildren(defaultOption);
+  for (const model of sessionFor(selected)?.models || []) {
+    const id = model.id || model.model; if (id) select.add(new Option(model.displayName || id, id));
+  }
+  select.value = selected.model;
+}
+async function loadModels(provider: string, session: ProviderSession) {
   try {
-    const result = await api<{ data?: Array<{ id?: string; model?: string; displayName?: string; isDefault?: boolean }> }>('agent.request', { method: 'model/list', params: {} });
-    const select = $<HTMLSelectElement>('agent-model'); const selected = select.value;
-    const defaultOption = new Option('', ''); setText(defaultOption, m('Account default model')); select.replaceChildren(defaultOption);
-    for (const model of result.data || []) { const id = model.id || model.model; if (id) select.add(new Option(model.displayName || id, id)); }
-    select.value = selected;
-  } catch (error) { addMessage('system', m('Model discovery unavailable: {error}', { error: errorText(error) })); }
+    const result = await api<{ data?: AgentModel[] }>('agent.request', { method:'model/list', connectionId:session.id, params:{} });
+    if (providerSessions.get(provider) !== session) return;
+    session.models = result.data ?? [];
+    if (sessionFor(selected) === session) renderModels();
+  } catch (error) { if (sessionFor(selected) === session) addMessage('system', m('Model discovery unavailable: {error}', {error:errorText(error)})); }
 }
 async function loginAgent() {
-  const result = await api<{ authUrl: string }>('agent.login');
+  const c = selected, session = sessionFor(c);
+  if (!session) return;
+  const result = await api<{ authUrl?: string; interactive?: boolean }>('agent.login', { connectionId:session.id });
+  if (sessionFor(c) !== session || c !== selected) return;
+  if (result.interactive) { notice(m('Complete sign-in in the browser opened by {provider}.', {provider:providerName(c.provider)})); return; }
   const url = safeAuthUrl(result.authUrl);
   if (!url) throw new Error(t(m('The agent returned an unsupported authentication URL.')));
   const content = node('div'); content.append(node('p', '', m('Continue in your provider’s secure sign-in page. Studio does not receive your password. Return here and refresh the connection after signing in.')));
-  const link = node('a', 'button primary', m('Open Codex sign-in')); link.href = url; link.target = '_blank'; link.rel = 'noopener noreferrer'; content.append(link);
+  const link = node('a', 'button primary', m('Open {provider} sign-in', {provider:providerName(c.provider)})); link.href = url; link.target = '_blank'; link.rel = 'noopener noreferrer'; content.append(link);
   await dialog(m('Connect your account'), content, [{ value: 'close', label: m('Done') }]);
 }
 async function sendMessage() {
-  const c = selected, text = composer.value.trim(), connection = agentConnection;
-  if (!text || c.busy) return;
-  if (!authenticated || !connection) throw new Error(t(m('Sign in to your Codex account before starting a conversation.')));
-  const source = editor.source(), path = currentPath, snapshotSavedHash = savedHash;
-  const live = () => conversations.has(c) && agentConnection === connection;
+  const c = selected, session = sessionFor(c);
+  const caps = providers.get(c.provider)?.capabilities;
+  const text = caps?.workspaceContext ? composer.value.trim() : composer.value;
+  if (!text.trim() || c.busy) return;
+  if (!session?.authenticated) throw new Error(t(m('Sign in to {provider}', {provider:providerName(c.provider)})));
+  const connection = session.id;
+  const source = caps?.workspaceContext && c.role !== 'reviewer' ? editor.source() : '', path = currentPath, snapshotSavedHash = savedHash;
+  const live = () => conversations.has(c) && sessionFor(c) === session;
   c.sending = true; c.draft = ''; composer.value = ''; agentState();
   try {
     if (!c.thread) {
-      const result = await api<{ thread?: { id: string }; id?: string }>('agent.request', { method: 'thread/start', connectionId: connection, role: c.role, params: c.model ? { model: c.model } : {} });
+      const result = await api<{ thread?: { id: string }; id?: string }>('agent.request', { method: 'thread/start', connectionId: connection, ...(caps?.reviewedTools ? {role:c.role} : {}), params: caps?.modelSelection && c.model ? { model: c.model } : {} });
       if (!live()) return;
       const id = result.thread?.id || result.id;
-      if (!id) throw new Error(t(m('Codex did not return a conversation ID.')));
+      if (!id) throw new Error(t(m('The provider did not return a conversation ID.')));
       c.thread = id;
     }
-    const context = c.role === 'reviewer'
+    const context = !caps?.workspaceContext ? text : c.role === 'reviewer'
       ? `${text}\n\nSelected workspace path: ${path}\nSaved file SHA-256: ${snapshotSavedHash ?? '(unsaved file)'}`
       : `${text}\n\nCurrent Verum editor source (may contain unsaved edits):\nPath: ${path}\nSource SHA-256: ${await sha256(source)}\nSaved file SHA-256: ${snapshotSavedHash ?? '(new file; not saved)'}\n<verum_source>\n${source}\n</verum_source>`;
     if (!live()) return;
     addMessage('user', text, undefined, c); agentState();
-    const result = await api<{ turn?: { id: string; status?: string } }>('agent.request', { method: 'turn/start', connectionId: connection, params: { threadId: c.thread, input: [{ type: 'text', text: context }], ...(c.model ? { model: c.model } : {}) } });
+    const result = await api<{ turn?: { id: string; status?: string } }>('agent.request', { method: 'turn/start', connectionId: connection, params: { threadId: c.thread, input: [{ type: 'text', text: context }], ...(caps?.modelSelection && c.model ? { model: c.model } : {}) } });
     if (!live()) return;
     if (result.turn?.id && !['completed', 'failed', 'interrupted'].includes(result.turn.status || '')) c.start(result.turn.id);
   } catch (error) {
@@ -1256,48 +1326,73 @@ async function sendMessage() {
 $('agent-role').addEventListener('change', () => { selected.role = $<HTMLSelectElement>('agent-role').value; agentState(); });
 $('agent-model').addEventListener('change', () => { selected.model = $<HTMLSelectElement>('agent-model').value; });
 bind('agent-connect', connectAgent); bind('agent-login', loginAgent);
-bind('new-thread', () => {
-  const blank = [...conversations].find(c => !c.thread && !c.busy && !c.title && !(selected === c ? composer.value : c.draft));
-  selectConversation(blank ?? createConversation()); composer.focus();
+$('agent-provider').addEventListener('change', () => {
+  const provider = $<HTMLSelectElement>('agent-provider').value;
+  if (!providers.has(provider)) return;
+  const c = [...conversations].find(c => c.provider === provider);
+  selectConversation(c ?? createConversation(provider));
 });
-bind('agent-suggestion', () => { $<HTMLTextAreaElement>('agent-input').value = t(m('Explain this Verum source and suggest one useful experiment. Use Verum tools to check your claims.')); if (connected) $('agent-input').focus(); else notice(m('Connect Codex to start this conversation.')); });
+bind('new-thread', () => {
+  const blank = [...conversations].find(c => c.provider === selected.provider && !c.thread && !c.busy && !c.title && !(selected === c ? composer.value : c.draft));
+  selectConversation(blank ?? createConversation(selected.provider)); composer.focus();
+});
+bind('agent-suggestion', () => { composer.value = t(m('Explain this Verum source and suggest one useful experiment. Use Verum tools to check your claims.')); if (sessionFor(selected)) composer.focus(); else notice(m('Connect {provider} to start this conversation.', {provider:providerName(selected.provider)})); });
 $('agent-form').addEventListener('submit', event => { event.preventDefault(); sendMessage().catch(fail); });
 bind('agent-stop', async () => {
   const c = selected;
   if (!c.thread || !c.turn) throw new Error(t(m('The turn is still starting. Try Stop again when its identifier arrives.')));
-  await api('agent.request', { method: 'turn/interrupt', connectionId: agentConnection, params: { threadId: c.thread, turnId: c.turn } });
+  const session = sessionFor(c);
+  if (!session) return;
+  await api('agent.request', { method: 'turn/interrupt', connectionId: session.id, params: { threadId: c.thread, turnId: c.turn } });
   if (selected === c && c.turn) setText($('agent-progress'), m('Stopping the current turn…'));
 });
 
 type RpcMessage = { id?: string | number; method?: string; params?: Record<string, unknown>; error?: unknown; result?: unknown };
-type AgentEvent = { seq: number; reviewId?: string; reviewKind?: unknown; message: RpcMessage };
-function resetAgentConversation() {
+type AgentEvent = { seq: number; reviewId?: string; reviewKind?: unknown; handoffSource?: boolean; message: RpcMessage };
+function removeConversations(provider?: string) {
+  const previous = selected, draft = composer.value;
   for (const c of conversations) {
+    if (provider && provider !== c.provider) continue;
     for (const expire of c.reviews.values()) expire();
     c.log.remove(); c.option.remove();
+    conversations.delete(c);
   }
-  conversations.clear(); accountCursor = 0;
-  selectConversation(createConversation());
+  if (!conversations.has(previous)) {
+    const replacement = createConversation(provider ?? '');
+    replacement.draft = draft; selectConversation(replacement);
+  }
+}
+function retireProvider(provider: string, id: string) {
+  if (providerSessions.get(provider)?.id !== id) return;
+  for (const invalidate of retiredReviewTargets) invalidate(id);
+  providerSessions.delete(provider); removeConversations(provider); agentState();
 }
 async function pollEvents() {
-  if (!connected || eventBusy) return;
+  if (!providerSessions.size || eventBusy) return;
   eventBusy = true;
   try {
     // A background turn may be waiting for a review while the author is typing
     // elsewhere. Keep its cursor moving independently of the visible transcript.
-    const watched = [...conversations].filter(c => c === selected || c.busy || c.reviews.size);
+    const available = [...conversations].filter(c => sessionFor(c));
+    const watched = available.filter(c => c === selected || c.busy || c.reviews.size);
+    for (const c of available) if (!watched.some(other => other.provider === c.provider)) watched.push(c);
     const results = await Promise.allSettled(watched.map(pollConversation));
     for (const result of results) if (result.status === 'rejected') throw result.reason;
   } finally { eventBusy = false; }
 }
 async function pollConversation(c: Conversation) {
-  const owner = c.thread, connection = agentConnection;
-  const live = () => agentConnection === connection && connected && owner === c.thread && conversations.has(c);
-  const result = await api<{ connectionId: string; cursor: number; events: AgentEvent[]; gap: boolean; pendingReviews: string[]; recoveredReviews: AgentEvent[]; actionSequence?: ActionSequence | null }>('agent.events', { after: c.cursor, threadId: owner });
-  if (!live()) return;
+  const owner = c.thread, session = sessionFor(c);
+  if (!session) return;
+  const connection = session.id;
+  const live = () => sessionFor(c) === session && owner === c.thread && conversations.has(c);
+  const result = await api<{ connectionId: string; cursor: number; events: AgentEvent[]; gap: boolean; pendingReviews: string[]; recoveredReviews: AgentEvent[]; actionSequence?: ActionSequence | null }>('agent.events', { after: c.cursor, threadId: owner, connectionId:connection }).catch(async error => {
+    if (live() && !sessionFailure(error)) await loadProviders();
+    if (live()) throw error;
+    return null;
+  });
+  if (!result || !live()) return;
   if (result.connectionId !== connection) {
-    connected = false; authenticated = false; agentConnection = null;
-    resetAgentConversation(); agentState(); return;
+    retireProvider(c.provider, connection); return;
   }
   const pending = new Set(result.pendingReviews);
   const sequence = result.actionSequence ?? null;
@@ -1311,29 +1406,39 @@ async function pollConversation(c: Conversation) {
     if (!live()) return;
     if (event.reviewId && !pending.has(event.reviewId)) continue;
     if (['account/updated', 'account/login/completed', 'studio/disconnected'].includes(event.message.method || '')) {
-      if (event.seq <= accountCursor) continue;
-      accountCursor = event.seq;
+      if (event.seq <= session.accountCursor) continue;
+      session.accountCursor = event.seq;
     }
-    await receiveEvent(c, event.message, event.reviewId, event.reviewKind);
+    await receiveEvent(c, event);
   }
   if (!live()) return;
   c.cursor = result.cursor;
   if (c === selected && (result.events.length || result.recoveredReviews.length)) renderEvents(c);
 }
-async function receiveEvent(c: Conversation, message: RpcMessage, reviewId?: string, hostKind?: unknown) {
+async function receiveEvent(c: Conversation, event: AgentEvent) {
+  const { message, reviewId, reviewKind:hostKind } = event;
   c.record(pretty(message));
   const method = message.method, params = message.params || {};
   if (message.id !== undefined && method) { if (reviewId) await showApproval(c, reviewId, method, params, hostKind); return; }
   if (method === 'item/agentMessage/delta') {
-    const id = String(params.itemId || 'stream');
+    const id = JSON.stringify([params.turnId, params.itemId || 'stream']);
     const body = c.messageBodies.get(id) || addMessage('agent', '', id, c);
+    body.parentElement?.querySelector('.forward-message')?.remove();
     const container = $('agent-messages'); const stick = container.scrollHeight - container.scrollTop - container.clientHeight < 90;
     body.textContent += typeof params.delta === 'string' ? params.delta : '';
     if (stick && c === selected) container.scrollTop = container.scrollHeight;
   } else if (method === 'item/completed') {
     const item = parseArguments(params.item);
     if (item.type === 'agentMessage' && typeof item.text === 'string') {
-      const id = String(item.id || 'stream'); const body = c.messageBodies.get(id) || addMessage('agent', '', id, c); setText(body, item.text);
+      const id = JSON.stringify([params.turnId, item.id || 'stream']);
+      const body = c.messageBodies.get(id) || addMessage('agent', '', id, c); setText(body, item.text);
+      const parent = body.parentElement!;
+      parent.querySelector('.forward-message')?.remove();
+      const turn = params.turnId, itemId = item.id, text = item.text;
+      if (event.handoffSource === true && typeof turn === 'string' && typeof itemId === 'string' && text.length) {
+        const forward = button(m('Forward message…'), () => forwardMessage(c, event.seq, turn, itemId, text), 'quiet-button forward-message');
+        parent.append(forward);
+      }
     }
   } else if (method === 'turn/started') {
     const turn = parseArguments(params.turn); if (typeof turn.id === 'string') c.start(turn.id);
@@ -1343,33 +1448,154 @@ async function receiveEvent(c: Conversation, message: RpcMessage, reviewId?: str
     if (turn.status === 'failed' || turn.error) addMessage('system', m('Turn failed: {error}', { error: pretty(turn.error || turn.status) }), undefined, c);
     else if (turn.status === 'interrupted') addMessage('system', m('Turn interrupted. Completed evidence remains in Results.'), undefined, c);
   } else if (method === 'studio/disconnected') {
-    connected = false; authenticated = false; agentConnection = null; resetAgentConversation();
-    addMessage('system', m('Provider disconnected. Reconnect to start a new conversation.'));
+    if (c.connectionId) retireProvider(c.provider, c.connectionId);
+    if (selected.provider === c.provider) addMessage('system', m('Provider disconnected. Reconnect to start a new conversation.'));
   } else if (method === 'account/updated' || method === 'account/login/completed') {
-    const account = await api('agent.request', { method: 'account/read', params: {} });
-    if (!conversations.has(c)) return;
-    const data = parseArguments(account); authenticated = data.account != null || data.requiresOpenaiAuth === false;
-    setText($('agent-account'), accountLabel(account));
+    const session = sessionFor(c); if (!session) return;
+    const account = await api('agent.request', { method:'account/read', connectionId:session.id, params:{} });
+    if (sessionFor(c) !== session || !conversations.has(c)) return;
+    const data = parseArguments(account); session.authenticated = data.account != null || data.requiresOpenaiAuth === false;
+    session.account = account;
+    if (params.success === false) addMessage('system', m('Sign-in failed: {error}', {error:errorText(params.error ?? '')}), undefined, c);
   } else if (method === 'error') addMessage('system', pretty(params), undefined, c);
   agentState();
 }
+function conversationLabel(c: Conversation): string {
+  const title = c.title || t(m('New conversation'));
+  const role = providers.get(c.provider)?.capabilities.reviewedTools ? t(c.role === 'reviewer' ? m('Reviewer') : m('Author')) : '';
+  const label = [providerName(c.provider), role, title].filter(Boolean).join(' · ');
+  const similar = [...conversations].filter(other => other.provider === c.provider && other.role === c.role && other.title === c.title);
+  return similar.length > 1 ? label + ' · ' + (similar.indexOf(c) + 1) : label;
+}
+function addressLabel(address: ConversationAddress, compact = false): string {
+  for (const c of conversations) {
+    const current = addressOf(c);
+    if (current && sameAddress(current, address)) return conversationLabel(c);
+  }
+  return t(m('Conversation {thread} on connection {connection}', {thread:address.threadId, connection:compact ? address.connectionId.slice(0, 8) : address.connectionId}));
+}
+let forwarding = false;
+function handoffPreview(packet: Handoff) {
+  const view = node('div', 'handoff-review'), to = addressLabel(packet.to);
+  view.append(node('p', '', m('From {sender}', {sender:addressLabel(packet.from)})),
+    node('p', '', m('To {recipient}', {recipient:to})), node('pre', 'handoff-text', packet.text));
+  const peer = [...conversations].find(c => c.thread === packet.to.threadId && c.connectionId === packet.to.connectionId);
+  view.append(node('p', 'muted', peer && providers.get(peer.provider)?.capabilities.reviewedTools ?
+    m('The recipient can request this inbox with verum_inbox in its next turn.') :
+    m('Delivery adds this message to the inbox. Insert its quote into a draft to include it in a new prompt.')));
+  return view;
+}
+async function forwardMessage(sender: Conversation, seq: number, turnId: string, itemId: string, text: string) {
+  const from = addressOf(sender);
+  const peers = [...conversations].filter(c => c !== sender && addressOf(c));
+  if (forwarding || selected !== sender || !from || !peers.length) return;
+  forwarding = true;
+  try {
+    const form = node('div', 'handoff-review');
+    const label = node('label', '', m('Recipient')), select = node('select');
+    select.id = 'handoff-recipient'; label.htmlFor = select.id;
+    for (const [i, peer] of peers.entries()) select.add(new Option(conversationLabel(peer), String(i)));
+    form.append(node('p', '', m('From {sender}', {sender:conversationLabel(sender)})), label, select);
+    if (await dialog(m('Forward message'), form, [{value:'cancel',label:m('Cancel')},{value:'preview',label:m('Review message'),primary:true}]) !== 'preview') return;
+    const recipient = peers[select.selectedIndex], to = recipient && addressOf(recipient);
+    if (!to || selected !== sender || !addressOf(sender)) throw new Error(t(m('The sender or recipient connection has changed.')));
+    const request = { from, to, seq };
+    const live = () => {
+      const a = addressOf(sender), b = addressOf(recipient);
+      return selected === sender && !!a && !!b && sameAddress(a, from) && sameAddress(b, to);
+    };
+    const raw = await api('agent.handoff.preview', request).catch(error => { throw new Error(t(m('Message preview unavailable. {error}', {error:errorText(error)}))); });
+    const packet = await verifiedHandoff(raw, request);
+    if (!live()) throw new Error(t(m('The sender or recipient connection has changed.')));
+    if (!packet || packet.turnId !== turnId || packet.itemId !== itemId || packet.text !== text) throw new Error(t(m('The host could not verify this exact message.')));
+    if (await dialog(m('Send this message?'), handoffPreview(packet), [{value:'cancel',label:m('Cancel')},{value:'send',label:m('Send to inbox'),primary:true}]) !== 'send') return;
+    if (!live()) throw new Error(t(m('The sender or recipient connection has changed.')));
+    const result = await api('agent.handoff.send', {id:packet.id}).catch(error => { throw new Error(t(m('Delivery could not be confirmed: {error}', {error:errorText(error)}))); });
+    const delivered = await verifiedHandoff(result, request);
+    if (!delivered || delivered.id !== packet.id || delivered.itemId !== itemId || delivered.turnId !== turnId || delivered.text !== text)
+      throw new Error(t(m('Delivery could not be verified. Refresh shared messages to check the inbox.')));
+    if (live()) {
+      notice(m('Delivered to {recipient}.', {recipient:conversationLabel(recipient)}));
+      if ($<HTMLDetailsElement>('agent-mailbox').open) await loadMailbox(sender);
+    }
+  } finally { forwarding = false; }
+}
+function visibleMailboxScope(c: Conversation) {
+  return mailboxScope === 'conversation' && addressOf(c) ? 'conversation' : 'project';
+}
+function renderMailbox(c: Conversation, error?: string) {
+  if (c !== selected) return;
+  const body = $('mailbox-body'), owner = addressOf(c);
+  const scope = visibleMailboxScope(c), project = scope === 'project', state = project ? archive : c;
+  $<HTMLSelectElement>('mailbox-scope').value = scope;
+  body.replaceChildren();
+  body.append(button(m('Refresh'), () => loadMailbox(c), 'quiet-button'));
+  if (error) body.append(node('p', 'preview-error', m('Shared messages unavailable: {error}', {error})));
+  else if (!state.sharedMessages.length) body.append(node('p', 'muted', state.mailboxLoaded ? m('No shared messages.') : m('Loading shared messages…')));
+  for (const message of state.sharedMessages) {
+    const incoming = !!owner && sameAddress(message.to, owner);
+    const row = node('details', 'shared-message');
+    const summary = project ? m('{sender} → {recipient}', {sender:addressLabel(message.from, true),recipient:addressLabel(message.to, true)}) :
+      incoming ? m('From {sender}', {sender:addressLabel(message.from)}) : m('To {recipient}', {recipient:addressLabel(message.to)});
+    row.append(node('summary', '', summary),
+      node('pre', 'handoff-text', message.text));
+    if (project || incoming) row.append(button(m('Insert quote into draft'), () => {
+      const current = addressOf(selected);
+      if (selected !== c || visibleMailboxScope(c) !== scope || (!project && (!current || !sameAddress(current, message.to)))) return;
+      const quote = quotedHandoff(message, t(m('Quoted message from {sender}', {sender:addressLabel(message.from)})));
+      composer.value += (composer.value ? '\n\n' : '') + quote; c.draft = composer.value; composer.focus();
+    }, 'quiet-button'));
+    body.append(row);
+  }
+  if (state.nextShared) body.append(button(m('Load more'), () => loadMailbox(c, true), 'quiet-button'));
+}
+async function loadMailbox(c: Conversation, more = false) {
+  const owner = addressOf(c);
+  const scope = visibleMailboxScope(c), project = scope === 'project', state = project ? archive : c;
+  if (selected !== c) return;
+  const revision = ++state.mailboxRequest, after = more ? state.nextShared : null;
+  const live = () => selected === c && visibleMailboxScope(c) === scope && revision === state.mailboxRequest;
+  try {
+    const page = await api<{messages:unknown[]; next:string|null}>(project ? 'agent.handoff.history' : 'agent.handoff.list',
+      { ...(project ? {} : owner), ...(after ? {after} : {}) });
+    if (!Array.isArray(page.messages) || (page.next !== null && typeof page.next !== 'string')) throw new Error(t(m('The host could not verify these shared messages.')));
+    const messages = await Promise.all(page.messages.map(message => verifiedHandoff(message)));
+    if (!live()) return;
+    const checked: Handoff[] = [];
+    for (const message of messages) {
+      if (!message || (!project && (!owner || !(sameAddress(owner, message.from) || sameAddress(owner, message.to))))) throw new Error(t(m('The host could not verify these shared messages.')));
+      checked.push(message);
+    }
+    state.sharedMessages = more ? [...state.sharedMessages, ...checked] : checked; state.nextShared = page.next; state.mailboxLoaded = true;
+    renderMailbox(c);
+  } catch (error) {
+    if (!live()) return;
+    renderMailbox(c, errorText(error));
+  }
+}
+$('agent-mailbox').addEventListener('toggle', () => { if ($<HTMLDetailsElement>('agent-mailbox').open) void loadMailbox(selected); });
+$('mailbox-scope').addEventListener('change', () => {
+  mailboxScope = $<HTMLSelectElement>('mailbox-scope').value;
+  renderMailbox(selected); void loadMailbox(selected);
+});
 async function showApproval(c: Conversation, reviewId: string, method: string, params: Record<string, unknown>, hostKind: unknown) {
   if (c.reviews.has(reviewId)) return;
   const owner = typeof params.threadId === 'string' ? params.threadId : null;
   if (owner !== null && owner !== c.thread) return;
-  const connection = agentConnection;
+  const connection = c.connectionId;
   const kind = approvalKind(method, hostKind);
-  const readHeading = params.tool === 'verum_action_sequence' ? m('Review action-order inspection') :
+  const needsPreview = kind === 'execution' || kind === 'handoff';
+  const readHeading = params.tool === 'verum_inbox' ? m('Review inbox access') : params.tool === 'verum_action_sequence' ? m('Review action-order inspection') :
     params.tool === 'verum_analyze' ? m('Review language analysis') : m('Review a workspace read');
   const readAction = params.tool === 'verum_action_sequence' ? m('Allow inspection') :
     params.tool === 'verum_analyze' ? m('Allow analysis') : m('Allow read');
   const args = kind === 'execution' ? {} : parseArguments(params.arguments);
   const card = node('section', 'approval'); setAttribute(card, 'aria-label', m('Agent request awaiting review'));
-  card.append(node('div', 'approval-heading', kind === 'source' ? m('Review a source proposal') : kind === 'execution' ? m('Review a Verum operation') : kind === 'read' ? readHeading : m('Unsupported agent request')));
+  card.append(node('div', 'approval-heading', kind === 'source' ? m('Review a source proposal') : kind === 'execution' ? m('Review a Verum operation') : kind === 'handoff' ? m('Review message transfer') : kind === 'read' ? readHeading : m('Unsupported agent request')));
   const content = node('div', 'approval-content');
-  let reviewAvailable = owner !== null && kind !== 'execution' && kind !== 'unsupported';
-  if (kind === 'execution') {
-    if (!owner) content.append(node('p', 'preview-error', m('The execution request is missing its conversation ID.')));
+  let reviewAvailable = owner !== null && !needsPreview && kind !== 'unsupported';
+  if (needsPreview) {
+    if (!owner) content.append(node('p', 'preview-error', kind === 'handoff' ? m('The sender or recipient connection has changed.') : m('The execution request is missing its conversation ID.')));
   } else {
     content.append(node('p', '', kind === 'unsupported' ? m('This request is outside the Verum tool boundary. Decline it to let the agent continue.') : `${String(params.tool || method)}${typeof args.path === 'string' ? ` · ${args.path}` : ''}`));
   }
@@ -1383,26 +1609,37 @@ async function showApproval(c: Conversation, reviewId: string, method: string, p
     if (args.path === currentPath && dirty()) content.append(node('p', '', m('You have unsaved editor changes. Accepting writes the file on disk; your editor draft will be preserved.')));
     content.append(node('span', 'approval-source-label', m('Before · saved workspace source')), node('pre', '', before), node('span', 'approval-source-label', m('Proposed source')), node('pre', '', typeof args.source === 'string' ? args.source : m('(Missing source)')));
     content.append(node('p', '', m('Expected file revision: {revision}', { revision: args.expected_hash === null ? m('new file') : typeof args.expected_hash === 'string' ? args.expected_hash : m('not supplied') })));
-  } else if (kind !== 'execution') appendDetails(content, m('Request details'), params, 'request', kind === 'read');
+  } else if (!needsPreview) appendDetails(content, m('Request details'), params, 'request', kind === 'read');
   const actions = node('div', 'approval-actions');
   const waiting = m('Awaiting your decision. No requested action has been approved.');
-  const status = node('div', 'approval-status', kind === 'execution' && owner ? m('Loading execution plan…') : waiting);
+  const status = node('div', 'approval-status', needsPreview && owner ? kind === 'handoff' ? m('Loading message preview…') : m('Loading execution plan…') : waiting);
+  let handoffTarget: Conversation | undefined;
+  let targetRetired = false;
+  const targetIsLive = () => !targetRetired && (!handoffTarget || !!addressOf(handoffTarget));
   let responding = false;
-  const current = () => conversations.has(c) && connection === agentConnection && (owner === null || owner === c.thread);
+  const current = () => conversations.has(c) && connection === sessionFor(c)?.id && (owner === null || owner === c.thread);
   const pending = () => current() && c.reviews.get(reviewId) === expire;
+  function invalidateTarget(id: string) {
+    if (kind !== 'handoff' || args.connectionId !== id) return;
+    targetRetired = true;
+    reviewAvailable = false; approve.remove();
+    content.replaceChildren(node('p', 'preview-error', m('The sender or recipient connection has changed.')));
+    retiredReviewTargets.delete(invalidateTarget);
+  }
   function expire() {
+    retiredReviewTargets.delete(invalidateTarget);
     c.reviews.delete(reviewId);
     actions.querySelectorAll('button').forEach(button => { button.disabled = true; });
     if (!responding) setText(status, m('This review is no longer pending.'));
     agentState();
   }
   async function respond(approved: boolean) {
-    if (responding || c !== selected || !pending() || (approved && !reviewAvailable)) return;
+    if (responding || c !== selected || !pending() || (approved && (!reviewAvailable || !targetIsLive()))) return;
     responding = true;
     actions.querySelectorAll('button').forEach(button => { button.disabled = true; });
     setText(status, approved ? m('Approved · waiting for the tool result…') : m('Declining request…'));
     let result: unknown;
-    try { result = await api('agent.respond', { reviewId, threadId: owner, result: approvalReply(method, approved) }); }
+    try { result = await api('agent.respond', { connectionId:connection, reviewId, threadId:owner, result:approvalReply(method, approved) }); }
     catch (error) {
       responding = false;
       if (pending()) {
@@ -1416,7 +1653,7 @@ async function showApproval(c: Conversation, reviewId: string, method: string, p
       const response = parseArguments(result);
       setText(status, !approved ? m('Request declined.') : response.success === true ? m('Tool completed. Its result is available below.') : response.success === false ? m('The tool reported a failure. Inspect the response below.') : m('Approval delivered. Inspect the tool result and evidence before treating the request as successful.'));
       if (result !== undefined && result !== null) appendDetails(content, m('Tool response'), result, 'response');
-      c.reviews.delete(reviewId); agentState();
+      retiredReviewTargets.delete(invalidateTarget); c.reviews.delete(reviewId); agentState();
       if (approved && kind === 'execution' && connection && owner && typeof params.turnId === 'string') {
         const review = { connection, conversation: owner, turn: params.turnId, review_id: reviewId };
         const id = reviewedOperationId(response.tool_result, review);
@@ -1429,24 +1666,38 @@ async function showApproval(c: Conversation, reviewId: string, method: string, p
           await replaceDocument(() => api<SourceFile>('workspace.read', { path: args.path }));
         }
       }
+      if (approved && kind === 'handoff' && response.success === true && $<HTMLDetailsElement>('agent-mailbox').open) await loadMailbox(c);
       await refreshOperations();
     } catch (error) { status.append(node('p', '', m('Refresh unavailable: {error}', { error: errorText(error) }))); }
   }
-  const approve = button(kind === 'source' ? m('Accept edit') : kind === 'read' ? readAction : m('Approve operation'), () => respond(true), 'button primary');
+  const approve = button(kind === 'source' ? m('Accept edit') : kind === 'read' ? readAction : kind === 'handoff' ? m('Send to inbox') : m('Approve operation'), () => respond(true), 'button primary');
   actions.append(button(m('Decline'), () => respond(false)));
   if (reviewAvailable) actions.append(approve);
   if (!current()) return;
   c.reviews.set(reviewId, expire);
+  if (kind === 'handoff') retiredReviewTargets.add(invalidateTarget);
   card.append(content, actions, status); c.log.append(card); agentState();
   announce(m('Agent request awaiting your review'));
   // Keep polling while the host resolves the plan. A recovered request can
   // expire, be declined, or lose its connection before its preview arrives.
-  if (kind === 'execution' && owner) void loadExecutionPreview(owner);
-  async function loadExecutionPreview(threadId: string) {
+  if (needsPreview && owner) void loadPreview(owner);
+  async function loadPreview(threadId: string) {
     try {
-      const preview = await api<ExecutionPreview>('agent.preview', { reviewId, threadId });
-      if (!pending()) return;
-      const view = await executionPreviewView(preview);
+      let view: HTMLElement | DocumentFragment;
+      if (kind === 'handoff') {
+        if (params.tool !== 'verum_handoff' || !connection || typeof args.connectionId !== 'string' || typeof args.threadId !== 'string' ||
+            typeof args.seq !== 'number' || !Number.isSafeInteger(args.seq) || args.seq < 1 || Object.keys(args).length !== 3)
+          throw new Error(t(m('The host could not verify this exact message.')));
+        const selection = { from:{connectionId:connection, threadId}, to:{connectionId:args.connectionId,threadId:args.threadId}, seq:args.seq };
+        handoffTarget = [...conversations].find(peer => peer.thread === args.threadId && peer.connectionId === args.connectionId);
+        const packet = await verifiedHandoff(await api('agent.handoff.preview', selection), selection);
+        if (!packet || !targetIsLive()) throw new Error(t(m('The host could not verify this exact message.')));
+        view = handoffPreview(packet);
+      } else {
+        const preview = await api<ExecutionPreview>('agent.preview', { connectionId:connection, reviewId, threadId });
+        if (!pending()) return;
+        view = await executionPreviewView(preview);
+      }
       if (!pending()) return;
       content.replaceChildren(view);
       reviewAvailable = true;
@@ -1454,7 +1705,7 @@ async function showApproval(c: Conversation, reviewId: string, method: string, p
       actions.append(approve);
     } catch (error) {
       if (!pending()) return;
-      content.replaceChildren(node('p', 'preview-error', m('Execution plan unavailable. {error}', { error: errorText(error) })));
+      content.replaceChildren(node('p', 'preview-error', kind === 'handoff' ? m('Message preview unavailable. {error}', {error:errorText(error)}) : m('Execution plan unavailable. {error}', { error: errorText(error) })));
     }
     if (!responding) setText(status, waiting);
   }
@@ -1501,7 +1752,7 @@ const commandRegistry = new CommandRegistry([
   control('architecture-toggle', m('Source architecture')), control('project-refresh', m('Refresh project')),
   control('language-status', m('Show module diagnostics')), control('theme', m('Change color theme')),
   command('lint.project', m('Inspect project with linter'), '', inspectProjectLint, everywhere, () => !lintBusy),
-  control('agent-connect', m('Connect agent')), control('agent-login', m('Sign in'), '', everywhere, () => connected),
+  control('agent-connect', m('Connect agent')), control('agent-login', m('Sign in'), '', everywhere, () => !!sessionFor(selected)),
   control('new-thread', m('New conversation')),
   command('agent.switchConversation', m('Switch conversation'), '', () => { setPane('agent'); picker.focus(); }, everywhere, () => conversations.size > 1), control('agent-stop', m('Stop agent turn'), '', everywhere, () => selected.turn !== null),
   command('agent.send', m('Send agent message'), 'Mod+Enter', sendMessage, ['agent'], () => !$<HTMLButtonElement>('agent-send').disabled, '#agent-send'),
@@ -1529,7 +1780,7 @@ async function initialize() {
   const initialRevision = documentRevision();
   const restoreInitial = !workspaceInitialized;
   workspaceInitialized = true;
-  await refreshFiles();
+  await Promise.all([refreshFiles(), loadProviders().catch(error => notice(m('Provider catalog unavailable: {error}', {error:errorText(error)})))]);
   // A returning workspace opens its existing default file, never a colliding new draft.
   // Both async boundaries must preserve the initial document revision: typing, opening
   // another file or entering a document-switch dialog revokes this automatic restore.
@@ -1572,8 +1823,8 @@ onSessionChange(state => {
       // the editor draft and readable conversation, but retire old actions.
       receipts = []; selectedReceipt = null; renderResults();
       analysisGeneration++; analysisPending = false;
-      connected = false; authenticated = false;
-      agentConnection = null; resetAgentConversation();
+      archive.sharedMessages = []; archive.nextShared = null; archive.mailboxLoaded = false; ++archive.mailboxRequest;
+      providerSessions.clear(); removeConversations();
       document.querySelectorAll<HTMLButtonElement>('#agent-messages button').forEach(button => { button.disabled = true; });
       agentState(); connectionStatus(false);
     }

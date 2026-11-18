@@ -10,6 +10,7 @@ import { join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
+import { exerciseHandoffs, inspectRestartedArchive } from './handoffs.mjs';
 
 const [binary, browser, compiler] = process.argv.slice(2);
 assert.ok(binary && browser, 'Pass the packaged Studio and Chromium executable paths');
@@ -17,28 +18,34 @@ const verum = compiler ? resolve(compiler) : 'verum';
 const root = await mkdtemp(join(tmpdir(), 'verum-conversations-'));
 const workspace = join(root, 'project');
 const children = [];
-function launch(executable, args, stdio) {
-  const child = spawn(resolve(executable), args, {stdio});
+function launch(executable, args, stdio, env = process.env) {
+  const child = spawn(resolve(executable), args, {stdio, env});
   children.push(child);
   return child;
 }
 try {
   await mkdir(workspace);
+  const dataHome = join(root, 'studio-data'); await mkdir(dataHome);
   await writeFile(join(workspace, 'experiment.vr'), 'fn main() -> Int { 42 }');
   const provider = fileURLToPath(new URL('./conversation-provider.mjs', import.meta.url));
-  const studio = launch(binary, ['--workspace', workspace, '--codex', provider, '--verum', verum], ['ignore','pipe','inherit']);
-  const startupMs = Number(process.env.VERUM_STUDIO_E2E_STARTUP_MS ?? 15000);
-  const deadline = AbortSignal.timeout(startupMs);
-  const [startup] = await Promise.race([
-    once(createInterface({input: studio.stdout}), 'line', {signal: deadline}),
-    once(studio, 'exit', {signal: deadline}).then(([code, signal]) => {
-      throw Error('Studio exited before publishing its launch URL: ' + (signal || code));
-    }),
-  ]).catch(error => {
-    if (deadline.aborted) throw Error('Studio startup exceeded ' + startupMs + ' ms');
-    throw error;
-  });
-  const url = new URL(startup.replace(/^Verum Studio: /, ''));
+  const agy = fileURLToPath(new URL('../../tests/acp/provider.py', import.meta.url));
+  async function startStudio() {
+    const studio = launch(binary, ['--workspace', workspace, '--codex', provider, '--agy', agy, '--verum', verum], ['ignore','pipe','inherit'],
+      {...process.env, VERUM_STUDIO_DATA_HOME:dataHome});
+    const startupMs = Number(process.env.VERUM_STUDIO_E2E_STARTUP_MS ?? 15000);
+    const deadline = AbortSignal.timeout(startupMs);
+    const [startup] = await Promise.race([
+      once(createInterface({input: studio.stdout}), 'line', {signal: deadline}),
+      once(studio, 'exit', {signal: deadline}).then(([code, signal]) => {
+        throw Error('Studio exited before publishing its launch URL: ' + (signal || code));
+      }),
+    ]).catch(error => {
+      if (deadline.aborted) throw Error('Studio startup exceeded ' + startupMs + ' ms');
+      throw error;
+    });
+    return {studio, url:new URL(startup.replace(/^Verum Studio: /, ''))};
+  }
+  const {studio, url} = await startStudio();
   const chrome = launch(browser, ['--remote-debugging-pipe', '--no-first-run', '--disable-background-networking', '--user-data-dir=' + join(root, 'profile')], ['ignore','ignore','ignore','pipe','pipe']);
   const stream = chrome.stdio[4].setEncoding('utf8');
   const pending = new Map();
@@ -76,7 +83,7 @@ try {
   }
   await rpc('Emulation.setDeviceMetricsOverride', {width: 1440, height: 900, deviceScaleFactor: 1, mobile: false}, sessionId);
   await rpc('Page.navigate', {url: url.href}, sessionId);
-  await wait('document.querySelector("#agent-connect") && !document.querySelector("#app").inert && document.querySelector(".cm-content")');
+  await wait('document.querySelector("#agent-provider option") && !document.querySelector("#app").inert && document.querySelector(".cm-content")');
   await evaluate(`window.byId = id => document.getElementById(id);
     window.choose = n => { byId('agent-conversation').selectedIndex = n; byId('agent-conversation').dispatchEvent(new Event('change')); };
     window.compose = text => { byId('agent-input').value = text; byId('agent-form').requestSubmit(); };
@@ -125,7 +132,7 @@ try {
       if (method === 'agent.request' && params.method === 'turn/start' && params.params.threadId === '3') journalReady();
       if (scopedPoll) {
         const {result} = await response.clone().json();
-        if (result.recoveredReviews.length) window.recoveredId = result.recoveredReviews[0].reviewId;
+        if (result.recoveredReviews.length) { window.recoveredId = result.recoveredReviews[0].reviewId; window.recoveredConnection = result.connectionId; }
         if (window.latePreviewReturned) window.polledAfterReturn = true;
       }
       if (method === 'agent.preview') {
@@ -147,7 +154,7 @@ try {
     'Script permissions': 'Source / CLI defaults', 'Runtime diagnostics': 'Off',
     Executable: verum, 'Source SHA-256': createHash('sha256').update(source).digest('hex'),
   });
-  assert.deepEqual(await evaluate('previews[0]'), { reviewId: await evaluate('recoveredId'), threadId: '3' });
+  assert.deepEqual(await evaluate('previews[0]'), { connectionId:await evaluate('recoveredConnection'), reviewId: await evaluate('recoveredId'), threadId: '3' });
   assert.equal(await evaluate("card(0).querySelector('details').open"), false);
   await evaluate("card(0).querySelector('summary').click(); language('ru')");
   assert.equal(await evaluate("card(0).querySelector('details pre').textContent"), source);
@@ -205,7 +212,12 @@ try {
     assert.equal(await evaluate('receipt().status'), index ? 'failed' : 'succeeded');
     assert.equal(await evaluate('receipt().agent.review_id'), await evaluate(`previews[${index + 3}].reviewId`));
   }
-  console.log('Passed concurrent conversations, scoped reviews, execution previews, exact receipt navigation, and host action-order checks through both the browser and the reviewed agent tool.');
+  await exerciseHandoffs(evaluate, wait);
+  const stopped = once(studio, 'exit'); studio.kill(); await stopped;
+  const replacement = await startStudio();
+  await rpc('Page.navigate', {url:replacement.url.href}, sessionId);
+  await inspectRestartedArchive(evaluate, wait);
+  console.log('Passed concurrent conversations, exact execution evidence, action-order inspection, reviewed Codex/Antigravity transfers, and project history across server restart.');
 } finally {
   await Promise.all(children.map(async child => {
     if (child.exitCode !== null || child.signalCode !== null) return;

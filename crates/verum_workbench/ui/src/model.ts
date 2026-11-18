@@ -85,9 +85,9 @@ export function relativeVerumPath(value: string): string | null {
   return path;
 }
 
-export type ReviewKind = 'source' | 'execution' | 'read' | 'unsupported';
+export type ReviewKind = 'source' | 'execution' | 'read' | 'handoff' | 'unsupported';
 export function approvalKind(method: string, hostKind: unknown): ReviewKind {
-  if (method === 'item/tool/call' && (hostKind === 'source' || hostKind === 'read' || hostKind === 'execution')) return hostKind;
+  if (method === 'item/tool/call' && (hostKind === 'source' || hostKind === 'read' || hostKind === 'execution' || hostKind === 'handoff')) return hostKind;
   return 'unsupported';
 }
 

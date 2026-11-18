@@ -96,7 +96,7 @@ test('history cap retains the newest 128 runs by their actual start times', () =
 });
 
 test('the review UI uses only the host classification of a dynamic tool call', () => {
-  for (const kind of ['source', 'execution', 'read']) assert.equal(approvalKind('item/tool/call', kind), kind);
+  for (const kind of ['source', 'execution', 'read', 'handoff']) assert.equal(approvalKind('item/tool/call', kind), kind);
   assert.equal(approvalKind('item/tool/call', undefined), 'unsupported');
   assert.equal(approvalKind('item/tool/call', { tool: 'verum_read', reviewKind: 'read' }), 'unsupported');
   assert.equal(approvalKind('item/commandExecution/requestApproval', 'execution'), 'unsupported');

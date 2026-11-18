@@ -1043,7 +1043,7 @@ dialog:has(.change-review) h2 { font-size: 15px; overflow-wrap: anywhere; }
   gap: 10px;
   background: var(--sidebar);
 }
-.agent-connection strong {
+.agent-connection select {
   font-size: 12px;
   display: block;
 }
@@ -1262,6 +1262,13 @@ dialog:has(.change-review) h2 { font-size: 15px; overflow-wrap: anywhere; }
 }
 #agent-sequence p { margin-block-start: var(--space-1); }
 #agent-sequence[data-status=violated] summary { color: var(--warning); }
+#agent-messages > div:not([data-can-forward]) .forward-message { display: none; }
+.forward-message { margin-top: var(--space-1); }
+.handoff-review select { width: 100%; margin-top: var(--space-1); }
+.handoff-text { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 36vh; overflow: auto; background: var(--editor); padding: var(--space-2); }
+#mailbox-body { max-height: 30vh; overflow: auto; }
+.shared-message { margin: var(--space-1) 0; }
+.shared-message summary { overflow-wrap: anywhere; }
 .event-log pre {
   max-height: 170px;
   overflow: auto;
