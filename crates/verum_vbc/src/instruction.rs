@@ -9985,6 +9985,10 @@ pub enum ExtendedSubOpcode {    /// Reserved no-op — forward-compat anchor. Al
     /// Host: set ANY value (List/Map/nested/scalar) as a global.
     /// `[0x1F][0x60][reg:engine][reg:name][reg:value]`.
     ScriptEngineSetGlobalValue = 0x60,
+    /// Discard the pending exception according to its issuer and write Unit to dst.
+    DiscardException = 0x13,
+    /// Forward the pending exception with its original ownership.
+    RethrowException = 0x14,
 }
 
 impl ExtendedSubOpcode {
@@ -10006,6 +10010,8 @@ impl ExtendedSubOpcode {
             0x0d => Some(Self::TypeIdentity),
             0x0e => Some(Self::TypeInspect),
             0x12 => Some(Self::RetainCopy),
+            0x13 => Some(Self::DiscardException),
+            0x14 => Some(Self::RethrowException),
             0x0f => Some(Self::CloneTyped),
             0x10 => Some(Self::ProcessExit),
             0x11 => Some(Self::PanicValue),
@@ -10102,6 +10108,8 @@ impl ExtendedSubOpcode {
             Self::TypeIdentity => "EXT_TYPE_IDENTITY",
             Self::TypeInspect => "EXT_TYPE_INSPECT",
             Self::RetainCopy => "EXT_RETAIN_COPY",
+            Self::DiscardException => "EXT_DISCARD_EXCEPTION",
+            Self::RethrowException => "EXT_RETHROW_EXCEPTION",
             Self::CloneTyped => "EXT_CLONE_TYPED",
             Self::GetFieldNamed => "EXT_GET_FIELD_NAMED",
             Self::SetFieldNamed => "EXT_SET_FIELD_NAMED",
@@ -13811,6 +13819,13 @@ pub enum Instruction {    // ===================================================
         /// Raw operand bytes.
         data: Vec<u8>,
     },
+    /// Dispose of an unobserved pending exception using its producer's ownership.
+    DiscardException {
+        /// Destination of the Unit value for the discarded binding.
+        dst: Reg,
+    },
+    /// Forward the existing pending exception without publishing its value.
+    RethrowException,
 }
 
 // ============================================================================

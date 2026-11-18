@@ -162,7 +162,11 @@ pub const VERSION_MAJOR: u16 = 2;
 // from exact Equality predicates ('='), including nominal and impl headers.
 // Generic-where Value payloads from older parsers cannot prove whether their
 // source was a value predicate or an incorrectly classified type equation.
-pub const VERSION_MINOR: u16 = 64;
+// v2.65: handlers may discard or forward a pending exception at its producer's
+// ownership boundary without publishing the exception as a raw register value.
+pub const VERSION_MINOR: u16 = 65;
+/// First wire version that can discard or forward a producer-owned exception.
+pub const EXCEPTION_DISPOSITION_VERSION: u16 = 65;
 pub const OWNED_CLOSURE_ENVIRONMENT_VERSION: u16 = 63;
 pub const SOURCE_CONSTRAINT_CLASSIFICATION_VERSION: u16 = 64;
 

@@ -127,11 +127,10 @@ fn caught_failed_retain_preserves_the_source_count() {
                 .try_as_i64(),
             Some(73)
         );
-        // The failed retain releases its unpublished wrapper; after recovery,
-        // normal scope cleanup also releases the original Handle and Counter.
-        // The uncaught-error gate above separately pins the one failed wrapper.
-        // Recovery packet lifetime is a separate exception-ownership contract.
-        assert_eq!(vm.state.heap.stats().total_frees, 3);
+        // The failed wrapper, Handle, Counter, panic packet and its Text each
+        // have one owner; recovery and normal scope exit retire all five.
+        let stats = vm.state.heap.stats();
+        assert_eq!((stats.total_allocs, stats.total_frees), (5, 5));
     }
 }
 

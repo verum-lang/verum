@@ -15339,7 +15339,13 @@ impl<'ctx> PlatformIR<'ctx> {
     // ========================================================================
 
     /// ExecutionContext layout constants (verified with offsetof).
-    const EC_SIZE: u64 = 239168;
+    // One byte per exception slot records the issuing operation. The original
+    // execution-context fields and jump-buffer layout keep their offsets.
+    const EC_EXCEPTION_ORIGINS: u64 = 239168;
+    const EXCEPTION_CAPACITY: u64 = 1024;
+    const EC_SIZE: u64 = Self::EC_EXCEPTION_ORIGINS + Self::EXCEPTION_CAPACITY;
+    const EXCEPTION_RAW: u64 = 1;
+    const EXCEPTION_RUNTIME_PANIC: u64 = 2;
     #[allow(dead_code)] // parked, T0310
     const EC_CACHED_EPOCH: u64 = 0;
     const EC_EXECUTION_TIER: u64 = 8;
@@ -15960,11 +15966,12 @@ impl<'ctx> PlatformIR<'ctx> {
                 let packet_value = builder.build_ptr_to_int(packet, i64_type, "panic_packet").or_llvm_err()?;
                 let throw_fn = self.get_or_declare_fn(
                     module,
-                    "verum_exception_throw",
-                    void_type.fn_type(&[i64_type.into()], false),
+                    "verum_exception_raise",
+                    void_type.fn_type(&[i64_type.into(), ctx.i8_type().into()], false),
                 );
                 builder
-                    .build_call(throw_fn, &[packet_value.into()], "")
+                    .build_call(throw_fn, &[packet_value.into(),
+                        ctx.i8_type().const_int(Self::EXCEPTION_RUNTIME_PANIC, false).into()], "")
                     .or_llvm_err()?;
                 builder.build_unreachable().or_llvm_err()?;
             }
@@ -16005,6 +16012,18 @@ impl<'ctx> PlatformIR<'ctx> {
             ptr_type.fn_type(&[], false),
         );
 
+        let origin_type = i8_type;
+        let raise_type = void_type.fn_type(&[i64_type.into(), origin_type.into()], false);
+        let raise = self.get_or_declare_fn(module, "verum_exception_raise", raise_type);
+        raise.set_linkage(verum_llvm::module::Linkage::Internal);
+        let take_origin = self.get_or_declare_fn(
+            module,
+            "verum_exception_take_origin",
+            origin_type.fn_type(&[], false),
+        );
+        take_origin.set_linkage(verum_llvm::module::Linkage::Internal);
+        let trap = self.get_or_declare_fn(module, "llvm.trap", void_type.fn_type(&[], false));
+
         // 8. verum_exception_push() -> ptr
         // Returns pointer to jmp_buf for setjmp. Entry: { jmp_buf(192), value(i64), active(i32), defer_depth(i64) } = 208 bytes
         {
@@ -16036,6 +16055,15 @@ impl<'ctx> PlatformIR<'ctx> {
                     .build_load(i64_type, cnt_ptr, "cnt")
                     .or_llvm_err()?
                     .into_int_value();
+                let room = builder.build_int_compare(IntPredicate::ULT, cnt,
+                    i64_type.const_int(Self::EXCEPTION_CAPACITY, false), "handler_room").or_llvm_err()?;
+                let available = ctx.append_basic_block(func, "available");
+                let full = ctx.append_basic_block(func, "full");
+                builder.build_conditional_branch(room, available, full).or_llvm_err()?;
+                builder.position_at_end(full);
+                builder.build_call(trap, &[], "").or_llvm_err()?;
+                builder.build_unreachable().or_llvm_err()?;
+                builder.position_at_end(available);
                 // Compute entry ptr = ec + EC_EXCEPTION_HANDLERS + cnt * 208
                 let entry_off = builder
                     .build_int_mul(
@@ -16139,6 +16167,25 @@ impl<'ctx> PlatformIR<'ctx> {
         {
             let fn_type = void_type.fn_type(&[i64_type.into()], false);
             let func = self.get_or_declare_fn(module, "verum_exception_throw", fn_type);
+            if func.count_basic_blocks() == 0 {
+                let builder = ctx.create_builder();
+                builder.position_at_end(ctx.append_basic_block(func, "entry"));
+                let value = func
+                    .get_first_param()
+                    .or_internal("throw operand missing")?;
+                builder
+                    .build_call(
+                        raise,
+                        &[
+                            value.into(),
+                            origin_type.const_int(Self::EXCEPTION_RAW, false).into(),
+                        ],
+                        "",
+                    )
+                    .or_llvm_err()?;
+                builder.build_unreachable().or_llvm_err()?;
+            }
+            let func = raise;
             if func.count_basic_blocks() > 0 { /* skip */
             } else {
                 func.add_attribute(
@@ -16232,7 +16279,27 @@ impl<'ctx> PlatformIR<'ctx> {
                         .build_gep(i8_type, ec, &[val_off], "vp")
                         .or_llvm_err()?
                 };
+                let origin_offset = builder.build_int_add(new_cnt,
+                    i64_type.const_int(Self::EC_EXCEPTION_ORIGINS, false), "origin_offset").or_llvm_err()?;
+                // SAFETY: this slot belonged to the bounded handler stack before the pop.
+                let origin_slot = unsafe { builder.build_gep(i8_type, ec, &[origin_offset], "origin_slot") }.or_llvm_err()?;
+                // A v64 handler may have left its packet unread. Retire its own
+                // issuer before installing another value in this same slot.
+                let previous = builder.build_load(origin_type, origin_slot, "previous_origin")
+                    .or_llvm_err()?.into_int_value();
+                let occupied = builder.build_int_compare(IntPredicate::NE, previous,
+                    origin_type.const_zero(), "occupied").or_llvm_err()?;
+                let retire = ctx.append_basic_block(func, "retire_previous");
+                let publish = ctx.append_basic_block(func, "publish");
+                builder.build_conditional_branch(occupied, retire, publish).or_llvm_err()?;
+                builder.position_at_end(retire);
+                let discard = self.get_or_declare_fn(module, "verum_exception_discard",
+                    void_type.fn_type(&[], false));
+                builder.build_call(discard, &[], "").or_llvm_err()?;
+                builder.build_unconditional_branch(publish).or_llvm_err()?;
+                builder.position_at_end(publish);
                 builder.build_store(val_ptr, value).or_llvm_err()?;
+                builder.build_store(origin_slot, func.get_nth_param(1).or_internal("exception origin missing")?).or_llvm_err()?;
                 // Get jmp_buf pointer (offset 0 of entry)
                 // SAFETY: GEP to compute the end-of-buffer position; the offset is the sum of validated lengths that fit within the allocation
                 let jmpbuf_ptr = unsafe {
@@ -16293,10 +16360,71 @@ impl<'ctx> PlatformIR<'ctx> {
             }
         }
 
-        // 11. verum_exception_get() -> i64
+        // Consume the origin before cleanup or another handler can reenter.
+        if take_origin.count_basic_blocks() == 0 {
+            let builder = ctx.create_builder();
+            builder.position_at_end(ctx.append_basic_block(take_origin, "entry"));
+            let ec = builder
+                .build_call(get_ctx_fn, &[], "ctx")
+                .or_llvm_err()?
+                .basic_value_or("missing execution context")?
+                .into_pointer_value();
+            // SAFETY: the execution context owns its fixed handler-count field.
+            let count_slot = unsafe {
+                builder.build_gep(
+                    i8_type,
+                    ec,
+                    &[i64_type.const_int(Self::EC_EXCEPTION_HANDLER_COUNT, false)],
+                    "count_slot",
+                )
+            }
+            .or_llvm_err()?;
+            let count = builder
+                .build_load(i64_type, count_slot, "count")
+                .or_llvm_err()?
+                .into_int_value();
+            let in_range = builder
+                .build_int_compare(
+                    IntPredicate::ULT,
+                    count,
+                    i64_type.const_int(Self::EXCEPTION_CAPACITY, false),
+                    "has_slot",
+                )
+                .or_llvm_err()?;
+            let valid = ctx.append_basic_block(take_origin, "valid_slot");
+            let invalid = ctx.append_basic_block(take_origin, "invalid_slot");
+            builder
+                .build_conditional_branch(in_range, valid, invalid)
+                .or_llvm_err()?;
+            builder.position_at_end(invalid);
+            builder
+                .build_return(Some(&origin_type.const_zero()))
+                .or_llvm_err()?;
+            builder.position_at_end(valid);
+            let offset = builder
+                .build_int_add(
+                    count,
+                    i64_type.const_int(Self::EC_EXCEPTION_ORIGINS, false),
+                    "origin_offset",
+                )
+                .or_llvm_err()?;
+            // SAFETY: count is bounded by the capacity of the context-owned origin array.
+            let slot =
+                unsafe { builder.build_gep(i8_type, ec, &[offset], "origin") }.or_llvm_err()?;
+            let origin = builder
+                .build_load(origin_type, slot, "issuer")
+                .or_llvm_err()?;
+            builder
+                .build_store(slot, origin_type.const_zero())
+                .or_llvm_err()?;
+            builder.build_return(Some(&origin)).or_llvm_err()?;
+        }
+
+        // Read the existing one-word exception value. The public getter transfers
+        // the legacy representation, while dispositions take its issuer as well.
         {
             let fn_type = i64_type.fn_type(&[], false);
-            let func = self.get_or_declare_fn(module, "verum_exception_get", fn_type);
+            let func = self.get_or_declare_fn(module, "verum_exception_value", fn_type);
             if func.count_basic_blocks() > 0 { /* skip */
             } else {
                 let builder = ctx.create_builder();
@@ -16344,8 +16472,148 @@ impl<'ctx> PlatformIR<'ctx> {
                         .or_llvm_err()?
                 };
                 let val = builder.build_load(i64_type, val_ptr, "val").or_llvm_err()?;
+                builder.build_store(val_ptr, i64_type.const_zero()).or_llvm_err()?;
                 builder.build_return(Some(&val)).or_llvm_err()?;
             }
+        }
+        let read = self.get_or_declare_fn(
+            module,
+            "verum_exception_value",
+            i64_type.fn_type(&[], false),
+        );
+        read.set_linkage(verum_llvm::module::Linkage::Internal);
+        let get =
+            self.get_or_declare_fn(module, "verum_exception_get", i64_type.fn_type(&[], false));
+        if get.count_basic_blocks() == 0 {
+            let builder = ctx.create_builder();
+            builder.position_at_end(ctx.append_basic_block(get, "entry"));
+            let origin = builder
+                .build_call(take_origin, &[], "origin")
+                .or_llvm_err()?
+                .basic_value_or("missing exception origin")?
+                .into_int_value();
+            let present = builder
+                .build_int_compare(
+                    IntPredicate::NE,
+                    origin,
+                    origin_type.const_zero(),
+                    "present",
+                )
+                .or_llvm_err()?;
+            let transfer = ctx.append_basic_block(get, "transfer");
+            let empty = ctx.append_basic_block(get, "empty");
+            builder
+                .build_conditional_branch(present, transfer, empty)
+                .or_llvm_err()?;
+            builder.position_at_end(empty);
+            builder
+                .build_return(Some(&i64_type.const_zero()))
+                .or_llvm_err()?;
+            builder.position_at_end(transfer);
+            let value = builder
+                .build_call(read, &[], "value")
+                .or_llvm_err()?
+                .basic_value_or("missing exception value")?;
+            builder.build_return(Some(&value)).or_llvm_err()?;
+        }
+
+        for (name, forward) in [
+            ("verum_exception_discard", false),
+            ("verum_exception_rethrow", true),
+        ] {
+            let function = self.get_or_declare_fn(module, name, void_type.fn_type(&[], false));
+            if function.count_basic_blocks() > 0 {
+                continue;
+            }
+            let builder = ctx.create_builder();
+            builder.position_at_end(ctx.append_basic_block(function, "entry"));
+            let origin = builder
+                .build_call(take_origin, &[], "origin")
+                .or_llvm_err()?
+                .basic_value_or("missing exception origin")?
+                .into_int_value();
+            let issued = ctx.append_basic_block(function, "issued");
+            let invalid = ctx.append_basic_block(function, "invalid");
+            builder
+                .build_switch(
+                    origin,
+                    invalid,
+                    &[
+                        (origin_type.const_int(Self::EXCEPTION_RAW, false), issued),
+                        (
+                            origin_type.const_int(Self::EXCEPTION_RUNTIME_PANIC, false),
+                            issued,
+                        ),
+                    ],
+                )
+                .or_llvm_err()?;
+            builder.position_at_end(invalid);
+            builder.build_call(trap, &[], "").or_llvm_err()?;
+            builder.build_unreachable().or_llvm_err()?;
+            builder.position_at_end(issued);
+            let value = builder
+                .build_call(read, &[], "value")
+                .or_llvm_err()?
+                .basic_value_or("missing exception value")?
+                .into_int_value();
+            if forward {
+                builder
+                    .build_call(raise, &[value.into(), origin.into()], "")
+                    .or_llvm_err()?;
+                builder.build_unreachable().or_llvm_err()?;
+                continue;
+            }
+            let raw = ctx.append_basic_block(function, "raw");
+            let panic = ctx.append_basic_block(function, "runtime_panic");
+            let owns_packet = builder
+                .build_int_compare(
+                    IntPredicate::EQ,
+                    origin,
+                    origin_type.const_int(Self::EXCEPTION_RUNTIME_PANIC, false),
+                    "owns_packet",
+                )
+                .or_llvm_err()?;
+            builder
+                .build_conditional_branch(owns_packet, panic, raw)
+                .or_llvm_err()?;
+            builder.position_at_end(raw);
+            builder.build_return(None).or_llvm_err()?;
+            builder.position_at_end(panic);
+            let packet = builder
+                .build_int_to_ptr(value, ptr_type, "packet")
+                .or_llvm_err()?;
+            let header = super::runtime::RuntimeLowering::OBJECT_HEADER_SIZE;
+            let bytes = header + verum_common::layout::VALUE_SLOT_SIZE;
+            let extent = super::object_storage::matches_os(ctx, &builder, packet, bytes)?;
+            let release = ctx.append_basic_block(function, "release_packet");
+            builder
+                .build_conditional_branch(extent, release, invalid)
+                .or_llvm_err()?;
+            builder.position_at_end(release);
+            super::object_storage::consume(ctx, &builder, packet)?;
+            // SAFETY: the issuing panic and exact extent establish the single Text slot.
+            let slot = unsafe {
+                builder.build_gep(
+                    i8_type,
+                    packet,
+                    &[i64_type.const_int(header, false)],
+                    "message_slot",
+                )
+            }
+            .or_llvm_err()?;
+            let message = builder
+                .build_load(i64_type, slot, "message")
+                .or_llvm_err()?;
+            let free_text = self.get_or_declare_fn(
+                module,
+                "verum_text_free",
+                void_type.fn_type(&[i64_type.into()], false),
+            );
+            builder
+                .build_call(free_text, &[message.into()], "")
+                .or_llvm_err()?;
+            super::object_storage::release_os(ctx, &builder, module, packet, bytes)?;
+            builder.build_return(None).or_llvm_err()?;
         }
         Ok(())
     }

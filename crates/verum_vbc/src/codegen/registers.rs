@@ -14,6 +14,16 @@
 
 use crate::instruction::Reg;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use verum_common::Shared;
+
+impl RegisterInfo {
+    fn observe_lookup(&self) {
+        if let Some(observed) = &self.lookup_observer {
+            observed.store(true, Ordering::Relaxed);
+        }
+    }
+}
 
 /// Maximum registers per function.
 pub const MAX_REGISTERS: u16 = 16384;
@@ -62,6 +72,9 @@ pub struct RegisterAllocator {
 /// Information about a register binding.
 #[derive(Debug, Clone)]
 pub struct RegisterInfo {
+    /// An optional observation of this exact binding while lowering a recovery
+    /// body. Shadowing creates a fresh binding, and snapshots share this flag.
+    lookup_observer: Option<Shared<AtomicBool>>,
     /// Exact source declaration identity, local to this function body.
     pub binding_id: verum_common::value_use::BindingId,
     /// The allocated register.
@@ -196,6 +209,7 @@ impl RegisterAllocator {
             self.variables.insert(
                 name.clone(),
                 RegisterInfo {
+                    lookup_observer: None,
                     binding_id,
                     reg,
                     is_mutable: *is_mutable,
@@ -250,6 +264,7 @@ impl RegisterAllocator {
         self.variables.insert(
             name.to_string(),
             RegisterInfo {
+                lookup_observer: None,
                 binding_id,
                 reg,
                 is_mutable,
@@ -315,12 +330,23 @@ impl RegisterAllocator {
 
     /// Looks up a variable's register.
     pub fn lookup(&self, name: &str) -> Option<&RegisterInfo> {
-        self.variables.get(name)
+        let binding = self.variables.get(name)?;
+        binding.observe_lookup();
+        Some(binding)
     }
 
     /// Looks up a variable's register (mutable).
     pub fn lookup_mut(&mut self, name: &str) -> Option<&mut RegisterInfo> {
-        self.variables.get_mut(name)
+        let binding = self.variables.get_mut(name)?;
+        binding.observe_lookup();
+        Some(binding)
+    }
+
+    pub(super) fn observe_binding_lookups(&mut self, name: &str) -> Option<Shared<AtomicBool>> {
+        let binding = self.variables.get_mut(name)?;
+        let observed = Shared::new(AtomicBool::new(false));
+        binding.lookup_observer = Some(observed.clone());
+        Some(observed)
     }
 
     /// Checks if a variable exists.
@@ -335,7 +361,7 @@ impl RegisterAllocator {
 
     /// Gets the register for a variable, if it exists.
     pub fn get_reg(&self, name: &str) -> Option<Reg> {
-        self.variables.get(name).map(|info| info.reg)
+        self.lookup(name).map(|info| info.reg)
     }
 
     /// Enters a new scope.
@@ -410,7 +436,10 @@ impl RegisterAllocator {
             .filter(|(_, info)| (info.kind == RegisterKind::Local
                 || (info.kind == RegisterKind::Parameter && self.parameter_owners.contains_key(&info.reg)))
                 && seen.insert(info.binding_id))
-            .map(|(name, info)| (verum_common::Text::from(name.as_str()), info.clone()))
+            .map(|(name, info)| {
+                info.observe_lookup();
+                (verum_common::Text::from(name.as_str()), info.clone())
+            })
             .collect();
         bindings.sort_by_key(|(_, info)| {
             std::cmp::Reverse((info.scope_level, info.binding_id.0))
@@ -510,7 +539,10 @@ impl RegisterAllocator {
         self.variables
             .iter()
             .filter(move |(_, info)| info.scope_level == current_level)
-            .map(|(name, info)| (name.as_str(), info))
+            .map(|(name, info)| {
+                info.observe_lookup();
+                (name.as_str(), info)
+            })
     }
 
     /// Hide caller-local names while emitting a declaration-owned expression.

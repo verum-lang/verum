@@ -819,6 +819,8 @@ fn write_instruction(
         TryBegin { handler_offset } => write!(out, "TRY_BEGIN handler={:+}", handler_offset),
         TryEnd => write!(out, "TRY_END"),
         GetException { dst } => write!(out, "GET_EXC   {}", r(dst)),
+        DiscardException { dst } => write!(out, "DISCARD_EXC {}", r(dst)),
+        RethrowException => write!(out, "RETHROW_EXC"),
 
         // ── Stack ──
         Push { src } => write!(out, "PUSH      {}", r(src)),

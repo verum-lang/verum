@@ -43,10 +43,12 @@ impl<'a> Edges<'a> {
             | Instruction::Panic { .. }
             | Instruction::PanicValue { .. }
             | Instruction::Unreachable
-            | Instruction::Throw { .. } => Self::Stop,
+            | Instruction::Throw { .. }
+            | Instruction::RethrowException => Self::Stop,
             Instruction::Extended { sub_op, .. }
-                if verum_vbc::instruction::ExtendedSubOpcode::from_byte(*sub_op)
-                    == Some(verum_vbc::instruction::ExtendedSubOpcode::ProcessExit) =>
+                if matches!(verum_vbc::instruction::ExtendedSubOpcode::from_byte(*sub_op),
+                    Some(verum_vbc::instruction::ExtendedSubOpcode::ProcessExit
+                        | verum_vbc::instruction::ExtendedSubOpcode::RethrowException)) =>
             {
                 Self::Stop
             }

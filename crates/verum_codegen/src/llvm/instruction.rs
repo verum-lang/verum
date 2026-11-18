@@ -2503,9 +2503,7 @@ fn lower_instruction_impl<'ctx>(
         }
 
         Instruction::LoadUnit { dst } => {
-            let unit_type = ctx.types().context().struct_type(&[], false);
-            let llvm_val = unit_type.const_zero();
-            ctx.set_register(dst.0, llvm_val.into());
+            set_unit_register(ctx, *dst);
             Ok(())
         }
 
@@ -6273,6 +6271,8 @@ fn lower_instruction_impl<'ctx>(
         Instruction::TryEnd => lower_try_end(ctx),
 
         Instruction::GetException { dst } => lower_get_exception(ctx, *dst),
+        Instruction::DiscardException { dst } => lower_exception_disposition(ctx, Some(*dst)),
+        Instruction::RethrowException => lower_exception_disposition(ctx, None),
 
         // ====================================================================
         // Context System Operations (0xB0-0xB2)
@@ -31198,6 +31198,19 @@ fn lower_extended<'ctx>(
         Some(ExtendedSubOpcode::PanicValue) => Err(LlvmLoweringError::unsupported(
             "PanicValue requires the canonical decoded instruction",
         )),
+        Some(op @ (ExtendedSubOpcode::DiscardException | ExtendedSubOpcode::RethrowException)) => {
+            let mut offset = 0;
+            let dst = if op == ExtendedSubOpcode::DiscardException {
+                Some(verum_vbc::encoding::decode_reg(operands, &mut offset)
+                    .map_err(|err| LlvmLoweringError::unsupported(format!("DiscardException: {err}")))?)
+            } else {
+                None
+            };
+            if offset != operands.len() {
+                return Err(LlvmLoweringError::unsupported("unexpected exception disposition operands"));
+            }
+            lower_exception_disposition(ctx, dst)
+        }
         Some(ExtendedSubOpcode::BindMethodReceiver) => Err(LlvmLoweringError::unsupported(
             "BindMethodReceiver requires the canonical decoded instruction",
         )),
@@ -37170,6 +37183,34 @@ fn build_runtime_type_switch<'ctx>(
                 mark_register_from_return_type(ctx, dst.0, &ret_type);
             }
         }
+    }
+    Ok(())
+}
+
+fn set_unit_register(ctx: &mut FunctionContext<'_, '_>, dst: Reg) {
+    let unit = ctx.types().context().struct_type(&[], false).const_zero();
+    ctx.set_register(dst.0, unit.into());
+}
+
+fn lower_exception_disposition<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    dst: Option<Reg>,
+) -> Result<()> {
+    let name = if dst.is_some() {
+        "verum_exception_discard"
+    } else {
+        "verum_exception_rethrow"
+    };
+    let function = super::error::get_or_declare_function(
+        ctx.get_module(),
+        name,
+        ctx.types().void_type().fn_type(&[], false),
+    );
+    ctx.builder().build_call(function, &[], "").or_llvm_err()?;
+    if let Some(dst) = dst {
+        set_unit_register(ctx, dst);
+    } else {
+        ctx.builder().build_unreachable().or_llvm_err()?;
     }
     Ok(())
 }

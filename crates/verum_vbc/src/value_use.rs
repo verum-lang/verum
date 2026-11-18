@@ -233,7 +233,9 @@ impl crate::module::VbcModule {
                 | Instruction::AsyncYield
                 | Instruction::CtxProvide { .. }
                 | Instruction::TailCall { .. }
-                | Instruction::Throw { .. } => return None,
+                | Instruction::Throw { .. }
+                | Instruction::DiscardException { .. }
+                | Instruction::RethrowException => return None,
                 _ => successors.push(BlockId(i as u64 + 1)),
             }
             for successor in successors {

@@ -248,6 +248,8 @@ pub(in super::super) fn handle_extended(
         Some(ExtendedSubOpcode::CloneTyped) => super::copy_typed::handle(state),
         Some(ExtendedSubOpcode::RetainCopy) => super::retain_copy::handle(state),
         Some(ExtendedSubOpcode::DropTyped) => super::cbgr::handle_drop_typed(state),
+        Some(ExtendedSubOpcode::DiscardException) => super::exceptions::handle_discard_exception(state),
+        Some(ExtendedSubOpcode::RethrowException) => super::exceptions::handle_rethrow_exception(state),
         Some(ExtendedSubOpcode::TypeLayout) => {
             let dst = read_reg(state)?;
             let raw = read_u8(state)?;

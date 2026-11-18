@@ -64,6 +64,58 @@ pub(in super::super) fn discard_unread_panic(state: &mut InterpreterState) -> In
     Ok(())
 }
 
+pub(in super::super) fn handle_discard_exception(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    let dst = read_reg(state)?;
+    if state.current_exception.is_none() {
+        return Err(InterpreterError::InvalidOperand {
+            message: "no pending exception to discard".into(),
+        });
+    }
+    // A legacy Throw supplies a value without a destruction declaration.
+    // Only the panic issuer can authorize destruction of its private packet.
+    discard_unread_panic(state)?;
+    state.current_exception = None;
+    state.set_reg(dst, Value::unit());
+    Ok(DispatchResult::Continue)
+}
+
+pub(in super::super) fn handle_rethrow_exception(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    let pending =
+        state
+            .current_exception
+            .as_mut()
+            .ok_or_else(|| InterpreterError::InvalidOperand {
+                message: "no pending exception to rethrow".into(),
+            })?;
+    if let Some(handler) = state.exception_handlers.pop() {
+        if let PendingException::RuntimePanic(owner) = pending {
+            owner.handler_depth = handler.stack_depth;
+        }
+        unwind_to_handler(state, handler)?;
+        return Ok(DispatchResult::Continue);
+    }
+    let message = match pending {
+        PendingException::Thrown(value) => {
+            let value = *value;
+            format!(
+                "unhandled exception: {}",
+                format_value_for_print(state, value)
+            )
+        }
+        PendingException::RuntimePanic(owner) => {
+            let (message, _) = state.heap.borrow_owned_packet(owner.ticket)?;
+            format_value_for_print(state, message)
+        }
+    };
+    discard_unread_panic(state)?;
+    state.current_exception = None;
+    Err(InterpreterError::Panic { message })
+}
+
 // ============================================================================
 // Exception Handling Operations
 // ============================================================================

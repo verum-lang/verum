@@ -33556,6 +33556,7 @@ impl VbcCodegen {
         error: Reg,
         dest: Reg,
         demand: ResultDemand,
+        pending: Option<usize>,
     ) -> CodegenResult<()> {
         match recover {
             verum_ast::RecoverBody::MatchArms { arms, .. } => {
@@ -33609,9 +33610,42 @@ impl VbcCodegen {
             }
             verum_ast::RecoverBody::Closure { param, body, .. } => {
                 self.ctx.enter_scope();
-                let result = (|| {
+                let result: CodegenResult<Option<Reg>> = (|| {
                     self.compile_pattern_bind(&param.pattern, error)?;
-                    self.compile_expr_with_demand(body, demand)
+                    let observed = match &param.pattern.kind {
+                        verum_ast::PatternKind::Ident { name, by_ref: false, subpattern: None, .. }
+                            if pending.is_some() => self.ctx.registers.observe_binding_lookups(name.as_str()),
+                        _ => None,
+                    };
+                    let result = self.compile_expr_with_demand(body, demand)?;
+                    if let Some(entry) = pending {
+                        // A register lookup tracks the selected lexical binding even
+                        // through captures and shadowing. Destructuring itself observes
+                        // the input and cannot authorize disposal here.
+                        let unused = matches!(&param.pattern.kind, verum_ast::PatternKind::Wildcard)
+                            || observed.is_some_and(|flag| !flag.load(std::sync::atomic::Ordering::Relaxed));
+                        if unused {
+                            self.ctx.instructions[entry] = Instruction::DiscardException { dst: error };
+                        } else {
+                            // Forward only an uninterrupted chain of whole-value moves.
+                            // Nothing before this throw may observe or replace the pending owner.
+                            let mut source = error;
+                            for index in entry + 1..self.ctx.instructions.len() {
+                                match self.ctx.instructions[index] {
+                                    Instruction::Mov { dst, src } if src == source => source = dst,
+                                    Instruction::Throw { error: operand } if operand == source => {
+                                        self.ctx.instructions[entry] = Instruction::RethrowException;
+                                        // Keep instruction indices stable for labels and
+                                        // source spans; no raw packet has been published.
+                                        self.ctx.instructions[entry + 1..=index].fill(Instruction::Nop);
+                                        break;
+                                    }
+                                    _ => break,
+                                }
+                            }
+                        }
+                    }
+                    Ok(result)
                 })();
                 let (_, defers) = self.ctx.exit_scope(false);
                 if let Some(value) = result? {
@@ -33677,10 +33711,11 @@ impl VbcCodegen {
 
         // Get the exception value
         let exception_reg = self.ctx.alloc_temp();
+        let pending = self.ctx.current_pc();
         self.ctx
             .emit(Instruction::GetException { dst: exception_reg });
 
-        self.compile_recover_body(recover, exception_reg, dest, demand)?;
+        self.compile_recover_body(recover, exception_reg, dest, demand, Some(pending))?;
 
         self.ctx.free_temp(exception_reg);
         self.ctx.define_label(&end_label);
@@ -34273,7 +34308,7 @@ impl VbcCodegen {
                 dst: error_reg,
             });
 
-            self.compile_recover_body(recover_body, error_reg, dest, demand)?;
+            self.compile_recover_body(recover_body, error_reg, dest, demand, None)?;
 
             self.ctx.free_temp(error_reg);
         } else {

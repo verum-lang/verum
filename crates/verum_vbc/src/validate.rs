@@ -616,6 +616,9 @@ impl<'a> Validator<'a> {
         // Pending jump targets we couldn't validate during the walk
         // (forward jumps to instructions not yet decoded).
         let mut pending_jumps: Vec<(u32, u32)> = Vec::new();
+        let mut handler_edges = verum_common::Set::new();
+        let mut dispositions = verum_common::Set::new();
+        let mut falls_through = true;
 
         let mut offset = func_start;
         let mut bound_call = None;
@@ -667,6 +670,20 @@ impl<'a> Validator<'a> {
                     bound_call = Some(offset);
                 }
             }
+            if let Instruction::TryBegin { handler_offset } = &instr {
+                handler_edges.insert((instr_start as u32, (offset as i64 + i64::from(*handler_offset)) as u32));
+            }
+            if matches!(instr, Instruction::DiscardException { .. } | Instruction::RethrowException) {
+                dispositions.insert(instr_start as u32);
+                if falls_through {
+                    self.errors.push(VbcError::InvalidInstructionEncoding { offset: instr_start,
+                        reason: "exception disposition must start an exclusively exceptional handler".into() });
+                }
+            }
+            falls_through = !matches!(instr, Instruction::Jmp { .. } | Instruction::Switch { .. }
+                | Instruction::Ret { .. } | Instruction::RetV | Instruction::TailCall { .. }
+                | Instruction::Panic { .. } | Instruction::PanicValue { .. } | Instruction::Unreachable
+                | Instruction::Throw { .. } | Instruction::RethrowException);
             self.validate_instruction(
                 &instr,
                 instr_start,
@@ -686,7 +703,23 @@ impl<'a> Validator<'a> {
         // forward-jump target against the boundary set + the function
         // bytecode range.
         let func_end_u32 = func_end as u32;
+        if !dispositions.is_empty() {
+            let destinations: verum_common::Set<_> =
+                handler_edges.iter().map(|(_, target)| *target).collect();
+            for &site in &dispositions {
+                if !destinations.contains(&site) {
+                    self.errors.push(VbcError::InvalidInstructionEncoding {
+                        offset: site as usize,
+                        reason: "exception disposition requires a handler entry".into(),
+                    });
+                }
+            }
+        }
         for &(source_offset, target) in &pending_jumps {
+            if dispositions.contains(&target) && !handler_edges.contains(&(source_offset, target)) {
+                self.errors.push(VbcError::InvalidInstructionEncoding { offset: source_offset as usize,
+                    reason: "ordinary control flow cannot enter an exception disposition".into() });
+            }
             if (target as usize) < func_start
                 || target > func_end_u32
                 || (target < func_end_u32 && !instr_starts.contains(&target))
@@ -723,6 +756,17 @@ impl<'a> Validator<'a> {
         let func_name = format!("fn#{}@0x{:x}", func.id.0, instr_start);
 
         match instr {
+            Instruction::DiscardException { .. } | Instruction::RethrowException => {
+                if self.module.header.version_minor < crate::format::EXCEPTION_DISPOSITION_VERSION {
+                    self.errors.push(VbcError::InvalidInstructionEncoding {
+                        offset: instr_start,
+                        reason: "exception disposition requires VBC minor 65 or newer".into(),
+                    });
+                }
+                if let Instruction::DiscardException { dst } = instr {
+                    self.check_reg(*dst, max_reg, &func_name);
+                }
+            }
             Instruction::CloneTyped { dst, src, type_ref } => {
                 if self.module.header.version_minor < 57 {
                     self.errors.push(VbcError::InvalidInstructionEncoding {

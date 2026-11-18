@@ -2453,6 +2453,15 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             output.push(Opcode::GetException.to_byte());
             encode_reg(*dst, output);
         }
+        Instruction::DiscardException { dst } => {
+            output.push(Opcode::Extended.to_byte());
+            output.push(ExtendedSubOpcode::DiscardException.to_byte());
+            encode_reg(*dst, output);
+        }
+        Instruction::RethrowException => {
+            output.push(Opcode::Extended.to_byte());
+            output.push(ExtendedSubOpcode::RethrowException.to_byte());
+        }
 
         // ====================================================================
         // Future/Async Operations (extended)
@@ -5354,6 +5363,10 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     let type_ref = decode_type_ref(data, offset)?;
                     Ok(Instruction::DropTyped { src, type_ref })
                 }
+                Some(ExtendedSubOpcode::DiscardException) => Ok(Instruction::DiscardException {
+                    dst: decode_reg(data, offset)?,
+                }),
+                Some(ExtendedSubOpcode::RethrowException) => Ok(Instruction::RethrowException),
                 Some(ExtendedSubOpcode::PanicValue) => Ok(Instruction::PanicValue {
                     message: decode_reg(data, offset)?,
                 }),

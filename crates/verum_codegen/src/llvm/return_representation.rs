@@ -642,6 +642,7 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                 I::Panic { .. } | I::Unreachable => next = false,
                 I::TryBegin { .. }
                 | I::Throw { .. }
+                | I::RethrowException
                 | I::TailCall { .. }
                 | I::JmpCmp { .. }
                 | I::Switch { .. }
