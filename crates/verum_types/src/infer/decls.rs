@@ -6737,7 +6737,7 @@ impl TypeChecker {
         match &impl_decl.kind {
             ImplKind::Inherent(for_type) => {
                 // Inherent impl: register methods directly on the type
-                let ty = self.ast_to_type(for_type)?;
+                let ty = self.declared_type(for_type)?;
 
                 // Get the type name for registering qualified method names
                 let type_name = match &for_type.kind {
@@ -6791,7 +6791,7 @@ impl TypeChecker {
                 ..
             } => {
                 // Protocol impl: register in protocol checker
-                let ty = self.ast_to_type(for_type)?;
+                let ty = self.declared_type(for_type)?;
                 let protocol_name = self.resolve_protocol_conformance_identity(protocol)?;
 
                 // CRITICAL FIX: Resolve Named types to ensure field access works in method bodies.

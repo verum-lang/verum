@@ -284,3 +284,23 @@ fn legacy_metadata_cannot_erase_declared_protocol_premises() {
         assert!(errors.iter().any(|error| matches!(error, TypeError::MethodNotFound { method, .. } if method == "selected")), "{errors:?}");
     }
 }
+
+#[test]
+fn generic_sum_methods_keep_their_nominal_receiver_in_the_implementation() {
+    let source = r#"
+        type Status<T> is Pending | Ready(T);
+        implement<T> Status<T> {
+            fn finished(&self) -> Bool { match self { Status.Ready(_) => true, _ => false } }
+            fn inspect(&mut self) -> Bool { self.finished() }
+        }
+        type Inspect is protocol { fn observe(&self) -> Bool; };
+        implement<T> Inspect for Status<T> {
+            fn observe(&self) -> Bool { self.finished() }
+        }
+        fn external<T>(value: &Status<T>) -> Bool { value.finished() }
+    "#;
+    accepts(source, &[]);
+    let wrong = format!("{source} type Other<T> is Pending | Ready(T);
+        implement<T> Other<T> {{ fn inspect(&self) -> Bool {{ self.finished() }} }}");
+    rejects_call(&wrong, &[]);
+}
