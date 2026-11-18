@@ -156,10 +156,36 @@ impl Studio {
                 }
                 provider.request(method, args).await
             }
+            "agent.preview" => self.preview_execution(params).await,
             "agent.respond" => self.respond(params).await,
             _ => self.workspace_operation(method, params).await,
         }
     }
+    async fn preview_execution(&self, params: Value) -> Result<Value> {
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase", deny_unknown_fields)]
+        struct Review {
+            review_id: Text,
+            thread_id: Text,
+        }
+        let review: Review = serde_json::from_value(params)?;
+        let provider = self.provider().await?;
+        let mut args = {
+            let events = provider.events.lock().await;
+            let request = events.pending_execution(&review.review_id, &review.thread_id)?;
+            agent_tools::operation(request)?.1
+        };
+        let plan = self.execution_plan(&args).await?;
+        // Resolution or interruption may have occurred while the planner waited.
+        provider.events.lock().await.pending_execution(&review.review_id, &review.thread_id)?;
+        Ok(json!({"plan": plan, "source": args["source"].take()}))
+    }
+
+    async fn execution_plan(&self, params: &Value) -> Result<execution::ExecutionPlan> {
+        self.workspace.lock().await.path(field(params, "path")?)?;
+        self.jobs.lock().await.plan(params)
+    }
+
     async fn respond(&self, params: Value) -> Result<Value> {
         let provider = self.provider().await?;
         let thread = params["threadId"].as_str();
@@ -273,12 +299,10 @@ impl Studio {
                     None => write(),
                 }
             }
-            "operation.plan" | "operation.start" => {
+            "operation.plan" => Ok(serde_json::to_value(self.execution_plan(&params).await?)?),
+            "operation.start" => {
                 let path = self.workspace.lock().await.path(field(&params, "path")?)?;
                 let mut jobs = self.jobs.lock().await;
-                if method == "operation.plan" {
-                    return Ok(serde_json::to_value(jobs.plan(&params)?)?);
-                }
                 let running = jobs
                     .list()
                     .await

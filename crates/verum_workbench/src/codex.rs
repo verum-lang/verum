@@ -209,16 +209,24 @@ impl Events {
         json!({"connectionId":self.connection.to_string(),"cursor":self.next,"events":events,"gap":gap,"pendingReviews":reviews,"recoveredReviews":recovered})
     }
 
-    pub(crate) fn take_review(&mut self, review: &str, thread: Option<&str>) -> Result<(Value, Option<Scope>)> {
-        let key = self
-            .requests
+    fn pending_review(&self, review: &str, thread: Option<&str>) -> Result<(&Text, &Value)> {
+        self.requests
             .iter()
-            .find_map(|(key, entry)| {
-                (entry["reviewId"] == review
-                    && entry["message"]["params"]["threadId"].as_str() == thread)
-                    .then(|| key.clone())
+            .find(|(_, entry)| {
+                entry["reviewId"] == review && entry["message"]["params"]["threadId"].as_str() == thread
             })
-            .context("This review has expired or belongs to another conversation")?;
+            .context("This review has expired or belongs to another conversation")
+    }
+
+    pub(crate) fn pending_execution(&self, review: &str, thread: &str) -> Result<&Value> {
+        let (key, entry) = self.pending_review(review, Some(thread))?;
+        ensure!(entry["reviewKind"] == "execution", "This review does not authorize an execution");
+        self.scopes.get(key).context("Execution has no live turn owner")?
+            .admit(|| Ok(&entry["message"]["params"]))
+    }
+
+    pub(crate) fn take_review(&mut self, review: &str, thread: Option<&str>) -> Result<(Value, Option<Scope>)> {
+        let key = self.pending_review(review, thread)?.0.clone();
         let mut entry = self.requests.remove(&key).context("Review has expired")?;
         let scope = self.scopes.remove(&key);
         if let Some(scope) = &scope {

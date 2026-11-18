@@ -152,6 +152,8 @@ while IFS= read -r line; do
                 printf '%s\n' '{"id":"edit-'$thread'","method":"item/tool/call","params":{"threadId":"'$thread'","turnId":"B","tool":"verum_propose","arguments":{"path":"forbidden.vr","source":"fn example() {}","expected_hash":null}}}'
             done
             printf '%s\n' '{"id":"run","method":"item/tool/call","params":{"threadId":"critic","turnId":"B","tool":"verum_run","arguments":{"path":"main.vr","source":"fn example() {}"}}}'
+            printf '%s\n' '{"id":"experiment","method":"item/tool/call","params":{"threadId":"author","turnId":"A","tool":"verum_run","arguments":{"path":"main.vr","source":"fn main() -> Int { 42 }","runtime_diagnostics":true}}}'
+            printf '%s\n' '{"id":"invalid","method":"item/tool/call","params":{"threadId":"author","turnId":"A","tool":"verum_check","arguments":{"path":"main.vr","source":"","timeout_ms":0}}}'
             printf '%s\n' '{"id":"stale","method":"item/tool/call","params":{"threadId":"author","turnId":"A","tool":"verum_propose","arguments":{"path":"forbidden.vr","source":"fn example() {}","expected_hash":null}}}'
             printf '%s\n' '{"id":4,"result":{}}' ;;
     esac
@@ -228,7 +230,7 @@ done
         .await
         .unwrap();
 
-    async fn review(studio: &Studio, thread: &str, wire: &str) -> Result<Value> {
+    async fn review_key(studio: &Studio, thread: &str, wire: &str) -> Result<Value> {
         let events = studio
             .call("agent.events", json!({"after":0,"threadId":thread}))
             .await?;
@@ -239,13 +241,37 @@ done
             .find(|e| e["message"]["id"] == wire)
             .context("missing fixture review")?["reviewId"]
             .clone();
-        studio
-            .call(
-                "agent.respond",
-                json!({"reviewId":id,"threadId":thread,"result":{"approved":true}}),
-            )
-            .await
+        Ok(json!({"reviewId":id,"threadId":thread}))
     }
+    async fn review(studio: &Studio, thread: &str, wire: &str) -> Result<Value> {
+        let mut key = review_key(studio, thread, wire).await?;
+        key["result"] = json!({"approved":true});
+        studio.call("agent.respond", key).await
+    }
+    let key = review_key(&studio, "author", "experiment").await.unwrap();
+    let preview = studio.call("agent.preview", key.clone()).await.unwrap();
+    let source = "fn main() -> Int { 42 }";
+    let plan = studio.call("operation.plan", json!({
+        "kind":"run","path":"main.vr","source":source,"runtime_diagnostics":true
+    })).await.unwrap();
+    assert_eq!(preview, json!({"source":source,"plan":plan}));
+    assert_eq!(plan["permissions"], "source");
+    assert_eq!(plan["timeout_ms"], 60_000);
+    assert_eq!(plan["runtime_diagnostics"], true);
+    assert_eq!(studio.call("agent.preview", key.clone()).await.unwrap(), preview);
+    for (field, value) in [("threadId", "critic"), ("source", "different"), ("path", "other.vr")] {
+        let mut changed = key.clone();
+        changed[field] = json!(value);
+        assert!(studio.call("agent.preview", changed).await.is_err(), "{field}");
+    }
+    for (thread, wire) in [("critic", "go"), ("critic", "run"), ("author", "invalid")] {
+        let request = review_key(&studio, thread, wire).await.unwrap();
+        assert!(studio.call("agent.preview", request).await.is_err(), "{wire}");
+    }
+    let mut declined = key.clone();
+    declined["result"] = json!({"approved":false});
+    assert_eq!(studio.call("agent.respond", declined).await.unwrap()["success"], false);
+    assert!(studio.call("agent.preview", key).await.is_err());
     let editor = studio.call("language.request",json!({"path":"main.vr","method":"textDocument/definition","position":{"line":1,"character":21}})).await.unwrap();
     assert!(!editor["result"].is_null());
     assert_eq!(
