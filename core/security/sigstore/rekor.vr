@@ -73,7 +73,7 @@ mount core.encoding.base64.{
 };
 mount core.encoding.hex.{encode as hex_encode, decode as hex_decode};
 mount core.encoding.jcs.{canonicalize};
-mount core.net.http.{HttpClient, Request, Response, Method, StatusCode, HttpError, Headers, Version};
+mount core.net.http.{HttpClient, Request, Response, StatusCode, HttpError};
 mount core.security.ecc.p256.{P256, P256PublicKey, P256Signature};
 mount core.hash.crypto.sha256.{Sha256, digest};
 mount core.security.sigstore.types.{
@@ -163,41 +163,19 @@ public async fn submit_entry<C: HttpClient>(
     spec:    &JsonValue,
 ) -> Result<LogEntry, RekorError> {
     let url = compose_url(&config.base_url, "/api/v2/log/entries");
-    let body = build_submit_body(kind, api_ver, spec);
-    let body_bytes = encoding.json.encode(&body);
-    let mut headers = Headers.new();
-    headers.set(&"content-type", &CONTENT_TYPE_JSON.to_text());
-    headers.set(&"accept", &CONTENT_TYPE_JSON.to_text());
-    headers.set(&"user-agent", &"verum-rekor/0.1".to_text());
-    let req = Request {
-        version: Version.Http11,
-        method: Method.Post,
-        url,
-        headers,
-        body: Maybe.Some(body_bytes),
-    };
-    let resp = client.send(&req).await
-        .map_err(|e| NetworkError(e))?;
-    if !resp.status.is_success() {
-        return Result.Err(HttpStatus {
-            status: resp.status,
-            body: text_of_body_lossy(&resp.body),
-        });
-    }
-    if resp.body.len() > MAX_ENTRY_RESPONSE_BYTES {
-        return Result.Err(TooLarge { size: resp.body.len(), limit: MAX_ENTRY_RESPONSE_BYTES });
-    }
-    let entry = parse_log_entry_response(&resp.body)?;
-    verify_entry_set(&entry, config)?;
-    Result.Ok(entry)
+    let req = Request.post(url)
+        .header(&"accept", &CONTENT_TYPE_JSON)
+        .header(&"user-agent", &"verum-rekor/0.1")
+        .body_json(encode_submit_body(kind, api_ver, spec));
+    let body = send_entry_request(client, req).await?;
+    parse_verified_entry(&body, config)
 }
 
-fn build_submit_body(kind: &EntryKind, api_ver: &ApiVersion, spec: &JsonValue) -> JsonValue {
-    let mut obj: JsonMap = JsonMap.new();
-    obj.insert("kind".to_text(), json_string(entry_kind_to_text(kind)));
-    obj.insert("apiVersion".to_text(), json_string(api_ver.0.clone()));
-    obj.insert("spec".to_text(), spec.clone());
-    json_object(obj)
+fn encode_submit_body(kind: &EntryKind, api_ver: &ApiVersion, spec: &JsonValue) -> Text {
+    let kind_json = encode(&json_string(entry_kind_to_text(kind)));
+    let version_json = encode(&json_string(api_ver.0.clone()));
+    let spec_json = encode(spec);
+    f"{{\"kind\":{kind_json},\"apiVersion\":{version_json},\"spec\":{spec_json}}}"
 }
 
 // =============================================================================
@@ -230,28 +208,35 @@ async fn fetch_entry_at_url<C: HttpClient>(
     config: &RekorClientConfig,
     url: &Text,
 ) -> Result<LogEntry, RekorError> {
-    let mut headers = Headers.new();
-    headers.set(&"accept", &CONTENT_TYPE_JSON.to_text());
-    headers.set(&"user-agent", &"verum-rekor/0.1".to_text());
-    let req = Request {
-        version: Version.Http11,
-        method:  Method.Get,
-        url:     url.clone(),
-        headers,
-        body: Maybe.None,
+    let req = Request.get(url.clone())
+        .header(&"accept", &CONTENT_TYPE_JSON)
+        .header(&"user-agent", &"verum-rekor/0.1");
+    let body = send_entry_request(client, req).await?;
+    parse_verified_entry(&body, config)
+}
+
+async fn send_entry_request<C: HttpClient>(
+    client: &C,
+    request: Request,
+) -> Result<List<Byte>, RekorError> {
+    let response: Response = match client.send(request).await {
+        Result.Ok(reply) => reply,
+        Result.Err(error) => return Result.Err(RekorError.NetworkError(error)),
     };
-    let resp = client.send(&req).await
-        .map_err(|e| NetworkError(e))?;
-    if !resp.status.is_success() {
-        return Result.Err(HttpStatus {
-            status: resp.status,
-            body: text_of_body_lossy(&resp.body),
-        });
+    let status = response.status_code();
+    let body = response.into_body();
+    if !status.is_success() {
+        return Result.Err(RekorError.HttpStatus { status, body: text_of_body_lossy(&body) });
     }
-    if resp.body.len() > MAX_ENTRY_RESPONSE_BYTES {
-        return Result.Err(TooLarge { size: resp.body.len(), limit: MAX_ENTRY_RESPONSE_BYTES });
+    let size = body.len();
+    if size > MAX_ENTRY_RESPONSE_BYTES {
+        return Result.Err(RekorError.TooLarge { size, limit: MAX_ENTRY_RESPONSE_BYTES });
     }
-    let entry = parse_log_entry_response(&resp.body)?;
+    Result.Ok(body)
+}
+
+fn parse_verified_entry(body: &List<Byte>, config: &RekorClientConfig) -> Result<LogEntry, RekorError> {
+    let entry = parse_log_entry_response(body)?;
     verify_entry_set(&entry, config)?;
     Result.Ok(entry)
 }
@@ -554,16 +539,14 @@ fn compose_url(base: &Text, path: &Text) -> Text {
 }
 
 fn text_of_body_lossy(body: &List<Byte>) -> Text {
-    Text.from_utf8(body.as_slice()).unwrap_or_else(|_| {
-        let mut out: Text = "".to_text();
-        let mut i: Int = 0;
-        while i < body.len() && i < 256 {
-            let b = body[i];
-            out = out.concat(&&f"{b:02x}");
-            i = i + 1;
+    let bytes = body.as_slice();
+    match Text.from_utf8(bytes) {
+        Result.Ok(message) => message,
+        Result.Err(_) => {
+            let end = if bytes.len() < 256 { bytes.len() } else { 256 };
+            hex_encode(&bytes[..end])
         }
-        out
-    })
+    }
 }
 
 // =============================================================================
