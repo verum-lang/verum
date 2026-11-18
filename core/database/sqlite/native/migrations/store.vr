@@ -8,8 +8,8 @@
 //
 // Native SQLite migration adapter. Its current transaction state does not
 // restore schema/rows on rollback, so transactional execute_step refuses before
-// SQL. The existing raw execution helpers remain a separate unqualified path;
-// no-op lock methods do not guarantee serialization of migration runners.
+// SQL. Reads and writes use the SQL facade on the supplied connection. Runner
+// locking is unavailable until the native engine can serialize separate sessions.
 // =============================================================================
 
 @arch_module(
@@ -35,15 +35,17 @@ mount base.{Text, Bool, Maybe, Some, None, Result, Ok, Err};
 mount collections.List;
 mount core.database.common.error.{DbError, AdapterId, AdSqlite, AdapterSpecific};
 mount core.database.common.migrations.store.{
-    MigrationStore, MigrationStoreConfig,
+    MigrationStore, MigrationStoreConfig, combine_migration_errors,
 };
 mount core.database.common.migrations.migration.{
     MigrationStatus, MsPending, MsApplied, MsRolledBack, MsFailed,
 };
 mount core.database.common.migrations.journal.{
-    MigrationJournal, JournalEntry,
+    MigrationJournal, JournalEntry, journal_from_entries,
 };
-mount core.database.sqlite.native.migrations.journal_codec.decode_status;
+mount core.database.sqlite.native.l4_vdbe.register.Register;
+mount core.database.sqlite.native.migrations.journal_codec.decode_entry;
+mount core.database.sqlite.native.l7_api.database.{Database, SqliteApiDbError};
 mount core.database.sqlite.native.l6_session.connection.{SqliteNativeConnection};
 
 // =============================================================================
@@ -51,12 +53,12 @@ mount core.database.sqlite.native.l6_session.connection.{SqliteNativeConnection}
 // =============================================================================
 
 public type SqliteMigrationStore is {
-    conn: SqliteNativeConnection,
+    db: Database,
     config: MigrationStoreConfig,
 };
 
 public fn store_new(conn: SqliteNativeConnection, config: MigrationStoreConfig) -> SqliteMigrationStore {
-    SqliteMigrationStore { conn: conn, config: config }
+    SqliteMigrationStore { db: Database.from_connection(conn), config: config }
 }
 
 implement MigrationStore for SqliteMigrationStore {
@@ -68,21 +70,23 @@ implement MigrationStore for SqliteMigrationStore {
 
     async fn init(&mut self) -> Result<(), DbError> {
         // SQLite-canonical types. CREATE TABLE IF NOT EXISTS is idempotent.
-        let table = &self.config.table_name;
+        let table = tracking_table(&self.config.table_name)?;
         let sql = f"CREATE TABLE IF NOT EXISTS {table} (\n                version    INTEGER PRIMARY KEY,\n                name       TEXT NOT NULL,\n                status     TEXT NOT NULL,\n                applied_at INTEGER,\n                error      TEXT,\n                checksum   INTEGER NOT NULL\n            )";
-        execute_raw(&mut self.conn, &sql).await
+        self.db.execute(&sql).map_err(sql_error)
     }
 
     async fn load_journal(&mut self) -> Result<MigrationJournal, DbError> {
-        let sql = f"SELECT version, name, status, applied_at, error, checksum FROM {self.config.table_name} ORDER BY version";
-        let entries = query_journal_rows(&mut self.conn, &sql).await?;
-        Result.Ok(MigrationJournal { entries: entries })
+        let table = tracking_table(&self.config.table_name)?;
+        let sql = f"SELECT version, name, status, applied_at, error, checksum FROM {table} ORDER BY version";
+        let rows = self.db.query_all(&sql).map_err(sql_error)?;
+        let entries = decode_rows(rows)?;
+        Result.Ok(journal_from_entries(entries))
     }
 
     async fn upsert_entry(&mut self, entry: &JournalEntry) -> Result<(), DbError> {
         let (status_str, applied_at_opt, error_opt) = render_status(&entry.status);
         // SQLite's "UPSERT" — `INSERT ... ON CONFLICT DO UPDATE`.
-        let table = &self.config.table_name;
+        let table = tracking_table(&self.config.table_name)?;
         let version = entry.version;
         let name_lit = sql_text_literal(&entry.name);
         let status_lit = sql_text_literal(&status_str);
@@ -90,29 +94,23 @@ implement MigrationStore for SqliteMigrationStore {
         let error_lit = match &error_opt { Maybe.Some(e) => sql_text_literal(e), Maybe.None => "NULL".to_text() };
         let checksum = entry.checksum;
         let sql = f"INSERT INTO {table} (version, name, status, applied_at, error, checksum)\n               VALUES ({version}, {name_lit}, {status_lit}, {applied_lit}, {error_lit}, {checksum})\n               ON CONFLICT(version) DO UPDATE SET\n                   name = excluded.name,\n                   status = excluded.status,\n                   applied_at = excluded.applied_at,\n                   error = excluded.error,\n                   checksum = excluded.checksum";
-        execute_raw(&mut self.conn, &sql).await
+        self.db.execute(&sql).map_err(sql_error)
     }
 
-    /// No native runner-level lock is implemented here. These no-op methods
-    /// do not provide serialization across separate migration statements.
-    async fn acquire_lock(&mut self) -> Result<(), DbError> { Result.Ok(()) }
-    async fn release_lock(&mut self) -> Result<(), DbError> { Result.Ok(()) }
+    async fn acquire_lock(&mut self) -> Result<(), DbError> { Result.Err(lock_unavailable()) }
+    async fn release_lock(&mut self) -> Result<(), DbError> { Result.Err(lock_unavailable()) }
 
     async fn execute_sql(&mut self, sql: &Text) -> Result<(), DbError> {
-        if self.config.transactional {
-            // Existing raw transaction wrapper; this path does not establish
-            // the stronger execute_step atomicity contract.
-            execute_raw(&mut self.conn, &"BEGIN".to_text()).await?;
-            let exec_res = execute_raw(&mut self.conn, sql).await;
-            match exec_res {
-                Result.Ok(_)  => execute_raw(&mut self.conn, &"COMMIT".to_text()).await,
-                Result.Err(e) => {
-                    let _ = execute_raw(&mut self.conn, &"ROLLBACK".to_text()).await;
-                    Result.Err(e)
-                }
-            }
-        } else {
-            execute_raw(&mut self.conn, sql).await
+        if !self.config.transactional { return self.db.execute(sql).map_err(sql_error); }
+        self.db.begin().map_err(sql_error)?;
+        match self.db.execute(sql).map_err(sql_error) {
+            Result.Ok(_) => self.db.commit().map_err(sql_error),
+            Result.Err(primary) => match self.db.rollback() {
+                Result.Ok(_) => Result.Err(primary),
+                Result.Err(recovery) => Result.Err(combine_migration_errors(
+                    AdSqlite, primary, &"rollback", sql_error(recovery),
+                )),
+            },
         }
     }
 
@@ -128,13 +126,14 @@ implement MigrationStore for SqliteMigrationStore {
         }
         // This retains the existing nontransactional execution path; it is not
         // an atomic fallback and its SQL/journal failures remain observable.
-        execute_raw(&mut self.conn, sql).await?;
+        self.db.execute(sql).map_err(sql_error)?;
         self.upsert_entry(entry).await
     }
 
     async fn drop_tracking_table(&mut self) -> Result<(), DbError> {
-        let sql = f"DROP TABLE IF EXISTS {self.config.table_name}";
-        execute_raw(&mut self.conn, &sql).await
+        let table = tracking_table(&self.config.table_name)?;
+        let sql = f"DROP TABLE IF EXISTS {table}";
+        self.db.execute(&sql).map_err(sql_error)
     }
 }
 
@@ -169,34 +168,43 @@ fn sql_text_literal(t: &Text) -> Text {
     out
 }
 
-async fn execute_raw(conn: &mut SqliteNativeConnection, sql: &Text) -> Result<(), DbError> {
-    conn.execute_simple(sql).await.map(|_| ())
+fn lock_unavailable() -> DbError {
+    DbError.Adapter(AdapterSpecific.new(AdSqlite, "migration_lock_unavailable",
+        "native SQLite does not provide a migration lock across sessions", false))
 }
 
-async fn query_journal_rows(conn: &mut SqliteNativeConnection, sql: &Text) -> Result<List<JournalEntry>, DbError> {
-    let raw_rows = conn.query_simple(sql).await?;
-    let mut entries: List<JournalEntry> = List.new();
-    let mut i: Int = 0;
-    while i < raw_rows.len() {
-        let r = &raw_rows[i];
-        let version    = r.get_int64("version")?;
-        let name       = r.get_text("name")?;
-        let status_txt = r.get_text("status")?;
-        let applied_at = r.get_int64_nullable("applied_at")?;
-        let error      = r.get_text_nullable("error")?;
-        let checksum   = r.get_int64("checksum")?;
-        entries.push(JournalEntry {
-            version: version as Int,
-            name: name,
-            status: decode_status(status_txt, applied_at, error)?,
-            checksum: checksum,
-        });
-        i = i + 1;
+fn sql_error(cause: SqliteApiDbError) -> DbError {
+    DbError.Adapter(AdapterSpecific.new(AdSqlite, "migration_sql", f"{cause:?}", false))
+}
+
+fn decode_rows(rows: List<List<Register>>) -> Result<List<JournalEntry>, DbError> {
+    let mut entries: List<JournalEntry> = List.with_capacity(rows.len());
+    for row in rows.iter() {
+        entries.push(decode_entry(row)?);
     }
     Result.Ok(entries)
 }
 
-// =============================================================================
-// Tests
-// =============================================================================
+/// The configured table name contains one identifier or a schema and table.
+fn tracking_table(name: &Text) -> Result<Text, DbError> {
+    let mut quoted = Text.new();
+    let parts = name.split(&".");
+    if parts.len() < 1 || parts.len() > 2 { return Result.Err(invalid_table_name()); }
+    for part in parts.iter() {
+        if part.len() == 0 { return Result.Err(invalid_table_name()); }
+        if !quoted.is_empty() { quoted.push_byte(0x2e_u8); }
+        quoted.push_byte(0x22_u8);
+        for byte in part.bytes() {
+            if byte == 0_u8 { return Result.Err(invalid_table_name()); }
+            if byte == 0x22_u8 { quoted.push_byte(byte); }
+            quoted.push_byte(byte);
+        }
+        quoted.push_byte(0x22_u8);
+    }
+    Result.Ok(quoted)
+}
 
+fn invalid_table_name() -> DbError {
+    DbError.Adapter(AdapterSpecific.new(AdSqlite, "migration_journal_invalid",
+        "expected a nonempty table or schema.table without NUL", false))
+}

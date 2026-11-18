@@ -1,0 +1,68 @@
+mount core.database.common.error.{AdapterId, DbError};
+mount core.database.common.migrations.journal.JournalEntry;
+mount core.database.common.migrations.migration.{Migration, MigrationStatus, migration_new};
+mount core.database.common.migrations.plan.build;
+mount core.database.common.migrations.runner.{RunMode, runner_new};
+mount core.database.common.migrations.store.{MigrationStore, store_config_default};
+mount core.database.sqlite.native.l6_session.connection.open_admin_memory;
+mount core.database.sqlite.native.l7_api.database.{open_admin, SqliteApiDbError};
+mount core.database.sqlite.native.migrations.store.store_new;
+
+@test
+async fn test_store_refuses_runner_lock() {
+    let mut store = store_new(open_admin_memory().unwrap(), store_config_default());
+    assert(store.adapter_id() is AdapterId.AdSqlite);
+    match store.acquire_lock().await.unwrap_err() {
+        DbError.Adapter(e) => assert_eq(e.code().to_text(), "migration_lock_unavailable"),
+        _ => panic("expected a native SQLite lock error"),
+    }
+}
+
+@test
+async fn test_store_refuses_unlock_without_a_runner_lock() {
+    let mut store = store_new(open_admin_memory().unwrap(), store_config_default());
+    match store.release_lock().await.unwrap_err() {
+        DbError.Adapter(e) => assert_eq(e.code().to_text(), "migration_lock_unavailable"),
+        _ => panic("expected a native SQLite lock error"),
+    }
+}
+
+@test
+async fn test_store_refuses_an_atomic_step() {
+    let entry = JournalEntry { version: 1, name: "one", status: MigrationStatus.MsPending, checksum: 0_i64 };
+    let mut store = store_new(open_admin_memory().unwrap(), store_config_default());
+    match store.execute_step(&"CREATE TABLE incomplete", &entry).await.unwrap_err() {
+        DbError.Adapter(e) => assert_eq(e.code().to_text(), "migration_atomicity_unavailable"),
+        _ => panic("expected a native SQLite atomicity error"),
+    }
+}
+
+@test
+async fn test_store_forwards_the_sql_error_from_the_native_database() {
+    let sql = "CREATE TABLE".to_text();
+    let mut reference = open_admin().unwrap();
+    let cause: SqliteApiDbError = reference.execute(&sql).unwrap_err();
+    let expected = f"{cause:?}";
+    let mut store = store_new(open_admin_memory().unwrap(), store_config_default().with_transactional(false));
+    match store.execute_sql(&sql).await.unwrap_err() {
+        DbError.Adapter(e) => {
+            assert_eq(e.code().to_text(), "migration_sql");
+            assert_eq(e.message().to_text(), expected);
+            assert(e.message().contains(&"expected identifier"));
+        }
+        _ => panic("expected the native SQL error"),
+    }
+}
+
+@test
+async fn test_runner_propagates_native_store_initialization_failure() {
+    let mut steps: List<Migration> = List.new();
+    steps.push(migration_new(1, "one", "CREATE TABLE runs (n INTEGER)"));
+    let plan = build(steps).unwrap();
+    let mut store = store_new(open_admin_memory().unwrap(), store_config_default().with_table_name(""));
+    let runner = runner_new(RunMode.RmStrict);
+    match runner.execute(&plan, &mut store, 17_i64).await {
+        Result.Err(DbError.Adapter(e)) => assert_eq(e.code().to_text(), "migration_journal_invalid"),
+        _ => panic("expected the native store initialization error"),
+    }
+}
