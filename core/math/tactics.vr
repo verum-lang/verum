@@ -120,18 +120,15 @@ public type ProofContext is {
 /// Each proposition becomes a `Goal` with an empty hypothesis list.
 /// The state is marked `dirty = false`; no tactic has been applied yet.
 public fn new_proof_state(goals: List<TacticProp>) -> ProofState {
-    let goal_list: List<Goal> = goals.map(fn(p: TacticProp) -> Goal {
-        Goal {
-            proposition: p,
-            hypotheses: [],
-            label: Maybe.None,
-        }
-    });
-    ProofState {
-        goals: goal_list,
+    let mut state = ProofState {
+        goals: List.with_capacity(goals.len()),
         focus_depth: 0,
         dirty: false,
+    };
+    for proposition in goals {
+        state.goals.push(Goal { proposition, hypotheses: [], label: Maybe.None });
     }
+    state
 }
 
 /// Apply a tactic (represented as a function from ProofState to TacticResult)

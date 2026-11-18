@@ -1,0 +1,14 @@
+mount core.math.tactics.{TacticProp, all_solved, close_goal, new_proof_state};
+
+@test
+fn test_empty_proof_state_is_solved() {
+    assert(all_solved(new_proof_state([])));
+}
+
+@test
+fn test_each_proposition_opens_one_goal() {
+    let state = new_proof_state([TacticProp(17), TacticProp(29)]);
+    let remaining = close_goal(state);
+    assert(!all_solved(remaining));
+    assert(all_solved(close_goal(remaining)));
+}
