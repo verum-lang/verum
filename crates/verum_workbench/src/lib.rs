@@ -34,6 +34,16 @@ pub struct Studio {
     agent: Mutex<Option<Arc<codex::Codex>>>,
     pub config: Config,
 }
+
+#[derive(Debug)]
+struct ReceiptUnavailable;
+
+impl std::fmt::Display for ReceiptUnavailable {
+    fn fmt(&self, output: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        output.write_str("Operation receipt is unavailable")
+    }
+}
+
 impl Studio {
     pub fn open(config: Config) -> Result<Self> {
         Self::open_with_library(config, None)
@@ -253,6 +263,7 @@ impl Studio {
             let step = match &outcome {
                 Ok((success, receipt)) if method == "operation.start" => action_order::receipt_outcome(&owner.review_origin()?, &receipt["agent"], *success),
                 Ok((true, _)) => Step::Succeeded,
+                Err(error) if error.is::<ReceiptUnavailable>() => Step::ReceiptUnavailable,
                 _ => Step::Failed,
             };
             owner.record_action(tool, step);
@@ -272,8 +283,7 @@ impl Studio {
             return Ok((true, result));
         }
         loop {
-            let receipt = self.jobs.lock().await.read(&result["id"]).await
-                .context("Operation receipt is unavailable")?;
+            let receipt = self.jobs.lock().await.read(&result["id"]).await.context(ReceiptUnavailable)?;
             if receipt.status != "running" {
                 return Ok((receipt.status == "succeeded", serde_json::to_value(receipt)?));
             }

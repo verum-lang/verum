@@ -16,6 +16,7 @@ pub(crate) enum Step {
     Dispatched,
     Succeeded,
     Failed,
+    ReceiptUnavailable,
     ReceiptOriginMissing,
     MisboundReceipt,
 }
@@ -155,7 +156,10 @@ impl Window {
                                     Step::Dispatched | Step::RefusedBeforeDispatch
                                 ) | (
                                     Step::Dispatched,
-                                    Step::Succeeded | Step::Failed | Step::ReceiptOriginMissing
+                                    Step::Succeeded
+                                        | Step::Failed
+                                        | Step::ReceiptOriginMissing
+                                        | Step::ReceiptUnavailable
                                 )
                             )
                     }
@@ -175,7 +179,9 @@ impl Window {
                 Step::Failed => check.failed += 1,
                 Step::Declined => check.declined += 1,
                 Step::RefusedBeforeDispatch => check.refused_before_dispatch += 1,
-                Step::ReceiptOriginMissing => check.unbound_receipts += 1,
+                Step::ReceiptOriginMissing | Step::ReceiptUnavailable => {
+                    check.unbound_receipts += 1
+                }
                 _ => {}
             }
         }

@@ -159,3 +159,59 @@ fn execution_outcomes_require_the_recorded_owner_and_exact_review_id() {
         Step::ReceiptOriginMissing
     );
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn an_evicted_execution_receipt_reports_incomplete_ordering() {
+    use crate::{Config, Studio, agent_runtime::Turns};
+    use serde_json::json;
+    use std::time::Duration;
+
+    let root = tempfile::tempdir().unwrap();
+    let studio = Studio::open(Config {
+        workspace: root.path().into(),
+        codex: "unused".into(),
+        verum: "/usr/bin/true".into(),
+        proof: "unused".into(),
+        port: 0,
+    })
+    .unwrap();
+    let turns = Turns::new(Uuid::new_v4());
+    let owner = turns
+        .get("author", "A")
+        .unwrap()
+        .child(Uuid::new_v4())
+        .unwrap();
+    owner.record_action("verum_check", Step::Approved);
+    let request = json!({"tool":"verum_check","arguments":{"path":"main.vr","source":""}});
+    let execute = studio.tool_owned(&request, Some(&owner));
+    let evict = async {
+        // The first receipt read sees the running process. Hold the jobs index until the
+        // worker settles, then evict its terminal entry before the next tool poll.
+        let mut jobs = loop {
+            let jobs = studio.jobs.lock().await;
+            if !jobs.jobs.is_empty() {
+                break jobs;
+            }
+            drop(jobs);
+            tokio::task::yield_now().await;
+        };
+        let receipt = jobs.jobs[0].receipt.clone();
+        while receipt.lock().await.status == "running" {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+        assert_eq!(receipt.lock().await.status.as_str(), "succeeded");
+        jobs.jobs.remove(0);
+    };
+    let (reply, ()) = tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::join!(biased; execute, evict)
+    })
+    .await
+    .unwrap();
+    assert!(reply.unwrap_err().is::<crate::ReceiptUnavailable>());
+    let check = turns.journal.check("author", 0, None);
+    assert_eq!(
+        (check.status, check.unbound_receipts, check.failed),
+        (Status::Incomplete, 1, 0)
+    );
+}
