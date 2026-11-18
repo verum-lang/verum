@@ -176,6 +176,8 @@ fn source_mounts_and_reexports_carry_roles_without_classifying_function_types() 
         "public mount core.reexport.roles.{VALUE, SLOT, callable, Build};",
         1,
     );
+    verum_modules::resolve_specific_reexport_kinds(&mut registry)
+        .expect("resolve named export edges before mounting the registry");
     for owner in ["core.reexport.roles", "core.reexport"] {
         let mut checker = TypeChecker::new();
         checker.register_primitives();
