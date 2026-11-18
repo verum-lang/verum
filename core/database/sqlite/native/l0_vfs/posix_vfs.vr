@@ -594,5 +594,5 @@ fn parent_of(path: &Text) -> Text {
         out.push(raw[j]);
         j = j + 1;
     }
-    Text.from_bytes(&out).unwrap_or(".".clone())
+    Text.from_utf8(out.as_slice()).unwrap_or(".".clone())
 }

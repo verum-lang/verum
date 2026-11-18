@@ -279,7 +279,7 @@ fn bytes_to_text(buf: &[Byte], start: Int, len: Int) -> Text {
         acc.push(buf[start + i]);
         i = i + 1;
     }
-    Text.from_bytes(&acc).unwrap_or("".clone())
+    Text.from_utf8(acc.as_slice()).unwrap_or("".clone())
 }
 
 fn cmp_blob(

@@ -432,7 +432,7 @@ fn int64_to_text(n: Int64) -> Text {
         out.push(digits[i]);
         i = i - 1;
     }
-    Text.from_bytes(&out).unwrap_or("0".clone())
+    Text.from_utf8(out.as_slice()).unwrap_or("0".clone())
 }
 
 fn float64_to_text(x: Float64) -> Text {
@@ -455,5 +455,5 @@ fn float64_to_text(x: Float64) -> Text {
     }
     bytes.push(0x2E as Byte);   // '.'
     bytes.push(0x30 as Byte);   // trailing zero placeholder
-    Text.from_bytes(&bytes).unwrap_or(out)
+    Text.from_utf8(bytes.as_slice()).unwrap_or(out)
 }

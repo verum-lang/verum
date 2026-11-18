@@ -413,7 +413,7 @@ fn int64_to_text(i: Int64) -> Text {
     if neg { out.push(0x2D as Byte); }
     let mut k: Int = digits.len() - 1;
     while k >= 0 { out.push(digits[k]); k = k - 1; }
-    Text.from_bytes(&out).unwrap_or("0".clone())
+    Text.from_utf8(out.as_slice()).unwrap_or("0".clone())
 }
 
 /// Best-effort Float64 → Text — strips trailing zeros from the
@@ -447,7 +447,7 @@ fn float_to_text(x: Float64) -> Text {
         k = k + 1;
     }
     if k == 0 { out.push(0x30 as Byte); }   // ensure at least "x.0"
-    Text.from_bytes(&out).unwrap_or("0.0".clone())
+    Text.from_utf8(out.as_slice()).unwrap_or("0.0".clone())
 }
 
 /// Convert a Text into an owned List<Byte> (UTF-8 bytes).  Used by

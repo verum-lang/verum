@@ -102,7 +102,7 @@ fn canonicalise(sql: &Text) -> Text {
         }
         out = trimmed;
     }
-    match Text.from_utf8(out) {
+    match Text.from_utf8(out.as_slice()) {
         Result.Ok(t)  => t,
         Result.Err(_) => sql.clone(),       // adversarial input → fall back to verbatim
     }

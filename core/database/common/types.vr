@@ -513,7 +513,7 @@ implement WireReader {
             j = j + 1;
         }
         self.pos = i + 1;     // skip the NUL
-        match Text.from_utf8(out) {
+        match Text.from_utf8(out.as_slice()) {
             Result.Ok(s)  => Result.Ok(s),
             Result.Err(_) => Result.Err(WrInvalidUtf8),
         }

@@ -405,7 +405,7 @@ implement PgJsonb {
     public fn into_canonical(&self, arena: &SpindleArena) -> Maybe<JsonbValue> {
         match self.text.to_owned(arena) {
             Maybe.None       => Maybe.None,
-            Maybe.Some(body) => match Text.from_utf8(body) {
+            Maybe.Some(body) => match Text.from_utf8(body.as_slice()) {
                 Result.Ok(t)  => Maybe.Some(JsonbValue { version: self.version, json_text: t }),
                 Result.Err(_) => Maybe.None,
             }

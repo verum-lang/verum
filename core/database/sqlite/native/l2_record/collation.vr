@@ -86,13 +86,7 @@ fn rtrim_spaces(t: &Text) -> Text {
     while end > 0 && raw[end - 1] == (0x20 as Byte) {
         end = end - 1;
     }
-    let mut out: List<Byte> = List.new();
-    let mut i: Int = 0;
-    while i < end {
-        out.push(raw[i]);
-        i = i + 1;
-    }
-    Text.from_bytes(&out).unwrap_or("".clone())
+    Text.from_utf8(&raw[..end]).unwrap_or("".clone())
 }
 
 // -----------------------------------------------------------------------------

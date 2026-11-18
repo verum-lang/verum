@@ -502,7 +502,7 @@ fn lex_string(st: &mut LexerState) -> Result<SqlToken, SqlLexError> {
                 continue;
             }
             st.pos = st.pos + 1;
-            return Result.Ok(TStringLit(Text.from_bytes(&out).unwrap_or("".clone())));
+            return Result.Ok(TStringLit(Text.from_utf8(out.as_slice()).unwrap_or("".clone())));
         }
         out.push(b);
         st.pos = st.pos + 1;
@@ -526,7 +526,7 @@ fn lex_quoted_ident_with_delim(st: &mut LexerState, delim: Byte) -> Result<SqlTo
                 continue;
             }
             st.pos = st.pos + 1;
-            return Result.Ok(TIdent(Text.from_bytes(&out).unwrap_or("".clone())));
+            return Result.Ok(TIdent(Text.from_utf8(out.as_slice()).unwrap_or("".clone())));
         }
         out.push(b);
         st.pos = st.pos + 1;
@@ -704,7 +704,7 @@ fn lex_identifier(st: &mut LexerState) -> SqlToken {
         raw.push(st.input[i]);
         i = i + 1;
     }
-    let t = Text.from_bytes(&raw).unwrap_or("".clone());
+    let t = Text.from_utf8(raw.as_slice()).unwrap_or("".clone());
     match lookup_keyword(&t) {
         Maybe.Some(kw) => TKeyword(kw),
         Maybe.None     => TIdent(t),
@@ -752,7 +752,7 @@ fn lex_named_variable(st: &mut LexerState, sigil: Byte, wrapper: fn(Text) -> Var
         raw.push(st.input[i]);
         i = i + 1;
     }
-    TVariable(wrapper(Text.from_bytes(&raw).unwrap_or("".clone())))
+    TVariable(wrapper(Text.from_utf8(raw.as_slice()).unwrap_or("".clone())))
 }
 
 fn lex_punct_or_op(st: &mut LexerState) -> Result<SqlToken, SqlLexError> {

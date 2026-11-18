@@ -147,13 +147,7 @@ public fn parse_ok(payload: &[Byte], capabilities: Int) -> Result<OkPacket, MyFr
         warnings = read_u16_le(payload, off)?;
         off = off + 2;
     }
-    let mut info_bytes: List<Byte> = List.new();
-    let mut i = off;
-    while i < payload.len() as Int {
-        info_bytes.push(payload[i]);
-        i = i + 1;
-    }
-    let info = match Text.from_bytes(&info_bytes) {
+    let info = match Text.from_utf8(&payload[off..]) {
         Result.Ok(t)  => t,
         Result.Err(_) => "".clone(),
     };
@@ -189,19 +183,13 @@ public fn parse_err(payload: &[Byte], capabilities: Int) -> Result<ErrPacket, My
     if (capabilities & CAP_PROTOCOL_41) != 0 {
         off = off + 1;     // '#' marker
         let bytes = read_bytes(payload, off, 5)?;
-        match Text.from_bytes(&bytes) {
+        match Text.from_utf8(bytes.as_slice()) {
             Result.Ok(t)  => { sql_state = t; }
             Result.Err(_) => {}
         }
         off = off + 5;
     }
-    let mut msg_bytes: List<Byte> = List.new();
-    let mut i = off;
-    while i < payload.len() as Int {
-        msg_bytes.push(payload[i]);
-        i = i + 1;
-    }
-    let message = match Text.from_bytes(&msg_bytes) {
+    let message = match Text.from_utf8(&payload[off..]) {
         Result.Ok(t)  => t,
         Result.Err(_) => "".clone(),
     };
@@ -300,7 +288,7 @@ public fn parse_column_def(payload: &[Byte]) -> Result<MyColumnDef, MyFrameError
 fn bytes_to_text(o: &Maybe<List<Byte>>) -> Text {
     match o {
         Maybe.None    => "".clone(),
-        Maybe.Some(v) => match Text.from_bytes(v) { Result.Ok(t) => t, Result.Err(_) => "".clone() },
+        Maybe.Some(v) => match Text.from_utf8(v.as_slice()) { Result.Ok(t) => t, Result.Err(_) => "".clone() },
     }
 }
 

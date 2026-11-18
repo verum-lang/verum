@@ -10,6 +10,7 @@
 //   * LeiKind 5-variant (LkNull / LkOneByte / LkTwoBytes / LkThreeBytes /
 //     LkEightBytes)
 //   * frame_packet() — 4-byte header + payload layout
+//   * read_cstr() — packet bounds, consumed byte count and UTF-8 errors
 //   * put_u8 / put_u16_le / put_u32_le / put_u64_le little-endian byte ordering
 //   * encode_lei across 4 size tiers (1B / 3B / 4B / 9B) + negative clamp
 //   * decode_lei round-trip across all 5 LeiKind variants
@@ -19,7 +20,7 @@ mount core.database.mysql.wire.frame.{
     MyFrameError, LeiKind,
     FeShort, FeBadLength, FeInvalidUtf8,
     LkNull, LkOneByte, LkTwoBytes, LkThreeBytes, LkEightBytes,
-    frame_packet, encode_lei, decode_lei,
+    frame_packet, encode_lei, decode_lei, read_cstr,
     put_u8, put_u16_le, put_u32_le, put_u64_le,
 };
 mount core.base.maybe.{Maybe, Some, None};
@@ -33,6 +34,25 @@ mount core.base.result.{Result, Ok, Err};
 fn test_my_frame_error_invalid_utf8_variant() {
     let e: MyFrameError = FeInvalidUtf8;
     assert(e is FeInvalidUtf8);
+}
+
+@test
+fn test_read_cstr_decodes_only_the_terminated_byte_range() {
+    let packet: [Byte; 6] = [0xff_u8, 0xe2_u8, 0x82_u8, 0xac_u8, 0_u8, 0xff_u8];
+    let (text, consumed) = read_cstr(&packet[..], 1).unwrap();
+    assert_eq(text, "€");
+    assert_eq(consumed, 4);
+    let (empty, terminator) = read_cstr(&packet[..], 4).unwrap();
+    assert_eq(empty, "");
+    assert_eq(terminator, 1);
+}
+
+@test
+fn test_read_cstr_distinguishes_invalid_utf8_from_missing_terminator() {
+    let invalid: [Byte; 3] = [0xc3_u8, 0x28_u8, 0_u8];
+    assert(read_cstr(&invalid[..], 0).unwrap_err() is MyFrameError.FeInvalidUtf8);
+    let unterminated: [Byte; 2] = [0xc3_u8, 0x28_u8];
+    assert(read_cstr(&unterminated[..], 0).unwrap_err() is not MyFrameError.FeInvalidUtf8);
 }
 
 // =============================================================================

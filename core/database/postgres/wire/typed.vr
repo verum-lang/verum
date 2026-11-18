@@ -353,7 +353,7 @@ fn decode_float8(s: &ArenaSlice) -> Result<Float, DbError> {
 fn decode_text(s: &ArenaSlice, arena: &SpindleArena) -> Result<Text, DbError> {
     match s.to_owned(arena) {
         Maybe.None       => Result.Err(decode_fault("text: arena slice stale".clone())),
-        Maybe.Some(b)    => match Text.from_utf8(b) {
+        Maybe.Some(b)    => match Text.from_utf8(b.as_slice()) {
             Result.Ok(t)  => Result.Ok(t),
             Result.Err(_) => Result.Err(decode_fault("text: invalid UTF-8".clone())),
         }
