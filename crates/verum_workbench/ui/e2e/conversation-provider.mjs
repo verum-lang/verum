@@ -15,6 +15,16 @@ const operations = [
 function requestExecution() {
   send({id: 'operation', method: 'item/tool/call', params: {...execution, ...operations.shift()}});
 }
+const checks = ['fn main() -> Int { 42 }', 'fn main() -> Int { missing_receipt_value }'];
+function requestCheck() {
+  if (!checks.length) {
+    send({method: 'turn/completed', params: {threadId: '4', turn: {id: 'T-4', status: 'completed'}}});
+    return;
+  }
+  send({id: 'check', method: 'item/tool/call', params: {
+    threadId: '4', turnId: 'T-4', tool: 'verum_check', arguments: {path, source: checks.shift()},
+  }});
+}
 for await (const line of createInterface({input: process.stdin})) {
   const {id, method, params: p} = JSON.parse(line);
   const reply = result => send({id, result});
@@ -41,6 +51,7 @@ for await (const line of createInterface({input: process.stdin})) {
       // Age this live occurrence out of the host journal before the first scoped poll.
       for (let i = 0; i < 513; i++) send({method: 'item/completed', params: {threadId: '2', item: {id: String(i), type: 'reasoning'}}});
     }
+    if (threadId === '4') requestCheck();
     reply({turn});
   }
   if (method === 'turn/interrupt') {
@@ -51,4 +62,5 @@ for await (const line of createInterface({input: process.stdin})) {
     send({method: 'turn/completed', params: {threadId: '2', turn: {id: 'T-2', status: 'completed'}}});
   }
   if (method === undefined && id === 'operation' && operations.length) requestExecution();
+  if (method === undefined && id === 'check') requestCheck();
 }

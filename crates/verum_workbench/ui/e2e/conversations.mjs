@@ -1,4 +1,5 @@
-// node e2e/conversations.mjs /path/to/verum-studio /path/to/chrome-headless-shell
+// node e2e/conversations.mjs /path/to/verum-studio /path/to/chrome-headless-shell [/path/to/verum]
+// VERUM_STUDIO_E2E_STARTUP_MS extends only the packaged server's cold-start budget.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -10,8 +11,9 @@ import { createInterface } from 'node:readline';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 
-const [binary, browser] = process.argv.slice(2);
+const [binary, browser, compiler] = process.argv.slice(2);
 assert.ok(binary && browser, 'Pass the packaged Studio and Chromium executable paths');
+const verum = compiler ? resolve(compiler) : 'verum';
 const root = await mkdtemp(join(tmpdir(), 'verum-conversations-'));
 const workspace = join(root, 'project');
 const children = [];
@@ -24,8 +26,18 @@ try {
   await mkdir(workspace);
   await writeFile(join(workspace, 'experiment.vr'), 'fn main() -> Int { 42 }');
   const provider = fileURLToPath(new URL('./conversation-provider.mjs', import.meta.url));
-  const studio = launch(binary, ['--workspace', workspace, '--codex', provider], ['ignore','pipe','inherit']);
-  const [startup] = await once(createInterface({input: studio.stdout}), 'line', {signal: AbortSignal.timeout(15000)});
+  const studio = launch(binary, ['--workspace', workspace, '--codex', provider, '--verum', verum], ['ignore','pipe','inherit']);
+  const startupMs = Number(process.env.VERUM_STUDIO_E2E_STARTUP_MS ?? 15000);
+  const deadline = AbortSignal.timeout(startupMs);
+  const [startup] = await Promise.race([
+    once(createInterface({input: studio.stdout}), 'line', {signal: deadline}),
+    once(studio, 'exit', {signal: deadline}).then(([code, signal]) => {
+      throw Error('Studio exited before publishing its launch URL: ' + (signal || code));
+    }),
+  ]).catch(error => {
+    if (deadline.aborted) throw Error('Studio startup exceeded ' + startupMs + ' ms');
+    throw error;
+  });
   const url = new URL(startup.replace(/^Verum Studio: /, ''));
   const chrome = launch(browser, ['--remote-debugging-pipe', '--no-first-run', '--disable-background-networking', '--user-data-dir=' + join(root, 'profile')], ['ignore','ignore','ignore','pipe','pipe']);
   const stream = chrome.stdio[4].setEncoding('utf8');
@@ -57,8 +69,8 @@ try {
     if (result.exceptionDetails) throw Error(result.exceptionDetails.exception?.description || result.exceptionDetails.text);
     return result.result.value;
   }
-  async function wait(expression) {
-    const deadline = Date.now() + 15000;
+  async function wait(expression, timeout = 15000) {
+    const deadline = Date.now() + timeout;
     do { if (await evaluate(`Boolean(${expression})`)) return; await delay(75); } while (Date.now() < deadline);
     throw Error('Studio did not reach ' + expression);
   }
@@ -97,12 +109,13 @@ try {
   await evaluate(`window.card = i => document.querySelectorAll('#agent-messages > div:not([hidden]) > .approval')[i];
     window.fields = el => Object.fromEntries([...el.querySelectorAll('dt')].map(dt => [dt.textContent, dt.nextElementSibling.textContent]));
     window.language = value => { byId('language').value = value; byId('language').dispatchEvent(new Event('change')); };
-    window.previews = [];
+    window.previews = []; window.receiptReads = [];
     const send = window.fetch.bind(window);
     let journalReady;
     const recovery = new Promise(resolve => { journalReady = resolve; });
     window.fetch = async (url, options) => {
       const {method, params} = JSON.parse(options.body);
+      if (method === 'operation.read') receiptReads.push(params.id);
       const scopedPoll = method === 'agent.events' && params.threadId === '3';
       if (scopedPoll) await recovery;
       const response = await send(url, options);
@@ -129,7 +142,7 @@ try {
   assert.deepEqual(await evaluate('fields(card(0))'), {
     Operation: 'Execution', 'File path': 'experiment.vr', 'Source mode': 'Script entry', 'Time limit': '60,000 ms',
     'Script permissions': 'Source / CLI defaults', 'Runtime diagnostics': 'Off',
-    Executable: 'verum', 'Source SHA-256': createHash('sha256').update(source).digest('hex'),
+    Executable: verum, 'Source SHA-256': createHash('sha256').update(source).digest('hex'),
   });
   assert.deepEqual(await evaluate('previews[0]'), { reviewId: await evaluate('recoveredId'), threadId: '3' });
   assert.equal(await evaluate("card(0).querySelector('details').open"), false);
@@ -150,7 +163,29 @@ try {
   assert.equal(await evaluate("card(2).querySelector('.primary, .approval-plan')"), null);
   assert.equal(await evaluate("card(2).querySelector('button').disabled"), true);
   assert.equal(await evaluate('new Set(previews.map(p => p.reviewId)).size'), 3);
-  console.log('Passed concurrent conversations, owner-bound read and interrupt, recovered execution preview, source and locale, decline after failure and expired preview delivery.');
+  await evaluate("window.holdPreview = false; byId('new-thread').click()");
+  await wait("byId('agent-conversation').selectedIndex === 3");
+  await evaluate("compose('Check both source revisions')");
+  for (const index of [0, 1]) {
+    await wait(`card(${index})?.querySelector('.primary')`);
+    await evaluate(`card(${index}).querySelector('.primary').click()`);
+    await wait(`card(${index})?.querySelector('[data-key="response"] pre')`, 75000);
+    const result = await evaluate(`JSON.parse(card(${index}).querySelector('[data-key="response"] pre').textContent).tool_result`);
+    assert.equal(result.status, index ? 'failed' : 'succeeded', result.error || result.stderr);
+    assert.equal(await evaluate(`card(${index}).querySelector('.approval-actions button').textContent`), 'Open operation receipt');
+  }
+  await evaluate(`window.receipt = () => JSON.parse(byId('result-detail').querySelector('[data-key="receipt"] pre')?.textContent || 'null');
+    window.fromCard = i => JSON.parse(card(i).querySelector('[data-key="response"] pre').textContent).tool_result;
+    language('ru');`);
+  for (const index of [1, 0]) {
+    assert.equal(await evaluate(`card(${index}).querySelector('.approval-actions button').textContent`), 'Открыть отчёт об операции');
+    await evaluate(`card(${index}).querySelector('.approval-actions button').click()`);
+    await wait(`byId('operations-tab').getAttribute('aria-selected') === 'true' && receipt()?.id === fromCard(${index}).id && document.activeElement?.dataset.focusKey === receipt().id`);
+    assert.equal(await evaluate('receiptReads.at(-1)'), await evaluate('receipt().id'));
+    assert.equal(await evaluate('receipt().status'), index ? 'failed' : 'succeeded');
+    assert.equal(await evaluate('receipt().agent.review_id'), await evaluate(`previews[${index + 3}].reviewId`));
+  }
+  console.log('Passed concurrent conversations, owner-bound read and interrupt, recovered execution review, decline after preview failure, expired preview delivery and exact history links for successful and failed Verum checks.');
 } finally {
   await Promise.all(children.map(async child => {
     if (child.exitCode !== null || child.signalCode !== null) return;

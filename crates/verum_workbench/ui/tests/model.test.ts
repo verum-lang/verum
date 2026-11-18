@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { sameDocumentRevision, replaceDocumentRevision, isStale, mergeReceipts, knownReceiptVersions, safeAuthUrl, relativeVerumPath, approvalKind, approvalReply, parseArguments, type Receipt } from '../src/model.ts';
+import { sameDocumentRevision, replaceDocumentRevision, isStale, mergeReceipts, knownReceiptVersions, reviewedOperationId, safeAuthUrl, relativeVerumPath, approvalKind, approvalReply, parseArguments, type Receipt } from '../src/model.ts';
 
 test('delayed document responses cannot replace intervening edits or a reopened document', async () => {
   for (const after of [{ path: 'a.vr', editVersion: 2 }, { path: 'b.vr', editVersion: 1 }, { path: 'a.vr', editVersion: 3 }]) {
@@ -27,6 +27,24 @@ test('document replacement distinguishes consent, current results and failed rea
 });
 
 const receipt: Receipt = { id: 'one', kind: 'proof', path: 'identity.vr', source_mode: 'source', source_hash: 'revision-a', status: 'succeeded', stdout: '', stderr: '', elapsed_ms: 4, exit_code: 0 };
+
+test('approved and failed receipts link only to their own host, thread, turn and review occurrence', () => {
+  const owner = { connection: 'host', conversation: 'author', turn: 'turn' };
+  const review = { ...owner, review_id: 'first' };
+  const next = { ...owner, review_id: 'second' };
+  const passed = { ...receipt, agent: review };
+  const failed = { ...receipt, id: 'two', agent: next, status: 'failed' };
+  assert.equal(reviewedOperationId(passed, review), 'one');
+  assert.equal(reviewedOperationId(failed, next), 'two');
+  assert.equal(reviewedOperationId(failed, review), null);
+  assert.equal(reviewedOperationId(passed, next), null);
+  for (const key of ['connection', 'conversation', 'turn']) {
+    assert.equal(reviewedOperationId(passed, { ...review, [key]: 'other' }), null);
+  }
+  for (const value of [receipt, { ...receipt, agent: owner }, { ...passed, id: null }, { error: 'declined' }, null]) {
+    assert.equal(reviewedOperationId(value, review), null);
+  }
+});
 
 test('startup restore is revoked by typing or opening another file during an async read', async () => {
   const requested = { path: 'experiment.vr', editVersion: 0 };

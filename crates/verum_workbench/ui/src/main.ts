@@ -26,7 +26,7 @@ import { initializeLanguage, setLocale, currentLocale, m, t, setText, setAttribu
 import { api, initialToken, isConnected, connectSession, onSessionChange } from './api';
 import { SessionAccessError, SessionChangedError } from './session';
 import type { SourceMode } from './model';
-import { STARTER, IDENTITY, sameDocumentRevision, replaceDocumentRevision, isStale, mergeReceipts, knownReceiptVersions, safeAuthUrl, relativeVerumPath, approvalKind, approvalReply, parseArguments, type Receipt, type RunPermissions, type ExecutionPlan } from './model';
+import { STARTER, IDENTITY, sameDocumentRevision, replaceDocumentRevision, isStale, mergeReceipts, knownReceiptVersions, reviewedOperationId, safeAuthUrl, relativeVerumPath, approvalKind, approvalReply, parseArguments, type AgentReview, type Receipt, type RunPermissions, type ExecutionPlan } from './model';
 
 // Register before command/editor handlers. The connection page keeps ordinary
 // text input and browser defaults, but cannot dispatch workspace commands.
@@ -94,6 +94,7 @@ let hashGeneration = 0;
 let hashTimer = 0;
 let receipts: Receipt[] = [];
 let selectedReceipt: string | null = null;
+let receiptNavigation = 0;
 let isSaving = false;
 let starting = false;
 let switching = false;
@@ -918,7 +919,7 @@ async function startOperation(kind: Receipt['kind'], diagnostics?: boolean) {
     if (plan.source_mode !== request.source_mode) throw new Error(t(m('This Studio host did not preserve the requested source mode.')));
     if (kind === 'run' && request.runtime_diagnostics && plan.runtime_diagnostics !== true) throw new Error(t(m('This Studio host does not support runtime diagnostics. Restart with the matching Studio build.')));
     const result = await api<{ id: string }>('operation.start', request);
-    selectedReceipt = result.id; await refreshOperations(); resultView(false); setPane('results'); announce(m('{kind} started for {path}', { kind: operationLabel(kind), path: request.path }));
+    selectReceipt(result.id); await refreshOperations(); resultView(false); setPane('results'); announce(m('{kind} started for {path}', { kind: operationLabel(kind), path: request.path }));
   } finally { starting = false; updateDocumentState(); }
 }
 bind('run', () => startOperation('run')); bind('check', () => startOperation('check')); bind('prove', () => startOperation('proof'));
@@ -938,6 +939,22 @@ async function refreshOperations() {
 const elapsed = (receipt: Receipt) => receipt.status === 'running' && receipt.started_unix_ms ? Math.max(0, Date.now() - receipt.started_unix_ms) : receipt.elapsed_ms;
 let detailSignature = '';
 let historySignature = '';
+function selectReceipt(id: string) {
+  receiptNavigation++; selectedReceipt = id; renderResults();
+}
+async function openReviewedReceipt(id: string, review: AgentReview, active: () => boolean) {
+  if (!active()) return;
+  const request = ++receiptNavigation;
+  const receipt = await api<Receipt>('operation.read', { id });
+  if (request !== receiptNavigation || !active()) return;
+  const unavailable = () => new Error(t(m('The recorded receipt could not be matched to this review.')));
+  if (reviewedOperationId(receipt, review) !== id) throw unavailable();
+  const history = mergeReceipts(receipts, [receipt]);
+  if (reviewedOperationId(history.find(item => item.id === id), review) !== id) throw unavailable();
+  receipts = history;
+  selectReceipt(id); resultView(false); setPane('results');
+  $('history').querySelector<HTMLButtonElement>('[aria-current="true"]')?.focus();
+}
 function restoreFocusAfterRender(container: HTMLElement) {
   const active = document.activeElement;
   if (!(active instanceof HTMLElement) || !container.contains(active)) return () => {};
@@ -982,7 +999,7 @@ function renderResults() {
     const restoreFocus = restoreFocusAfterRender($('history'));
     historySignature = nextHistory; $('history').replaceChildren();
     for (const receipt of [...receipts].reverse()) {
-    const entry = button('', () => { selectedReceipt = receipt.id; renderResults(); }, 'history-item');
+    const entry = button('', () => selectReceipt(receipt.id), 'history-item');
     entry.dataset.focusKey = receipt.id;
     entry.setAttribute('aria-current', String(receipt.id === selectedReceipt));
     const row = node('span', 'history-row'); row.append(icon(receipt.kind === 'proof' ? 'proof' : receipt.kind === 'check' ? 'check' : 'run'), node('span', '', operationLabel(receipt.kind)), node('span', `badge ${receipt.status}`, m(receipt.status)));
@@ -1389,6 +1406,12 @@ async function showApproval(c: Conversation, reviewId: string, method: string, p
       setText(status, !approved ? m('Request declined.') : response.success === true ? m('Tool completed. Its result is available below.') : response.success === false ? m('The tool reported a failure. Inspect the response below.') : m('Approval delivered. Inspect the tool result and evidence before treating the request as successful.'));
       if (result !== undefined && result !== null) appendDetails(content, m('Tool response'), result, 'response');
       c.reviews.delete(reviewId); agentState();
+      if (approved && kind === 'execution' && connection && owner && typeof params.turnId === 'string') {
+        const review = { connection, conversation: owner, turn: params.turnId, review_id: reviewId };
+        const id = reviewedOperationId(response.tool_result, review);
+        if (id) actions.replaceChildren(button(m('Open operation receipt'),
+          () => openReviewedReceipt(id, review, () => current() && c === selected), 'quiet-button'));
+      }
       if (approved && kind === 'source' && typeof args.path === 'string') {
         await refreshFiles();
         if (!switching && args.path === currentPath && !dirty()) {

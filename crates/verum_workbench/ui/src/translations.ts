@@ -395,6 +395,8 @@ export const translations = {
   'This result does not describe the current editor source.': 'Этот результат не относится к текущему коду в редакторе.',
   'Current source': 'Текущий код',
   'Copy receipt': 'Скопировать отчёт',
+  'Open operation receipt': 'Открыть отчёт об операции',
+  'The recorded receipt could not be matched to this review.': 'Не удалось связать сохранённый отчёт с этим запросом.',
   'Receipt copied': 'Отчёт скопирован',
   '{path} · {seconds}s · {hash}': '{path} · {seconds} с · {hash}',
   '{path} · {seconds}s · exit {code} · {hash}': '{path} · {seconds} с · код завершения {code} · {hash}',

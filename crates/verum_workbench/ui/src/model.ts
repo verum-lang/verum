@@ -2,6 +2,8 @@ import type { RuntimeReport } from './runtime';
 export type RunPermissions = 'source' | 'deny-all' | 'allow-all';
 export type SourceMode = 'source' | 'script';
 export type ProofProfile = 'verum-source-pi-id/1' | 'verum-source-finite/1';
+type AgentTurn = { connection: string; conversation: string; turn: string };
+export type AgentReview = AgentTurn & { review_id: string };
 export type ExecutionPlan = {
   source_mode?: SourceMode | null;
   kind: 'run' | 'check' | 'proof'; path: string; source_hash: string;
@@ -9,6 +11,7 @@ export type ExecutionPlan = {
   proof_profile?: ProofProfile | null;
 };
 export type Receipt = {
+  agent?: (AgentTurn & { review_id?: string | null }) | null;
   source_mode?: SourceMode | null;
   id: string; kind: 'run' | 'check' | 'proof'; path: string; source_hash: string;
   status: 'running' | 'succeeded' | 'failed' | 'cancelled' | 'exhausted' | 'inconclusive' | 'unsupported';
@@ -59,6 +62,14 @@ export function mergeReceipts(existing: Receipt[], changes: Receipt[]): Receipt[
 export function knownReceiptVersions(receipts: Receipt[]): Record<string, number> | null {
   if (!receipts.length || receipts.some(receipt => receipt.version === undefined)) return null;
   return Object.fromEntries(receipts.map(receipt => [receipt.id, receipt.version!]));
+}
+
+export function reviewedOperationId(value: unknown, review: AgentReview): string | null {
+  const receipt = value as Partial<Receipt> | null;
+  const agent = receipt?.agent;
+  if (!agent?.review_id || typeof receipt?.id !== 'string' || !receipt.id) return null;
+  return agent.review_id === review.review_id && agent.connection === review.connection
+    && agent.conversation === review.conversation && agent.turn === review.turn ? receipt.id : null;
 }
 
 export function safeAuthUrl(value: unknown): string | null {
