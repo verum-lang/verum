@@ -260,6 +260,21 @@ fn test_der_error_kind_invalid_time() {
     assert(k is DerErrorKind.InvalidTime);
 }
 
+@test
+fn test_noncanonical_boolean_reports_offending_byte() {
+    let bytes: List<Byte> = [1_u8, 1_u8, 0_u8, 1_u8, 1_u8, 1_u8];
+    let mut reader = DerReader.new(bytes.as_slice());
+    assert(!reader.read_boolean().unwrap());
+    match reader.read_boolean() {
+        Result.Ok(_) => panic("accepted a noncanonical DER BOOLEAN"),
+        Result.Err(error) => {
+            assert(error.kind is DerErrorKind.InvalidBoolean);
+            assert_eq(error.position, 5);
+            assert(!error.message.is_empty());
+        }
+    }
+}
+
 fn main() {}
 
 @test

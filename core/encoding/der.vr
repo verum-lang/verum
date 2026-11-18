@@ -102,9 +102,9 @@ public type DerErrorKind is
     | InvalidTime;           // malformed UTCTime / GeneralizedTime
 
 public type DerError is {
-    kind: DerErrorKind,
-    position: Int,
-    message: Text,
+    public kind: DerErrorKind,
+    public position: Int,
+    public message: Text,
 };
 
 fn err(kind: DerErrorKind, pos: Int, msg: Text) -> DerError {
