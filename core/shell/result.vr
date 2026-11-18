@@ -222,12 +222,12 @@ implement Iterator for ShellLinesIter {
 // in a spec amendment.
 
 public type ShellError is
-    | NonZeroExit       { command: Text, status: ExitStatus, stderr: Text }
-    | SpawnFailed       { command: Text, reason: Text }
-    | Timeout           { command: Text, after_ms: Int }
-    | PermissionDenied  { command: Text, kind: Text }
-    | ParseError        { command: Text, format: Text, cause: Text }
-    | Cancelled         { command: Text, reason: Text };
+    | NonZeroExit       { public command: Text, public status: ExitStatus, public stderr: Text }
+    | SpawnFailed       { public command: Text, public reason: Text }
+    | Timeout           { public command: Text, public after_ms: Int }
+    | PermissionDenied  { public command: Text, public kind: Text }
+    | ParseError        { public command: Text, public format: Text, public cause: Text }
+    | Cancelled         { public command: Text, public reason: Text };
 
 implement ShellError {
     /// Re-fetch the command field regardless of variant.

@@ -63,7 +63,14 @@ fn test_shell_error_parse_error() {
         format:  Text.from("JSON"),
         cause:   Text.from("unexpected EOF"),
     };
-    assert(e is ShellError.ParseError);
+    match e {
+        ShellError.ParseError { command, format, cause } => {
+            assert_eq(command, "jq .");
+            assert_eq(format, "JSON");
+            assert_eq(cause, "unexpected EOF");
+        }
+        _ => panic("expected a shell parse error"),
+    }
 }
 
 @test
