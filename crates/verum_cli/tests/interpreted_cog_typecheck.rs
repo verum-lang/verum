@@ -5,7 +5,12 @@ use std::{fs, path::Path, process::Command};
 const GOOD: &str = "module cog.lib;\npublic fn answer() -> Int { 17 }\n";
 const TEST: &str = "@test\nfn selected() { assert_eq(answer(), 17); }\n";
 
-fn run(root: &str, tests: &str, selection: &[&str]) -> (bool, Vec<Value>, String) {
+fn run(
+    root: &str,
+    tests: &str,
+    selection: &[&str],
+    sources: &[(&str, &str)],
+) -> (bool, Vec<Value>, String) {
     let dir = tempfile::tempdir().unwrap();
     fs::create_dir(dir.path().join("src")).unwrap();
     fs::create_dir(dir.path().join("tests")).unwrap();
@@ -15,6 +20,9 @@ fn run(root: &str, tests: &str, selection: &[&str]) -> (bool, Vec<Value>, String
     )
     .unwrap();
     fs::write(dir.path().join("src/lib.vr"), root).unwrap();
+    for (name, source) in sources {
+        fs::write(dir.path().join("src").join(name), source).unwrap();
+    }
     fs::write(dir.path().join("tests/probe.vr"), tests).unwrap();
     let out = Command::new(env!("CARGO_BIN_EXE_verum"))
         .args([
@@ -66,7 +74,7 @@ fn checks_cog_root_and_test_file_even_when_invalid_function_is_unused() {
             "Parse error",
         ),
     ] {
-        let (success, events, message) = run(&root, &tests, &[]);
+        let (success, events, message) = run(&root, &tests, &[], &[]);
         assert!(!success, "{message}");
         assert!(
             events
@@ -84,7 +92,7 @@ fn checks_cog_root_and_test_file_even_when_invalid_function_is_unused() {
 #[test]
 fn ignored_declarations_are_checked_when_selected_and_do_not_poison_active_tests() {
     let tests = format!("{TEST}\n@test\n@ignore\nfn pinned() {{ let wrong: Bool = 47; }}");
-    let (success, events, message) = run(GOOD, &tests, &[]);
+    let (success, events, message) = run(GOOD, &tests, &[], &[]);
     assert!(
         success
             && events
@@ -92,7 +100,7 @@ fn ignored_declarations_are_checked_when_selected_and_do_not_poison_active_tests
                 .any(|e| e["event"] == "summary" && e["passed"] == 1),
         "{message}"
     );
-    let (success, events, message) = run(GOOD, &tests, &["--include-ignored"]);
+    let (success, events, message) = run(GOOD, &tests, &["--include-ignored"], &[]);
     assert!(!success, "{message}");
     assert!(
         events
@@ -101,4 +109,45 @@ fn ignored_declarations_are_checked_when_selected_and_do_not_poison_active_tests
         "{message}"
     );
     assert!(message.contains("tests/probe.vr"), "{message}");
+}
+
+#[test]
+fn checked_sibling_declarations_and_bodies_reach_the_interpreter() {
+    let root = "module probe.lib;\nmount probe.values.{Count, contribution};\npublic fn answer() -> Count { contribution() + 2 }";
+    let values =
+        "module probe.values;\npublic type Count is Int;\npublic fn contribution() -> Int { 15 }";
+    let (success, events, message) = run(root, TEST, &[], &[("values.vr", values)]);
+    assert!(
+        success
+            && events
+                .iter()
+                .any(|e| e["event"] == "summary" && e["passed"] == 1),
+        "{message}"
+    );
+    let invalid = format!("{values}\nfn bad() -> Bool {{ 8 }}");
+    let (success, events, message) = run(root, TEST, &[], &[("values.vr", &invalid)]);
+    assert!(
+        !success
+            && events
+                .iter()
+                .any(|e| e["event"] == "summary" && e["failed"] == 1),
+        "{message}"
+    );
+    assert!(
+        message.contains("src/values.vr:4:") && message.contains("expected 'Bool', found 'Int'"),
+        "{message}"
+    );
+}
+
+#[test]
+fn staged_cog_root_retains_the_selected_test() {
+    let root = "module probe.lib;\npublic fn answer() -> Int { @const { 8 + 9 } }";
+    let (success, events, message) = run(root, TEST, &[], &[]);
+    assert!(
+        success
+            && events
+                .iter()
+                .any(|e| e["event"] == "summary" && e["passed"] == 1),
+        "{message}"
+    );
 }

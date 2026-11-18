@@ -34,7 +34,11 @@ use verum_vbc::module::VbcModule;
 use super::CompilationPipeline;
 
 impl<'s> CompilationPipeline<'s> {
-    fn materialize_codegen_sources(&self, entry: &Module) -> Result<(Module, Vec<Arc<Module>>)> {
+    fn materialize_codegen_sources(
+        &self,
+        entry: &Module,
+        original_entry: Option<&Module>,
+    ) -> Result<(Module, Vec<Arc<Module>>)> {
         use crate::meta::const_lowering::ConstLowering;
         let target = self.session.cfg_evaluator().config().clone();
         let mut units = vec![(
@@ -49,13 +53,21 @@ impl<'s> CompilationPipeline<'s> {
         }
         let refs: Vec<_> = units.iter().map(|(owner, path, module)| (owner.as_str(), path.as_str(), module)).collect();
         let mut units = crate::owned_source_semantics::select_source_roster(&refs, &target)?;
-        if units.iter().any(|(_, _, module)| ConstLowering::required(module)) {
+        let staged = units.iter().any(|(_, _, module)| ConstLowering::required(module));
+        // A composite entry can import executable siblings. Admit their original
+        // bodies before publishing a test result, even without staged code.
+        if staged || (original_entry.is_some() && units.len() > 1) {
             // The parsed cache is the original source, before the typechecker
             // stamps resolved call targets. Never weaken the registry's exact
             // source comparison to authorize an annotated replacement.
             let originals: Vec<_> = units.iter().map(|(owner, path, module)| {
-                (owner.clone(), path.clone(), self.session.get_module(module.file_id)
-                    .map(|original| original.as_ref().clone()).unwrap_or_else(|| module.clone()))
+                let original = if module.file_id == entry.file_id && let Some(parsed) = original_entry {
+                    parsed.clone()
+                } else {
+                    self.session.get_module(module.file_id)
+                        .map(|source| source.as_ref().clone()).unwrap_or_else(|| module.clone())
+                };
+                (owner.clone(), path.clone(), original)
             }).collect();
             let source_refs: Vec<_> = originals.iter().map(|(owner, path, module)|
                 (owner.as_str(), path.as_str(), module)).collect();
@@ -67,6 +79,8 @@ impl<'s> CompilationPipeline<'s> {
             }
             semantic.admit_selected_sources(&mut selected, self.session)?;
             units = selected;
+        }
+        if staged {
             let mut lowering = ConstLowering::new(self.fresh_meta_ctx_with_version_stamp());
             for (owner, _, module) in &units { lowering.register(owner, module)?; }
             for (owner, _, module) in &mut units {
@@ -88,11 +102,22 @@ impl<'s> CompilationPipeline<'s> {
         Ok((materialized, siblings))
     }
 
-    /// Compile AST module to VBC module.
+    /// Check and lower a compilation unit whose items may originate in
+    /// multiple source files. Preserve the selected unit across elaboration.
+    pub fn compile_test_unit_to_vbc(&mut self, parsed: Module) -> Result<Arc<VbcModule>> {
+        let mut checked = parsed.clone();
+        self.check_parsed_module(&mut checked)?;
+        self.apply_resolved_call_targets(&mut checked);
+        let (entry, siblings) = self.materialize_codegen_sources(&checked, Some(&parsed))?;
+        crate::single_module::compile_unit_with_stdlib(
+            &entry, &siblings, CodegenConfig::new("test"), true,
+        ).map(Arc::new)
+    }
+
     pub(super) fn compile_ast_to_vbc(&self, module: &Module) -> Result<Arc<VbcModule>> {
         // This path can be entered in runtime-only mode. A staged computation
         // still requires original-source admission before its body is erased.
-        let (materialized, sibling_modules) = self.materialize_codegen_sources(module)?;
+        let (materialized, sibling_modules) = self.materialize_codegen_sources(module, None)?;
         let module = &materialized;
         // Phase 4.4: Dependent-type verification at module boundary.
         // The `DependentVerifier` orchestrator dispatches accumulated
@@ -326,7 +351,7 @@ impl<'s> CompilationPipeline<'s> {
 
         // T0363 — CODEGEN-MOUNT-ALIAS-DISPATCH-1: seed cross-module TYPE
         // re-export renames into this module's `type_aliases`. Shared with
-        // the `verum test` path (`single_module::compile_module_with_stdlib`)
+        // the test compilation unit
         // so alias resolution is identical across tiers — see
         // `seed_reexport_type_aliases`.
         if let Some(metadata) = self.stdlib_metadata.get() {
@@ -514,62 +539,9 @@ impl<'s> CompilationPipeline<'s> {
                 }
             };
         }
-        // USER-COG SIBLINGS (task #18, 2026-07-10): a multi-file
-        // project's sibling `.vr` files were loaded for the TYPE
-        // CHECKER (`load_project_modules` → `self.project_modules`)
-        // but never reached VBC codegen — "the user module is the
-        // ONLY AST that goes through codegen" held for the ENTRY
-        // file only.  Every cross-module call into a sibling
-        // (`mount cog.helper.{Widget}; Widget.make(7)`) type-checked
-        // and then died at runtime with "method 'make' not found …
-        // No registered function ends with the bare method name",
-        // because `Widget.make` was never compiled.  Feed the
-        // siblings through the SAME phase sequence as the entry
-        // module — all declarations across all modules FIRST (so
-        // cross-module static binding resolves), then all bodies.
-
-        step_mark!("collect_protocol_definitions");
-        codegen.collect_protocol_definitions(module);
-        for sib in &sibling_modules {
-            codegen.collect_protocol_definitions(sib);
-        }
-        step_mark!("collect_non_protocol_declarations");
-        // ONE unit, all files. Collected file-by-file, a mount in the
-        // entry module runs before a sibling's declarations exist, so
-        // every qualified probe for `demo.lib.resolve` misses and the
-        // ladder falls back to the bare name — which whichever library
-        // function won the first-wins race owns (T0882). Handing the
-        // whole set to the unit collector lets it know the unit's module
-        // paths before it walks any of them.
-        let unit_files: Vec<&verum_ast::Module> = std::iter::once(module)
-            .chain(sibling_modules.iter().map(|m| m.as_ref()))
-            .collect();
-        codegen.collect_unit_declarations(&unit_files).map_err(|e| {
-            anyhow::anyhow!("VBC codegen error (unit declarations): {}", e)
-        })?;
-        step_mark!("mark_user_defined_types");
-        codegen.mark_user_defined_types(module);
-        for sib in &sibling_modules {
-            codegen.mark_user_defined_types(sib);
-        }
-        step_mark!("resolve_pending_imports");
-        codegen.resolve_pending_imports();
-        step_mark!("compile_pending_default_methods");
-        codegen
-            .compile_pending_default_methods()
-            .map_err(|e| {
-                anyhow::anyhow!("VBC codegen error (default methods): {}", e)
-            })?;
-        codegen.set_propagate_test_attr(true);
-        step_mark!("compile_module_items");
-        codegen
-            .compile_module_items(module)
-            .map_err(|e| anyhow::anyhow!("VBC codegen error (user bodies): {}", e))?;
-        for sib in &sibling_modules {
-            codegen.compile_module_items(sib).map_err(|e| {
-                anyhow::anyhow!("VBC codegen error (project-module bodies): {}", e)
-            })?;
-        }
+        crate::single_module::emit_source_bodies(
+            &mut codegen, module, &sibling_modules, true, |phase| { step_mark!(phase); },
+        )?;
         step_mark!("compile_module_items DONE");
         if trace_path {
             eprintln!(
@@ -1006,7 +978,7 @@ impl<'s> CompilationPipeline<'s> {
 /// additive/first-wins, so a module's own alias declarations always win.
 ///
 /// Called from BOTH `compile_ast_to_vbc` (interpreter/build path) and
-/// `single_module::compile_module_with_stdlib` (the `verum test` path).
+/// source-unit codegen for interpreted tests.
 pub(crate) fn seed_reexport_type_aliases(
     codegen: &mut VbcCodegen,
     metadata: &verum_types::core_metadata::CoreMetadata,

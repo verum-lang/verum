@@ -1,46 +1,32 @@
-//! Canonical entry point for compiling a single Verum AST module to VBC.
-//!
-//! Single source of truth for stdlib-aware codegen used by:
-//!   * Test runners (`crates/verum_cli/src/commands/test.rs`)
-//!   * REPL single-input compilation
-//!   * IDE diagnostic compilation
-//!   * Direct AST-to-VBC paths that don't need the full session pipeline
-//!
-//! The full compilation pipeline (`pipeline::vbc_codegen::compile_ast_to_vbc`)
-//! also delegates here for the codegen body, so dependent verification +
-//! tier analysis remain pipeline concerns while archive-driven stdlib
-//! linkage and the codegen passes themselves stay in one place.
-//!
-//! Architecture:
-//!   1. Initialize a fresh `VbcCodegen` with the given config.
-//!   2. Register the four built-in surfaces every module needs
-//!      (variants, stdlib constants, stdlib intrinsics, runtime I/O).
-//!   3. Lazy-load the embedded stdlib `VbcArchive` for symbols
-//!      transitively referenced by the user module (mounts +
-//!      static-method calls + type references).
-//!   4. Run the user-side codegen passes:
-//!      protocols → declarations → user-type marking → import
-//!      resolution → default-method bodies → item bodies → finalize.
-//!
-//! Steps 2-4 mirror `compile_ast_to_vbc`; step 3 was missing from
-//! `VbcCodegen::compile_module` and from the test-runner direct path,
-//! producing the "method 'X' not found on receiver of runtime kind 'Y'"
-//! class of failures whenever stdlib was referenced.
+//! Lower selected source units to VBC. Bootstrap test tools can compile
+//! self-contained units before the runtime archive exists. Project and test
+//! pipelines share declaration collection, import resolution and body emission.
 
+use std::sync::Arc;
 use anyhow::{anyhow, Result};
 use verum_ast::Module;
 use verum_vbc::codegen::{CodegenConfig, VbcCodegen};
 use verum_vbc::module::VbcModule;
 
-/// Compile a single AST module to a VBC module with embedded-stdlib
+/// Compile a standalone module with the same declaration and import rules as a cog.
+pub fn compile_module_with_stdlib(
+    module: &Module,
+    config: CodegenConfig,
+    propagate_test_attr: bool,
+) -> Result<VbcModule> {
+    compile_unit_with_stdlib(module, &[], config, propagate_test_attr)
+}
+
+/// Compile a selected entry and its sibling modules with embedded-stdlib
 /// linkage. Stateless — every call gets a fresh codegen instance, so
 /// repeated calls don't leak state across compilations.
 ///
 /// The `propagate_test_attr` flag controls whether the codegen
 /// propagates `@test` attribute metadata to the output module — required
 /// by the test runner so `.functions[*].is_test` survives finalize.
-pub fn compile_module_with_stdlib(
+pub(crate) fn compile_unit_with_stdlib(
     module: &Module,
+    siblings: &[Arc<Module>],
     config: CodegenConfig,
     propagate_test_attr: bool,
 ) -> Result<VbcModule> {
@@ -73,13 +59,7 @@ pub fn compile_module_with_stdlib(
         // module's mount tree + harvested call sites, so a hello-world
         // compile touches a handful of archive entries instead of all
         // 7000+.
-        cache.apply_lazy_with_types(
-            &mut codegen,
-            module,
-            // T1126: a single-module compile has no siblings by
-            // definition — the whole point of this entry point.
-            &[],
-        )?;
+        cache.apply_lazy_with_types(&mut codegen, module, siblings)?;
     }
 
     // T0363 — CODEGEN-MOUNT-ALIAS-DISPATCH-1: seed cross-module TYPE
@@ -117,30 +97,7 @@ pub fn compile_module_with_stdlib(
         codegen.collect_protocol_definitions(protocols);
     }
 
-    // User-side passes. Same order as `compile_ast_to_vbc`:
-    //   protocols (so default-method inheritance is in place) →
-    //   declarations (types/functions/consts) →
-    //   user-type marking (so codegen can distinguish user types
-    //     from archive-imported types in disambiguation tables) →
-    //   import resolution (resolves pending mount-driven aliases) →
-    //   default-method bodies (impl<T: Protocol> { ... } shadows) →
-    //   item bodies (the actual function bytecode emission) →
-    //   finalize (build VbcModule from accumulated state).
-    codegen.collect_protocol_definitions(module);
-    codegen
-        .collect_non_protocol_declarations(module)
-        .map_err(|e| anyhow!("VBC codegen: declarations: {:?}", e))?;
-    codegen.mark_user_defined_types(module);
-    codegen.resolve_pending_imports();
-    codegen
-        .compile_pending_default_methods()
-        .map_err(|e| anyhow!("VBC codegen: default methods: {:?}", e))?;
-    if propagate_test_attr {
-        codegen.set_propagate_test_attr(true);
-    }
-    codegen
-        .compile_module_items(module)
-        .map_err(|e| anyhow!("VBC codegen: bodies: {:?}", e))?;
+    emit_source_bodies(&mut codegen, module, siblings, propagate_test_attr, |_| {})?;
 
     let mut vbc_module = codegen
         .finalize_module()
@@ -157,4 +114,38 @@ pub fn compile_module_with_stdlib(
     // recomputes on its own (possibly merged) assembly.
     let _ = vbc_module.resolve_protocol_dispatch();
     Ok(vbc_module)
+}
+
+/// Register every source declaration before lowering any body that may use it.
+pub(crate) fn emit_source_bodies(
+    codegen: &mut VbcCodegen,
+    entry: &Module,
+    siblings: &[Arc<Module>],
+    propagate_test_attr: bool,
+    mark: impl Fn(&'static str),
+) -> Result<()> {
+    let modules: Vec<_> = std::iter::once(entry).chain(siblings.iter().map(Arc::as_ref)).collect();
+    mark("collect_protocol_definitions");
+    for module in &modules {
+        codegen.collect_protocol_definitions(module);
+    }
+    mark("collect_non_protocol_declarations");
+    codegen.collect_unit_declarations(&modules)
+        .map_err(|err| anyhow!("VBC codegen error (unit declarations): {err}"))?;
+    mark("mark_user_defined_types");
+    for module in &modules {
+        codegen.mark_user_defined_types(module);
+    }
+    mark("resolve_pending_imports");
+    codegen.resolve_pending_imports();
+    mark("compile_pending_default_methods");
+    codegen.compile_pending_default_methods()
+        .map_err(|err| anyhow!("VBC codegen error (default methods): {err}"))?;
+    codegen.set_propagate_test_attr(propagate_test_attr);
+    mark("compile_module_items");
+    for module in modules {
+        codegen.compile_module_items(module)
+            .map_err(|err| anyhow!("VBC codegen error (source bodies): {err}"))?;
+    }
+    Ok(())
 }

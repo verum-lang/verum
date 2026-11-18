@@ -1753,7 +1753,7 @@ fn run_test_property(
     // Compile file → VBC through the SAME stdlib-aware path as
     // `run_test_interpret`, memoised per file and active test selection so an N-property file — or a file mixing @test and @property —
     // compiles exactly once.  This unification fixes the prior
-    // archive-const codegen miss (see `build_stdlib_test_module`).
+    // archive-const codegen miss (see `build_test_module`).
     let module = match compiled_test_module(test) {
         Ok(m) => m,
         Err(error) => {
@@ -2516,7 +2516,7 @@ fn compiled_test_module(test: &Test) -> CachedModule {
     if let Some(cached) = slot_guard.as_ref() {
         return cached.clone();
     }
-    let built = build_stdlib_test_module(test, keep);
+    let built = build_test_module(&test.file, keep).map_err(|err| err.to_string());
     *slot_guard = Some(built.clone());
     built
 }
@@ -2536,7 +2536,7 @@ fn retain_selected_tests(module: &mut verum_ast::Module, keep: Option<&str>) {
     });
 }
 
-fn checked_test_source(test_file: &Path, keep: Option<&str>) -> anyhow::Result<verum_ast::Module> {
+fn build_test_module(test_file: &Path, keep: Option<&str>) -> anyhow::Result<Arc<VbcModule>> {
     use anyhow::Context;
 
     let root_path = test_crate_root_path(test_file);
@@ -2561,26 +2561,13 @@ fn checked_test_source(test_file: &Path, keep: Option<&str>) -> anyhow::Result<v
             let mut root = pipeline.phase_parse(id)
                 .with_context(|| format!("parsing {}", path.display()))?;
             root.items.append(&mut module.items);
-            module.items = root.items;
+            // The cog root owns the combined namespace; every item retains
+            // its own physical file coordinates for checking and diagnostics.
+            module = root;
         }
-        pipeline.check_parsed_module(&mut module)?;
-        Ok(module)
+        pipeline.compile_test_unit_to_vbc(module)
     })();
     result.map_err(|err: anyhow::Error| anyhow::anyhow!("{err:#}\n{}", session.format_diagnostics()))
-}
-
-fn build_stdlib_test_module(test: &Test, keep: Option<&str>) -> CachedModule {
-    use verum_vbc::codegen::CodegenConfig;
-
-    let ast = checked_test_source(&test.file, keep).map_err(|err| format!("preflight: {err}"))?;
-    let config = CodegenConfig::new("test");
-    let module = verum_compiler::single_module::compile_module_with_stdlib(
-        &ast,
-        config,
-        /* propagate_test_attr = */ true,
-    )
-    .map_err(|e| format!("codegen: {:?}", e))?;
-    Ok(Arc::new(module))
 }
 
 fn run_test_interpret(test: &Test, _cfg: &TestRunCfg) -> TestResult {
