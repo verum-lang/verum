@@ -81,6 +81,28 @@ impl std::fmt::Debug for ScriptPermissionPolicy {
     }
 }
 
+#[derive(Debug, Default)]
+struct SessionSources {
+    by_id: Map<FileId, Shared<SourceFile>>,
+    by_path: Map<PathBuf, FileId>,
+}
+
+impl SessionSources {
+    fn lookup(&self, path: &PathBuf, observed: Option<&str>) -> Result<Option<FileId>> {
+        let Some(&id) = self.by_path.get(path) else {
+            return Ok(None);
+        };
+        if let Some(text) = observed {
+            anyhow::ensure!(
+                self.by_id[&id].source.as_str() == text,
+                "source changed during compilation: {}",
+                path.display()
+            );
+        }
+        Ok(Some(id))
+    }
+}
+
 /// Module structure: modules organize code into hierarchical namespaces,
 /// with file system mapping (lib.vr=root, foo.vr=module, foo/bar.vr=child).
 #[derive(Debug)]
@@ -89,7 +111,7 @@ pub struct Session {
     options: CompilerOptions,
 
     /// Source files indexed by FileId
-    source_files: Shared<RwLock<Map<FileId, Shared<SourceFile>>>>,
+    source_files: Shared<RwLock<SessionSources>>,
 
     /// Parsed modules (cached)
     modules: Shared<RwLock<Map<FileId, Shared<Module>>>>,
@@ -291,7 +313,7 @@ impl Session {
 
         Self {
             options,
-            source_files: Shared::new(RwLock::new(Map::new())),
+            source_files: Shared::new(RwLock::new(SessionSources::default())),
             modules: Shared::new(RwLock::new(Map::new())),
             module_registry: Shared::new(RwLock::new(ModuleRegistry::new())),
             diagnostics_queue: Shared::new(crossbeam::queue::SegQueue::new()),
@@ -1030,7 +1052,7 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
         Self {
             options,
-            source_files: Shared::new(RwLock::new(Map::new())),
+            source_files: Shared::new(RwLock::new(SessionSources::default())),
             modules: Shared::new(RwLock::new(Map::new())),
             module_registry: Shared::new(RwLock::new(registry)),
             diagnostics_queue: Shared::new(crossbeam::queue::SegQueue::new()),
@@ -1135,37 +1157,33 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
         )
     }
 
-    /// Load a source file and return its FileId
+    /// Read an immutable source snapshot, reusing its identity across filesystem aliases.
     pub fn load_file(&self, path: &Path) -> Result<FileId> {
-        // Check if already loaded
-        let sources = self.source_files.read();
-        for (id, source) in sources.iter() {
-            if let Some(ref existing_path) = source.path {
-                if existing_path == path {
-                    return Ok(*id);
-                }
-            }
+        self.load_file_snapshot(path, None)
+    }
+
+    /// Scanners that already read the file register those exact bytes for parsing and diagnostics.
+    pub(crate) fn load_file_snapshot(&self, path: &Path, observed: Option<&str>) -> Result<FileId> {
+        let key = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        if let Some(id) = self.source_files.read().lookup(&key, observed)? {
+            return Ok(id);
         }
-        drop(sources);
 
-        // Allocate new FileId
+        let bytes = match observed {
+            Some(text) => text.to_owned(),
+            None => std::fs::read_to_string(&key)?,
+        };
+        let mut sources = self.source_files.write();
+        if let Some(id) = sources.lookup(&key, Some(&bytes))? {
+            return Ok(id);
+        }
         let file_id = self.allocate_file_id();
-
-        // Create SourceFile from path
-        let source_file = SourceFile::from_path(file_id, path.to_path_buf())?;
-
-        // Register with global registry for error diagnostics
-        verum_common::register_source_file(
-            file_id,
-            path.display().to_string(),
-            source_file.source.as_str(),
-        );
-
-        // Store it
-        self.source_files
-            .write()
-            .insert(file_id, Shared::new(source_file));
-
+        let name = path.file_name().and_then(|name| name.to_str()).unwrap_or("unknown");
+        let mut source = SourceFile::new(file_id, name.to_owned(), bytes);
+        source.path = Some(key.clone());
+        verum_common::register_source_file(file_id, key.display().to_string(), source.source.as_str());
+        sources.by_id.insert(file_id, Shared::new(source));
+        sources.by_path.insert(key, file_id);
         Ok(file_id)
     }
 
@@ -1189,10 +1207,11 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
             source_code,
         );
 
-        // Store it
-        self.source_files
-            .write()
-            .insert(file_id, Shared::new(source_file));
+        // Editor revisions retain distinct FileIds, even at the same path.
+        let key = virtual_path.canonicalize().unwrap_or(virtual_path);
+        let mut sources = self.source_files.write();
+        sources.by_id.insert(file_id, Shared::new(source_file));
+        sources.by_path.insert(key, file_id);
 
         Ok(file_id)
     }
@@ -1245,6 +1264,7 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
         self.source_files
             .write()
+            .by_id
             .insert(file_id, Shared::new(source_file));
 
         Ok(file_id)
@@ -1260,13 +1280,14 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
     pub fn synthetic_origin(&self, file_id: FileId) -> Option<verum_common::span::SyntheticOrigin> {
         self.source_files
             .read()
+            .by_id
             .get(&file_id)
             .and_then(|sf| sf.synthetic_origin)
     }
 
     /// Get source file by ID
     pub fn get_source(&self, file_id: FileId) -> Option<Shared<SourceFile>> {
-        self.source_files.read().get(&file_id).cloned()
+        self.source_files.read().by_id.get(&file_id).cloned()
     }
 
     /// Add a parsed module to the cache
@@ -1487,6 +1508,7 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
     pub fn all_sources(&self) -> List<Shared<SourceFile>> {
         self.source_files
             .read()
+            .by_id
             .iter()
             .map(|(_, v)| v.clone())
             .collect::<List<_>>()
@@ -1496,7 +1518,7 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
     /// Get statistics about the session
     pub fn stats(&self) -> SessionStats {
         SessionStats {
-            num_files: self.source_files.read().len(),
+            num_files: self.source_files.read().by_id.len(),
             num_modules: self.modules.read().len(),
             num_errors: self.error_count(),
             num_warnings: self.warning_count(),
@@ -1680,7 +1702,7 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
         // Look up the source file
         let source_files = self.source_files.read();
-        let source_file = match source_files.get(&ast_span.file_id) {
+        let source_file = match source_files.by_id.get(&ast_span.file_id) {
             Some(sf) => sf,
             None => {
                 // Fallback: source file not in session (shouldn't happen in normal flow)

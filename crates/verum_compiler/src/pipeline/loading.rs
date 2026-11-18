@@ -271,17 +271,14 @@ impl<'s> CompilationPipeline<'s> {
                 total
             );
             let mut entries = Vec::with_capacity(file_data.len());
-            for (idx, (module_path_str, source_text, file_path)) in file_data.iter().enumerate() {
-                match self.parse_module_file(
-                    module_path_str,
-                    &Text::from(source_text.clone()),
-                    file_path,
-                ) {
+            for (idx, (module_path_str, source_text, file_path)) in file_data.into_iter().enumerate() {
+                let file_id = self.session.load_file_snapshot(&file_path, Some(&source_text))?;
+                match Self::parse_module_file(&module_path_str, &source_text, file_id) {
                     Ok(module) => {
                         entries.push((
                             module_path_str.clone(),
                             module,
-                            Text::from(source_text.clone()),
+                            Text::from(source_text),
                         ));
                     }
                     Err(e) => {
@@ -317,17 +314,11 @@ impl<'s> CompilationPipeline<'s> {
             let module_registry = self.session.module_registry();
             let module_id = module_registry.read().allocate_id();
 
-            let file_id = module
-                .items
-                .first()
-                .map(|item| item.span.file_id)
-                .unwrap_or(FileId::new(0));
-
             let mut module_info = ModuleInfo::new(
                 module_id,
                 module_path.clone(),
                 module.clone(),
-                file_id,
+                module.file_id,
                 source_text.clone(),
             );
 
@@ -518,8 +509,9 @@ impl<'s> CompilationPipeline<'s> {
                     )
                 })?
                 .into();
+            let file_id = self.session.load_file_snapshot(&file_path, Some(source.as_str()))?;
             let module = self
-                .parse_project_module(&module_path_str, &source, &file_path)
+                .parse_project_module(&module_path_str, source.as_str(), file_id)
                 .with_context(|| {
                     format!(
                         "Cannot parse external module '{}' at {}",
@@ -788,27 +780,18 @@ impl<'s> CompilationPipeline<'s> {
                 }
             };
 
-            match self.parse_project_module(
-                &module_path_str,
-                &Text::from(source_text.clone()),
-                file_path,
-            ) {
+            let file_id = self.session.load_file_snapshot(file_path, Some(&source_text))?;
+            match self.parse_project_module(&module_path_str, &source_text, file_id) {
                 Ok(module) => {
                     let module_path = ModulePath::from_str(module_path_str.as_str());
                     let module_registry = self.session.module_registry();
                     let module_id = module_registry.read().allocate_id();
 
-                    let file_id = module
-                        .items
-                        .first()
-                        .map(|item| item.span.file_id)
-                        .unwrap_or(FileId::new(0));
-
                     let mut module_info = ModuleInfo::new(
                         module_id,
                         module_path.clone(),
                         module.clone(),
-                        file_id,
+                        module.file_id,
                         Text::from(source_text),
                     );
 
@@ -1272,10 +1255,10 @@ impl<'s> CompilationPipeline<'s> {
     fn parse_project_module(
         &mut self,
         module_path: &Text,
-        source: &Text,
-        file_path: &Path,
+        source: &str,
+        file_id: FileId,
     ) -> Result<Module> {
-        let mut module = self.parse_module_file(module_path, source, file_path)?;
+        let mut module = Self::parse_module_file(module_path, source, file_id)?;
         if matches!(self.build_mode, super::BuildMode::Normal) {
             super::inject_implicit_prelude_mount(&mut module);
         }
@@ -1284,15 +1267,11 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Parse a module and attach its spans to the source file in this session.
     fn parse_module_file(
-        &mut self,
         module_path: &Text,
-        source: &Text,
-        file_path: &Path,
+        source: &str,
+        file_id: FileId,
     ) -> Result<Module> {
-        // Load file into session for proper file_id tracking
-        let file_id = self.session.load_file(file_path)?;
-
-        let lexer = Lexer::new(source.as_str(), file_id);
+        let lexer = Lexer::new(source, file_id);
 
         let parser = VerumParser::new();
         let module = parser.parse_module(lexer, file_id).map_err(|errors| {

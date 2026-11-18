@@ -87,10 +87,13 @@ fn one_physical_source_is_registered_once_across_entry_and_both_maps() {
     let path = write(&directory, "model.vr", IMPLEMENTATION);
     let mut session = new_session(&path);
     let module = load(&session, &path);
-    // Different path spelling causes a distinct session FileId for the same file.
     std::fs::create_dir(path.parent().unwrap().join("alias")).unwrap();
-    let alias = load(&session, &path.parent().unwrap().join("alias/../model.vr"));
-    assert_ne!(module.file_id, alias.file_id);
+    let alias_path = path.parent().unwrap().join("alias/../model.vr");
+    assert_eq!(session.load_file(&alias_path).unwrap(), module.file_id);
+    // Independent in-memory snapshots may still reach coherence under distinct IDs.
+    let alias_id = session.load_source_string(IMPLEMENTATION, alias_path).unwrap();
+    let alias = VerumParser::new().parse_module_str(IMPLEMENTATION, alias_id).unwrap();
+    assert_ne!(module.file_id, alias_id);
     let mut pipeline = CompilationPipeline::new_check(&mut session);
     pipeline
         .modules
@@ -258,6 +261,20 @@ fn public_entry_cannot_replace_a_different_source_with_the_same_owner() {
             original.file_id
         );
     }
+}
+
+#[test]
+fn prefetched_source_cannot_reuse_another_revisions_spans() {
+    let directory = fixture();
+    let path = write(&directory, "model.vr", IMPLEMENTATION);
+    let session = new_session(&path);
+    let id = session.load_file_snapshot(&path, Some(IMPLEMENTATION)).unwrap();
+    assert_eq!(session.load_file(&path).unwrap(), id);
+    let other = IMPLEMENTATION.replace("self.value", "self.other");
+    assert_eq!(IMPLEMENTATION.len(), other.len());
+    assert!(session.load_file_snapshot(&path, Some(&other)).is_err());
+    assert_eq!(session.get_source(id).unwrap().source.as_str(), IMPLEMENTATION);
+    assert_eq!(session.stats().num_files, 1);
 }
 
 #[test]
