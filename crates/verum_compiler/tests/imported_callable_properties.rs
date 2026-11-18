@@ -459,12 +459,25 @@ fn imported_function_values_preserve_unrelated_closure_origins() {
 
 #[test]
 fn imported_function_provenance_does_not_escape_into_a_shadowing_parameter() {
-    let error = contract(
-        "public pure fn selected(value:Int)->Int {value}",
+    let provider = "public pure fn selected(value:Int)->Int {value}";
+    contract(
+        provider,
         "mount core.raw.selected; fn invoke(callback:fn(Int)->Int)->Int {callback(73)}
-         fn rejected(selected:fn(Int)->Int)->Int {let factor=2;
-         let scaled:fn(Int)->Int=|value| factor*value; invoke(selected); invoke(scaled)}
-         public fn probe()->Int {73}",
-    ).expect_err("an opaque parameter acquired its imported homonym's closed environment");
-    assert!(error.contains("E312") && error.contains("scaled"), "{error}");
+         pure fn zero(value:Int)->Int {0}
+         fn through(selected:fn(Int)->Int)->Int {let factor=2;
+         let scaled:fn(Int)->Int=|value| factor*value; invoke(selected)+invoke(scaled)}
+         public fn probe()->Int {if through(zero)==146 {73} else {0}}",
+    ).expect("the parameter selects zero and cannot rewrite a fresh scalar capture");
+
+    let consumer = |parameters: &str| format!(
+        "mount core.raw.selected;
+         type Payload is {{public ptr:&Int,public marker:Int}};
+         fn invoke(callback:fn(Int)->Int)->Int {{callback(73)}}
+         fn read(input:&mut Payload{parameters})->&Int {{invoke(selected); input.ptr}}
+         public fn probe()->Int {{73}}"
+    );
+    contract(provider, &consumer("")).expect("the imported function has no captured environment");
+    let error = contract(provider, &consumer(",selected:fn(Int)->Int"))
+        .expect_err("an opaque parameter may reach the incoming referent");
+    assert!(error.contains("E312") && error.contains("input"), "{error}");
 }

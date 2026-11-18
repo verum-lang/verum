@@ -54,6 +54,37 @@ fn an_unbounded_callback_cannot_inherit_a_siblings_projected_parameter() {
 }
 
 #[test]
+fn a_local_callable_alias_preserves_reference_parameters_in_the_archive() {
+    use verum_vbc::types::{CbgrTier, Mutability, TypeId, TypeRef};
+
+    let module = compile(r#"
+        module consumer;
+        type Reader is fn(&Int) -> Int;
+        fn run() -> Int {
+            let read: Reader = (|item| *item);
+            let value = 47;
+            read(&value)
+        }
+    "#).unwrap();
+    let wire = verum_vbc::deserialize::deserialize_module(
+        &verum_vbc::serialize::serialize_module(&module).unwrap(),
+    ).unwrap();
+    for module in [module, wire] {
+        let closure = module.functions.iter()
+            .find(|function| function.closure_capture_count.is_some()).unwrap();
+        let expected = TypeRef::Reference {
+            inner: Box::new(TypeRef::Concrete(TypeId::INT)),
+            tier: CbgrTier::Tier0,
+            mutability: Mutability::Immutable,
+        };
+        assert_eq!(closure.semantic_parameter_types().unwrap(), [None, Some(expected)]);
+        let entry = module.find_function_by_name("consumer.run").unwrap();
+        let result = Interpreter::new(module.into()).execute_function(entry).unwrap();
+        assert_eq!(result.try_as_i64(), Some(47));
+    }
+}
+
+#[test]
 fn a_projected_callback_transports_distinct_callee_and_caller_binder_ids() {
     let module = compile(r#"
         module consumer;

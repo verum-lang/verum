@@ -4137,7 +4137,7 @@ impl VbcCodegen {
             _ => None,
         };
         if let Some(hint) = target_type_hint.as_deref() {
-            self.set_closure_signature_hint_from_name(value, hint);
+            self.set_closure_return_hint_from_name(value, hint);
         }
         let saved_assign_rt = target_type_hint.map(|hint| {
             let base = hint.split('<').next().unwrap_or(&hint).to_string();
@@ -26359,7 +26359,7 @@ impl VbcCodegen {
                         && let Some(hint) = self.field_type_name(&variant_type_name, &field.name.name)
                         .map(verum_common::Text::from)
                     {
-                        self.set_closure_signature_hint_from_name(v, hint.as_str());
+                        self.set_closure_return_hint_from_name(v, hint.as_str());
                     }
                     self.compile_expr(v)?
                         .or_internal("field value has no value")?
@@ -26626,7 +26626,7 @@ impl VbcCodegen {
                         && let Some(hint) = self.field_type_name(&type_name, &field.name.name)
                         .map(verum_common::Text::from)
                     {
-                        self.set_closure_signature_hint_from_name(v, hint.as_str());
+                        self.set_closure_return_hint_from_name(v, hint.as_str());
                     }
                     // PACKED-FIELD-INIT-DYNCOUNT-1 (#37): a field DECLARED as
                     // a fixed-size primitive array (`buffer: [Byte; SIZE]`)
@@ -32297,7 +32297,7 @@ impl VbcCodegen {
         }
     }
 
-    pub(super) fn set_closure_signature_hint(&mut self, expr: &Expr, ty: &verum_ast::ty::Type) {
+    fn set_closure_return_from_annotation(&mut self, expr: &Expr, ty: &verum_ast::ty::Type) {
         if let verum_ast::ty::TypeKind::Function { return_type, .. } = &ty.kind
             && let Some(name) = self.extract_type_name(return_type)
         {
@@ -32305,15 +32305,34 @@ impl VbcCodegen {
         }
     }
 
-    fn set_closure_signature_hint_from_name(&mut self, expr: &Expr, name: &str) {
-        match &expr.kind {
-            ExprKind::Paren(inner) => self.set_closure_signature_hint_from_name(inner, name),
-            ExprKind::Closure { .. } => {
-                if let Ok(ty) = verum_fast_parser::Parser::new(name).parse_type() {
-                    self.set_closure_signature_hint(expr, &ty);
-                }
-            }
-            _ => {}
+    /// Local annotations resolve in the binder scope that owns the closure.
+    /// Each input carries its original VBC type, including references and
+    /// generic slots, across the transition into the closure body.
+    pub(super) fn set_closure_signature_hint(&mut self, expr: &Expr, ty: &verum_ast::ty::Type) {
+        let closure = Self::normalized_place(expr);
+        if !matches!(closure.kind, ExprKind::Closure { .. })
+            || (closure.span.start == 0 && closure.span.end == 0)
+        {
+            return;
+        }
+        self.set_closure_return_from_annotation(closure, ty);
+        if let Some(crate::types::TypeRef::Function { params, .. }) =
+            self.source_type_in_current_scope(ty).and_then(|ty| self.expand_declared_alias(ty))
+        {
+            self.ctx.closure_param_type_hints.insert(
+                closure.span, params.into_iter().map(Some).collect(),
+            );
+        }
+    }
+
+    fn set_closure_return_hint_from_name(&mut self, expr: &Expr, name: &str) {
+        let closure = Self::normalized_place(expr);
+        if matches!(closure.kind, ExprKind::Closure { .. })
+            && let Ok(ty) = verum_fast_parser::Parser::new(name).parse_type()
+        {
+            // A field's display name can guide a return constructor. Resolving
+            // its inputs here would borrow names from the consumer's scope.
+            self.set_closure_return_from_annotation(closure, &ty);
         }
     }
 
