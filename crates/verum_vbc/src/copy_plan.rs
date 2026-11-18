@@ -350,9 +350,7 @@ pub fn build(module: &VbcModule, ty: &TypeRef) -> Result<CopyPlan, Text> {
         nodes.push(CopyNode::Identity);
         return Ok(CopyPlan { nodes });
     }
-    if module.resource_discipline(ty) != ResourceDiscipline::Unrestricted {
-        return Err("typed copy requires a fully declared unrestricted value".into());
-    }
+    module.require_unrestricted_ownership(ty)?;
     let mut builder = Builder {
         module,
         types: List::new(),

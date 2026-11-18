@@ -4,19 +4,131 @@
 use crate::module::VbcModule;
 use crate::mono::TypeSubstitution;
 use crate::types::{
-    MAX_TYPE_REF_DEPTH, MAX_TYPE_REF_NODES, TypeDescriptor, TypeId, TypeKind, TypeRef,
+    MAX_TYPE_REF_DEPTH, MAX_TYPE_REF_NODES, StringId, TypeDescriptor, TypeId, TypeKind,
+    TypeParamId, TypeRef,
 };
-use verum_common::{List, Map, ResourceDiscipline, well_known_types::WellKnownType};
+use verum_common::{List, Map, ResourceDiscipline, Text, well_known_types::WellKnownType};
+
+enum ResolvedDiscipline {
+    Unrestricted,
+    /// The first declaration imposing the strongest constraint in this graph.
+    Restricted {
+        kind: ResourceDiscipline,
+        owner: TypeId,
+    },
+}
+
+impl ResolvedDiscipline {
+    fn kind(&self) -> ResourceDiscipline {
+        match self {
+            Self::Unrestricted => ResourceDiscipline::Unrestricted,
+            Self::Restricted { kind, .. } => *kind,
+        }
+    }
+}
+
+fn ownership_type_name(module: &VbcModule, id: TypeId) -> Text {
+    let name = module.display_type_id(id);
+    let origin = module
+        .get_type(id)
+        .and_then(|ty| ty.origin_module)
+        .and_then(|origin| module.get_string(origin));
+    match origin {
+        Some(origin) if !name.contains('.') => format!("{origin}.{name} (type #{})", id.0).into(),
+        _ => format!("{name} (type #{})", id.0).into(),
+    }
+}
+
+/// Evidence lost when an ownership query is reduced to its conservative
+/// `Unknown` result. Keep IDs from the traversed declarations until rendering.
+enum DisciplineError {
+    MissingDeclaration(TypeId),
+    UndeclaredDiscipline(TypeId),
+    Arity(TypeId, usize, usize),
+    UnsupportedOwner(TypeId),
+    InvalidMember(TypeId, Option<StringId>),
+    MissingStorageArgument(TypeId, usize),
+    UnboundParameter(TypeParamId),
+    UnresolvedType,
+    InvalidTypeShape,
+    WorkLimit,
+    InlineCycle,
+}
+
+impl DisciplineError {
+    fn describe(self, module: &VbcModule) -> Text {
+        let owner = |id| ownership_type_name(module, id);
+        match self {
+            Self::MissingDeclaration(id) => format!("missing VBC declaration for {}", owner(id)),
+            Self::UndeclaredDiscipline(id) => {
+                format!("{} has no declared ownership discipline", owner(id))
+            }
+            Self::Arity(id, expected, supplied) => format!(
+                "{} expects {expected} type arguments, received {supplied}",
+                owner(id)
+            ),
+            Self::UnsupportedOwner(id) => {
+                format!("{} does not declare owned value storage", owner(id))
+            }
+            Self::InvalidMember(id, member) => {
+                let component = match member {
+                    Some(name) => module
+                        .get_string(name)
+                        .map(str::to_owned)
+                        .unwrap_or_else(|| format!("member #{}", name.0)),
+                    None => "alias target".into(),
+                };
+                format!(
+                    "{} has no resolved ownership type for {component}",
+                    owner(id)
+                )
+            }
+            Self::MissingStorageArgument(id, index) => {
+                format!("{} lacks owned storage argument {index}", owner(id))
+            }
+            Self::UnboundParameter(id) => {
+                format!("missing ownership witness for type parameter T{}", id.0)
+            }
+            Self::UnresolvedType => "unresolved ownership type".into(),
+            Self::InvalidTypeShape => "invalid or oversized ownership type".into(),
+            Self::WorkLimit => "ownership graph exceeds the traversal budget".into(),
+            Self::InlineCycle => "ownership graph contains a cycle through inline storage".into(),
+        }
+        .into()
+    }
+}
 
 impl VbcModule {
     /// Resolve usage discipline from exact declarations and substituted owned fields.
     /// Unknown components or missing/legacy descriptors never imply unrestricted use.
     pub fn resource_discipline(&self, ty: &TypeRef) -> ResourceDiscipline {
-        resource_discipline_with(
+        self.resolve_resource_discipline(ty)
+            .map_or(ResourceDiscipline::Unknown, |resolved| resolved.kind())
+    }
+
+    fn resolve_resource_discipline(
+        &self,
+        ty: &TypeRef,
+    ) -> Result<ResolvedDiscipline, DisciplineError> {
+        resolve_discipline(
             ty,
             |id| self.get_type(id),
             |id| self.declared_runtime_carrier(id),
         )
+    }
+
+    pub(crate) fn require_unrestricted_ownership(&self, ty: &TypeRef) -> Result<(), Text> {
+        let resolved = self
+            .resolve_resource_discipline(ty)
+            .map_err(|error| error.describe(self))?;
+        match resolved {
+            ResolvedDiscipline::Unrestricted => Ok(()),
+            ResolvedDiscipline::Restricted { kind, owner } => Err(format!(
+                "effective ownership is {kind:?} through {}",
+                ownership_type_name(self, owner)
+            )
+            .into()),
+        }
     }
 
     /// The canonical runtime carrier of an exact source-owned record.
@@ -62,10 +174,9 @@ impl VbcModule {
                 ));
             };
             let ty = resolve(ty);
-            let discipline = self.resource_discipline(&ty);
-            if discipline != ResourceDiscipline::Unrestricted {
+            if let Err(reason) = self.require_unrestricted_ownership(&ty) {
                 return Err(format!(
-                    "shared callable capture {index} requires unrestricted ownership; found {discipline:?} for {ty:?}"
+                    "shared callable capture {index} requires unrestricted ownership: {reason}"
                 ));
             }
         }
@@ -80,12 +191,20 @@ pub fn resource_discipline_with<'a>(
     resolve: impl Fn(TypeId) -> Option<&'a TypeDescriptor>,
     carrier: impl Fn(TypeId) -> Option<WellKnownType>,
 ) -> ResourceDiscipline {
-    use ResourceDiscipline::{Unknown, Unrestricted};
+    resolve_discipline(ty, resolve, carrier)
+        .map_or(ResourceDiscipline::Unknown, |resolved| resolved.kind())
+}
+
+fn resolve_discipline<'a>(
+    ty: &TypeRef,
+    resolve: impl Fn(TypeId) -> Option<&'a TypeDescriptor>,
+    carrier: impl Fn(TypeId) -> Option<WellKnownType>,
+) -> Result<ResolvedDiscipline, DisciplineError> {
     if is_reference_or_callable(ty) {
-        return Unrestricted;
+        return Ok(ResolvedDiscipline::Unrestricted);
     }
     if !bounded_type_shape(ty) {
-        return Unknown;
+        return Err(DisciplineError::InvalidTypeShape);
     }
 
     let mut types = List::new();
@@ -94,7 +213,7 @@ pub fn resource_discipline_with<'a>(
     indices.insert(ty.clone(), 0usize);
     let mut direct_edges: List<List<usize>> = List::new();
     let mut remaining = MAX_TYPE_REF_NODES;
-    let mut mode = Unrestricted;
+    let mut result = ResolvedDiscipline::Unrestricted;
     let mut cursor = 0;
     while cursor < types.len() {
         let ty = types[cursor].clone();
@@ -104,7 +223,7 @@ pub fn resource_discipline_with<'a>(
             TypeRef::Instantiated { base, args } => Some((*base, args.as_slice())),
             TypeRef::Tuple(parts) => {
                 if parts.len() > remaining {
-                    return Unknown;
+                    return Err(DisciplineError::WorkLimit);
                 }
                 children.extend(parts.iter().cloned().map(|part| (part, false)));
                 None
@@ -114,72 +233,79 @@ pub fn resource_discipline_with<'a>(
                 None
             }
             _ if is_reference_or_callable(&ty) => None,
-            _ => return Unknown,
+            TypeRef::Generic(id) => return Err(DisciplineError::UnboundParameter(*id)),
+            _ => return Err(DisciplineError::UnresolvedType),
         };
         if let Some((id, args)) = nominal {
             if id.is_builtin() && id != TypeId::PTR && id != TypeId::RESERVED {
                 if !args.is_empty() {
-                    return Unknown;
+                    return Err(DisciplineError::Arity(id, 0, args.len()));
                 }
             } else {
-                let Some(descriptor) = resolve(id) else {
-                    return Unknown;
-                };
-                mode = mode.with_component(descriptor.resource_discipline);
-                if mode == Unknown
-                    || descriptor.type_params.len() != args.len()
-                    || matches!(descriptor.kind, TypeKind::Protocol | TypeKind::Tensor)
-                {
-                    return Unknown;
+                let descriptor = resolve(id).ok_or(DisciplineError::MissingDeclaration(id))?;
+                let combined = result.kind().with_component(descriptor.resource_discipline);
+                if combined == ResourceDiscipline::Unknown {
+                    return Err(DisciplineError::UndeclaredDiscipline(id));
+                }
+                if combined != result.kind() {
+                    result = ResolvedDiscipline::Restricted {
+                        kind: combined,
+                        owner: id,
+                    };
+                }
+                if descriptor.type_params.len() != args.len() {
+                    return Err(DisciplineError::Arity(
+                        id,
+                        descriptor.type_params.len(),
+                        args.len(),
+                    ));
+                }
+                if matches!(descriptor.kind, TypeKind::Protocol | TypeKind::Tensor) {
+                    return Err(DisciplineError::UnsupportedOwner(id));
                 }
                 let substitution = TypeSubstitution::new(&descriptor.type_params, args);
-                let mut add_declared = |declared: Option<&TypeRef>| -> Option<()> {
-                    let declared = declared?;
-                    if children.len() >= remaining || !bounded_type_shape(declared) {
-                        return None;
+                let mut add_declared = |declared: Option<&TypeRef>, member| {
+                    let invalid = || DisciplineError::InvalidMember(id, member);
+                    let declared = declared.ok_or_else(invalid)?;
+                    if children.len() >= remaining {
+                        return Err(DisciplineError::WorkLimit);
                     }
-                    let value = substitution.apply(declared).ok()?;
+                    if !bounded_type_shape(declared) {
+                        return Err(DisciplineError::InvalidTypeShape);
+                    }
+                    let value = substitution.apply(declared).map_err(|_| invalid())?;
                     if !bounded_type_shape(&value) {
-                        return None;
+                        return Err(DisciplineError::InvalidTypeShape);
                     }
                     // The borrowed boundary changes ownership, not the validity
                     // of its declaration-owned parameter substitution.
-                    if is_reference_or_callable(&value) {
-                        return Some(());
+                    if !is_reference_or_callable(&value) {
+                        children.push((value, false));
                     }
-                    children.push((value, false));
-                    Some(())
+                    Ok(())
                 };
                 if descriptor.kind == TypeKind::Alias {
-                    if add_declared(descriptor.alias_target.as_ref()).is_none() {
-                        return Unknown;
-                    }
+                    add_declared(descriptor.alias_target.as_ref(), None)?;
                 } else {
                     for field in &descriptor.fields {
-                        if add_declared(field.declaration_type.as_ref()).is_none() {
-                            return Unknown;
-                        }
+                        add_declared(field.declaration_type.as_ref(), Some(field.name))?;
                     }
                     for variant in &descriptor.variants {
-                        if let Some(payload) = &variant.payload
-                            && add_declared(Some(payload)).is_none()
-                        {
-                            return Unknown;
+                        if let Some(payload) = &variant.payload {
+                            add_declared(Some(payload), Some(variant.name))?;
                         }
                         for field in &variant.fields {
-                            if add_declared(field.declaration_type.as_ref()).is_none() {
-                                return Unknown;
-                            }
+                            add_declared(field.declaration_type.as_ref(), Some(field.name))?;
                         }
                     }
                 }
                 if let Some(carrier) = carrier(id) {
                     for &position in carrier.owned_storage_parameters() {
-                        let Some(argument) = args.get(position) else {
-                            return Unknown;
-                        };
+                        let argument = args
+                            .get(position)
+                            .ok_or(DisciplineError::MissingStorageArgument(id, position))?;
                         if children.len() >= remaining {
-                            return Unknown;
+                            return Err(DisciplineError::WorkLimit);
                         }
                         children.push((argument.clone(), true));
                     }
@@ -190,7 +316,7 @@ pub fn resource_discipline_with<'a>(
         let mut edges = List::new();
         for (child, storage_edge) in children {
             if remaining == 0 {
-                return Unknown;
+                return Err(DisciplineError::WorkLimit);
             }
             remaining -= 1;
             if is_reference_or_callable(&child) {
@@ -200,7 +326,7 @@ pub fn resource_discipline_with<'a>(
                 next
             } else {
                 if types.len() >= MAX_TYPE_REF_NODES {
-                    return Unknown;
+                    return Err(DisciplineError::WorkLimit);
                 }
                 let next = types.len();
                 indices.insert(child.clone(), next);
@@ -241,9 +367,9 @@ pub fn resource_discipline_with<'a>(
         }
     }
     if visited == types.len() {
-        mode
+        Ok(result)
     } else {
-        Unknown
+        Err(DisciplineError::InlineCycle)
     }
 }
 

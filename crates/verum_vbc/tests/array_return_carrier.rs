@@ -100,10 +100,14 @@ fn forwarding_without_a_list_declaration_rejects_the_typed_copy() {
         let ty = &module.get_function(forward).unwrap().return_type;
         let TypeRef::Instantiated { base, .. } = ty else { panic!("List type operand") };
         assert!(module.get_type(*base).is_none());
+        let expected = format!(
+            "typed copy requires valid declared owned storage: missing VBC declaration for List (type #{})",
+            base.0,
+        );
         let entry = module.find_function_by_name("consumer.probe").expect("probe");
         let error = Interpreter::new(Shared::new(module).into_arc()).execute_function(entry).unwrap_err();
         assert!(matches!(error, InterpreterError::InvalidOperand { ref message }
-            if message == "typed copy requires valid declared owned storage: typed copy requires a fully declared unrestricted value"),
+            if message == &expected),
             "{error:?}");
     }
 }

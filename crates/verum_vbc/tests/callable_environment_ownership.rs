@@ -199,7 +199,7 @@ fn creator_witnesses_and_exact_empty_arity_are_required() {
         module
             .validate_closure_captures(Some(&types), 1, Clone::clone)
             .unwrap_err()
-            .contains("Unknown")
+            .contains("capture 0 requires unrestricted ownership: missing ownership witness for type parameter T7")
     );
     module
         .validate_closure_captures(Some(&types), 1, |ty| match ty {

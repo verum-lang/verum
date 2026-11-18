@@ -167,6 +167,9 @@ fn recursive_container_values_join_all_alternatives() {
         for name in ["DirectCycle", "MixedCycle", "Unbounded"] {
             assert_eq!(discipline(module, name), D::Unknown, "{name}");
         }
+        let cycle = TypeRef::Concrete(descriptor(module, "app", "MixedCycle").id);
+        let error = verum_vbc::copy_plan::build(module, &cycle).unwrap_err();
+        assert!(error.contains("cycle through inline storage"), "{error}");
     }
 }
 
@@ -252,18 +255,16 @@ fn copy_plan_refuses_affine_alternatives_and_missing_field_authority() {
         mount core.base.memory.Heap;
         type Mixed is Scalar(Int) | Owner(Heap<Int>);
         type Good is { value: Int };
+        type Wrapped is { payload: Good };
     "#,
         "core.collections.list",
     );
-    assert!(
-        copy_plan::build(
-            &module,
-            &TypeRef::Concrete(descriptor(&module, "app", "Mixed").id)
-        )
-        .is_err()
-    );
+    let mixed = TypeRef::Concrete(descriptor(&module, "app", "Mixed").id);
+    let error = copy_plan::build(&module, &mixed).unwrap_err();
+    assert!(error.contains("effective ownership is Affine through core.base.memory.Heap"), "{error}");
     let id = descriptor(&module, "app", "Good").id;
-    assert!(copy_plan::build(&module, &TypeRef::Concrete(id)).is_ok());
+    let wrapped = TypeRef::Concrete(descriptor(&module, "app", "Wrapped").id);
+    assert!(copy_plan::build(&module, &wrapped).is_ok());
     module
         .types
         .iter_mut()
@@ -271,7 +272,11 @@ fn copy_plan_refuses_affine_alternatives_and_missing_field_authority() {
         .unwrap()
         .fields[0]
         .declaration_type = None;
-    assert!(copy_plan::build(&module, &TypeRef::Concrete(id)).is_err());
+    for module in [&module, &deserialize_module(&serialize_module(&module).unwrap()).unwrap()] {
+        assert_eq!(module.resource_discipline(&wrapped), D::Unknown);
+        let error = copy_plan::build(module, &wrapped).unwrap_err();
+        assert!(error.contains(&format!("Good (type #{}) has no resolved ownership type for value", id.0)), "{error}");
+    }
 }
 
 #[test]
