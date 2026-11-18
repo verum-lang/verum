@@ -20,95 +20,59 @@ module core.database.sqlite.native.l6_session.bridge;
 
 mount collections.List;
 mount base.{Result, Ok, Err, Text};
-mount core.database.sqlite.native.l3_btree.BtreeKind;
-mount core.database.sqlite.native.l4_vdbe.{
-    Register, CursorTable, CursorSlotKind, CursorKind,
-    VdbeProgram,
-};
+mount core.database.sqlite.native.l4_vdbe.opcode.Opcode;
 mount core.database.sqlite.native.l4_vdbe.interpreter.{
     RowMutation, RowMutationKind, RmkInsert, RmkUpdate, RmkDelete,
 };
 mount core.database.sqlite.native.ext.hooks.{
     UpdateOp, UoInsert, UoUpdate, UoDelete,
 };
-mount core.database.sqlite.native.l6_session.connection.SqliteNativeConnection;
+mount core.database.sqlite.native.l6_session.connection.{SqliteNativeConnection, ConnectionError};
 mount core.database.sqlite.native.l6_session.statement.PreparedStatement;
 
 public fn seed_cursors_from_connection(
     stmt: &mut PreparedStatement,
     conn: &SqliteNativeConnection,
 ) {
-    let n = stmt.program_ref().cursor_count();
-    let mut i: Int = 0;
-    while i < n {
-        let decl_opt = stmt.program_ref().get_cursor_decl(i);
-        match decl_opt {
-            Maybe.Some(decl) => {
-                let is_table = match decl.kind {
-                    CkTable | CkIndex => true,
-                    _ => false,
-                };
-                if is_table {
-                    let has = conn.has_table_at(decl.root_page);
-                    let rows: List<List<Register>> = if has {
-                        conn.rows_at(decl.root_page)
-                    } else {
-                        List.new()
-                    };
-                    let ct = stmt.state_mut().cursor_table_mut();
-                    let _ = ct.open_write(i, decl.root_page, decl.n_cols, TableBtree);
-                    let _ = ct.install_rows(i, rows);
-                }
-            }
-            Maybe.None => {}
+    if !stmt.bind_row_scope(conn.row_scope()) { return; }
+    let mut i = 0;
+    while i < stmt.instruction_count() {
+        let op = stmt.program_ref().get_opcode(i);
+        let root = match op {
+            Maybe.Some(Opcode.OpenRead(_, r, _)) | Maybe.Some(Opcode.OpenWrite(_, r, _))
+                | Maybe.Some(Opcode.OpenIndex(_, r, _)) => r,
+            _ => 0,
+        };
+        if root > 0 && !stmt.state_ref().cursor_table_ref().has_root(root) {
+            stmt.state_mut().cursor_table_mut().seed_root(root, conn.row_revision(root), conn.rows_at(root));
         }
         i = i + 1;
     }
 }
 
 public fn writeback_cursors_to_connection(
-    stmt: &PreparedStatement,
+    mut stmt: PreparedStatement,
     conn: &mut SqliteNativeConnection,
-) {
-    let n = stmt.program_ref().cursor_count();
-    let mut i: Int = 0;
-    while i < n {
-        let decl_opt = stmt.program_ref().get_cursor_decl(i);
-        match decl_opt {
-            Maybe.Some(decl) => {
-                let is_table = match decl.kind {
-                    CkTable | CkIndex => true,
-                    _ => false,
-                };
-                if is_table {
-                    let snapshot = stmt.state_ref().cursor_table_ref()
-                        .snapshot_rows(i);
-                    conn.set_rows_at(decl.root_page, snapshot);
-                }
-            }
-            Maybe.None => {}
-        }
-        i = i + 1;
+) -> Result<PreparedStatement, ConnectionError> {
+    if stmt.was_published() { return Result.Ok(stmt); }
+    if !stmt.completed() { return Result.Err(ConnectionError.IncompleteStatement); }
+    let writes = stmt.state_ref().cursor_table_ref().pending_writes();
+    if !writes.is_empty() {
+        let scope = match stmt.bound_row_scope() {
+            Maybe.Some(scope) => scope,
+            Maybe.None => { return Result.Err(ConnectionError.StaleStatement); }
+        };
+        conn.publish_rows(scope, writes)?;
     }
-    // Fire update_hook (if registered) for every Insert / Delete /
-    // UpdateRow that happened during this program run. Resolution
-    // walk: cursor_id → CursorDecl.root_page → SchemaCache.lookup_
-    // table_by_root → TableMeta { schema, name }. Mutations whose
-    // cursor's root_page isn't in the schema cache (transient temp
-    // tables, ephemeral cursors) are silently skipped.
-    fire_update_hooks(stmt, conn);
+    stmt.mark_published();
+    if conn.registry_view().has_update_hook() {
+        fire_update_hooks(stmt.state_mut().drain_mutations(), conn);
+    }
+    Result.Ok(stmt)
 }
 
-/// Drive the connection's update_hook over the VDBE mutation log.
-/// Separated from writeback so callers that want write-through-
-/// without-hook semantics (e.g. internal schema bootstrap) can
-/// invoke the row apply step alone.
-public fn fire_update_hooks(stmt: &PreparedStatement, conn: &mut SqliteNativeConnection) {
-    // Bail out of the hot path before grabbing the hook reference.
-    if !conn.registry_view().has_update_hook() {
-        return;
-    }
-    let mutations = stmt.state_ref().mutations_ref();
+/// Deliver the completed statement's update-hook events in execution order.
+fn fire_update_hooks(mutations: List<RowMutation>, conn: &mut SqliteNativeConnection) {
     if mutations.len() == 0 { return; }
 
     // We need both the schema (for root→table resolution) and the
@@ -120,27 +84,17 @@ public fn fire_update_hooks(stmt: &PreparedStatement, conn: &mut SqliteNativeCon
     let mut i: Int = 0;
     while i < mutations.len() {
         let m = &mutations[i];
-        let decl_opt = stmt.program_ref().get_cursor_decl(m.cursor_id);
-        match decl_opt {
-            Maybe.Some(decl) => {
-                match conn.schema().lookup_table_by_root(decl.root_page) {
-                    Maybe.Some(meta) => {
-                        let op = match m.kind {
-                            RmkInsert => UoInsert,
-                            RmkUpdate => UoUpdate,
-                            RmkDelete => UoDelete,
-                        };
-                        let schema_name = if meta.schema.len() > 0 {
-                            meta.schema.clone()
-                        } else {
-                            main_db.clone()
-                        };
-                        staged.push((op, schema_name, meta.name.clone(), m.rowid));
-                    }
-                    Maybe.None => {}   // ephemeral cursor — skip
+        if m.root_page > 0 {
+            match conn.schema().lookup_table_by_root(m.root_page) {
+                Maybe.Some(meta) => {
+                    let op = match m.kind {
+                        RmkInsert => UoInsert, RmkUpdate => UoUpdate, RmkDelete => UoDelete,
+                    };
+                    let schema_name = if meta.schema.is_empty() { main_db.clone() } else { meta.schema.clone() };
+                    staged.push((op, schema_name, meta.name.clone(), m.rowid));
                 }
+                Maybe.None => {}
             }
-            Maybe.None => {}
         }
         i = i + 1;
     }
@@ -149,7 +103,7 @@ public fn fire_update_hooks(stmt: &PreparedStatement, conn: &mut SqliteNativeCon
     let mut k: Int = 0;
     while k < staged.len() {
         let entry = &staged[k];
-        conn.registry_mut().invoke_update_hook(entry.0, &entry.1, &entry.2, entry.3);
+        conn.registry_mut().invoke_update_hook(entry.0, entry.1.clone(), entry.2.clone(), entry.3);
         k = k + 1;
     }
 }

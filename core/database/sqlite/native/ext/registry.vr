@@ -31,7 +31,7 @@ mount collections.List;
 mount core.database.sqlite.native.ext.fn_flags.{FnFlags, flags_default};
 mount core.database.sqlite.native.ext.scalar.{ScalarFn};
 mount core.database.sqlite.native.ext.hooks.{
-    CommitHook, RollbackHook, UpdateHook, PreUpdateHook, UpdateOp,
+    CommitHook, CommitDecision, RollbackHook, UpdateHook, PreUpdateHook, UpdateOp,
     AuthorizerHook, BusyHandler, ProgressHandler, TraceHook,
 };
 
@@ -244,13 +244,13 @@ implement FnRegistry {
 
     /// Dispatch through the installed hook while keeping its storage private.
     public(cog) fn invoke_update_hook(
-        &mut self, op: UpdateOp, db: &Text, table: &Text, rowid: Int64,
+        &mut self, op: UpdateOp, db: Text, table: Text, rowid: Int64,
     ) {
         match &mut self.update_hook {
             Maybe.None => {},
             Maybe.Some(h) => {
                 let hook_ref = &mut **h;
-                hook_ref.on_update(op, db, table, rowid);
+                hook_ref.on_update(op, &db, &table, rowid);
             },
         }
     }
@@ -279,6 +279,20 @@ implement FnRegistry {
 
     public fn scalar_count(&self) -> Int { self.scalars.len() }
     public fn aggregate_count(&self) -> Int { self.aggregates.len() }
+
+    public(in core.database.sqlite.native) fn commit_decision(&mut self) -> CommitDecision {
+        match &mut self.commit_hook {
+            Maybe.Some(hook) => hook.as_mut().on_commit(),
+            Maybe.None => CommitDecision.CdAllow,
+        }
+    }
+
+    public(in core.database.sqlite.native) fn notify_rollback(&mut self) {
+        match &mut self.rollback_hook {
+            Maybe.Some(hook) => hook.as_mut().on_rollback(),
+            Maybe.None => {},
+        }
+    }
 
     public fn has_commit_hook(&self) -> Bool {
         match &self.commit_hook { Maybe.Some(_) => true, Maybe.None => false }

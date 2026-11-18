@@ -1,0 +1,29 @@
+module core.database.sqlite.native.tests.sql_writeback;
+
+mount core.database.sqlite.native.l4_vdbe.register.Register;
+mount core.database.sqlite.native.l4_vdbe.interpreter.StepResult;
+mount core.database.sqlite.native.l6_session.connection.{open_admin_memory, SqliteNativeConnection};
+mount core.database.sqlite.native.l6_session.statement.prepare_with_schema;
+mount core.database.sqlite.native.l6_session.bridge.{seed_cursors_from_connection, writeback_cursors_to_connection};
+
+@test
+fn test_prepared_sql_insert_publishes_both_columns_and_preserves_the_seeded_row() {
+    prepared_sql_insert_publishes_both_columns_and_preserves_the_seeded_row(&mut open_admin_memory().unwrap());
+}
+
+fn prepared_sql_insert_publishes_both_columns_and_preserves_the_seeded_row(conn: &mut SqliteNativeConnection) {
+    let mut stmt = prepare_with_schema(&"INSERT INTO sample (id,amount) VALUES (17,41),(18,59)", conn.schema()).unwrap();
+    let root = stmt.program_ref().get_cursor_decl(0).unwrap().root_page;
+    conn.set_rows_at(root, [[Register.RInt(3_i64), Register.RText("original")]]);
+    seed_cursors_from_connection(&mut stmt, conn);
+    assert(stmt.step() is StepResult.Done, "INSERT must reach Done");
+    writeback_cursors_to_connection(stmt, conn).unwrap();
+    let rows = conn.rows_at(root);
+    assert_eq(rows.len(), 3);
+    assert(&rows[0][0] is Register.RInt(3), "wrong value at row 0 column 0");
+    assert(&rows[0][1] is Register.RText("original"), "wrong value at row 0 column 1");
+    assert(&rows[1][0] is Register.RInt(17), "wrong value at row 1 column 0");
+    assert(&rows[1][1] is Register.RInt(41), "wrong value at row 1 column 1");
+    assert(&rows[2][0] is Register.RInt(18), "wrong value at row 2 column 0");
+    assert(&rows[2][1] is Register.RInt(59), "wrong value at row 2 column 1");
+}

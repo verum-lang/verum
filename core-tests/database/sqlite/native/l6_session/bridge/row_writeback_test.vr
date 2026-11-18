@@ -1,0 +1,201 @@
+module core.database.sqlite.native.tests.row_writeback;
+
+mount core.base.result.Result;
+mount core.base.maybe.Maybe;
+mount core.database.sqlite.native.l4_vdbe.interpreter.StepResult;
+mount core.database.sqlite.native.l4_vdbe.opcode.Opcode;
+mount core.database.sqlite.native.l4_vdbe.program.{CursorKind, program_new};
+mount core.database.sqlite.native.l4_vdbe.register.Register;
+mount core.database.sqlite.native.l6_session.connection.{
+    ConnectionError, SqliteNativeConnection, TxMode, open_admin_memory, open_readonly_memory,
+};
+mount core.database.sqlite.native.ext.hooks.{CommitHook, CommitDecision};
+mount core.database.sqlite.native.l6_session.statement.{PreparedStatement, prepared_program};
+mount core.database.sqlite.native.l6_session.bridge.{seed_cursors_from_connection, writeback_cursors_to_connection};
+
+fn statement(root: Int, ops: List<Opcode>) -> PreparedStatement {
+    let mut program = program_new("row writeback", 4);
+    let _ = program.declare_cursor(CursorKind.CkTable, root, 1);
+    for op in ops { let _ = program.emit(op); }
+    prepared_program(&"row writeback", program)
+}
+
+fn append_stmt(root: Int, n: Int, code: Int) -> PreparedStatement {
+    statement(root, [
+        Opcode.OpenWrite(0,root,1), Opcode.Integer(n,1), Opcode.NewRowid(0,2),
+        Opcode.Insert(0,1,2,0), Opcode.Close(0), Opcode.Halt(code,0),
+    ])
+}
+
+fn expect_cell(conn: &SqliteNativeConnection, root: Int, pos: Int, n: Int64) {
+    let rows = conn.rows_at(root);
+    match rows[pos][0] {
+        Register.RInt(value) => assert_eq(value, n),
+        _ => panic("expected integer row"),
+    }
+}
+
+@test
+fn test_completed_insert_update_and_delete_publish_rows_after_close() {
+    completed_insert_update_and_delete_publish_rows_after_close(&mut open_admin_memory().unwrap());
+}
+
+fn completed_insert_update_and_delete_publish_rows_after_close(conn: &mut SqliteNativeConnection) {
+    let root = conn.allocate_root_page();
+    let other = conn.allocate_root_page();
+    conn.set_rows_at(root, [[Register.RInt(3_i64)]]);
+    conn.set_rows_at(other, [[Register.RInt(77_i64)]]);
+    let mut insert = append_stmt(root,4,0);
+    seed_cursors_from_connection(&mut insert,conn);
+    assert(insert.step() is StepResult.Done);
+    let applied = writeback_cursors_to_connection(insert,conn).unwrap();
+    assert_eq(conn.row_count_at(root),2);
+    expect_cell(conn,root,0,3_i64);
+    expect_cell(conn,root,1,4_i64);
+    let mut update = statement(root,[Opcode.OpenWrite(0,root,1),Opcode.Rewind(0,5),
+        Opcode.Integer(8,1),Opcode.UpdateRow(0,1),Opcode.Close(0),Opcode.Halt(0,0)]);
+    seed_cursors_from_connection(&mut update,conn);
+    assert(update.step() is StepResult.Done);
+    writeback_cursors_to_connection(update,conn).unwrap();
+    let _ = writeback_cursors_to_connection(applied,conn).unwrap();
+    expect_cell(conn,root,0,8_i64);
+    expect_cell(conn,root,1,4_i64);
+    let mut delete = statement(other,[Opcode.OpenWrite(0,other,1),Opcode.Rewind(0,4),
+        Opcode.Delete(0),Opcode.Close(0),Opcode.Halt(0,0)]);
+    seed_cursors_from_connection(&mut delete,conn);
+    assert(delete.step() is StepResult.Done);
+    writeback_cursors_to_connection(delete,conn).unwrap();
+    assert_eq(conn.row_count_at(other),0);
+    assert_eq(conn.row_count_at(root),2);
+}
+
+@test
+fn test_readonly_aborted_and_outdated_statements_cannot_publish_rows() {
+    readonly_aborted_and_outdated_statements_cannot_publish_rows(&mut open_admin_memory().unwrap());
+}
+
+fn readonly_aborted_and_outdated_statements_cannot_publish_rows(conn: &mut SqliteNativeConnection) {
+    let root = conn.allocate_root_page();
+    conn.set_rows_at(root, [[Register.RInt(3_i64)]]);
+    let mut reader = statement(root,[Opcode.OpenRead(0,root,1),Opcode.Close(0),Opcode.Halt(0,0)]);
+    seed_cursors_from_connection(&mut reader,conn);
+    let mut stale = append_stmt(root,4,0);
+    seed_cursors_from_connection(&mut stale,conn);
+    conn.set_rows_at(root, [[Register.RInt(9_i64)]]);
+    assert(reader.step() is StepResult.Done);
+    writeback_cursors_to_connection(reader,conn).unwrap();
+    assert(stale.step() is StepResult.Done);
+    assert(writeback_cursors_to_connection(stale,conn) is Result.Err(ConnectionError.StaleStatement));
+    let mut aborted = append_stmt(root,8,1);
+    seed_cursors_from_connection(&mut aborted,conn);
+    assert(aborted.step() is StepResult.ExecError(_, _));
+    assert(writeback_cursors_to_connection(aborted,conn).is_err());
+    let mut invalid = statement(root,[Opcode.OpenRead(0,root,1),Opcode.Integer(37,1),
+        Opcode.Insert(0,1,2,0),Opcode.Halt(0,0)]);
+    seed_cursors_from_connection(&mut invalid,conn);
+    assert(invalid.step() is StepResult.ExecError(_, _));
+    assert(writeback_cursors_to_connection(invalid,conn).is_err());
+    assert_eq(conn.row_count_at(root),1);
+    expect_cell(conn,root,0,9_i64);
+}
+
+@test
+fn test_reusing_one_slot_preserves_the_distinct_roots_and_their_rows() {
+    reusing_one_slot_preserves_the_distinct_roots_and_their_rows(&mut open_admin_memory().unwrap());
+}
+
+fn reusing_one_slot_preserves_the_distinct_roots_and_their_rows(conn: &mut SqliteNativeConnection) {
+    let one = conn.allocate_root_page();
+    let two = conn.allocate_root_page();
+    conn.set_rows_at(one,[[Register.RInt(1_i64)]]);
+    conn.set_rows_at(two,[[Register.RInt(2_i64)]]);
+    let mut st=statement(one,[
+        Opcode.OpenWrite(0,one,1),Opcode.Integer(3,1),Opcode.NewRowid(0,2),Opcode.Insert(0,1,2,0),Opcode.Close(0),
+        Opcode.OpenWrite(0,two,1),Opcode.Integer(4,1),Opcode.NewRowid(0,2),Opcode.Insert(0,1,2,0),Opcode.Close(0),
+        Opcode.OpenRead(0,one,1),Opcode.Close(0),Opcode.Halt(0,0),
+    ]);
+    seed_cursors_from_connection(&mut st,conn);
+    assert(st.step() is StepResult.Done);
+    writeback_cursors_to_connection(st,conn).unwrap();
+    assert_eq(conn.row_count_at(one),2); assert_eq(conn.row_count_at(two),2);
+    expect_cell(conn,one,0,1_i64); expect_cell(conn,one,1,3_i64);
+    expect_cell(conn,two,0,2_i64); expect_cell(conn,two,1,4_i64);
+}
+
+@test
+fn test_transaction_rollback_restores_rows_and_revokes_unflushed_statements() {
+    transaction_rollback_restores_rows_and_revokes_unflushed_statements(&mut open_admin_memory().unwrap());
+}
+
+fn transaction_rollback_restores_rows_and_revokes_unflushed_statements(conn: &mut SqliteNativeConnection) {
+    let root=conn.allocate_root_page();
+    conn.set_rows_at(root,[[Register.RInt(6_i64)]]);
+    conn.begin_tx(TxMode.TmImmediate).unwrap();
+    let mut first=append_stmt(root,7,0);
+    seed_cursors_from_connection(&mut first,conn);
+    assert(first.step() is StepResult.Done);
+    writeback_cursors_to_connection(first,conn).unwrap();
+    assert_eq(conn.row_count_at(root),2);
+    let mut late=append_stmt(root,8,0);
+    seed_cursors_from_connection(&mut late,conn);
+    assert(late.step() is StepResult.Done);
+    conn.rollback_tx().unwrap();
+    assert_eq(conn.row_count_at(root),1);
+    expect_cell(conn,root,0,6_i64);
+    assert(writeback_cursors_to_connection(late,conn).is_err());
+    conn.begin_tx(TxMode.TmImmediate).unwrap();
+    let mut committed=append_stmt(root,9,0);
+    seed_cursors_from_connection(&mut committed,conn);
+    assert(committed.step() is StepResult.Done);
+    writeback_cursors_to_connection(committed,conn).unwrap();
+    conn.commit_tx().unwrap();
+    assert_eq(conn.row_count_at(root),2);
+    expect_cell(conn,root,1,9_i64);
+}
+
+type VetoRowCommit is {};
+implement CommitHook for VetoRowCommit {
+    fn on_commit(&mut self) -> CommitDecision { CommitDecision.CdAbort("veto") }
+}
+
+@test
+fn test_commit_veto_restores_the_rows_visible_before_the_transaction() {
+    commit_veto_restores_the_rows_visible_before_the_transaction(&mut open_admin_memory().unwrap());
+}
+
+fn commit_veto_restores_the_rows_visible_before_the_transaction(conn: &mut SqliteNativeConnection) {
+    let root = conn.allocate_root_page();
+    conn.set_rows_at(root, [[Register.RInt(5_i64)]]);
+    conn.begin_tx(TxMode.TmDeferred).unwrap();
+    let mut st = append_stmt(root, 9, 0);
+    seed_cursors_from_connection(&mut st, conn);
+    assert(st.step() is StepResult.Done);
+    writeback_cursors_to_connection(st, conn).unwrap();
+    assert_eq(conn.row_count_at(root), 2);
+    conn.registry_mut().set_commit_hook(Heap.new(VetoRowCommit {}));
+    assert(conn.commit_tx().is_err());
+    assert_eq(conn.row_count_at(root), 1);
+    expect_cell(conn, root, 0, 5_i64);
+}
+
+@test
+fn test_incomplete_readonly_and_foreign_connections_refuse_writeback() {
+    incomplete_readonly_and_foreign_connections_refuse_writeback(&mut open_readonly_memory().unwrap(), &mut open_admin_memory().unwrap());
+}
+
+fn incomplete_readonly_and_foreign_connections_refuse_writeback(readonly: &mut SqliteNativeConnection, other: &mut SqliteNativeConnection) {
+    let mut incomplete = append_stmt(7, 5, 0);
+    seed_cursors_from_connection(&mut incomplete, readonly);
+    assert(writeback_cursors_to_connection(incomplete, readonly) is Result.Err(ConnectionError.IncompleteStatement));
+    let mut denied = append_stmt(7, 5, 0);
+    seed_cursors_from_connection(&mut denied, readonly);
+    assert(denied.step() is StepResult.Done);
+    assert(writeback_cursors_to_connection(denied, readonly) is Result.Err(ConnectionError.NotWritable));
+    let mut foreign = append_stmt(7, 5, 0);
+    seed_cursors_from_connection(&mut foreign, readonly);
+    seed_cursors_from_connection(&mut foreign, other);
+    assert(foreign.step() is StepResult.Done);
+    assert(writeback_cursors_to_connection(foreign, other) is Result.Err(ConnectionError.StaleStatement));
+    assert(!other.has_table_at(7));
+    assert(!readonly.has_table_at(7));
+}

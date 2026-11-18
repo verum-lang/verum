@@ -1,0 +1,83 @@
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Definition
+)
+module core.database.sqlite.native.l6_session.row_store;
+
+mount core.database.sqlite.native.l4_vdbe.register.Register;
+mount core.database.sqlite.native.l4_vdbe.cursor_table.CursorWriteback;
+
+type SavedRows is { root: Int, previous: Maybe<List<List<Register>>> };
+
+public(in core.database.sqlite.native) type ConnectionRows is {
+    tables: Map<Int, List<List<Register>>>,
+    revisions: Map<Int, Int>,
+    scope: Shared<Int>,
+    transaction: Bool,
+    undo: List<SavedRows>,
+};
+
+public(in core.database.sqlite.native) fn connection_rows() -> ConnectionRows {
+    ConnectionRows { tables: Map.new(), revisions: Map.new(), scope: Shared.new(0),
+        transaction: false, undo: [] }
+}
+
+implement ConnectionRows {
+    public(in core.database.sqlite.native) fn scope(&self) -> Shared<Int> { self.scope.clone() }
+    public(in core.database.sqlite.native) fn revision(&self, root: Int) -> Int {
+        self.revisions.get_or(root, 0)
+    }
+    public(in core.database.sqlite.native) fn contains(&self, root: Int) -> Bool {
+        self.tables.contains_key(root)
+    }
+    public(in core.database.sqlite.native) fn read(&self, root: Int) -> List<List<Register>> {
+        self.tables.get_or(root, [])
+    }
+
+    fn record_change(&mut self, root: Int) {
+        let next = self.revision(root) + 1;
+        let _ = self.revisions.insert(root, next);
+        if self.transaction {
+            for saved in self.undo.iter() { if saved.root == root { return; } }
+            self.undo.push(SavedRows { root, previous: self.tables.get(root) });
+        }
+    }
+
+    public(in core.database.sqlite.native) fn put(&mut self, root: Int, rows: List<List<Register>>) {
+        self.record_change(root);
+        let _ = self.tables.insert(root, rows);
+    }
+    public(in core.database.sqlite.native) fn remove(&mut self, root: Int) {
+        if self.tables.contains_key(root) {
+            self.record_change(root);
+            let _ = self.tables.remove(root);
+        }
+    }
+    public(in core.database.sqlite.native) fn begin(&mut self) {
+        self.transaction = true;
+    }
+    public(in core.database.sqlite.native) fn finish(&mut self, rollback: Bool) {
+        self.transaction = false;
+        self.scope = Shared.new(0);
+        if rollback {
+            for saved in self.undo.iter() {
+                match &saved.previous {
+                    Maybe.Some(rows) => { let _ = self.tables.insert(saved.root, rows.clone()); }
+                    Maybe.None => { let _ = self.tables.remove(saved.root); }
+                }
+            }
+        }
+        self.undo.clear();
+    }
+
+    // Validate every destination before publishing the first changed root.
+    public(in core.database.sqlite.native) fn apply(&mut self, scope: Shared<Int>, writes: List<CursorWriteback>) -> Bool {
+        if !self.scope.ptr_eq(&scope) { return false; }
+        for change in writes.iter() {
+            if self.revision(change.root_page) != change.revision { return false; }
+        }
+        for change in writes.iter() { self.put(change.root_page, change.rows.clone()); }
+        true
+    }
+}

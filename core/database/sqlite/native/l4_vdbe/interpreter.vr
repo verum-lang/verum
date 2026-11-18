@@ -29,6 +29,7 @@ module core.database.sqlite.native.l4_vdbe.interpreter;
 // to `Yield` until the actor IPC integration lands.
 // =============================================================================
 
+mount core.base.memory.replace;
 mount collections.List;
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l4_vdbe.opcode.Opcode;
@@ -69,11 +70,12 @@ public type RowMutationKind is RmkInsert | RmkUpdate | RmkDelete;
 
 /// One row-level mutation observed during a single VDBE program run.
 /// The bridge replays these in original order, resolves
-/// `cursor_id` → `(schema, table)` via `SqliteNativeConnection.schema`, and
+/// each recorded root page to its schema and table, and
 /// invokes the per-connection `update_hook` (when set).
 public type RowMutation is {
     public(cog) kind: RowMutationKind,
     public(cog) cursor_id: Int,
+    public(in core.database.sqlite.native) root_page: Int = 0,
     public(cog) rowid: Int64,
 };
 
@@ -115,16 +117,13 @@ implement VdbeState {
     public fn set_reg(&mut self, i: Int, v: Register) { self.regs.set(i, v); }
     public fn cursor_table_mut(&mut self) -> &mut CursorTable { &mut self.cursors }
     public fn cursor_table_ref(&self) -> &CursorTable { &self.cursors }
-    /// Borrow the mutation log — bridge consumers call this to fire
-    /// update_hooks.
+    /// Inspect the mutations recorded by the running statement.
     public fn mutations_ref(&self) -> &List<RowMutation> { &self.mutations }
     /// Drain the mutation log. Bridge calls this to consume + fire
     /// hooks, leaving the state ready for a fresh program (re-run on
     /// the same statement).
     public fn drain_mutations(&mut self) -> List<RowMutation> {
-        let out = self.mutations.clone();
-        self.mutations = List.new();
-        out
+        replace(&mut self.mutations, List.new())
     }
 
     /// Snapshot the caller's bindings into the interpreter state.
@@ -745,21 +744,9 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
         }
 
         Insert(cursor_id, data_reg, key_reg, _flags) => {
-            // Data register holds a prepared MakeRecord result; for our
-            // v1 row-store path we reconstruct the row from the
-            // originating register range. Until MakeRecord lowering
-            // lands in the interpreter, the simpler path is: the
-            // preceding Column-like setup wrote n_cols registers
-            // starting at `data_reg`; we read them all. This matches
-            // what the current codegen emits for PnValues INSERT.
-            // The `key_reg` carries the rowid the row will receive
-            // (autoincrement or user-supplied) — used to populate the
-            // update_hook payload.
-            let slot_kind = state.cursors.kind(cursor_id);
-            match slot_kind {
-                CskClosed => { state.pc = state.pc + 1; return Yield; }
-                _ => {}
-            }
+            // The row occupies n_cols consecutive registers. The key register
+            // supplies the rowid reported to the update hook.
+            if !state.cursors.is_writable(cursor_id) { return ExecError(8, "write cursor required"); }
             let n_cols = state.cursors.n_cols_of(cursor_id);
             let mut row: List<Register> = List.new();
             let mut i: Int = 0;
@@ -780,6 +767,7 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
             state.mutations.push(RowMutation {
                 kind: RmkInsert,
                 cursor_id: cursor_id,
+                root_page: state.cursors.persistent_root(cursor_id),
                 rowid: rowid,
             });
             state.pc = state.pc + 1;
@@ -794,11 +782,7 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
             // the record through the row-store path used by the
             // base table; the actual index-tree insert happens
             // in the L3 pager-backed dispatch when wired.
-            let slot_kind = state.cursors.kind(cursor_id);
-            match slot_kind {
-                CskClosed => { state.pc = state.pc + 1; return Yield; }
-                _ => {}
-            }
+            if !state.cursors.is_writable(cursor_id) { return ExecError(8, "write cursor required"); }
             let mut row: List<Register> = List.new();
             row.push(state.regs.get(record_reg));
             let _ = state.cursors.append_row(cursor_id, row);
@@ -810,10 +794,12 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
             // Capture rowid BEFORE delete so the update_hook payload
             // points at the row that just disappeared.
             let rowid = state.cursors.current_rowid(cursor_id);
-            let _ = state.cursors.delete_current(cursor_id);
+            if !state.cursors.is_writable(cursor_id) { return ExecError(8, "write cursor required"); }
+            if !state.cursors.delete_current(cursor_id) { state.pc = state.pc + 1; return Yield; }
             state.mutations.push(RowMutation {
                 kind: RmkDelete,
                 cursor_id: cursor_id,
+                root_page: state.cursors.persistent_root(cursor_id),
                 rowid: rowid,
             });
             state.pc = state.pc + 1;
@@ -832,10 +818,12 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
                 row.push(state.regs.get(data_reg + i));
                 i = i + 1;
             }
-            let _ = state.cursors.replace_current_row(cursor_id, row);
+            if !state.cursors.is_writable(cursor_id) { return ExecError(8, "write cursor required"); }
+            if !state.cursors.replace_current_row(cursor_id, row) { state.pc = state.pc + 1; return Yield; }
             state.mutations.push(RowMutation {
                 kind: RmkUpdate,
                 cursor_id: cursor_id,
+                root_page: state.cursors.persistent_root(cursor_id),
                 rowid: rowid,
             });
             state.pc = state.pc + 1;

@@ -181,6 +181,8 @@ public fn db_error_from_conn(e: ConnectionError) -> SqliteApiDbError {
         ConnectionError.NotAdmin => SqliteApiDbError.DbAuthDenied,
         ConnectionError.TxAlreadyActive => SqliteApiDbError.DbMisuse("transaction already active"),
         ConnectionError.TxNotActive => SqliteApiDbError.DbMisuse("no active transaction"),
+        ConnectionError.StaleStatement => SqliteApiDbError.DbBusy,
+        ConnectionError.IncompleteStatement => SqliteApiDbError.DbMisuse("statement has not completed successfully"),
         ConnectionError.IoFailure(message) => SqliteApiDbError.DbIoError(message),
     }
 }
@@ -297,18 +299,8 @@ implement Database {
     /// Compile `sql` into a PreparedStatement. Routes through the
     /// schema-aware pipeline so that `SELECT ... FROM t` resolves
     /// column references against the live SchemaCache.
-    ///
-
-    /// **Cursor seed at prepare-time** — pre-fix the bare `prepare`
-    /// path returned a statement with empty cursors, so a direct
-    /// `db.prepare(sql).step()` returned no rows for SELECT and
-    /// silently dropped INSERTs (only `execute`/`query_first_row`/
-    /// `query_all` called `seed_cursors_from_connection`). Seeding
-    /// here gives `prepare()` the same row-store visibility as the
-    /// other entry points; the caller still owns writeback via
-    /// `Database.flush_statement(&stmt)` (added below) when their
-    /// statement issues mutations. Read-only `SELECT` callers
-    /// don't need writeback.
+    /// The statement sees the connection's rows at prepare time. After
+    /// stepping a writer to Done, pass it to flush_statement to apply its rows.
     public fn prepare(&self, sql: &Text) -> Result<PreparedStatement, SqliteApiDbError> {
         match prepare_with_schema(sql, self.conn.schema()) {
             Result.Ok(mut p) => {
@@ -319,13 +311,10 @@ implement Database {
         }
     }
 
-    /// Drain mutations from a `prepare()`-obtained statement back
-    /// into the connection's row stores. Caller MUST invoke this
-    /// after stepping a mutating statement (INSERT/UPDATE/DELETE)
-    /// or the writes are lost. Read-only SELECTs may skip it.
-    /// Internal `execute`/`query_*` paths still call this implicitly.
-    public fn flush_statement(&mut self, stmt: &PreparedStatement) {
-        writeback_cursors_to_connection(stmt, &mut self.conn);
+    /// Apply a successfully completed statement. On success the returned
+    /// statement may be reset or flushed again without replaying changes.
+    public fn flush_statement(&mut self, stmt: PreparedStatement) -> Result<PreparedStatement, SqliteApiDbError> {
+        writeback_cursors_to_connection(stmt, &mut self.conn).map_err(db_error_from_conn)
     }
 
     /// Compile + run-to-completion. Intended for statements that
@@ -419,7 +408,6 @@ implement Database {
         let mut stmt = match self.prepare(sql) {
             Result.Ok(s)  => s, Result.Err(e) => { return Result.Err(e); }
         };
-        seed_cursors_from_connection(&mut stmt, &self.conn);
         let mut err_result: Maybe<SqliteApiDbError> = Maybe.None;
         loop {
             match stmt.step() {
@@ -438,10 +426,9 @@ implement Database {
                 }
             }
         }
-        writeback_cursors_to_connection(&stmt, &mut self.conn);
         match err_result {
             Maybe.Some(e) => Result.Err(e),
-            Maybe.None    => Result.Ok(()),
+            Maybe.None    => { let _ = self.flush_statement(stmt)?; Result.Ok(()) }
         }
     }
 
@@ -452,7 +439,6 @@ implement Database {
         let mut stmt = match self.prepare(sql) {
             Result.Ok(s)  => s, Result.Err(e) => { return Result.Err(e); }
         };
-        seed_cursors_from_connection(&mut stmt, &self.conn);
         let result = match stmt.step() {
             Row(start, cols) => {
                 let mut out: List<Register> = List.new();
@@ -467,7 +453,7 @@ implement Database {
             ExecError(c, m) => Result.Err(DbStmtError(StmtExec(c, m))),
             Yield => Result.Err(DbMisuse("yield outside run_until_row".clone())),
         };
-        writeback_cursors_to_connection(&stmt, &mut self.conn);
+        if stmt.completed() { let _ = self.flush_statement(stmt)?; }
         result
     }
 
@@ -479,7 +465,6 @@ implement Database {
         let mut stmt = match self.prepare(sql) {
             Result.Ok(s)  => s, Result.Err(e) => { return Result.Err(e); }
         };
-        seed_cursors_from_connection(&mut stmt, &self.conn);
         let mut out: List<List<Register>> = List.new();
         let mut err_result: Maybe<SqliteApiDbError> = Maybe.None;
         loop {
@@ -501,10 +486,9 @@ implement Database {
                 Yield => {}
             }
         }
-        writeback_cursors_to_connection(&stmt, &mut self.conn);
         match err_result {
             Maybe.Some(e) => Result.Err(e),
-            Maybe.None    => Result.Ok(out),
+            Maybe.None    => { let _ = self.flush_statement(stmt)?; Result.Ok(out) }
         }
     }
 

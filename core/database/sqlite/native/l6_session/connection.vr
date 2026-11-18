@@ -41,6 +41,8 @@ module core.database.sqlite.native.l6_session.connection;
 // it behind a trait hierarchy once that lands.
 // =============================================================================
 
+mount core.database.sqlite.native.l6_session.row_store.{ConnectionRows, connection_rows};
+mount core.database.sqlite.native.l4_vdbe.cursor_table.CursorWriteback;
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l0_vfs.OpenFlags;
@@ -117,7 +119,9 @@ public type ConnectionError is
     | NotAdmin
     | TxAlreadyActive
     | TxNotActive
-    | IoFailure(Text);
+    | IoFailure(Text)
+    | StaleStatement
+    | IncompleteStatement;
 
 implement Display for ConnectionError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
@@ -126,6 +130,8 @@ implement Display for ConnectionError {
             NotAdmin        => f.write_str("sqlite connection not admin"),
             TxAlreadyActive => f.write_str("sqlite transaction already active"),
             TxNotActive     => f.write_str("sqlite no active transaction"),
+            IncompleteStatement => f.write_str("SQLite statement has not completed successfully"),
+            StaleStatement  => f.write_str("SQLite statement uses an outdated row snapshot"),
             IoFailure(m)    => f.write_str(f"sqlite connection I/O error: {m}".as_str()),
         }
     }
@@ -138,6 +144,8 @@ implement Debug for ConnectionError {
             NotAdmin        => f.write_str("NotAdmin"),
             TxAlreadyActive => f.write_str("TxAlreadyActive"),
             TxNotActive     => f.write_str("TxNotActive"),
+            IncompleteStatement => f.write_str("IncompleteStatement"),
+            StaleStatement  => f.write_str("StaleStatement"),
             IoFailure(m)    => f.write_str(f"IoFailure({m})".as_str()),
         }
     }
@@ -150,6 +158,7 @@ implement PartialEq for ConnectionError {
             (NotAdmin,        NotAdmin)        => true,
             (TxAlreadyActive, TxAlreadyActive) => true,
             (TxNotActive,     TxNotActive)     => true,
+            (StaleStatement, StaleStatement) | (IncompleteStatement, IncompleteStatement) => true,
             (IoFailure(a),    IoFailure(b))    => a == b,
             _ => false,
         }
@@ -175,7 +184,7 @@ public type SqliteNativeConnection is {
     // bridge that makes INSERT-then-SELECT in the same connection
     // actually see the inserted rows — real pager-backed row
     // persistence plugs in here once the actor IPC lands.
-    table_store: Map<Int, List<List<Register>>>,
+    table_store: ConnectionRows,
     /// Per-connection function & hook registry — holds scalar /
     /// aggregate / window function entries plus the eight observation
     /// hook slots (commit / rollback / update / pre_update /
@@ -210,7 +219,7 @@ public fn open_memory(mode: ConnectionMode) -> Result<SqliteNativeConnection, Co
         tx: tx_state_autocommit(),
         path: ":memory:".clone(),
         next_root_page: 2,
-        table_store: Map.new(),
+        table_store: connection_rows(),
         registry: registry_new(),
         pragma_cfg: pragma_config_default(),
         blob_engine: core.database.sqlite.native.incrblob.engine.engine_new(),
@@ -249,7 +258,7 @@ public fn open_file(path: &Text, mode: ConnectionMode) -> Result<SqliteNativeCon
         tx: tx_state_autocommit(),
         path: path.clone(),
         next_root_page: 2,
-        table_store: Map.new(),
+        table_store: connection_rows(),
         registry: registry_new(),
         pragma_cfg: pragma_config_default(),
         blob_engine: core.database.sqlite.native.incrblob.engine.engine_new(),
@@ -282,6 +291,7 @@ implement SqliteNativeConnection {
     public fn begin_tx(&mut self, mode: TxMode) -> Result<(), ConnectionError> {
         match self.ensure_writable() { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
         if self.tx.active { return Result.Err(TxAlreadyActive); }
+        self.table_store.begin();
         self.tx = TxState { mode: mode, depth: 1, active: true };
         Result.Ok(())
     }
@@ -292,26 +302,15 @@ implement SqliteNativeConnection {
         // (CdAbort) — in that case we treat it as a constraint
         // violation and force a rollback instead. Matches the SQLite
         // C API semantics for sqlite3_commit_hook.
-        let veto: Maybe<Text> = match &mut self.registry.commit_hook {
-            Maybe.None => Maybe.None,
-            Maybe.Some(h) => {
-                let hook_ref = &mut **h;
-                match hook_ref.on_commit() {
-                    CdAllow      => Maybe.None,
-                    CdAbort(msg) => Maybe.Some(msg),
-                }
-            }
-        };
+        let veto = self.registry.commit_decision();
         match veto {
-            Maybe.None => {
+            CommitDecision.CdAllow => {
+                self.table_store.finish(false);
                 self.tx = tx_state_autocommit();
                 Result.Ok(())
             }
-            Maybe.Some(msg) => {
-                // Commit aborted by hook → rollback the tx and emit
-                // the hook's rejection reason via ConnectionError.IoFailure until a
-                // dedicated "constraint by hook" error variant lands.
-                self.tx = tx_state_autocommit();
+            CommitDecision.CdAbort(msg) => {
+                self.rollback_tx()?;
                 Result.Err(ConnectionError.IoFailure(msg))
             }
         }
@@ -319,16 +318,9 @@ implement SqliteNativeConnection {
 
     public fn rollback_tx(&mut self) -> Result<(), ConnectionError> {
         if !self.tx.active { return Result.Err(TxNotActive); }
+        self.table_store.finish(true);
         self.tx = tx_state_autocommit();
-        // Notify rollback-hook AFTER state transitions so observers
-        // see the post-rollback world. Notification only — no veto.
-        match &mut self.registry.rollback_hook {
-            Maybe.None => {}
-            Maybe.Some(h) => {
-                let hook_ref = &mut **h;
-                hook_ref.on_rollback();
-            }
-        }
+        self.registry.notify_rollback();
         Result.Ok(())
     }
 
@@ -352,6 +344,7 @@ implement SqliteNativeConnection {
     /// Caller is responsible for issuing the SAVEPOINT VDBE opcode.
     public fn savepoint_push(&mut self) {
         if !self.tx.active {
+            self.table_store.begin();
             self.tx = TxState { mode: TmDeferred, depth: 1, active: true };
         }
         self.tx.depth = self.tx.depth + 1;
@@ -363,6 +356,7 @@ implement SqliteNativeConnection {
         }
         self.tx.depth = self.tx.depth - 1;
         if self.tx.depth == 0 {
+            self.table_store.finish(false);
             self.tx = tx_state_autocommit();
         }
         Result.Ok(())
@@ -383,7 +377,7 @@ implement SqliteNativeConnection {
         let p = self.next_root_page;
         self.next_root_page = self.next_root_page + 1;
         // Seed an empty row store entry so Insert/Rewind find a bucket.
-        let _ = self.table_store.insert(p, List.new());
+        self.table_store.put(p, []);
         p
     }
 
@@ -395,33 +389,37 @@ implement SqliteNativeConnection {
 
     /// Current rows at `root_page`. Returns empty list if unknown.
     public fn rows_at(&self, root_page: Int) -> List<List<Register>> {
-        if !self.table_store.contains_key(root_page) {
-            return List.new();
-        }
-        clone_rows(&self.table_store.get(root_page))
+        self.table_store.read(root_page)
     }
 
     /// Replace rows at `root_page`. Creates the slot if absent.
     public fn set_rows_at(&mut self, root_page: Int, rows: List<List<Register>>) {
-        let _ = self.table_store.insert(root_page, rows);
+        self.table_store.put(root_page, rows);
     }
 
     /// Has this root_page been registered? (CREATE TABLE allocates.)
     public fn has_table_at(&self, root_page: Int) -> Bool {
-        self.table_store.contains_key(root_page)
+        self.table_store.contains(root_page)
     }
 
     /// Row count at `root_page`; 0 on missing.
     public fn row_count_at(&self, root_page: Int) -> Int {
-        if !self.table_store.contains_key(root_page) { return 0; }
-        self.table_store.get(root_page).len()
+        self.table_store.read(root_page).len()
     }
 
     /// Drop a table's rows. Called after successful DROP TABLE.
     public fn forget_table_rows(&mut self, root_page: Int) {
-        if self.table_store.contains_key(root_page) {
-            let _ = self.table_store.remove(root_page);
-        }
+        self.table_store.remove(root_page);
+    }
+
+    public(in core.database.sqlite.native) fn row_scope(&self) -> Shared<Int> { self.table_store.scope() }
+    public(in core.database.sqlite.native) fn row_revision(&self, root: Int) -> Int {
+        self.table_store.revision(root)
+    }
+    public(in core.database.sqlite.native) fn publish_rows(&mut self, scope: Shared<Int>, writes: List<CursorWriteback>) -> Result<(), ConnectionError> {
+        self.ensure_writable()?;
+        if !self.table_store.apply(scope, writes) { return Result.Err(ConnectionError.StaleStatement); }
+        Result.Ok(())
     }
 
     // -------------------------------------------------------------------------
@@ -430,21 +428,4 @@ implement SqliteNativeConnection {
 
     public fn pager(&self) -> &Pager { &self.pager }
     public fn pager_mut(&mut self) -> &mut Pager { &mut self.pager }
-}
-
-fn clone_rows(xs: &List<List<Register>>) -> List<List<Register>> {
-    let mut out: List<List<Register>> = List.new();
-    let mut i: Int = 0;
-    while i < xs.len() {
-        let row = &xs[i];
-        let mut copy: List<Register> = List.new();
-        let mut j: Int = 0;
-        while j < row.len() {
-            copy.push(row[j]);
-            j = j + 1;
-        }
-        out.push(copy);
-        i = i + 1;
-    }
-    out
 }

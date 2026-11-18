@@ -37,7 +37,7 @@ mount base.{Result, Ok, Err, Text};
 mount core.database.sqlite.native.l4_vdbe.{
     Register, RegisterFile, register_file_new,
     Opcode, VdbeProgram, VdbeState, vdbe_state_new, step, StepResult,
-    run_until_row, CursorTable, cursor_table_new,
+    run_until_row,
     CursorSlotKind, ParamBindings, param_bindings_new,
 };
 mount core.database.sqlite.native.l5_sql.{
@@ -94,10 +94,12 @@ implement Eq for StmtError {}
 public type PreparedStatement is {
     program: VdbeProgram,
     state: VdbeState,
-    cursors: CursorTable,
     bindings: ParamBindings,
     sql: Text,
     done: Bool,
+    successful: Bool,
+    published: Bool,
+    row_scope: Maybe<Shared<Int>>,
     last_row_start: Int,
     last_row_cols: Int,
 };
@@ -109,18 +111,7 @@ public fn prepare(sql: &Text) -> Result<PreparedStatement, StmtError> {
         Result.Ok(p)  => p,
         Result.Err(e) => { return Result.Err(StmtCompile(e)); }
     };
-    let state = vdbe_state_new(&program);
-    let cursors = cursor_table_new(program.cursor_count(), 4096, 0);
-    Result.Ok(PreparedStatement {
-        program: program,
-        state: state,
-        cursors: cursors,
-        bindings: param_bindings_new(),
-        sql: sql.clone(),
-        done: false,
-        last_row_start: 0,
-        last_row_cols: 0,
-    })
+    Result.Ok(prepared_program(sql, program))
 }
 
 /// Schema-aware prepare. Resolves column references against the
@@ -131,18 +122,16 @@ public fn prepare_with_schema(sql: &Text, schema: &SchemaCache) -> Result<Prepar
         Result.Ok(p)  => p,
         Result.Err(e) => { return Result.Err(StmtCompile(e)); }
     };
+    Result.Ok(prepared_program(sql, program))
+}
+
+public(in core.database.sqlite.native) fn prepared_program(sql: &Text, program: VdbeProgram) -> PreparedStatement {
     let state = vdbe_state_new(&program);
-    let cursors = cursor_table_new(program.cursor_count(), 4096, 0);
-    Result.Ok(PreparedStatement {
-        program: program,
-        state: state,
-        cursors: cursors,
-        bindings: param_bindings_new(),
-        sql: sql.clone(),
-        done: false,
-        last_row_start: 0,
-        last_row_cols: 0,
-    })
+    PreparedStatement {
+        program, state, bindings: param_bindings_new(), sql: sql.clone(),
+        done: false, successful: false, published: false, row_scope: Maybe.None,
+        last_row_start: 0, last_row_cols: 0,
+    }
 }
 
 implement PreparedStatement {
@@ -183,6 +172,7 @@ implement PreparedStatement {
             }
             Done => {
                 self.done = true;
+                self.successful = true;
                 StepResult.Done
             }
             ExecError(c, m) => {
@@ -209,8 +199,10 @@ implement PreparedStatement {
     /// different parameter values.
     public fn reset(&mut self) {
         self.state = vdbe_state_new(&self.program);
-        self.cursors = cursor_table_new(self.program.cursor_count(), 4096, 0);
         self.done = false;
+        self.successful = false;
+        self.published = false;
+        self.row_scope = Maybe.None;
         self.last_row_start = 0;
         self.last_row_cols = 0;
     }
@@ -235,6 +227,15 @@ implement PreparedStatement {
     /// `l6_session.bridge.seed_cursors_from_connection` and its
     /// writeback sibling can reach the state without requiring a
     /// visibility downgrade on the underlying fields.
+    public(in core.database.sqlite.native) fn bind_row_scope(&mut self, scope: Shared<Int>) -> Bool {
+        if self.done || self.state.program_counter() != 0 || self.row_scope.is_some() { return false; }
+        self.row_scope = Maybe.Some(scope);
+        true
+    }
+    public(in core.database.sqlite.native) fn completed(&self) -> Bool { self.successful }
+    public(in core.database.sqlite.native) fn was_published(&self) -> Bool { self.published }
+    public(in core.database.sqlite.native) fn mark_published(&mut self) { self.published = true; }
+    public(in core.database.sqlite.native) fn bound_row_scope(&self) -> Maybe<Shared<Int>> { self.row_scope.clone() }
     public fn program_ref(&self) -> &VdbeProgram { &self.program }
     public fn state_ref(&self) -> &VdbeState { &self.state }
     public fn state_mut(&mut self) -> &mut VdbeState { &mut self.state }

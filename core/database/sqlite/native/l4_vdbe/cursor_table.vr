@@ -75,16 +75,9 @@ public type CursorSlot is {
     // OpenRead leaves it false. Used to reject Insert/Delete on
     // read-only cursors.
     writable: Bool,
-    // In-memory row store — filled by OpenEphemeral / test harnesses
-    // or by cursor-backed reads from the pager once IPC is wired. The
-    // interpreter's Column / Next / Rewind opcodes consult `rows` +
-    // `pos` directly; for CskBtree slots the pager will drive these
-    // via a streaming adapter that materialises one row at a time.
-    rows: List<List<Register>>,
-    pos: Int,             // 0 ≤ pos ≤ rows.len(); pos == rows.len() → at end
-    // Next rowid to issue — used by NewRowid for INSERT paths. Starts
-    // at 1; bumps on every Insert.
-    next_rowid: Int64,
+    // Cursor position is local; persistent rows belong to their root page.
+    row_bank: Int,
+    pos: Int,
 };
 
 // -----------------------------------------------------------------------------
@@ -280,9 +273,8 @@ fn cursor_slot_empty(cursor_id: Int) -> CursorSlot {
         btree: Maybe.None,
         position: Maybe.None,
         writable: false,
-        rows: List.new(),
+        row_bank: cursor_id,
         pos: 0,
-        next_rowid: 1 as Int64,
     }
 }
 
@@ -332,7 +324,27 @@ implement Eq for CursorTableError {}
 // Cursor table
 // -----------------------------------------------------------------------------
 
+type RowBank is {
+    root_page: Int,
+    revision: Int,
+    rows: List<List<Register>>,
+    next_rowid: Int64,
+    dirty: Bool,
+};
+
+public(in core.database.sqlite.native) type CursorWriteback is {
+    public(in core.database.sqlite.native) root_page: Int,
+    public(in core.database.sqlite.native) revision: Int,
+    public(in core.database.sqlite.native) rows: List<List<Register>>,
+};
+
+fn row_bank(root_page: Int, revision: Int, rows: List<List<Register>>) -> RowBank {
+    let next_rowid = (rows.len() as Int64) + 1_i64;
+    RowBank { root_page, revision, rows, next_rowid, dirty: false }
+}
+
 public type CursorTable is {
+    banks: List<RowBank>,
     slots: List<CursorSlot>,
     page_size: Int,
     reserved_bytes: Int,
@@ -341,13 +353,15 @@ public type CursorTable is {
 /// Build a fresh table sized for `n` cursors; each slot is CskClosed.
 public fn cursor_table_new(n: Int, page_size: Int, reserved_bytes: Int) -> CursorTable {
     let mut slots: List<CursorSlot> = List.new();
+    let mut banks: List<RowBank> = List.new();
     let mut i: Int = 0;
     while i < n {
         slots.push(cursor_slot_empty(i));
+        banks.push(row_bank(0, 0, []));
         i = i + 1;
     }
     CursorTable {
-        slots: slots,
+        slots, banks,
         page_size: page_size,
         reserved_bytes: reserved_bytes,
     }
@@ -355,6 +369,57 @@ public fn cursor_table_new(n: Int, page_size: Int, reserved_bytes: Int) -> Curso
 
 implement CursorTable {
     public fn size(&self) -> Int { self.slots.len() }
+
+    // The first bank per cursor is reserved for transient rows. Persistent
+    // banks are keyed by the actual OpenRead/OpenWrite root and outlive Close.
+    fn root_bank(&self, root_page: Int) -> Int {
+        let mut i = self.slots.len();
+        while i < self.banks.len() {
+            if self.banks[i].root_page == root_page { return i; }
+            i = i + 1;
+        }
+        -1
+    }
+
+    public(in core.database.sqlite.native) fn has_root(&self, root_page: Int) -> Bool {
+        self.root_bank(root_page) >= 0
+    }
+
+    public(in core.database.sqlite.native) fn seed_root(&mut self, root_page: Int, revision: Int, rows: List<List<Register>>) {
+        if root_page > 0 && self.root_bank(root_page) < 0 {
+            self.banks.push(row_bank(root_page, revision, rows));
+        }
+    }
+
+    public(in core.database.sqlite.native) fn pending_writes(&self) -> List<CursorWriteback> {
+        let mut writes: List<CursorWriteback> = List.new();
+        let mut i = self.slots.len();
+        while i < self.banks.len() {
+            let bank = &self.banks[i];
+            if bank.dirty {
+                writes.push(CursorWriteback {
+                    root_page: bank.root_page, revision: bank.revision, rows: bank.rows.clone(),
+                });
+            }
+            i = i + 1;
+        }
+        writes
+    }
+
+    public(in core.database.sqlite.native) fn persistent_root(&self, cursor_id: Int) -> Int {
+        if cursor_id < 0 || cursor_id >= self.slots.len() { return 0; }
+        self.banks[self.slots[cursor_id].row_bank].root_page
+    }
+
+    // ORDER BY and DISTINCT operate on a cursor's private result rows.
+    fn detach_query_rows(&mut self, cursor_id: Int) {
+        let bank = self.slots[cursor_id].row_bank;
+        if bank != cursor_id {
+            self.banks[cursor_id] = row_bank(0, 0, self.banks[bank].rows.clone());
+            self.slots[cursor_id].row_bank = cursor_id;
+            self.slots[cursor_id].writable = false;
+        }
+    }
 
     // -------------------------------------------------------------------------
     // OpenRead / OpenWrite
@@ -400,6 +465,14 @@ implement CursorTable {
             Result.Ok(t)  => t,
             Result.Err(_) => { return Result.Err(WrongKind(cursor_id, "btree_new".clone())); }
         };
+        let mut bank = cursor_id;
+        if root_page > 0 {
+            bank = self.root_bank(root_page);
+            if bank < 0 {
+                bank = self.banks.len();
+                self.banks.push(row_bank(root_page, 0, []));
+            }
+        }
         self.slots[cursor_id] = CursorSlot {
             kind: CskBtree,
             cursor_id: cursor_id,
@@ -408,9 +481,8 @@ implement CursorTable {
             btree: Maybe.Some(tree),
             position: Maybe.None,
             writable: writable,
-            rows: List.new(),
+            row_bank: bank,
             pos: 0,
-            next_rowid: 1 as Int64,
         };
         Result.Ok(())
     }
@@ -435,9 +507,8 @@ implement CursorTable {
             btree: Maybe.None,
             position: Maybe.None,
             writable: true,
-            rows: List.new(),
+            row_bank: cursor_id,
             pos: 0,
-            next_rowid: 1 as Int64,
         };
         Result.Ok(())
     }
@@ -454,9 +525,8 @@ implement CursorTable {
             btree: Maybe.None,
             position: Maybe.None,
             writable: true,
-            rows: List.new(),
+            row_bank: cursor_id,
             pos: 0,
-            next_rowid: 1 as Int64,
         };
         Result.Ok(())
     }
@@ -470,6 +540,7 @@ implement CursorTable {
             return Result.Err(NoSuchSlot(cursor_id));
         }
         self.slots[cursor_id] = cursor_slot_empty(cursor_id);
+        self.banks[cursor_id] = row_bank(0, 0, []);
         Result.Ok(())
     }
 
@@ -536,12 +607,13 @@ implement CursorTable {
     /// opcodes AND by test harnesses that pre-populate ephemeral
     /// tables. Auto-issues the next rowid and returns it.
     public fn append_row(&mut self, cursor_id: Int, row: List<Register>) -> Result<Int64, CursorTableError> {
-        if cursor_id < 0 || cursor_id >= self.slots.len() {
-            return Result.Err(NoSuchSlot(cursor_id));
-        }
-        self.slots[cursor_id].rows.push(row);
-        let rid = self.slots[cursor_id].next_rowid;
-        self.slots[cursor_id].next_rowid = rid + 1_i64;
+        self.ensure_writable(cursor_id)?;
+        let idx = self.slots[cursor_id].row_bank;
+        let bank = &mut self.banks[idx];
+        bank.rows.push(row);
+        bank.dirty = true;
+        let rid = bank.next_rowid;
+        bank.next_rowid = rid + 1_i64;
         Result.Ok(rid)
     }
 
@@ -551,7 +623,9 @@ implement CursorTable {
         if cursor_id < 0 || cursor_id >= self.slots.len() {
             return Result.Err(NoSuchSlot(cursor_id));
         }
-        self.slots[cursor_id].rows = rows;
+        let idx = self.slots[cursor_id].row_bank;
+        self.banks[idx].next_rowid = (rows.len() as Int64) + 1_i64;
+        self.banks[idx].rows = rows;
         self.slots[cursor_id].pos = 0;
         Result.Ok(())
     }
@@ -561,7 +635,7 @@ implement CursorTable {
     public fn has_more(&self, cursor_id: Int) -> Bool {
         if cursor_id < 0 || cursor_id >= self.slots.len() { return false; }
         let s = &self.slots[cursor_id];
-        s.pos < s.rows.len()
+        s.pos < self.banks[s.row_bank].rows.len()
     }
 
     /// Advance the cursor. Returns true if a row is now current;
@@ -570,7 +644,7 @@ implement CursorTable {
         if cursor_id < 0 || cursor_id >= self.slots.len() { return false; }
         let s = &mut self.slots[cursor_id];
         s.pos = s.pos + 1;
-        s.pos < s.rows.len()
+        s.pos < self.banks[s.row_bank].rows.len()
     }
 
     /// Read column `col` of the current row. Returns RNull if the
@@ -578,8 +652,8 @@ implement CursorTable {
     public fn peek_cell(&self, cursor_id: Int, col: Int) -> Register {
         if cursor_id < 0 || cursor_id >= self.slots.len() { return RNull; }
         let s = &self.slots[cursor_id];
-        if s.pos >= s.rows.len() { return RNull; }
-        let row = &s.rows[s.pos];
+        if s.pos >= self.banks[s.row_bank].rows.len() { return RNull; }
+        let row = &self.banks[s.row_bank].rows[s.pos];
         if col < 0 || col >= row.len() { return RNull; }
         row[col]
     }
@@ -591,8 +665,8 @@ implement CursorTable {
         let mut out: List<Register> = List.new();
         if cursor_id < 0 || cursor_id >= self.slots.len() { return out; }
         let s = &self.slots[cursor_id];
-        if s.pos >= s.rows.len() { return out; }
-        let row = &s.rows[s.pos];
+        if s.pos >= self.banks[s.row_bank].rows.len() { return out; }
+        let row = &self.banks[s.row_bank].rows[s.pos];
         let mut i: Int = 0;
         while i < row.len() {
             out.push(row[i]);
@@ -627,8 +701,8 @@ implement CursorTable {
     ) -> Maybe<Int> {
         if cursor_id < 0 || cursor_id >= self.slots.len() { return Maybe.None; }
         let s = &self.slots[cursor_id];
-        if s.pos >= s.rows.len() { return Maybe.None; }
-        let row = &s.rows[s.pos];
+        if s.pos >= self.banks[s.row_bank].rows.len() { return Maybe.None; }
+        let row = &self.banks[s.row_bank].rows[s.pos];
         let mut k: Int = 0;
         while k < n_keys {
             if k >= row.len() || k >= key_values.len() { break; }
@@ -643,15 +717,15 @@ implement CursorTable {
     /// NewRowid opcode reads this.
     public fn peek_next_rowid(&self, cursor_id: Int) -> Int64 {
         if cursor_id < 0 || cursor_id >= self.slots.len() { return 0 as Int64; }
-        self.slots[cursor_id].next_rowid
+        self.banks[self.slots[cursor_id].row_bank].next_rowid
     }
 
-    /// The rowid of the current row — pos is 1-based for rowid
-    /// assignment convention (pos == rowid - 1 after append_row).
+    /// Table rows in this in-memory store use their current one-based
+    /// position as rowid. Removing an earlier row changes that position.
     public fn current_rowid(&self, cursor_id: Int) -> Int64 {
         if cursor_id < 0 || cursor_id >= self.slots.len() { return 0 as Int64; }
         let s = &self.slots[cursor_id];
-        if s.pos >= s.rows.len() { return 0 as Int64; }
+        if s.pos >= self.banks[s.row_bank].rows.len() { return 0 as Int64; }
         (s.pos as Int64) + 1_i64
     }
 
@@ -659,9 +733,13 @@ implement CursorTable {
     /// unchanged so Next lands on the successor.
     public fn delete_current(&mut self, cursor_id: Int) -> Bool {
         if cursor_id < 0 || cursor_id >= self.slots.len() { return false; }
-        let s = &mut self.slots[cursor_id];
-        if s.pos >= s.rows.len() { return false; }
-        let _ = s.rows.remove(s.pos);
+        if !self.slots[cursor_id].writable { return false; }
+        let pos = self.slots[cursor_id].pos;
+        let idx = self.slots[cursor_id].row_bank;
+        let bank = &mut self.banks[idx];
+        if pos >= bank.rows.len() { return false; }
+        let _ = bank.rows.remove(pos);
+        bank.dirty = true;
         true
     }
 
@@ -670,16 +748,20 @@ implement CursorTable {
     /// contiguous registers, then call this to commit.
     public fn replace_current_row(&mut self, cursor_id: Int, row: List<Register>) -> Bool {
         if cursor_id < 0 || cursor_id >= self.slots.len() { return false; }
-        let s = &mut self.slots[cursor_id];
-        if s.pos >= s.rows.len() { return false; }
-        s.rows[s.pos] = row;
+        if !self.slots[cursor_id].writable { return false; }
+        let pos = self.slots[cursor_id].pos;
+        let idx = self.slots[cursor_id].row_bank;
+        let bank = &mut self.banks[idx];
+        if pos >= bank.rows.len() { return false; }
+        bank.rows[pos] = row;
+        bank.dirty = true;
         true
     }
 
     /// Total rows currently in the store.
     public fn row_count(&self, cursor_id: Int) -> Int {
         if cursor_id < 0 || cursor_id >= self.slots.len() { return 0; }
-        self.slots[cursor_id].rows.len()
+        self.banks[self.slots[cursor_id].row_bank].rows.len()
     }
 
     public fn current_position(&self, cursor_id: Int) -> Int {
@@ -701,8 +783,8 @@ implement CursorTable {
     public fn peek_cell_at(&self, cursor_id: Int, pos: Int, col: Int) -> Register {
         if cursor_id < 0 || cursor_id >= self.slots.len() { return RNull; }
         let s = &self.slots[cursor_id];
-        if pos < 0 || pos >= s.rows.len() { return RNull; }
-        let row = &s.rows[pos];
+        if pos < 0 || pos >= self.banks[s.row_bank].rows.len() { return RNull; }
+        let row = &self.banks[s.row_bank].rows[pos];
         if col < 0 || col >= row.len() { return RNull; }
         row[col]
     }
@@ -712,8 +794,8 @@ implement CursorTable {
         let mut out: List<Register> = List.new();
         if cursor_id < 0 || cursor_id >= self.slots.len() { return out; }
         let s = &self.slots[cursor_id];
-        if pos < 0 || pos >= s.rows.len() { return out; }
-        let row = &s.rows[pos];
+        if pos < 0 || pos >= self.banks[s.row_bank].rows.len() { return out; }
+        let row = &self.banks[s.row_bank].rows[pos];
         let mut i: Int = 0;
         while i < row.len() {
             out.push(row[i]);
@@ -727,21 +809,22 @@ implement CursorTable {
     public fn dedup_adjacent(&mut self, cursor_id: Int, n_cells: Int) -> Bool {
         if cursor_id < 0 || cursor_id >= self.slots.len() { return false; }
         if n_cells <= 0 { return true; }
-        let s = &mut self.slots[cursor_id];
+        self.detach_query_rows(cursor_id);
+        let bank = &mut self.banks[cursor_id];
         let mut kept: List<List<Register>> = List.new();
         let mut i: Int = 0;
-        while i < s.rows.len() {
+        while i < bank.rows.len() {
             let push_it = if kept.len() == 0 {
                 true
             } else {
                 let prev = &kept[kept.len() - 1];
-                compare_rows_prefix(prev, &s.rows[i], n_cells, 0) != 0
+                compare_rows_prefix(prev, &bank.rows[i], n_cells, 0) != 0
             };
-            if push_it { kept.push(s.rows[i].clone()); }
+            if push_it { kept.push(bank.rows[i].clone()); }
             i = i + 1;
         }
-        s.rows = kept;
-        s.pos = 0;
+        bank.rows = kept;
+        self.slots[cursor_id].pos = 0;
         true
     }
 
@@ -751,20 +834,21 @@ implement CursorTable {
     public fn sort_by_prefix(&mut self, cursor_id: Int, n_keys: Int, dir_bits: Int) -> Bool {
         if cursor_id < 0 || cursor_id >= self.slots.len() { return false; }
         if n_keys <= 0 { return true; }
-        let s = &mut self.slots[cursor_id];
+        self.detach_query_rows(cursor_id);
+        let bank = &mut self.banks[cursor_id];
         // Stable insertion sort — v1 row counts are bounded by the
         // test-harness row-store; real pager streams will back a
         // merge-based sorter later.
-        let n = s.rows.len();
+        let n = bank.rows.len();
         let mut i: Int = 1;
         while i < n {
             let mut j: Int = i;
             while j > 0 {
-                let cmp = compare_rows_prefix(&s.rows[j - 1], &s.rows[j], n_keys, dir_bits);
+                let cmp = compare_rows_prefix(&bank.rows[j - 1], &bank.rows[j], n_keys, dir_bits);
                 if cmp <= 0 { break; }
-                let tmp = s.rows[j - 1].clone();
-                s.rows[j - 1] = s.rows[j].clone();
-                s.rows[j] = tmp;
+                let tmp = bank.rows[j - 1].clone();
+                bank.rows[j - 1] = bank.rows[j].clone();
+                bank.rows[j] = tmp;
                 j = j - 1;
             }
             i = i + 1;
@@ -789,19 +873,20 @@ implement CursorTable {
     ) -> Bool {
         if cursor_id < 0 || cursor_id >= self.slots.len() { return false; }
         if n_keys <= 0 { return true; }
-        let s = &mut self.slots[cursor_id];
-        let n = s.rows.len();
+        self.detach_query_rows(cursor_id);
+        let bank = &mut self.banks[cursor_id];
+        let n = bank.rows.len();
         let mut i: Int = 1;
         while i < n {
             let mut j: Int = i;
             while j > 0 {
                 let cmp = compare_rows_prefix_with_schema(
-                    &s.rows[j - 1], &s.rows[j], n_keys, dir_bits, schema, registry,
+                    &bank.rows[j - 1], &bank.rows[j], n_keys, dir_bits, schema, registry,
                 );
                 if cmp <= 0 { break; }
-                let tmp = s.rows[j - 1].clone();
-                s.rows[j - 1] = s.rows[j].clone();
-                s.rows[j] = tmp;
+                let tmp = bank.rows[j - 1].clone();
+                bank.rows[j - 1] = bank.rows[j].clone();
+                bank.rows[j] = tmp;
                 j = j - 1;
             }
             i = i + 1;
@@ -815,7 +900,7 @@ implement CursorTable {
     public fn snapshot_rows(&self, cursor_id: Int) -> List<List<Register>> {
         let mut out: List<List<Register>> = List.new();
         if cursor_id < 0 || cursor_id >= self.slots.len() { return out; }
-        let row_total = self.slots[cursor_id].rows.len();
+        let row_total = self.banks[self.slots[cursor_id].row_bank].rows.len();
         let mut i: Int = 0;
         while i < row_total {
             out.push(self.peek_row_at(cursor_id, i));

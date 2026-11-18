@@ -14,6 +14,7 @@ module core.database.sqlite.native.l6_session;
 
 public module schema_cache;
 public module connection;
+module row_store;
 public module statement;
 public module bridge;
 public module statement_cache;

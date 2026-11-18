@@ -2304,9 +2304,7 @@ fn emit_insert(
                 }
                 let key_reg = st.regs.alloc();
                 let _ = st.program.emit(NewRowid(cursor_id, key_reg));
-                let data_reg = st.regs.alloc();
-                let _ = st.program.emit(MakeRecord(data_start, row.len(), data_reg, 0));
-                let _ = st.program.emit(Insert(cursor_id, data_reg, key_reg, 0));
+                let _ = st.program.emit(Insert(cursor_id, data_start, key_reg, 0));
                 i = i + 1;
             }
         }
