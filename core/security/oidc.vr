@@ -76,7 +76,7 @@ module core.security.oidc;
 mount core.context.standard.{Logger};
 mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount collections.{List, Map, Set};
-mount core.net.http.{HttpClient, Request, Response, Method, StatusCode, HttpError, Headers, Version};
+mount core.net.http.{HttpClient, Request, StatusCode, HttpError};
 mount core.security.jwt.{
     JwtAlgorithm, JwtKey, JwtError, JwtHeader, JwtPayload,
     VerifyOptions, verify_compact as jwt_verify_compact,
@@ -178,22 +178,17 @@ public async fn discover<C: HttpClient>(
     using [Logger]
 {
     let url = compose_discovery_url(expected_issuer);
-    let req = Request {
-        version: Version.Http11,
-        method: Method.Get,
-        url,
-        headers: build_accept_json_headers(),
-        body: Maybe.None,
-    };
-    let resp = client.send(&req).await
+    let resp = client.send(json_request(url)).await
         .map_err(|e| DiscoveryError.NetworkError(e))?;
-    if !resp.status.is_success() {
-        return Result.Err(DiscoveryError.InvalidStatus(resp.status));
+    if !resp.is_success() {
+        return Result.Err(DiscoveryError.InvalidStatus(resp.status_code()));
     }
-    if resp.body.len() > MAX_DISCOVERY_BYTES {
-        return Result.Err(DiscoveryError.TooLarge { size: resp.body.len(), limit: MAX_DISCOVERY_BYTES });
+    let body = resp.body_bytes();
+    if body.len() > MAX_DISCOVERY_BYTES {
+        return Result.Err(DiscoveryError.TooLarge { size: body.len(), limit: MAX_DISCOVERY_BYTES });
     }
-    let json_value = encoding.json.decode(&resp.body)
+    let text = Text.from_utf8(body).map_err(|e| DiscoveryError.InvalidJson(e.to_text()))?;
+    let json_value = decode(&text)
         .map_err(|e| DiscoveryError.InvalidJson(f"{e}"))?;
     parse_provider_config(&json_value, expected_issuer)
 }
@@ -208,11 +203,10 @@ fn compose_discovery_url(issuer: &Text) -> Text {
     }
 }
 
-fn build_accept_json_headers() -> Headers {
-    let mut h = Headers.new();
-    h.set(&"accept", &"application/json");
-    h.set(&"user-agent", &"verum-oidc/0.1");
-    h
+fn json_request(url: Text) -> Request {
+    Request.get(url)
+        .header(&"accept", &"application/json")
+        .header(&"user-agent", &"verum-oidc/0.1")
 }
 
 fn parse_provider_config(value: &JsonValue, expected_issuer: &Text) -> Result<OidcProviderConfig, DiscoveryError> {
@@ -341,22 +335,17 @@ public async fn fetch_jwks<C: HttpClient>(
     client: &C,
     jwks_uri: &Text,
 ) -> Result<Jwks, JwksError> {
-    let req = Request {
-        version: Version.Http11,
-        method:  Method.Get,
-        url:     jwks_uri.clone(),
-        headers: build_accept_json_headers(),
-        body: Maybe.None,
-    };
-    let resp = client.send(&req).await
+    let resp = client.send(json_request(jwks_uri.clone())).await
         .map_err(|e| JwksError.NetworkError(e))?;
-    if !resp.status.is_success() {
-        return Result.Err(JwksError.InvalidStatus(resp.status));
+    if !resp.is_success() {
+        return Result.Err(JwksError.InvalidStatus(resp.status_code()));
     }
-    if resp.body.len() > MAX_JWKS_BYTES {
-        return Result.Err(JwksError.TooLarge { size: resp.body.len(), limit: MAX_JWKS_BYTES });
+    let body = resp.body_bytes();
+    if body.len() > MAX_JWKS_BYTES {
+        return Result.Err(JwksError.TooLarge { size: body.len(), limit: MAX_JWKS_BYTES });
     }
-    let value = encoding.json.decode(&resp.body)
+    let text = Text.from_utf8(body).map_err(|e| JwksError.InvalidJson(e.to_text()))?;
+    let value = decode(&text)
         .map_err(|e| JwksError.InvalidJson(f"{e}"))?;
     parse_jwks(&value)
 }

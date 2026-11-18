@@ -47,11 +47,7 @@ module core.storage.s3.client;
 mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount collections.{List, Map};
 mount core.encoding.hex.{encode as hex_encode};
-mount net.http.{HttpClient, Request, Response, Method, StatusCode, HttpError,
-                // T1367 — the literals below omitted `version`, and an
-                // omitted field is not a compile error today: it reads
-                // back as a float zero whatever the declared type.
-                Version};
+mount core.net.http.{Headers, HttpClient, Method, Request, Response};
 mount core.hash.crypto.sha256.{Sha256, digest};
 mount time.system_time.epoch_seconds;
 mount time.rfc3339.{Rfc3339Time};
@@ -154,27 +150,19 @@ implement<C: HttpClient> ObjectStore for S3Client<C> {
         ).map_err(|e| StorageError.Backend(e))?;
         for (k, v) in signed.headers.iter() { headers.insert(k.clone(), v.clone()); }
 
-        let req = Request {
-            method:  Method.Put,
-            url:     url.clone(),
-            version: Version.Http11,
-            headers,
-            body:    data.clone(),
-        };
-        let resp = self.http.send(&req).await
+        let req = request_with_signed_headers(Method.Put, url, &headers).body_bytes(data.clone());
+        let resp = self.http.send(req).await
             .map_err(|e| StorageError.Network(f"{e}"))?;
-        if resp.status.is_409() {
+        if resp.status_code().code() == 409 {
             return Result.Err(StorageError.Conflict(extract_error_message(&resp)));
         }
-        if resp.status.is_403() {
+        if resp.status_code().code() == 403 {
             return Result.Err(StorageError.AccessDenied(extract_error_message(&resp)));
         }
-        if !resp.status.is_success() {
-            return Result.Err(StorageError.Backend(f"PUT HTTP {resp.status} {extract_error_message(&resp)}"));
+        if !resp.is_success() {
+            return Result.Err(StorageError.Backend(f"PUT HTTP {resp.status_code()} {extract_error_message(&resp)}"));
         }
-        let etag = resp.headers.get(&"etag".to_text())
-            .map(|v| strip_quotes(v))
-            .unwrap_or_else(|| "".to_text());
+        let etag = header_etag(resp.headers());
         Result.Ok(ObjectMetadata {
             key:           key.clone(),
             content_length: data.len(),
@@ -218,23 +206,17 @@ implement<C: HttpClient> ObjectStore for S3Client<C> {
         ).map_err(|e| StorageError.Backend(e))?;
         for (k, v) in signed.headers.iter() { headers.insert(k.clone(), v.clone()); }
 
-        let req = Request {
-            method:  Method.Get,
-            url:     url.clone(),
-            version: Version.Http11,
-            headers,
-            body:    List.new(),
-        };
-        let resp = self.http.send(&req).await
+        let req = request_with_signed_headers(Method.Get, url, &headers).body_bytes(empty_body);
+        let resp = self.http.send(req).await
             .map_err(|e| StorageError.Network(f"{e}"))?;
-        if resp.status.is_404() {
+        if resp.status_code().code() == 404 {
             return Result.Err(StorageError.NotFound(key.clone()));
         }
-        if !resp.status.is_success() {
-            return Result.Err(StorageError.Backend(f"GET HTTP {resp.status} {extract_error_message(&resp)}"));
+        if !resp.is_success() {
+            return Result.Err(StorageError.Backend(f"GET HTTP {resp.status_code()} {extract_error_message(&resp)}"));
         }
-        let meta = parse_metadata_from_headers(key, &resp.headers, resp.body.len());
-        Result.Ok((meta, resp.body))
+        let meta = parse_metadata_from_headers(key, resp.headers(), resp.body_bytes().len());
+        Result.Ok((meta, resp.into_body()))
     }
 
     async fn head(&self, key: &Text) -> Result<ObjectMetadata, StorageError> {
@@ -259,22 +241,15 @@ implement<C: HttpClient> ObjectStore for S3Client<C> {
         ).map_err(|e| StorageError.Backend(e))?;
         for (k, v) in signed.headers.iter() { headers.insert(k.clone(), v.clone()); }
 
-        let req = Request {
-            method:  Method.Head,
-            url:     url.clone(),
-            version: Version.Http11,
-            headers,
-            body:    List.new(),
-        };
-        let resp = self.http.send(&req).await
+        let req = request_with_signed_headers(Method.Head, url, &headers).body_bytes(empty_body);
+        let resp = self.http.send(req).await
             .map_err(|e| StorageError.Network(f"{e}"))?;
-        if resp.status.is_404() { return Result.Err(StorageError.NotFound(key.clone())); }
-        if !resp.status.is_success() {
-            return Result.Err(StorageError.Backend(f"HEAD HTTP {resp.status}"));
+        if resp.status_code().code() == 404 { return Result.Err(StorageError.NotFound(key.clone())); }
+        if !resp.is_success() {
+            return Result.Err(StorageError.Backend(f"HEAD HTTP {resp.status_code()}"));
         }
-        let cl = resp.headers.get(&"content-length".to_text())
-            .and_then(|v| Int.parse(v).ok()).unwrap_or(0);
-        Result.Ok(parse_metadata_from_headers(key, &resp.headers, cl))
+        let cl = resp.content_length().unwrap_or(0);
+        Result.Ok(parse_metadata_from_headers(key, resp.headers(), cl))
     }
 
     async fn delete(&self, key: &Text) -> Result<(), StorageError> {
@@ -299,18 +274,12 @@ implement<C: HttpClient> ObjectStore for S3Client<C> {
         ).map_err(|e| StorageError.Backend(e))?;
         for (k, v) in signed.headers.iter() { headers.insert(k.clone(), v.clone()); }
 
-        let req = Request {
-            method:  Method.Delete,
-            url:     url.clone(),
-            version: Version.Http11,
-            headers,
-            body:    List.new(),
-        };
-        let resp = self.http.send(&req).await
+        let req = request_with_signed_headers(Method.Delete, url, &headers).body_bytes(empty_body);
+        let resp = self.http.send(req).await
             .map_err(|e| StorageError.Network(f"{e}"))?;
         // S3 delete is idempotent — 204 even on missing keys.
-        if !resp.status.is_success() {
-            return Result.Err(StorageError.Backend(f"DELETE HTTP {resp.status}"));
+        if !resp.is_success() {
+            return Result.Err(StorageError.Backend(f"DELETE HTTP {resp.status_code()}"));
         }
         Result.Ok(())
     }
@@ -350,19 +319,13 @@ implement<C: HttpClient> ObjectStore for S3Client<C> {
         ).map_err(|e| StorageError.Backend(e))?;
         for (k, v) in signed.headers.iter() { headers.insert(k.clone(), v.clone()); }
 
-        let req = Request {
-            method:  Method.Get,
-            url:     url,
-            version: Version.Http11,
-            headers,
-            body:    List.new(),
-        };
-        let resp = self.http.send(&req).await
+        let req = request_with_signed_headers(Method.Get, url, &headers).body_bytes(empty_body);
+        let resp = self.http.send(req).await
             .map_err(|e| StorageError.Network(f"{e}"))?;
-        if !resp.status.is_success() {
-            return Result.Err(StorageError.Backend(f"LIST HTTP {resp.status} {extract_error_message(&resp)}"));
+        if !resp.is_success() {
+            return Result.Err(StorageError.Backend(f"LIST HTTP {resp.status_code()} {extract_error_message(&resp)}"));
         }
-        parse_list_v2_response(&resp.body)
+        parse_list_v2_response(resp.body_bytes())
     }
 
     fn presign(
@@ -417,19 +380,13 @@ implement<C: HttpClient> ObjectStore for S3Client<C> {
         ).map_err(|e| StorageError.Backend(e))?;
         for (k, v) in signed.headers.iter() { headers.insert(k.clone(), v.clone()); }
 
-        let req = Request {
-            method:  Method.Head,
-            url:     url,
-            version: Version.Http11,
-            headers,
-            body:    List.new(),
-        };
-        let resp = self.http.send(&req).await
+        let req = request_with_signed_headers(Method.Head, url, &headers).body_bytes(empty_body);
+        let resp = self.http.send(req).await
             .map_err(|e| StorageError.Network(f"{e}"))?;
-        if resp.status.is_404() { return Result.Err(StorageError.NotFound(self.config.bucket.clone())); }
-        if resp.status.is_403() { return Result.Err(StorageError.AccessDenied("HEAD bucket".to_text())); }
-        if !resp.status.is_success() {
-            return Result.Err(StorageError.Backend(f"HEAD bucket HTTP {resp.status}"));
+        if resp.status_code().code() == 404 { return Result.Err(StorageError.NotFound(self.config.bucket.clone())); }
+        if resp.status_code().code() == 403 { return Result.Err(StorageError.AccessDenied("HEAD bucket".to_text())); }
+        if !resp.is_success() {
+            return Result.Err(StorageError.Backend(f"HEAD bucket HTTP {resp.status_code()}"));
         }
         Result.Ok(())
     }
@@ -518,16 +475,37 @@ fn encode_query(pairs: &List<(Text, Text)>) -> Text {
 // Helpers — header / response parsing
 // =============================================================================
 
+fn request_with_signed_headers(method: Method, url: Text, headers: &Map<Text, Text>) -> Request {
+    let mut req = Request.new(method, url);
+    for (name, value) in headers.iter() {
+        req = req.header(&name, &value);
+    }
+    req
+}
+
+fn header_etag(headers: &Headers) -> Text {
+    match headers.get(&"etag") {
+        Maybe.Some(value) => strip_quotes(value),
+        Maybe.None => "".to_text(),
+    }
+}
+
 fn parse_metadata_from_headers(
-    key: &Text, headers: &Map<Text, Text>, content_length: Int,
+    key: &Text, headers: &Headers, content_length: Int,
 ) -> ObjectMetadata {
-    let etag = headers.get(&"etag".to_text())
-        .map(|v| strip_quotes(v)).unwrap_or_else(|| "".to_text());
-    let content_type = headers.get(&"content-type".to_text())
-        .cloned().unwrap_or_else(|| "application/octet-stream".to_text());
-    let last_modified = headers.get(&"last-modified".to_text())
-        .and_then(|v| http_date_to_rfc3339(v))
-        .unwrap_or_else(|| now_rfc3339());
+    let etag = header_etag(headers);
+    let content_type = match headers.get(&"content-type") {
+        Maybe.Some(value) => value.clone(),
+        Maybe.None => "application/octet-stream".to_text(),
+    };
+    let modified = match headers.get(&"last-modified") {
+        Maybe.Some(value) => http_date_to_rfc3339(value),
+        Maybe.None => Maybe.None,
+    };
+    let last_modified = match modified {
+        Maybe.Some(time) => time,
+        Maybe.None => now_rfc3339(),
+    };
     let mut user_metadata: Map<Text, Text> = Map.new();
     for (k, v) in headers.iter() {
         if k.starts_with("x-amz-meta-") {
@@ -570,16 +548,19 @@ fn current_iso8601_basic() -> Text {
 }
 
 fn extract_error_message(resp: &Response) -> Text {
-    Text.from_utf8(resp.body.as_slice())
-        .unwrap_or_else(|_| f"<{resp.body.len()} bytes>")
+    let body = resp.body_bytes();
+    match Text.from_utf8(body) {
+        Result.Ok(message) => message,
+        Result.Err(_) => f"<{body.len()} bytes>",
+    }
 }
 
 // =============================================================================
 // XML response parsing — minimal in-place scanner (no external XML dep)
 // =============================================================================
 
-fn parse_list_v2_response(body: &List<Byte>) -> Result<ListPage, StorageError> {
-    let xml = Text.from_utf8(body.as_slice())
+fn parse_list_v2_response(body: &[Byte]) -> Result<ListPage, StorageError> {
+    let xml = Text.from_utf8(body)
         .map_err(|e| StorageError.Backend(f"xml utf8: {e}"))?;
     let mut objects: List<ObjectMetadata> = List.new();
     let mut common: List<Text> = List.new();

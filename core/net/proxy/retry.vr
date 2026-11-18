@@ -241,7 +241,7 @@ implement<H: Handler> Handler for RetryHandler<H> {
 
             match result {
                 Result.Ok(r) => {
-                    let code = r.status.code();
+                    let code = r.status_code().code();
                     if code == 502 || code == 503 || code == 504 {
                         // Treat upstream-class as retryable.
                         last_err = Maybe.Some(WeftError.UpstreamIo(f"upstream {code}"));

@@ -21,16 +21,11 @@
 module core.net.weft.response_ext;
 
 mount core.collections.list.{List};
-mount core.net.http.{Response, StatusCode, Version, Headers};
+mount core.net.http.{Response, StatusCode};
 
 /// Empty response with the given status code.
 public fn resp_status(status: StatusCode) -> Response {
-    Response {
-        status: status,
-        version: Version.Http11,
-        headers: Headers.new(),
-        body: List.new(),
-    }
+    Response.new(status)
 }
 
 /// `200 OK` with no body.
@@ -40,30 +35,14 @@ public fn resp_ok() -> Response {
 
 /// `200 OK` with UTF-8 text body + content-type text/plain + content-length.
 public fn resp_text(body: Text) -> Response {
-    let bytes = body.into_bytes();
-    let mut headers = Headers.new();
-    headers.set(&"content-type", &"text/plain; charset=utf-8");
-    headers.set(&"content-length", &f"{bytes.len()}");
-    Response {
-        status: StatusCode.ok(),
-        version: Version.Http11,
-        headers: headers,
-        body: bytes,
-    }
+    let response = resp_ok().header("content-type", "text/plain; charset=utf-8");
+    resp_with_body_bytes(response, body.into_bytes())
 }
 
 /// `200 OK` with raw JSON body + content-type application/json.
 public fn resp_json(body: Text) -> Response {
-    let bytes = body.into_bytes();
-    let mut headers = Headers.new();
-    headers.set(&"content-type", &"application/json");
-    headers.set(&"content-length", &f"{bytes.len()}");
-    Response {
-        status: StatusCode.ok(),
-        version: Version.Http11,
-        headers: headers,
-        body: bytes,
-    }
+    let response = resp_ok().header("content-type", "application/json");
+    resp_with_body_bytes(response, body.into_bytes())
 }
 
 /// `404 Not Found` with empty body.
@@ -83,25 +62,20 @@ public fn resp_internal_error() -> Response {
 
 /// Set/replace a response header. Returns a new Response value.
 public fn resp_with_header(r: Response, name: &Text, value: &Text) -> Response {
-    let mut out = r;
-    out.headers.set(name, value);
-    out
+    r.header(name.clone(), value.clone())
 }
 
-/// Set body from UTF-8 text (adds content-type/content-length if absent).
+/// Set a UTF-8 body, retaining an existing content type and updating the length.
 public fn resp_with_body_text(r: Response, body: Text) -> Response {
-    let bytes = body.into_bytes();
-    let mut out = Response { body: bytes, ..r };
-    if !out.headers.contains(&"content-type") {
-        out.headers.set(&"content-type", &"text/plain; charset=utf-8");
-    }
-    out.headers.set(&"content-length", &f"{out.body.len()}");
-    out
+    let response = if r.content_type().is_none() {
+        r.header("content-type", "text/plain; charset=utf-8")
+    } else {
+        r
+    };
+    resp_with_body_bytes(response, body.into_bytes())
 }
 
 /// Set body from raw bytes; updates content-length.
 public fn resp_with_body_bytes(r: Response, body: List<Byte>) -> Response {
-    let mut out = Response { body: body, ..r };
-    out.headers.set(&"content-length", &f"{out.body.len()}");
-    out
+    r.header("content-length", f"{body.len()}").body(body)
 }

@@ -58,7 +58,7 @@ module core.security.tuf.repository;
 
 mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount collections.{List, Map};
-mount core.net.http.{HttpClient, Request, Response, Method, StatusCode, HttpError, Headers, Version};
+mount core.net.http.{HttpClient, Request, StatusCode, HttpError};
 mount io.path.{Path, PathBuf};
 mount core.io.file.{read_async};
 mount core.io.protocols.{IoErrorKind};
@@ -215,30 +215,23 @@ async fn http_get<C: HttpClient>(
     max_size: Int,
     label: &Text,
 ) -> Result<List<Byte>, RepoError> {
-    let mut headers = Headers.new();
-    headers.set(&"user-agent", &"verum-tuf/0.1".to_text());
-    let req = Request {
-        version: Version.Http11,
-        method:  Method.Get,
-        url:     url.clone(),
-        headers,
-        body: Maybe.None,
-    };
-    let resp = client.send(&req).await
+    let req = Request.get(url.clone()).header(&"user-agent", &"verum-tuf/0.1");
+    let resp = client.send(req).await
         .map_err(|e| NetworkError(e))?;
-    if resp.status.is_404() {
+    if resp.status_code().code() == 404 {
         return Result.Err(NotFound {
             role: RoleName.Delegated(f"@url={url}"),
             version: Maybe.None,
         });
     }
-    if !resp.status.is_success() {
-        return Result.Err(InvalidStatus(resp.status));
+    if !resp.is_success() {
+        return Result.Err(InvalidStatus(resp.status_code()));
     }
-    if resp.body.len() > max_size {
-        return Result.Err(TooLarge { role: label.to_text(), size: resp.body.len(), limit: max_size });
+    let size = resp.body_bytes().len();
+    if size > max_size {
+        return Result.Err(TooLarge { role: label.to_text(), size, limit: max_size });
     }
-    Result.Ok(resp.body)
+    Result.Ok(resp.into_body())
 }
 
 // =============================================================================

@@ -66,7 +66,7 @@ mount core.security.x509.crl.{
     parse_crl, find_revoked, decode_reason,
 };
 mount core.security.x509.oid.{Oid};
-mount core.net.http.{HttpClient, Request, Response, Method, StatusCode, HttpError, Headers, Version};
+mount core.net.http.{HttpClient, Request, Response, StatusCode, HttpError};
 mount sync.rwlock.{RwLock};
 mount time.system_time.{epoch_seconds};
 
@@ -235,34 +235,26 @@ public async fn fetch_crl<C: HttpClient>(
     client: &C,
     url: &Text,
 ) -> Result<List<Byte>, CrlFetchError> {
-    let mut headers = Headers.new();
-    headers.set(&"accept", &CONTENT_TYPE_PKIX_CRL.to_text());
-    headers.set(&"user-agent", &"verum-crl/0.1".to_text());
-    let req = Request {
-        version: Version.Http11,
-        method:  Method.Get,
-        url:     url.clone(),
-        headers,
-        body: Maybe.None,
-    };
-    let resp: Response = client.send(&req).await
+    let req = Request.get(url.clone())
+        .header(&"accept", &CONTENT_TYPE_PKIX_CRL)
+        .header(&"user-agent", &"verum-crl/0.1");
+    let resp: Response = client.send(req).await
         .map_err(|e| CrlFetchError.Network(e))?;
-    if !resp.status.is_success() {
-        return Result.Err(CrlFetchError.HttpStatus(resp.status));
+    if !resp.is_success() {
+        return Result.Err(CrlFetchError.HttpStatus(resp.status_code()));
     }
-    if resp.body.len() > MAX_CRL_BYTES {
-        return Result.Err(CrlFetchError.TooLarge { size: resp.body.len(), limit: MAX_CRL_BYTES });
+    let size = resp.body_bytes().len();
+    if size > MAX_CRL_BYTES {
+        return Result.Err(CrlFetchError.TooLarge { size, limit: MAX_CRL_BYTES });
     }
-    // Some CAs serve `application/x-pkcs7-crl` legacy MIME — accept both.
-    let ct = resp.headers.get(&"content-type".to_text())
-        .map(|v| v.clone()).unwrap_or_else(|| "".to_text());
-    if !(ct.starts_with(&CONTENT_TYPE_PKIX_CRL) || ct.starts_with("application/x-pkcs7-crl")) {
-        // Tolerate empty Content-Type (some legacy mirrors omit the header).
-        if !ct.is_empty() {
-            return Result.Err(CrlFetchError.WrongContentType(ct));
+    // Legacy mirrors may omit Content-Type or serve application/x-pkcs7-crl.
+    if let Maybe.Some(ct) = resp.content_type() {
+        if !ct.is_empty() && !ct.starts_with(&CONTENT_TYPE_PKIX_CRL)
+            && !ct.starts_with(&"application/x-pkcs7-crl") {
+            return Result.Err(CrlFetchError.WrongContentType(ct.clone()));
         }
     }
-    Result.Ok(resp.body)
+    Result.Ok(resp.into_body())
 }
 
 // =============================================================================

@@ -58,7 +58,7 @@
 )
 module core.net.weft.zero_rtt_gate;
 
-mount core.net.http.{Method, Response, StatusCode, Headers, Version};
+mount core.net.http.{Method, Response, StatusCode};
 mount core.net.weft.handler.{WeftRequest, Handler};
 mount core.net.weft.service.{Layer};
 mount core.net.weft.error.{WeftError};
@@ -190,13 +190,7 @@ implement<H: Handler> Handler for ZeroRttGateHandler<H> {
         }
         // Reject. 425 Too Early instructs the client to retry on a
         // fresh post-handshake connection.
-        let mut h = Headers.new();
-        h.append(f"connection", f"close");
-        Result.Ok(Response {
-            status:  StatusCode { code: self.layer.reject_status as Int },
-            version: Version.Http11,
-            headers: h,
-            body:    [],
-        })
+        Result.Ok(Response.new(StatusCode.new(self.layer.reject_status as Int))
+            .header("connection", "close"))
     }
 }

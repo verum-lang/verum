@@ -644,20 +644,32 @@ implement Response {
         self.status
     }
 
+    /// Borrow the response headers for lookup or iteration.
+    public fn headers(&self) -> &Headers {
+        &self.headers
+    }
+
     /// Get the response body as text (UTF-8).
     public fn body_text(&self) -> Text {
-        Text.from_utf8_lossy(&self.body)
+        Text.from_utf8_lossy(self.body_bytes())
     }
 
     /// Get the response body as raw bytes.
     public fn body_bytes(&self) -> &[Byte] {
-        &self.body
+        self.body.as_slice()
+    }
+
+    /// Consume the response and return its owned body.
+    public fn into_body(self) -> List<Byte> {
+        self.body
     }
 
     /// Get the Content-Length header value, if present.
     public fn content_length(&self) -> Maybe<Int> {
-        self.headers.get(&"content-length")
-            .and_then(|v| v.parse_int().ok())
+        match self.headers.get(&"content-length") {
+            Maybe.Some(value) => value.parse_int().ok(),
+            Maybe.None => Maybe.None,
+        }
     }
 
     /// Get the Content-Type header value, if present.

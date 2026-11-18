@@ -481,14 +481,14 @@ fn test_request_new_url_preserved() {
 @test
 fn test_response_new_status_preserved() {
     let resp = Response.new(StatusCode.ok());
-    assert_eq(resp.status.code(), 200);
+    assert_eq(resp.status_code().code(), 200);
 }
 
 @test
 fn test_response_new_404() {
     let resp = Response.new(StatusCode.not_found());
-    assert_eq(resp.status.code(), 404);
-    assert(resp.status.is_client_error());
+    assert_eq(resp.status_code().code(), 404);
+    assert(resp.status_code().is_client_error());
 }
 
 // =============================================================================

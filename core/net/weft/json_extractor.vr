@@ -45,7 +45,7 @@ module core.net.weft.json_extractor;
 mount core.collections.list.{List};
 mount core.collections.map.{Map};
 mount core.encoding.json.{JsonValue, JsonError, parse};
-mount core.net.http.{Response, StatusCode, Headers, Version};
+mount core.net.http.{Response, StatusCode};
 mount core.net.weft.handler.{WeftRequest, FromRequest};
 mount core.net.weft.error.{WeftError};
 
@@ -146,14 +146,9 @@ implement JsonExtractError {
             JsonExtractError.RefinementViolation { reason, path } =>
                 (422, f"refinement violation at {path}: {reason}"),
         };
-        let mut headers = Headers.new();
-        headers.append(f"content-type", f"text/plain; charset=utf-8");
-        Response {
-            status:  StatusCode { code: status_code },
-            version: Version.Http11,
-            headers: headers,
-            body:    message.into_bytes(),
-        }
+        Response.new(StatusCode.new(status_code))
+            .header("content-type", "text/plain; charset=utf-8")
+            .body(message.into_bytes())
     }
 }
 
