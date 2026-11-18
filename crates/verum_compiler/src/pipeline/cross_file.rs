@@ -1351,8 +1351,9 @@ impl<'s> CompilationPipeline<'s> {
             // Convert parser errors to diagnostics
             let error_count = errors.len();
             for error in errors.iter() {
-                let mut builder =
-                    DiagnosticBuilder::error().message(format!("Parse error: {}", error));
+                let mut builder = DiagnosticBuilder::error()
+                    .message(format!("Parse error: {}", error))
+                    .span(self.session.convert_span(error.span));
                 // Include error code if present (e.g., M401 for splice outside quote)
                 if let Some(ref code) = error.code {
                     builder = builder.code(code.clone());

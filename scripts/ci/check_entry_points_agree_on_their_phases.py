@@ -162,6 +162,10 @@ def main(argv):
             print("  The gate cannot compare what it cannot locate; if the function was")
             print("  renamed, rename it here too rather than deleting the row.")
             return 1
+        # Check has both file and parsed-module callers. Follow its actual
+        # call edge to the common phases; a removed call must fail this gate.
+        if "self.check_parsed_module(" in "\n".join(b):
+            b += body(path, "check_parsed_module") or []
         for phase in set(CALL.findall("\n".join(b))):
             actual.setdefault(phase, set()).add(name)
 

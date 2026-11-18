@@ -1751,13 +1751,10 @@ fn run_test_property(
     let start = Instant::now();
 
     // Compile file → VBC through the SAME stdlib-aware path as
-    // `run_test_interpret`, memoised per file (shared `CompileKind::Stdlib`
-    // cache) so an N-property file — or a file mixing @test and @property —
+    // `run_test_interpret`, memoised per file and active test selection so an N-property file — or a file mixing @test and @property —
     // compiles exactly once.  This unification fixes the prior
     // archive-const codegen miss (see `build_stdlib_test_module`).
-    let module = match compiled_test_module(&test.file, CompileKind::Stdlib, || {
-        build_stdlib_test_module(test)
-    }) {
+    let module = match compiled_test_module(test) {
         Ok(m) => m,
         Err(error) => {
             return TestResult::CompileError {
@@ -2268,20 +2265,11 @@ fn synthesise_test_input_with_crate_root(
     keep_ignored_fn: Option<&str>,
     case_args: Option<&[crate::commands::property::TreeValue]>,
 ) -> Option<PathBuf> {
-    let mut cur = test_file.parent()?;
-    let cog_root = loop {
-        if cur.join("verum.toml").is_file() || cur.join("Verum.toml").is_file() {
-            break cur.to_path_buf();
-        }
-        cur = cur.parent()?;
-    };
-
-    let candidates = [cog_root.join("src/lib.vr"), cog_root.join("src/main.vr")];
-    let root_path = candidates.iter().find(|p| p.is_file())?;
+    let root_path = test_crate_root_path(test_file)?;
 
     let test_source =
         strip_ignored_tests(&std::fs::read_to_string(test_file).ok()?, keep_ignored_fn);
-    let root_source = std::fs::read_to_string(root_path).ok()?;
+    let root_source = std::fs::read_to_string(&root_path).ok()?;
 
     // Strip any leading `module …;` declaration from the crate root —
     // the test file's module identity wins.
@@ -2492,95 +2480,26 @@ fn synthesise_test_main_only(
     Some(merged_path)
 }
 
-/// T6.0.4 — locate the cog's crate root (src/lib.vr or src/main.vr)
-/// and parse its items so the test module can reference them
-/// without an explicit `mount` line. Walks up from the test file
-/// looking for a `verum.toml`; on hit, tries `src/lib.vr` then
-/// `src/main.vr`. Returns the parsed root's items on success;
-/// `None` if no cog manifest, no root file, or parse failure
-/// (we silently fall through — a parse error in the crate root
-/// will surface as the user runs `verum check` separately).
-fn find_and_parse_crate_root(test: &Test) -> Option<List<verum_ast::Item>> {
-    use std::path::Path;
-
-    fn walk_up_for_manifest(start: &Path) -> Option<std::path::PathBuf> {
-        let mut cur = start.parent()?;
-        loop {
-            if cur.join("verum.toml").is_file() || cur.join("Verum.toml").is_file() {
-                return Some(cur.to_path_buf());
-            }
-            cur = cur.parent()?;
-        }
-    }
-
-    let cog_root = walk_up_for_manifest(&test.file)?;
-    let candidates = [cog_root.join("src/lib.vr"), cog_root.join("src/main.vr")];
-    let root_path = candidates.iter().find(|p| p.is_file())?;
-
-    let source = std::fs::read_to_string(root_path).ok()?;
-    let file_id = FileId::new(1); // Distinct from test file's FileId(0).
-    let parser = VerumParser::new();
-    let lexer = Lexer::new(&source, file_id);
-    let module = parser.parse_module(lexer, file_id).ok()?;
-    Some(module.items)
-}
-
-// --------------------------------------------------------------------
-// Per-file compiled-module cache
-// --------------------------------------------------------------------
-//
-// Every `@test` in a file shares one identical AST, so it lowers to one
-// identical compiled `VbcModule`.  The historical runner recompiled the
-// file — and lazily re-linked the embedded stdlib archive — once *per
-// test*, so an N-test file paid the full stdlib-link cost N times.  For
-// a 143-test module that is ~140 redundant full compilations (measured
-// at ~43 s each for a module that mounts `core.base.*`).
-//
-// `compiled_test_module` memoises the compiled module by
-// (canonical-path, kind).  The first test to reach a given file
-// compiles it while holding that file's slot lock; concurrent same-file
-// tests (the suite runs under rayon's `par_iter`) block on the single
-// slot lock and then reuse the cached `Arc<VbcModule>`.  Distinct files
-// still compile fully in parallel — the outer map lock is held only
-// long enough to fetch-or-create the slot, never across a compile.
-//
-// `kind` is retained as a cache-key discriminant for forward
-// extensibility, but both runner entry points (`run_test_interpret`
-// for @test and `run_test_property` for @property) now compile through
-// the single stdlib-aware `build_stdlib_test_module`
-// (`compile_module_with_stdlib` + crate-root merge), so they share the
-// `CompileKind::Stdlib` slot and a mixed @test/@property file compiles
-// exactly once.
-//
-// Sharing one module across tests is sound: `VbcModule` carries no
-// interior mutability and the interpreter takes it via `Arc` (read
-// only), so every test still runs in a fresh `Interpreter` over the
-// same immutable bytecode.  A compile *error* is cached too — a file
-// that fails to compile fails identically for all its tests, and we
-// must not pay to rediscover that per test.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-enum CompileKind {
-    /// `compile_module_with_stdlib` + crate-root merge — the canonical
-    /// (and currently only) test-compile path for both @test and
-    /// @property.
-    Stdlib,
+fn test_crate_root_path(test_file: &Path) -> Option<PathBuf> {
+    let root = test_file.ancestors().skip(1).find(|dir| {
+        dir.join("verum.toml").is_file() || dir.join("Verum.toml").is_file()
+    })?;
+    [root.join("src/lib.vr"), root.join("src/main.vr")]
+        .into_iter()
+        .find(|path| path.is_file())
 }
 
 type CachedModule = std::result::Result<Arc<VbcModule>, String>;
 
-fn compiled_test_module(
-    file: &Path,
-    kind: CompileKind,
-    build: impl FnOnce() -> CachedModule,
-) -> CachedModule {
+/// Active tests share one checked module. An explicitly selected ignored test
+/// includes its own declaration and therefore has a distinct compilation unit.
+fn compiled_test_module(test: &Test) -> CachedModule {
     type Slot = Arc<Mutex<Option<CachedModule>>>;
-    static CACHE: OnceLock<Mutex<HashMap<(PathBuf, CompileKind), Slot>>> = OnceLock::new();
+    static CACHE: OnceLock<Mutex<HashMap<(PathBuf, Option<Text>), Slot>>> = OnceLock::new();
     let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-
-    // Canonicalise so two spellings of the same path collapse to one
-    // entry; fall back to the raw path if the file can't be resolved.
-    let canon = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
-    let key = (canon, kind);
+    let canon = test.file.canonicalize().unwrap_or_else(|_| test.file.clone());
+    let keep = if test.ignored { test.fn_name.as_deref() } else { None };
+    let key = (canon, keep.map(Text::from));
 
     // Brief outer-lock window: fetch or create this file's slot.
     let slot: Slot = {
@@ -2597,141 +2516,63 @@ fn compiled_test_module(
     if let Some(cached) = slot_guard.as_ref() {
         return cached.clone();
     }
-    let built = build();
+    let built = build_stdlib_test_module(test, keep);
     *slot_guard = Some(built.clone());
     built
 }
 
-// Compile a test file to a stdlib-aware `VbcModule`.
-//
-// This is the single canonical test-compile entry point: it parses the
-// source, merges the cog crate-root (T6.0.4), and lowers through
-// `compile_module_with_stdlib` so the embedded stdlib archive's full
-// const/function surface is registered in codegen context (via
-// `apply_lazy_with_types`).  BOTH `run_test_interpret` (@test) and
-// `run_test_property` (@property) route through here so the two paths
-// share identical codegen semantics AND the same per-file compile cache
-// (`CompileKind::Stdlib`).
-//
-// Historical defect (fixed): `run_test_property` previously used the
-// bare `VbcCodegen::compile_module`, which skips the archive load.  A
-// stdlib const reachable only through the archive (e.g.
-// `core.mem.capability.CAP_EXECUTE`, referenced from a non-DCE'd helper
-// inside a `@property` file) then failed codegen with
-// `UndefinedVariable("CAP_EXECUTE")` even though the same code compiled
-// cleanly as an `@test`.  Unifying on `compile_module_with_stdlib`
-// closes that whole class.
-fn build_stdlib_test_module(test: &Test) -> CachedModule {
+fn is_ignored_test(function: &verum_ast::decl::FunctionDecl) -> bool {
+    let attrs = &function.attributes;
+    attrs.iter().any(|attr| matches!(attr.name.as_str(), "ignore" | "ignored"))
+        && attrs.iter().any(|attr| matches!(attr.name.as_str(), "test" | "property"))
+}
+
+fn retain_selected_tests(module: &mut verum_ast::Module, keep: Option<&str>) {
+    module.items.retain(|item| match &item.kind {
+        ItemKind::Function(function) => {
+            Some(function.name.as_str()) == keep || !is_ignored_test(function)
+        }
+        _ => true,
+    });
+}
+
+fn checked_test_source(test_file: &Path, keep: Option<&str>) -> anyhow::Result<verum_ast::Module> {
+    use anyhow::Context;
+
+    let root_path = test_crate_root_path(test_file);
+    let options = CompilerOptions {
+        input: root_path.as_deref().unwrap_or(test_file).to_path_buf(),
+        output_format: OutputFormat::Human,
+        verify_mode: VerifyMode::Runtime,
+        ..Default::default()
+    };
+    let mut session = Session::new(options);
+    let test_id = session.load_file(test_file)?;
+    let root_id = root_path
+        .as_ref()
+        .map(|path| session.load_file(path))
+        .transpose()?;
+    let result = (|| {
+        let mut pipeline = CompilationPipeline::new(&mut session);
+        let mut module = pipeline.phase_parse(test_id)
+            .with_context(|| format!("parsing {}", test_file.display()))?;
+        retain_selected_tests(&mut module, keep);
+        if let Some((path, id)) = root_path.zip(root_id) {
+            let mut root = pipeline.phase_parse(id)
+                .with_context(|| format!("parsing {}", path.display()))?;
+            root.items.append(&mut module.items);
+            module.items = root.items;
+        }
+        pipeline.check_parsed_module(&mut module)?;
+        Ok(module)
+    })();
+    result.map_err(|err: anyhow::Error| anyhow::anyhow!("{err:#}\n{}", session.format_diagnostics()))
+}
+
+fn build_stdlib_test_module(test: &Test, keep: Option<&str>) -> CachedModule {
     use verum_vbc::codegen::CodegenConfig;
 
-    let source = std::fs::read_to_string(&test.file).map_err(|e| format!("read: {}", e))?;
-
-    let file_id = FileId::new(0);
-    let parser = VerumParser::new();
-    let lexer = Lexer::new(&source, file_id);
-    let mut ast = parser.parse_module(lexer, file_id).map_err(|errs| {
-        let joined = errs
-            .iter()
-            .map(|e| format!("{}", e))
-            .collect::<Vec<_>>()
-            .join("\n");
-        format!("parse: {}", joined)
-    })?;
-
-    // T6.0.4 — tests/ files implicitly mount the cog's crate root
-    // (src/lib.vr or src/main.vr). Cargo / npm conventionally make a
-    // package's tests/ directory have unrestricted access to the
-    // package's public API; Verum aligns: locate the cog manifest by
-    // walking up from the test file, parse the crate root, and
-    // append its items to the test module's item list. Mount-line
-    // boilerplate in test files becomes optional.
-    let crate_root_items = find_and_parse_crate_root(test);
-
-    // META-TEST-TYPECHECK-1 — run the REAL type checker before VBC
-    // codegen.  Pre-fix the interp/property harness compiled test
-    // files straight through `compile_module_with_stdlib` (AST → VBC),
-    // which contains NO `verum_types` phase at all — a test could
-    // assign `()` (e.g. the Unit return of `List.append`) into a
-    // `List<T>`-typed field and "pass" compilation, then die at
-    // runtime with NullPointer/`method not found on ()`.  That made
-    // `verum test --interp` STRICTLY MORE LENIENT than both
-    // `verum run --interp` (which calls `validate_module`) and
-    // `verum test --aot` (full pipeline `phase_type_check`) — so
-    // interp-vs-AOT "divergence" was frequently just the missing
-    // checker, not a tier bug.  Route through the same
-    // `run_check_only` entry `verum check` uses; the per-file compile
-    // cache (`CompileKind::Stdlib`) amortises it to once per file.
-    //
-    // Scope: standalone (non-cog) test files — exactly the
-    // `core-tests/` conformance surface.  Cog tests merge crate-root
-    // items below and would need the same synthesis the AOT path does;
-    // they keep the pre-existing behaviour for now.
-    // Escape hatch for triage sweeps: `VERUM_TEST_LENIENT_TYPES=1`.
-    if crate_root_items.is_none()
-        && std::env::var("VERUM_TEST_LENIENT_TYPES").is_err()
-    {
-        // TEST-PREFLIGHT-IGNORE-1: strip `@ignore`'d test fns before the
-        // file-level check. A deliberately compile-broken pinned test
-        // (an E400 repro under @ignore) previously failed EVERY test in
-        // the file uniformly — @ignore only skipped execution, not this
-        // preflight — forcing pins to be fully commented out. The strip
-        // is lexical (attr-anchored brace matching, string/char-aware)
-        // and FAIL-OPEN: any irregularity falls back to checking the
-        // original file (today's behaviour). The stripped copy lives at
-        // a stable per-source path so the pipeline's per-file compile
-        // cache keeps amortising.
-        let check_input: std::path::PathBuf = match std::fs::read_to_string(&test.file)
-            .ok()
-            .and_then(|s| strip_ignored_test_fns(&s))
-        {
-            Some(stripped) => {
-                let mut tmp = std::env::temp_dir();
-                tmp.push("verum-preflight");
-                let _ = std::fs::create_dir_all(&tmp);
-                let stem = test
-                    .file
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("test");
-                let mut hasher = std::collections::hash_map::DefaultHasher::new();
-                use std::hash::{Hash, Hasher};
-                test.file.hash(&mut hasher);
-                tmp.push(format!("{}_{:016x}.vr", stem, hasher.finish()));
-                if std::fs::write(&tmp, stripped).is_ok() {
-                    tmp
-                } else {
-                    test.file.clone()
-                }
-            }
-            None => test.file.clone(),
-        };
-        let options = CompilerOptions {
-            input: check_input,
-            output_format: OutputFormat::Human,
-            // The preflight is a fast-fail TYPE check. Proof
-            // obligations are verified once at execution time
-            // (`validate_module` → `phase_verify` in the run
-            // pipeline); running SMT here too would verify every
-            // theorem twice per test file.
-            verify_mode: verum_compiler::VerifyMode::Runtime,
-            ..Default::default()
-        };
-        let mut session = Session::new(options);
-        let mut pipeline = CompilationPipeline::new(&mut session);
-        if let Err(e) = pipeline.run_check_only() {
-            return Err(format!("typecheck: {}", e));
-        }
-    }
-
-    if let Some(crate_root_items) = crate_root_items {
-        // Prepend crate-root items so test items can reference them.
-        let mut merged = crate_root_items;
-        for item in ast.items.iter() {
-            merged.push((*item).clone());
-        }
-        ast.items = merged;
-    }
-
+    let ast = checked_test_source(&test.file, keep).map_err(|err| format!("preflight: {err}"))?;
     let config = CodegenConfig::new("test");
     let module = verum_compiler::single_module::compile_module_with_stdlib(
         &ast,
@@ -2747,9 +2588,7 @@ fn run_test_interpret(test: &Test, _cfg: &TestRunCfg) -> TestResult {
 
     let start = Instant::now();
 
-    let module = match compiled_test_module(&test.file, CompileKind::Stdlib, || {
-        build_stdlib_test_module(test)
-    }) {
+    let module = match compiled_test_module(test) {
         Ok(m) => m,
         Err(error) => {
             return TestResult::CompileError {
@@ -3030,10 +2869,7 @@ fn discover_tests(file: &Path) -> Result<List<Test>> {
                     if !is_test && !is_property {
                         continue;
                     }
-                    let is_ignored = func
-                        .attributes
-                        .iter()
-                        .any(|a| a.name.as_str() == "ignore" || a.name.as_str() == "ignored");
+                    let is_ignored = is_ignored_test(func);
                     let should_panic = func
                         .attributes
                         .iter()
@@ -3659,29 +3495,14 @@ fn pinned_drop_me() {
     }
     use super::*;
 
-    /// TEST-PREFLIGHT-IGNORE-2: attributes PRECEDING `@ignore`
-    /// (`@test` first is the dominant stdlib order) must be stripped
-    /// with the fn, or the preflight file dangles an item-less
-    /// attribute and fails to parse (E018).
     #[test]
-    fn strip_ignored_peels_preceding_attributes() {
-        let src = "@test\nfn keep_me() {\n    assert(true);\n}\n\n@test\n@ignore\nfn drop_me() {\n    assert(false);\n}\n";
-        let out = strip_ignored_test_fns(src).expect("one fn stripped");
-        assert!(out.contains("fn keep_me"));
-        assert!(!out.contains("fn drop_me"));
-        // The dangling-@test hazard: no attribute may immediately
-        // precede the strip marker.
-        let marker_at = out.find("[preflight]").unwrap();
-        let before = &out[..marker_at];
-        let last_line = before
-            .trim_end_matches(|c| c == '\n' || c == '/' || c == ' ')
-            .rsplit('\n')
-            .next()
-            .unwrap_or("");
-        assert!(
-            !last_line.trim_start().starts_with('@'),
-            "dangling attribute before strip marker: {last_line:?}"
-        );
+    fn retaining_active_declarations_removes_all_attributes_of_ignored_tests() {
+        let source = "@test\nfn keep_me() {}\n@test\n@ignore\nfn drop_me() {}";
+        let file = FileId::new(0);
+        let mut module = VerumParser::new().parse_module(Lexer::new(source, file), file).unwrap();
+        retain_selected_tests(&mut module, None);
+        assert_eq!(module.items.len(), 1);
+        assert!(matches!(&module.items[0].kind, ItemKind::Function(f) if f.name.as_str() == "keep_me"));
     }
 
     /// T0365 pin: the selection truth-table for the three ignore
@@ -4220,133 +4041,4 @@ fn pinned_drop_me() {
             }
         }
     }
-}
-
-/// TEST-PREFLIGHT-IGNORE-1: lexically remove test fns annotated
-/// `@ignore` (with or without a reason) so the file-level typecheck
-/// preflight tolerates deliberately compile-broken pinned tests.
-///
-/// Returns `Some(stripped)` when at least one fn was removed and the
-/// scan stayed regular; `None` means "use the original file" (no
-/// @ignore present, or the matcher hit something irregular —
-/// fail-open by design).
-fn strip_ignored_test_fns(src: &str) -> Option<String> {
-    if !src.contains("@ignore") {
-        return None;
-    }
-    let bytes = src.as_bytes();
-    let mut out = String::with_capacity(src.len());
-    let mut i = 0usize;
-    let mut stripped_any = false;
-    'outer: while i < bytes.len() {
-        // Find the next line start with `@ignore` (allow leading ws).
-        let line_end = src[i..].find('\n').map(|o| i + o + 1).unwrap_or(bytes.len());
-        let line = &src[i..line_end];
-        let t = line.trim_start();
-        if t.starts_with("@ignore") {
-            // Scan forward over subsequent attribute/comment lines to
-            // the `fn ` header; give up (fail-open) past 8 lines.
-            let mut j = line_end;
-            let mut hops = 0;
-            loop {
-                if hops > 8 || j >= bytes.len() {
-                    // Irregular shape — keep original text as-is.
-                    out.push_str(line);
-                    i = line_end;
-                    continue 'outer;
-                }
-                let le = src[j..].find('\n').map(|o| j + o + 1).unwrap_or(bytes.len());
-                let l2 = src[j..le].trim_start();
-                if l2.starts_with("fn ") || l2.starts_with("pub fn ") {
-                    // Brace-match from the first '{' after the header.
-                    let Some(open_rel) = src[j..].find('{') else {
-                        out.push_str(line);
-                        i = line_end;
-                        continue 'outer;
-                    };
-                    let mut k = j + open_rel;
-                    let mut depth = 0i32;
-                    let mut in_str = false;
-                    let mut in_char = false;
-                    let mut prev_bs = false;
-                    while k < bytes.len() {
-                        let c = bytes[k] as char;
-                        if in_str {
-                            if c == '"' && !prev_bs {
-                                in_str = false;
-                            }
-                            prev_bs = c == '\\' && !prev_bs;
-                        } else if in_char {
-                            if c == '\'' && !prev_bs {
-                                in_char = false;
-                            }
-                            prev_bs = c == '\\' && !prev_bs;
-                        } else {
-                            match c {
-                                '"' => in_str = true,
-                                '\'' => in_char = true,
-                                '{' => depth += 1,
-                                '}' => {
-                                    depth -= 1;
-                                    if depth == 0 {
-                                        // Consume through end of line.
-                                        let after = src[k..]
-                                            .find('\n')
-                                            .map(|o| k + o + 1)
-                                            .unwrap_or(bytes.len());
-                                        // Attributes PRECEDING the
-                                        // `@ignore` line (`@test`,
-                                        // `@cfg(...)`, ...) were already
-                                        // emitted — peel them off `out`,
-                                        // or the strip leaves a dangling
-                                        // `@test` with no item and the
-                                        // whole preflight file fails to
-                                        // PARSE (E018 at the marker
-                                        // comment; the sync/condvar
-                                        // suite's uniform 217ms
-                                        // compile-fail signature).
-                                        loop {
-                                            let trimmed_end = out.trim_end_matches('\n');
-                                            let Some(last_nl) = trimmed_end.rfind('\n') else {
-                                                break;
-                                            };
-                                            let last_line = trimmed_end[last_nl + 1..].trim_start();
-                                            if last_line.starts_with('@') {
-                                                out.truncate(last_nl + 1);
-                                            } else {
-                                                break;
-                                            }
-                                        }
-                                        out.push_str(
-                                            "// [preflight] @ignore'd test stripped\n",
-                                        );
-                                        stripped_any = true;
-                                        i = after;
-                                        continue 'outer;
-                                    }
-                                }
-                                _ => {}
-                            }
-                            prev_bs = false;
-                        }
-                        k += 1;
-                    }
-                    // Unbalanced — fail-open.
-                    return None;
-                }
-                if l2.starts_with('@') || l2.starts_with("//") || l2.is_empty() {
-                    j = le;
-                    hops += 1;
-                    continue;
-                }
-                // Non-attr, non-fn after @ignore — irregular; keep text.
-                out.push_str(line);
-                i = line_end;
-                continue 'outer;
-            }
-        }
-        out.push_str(line);
-        i = line_end;
-    }
-    if stripped_any { Some(out) } else { None }
 }

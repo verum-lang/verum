@@ -351,7 +351,14 @@ impl<'s> CompilationPipeline<'s> {
         // after it.
         let file_id = self.phase_load_source()?;
         let mut module = self.phase_parse(file_id)?;
+        self.check_parsed_module(&mut module)?;
+        info!("Type checking completed in {:.2}s", start.elapsed().as_secs_f64());
+        Ok(())
+    }
 
+    /// Check a parsed compilation unit against its real project and stdlib.
+    /// All source spans must belong to this pipeline's session.
+    pub fn check_parsed_module(&mut self, module: &mut verum_ast::Module) -> Result<()> {
         // #109 lazy stdlib monomorphization — compute the transitive
         // closure of stdlib modules referenced by the user file's mount
         // tree (plus the implicit prelude). Stdlib modules outside the
@@ -368,7 +375,7 @@ impl<'s> CompilationPipeline<'s> {
         let reachable = if full_stdlib {
             None
         } else {
-            crate::stdlib_reachability::compute_reachable_stdlib_modules(&module)
+            crate::stdlib_reachability::compute_reachable_stdlib_modules(module)
         };
 
         // Load the stdlib modules the closure names (enables std.* imports).
@@ -403,16 +410,16 @@ impl<'s> CompilationPipeline<'s> {
         //
         // Fundamental fix for #192 (kernel_v0 self-check unblock).
         let module_path = self
-            .extract_top_level_module_decl_path(&module)
+            .extract_top_level_module_decl_path(module)
             .unwrap_or_else(|| {
                 Text::from(self.session.options().input.display().to_string())
             });
 
         // Register meta functions (enables meta-fail tests)
-        self.register_meta_declarations(&module_path, &module)?;
+        self.register_meta_declarations(&module_path, module)?;
 
         // Expand macros (evaluates @macro() invocations, triggers hygiene checks)
-        self.expand_module(&module_path, &mut module)?;
+        self.expand_module(&module_path, module)?;
 
         // Check if file has meta functions for special handling
         let has_meta_functions = module.items.iter().any(|item| {
@@ -445,9 +452,9 @@ impl<'s> CompilationPipeline<'s> {
         // different ones. `scripts/ci/check_entry_points_agree_on_their_phases.py`
         // holds the mapping and names these two rows.
         if std::env::var("VERUM_FULL_STDLIB").is_err() {
-            self.clear_non_compilable_stdlib_modules(Some(&module));
+            self.clear_non_compilable_stdlib_modules(Some(module));
         }
-        self.phase_safety_gate(&module)?;
+        self.phase_safety_gate(module)?;
 
         if has_meta_functions {
             // For files with meta functions, run BOTH meta evaluation and type checking.
@@ -455,8 +462,8 @@ impl<'s> CompilationPipeline<'s> {
             // Type checking also runs to produce E-code errors (needed for tests expecting E400, etc.).
             // Both phases emit diagnostics to the session, so all errors are collected
             // in format_diagnostics() regardless of which phase returned first.
-            let meta_result = self.phase_meta_evaluation(&module, &module_path);
-            let type_check_result = self.phase_type_check(&module);
+            let meta_result = self.phase_meta_evaluation(module, &module_path);
+            let type_check_result = self.phase_type_check(module);
 
             // Return error from whichever phase failed (meta errors take priority)
             if let Err(e) = meta_result {
@@ -471,9 +478,9 @@ impl<'s> CompilationPipeline<'s> {
             }
         } else {
             // For files without meta functions, original ordering: type check then meta eval
-            let type_check_result = self.phase_type_check(&module);
+            let type_check_result = self.phase_type_check(module);
             if type_check_result.is_ok() {
-                self.phase_meta_evaluation(&module, &module_path)?;
+                self.phase_meta_evaluation(module, &module_path)?;
             } else {
                 return type_check_result;
             }
@@ -489,7 +496,7 @@ impl<'s> CompilationPipeline<'s> {
         // verify separately afterwards (`verum verify`, the
         // `verum test` preflight) opt out via `VerifyMode::Runtime`.
         if self.session.options().verify_mode.use_smt() {
-            let r = self.phase_verify(&module);
+            let r = self.phase_verify(module);
             self.session.collect_phase_error("verify", r)?;
         }
 
@@ -501,20 +508,17 @@ impl<'s> CompilationPipeline<'s> {
         // a diagnostic under `verum build` and NOTHING under
         // `verum check <file>`. `check_project` got this in T1095; the
         // single-file path is a third entry point and got it here.
-        self.phase_context_validation(&module);
+        self.phase_context_validation(module);
 
         // Dependency analysis (validates against target constraints)
-        self.phase_dependency_analysis(&module)?;
+        self.phase_dependency_analysis(module)?;
 
         // CBGR analysis — the fourth entry of the same invariant (T1101).
         // `run_interpreter` and `run_for_test` both run it; `verum check`
         // skipped it outright, so a borrow the shipped path refuses passed
         // `check` clean. It goes last here for the same reason it goes
         // last there: it reads the types the checker has just settled.
-        self.phase_cbgr_analysis(&module)?;
-
-        let elapsed = start.elapsed();
-        info!("Type checking completed in {:.2}s", elapsed.as_secs_f64());
+        self.phase_cbgr_analysis(module)?;
 
         self.diagnostic_gate()
     }

@@ -697,7 +697,7 @@ decrement in `DropRef` and `*shared` deref-to-inner in
 | Stable trigger | Any type error inside a `core-tests/` file under `verum test --interp` (canonical: `candidates: List.of(a).append(List.of(b))` — `append` returns `()` into a `List<T>` field). |
 | Manifestation | Test compiles, then dies at runtime far from the mistake: `NullPointerAt opcode 0x66`, `method '().append' not found on receiver of runtime kind ()`. Interp-vs-AOT "divergence" that was really the missing checker. |
 | Root cause | `compile_module_with_stdlib` (the interp/property harness path) contains NO `verum_types` phase — strictly more lenient than both `verum run --interp` (validate_module) and `verum test --aot` (full pipeline). |
-| Fix (landed) | `build_stdlib_test_module` preflights each standalone test file through `run_check_only` (the `verum check` entry), per-file cached. Escape hatch for triage sweeps: `VERUM_TEST_LENIENT_TYPES=1`. |
+| Fix (landed) | `build_stdlib_test_module` checks the parsed test and its cog root in the compiler session before lowering that same unit to VBC. The cache distinguishes active tests from each explicitly selected ignored test. |
 | Pinned by | The rewritten oracle/hygiene/diakrisis suites (list literals) — a reintroduced `()`-into-`List<T>` now fails compile. |
 
 ## 50. Dotted wanted keys squatted by bare-name descriptors (CLOSED 2026-07-06)
