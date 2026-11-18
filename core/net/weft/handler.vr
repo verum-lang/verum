@@ -83,11 +83,11 @@ implement WeftRequest {
     }
 
     public fn body_text(&self) -> Text {
-        Text.from_utf8_lossy(&self.body)
+        Text.from_utf8_lossy(self.body_bytes())
     }
 
     public fn body_bytes(&self) -> &[Byte] {
-        &self.body
+        self.body.as_slice()
     }
 
     public fn content_type(&self) -> Maybe<&Text> {
@@ -295,7 +295,7 @@ public type BodyBytes is { inner: List<Byte> };
 
 implement BodyBytes {
     public fn into_inner(self) -> List<Byte> { self.inner }
-    public fn as_slice(&self) -> &[Byte] { &self.inner }
+    public fn as_slice(&self) -> &[Byte] { self.inner.as_slice() }
     public fn len(&self) -> Int { self.inner.len() }
 }
 
@@ -317,7 +317,7 @@ implement BodyText {
 implement FromRequest for BodyText {
     type Rejection = ExtractRejection;
     async fn from_request(req: &mut WeftRequest) -> Result<BodyText, ExtractRejection> {
-        match Text.from_utf8(&req.body) {
+        match Text.from_utf8(req.body_bytes()) {
             Result.Ok(t)  => Result.Ok(BodyText { inner: t }),
             Result.Err(_) => Result.Err(ExtractRejection.InvalidBody("non-UTF8 body")),
         }

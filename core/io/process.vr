@@ -187,12 +187,12 @@ public type Output is {
 implement Output {
     /// Returns stdout as a Text string.
     public fn stdout(&self) -> Text {
-        Text.from_utf8_lossy(&self.stdout_bytes)
+        Text.from_utf8_lossy(self.stdout_bytes.as_slice())
     }
 
     /// Returns stderr as a Text string.
     public fn stderr(&self) -> Text {
-        Text.from_utf8_lossy(&self.stderr_bytes)
+        Text.from_utf8_lossy(self.stderr_bytes.as_slice())
     }
 }
 

@@ -454,7 +454,7 @@ fn int_to_hex_text(n: Int) -> Text {
         out.push(bytes[i]);
         i = i - 1;
     }
-    Text.from_utf8_lossy(&out)
+    Text.from_utf8_lossy(out.as_slice())
 }
 
 // Parse a dotted-decimal IPv4 address into its 32-bit big-endian

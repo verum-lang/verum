@@ -1,10 +1,34 @@
 mount core.net.http.{Headers, Method, Response, StatusCode};
-mount core.net.weft.error.{WeftError};
-mount core.net.weft.handler.{Handler, WeftRequest};
+mount core.net.weft.error.{ExtractRejection, WeftError};
+mount core.net.weft.handler.{BodyBytes, BodyText, FromRequest, Handler, WeftRequest};
 mount core.net.weft.json_extractor.{JsonExtractorConfig, extract_json};
 mount core.net.weft.response_ext.{resp_json, resp_text, resp_with_body_bytes, resp_with_body_text};
 mount core.net.weft.service.{ServiceBuilder};
 mount core.net.weft.zero_rtt_gate.{ZeroRttGateHandler, ZeroRttGateLayer};
+
+@test
+fn request_body_preserves_bytes_when_decoded_lossily() {
+    let request = WeftRequest.new(Method.Post, "/", Maybe.None, Headers.new(),
+        [0x61_u8, 0xFF_u8, 0xC3_u8, 0xA9_u8]);
+    assert_eq(request.body_text(), "a�é");
+    let bytes = request.body_bytes();
+    assert_eq(bytes.len(), 4);
+    assert_eq(bytes[1], 0xFF_u8);
+}
+
+@test
+async fn request_extractors_preserve_binary_and_reject_invalid_text() {
+    let mut request = WeftRequest.new(Method.Post, "/", Maybe.None, Headers.new(), [0xFF_u8]);
+    let binary = match BodyBytes.from_request(&mut request).await {
+        Result.Ok(value) => value,
+        Result.Err(_) => panic("binary extractor rejected a byte"),
+    };
+    assert_eq(binary.as_slice()[0], 0xFF_u8);
+    match BodyText.from_request(&mut request).await {
+        Result.Err(ExtractRejection.InvalidBody(_)) => {},
+        _ => panic("invalid UTF-8 must be rejected"),
+    };
+}
 
 @test
 fn weft_response_builders_count_utf8_bytes_and_preserve_content_type() {

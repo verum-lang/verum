@@ -78,13 +78,13 @@ implement ShellResult {
 
     /// stdout as Text (UTF-8 lossy). Allocates a fresh Text.
     public fn stdout(&self) -> Text {
-        Text.from_utf8_lossy(&self.stdout_bytes)
+        Text.from_utf8_lossy(self.bytes())
     }
 
     /// stdout trimmed of leading/trailing whitespace — the most common
     /// projection (matches `$(cmd)` semantics in POSIX shells).
     public fn text(&self) -> Text {
-        self.stdout().trim().into()
+        self.stdout().trim()
     }
 
     /// stdout split into lines without trailing newlines. Empty trailing
@@ -92,17 +92,17 @@ implement ShellResult {
     public fn lines(&self) -> List<Text> {
         let s = self.stdout();
         let mut out: List<Text> = [];
-        for line in s.lines() { out.push(line.into()); }
+        for line in s.lines() { out.push(line); }
         out
     }
 
     /// stderr as Text.
     public fn stderr(&self) -> Text {
-        Text.from_utf8_lossy(&self.stderr_bytes)
+        Text.from_utf8_lossy(self.stderr_bytes.as_slice())
     }
 
     /// Reference to raw stdout bytes. Zero-copy.
-    public fn bytes(&self) -> &[Byte] { &self.stdout_bytes }
+    public fn bytes(&self) -> &[Byte] { self.stdout_bytes.as_slice() }
 
     /// Process exit code; meaningful when `status.is_exited()` is true.
     public fn code(&self) -> Int { self.status.code() }

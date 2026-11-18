@@ -141,7 +141,7 @@ implement SysChild {
             }
         }
         let _ = __fd_close_raw(self.stdout_fd);
-        Text.from_utf8_lossy(&bytes)
+        Text.from_utf8_lossy(bytes.as_slice())
     }
 }
 
