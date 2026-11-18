@@ -359,3 +359,28 @@ fn a_variant_constructor_cannot_be_assigned_as_a_storage_field() {
     let found = errors("type State is Closed | Open; fn reject() { State.Closed=State.Open; }");
     assert!(!found.is_empty(), "a constructor is not an assignable place");
 }
+
+#[test]
+fn inline_fields_can_reborrow_caller_storage_exclusively() {
+    let definitions = "type Owner is { inner: Boxed };
+        type Evidence<T> is { value: T };
+        type Package is { carrier: Type, witness: Evidence<carrier> };";
+    let valid = errors(&format!(r#"{definitions}
+        implement Owner {{
+            fn shared(&self) -> &Boxed {{ &self.inner }}
+            fn exclusive(&mut self) -> &mut Boxed {{ &mut self.inner }}
+        }}
+        fn project(owner: &mut Owner) -> &mut Int {{ &mut owner.inner.value }}
+    "#));
+    assert!(valid.is_empty(), "{valid:?}");
+
+    for invalid in [
+        "fn local() -> &mut Int { let mut owner = Owner { inner: Boxed { value: 1 } }; &mut owner.inner.value }",
+        "fn owned(mut owner: Owner) -> &mut Int { &mut owner.inner.value }",
+        "fn via_alias() -> &mut Int { let mut owner = Owner { inner: Boxed { value: 1 } }; let alias = &mut owner; &mut alias.inner.value }",
+        "implement Owner { fn owned(mut self) -> &mut Int { &mut self.inner.value } }",
+    ] {
+        let rejected = errors(&format!("{definitions} {invalid}"));
+        assert!(rejected.iter().any(|message| message.contains("does not live long enough")), "{invalid}: {rejected:?}");
+    }
+}

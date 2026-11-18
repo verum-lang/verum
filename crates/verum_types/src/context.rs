@@ -1694,13 +1694,13 @@ impl TypeEnv {
     pub(crate) fn check_record_place_write(
         &mut self,
         name: &str,
-        permitted: bool,
+        invalidate_binding: bool,
     ) -> Result<(), Span> {
         if let Some(place) = self.local_record_place(name) {
             if let Some(origin) = place.projection {
                 return Err(origin);
             }
-            if permitted {
+            if invalidate_binding {
                 *place = RecordPlace {
                     mutable: true,
                     loan_region: place.loan_region,

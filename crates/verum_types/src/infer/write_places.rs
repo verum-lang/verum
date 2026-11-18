@@ -259,6 +259,7 @@ impl TypeChecker {
             .is_some();
         let mut step = unparen(place);
         let mut target = true;
+        let mut projects_through_reference = false;
         while let Some((operand, auto_deref)) = place_operand(step) {
             // A selected member of a declared type is a produced value, not
             // storage reached through that type name. Receiver borrows may
@@ -272,6 +273,11 @@ impl TypeChecker {
                 break;
             }
             let ty = self.place_operand_type(operand)?;
+            // Only the last step reaches the lexical root. Writing through a
+            // reference leaves the binding that holds that reference intact.
+            if tracks_indices && matches!(unparen(operand).kind, ExprKind::Path(_)) {
+                projects_through_reference = self.reference_mode(&ty, operand.span)?.is_some();
+            }
             self.check_write_through_reference(&ty, auto_deref, operand.span)?;
             if auto_deref && self.projection_carrier(&ty, operand.span)?.refined {
                 return Err(TypeError::OtherWithCodeSpanned {
@@ -303,7 +309,10 @@ impl TypeChecker {
                 && let Err(origin) = self
                     .ctx
                     .env
-                    .check_record_place_write(&name, conflict.is_none())
+                    .check_record_place_write(
+                        &name,
+                        conflict.is_none() && !projects_through_reference,
+                    )
             {
                 return Err(TypeError::DependentReceiverMutation {
                     receiver: name,
