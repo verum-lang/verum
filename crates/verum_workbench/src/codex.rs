@@ -131,6 +131,7 @@ impl Events {
                     && !self.requests.contains_key(&key) && !self.executing.contains_key(&key),
                 "Invalid pending provider request"
             );
+            let review_id = uuid::Uuid::new_v4();
             let mut reviewable = true;
             if message["method"] == "item/tool/call"
                 && let Some(role) = params["threadId"]
@@ -142,7 +143,7 @@ impl Events {
             {
                 let thread = params["threadId"].as_str().expect("scoped request");
                 let turn = params["turnId"].as_str().context("Unscoped provider tool call")?;
-                match self.turns.get(thread, turn)?.child() {
+                match self.turns.get(thread, turn)?.child(review_id) {
                     Ok(scope) => {
                         self.scopes.insert(key.clone(), scope);
                         entry["reviewKind"] = json!(kind);
@@ -156,7 +157,7 @@ impl Events {
                 }
             }
             if reviewable {
-                entry["reviewId"] = json!(uuid::Uuid::new_v4().to_string());
+                entry["reviewId"] = json!(review_id);
                 self.requests.insert(key, entry.clone());
             }
         }

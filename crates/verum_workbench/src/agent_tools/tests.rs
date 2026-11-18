@@ -305,8 +305,10 @@ done
     assert_eq!(studio.call("operation.list", json!({})).await.unwrap(), json!([]));
     let mut observed = verum_common::List::new();
     for (wire, status) in [("rejected", "failed"), ("empty-proof", "inconclusive")] {
+        let key = review_key(&studio, "author", wire).await.unwrap();
         let response = review(&studio, "author", wire).await.unwrap();
         let receipt = &response["tool_result"];
+        assert_eq!(receipt["agent"]["review_id"], key["reviewId"]);
         assert_eq!(receipt["status"], status, "{response}");
         assert_eq!(response["delivered"], true);
         assert_eq!(response["success"], false);
@@ -351,10 +353,11 @@ async fn packet_binds_one_declaration_and_retained_proof_without_promoting_the_r
         verum_source_proof::SourceOutcome::Verified
     );
     let run = root.path().join(".verum-studio/runs/saved-proof");
+    let origin = json!({"connection":"saved","conversation":"author","turn":"A","review_id":uuid::Uuid::new_v4().to_string()});
     std::fs::create_dir_all(&run).unwrap();
     std::fs::write(run.join("source.vr"), source).unwrap();
     std::fs::write(run.join("receipt.json"), serde_json::to_vec(&json!({
-        "id":"saved-proof","kind":"proof","path":"subject.vr","source_hash":hash,"source_mode":"source",
+        "id":"saved-proof","kind":"proof","path":"subject.vr","source_hash":hash,"source_mode":"source","agent":origin,
         "declaration":"first","proof_profile":request.profile,"status":"succeeded","proof":proof,
         "executable":"verum-source-replay","timeout_ms":1000,"elapsed_ms":1,"exit_code":0,
         "stdout":"","stderr":"","evidence_path":run,"started_unix_ms":1,"termination":"exit","version":1
@@ -408,6 +411,7 @@ async fn packet_binds_one_declaration_and_retained_proof_without_promoting_the_r
         json!(proof.source.span)
     );
     assert_eq!(packet["operation"]["relation"], "checker-source-span");
+    assert_eq!(packet["operation"]["agent"], origin);
     assert_eq!(packet["operation"]["status"], "succeeded");
     assert_eq!(
         packet["operation"].get("project_revision"),

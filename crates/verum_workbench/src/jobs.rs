@@ -27,7 +27,7 @@ const RECEIPT_LIMIT: u64 = 4 * WORKER_LIMITS.process.output_bytes;
 pub struct Receipt {
     pub id: Text,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub agent: Option<crate::agent_runtime::TurnIdentity>,
+    pub agent: Option<crate::agent_runtime::ReviewOrigin>,
     #[serde(flatten)]
     pub plan: ExecutionPlan,
     pub status: Text,
@@ -134,6 +134,7 @@ impl Jobs {
         owner.admit(|| self.start_inner(params, source_path, Some(owner.clone())))
     }
     fn start_inner(&mut self, params: &Value, source_path: PathBuf, owner: Option<crate::agent_runtime::Scope>) -> Result<Value> {
+        let agent = owner.as_ref().map(crate::agent_runtime::Scope::review_origin).transpose()?;
         let plan = self.plan(params)?;
         let source = params["source"].as_str().context("Expected source")?;
         let timeout = plan.timeout_ms;
@@ -201,7 +202,7 @@ impl Jobs {
             .with_context(|| format!("Start {}", plan.executable.display()))?;
         let receipt = Arc::new(Mutex::new(Receipt {
             id: id.clone(),
-            agent: owner.as_ref().map(|scope| scope.identity().clone()),
+            agent,
             plan,
             status: "running".into(),
             stdout: Text::new(),

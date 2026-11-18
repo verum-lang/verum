@@ -98,6 +98,7 @@ fn operation_evidence(receipt: &Receipt, path: &str, analysis: &Value) -> Result
     };
     Ok(json!({
         "id":receipt.id, "version":receipt.version, "kind":plan.kind, "status":receipt.status,
+        "agent":receipt.agent,
         "relation":relation, "path":plan.path, "source_hash":plan.source_hash,
         "declaration":plan.declaration, "proof_profile":plan.proof_profile,
         "termination":receipt.termination, "exit_code":receipt.exit_code,

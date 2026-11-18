@@ -1,5 +1,5 @@
 //! Provider-independent ownership of a turn and its reviewed operations.
-use anyhow::{Result, ensure};
+use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex, Weak};
 use tokio::sync::watch;
@@ -14,6 +14,15 @@ pub struct TurnIdentity {
     pub connection: Text,
     pub conversation: Text,
     pub turn: Text,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ReviewOrigin {
+    #[serde(flatten)]
+    pub owner: TurnIdentity,
+    /// Receipts written before individual reviews were recorded retain only the turn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_id: Option<uuid::Uuid>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -44,17 +53,17 @@ struct State {
 }
 struct Inner {
     identity: TurnIdentity,
-    parent: Option<Scope>,
+    parent_review: Option<(Scope, uuid::Uuid)>,
     state: Mutex<State>,
     ended: watch::Sender<Option<End>>,
 }
 #[derive(Clone)]
 pub(crate) struct Scope(Arc<Inner>);
 impl Scope {
-    fn new(identity: TurnIdentity, parent: Option<Self>) -> Self {
+    fn new(identity: TurnIdentity, parent_review: Option<(Self, uuid::Uuid)>) -> Self {
         Self(Arc::new(Inner {
             identity,
-            parent,
+            parent_review,
             state: Mutex::new(State {
                 ended: None,
                 children: List::new(),
@@ -65,6 +74,11 @@ impl Scope {
 
     pub(crate) fn identity(&self) -> &TurnIdentity {
         &self.0.identity
+    }
+
+    pub(crate) fn review_origin(&self) -> Result<ReviewOrigin> {
+        let (_, id) = self.0.parent_review.as_ref().context("Execution requires an individual review")?;
+        Ok(ReviewOrigin { owner: self.identity().clone(), review_id: Some(*id) })
     }
 
     /// Mutation admission and cancellation share a lock. Callers must acquire
@@ -79,17 +93,17 @@ impl Scope {
             ensure!(state.ended.is_none(), "Agent operation has expired");
             action()
         };
-        match &self.0.parent {
-            Some(parent) => parent.admit_inner(&mut local),
+        match &self.0.parent_review {
+            Some((parent, _)) => parent.admit_inner(&mut local),
             None => local(),
         }
     }
 
-    pub(crate) fn child(&self) -> Result<Self> {
+    pub(crate) fn child(&self, review: uuid::Uuid) -> Result<Self> {
         let mut state = self.0.state.lock().unwrap_or_else(|e| e.into_inner());
         ensure!(state.ended.is_none(), "Agent turn has expired");
         state.children.retain(|child| child.strong_count() != 0);
-        let child = Self::new(self.0.identity.clone(), Some(self.clone()));
+        let child = Self::new(self.0.identity.clone(), Some((self.clone(), review)));
         state.children.push(Arc::downgrade(&child.0));
         Ok(child)
     }

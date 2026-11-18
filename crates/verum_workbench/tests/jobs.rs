@@ -99,7 +99,7 @@ async fn invalid_policies_and_budgets_are_rejected_before_creating_or_running_an
 }
 
 #[tokio::test]
-async fn legacy_receipts_do_not_fabricate_a_permission_policy() {
+async fn legacy_receipts_preserve_recorded_authority_without_inventing_a_policy_or_review() {
     let dir = tempfile::tempdir().unwrap();
     let mut jobs = runner(dir.path(), "cat >/dev/null");
     start(&mut jobs, "print(42);", 1000);
@@ -107,11 +107,14 @@ async fn legacy_receipts_do_not_fabricate_a_permission_policy() {
     assert_eq!(receipt["permissions"], "source");
     receipt.as_object_mut().unwrap().remove("permissions");
     receipt.as_object_mut().unwrap().remove("declaration");
+    receipt["agent"] = json!({"connection":"previous","conversation":"author","turn":"A"});
     let path = Path::new(receipt["evidence_path"].as_str().unwrap()).join("receipt.json");
     std::fs::write(path, serde_json::to_vec(&receipt).unwrap()).unwrap();
     let mut restored = runner(dir.path(), "exit 0");
     restored.restore().unwrap();
-    assert_eq!(restored.list().await[0]["permissions"], Value::Null);
+    let entries = restored.list().await;
+    assert_eq!(entries[0]["permissions"], Value::Null);
+    assert_eq!(entries[0]["agent"], receipt["agent"]);
 }
 #[tokio::test]
 async fn drains_both_pipes_and_runs_an_immutable_entry_snapshot() {

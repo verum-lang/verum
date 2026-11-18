@@ -22,7 +22,7 @@ tokio = { workspace = true, features = ["process", "signal"] }
 hyper = { version = "1.8", features = ["server", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 http-body-util = "0.1"
-uuid = { version = "1.19", features = ["v4"] }
+uuid.workspace = true
 libc.workspace = true
 hex = "0.4"
 dirs = "6"
