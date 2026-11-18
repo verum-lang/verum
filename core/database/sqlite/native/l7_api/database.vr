@@ -196,7 +196,7 @@ public type Database is {
 /// Open an in-memory database with the given capability.
 public fn open_memory_db(mode: ConnectionMode) -> Result<Database, SqliteApiDbError> {
     match open_memory(mode) {
-        Result.Ok(c)  => Result.Ok(Database { conn: c }),
+        Result.Ok(c)  => Result.Ok(Database.from_connection(c)),
         Result.Err(e) => Result.Err(db_error_from_conn(e)),
     }
 }
@@ -210,21 +210,21 @@ public fn open_memory_db(mode: ConnectionMode) -> Result<Database, SqliteApiDbEr
 // match is the only price.
 public fn open_readonly() -> Result<Database, SqliteApiDbError> {
     match open_memory(CmRead) {
-        Result.Ok(c)  => Result.Ok(Database { conn: c }),
+        Result.Ok(c)  => Result.Ok(Database.from_connection(c)),
         Result.Err(e) => Result.Err(db_error_from_conn(e)),
     }
 }
 
 public fn open_readwrite() -> Result<Database, SqliteApiDbError> {
     match open_memory(CmWrite) {
-        Result.Ok(c)  => Result.Ok(Database { conn: c }),
+        Result.Ok(c)  => Result.Ok(Database.from_connection(c)),
         Result.Err(e) => Result.Err(db_error_from_conn(e)),
     }
 }
 
 public fn open_admin() -> Result<Database, SqliteApiDbError> {
     match open_memory(CmAdmin) {
-        Result.Ok(c)  => Result.Ok(Database { conn: c }),
+        Result.Ok(c)  => Result.Ok(Database.from_connection(c)),
         Result.Err(e) => Result.Err(db_error_from_conn(e)),
     }
 }
@@ -236,7 +236,7 @@ public fn open_admin() -> Result<Database, SqliteApiDbError> {
 /// separate `core.database.sqlite.native.uri` task).
 public fn open_path(path: &Text, mode: ConnectionMode) -> Result<Database, SqliteApiDbError> {
     match open_file(path, mode) {
-        Result.Ok(c)  => Result.Ok(Database { conn: c }),
+        Result.Ok(c)  => Result.Ok(Database.from_connection(c)),
         Result.Err(e) => Result.Err(db_error_from_conn(e)),
     }
 }
@@ -254,6 +254,11 @@ public fn open_path_admin(path: &Text) -> Result<Database, SqliteApiDbError> {
 }
 
 implement Database {
+    /// Adopt an open session, preserving its capability, transaction and schema.
+    public fn from_connection(conn: SqliteNativeConnection) -> Database {
+        Database { conn: conn }
+    }
+
     public fn mode(&self) -> ConnectionMode { self.conn.mode() }
     public fn is_in_tx(&self) -> Bool { self.conn.is_in_tx() }
     public fn schema_generation(&self) -> Int { self.conn.schema_generation() }

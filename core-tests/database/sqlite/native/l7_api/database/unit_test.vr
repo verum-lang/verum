@@ -1,5 +1,5 @@
-mount core.database.sqlite.native.l7_api.database.{open_admin, db_error_from_conn, SqliteApiDbError};
-mount core.database.sqlite.native.l6_session.{ConnectionError, StmtError};
+mount core.database.sqlite.native.l7_api.database.{Database, open_admin, db_error_from_conn, SqliteApiDbError};
+mount core.database.sqlite.native.l6_session.{ConnectionError, ConnectionMode, StmtError, TxMode, open_memory};
 mount core.database.sqlite.native.l5_sql.{parse_one, CompileError};
 
 @test
@@ -31,3 +31,16 @@ fn test_connection_io_failure_retains_its_payload_and_category() {
 }
 
 fn main() {}
+
+@test
+fn test_adopting_a_connection_preserves_its_active_transaction() {
+    let mut connection = open_memory(ConnectionMode.CmWrite).unwrap();
+    connection.begin_tx(TxMode.TmImmediate).unwrap();
+
+    let mut db = Database.from_connection(connection);
+    assert(db.mode() is ConnectionMode.CmWrite);
+    assert(db.is_in_tx());
+    db.rollback().unwrap();
+    assert(!db.is_in_tx());
+    db.close();
+}
