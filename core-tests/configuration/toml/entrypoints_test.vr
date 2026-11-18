@@ -21,3 +21,22 @@ fn test_toml_document_and_table_entry_points() {
     assert(parse(&duplicate).is_err());
     assert(parse_table(&duplicate).is_err());
 }
+
+@test
+fn test_toml_token_slices_keep_utf8_byte_boundaries() {
+    let table = parse_table(&"bare-key = 'café λ🙂'\n'二' = '''\nβ\nγ'''\nempty = ''\nnumber = -17\n").unwrap();
+    match table.get("bare-key").unwrap() {
+        TomlValue.TomlString(text) => assert_eq(*text, "café λ🙂"),
+        _ => panic("expected a literal string"),
+    };
+    match table.get("二").unwrap() {
+        TomlValue.TomlString(text) => assert_eq(*text, "β\nγ"),
+        _ => panic("expected a multiline literal string"),
+    };
+    match table.get("empty").unwrap() {
+        TomlValue.TomlString(text) => assert_eq(*text, ""),
+        _ => panic("expected an empty literal"),
+    };
+    assert(table.get("number").unwrap() is TomlValue.TomlInt(-17));
+    assert(parse_table(&"broken = 'λ").is_err());
+}

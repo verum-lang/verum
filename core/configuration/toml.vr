@@ -440,13 +440,9 @@ fn parse_bare_key(p: &mut Parser) -> Result<Text, TomlError> {
     Result.Ok(slice_text(p.bytes, start, p.pos))
 }
 
-// Slice bytes [start, end) into a Text via UTF-8 decode. Bare keys
-// and bare-token byte ranges are valid UTF-8 by construction.
+// Token boundaries in the input text fall between UTF-8 code points.
 fn slice_text(bytes: &[Byte], start: Int, end: Int) -> Text {
-    let mut buf: List<Byte> = List.new();
-    let mut i = start;
-    while i < end { buf.push(bytes[i]); i = i + 1; }
-    Text.from_bytes(&buf).unwrap_or(Text.new())
+    Text.from_bytes(&bytes[start..end]).expect("TOML token must contain valid UTF-8")
 }
 
 // Expect a single byte, advance.
