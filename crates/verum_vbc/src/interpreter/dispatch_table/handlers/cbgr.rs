@@ -1437,6 +1437,16 @@ fn live_drop_owner(state: &InterpreterState, owner: Value, generation: u32)
     Ok(pointer)
 }
 
+fn release_drop_owner(state: &mut InterpreterState, owner: Value, generation: u32)
+    -> InterpreterResult<()>
+{
+    let pointer = live_drop_owner(state, owner, generation)?;
+    // SAFETY: the same allocation still owns the storage after its cleanup.
+    let object = unsafe { heap::Object::from_raw(pointer) }.expect("checked live owner");
+    unsafe { state.heap.free(object); }
+    Ok(())
+}
+
 fn push_drop_work(work: &mut verum_common::List<DropWork>, item: DropWork, budget: &mut usize)
     -> InterpreterResult<()>
 {
@@ -1553,11 +1563,7 @@ pub(super) fn execute_typed_drop(state: &mut InterpreterState, value: Value, pla
                 (value, plan)
             }
             DropWork::Free { owner, generation } => {
-                let owner = live_drop_owner(state, owner, generation)?;
-                // SAFETY: exact live allocation membership precedes this free;
-                // all declared owned fields have completed their cleanup.
-                let object = unsafe { heap::Object::from_raw(owner) }.expect("checked live owner");
-                unsafe { state.heap.free(object); }
+                release_drop_owner(state, owner, generation)?;
                 continue;
             }
         };
@@ -1598,9 +1604,16 @@ pub(super) fn execute_typed_drop(state: &mut InterpreterState, value: Value, pla
             }
             continue;
         }
-        if let DropPlan::Glue { function, type_args, .. } = plan {
-            super::super::call_function_sync_with_witnesses(state, function, &[value],
-                (!type_args.is_empty()).then(|| type_args.into_boxed_slice()))?;
+        if let DropPlan::Glue { function, type_args, .. } = &plan {
+            typed_drop_fields(state, value, &plan)?;
+            // SAFETY: the declared receiver and its complete extent were validated above.
+            let generation = unsafe { (*value.as_ptr::<heap::ObjectHeader>()).generation };
+            let result = super::super::call_function_sync_with_witnesses(state, *function, &[value],
+                (!type_args.is_empty()).then(|| type_args.clone().into_boxed_slice()));
+            // The method borrows self. The owning drop retires its outer storage
+            // after the call, including when the destructor raises an exception.
+            release_drop_owner(state, value, generation)?;
+            result?;
         } else if let Some((payload, fields)) = typed_drop_fields(state, value, &plan)? {
             let pointer = value.as_ptr::<heap::ObjectHeader>();
             // SAFETY: typed_drop_fields established this complete live owner.
