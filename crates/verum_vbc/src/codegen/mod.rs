@@ -16732,6 +16732,29 @@ impl VbcCodegen {
         self.lexical_constant_scopes.iter().rev().find_map(|scope| scope.get(name))
     }
 
+    // Initializers have no incoming parameters. Their source expressions still
+    // transfer owned arguments to callees under the ordinary eager function ABI.
+    fn begin_source_initializer(&mut self, name: &str) {
+        self.ctx.begin_function(name, &[], None);
+        self.ctx.registers.emits_owned_parameter_calls = true;
+    }
+
+    fn finish_initializer(
+        &mut self,
+        name: &str,
+        id: FunctionId,
+    ) -> (crate::module::FunctionDescriptor, Vec<Instruction>) {
+        let owns_parameters = self.ctx.registers.emits_owned_parameter_calls;
+        let (instructions, register_count) = self.ctx.end_function();
+        let name_id = StringId(self.intern_string(name));
+        let mut descriptor = self.new_fn_descriptor(name_id);
+        descriptor.id = id;
+        descriptor.register_count = register_count;
+        descriptor.has_source_body = owns_parameters;
+        descriptor.owned_value_parameters = owns_parameters;
+        (descriptor, instructions)
+    }
+
     fn compile_pending_constants(&mut self) -> CodegenResult<()> {
         self.compile_pending_constants_with_policy(ItemFailurePolicy::Strict)
     }
@@ -16747,7 +16770,7 @@ impl VbcCodegen {
             let PendingConstant { name, expr, info: func_info, result_type, source_module: queued_source_module, lexical_scopes } = pending;
             let previous_scope = std::mem::replace(&mut self.lexical_constant_scopes, lexical_scopes);
             let previous_module = std::mem::replace(&mut self.ctx.current_source_module, queued_source_module.clone());
-            self.ctx.begin_function(&name, &[], None);
+            self.begin_source_initializer(&name);
             let compiled: CodegenResult<Option<i64>> = (|| {
                 // Preserve scalar folding for imported array counts without
                 // suppressing an invalid initializer's original diagnostic.
@@ -16778,7 +16801,6 @@ impl VbcCodegen {
                 Ok(folded_integer)
             })();
             let lexical_scopes = std::mem::replace(&mut self.lexical_constant_scopes, previous_scope);
-            self.ctx.current_source_module = previous_module;
             let folded_integer = match compiled {
                 Ok(value) => value,
                 Err(mut error) => {
@@ -16793,6 +16815,7 @@ impl VbcCodegen {
                             self.pending_constants.push(PendingConstant { name, expr, source_module: queued_source_module, info: func_info, result_type, lexical_scopes });
                             self.pending_constants.extend(constants);
                             self.pending_constants.extend(added);
+                            self.ctx.current_source_module = previous_module;
                             return Err(error);
                         }
                         ItemFailurePolicy::StubAndContinue => {
@@ -16817,19 +16840,14 @@ impl VbcCodegen {
             };
 
             // End the function and collect instructions
-            let (instructions, register_count) = self.ctx.end_function();
-
-            let name_id = StringId(self.intern_string(&name));
-            let mut descriptor = self.new_fn_descriptor(name_id);
+            let (mut descriptor, instructions) = self.finish_initializer(&name, func_info.id);
+            self.ctx.current_source_module = previous_module;
             self.trace_id_adoption(func_info.id.0, &name);
-            descriptor.id = func_info.id;
             // RETNAME-CARRY-1 — carry the source-level return-type name.
             descriptor.return_type_name = func_info
                 .return_type_name
                 .as_ref()
                 .map(|n| StringId(self.intern_string(n)));
-            descriptor.register_count = register_count;
-            descriptor.locals_count = 0;
             descriptor.is_const = true;
             if let Some(value) = folded_integer {
                 descriptor.intrinsic_name = Some(StringId(self.intern_string(&format!(
@@ -16866,7 +16884,7 @@ impl VbcCodegen {
             self.next_func_id = self.next_func_id.saturating_add(1);
 
             // Begin compiling the init function
-            self.ctx.begin_function(&init_name, &[], None);
+            self.begin_source_initializer(&init_name);
 
             // The annotation belongs to this static, even when a different
             // module was compiled between registration and deferred lowering.
@@ -16953,14 +16971,7 @@ impl VbcCodegen {
                 self.ctx.emit(Instruction::Ret { value: nil_reg });
             }
 
-            let (instructions, register_count) = self.ctx.end_function();
-
-            let name_id = StringId(self.intern_string(&init_name));
-            let mut descriptor = self.new_fn_descriptor(name_id);
-            descriptor.id = func_id;
-            descriptor.register_count = register_count;
-            descriptor.locals_count = 0;
-
+            let (descriptor, instructions) = self.finish_initializer(&init_name, func_id);
             let vbc_func = VbcFunction::new(descriptor, instructions);
             self.push_function_dedup(vbc_func);
 
