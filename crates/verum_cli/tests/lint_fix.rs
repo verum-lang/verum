@@ -60,6 +60,47 @@ fn rule_count(json_out: &str, rule: &str) -> usize {
         .count()
 }
 
+#[test]
+fn fixes_preserve_heap_values_and_user_declared_calls() {
+    let cases = [
+        (
+            "allocation",
+            "mount core.base.memory.Heap;\npublic fn make() -> Heap<Int> { Heap.new(42) }\n",
+        ),
+        (
+            "function",
+            "fn Heap(n: Int) -> Int { n + 1 }\npublic fn make() -> Int { Heap(42) }\n",
+        ),
+        (
+            "variant",
+            "type Event is Heap(Int) | Plain;\npublic fn make() -> Event { Heap(42) }\n",
+        ),
+        (
+            "tuple",
+            "type Heap is (Int);\npublic fn make() -> Heap { Heap(42) }\n",
+        ),
+        (
+            "method",
+            "type Heap is { value: Int };\nimplement Heap { fn new(n: Int) -> Heap { Heap { value: n } } }\npublic fn make() -> Heap { Heap.new(42) }\n",
+        ),
+    ];
+    for (name, source) in cases {
+        let (dir, file) = make_fixture(name, "main.vr", source);
+        let before = lint_json(&dir);
+        for rule in ["parse-error", "unnecessary-heap", "deprecated-syntax"] {
+            assert_eq!(rule_count(&before, rule), 0, "{name}: {before}");
+        }
+        let result = Command::new(binary())
+            .args(["lint", "--fix", "--no-cache"])
+            .current_dir(&dir)
+            .output()
+            .expect("run verum lint --fix");
+        assert!(result.status.success(), "{name}: {result:?}");
+        assert_eq!(std::fs::read_to_string(file).unwrap(), source, "{name}");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
 // ============================================================
 // todo-in-code
 // ============================================================

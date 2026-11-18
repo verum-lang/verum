@@ -170,12 +170,41 @@ fn unchecked_refinement_silent_with_verify() {
 
 #[test]
 fn deprecated_syntax_fires_on_box_new() {
-    fires("deprecated-syntax", "fn make() { let x = Box::new(5); }\n");
+    let source = "fn make() {\n    let x = Box::new(5);\n}\n";
+    let issues = run(source);
+    let issue = issues
+        .iter()
+        .find(|issue| issue.rule == "deprecated-syntax" && issue.column == 13)
+        .expect("Box::new should offer the Verum heap constructor");
+    assert_eq!(issue.line, 2);
+    assert_eq!(issue.message, "Use 'Heap.new(x)' instead of 'Box::new(x)'");
+    assert_eq!(issue.suggestion.as_deref(), Some(issue.message.as_str()));
+    assert!(!issue.fixable);
 }
 
 #[test]
 fn deprecated_syntax_silent_on_heap() {
-    silent("deprecated-syntax", "fn make() { let x = Heap(5); }\n");
+    silent(
+        "deprecated-syntax",
+        "fn make() -> Heap<Int> { Heap.new(5) }\n",
+    );
+}
+
+#[test]
+fn heap_migration_only_reports_rust_box_paths() {
+    let source = concat!(
+        "fn make() { MyBox::new(1); my_Box::new(2); factory.Box::new(3); user::Box::new(4); ",
+        "Box::new(5); std::boxed::Box::new(6); alloc::boxed::Box::new(7); }",
+    );
+    let issues = run(source);
+    let columns: Vec<_> = issues
+        .iter()
+        .filter(|issue| issue.message.contains("Heap.new"))
+        .map(|issue| issue.column)
+        .collect();
+    let expected =
+        ["Box::new(5)", "Box::new(6)", "Box::new(7)"].map(|call| source.find(call).unwrap() + 1);
+    assert_eq!(columns, expected);
 }
 
 #[test]
@@ -270,15 +299,6 @@ fn unbounded_channel_silent_when_capacity_passed() {
         "unbounded-channel",
         "fn main() { let ch = Channel.new(64); }\n",
     );
-}
-
-// ============================================================
-// Performance rules
-// ============================================================
-
-#[test]
-fn unnecessary_heap_fires() {
-    fires("unnecessary-heap", "fn main() { let x = Heap(42); }\n");
 }
 
 // ============================================================
@@ -625,12 +645,6 @@ fn unused_import_silent_on_glob_mount_no_comment() {
     // Sanity — the bare glob mount continues to work.
     let src = "mount foo.*;\nfn main() {}\n";
     silent("unused-import", src);
-}
-
-#[test]
-fn unnecessary_heap_silent_on_string_literal_match() {
-    let src = "fn main() { let s = \"Heap(5)\"; let _ = s; }\n";
-    silent("unnecessary-heap", src);
 }
 
 #[test]

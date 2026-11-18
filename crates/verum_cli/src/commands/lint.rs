@@ -1,6 +1,5 @@
 // Lint command - static analysis for code quality issues.
 // Checks for unused imports, dead code, style violations, and common mistakes.
-// Implements 10 Verum-specific lint rules using fast text-based scanning.
 
 use crate::error::{CliError, Result};
 use crate::ui;
@@ -218,12 +217,6 @@ const LINT_RULES: &[LintRule] = &[
         level: LintLevel::Warning,
         description: "Unused mount/import statement",
         category: LintCategory::Style,
-    },
-    LintRule {
-        name: "unnecessary-heap",
-        level: LintLevel::Warning,
-        description: "Heap allocation for small type that could be stack-allocated",
-        category: LintCategory::Performance,
     },
     LintRule {
         name: "missing-error-context",
@@ -1568,30 +1561,6 @@ fn fix_shadow_rename_inner(line: &str) -> Option<String> {
     Some(format!("{indent}{prefix}{new_name}{suffix}"))
 }
 
-/// Check if a string is a small literal (Int, Float, Bool)
-fn is_small_literal(s: &str) -> bool {
-    if s == "true" || s == "false" {
-        return true;
-    }
-    // Integer literal (possibly negative)
-    let s = s.strip_prefix('-').unwrap_or(s);
-    if s.chars().all(|c| c.is_ascii_digit()) && !s.is_empty() {
-        return true;
-    }
-    // Float literal
-    if s.contains('.') {
-        let parts: Vec<&str> = s.splitn(2, '.').collect();
-        if parts.len() == 2
-            && parts[0].chars().all(|c| c.is_ascii_digit())
-            && parts[1].chars().all(|c| c.is_ascii_digit())
-            && !parts[0].is_empty()
-        {
-            return true;
-        }
-    }
-    false
-}
-
 // ---------------------------------------------------------------------------
 // Core linting engine
 // ---------------------------------------------------------------------------
@@ -2170,107 +2139,6 @@ fn contains_word(line: &str, word: &str) -> bool {
     })
 }
 
-/// Rule 4: UnnecessaryHeap
-/// Heap(x) where x is a small type (Int, Float, Bool) literal.
-///
-/// Iterates the masked code view so `let s = "Heap(5)"` (string
-/// data) doesn't match.
-fn check_unnecessary_heap(path: &Path, info: &FileInfo, issues: &mut List<LintIssue>) {
-    for line_num in 0..info.lines.len() {
-        let line = info.code_line(line_num);
-
-        let mut search_start = 0;
-        while let Some(pos) = line[search_start..].find("Heap(") {
-            let abs_pos = search_start + pos;
-            // Check it's not part of a larger word (e.g., "MinHeap(")
-            if abs_pos > 0 && line.as_bytes()[abs_pos - 1].is_ascii_alphanumeric() {
-                search_start = abs_pos + 5;
-                continue;
-            }
-
-            let after = &line[abs_pos + 5..];
-            if let Some(close) = find_matching_paren(after) {
-                let inner = after[..close].trim();
-                if is_small_literal(inner) {
-                    issues.push(LintIssue {
-                        rule: "unnecessary-heap",
-                        level: LintLevel::Warning,
-                        file: path.to_path_buf(),
-                        line: line_num + 1,
-                        column: abs_pos + 1,
-                        message: format!(
-                            "Unnecessary heap allocation for small value: Heap({})",
-                            inner
-                        ),
-                        suggestion: Some(
-                            format!("Use '{}' directly; Int/Float/Bool fit in registers", inner)
-                                .into(),
-                        ),
-                        fixable: true,
-                    });
-                } else {
-                    // Check if inner is a known small type variable
-                    // Heuristic: if the inner expression is a simple identifier and its type
-                    // is declared as Int/Float/Bool, flag it
-                    check_heap_of_small_type(path, info, line_num, abs_pos, inner, issues);
-                }
-            }
-            search_start = abs_pos + 5;
-        }
-    }
-}
-
-/// Check if a Heap() argument is a known small type
-fn check_heap_of_small_type(
-    path: &Path,
-    _info: &FileInfo,
-    line_num: usize,
-    col: usize,
-    inner: &str,
-    issues: &mut List<LintIssue>,
-) {
-    // If inner is something like "0", "1.0", "true", "false" we already caught it
-    // Here check for typed constructor patterns: Heap(Int), Heap(Bool), Heap(Float)
-    let small_types = ["Int", "Float", "Bool", "Byte", "Char"];
-    for st in &small_types {
-        if inner == *st {
-            issues.push(LintIssue {
-                rule: "unnecessary-heap",
-                level: LintLevel::Warning,
-                file: path.to_path_buf(),
-                line: line_num + 1,
-                column: col + 1,
-                message: format!(
-                    "Unnecessary heap allocation for small type: Heap({})",
-                    inner
-                ),
-                suggestion: Some(
-                    format!("{} is a small type that fits in a register", inner).into(),
-                ),
-                fixable: false,
-            });
-        }
-    }
-}
-
-/// Find the position of the matching closing paren, accounting for nesting
-fn find_matching_paren(s: &str) -> Option<usize> {
-    let mut depth = 0;
-    for (i, ch) in s.chars().enumerate() {
-        match ch {
-            '(' => depth += 1,
-            ')' => {
-                if depth == 0 {
-                    return Some(i);
-                }
-                depth -= 1;
-            }
-            _ => {}
-        }
-    }
-    None
-}
-
 /// Rule 5: MissingErrorContext
 /// `?` operator usage without `.with_context()` or `.map_err()`.
 ///
@@ -2747,17 +2615,28 @@ fn check_deprecated_syntax(path: &Path, info: &FileInfo, issues: &mut List<LintI
             });
         }
 
-        // `Box::new(` — Heap is the Verum equivalent.
-        if code.contains("Box::new(") {
-            let col = code.find("Box::new(").unwrap_or(0) + 1;
+        // Both Rust standard paths refer to Box; other qualified types can have their own new.
+        for (start, _) in code.match_indices("Box::new(") {
+            let before = &code[..start];
+            let before_path = before
+                .strip_suffix("std::boxed::")
+                .or_else(|| before.strip_suffix("alloc::boxed::"))
+                .unwrap_or(before);
+            if before_path.ends_with(|ch: char| ch == '_' || ch.is_alphanumeric())
+                || before_path.trim_end().ends_with('.')
+                || before_path.trim_end().ends_with("::")
+            {
+                continue;
+            }
+            let guidance = "Use 'Heap.new(x)' instead of 'Box::new(x)'";
             issues.push(LintIssue {
                 rule: "deprecated-syntax",
                 level: LintLevel::Error,
                 file: path.to_path_buf(),
                 line: line_num + 1,
-                column: col,
-                message: "Use 'Heap(x)' instead of 'Box::new(x)'".to_string(),
-                suggestion: Some("Use 'Heap(x)' instead of 'Box::new(x)'".into()),
+                column: start + 1,
+                message: guidance.to_string(),
+                suggestion: Some(guidance.into()),
                 fixable: false,
             });
         }
@@ -2904,7 +2783,6 @@ fn lint_file_with(path: &Path, cfg: &LintConfig) -> Result<List<LintIssue>> {
 
     check_unchecked_refinement(path, &info, &mut issues);
     check_missing_context_decl(path, &info, &mut issues);
-    check_unnecessary_heap(path, &info, &mut issues);
     check_missing_error_context(path, &info, &mut issues);
     check_large_copy(path, &info, &mut issues);
     check_unused_result(path, &info, &mut issues);
@@ -3128,7 +3006,6 @@ fn lint_content_with_module(
 
     check_unchecked_refinement(path, &info, &mut issues);
     check_missing_context_decl(path, &info, &mut issues);
-    check_unnecessary_heap(path, &info, &mut issues);
     check_missing_error_context(path, &info, &mut issues);
     check_large_copy(path, &info, &mut issues);
     check_unused_result(path, &info, &mut issues);
@@ -3510,7 +3387,6 @@ pub fn lint_source(path: &Path, content: &str, config: Option<&LintConfig>) -> L
 
     check_unchecked_refinement(path, &info, &mut issues);
     check_missing_context_decl(path, &info, &mut issues);
-    check_unnecessary_heap(path, &info, &mut issues);
     check_missing_error_context(path, &info, &mut issues);
     check_large_copy(path, &info, &mut issues);
     check_unused_result(path, &info, &mut issues);
@@ -4073,7 +3949,7 @@ impl LintOutputFormat {
 /// - `event`: always `"lint"` for issue lines.
 /// - `schema_version`: integer; bump = breaking change.
 /// - `rule`, `level`, `file`, `line`, `column`, `message`, `fixable`.
-/// - `suggestion`: present only when `fixable` is true.
+/// - `suggestion`: present when the rule offers guidance, including manual fixes.
 /// - `fix.edits`: present only when the rule has a structured
 ///  replacement available (LSP-style TextEdit ranges). Each edit
 ///  is `{start_line, start_column, end_line, end_column, new_text}`.
@@ -4329,7 +4205,6 @@ pub fn synthesize_fix_edits_for(issue: &LintIssue, content: &str) -> Option<Vec<
         // CI fix-bots and `verum lint --fix` produce byte-identical
         // results, and the lint_rules contract test can prove it.
         "deprecated-syntax" => synthesize_deprecated_syntax_edits(issue, line),
-        "unnecessary-heap" => synthesize_unnecessary_heap_edits(issue, line),
         "single-variant-match" => fix_single_variant_match_inline(line).map(|new_line| {
             vec![FixEdit {
                 start_line: issue.line,
@@ -4433,33 +4308,6 @@ fn synthesize_deprecated_syntax_edits(issue: &LintIssue, line: &str) -> Option<V
         }
     }
     None
-}
-
-/// Build the structured edit that replaces a `Heap(literal)` call
-/// with the bare literal. Mirrors [`fix_unnecessary_heap`] but
-/// scoped to the column reported in the issue, so we surface
-/// exactly one edit per diagnostic — no whole-line rewrite.
-fn synthesize_unnecessary_heap_edits(issue: &LintIssue, line: &str) -> Option<Vec<FixEdit>> {
-    let col = issue.column.checked_sub(1)?;
-    let after = line.get(col..)?;
-    if !after.starts_with("Heap(") {
-        return None;
-    }
-    let inner_start = col + "Heap(".len();
-    let inner = &line[inner_start..];
-    let close = find_matching_paren(inner)?;
-    let inner_text = inner[..close].trim().to_string();
-    if !is_small_literal(&inner_text) {
-        return None;
-    }
-    let end_col = inner_start + close + 1; // 0-indexed end byte
-    Some(vec![FixEdit {
-        start_line: issue.line,
-        start_column: col + 1,
-        end_line: issue.line,
-        end_column: end_col + 1,
-        new_text: inner_text,
-    }])
 }
 
 fn emit_issue_json(issue: &LintIssue) {

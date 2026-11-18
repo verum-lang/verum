@@ -112,6 +112,30 @@ fn second_run_returns_identical_diagnostic_set() {
 }
 
 #[test]
+fn relints_unchanged_sources_with_obsolete_heap_guidance() {
+    let dir = make_fixture("obsolete_heap");
+    run_lint(&dir, &[]);
+    let entry = walkdir::WalkDir::new(dir.join("target/lint-cache"))
+        .min_depth(2)
+        .into_iter()
+        .map(Result::unwrap)
+        .find(|entry| entry.file_type().is_file())
+        .expect("cached diagnostics")
+        .into_path();
+    let mut old: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&entry).unwrap()).unwrap();
+    old["version"] = 2.into();
+    old["issues"][0]["message"] = "Use 'Heap(x)' instead of 'Box::new(x)'".into();
+    std::fs::write(&entry, old.to_string()).unwrap();
+
+    let out = run_lint(&dir, &[]);
+    let messages = String::from_utf8(out.stdout).unwrap();
+    assert!(messages.contains("Use 'Heap.new(x)'"), "{messages}");
+    assert!(!messages.contains("Use 'Heap(x)'"), "{messages}");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn no_cache_flag_bypasses_cache() {
     let dir = make_fixture("no_cache_flag");
     let _ = run_lint(&dir, &[]); // populate
@@ -147,7 +171,7 @@ fn modifying_source_invalidates_one_entry() {
     // unreachable; the other 5 entries remain.
     std::fs::write(
         dir.join("src").join("file_0.vr"),
-        "fn item_0() {\n    let x = Heap(0);\n}\n",
+        "fn item_0() {\n    let x = Heap.new(0);\n}\n",
     )
     .expect("rewrite file_0");
     let _ = run_lint(&dir, &[]);

@@ -38,8 +38,8 @@ use serde::{Deserialize, Serialize};
 use super::lint::{LintConfig, LintIssue, LintLevel};
 use verum_common::Text;
 
-/// Bumped when the on-disk format changes in a breaking way.
-const CACHE_FORMAT_VERSION: u32 = 2;
+/// Bump when cached diagnostics or their on-disk representation become stale.
+const CACHE_FORMAT_VERSION: u32 = 3;
 
 /// Per-issue cache record. Mirrors `LintIssue` but uses `String`
 /// for the rule name so it survives a serialisation round-trip;

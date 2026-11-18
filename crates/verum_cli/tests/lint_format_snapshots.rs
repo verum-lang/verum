@@ -11,25 +11,21 @@
 //! every field present, schema version, level mapping) instead of
 //! locking in trivia like whitespace.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use verum_cli::commands::lint::{
     LintIssue, LintLevel, format_issue_gha, format_issue_json, format_sarif, format_tap,
+    lint_source,
 };
-use verum_common::Text;
 
 fn sample_issues() -> Vec<LintIssue> {
+    let source = "fn main() {\n    let x = Box::new(5);\n}\n";
+    let migration = lint_source(Path::new("src/main.vr"), source, None)
+        .into_iter()
+        .find(|issue| issue.rule == "deprecated-syntax" && issue.column == 13)
+        .expect("diagnostic at Box::new");
     vec![
-        LintIssue {
-            rule: "deprecated-syntax",
-            level: LintLevel::Error,
-            file: PathBuf::from("src/main.vr"),
-            line: 4,
-            column: 13,
-            message: "use `Heap(x)` instead of `Box::new(x)`".to_string(),
-            suggestion: Some(Text::from("Heap(x)".to_string())),
-            fixable: true,
-        },
+        migration,
         LintIssue {
             rule: "todo-in-code",
             level: LintLevel::Warning,
@@ -92,12 +88,16 @@ fn json_emits_all_required_fields() {
 }
 
 #[test]
-fn json_emits_suggestion_only_when_fixable() {
+fn json_keeps_manual_guidance_without_a_fix_edit() {
     let issues = sample_issues();
-    let with_fix = format_issue_json(&issues[0]);
-    let without = format_issue_json(&issues[1]);
-    assert!(with_fix.contains("\"suggestion\":"), "got: {with_fix}");
-    assert!(!without.contains("\"suggestion\":"), "got: {without}");
+    let manual: serde_json::Value = serde_json::from_str(&format_issue_json(&issues[0])).unwrap();
+    assert_eq!(
+        manual["suggestion"],
+        "Use 'Heap.new(x)' instead of 'Box::new(x)'"
+    );
+    assert_eq!(manual["fixable"], false);
+    assert!(manual.get("fix").is_none());
+    assert!(!format_issue_json(&issues[1]).contains("\"suggestion\":"));
 }
 
 #[test]
@@ -152,7 +152,7 @@ fn gha_uses_correct_directive_per_level() {
 fn gha_includes_file_line_col() {
     let line = format_issue_gha(&sample_issues()[0]);
     assert!(line.contains("file=src/main.vr"), "got: {line}");
-    assert!(line.contains("line=4"), "got: {line}");
+    assert!(line.contains("line=2"), "got: {line}");
     assert!(line.contains("col=13"), "got: {line}");
 }
 
