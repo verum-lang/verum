@@ -1,6 +1,7 @@
 // node e2e/conversations.mjs /path/to/verum-studio /path/to/chrome-headless-shell
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -91,7 +92,65 @@ try {
   assert.match(await evaluate("byId('agent-messages').querySelector('.approval details:last-of-type').textContent"), /fn main\(\) -> Int/);
   await evaluate('choose(0)');
   assert.equal(await evaluate("byId('agent-input').value"), 'author draft');
-  console.log('Passed: concurrent author and reviewer, independent drafts and streamed item IDs, background review, owner-bound interrupt and approved workspace read.');
+
+  // Hold selected real HTTP responses to exercise journal recovery and late UI delivery.
+  await evaluate(`window.card = i => document.querySelectorAll('#agent-messages > div:not([hidden]) > .approval')[i];
+    window.fields = el => Object.fromEntries([...el.querySelectorAll('dt')].map(dt => [dt.textContent, dt.nextElementSibling.textContent]));
+    window.language = value => { byId('language').value = value; byId('language').dispatchEvent(new Event('change')); };
+    window.previews = [];
+    const send = window.fetch.bind(window);
+    let journalReady;
+    const recovery = new Promise(resolve => { journalReady = resolve; });
+    window.fetch = async (url, options) => {
+      const {method, params} = JSON.parse(options.body);
+      const scopedPoll = method === 'agent.events' && params.threadId === '3';
+      if (scopedPoll) await recovery;
+      const response = await send(url, options);
+      if (method === 'agent.request' && params.method === 'turn/start' && params.params.threadId === '3') journalReady();
+      if (scopedPoll) {
+        const {result} = await response.clone().json();
+        if (result.recoveredReviews.length) window.recoveredId = result.recoveredReviews[0].reviewId;
+        if (window.latePreviewReturned) window.polledAfterReturn = true;
+      }
+      if (method === 'agent.preview') {
+        previews.push(params);
+        if (window.holdPreview) {
+          await new Promise(resolve => { window.releasePreview = resolve; });
+          window.latePreviewReturned = true;
+        }
+      }
+      return response;
+    };
+    byId('new-thread').click();`);
+  await wait("byId('agent-conversation').selectedIndex === 2");
+  await evaluate("compose('Review execution')");
+  await wait("window.recoveredId && card(0)?.querySelector('.primary')");
+  const source = 'print("<b>λ</b>");\r\n';
+  assert.deepEqual(await evaluate('fields(card(0))'), {
+    Operation: 'Execution', 'File path': 'experiment.vr', 'Source mode': 'Script entry', 'Time limit': '60,000 ms',
+    'Script permissions': 'Source / CLI defaults', 'Runtime diagnostics': 'Off',
+    Executable: 'verum', 'Source SHA-256': createHash('sha256').update(source).digest('hex'),
+  });
+  assert.deepEqual(await evaluate('previews[0]'), { reviewId: await evaluate('recoveredId'), threadId: '3' });
+  assert.equal(await evaluate("card(0).querySelector('details').open"), false);
+  await evaluate("card(0).querySelector('summary').click(); language('ru')");
+  assert.equal(await evaluate("card(0).querySelector('details pre').textContent"), source);
+  assert.equal(await evaluate("fields(card(0))['Разрешения скрипта']"), 'Из исходника / настройки CLI');
+  await evaluate("language('en'); card(0).querySelector('.approval-actions button').click()");
+  await wait("card(1)?.querySelector('.preview-error')");
+  assert.match(await evaluate('card(1).textContent'), /Execution plan unavailable.*Timeout/s);
+  assert.equal(await evaluate("card(1).querySelector('.primary')"), null);
+  await evaluate("window.holdPreview = true; card(1).querySelector('.approval-actions button').click()");
+  await wait("window.releasePreview && card(1).textContent.includes('Request declined.') && card(2)");
+  assert.equal(await evaluate("card(2).querySelector('.primary')"), null);
+  await evaluate("byId('agent-stop').click()");
+  await wait("card(2).textContent.includes('This review is no longer pending.')");
+  await evaluate('releasePreview()');
+  await wait('window.polledAfterReturn');
+  assert.equal(await evaluate("card(2).querySelector('.primary, .approval-plan')"), null);
+  assert.equal(await evaluate("card(2).querySelector('button').disabled"), true);
+  assert.equal(await evaluate('new Set(previews.map(p => p.reviewId)).size'), 3);
+  console.log('Passed concurrent conversations, owner-bound read and interrupt, recovered execution preview, source and locale, decline after failure and expired preview delivery.');
 } finally {
   await Promise.all(children.map(async child => {
     if (child.exitCode !== null || child.signalCode !== null) return;

@@ -1,10 +1,20 @@
 #!/usr/bin/env node
-// Both conversations stream the same item ID. Only the reviewer requests a read.
+// Stream shared item IDs across roles and reuse one provider ID for successive execution reviews.
 import { createInterface } from 'node:readline';
 
 const send = packet => process.stdout.write(JSON.stringify(packet) + '\n');
 const roles = new Map();
 let next = 0;
+const execution = { threadId: '3', turnId: 'T-3' };
+const path = 'experiment.vr', source = 'print("<b>λ</b>");\r\n';
+const operations = [
+  { tool: 'verum_run', arguments: { path, source, source_mode: 'script' } },
+  { tool: 'verum_run', arguments: { path, source, timeout_ms: 0 } },
+  { tool: 'verum_check', arguments: { path, source, source_mode: 'script' } },
+];
+function requestExecution() {
+  send({id: 'operation', method: 'item/tool/call', params: {...execution, ...operations.shift()}});
+}
 for await (const line of createInterface({input: process.stdin})) {
   const {id, method, params: p} = JSON.parse(line);
   const reply = result => send({id, result});
@@ -21,12 +31,17 @@ for await (const line of createInterface({input: process.stdin})) {
     const threadId = p.threadId, role = roles.get(threadId);
     const turn = {id: 'T-' + threadId, status: 'inProgress'};
     const params = {threadId, turnId: turn.id};
-    reply({turn});
     send({method: 'turn/started', params: {...params, turn}});
     send({method: 'item/agentMessage/delta', params: {...params, itemId: 'shared', delta: role + ' response'}});
     if (role === 'reviewer') {
       send({id: 'read', method: 'item/tool/call', params: {...params, tool: 'verum_read', arguments: {path: 'experiment.vr'}}});
     }
+    if (threadId === execution.threadId) {
+      requestExecution();
+      // Age this live occurrence out of the host journal before the first scoped poll.
+      for (let i = 0; i < 513; i++) send({method: 'item/completed', params: {threadId: '2', item: {id: String(i), type: 'reasoning'}}});
+    }
+    reply({turn});
   }
   if (method === 'turn/interrupt') {
     reply({});
@@ -35,4 +50,5 @@ for await (const line of createInterface({input: process.stdin})) {
   if (method === undefined && id === 'read') {
     send({method: 'turn/completed', params: {threadId: '2', turn: {id: 'T-2', status: 'completed'}}});
   }
+  if (method === undefined && id === 'operation' && operations.length) requestExecution();
 }

@@ -8,6 +8,7 @@ import { proofSourceRange } from './proof';
 import { ProofTargets, declarationProfile, type ProofProfile } from './proof-targets';
 import { sourceHash as sha256, sourceRevision } from './source';
 import { runtimeView } from './runtime-view';
+import { executionPreviewView, operationLabel, permissionLabel, type ExecutionPreview } from './execution-view';
 import { makeEditor } from './editor';
 import { NavigationHistory, NavigationRequests, type SourceBookmark } from './navigation';
 import { CommandRegistry, type CommandContext, type StudioCommand } from './commands';
@@ -917,7 +918,7 @@ async function startOperation(kind: Receipt['kind'], diagnostics?: boolean) {
     if (plan.source_mode !== request.source_mode) throw new Error(t(m('This Studio host did not preserve the requested source mode.')));
     if (kind === 'run' && request.runtime_diagnostics && plan.runtime_diagnostics !== true) throw new Error(t(m('This Studio host does not support runtime diagnostics. Restart with the matching Studio build.')));
     const result = await api<{ id: string }>('operation.start', request);
-    selectedReceipt = result.id; await refreshOperations(); resultView(false); setPane('results'); announce(m('{kind} started for {path}', { kind: resultLabel(kind), path: request.path }));
+    selectedReceipt = result.id; await refreshOperations(); resultView(false); setPane('results'); announce(m('{kind} started for {path}', { kind: operationLabel(kind), path: request.path }));
   } finally { starting = false; updateDocumentState(); }
 }
 bind('run', () => startOperation('run')); bind('check', () => startOperation('check')); bind('prove', () => startOperation('proof'));
@@ -929,12 +930,11 @@ async function refreshOperations() {
     const known = knownReceiptVersions(receipts);
     const changes = await api<Receipt[]>('operation.list', known ? { known } : {});
     receipts = mergeReceipts(receipts, changes);
-    for (const receipt of receipts) if (previous.get(receipt.id) === 'running' && receipt.status !== 'running') announce(m('{kind} {status}: {path}', { kind: resultLabel(receipt.kind), status: m(receipt.status), path: receipt.path }));
+    for (const receipt of receipts) if (previous.get(receipt.id) === 'running' && receipt.status !== 'running') announce(m('{kind} {status}: {path}', { kind: operationLabel(receipt.kind), status: m(receipt.status), path: receipt.path }));
     if (!selectedReceipt && receipts.length) selectedReceipt = receipts[receipts.length - 1].id;
     renderResults();
   } finally { operationsBusy = false; }
 }
-const resultLabel = (kind: string) => m(kind === 'proof' ? 'Proof check' : kind === 'check' ? 'Module check' : 'Execution');
 const elapsed = (receipt: Receipt) => receipt.status === 'running' && receipt.started_unix_ms ? Math.max(0, Date.now() - receipt.started_unix_ms) : receipt.elapsed_ms;
 let detailSignature = '';
 let historySignature = '';
@@ -985,15 +985,15 @@ function renderResults() {
     const entry = button('', () => { selectedReceipt = receipt.id; renderResults(); }, 'history-item');
     entry.dataset.focusKey = receipt.id;
     entry.setAttribute('aria-current', String(receipt.id === selectedReceipt));
-    const row = node('span', 'history-row'); row.append(icon(receipt.kind === 'proof' ? 'proof' : receipt.kind === 'check' ? 'check' : 'run'), node('span', '', resultLabel(receipt.kind)), node('span', `badge ${receipt.status}`, m(receipt.status)));
+    const row = node('span', 'history-row'); row.append(icon(receipt.kind === 'proof' ? 'proof' : receipt.kind === 'check' ? 'check' : 'run'), node('span', '', operationLabel(receipt.kind)), node('span', `badge ${receipt.status}`, m(receipt.status)));
     entry.append(row, node('span', 'history-path', receipt.path), node('span', 'history-path', m('{seconds}s · {hash}', { seconds: Math.max(0, elapsed(receipt) / 1000), hash: receipt.source_hash.slice(0, 7) })));
-    setAttribute(entry, 'title', m('{kind} · {path} · {status}', { kind: resultLabel(receipt.kind), path: receipt.path, status: m(receipt.status) }));
+    setAttribute(entry, 'title', m('{kind} · {path} · {status}', { kind: operationLabel(receipt.kind), path: receipt.path, status: m(receipt.status) }));
       $('history').append(entry);
     }
     restoreFocus();
   }
   const receipt = receipts.find(receipt => receipt.id === selectedReceipt);
-  setText($('result-summary'), receipt ? m('{kind} · {status}', { kind: resultLabel(receipt.kind), status: m(receipt.status) }) : m('No operations yet'));
+  setText($('result-summary'), receipt ? m('{kind} · {status}', { kind: operationLabel(receipt.kind), status: m(receipt.status) }) : m('No operations yet'));
   if (!receipt) return;
   const nextDetail = JSON.stringify(receipt) + currentPath + currentHash + sourceMode() + Math.floor(elapsed(receipt) / 1000);
   if (detailSignature === nextDetail) return;
@@ -1005,7 +1005,7 @@ function renderResults() {
   const scroll = detail.scrollTop;
   const restoreFocus = restoreFocusAfterRender(detail);
   detail.replaceChildren(); detail.dataset.receipt = receipt.id;
-  const heading = node('div', 'result-heading'); heading.append(node('strong', '', resultLabel(receipt.kind)), node('span', `badge ${receipt.status}`, m(receipt.status)));
+  const heading = node('div', 'result-heading'); heading.append(node('strong', '', operationLabel(receipt.kind)), node('span', `badge ${receipt.status}`, m(receipt.status)));
   if (isStale(receipt, currentPath, currentHash, sourceMode())) {
     const badge = node('span', 'badge stale', currentHash === null && currentPath === receipt.path ? m('Checking revision') : m('Different revision'));
     setAttribute(badge, 'title', m('This result does not describe the current editor source.')); heading.append(badge);
@@ -1026,8 +1026,7 @@ function renderResults() {
   const contextHeading = node('summary', '', m('Execution context')); contextHeading.dataset.focusKey = 'context'; context.append(contextHeading);
   if (receipt.timeout_ms) context.append(node('p', 'muted', m(receipt.evidence_path ? 'Wall budget {seconds}s · source and receipt retained locally' : 'Wall budget {seconds}s', { seconds: receipt.timeout_ms / 1000 })));
   if (receipt.kind === 'run') {
-    const label = receipt.permissions === 'source' ? 'Source / CLI defaults' : receipt.permissions === 'deny-all' ? 'Deny all grants' : receipt.permissions === 'allow-all' ? 'Allow all grants' : 'Not recorded';
-    context.append(node('p', 'result-meta', m('Script permissions: {policy}', { policy: m(label) })));
+    context.append(node('p', 'result-meta', m('Script permissions: {policy}', { policy: permissionLabel(receipt.permissions) })));
   }
   if (receipt.termination) context.append(node('p', 'termination', receipt.termination));
   if (receipt.kind === 'proof') {
@@ -1335,12 +1334,17 @@ async function showApproval(c: Conversation, reviewId: string, method: string, p
   const owner = typeof params.threadId === 'string' ? params.threadId : null;
   if (owner !== null && owner !== c.thread) return;
   const connection = agentConnection;
-  const kind = approvalKind(method, hostKind), args = parseArguments(params.arguments);
-  const card = node('section', 'approval'); card.setAttribute('aria-label', 'Agent request awaiting review');
+  const kind = approvalKind(method, hostKind);
+  const args = kind === 'execution' ? {} : parseArguments(params.arguments);
+  const card = node('section', 'approval'); setAttribute(card, 'aria-label', m('Agent request awaiting review'));
   card.append(node('div', 'approval-heading', kind === 'source' ? m('Review a source proposal') : kind === 'execution' ? m('Review a Verum operation') : kind === 'read' ? params.tool === 'verum_analyze' ? m('Review language analysis') : m('Review a workspace read') : m('Unsupported agent request')));
   const content = node('div', 'approval-content');
-  let reviewAvailable = owner !== null;
-  content.append(node('p', '', kind === 'unsupported' ? m('This request is outside the Verum tool boundary. Decline it to let the agent continue.') : `${String(params.tool || method)}${typeof args.path === 'string' ? ` · ${args.path}` : ''}`));
+  let reviewAvailable = owner !== null && kind !== 'execution' && kind !== 'unsupported';
+  if (kind === 'execution') {
+    if (!owner) content.append(node('p', 'preview-error', m('The execution request is missing its conversation ID.')));
+  } else {
+    content.append(node('p', '', kind === 'unsupported' ? m('This request is outside the Verum tool boundary. Decline it to let the agent continue.') : `${String(params.tool || method)}${typeof args.path === 'string' ? ` · ${args.path}` : ''}`));
+  }
   if (kind === 'source') {
     let before: Content = m('(A new file is proposed; the server will check that it does not already exist.)');
     if (typeof args.path === 'string' && args.expected_hash !== null) {
@@ -1351,10 +1355,13 @@ async function showApproval(c: Conversation, reviewId: string, method: string, p
     if (args.path === currentPath && dirty()) content.append(node('p', '', m('You have unsaved editor changes. Accepting writes the file on disk; your editor draft will be preserved.')));
     content.append(node('span', 'approval-source-label', m('Before · saved workspace source')), node('pre', '', before), node('span', 'approval-source-label', m('Proposed source')), node('pre', '', typeof args.source === 'string' ? args.source : m('(Missing source)')));
     content.append(node('p', '', m('Expected file revision: {revision}', { revision: args.expected_hash === null ? m('new file') : typeof args.expected_hash === 'string' ? args.expected_hash : m('not supplied') })));
-  } else appendDetails(content, m('Request details'), params, 'request', kind === 'execution' || kind === 'read');
+  } else if (kind !== 'execution') appendDetails(content, m('Request details'), params, 'request', kind === 'read');
   const actions = node('div', 'approval-actions');
-  const status = node('div', 'approval-status', m('Awaiting your decision. No requested action has been approved.'));
+  const waiting = m('Awaiting your decision. No requested action has been approved.');
+  const status = node('div', 'approval-status', kind === 'execution' && owner ? m('Loading execution plan…') : waiting);
   let responding = false;
+  const current = () => conversations.has(c) && connection === agentConnection && (owner === null || owner === c.thread);
+  const pending = () => current() && c.reviews.get(reviewId) === expire;
   function expire() {
     c.reviews.delete(reviewId);
     actions.querySelectorAll('button').forEach(button => { button.disabled = true; });
@@ -1362,16 +1369,21 @@ async function showApproval(c: Conversation, reviewId: string, method: string, p
     agentState();
   }
   async function respond(approved: boolean) {
-    if (responding || c !== selected || !c.reviews.has(reviewId) || connection !== agentConnection) return; responding = true;
+    if (responding || c !== selected || !pending() || (approved && !reviewAvailable)) return;
+    responding = true;
     actions.querySelectorAll('button').forEach(button => { button.disabled = true; });
     setText(status, approved ? m('Approved · waiting for the tool result…') : m('Declining request…'));
     let result: unknown;
     try { result = await api('agent.respond', { reviewId, threadId: owner, result: approvalReply(method, approved) }); }
     catch (error) {
-      responding = false; setText(status, m('Request response failed: {error}', { error: errorText(error) }));
-      if (c.reviews.has(reviewId)) actions.querySelectorAll('button').forEach(button => { button.disabled = false; });
+      responding = false;
+      if (pending()) {
+        setText(status, m('Request response failed: {error}', { error: errorText(error) }));
+        actions.querySelectorAll('button').forEach(button => { button.disabled = false; });
+      } else setText(status, m('This review is no longer pending.'));
       return;
     }
+    if (!current()) return;
     try {
       const response = parseArguments(result);
       setText(status, !approved ? m('Request declined.') : response.success === true ? m('Tool completed. Its result is available below.') : response.success === false ? m('The tool reported a failure. Inspect the response below.') : m('Approval delivered. Inspect the tool result and evidence before treating the request as successful.'));
@@ -1386,12 +1398,32 @@ async function showApproval(c: Conversation, reviewId: string, method: string, p
       await refreshOperations();
     } catch (error) { status.append(node('p', '', m('Refresh unavailable: {error}', { error: errorText(error) }))); }
   }
+  const approve = button(kind === 'source' ? m('Accept edit') : kind === 'read' ? params.tool === 'verum_analyze' ? m('Allow analysis') : m('Allow read') : m('Approve operation'), () => respond(true), 'button primary');
   actions.append(button(m('Decline'), () => respond(false)));
-  if (kind !== 'unsupported' && reviewAvailable) actions.append(button(kind === 'source' ? m('Accept edit') : kind === 'read' ? params.tool === 'verum_analyze' ? m('Allow analysis') : m('Allow read') : m('Approve operation'), () => respond(true), 'button primary'));
-  if (!conversations.has(c) || connection !== agentConnection || (owner !== null && owner !== c.thread)) return;
+  if (reviewAvailable) actions.append(approve);
+  if (!current()) return;
   c.reviews.set(reviewId, expire);
   card.append(content, actions, status); c.log.append(card); agentState();
   announce(m('Agent request awaiting your review'));
+  // Keep polling while the host resolves the plan. A recovered request can
+  // expire, be declined, or lose its connection before its preview arrives.
+  if (kind === 'execution' && owner) void loadExecutionPreview(owner);
+  async function loadExecutionPreview(threadId: string) {
+    try {
+      const preview = await api<ExecutionPreview>('agent.preview', { reviewId, threadId });
+      if (!pending()) return;
+      const view = await executionPreviewView(preview);
+      if (!pending()) return;
+      content.replaceChildren(view);
+      reviewAvailable = true;
+      approve.disabled = responding;
+      actions.append(approve);
+    } catch (error) {
+      if (!pending()) return;
+      content.replaceChildren(node('p', 'preview-error', m('Execution plan unavailable. {error}', { error: errorText(error) })));
+    }
+    if (!responding) setText(status, waiting);
+  }
 }
 
 bind('theme', () => {

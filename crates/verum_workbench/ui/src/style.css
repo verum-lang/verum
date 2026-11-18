@@ -1175,6 +1175,16 @@ dialog:has(.change-review) h2 { font-size: 15px; overflow-wrap: anywhere; }
   cursor: pointer;
   margin-bottom: 5px;
 }
+.approval-plan {
+  display: grid;
+  grid-template-columns: fit-content(42%) minmax(0, 1fr);
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.approval-plan dt { color: var(--muted); }
+.approval-plan dd { margin: 0; }
+.approval-content .preview-error { color: var(--warning); overflow-wrap: anywhere; }
 .approval-actions {
   padding: 10px var(--gutter);
   flex: 0 0 auto;
