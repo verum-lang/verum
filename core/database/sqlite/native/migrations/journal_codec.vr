@@ -4,6 +4,9 @@ module core.database.sqlite.native.migrations.journal_codec;
 mount core.base.maybe.Maybe;
 mount core.base.result.Result;
 mount core.text.text.Text;
+mount core.collections.list.List;
+mount core.database.common.migrations.journal.JournalEntry;
+mount core.database.sqlite.native.l4_vdbe.register.Register;
 mount core.database.common.error.{DbError, AdapterSpecific, AdSqlite};
 mount core.database.common.migrations.migration.{MigrationStatus, MsPending, MsApplied, MsRolledBack, MsFailed};
 
@@ -20,4 +23,37 @@ public fn decode_status(tag: Text, applied_at: Maybe<Int64>, error: Maybe<Text>)
         ("failed", Maybe.None, Maybe.Some(message)) => Result.Ok(MsFailed(message)),
         _ => Result.Err(invalid("unknown status or inconsistent status fields")),
     }
+}
+
+/// Decode the six columns selected by the store using their SQLite storage classes.
+public fn decode_entry(row: &List<Register>) -> Result<JournalEntry, DbError> {
+    if row.len() != 6 { return Result.Err(invalid("expected six journal columns")); }
+    let version = match &row[0] {
+        Register.RInt(n) | Register.RRowId(n) => *n as Int,
+        _ => return Result.Err(invalid("version must be an integer")),
+    };
+    let name = match &row[1] {
+        Register.RText(t) => t.to_text(),
+        _ => return Result.Err(invalid("name must be text")),
+    };
+    let tag = match &row[2] {
+        Register.RText(t) => t.to_text(),
+        _ => return Result.Err(invalid("status must be text")),
+    };
+    let stamp = match &row[3] {
+        Register.RInt(n) => Maybe.Some(*n),
+        Register.RNull => Maybe.None,
+        _ => return Result.Err(invalid("applied_at must be an integer or NULL")),
+    };
+    let error = match &row[4] {
+        Register.RText(t) => Maybe.Some(t.to_text()),
+        Register.RNull => Maybe.None,
+        _ => return Result.Err(invalid("error must be text or NULL")),
+    };
+    let checksum = match &row[5] {
+        Register.RInt(n) => *n,
+        _ => return Result.Err(invalid("checksum must be an integer")),
+    };
+    let status = decode_status(tag, stamp, error)?;
+    Result.Ok(JournalEntry { version: version, name: name, status: status, checksum: checksum })
 }

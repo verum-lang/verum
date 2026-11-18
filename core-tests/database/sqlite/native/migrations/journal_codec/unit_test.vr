@@ -1,4 +1,5 @@
-mount core.database.sqlite.native.migrations.journal_codec.decode_status;
+mount core.database.sqlite.native.migrations.journal_codec.{decode_entry, decode_status};
+mount core.database.sqlite.native.l4_vdbe.register.Register;
 mount core.database.common.migrations.migration.MigrationStatus;
 mount core.database.common.error.DbError;
 mount core.base.result.Result;
@@ -35,6 +36,41 @@ fn test_unknown_and_inconsistent_journal_statuses_return_adapter_errors() {
     assert_invalid_journal_status("pending", Maybe.Some(0_i64), Maybe.None);
     assert_invalid_journal_status("applied", Maybe.Some(19_i64), Maybe.Some("conflicting"));
     assert_invalid_journal_status("failed", Maybe.Some(19_i64), Maybe.Some("conflicting"));
+}
+
+@test
+fn test_decode_entry_reads_sqlite_values_in_projection_order() {
+    let row: List<Register> = [Register.RRowId(23_i64), Register.RText("t'é"),
+        Register.RText("applied"), Register.RInt(17_i64), Register.RNull, Register.RInt(-73_i64)];
+    let entry = decode_entry(&row).unwrap();
+    assert_eq(entry.version, 23);
+    assert_eq(entry.name, "t'é");
+    assert_eq(entry.checksum, -73_i64);
+    match entry.status {
+        MigrationStatus.MsApplied(time) => assert_eq(time, 17_i64),
+        _ => panic("expected applied status"),
+    }
+}
+
+@test
+fn test_decode_entry_preserves_sql_null_and_rejects_malformed_rows() {
+    let mut row: List<Register> = [Register.RInt(1_i64), Register.RText("one"),
+        Register.RText("failed"), Register.RNull, Register.RText("disk-full"), Register.RInt(4_i64)];
+    match decode_entry(&row).unwrap().status {
+        MigrationStatus.MsFailed(detail) => assert_eq(detail, "disk-full"),
+        _ => panic("expected failure detail"),
+    }
+    row[3] = Register.RText("17");
+    assert(decode_entry(&row).is_err());
+    row[3] = Register.RInt(17_i64);
+    assert(decode_entry(&row).is_err());
+    row[3] = Register.RNull;
+    row[5] = Register.RReal(4.0);
+    assert(decode_entry(&row).is_err());
+    row[5] = Register.RInt(4_i64);
+    row.push(Register.RNull);
+    assert(decode_entry(&row).is_err());
+    assert(decode_entry(&[]).is_err());
 }
 
 fn main() {}
