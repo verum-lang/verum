@@ -11,6 +11,7 @@ enum Route {
     Propose,
     Receipt,
     Evidence,
+    ActionSequence,
     Plan,
     Files,
     Changes,
@@ -43,6 +44,7 @@ impl Tool {
             Route::Project
             | Route::ReadSource
             | Route::Evidence
+            | Route::ActionSequence
             | Route::Receipt
             | Route::Plan
             | Route::Files
@@ -119,6 +121,7 @@ pub(super) fn operation(params: &Value) -> Result<(&'static str, Value)> {
         Route::Propose => "workspace.write",
         Route::Receipt => "operation.read",
         Route::Evidence => "evidence.packet",
+        Route::ActionSequence => "agent.action_sequence",
         Route::Plan => "operation.plan",
         Route::Files => {
             ensure!(
@@ -180,6 +183,11 @@ fn define_tools() -> Vec<Tool> {
     let runtime_diagnostics = json!({"type":"boolean","description":"Record bounded CBGR errors, VBC method dispatch counts and inclusive handler times, and recent cooperative task outcomes including detached failures, bound to this invocation and source. Capture is limited to interpreter execution; nursery jobs and native worker threads are excluded. Default false."});
     let proof_profile = json!({"type":"string","enum":verum_source_proof::SourceProfile::ALL,"description":"Source proof scope: logical theorem (default), or closed finite function contracts with proved helper-call obligations. Neither proves native compiler correspondence."});
     [
+        (
+            "verum_action_sequence", Route::ActionSequence,
+            "Check the host-observed order of reviewed tool dispatches and outcomes in this conversation. Reports pending decisions, unfinished calls and lost evidence. The current inspection identifies and excludes its own in-flight review.",
+            json!({}), json!([]),
+        ),
         (
             "verum_files", Route::Files,
             "Browse a project directory lazily (path defaults to the root), or search project file paths with query. Includes source and supporting files; hidden, generated and symlink paths are excluded. Search reports truncation explicitly.",

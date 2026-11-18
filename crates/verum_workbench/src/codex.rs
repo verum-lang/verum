@@ -207,7 +207,14 @@ impl Events {
             .filter(|e| gap && e["seq"].as_u64().is_some_and(|seq| seq < first))
             .collect();
         let reviews: List<_> = pending.iter().map(|e| &e["reviewId"]).collect();
-        json!({"connectionId":self.connection.to_string(),"cursor":self.next,"events":events,"gap":gap,"pendingReviews":reviews,"recoveredReviews":recovered})
+        let action_sequence = thread.filter(|id| self.roles.contains_key(*id)).map(|id| self.action_sequence(id, None));
+        json!({"connectionId":self.connection.to_string(),"cursor":self.next,"events":events,"gap":gap,
+            "pendingReviews":reviews,"recoveredReviews":recovered,"actionSequence":action_sequence})
+    }
+
+    pub(crate) fn action_sequence(&self, thread: &str, inspecting_review: Option<uuid::Uuid>) -> crate::action_order::Check {
+        let awaiting = self.scopes.values().filter(|scope| scope.identity().conversation.as_str() == thread).count();
+        self.turns.journal.check(thread, awaiting, inspecting_review)
     }
 
     fn pending_review(&self, review: &str, thread: Option<&str>) -> Result<(&Text, &Value)> {

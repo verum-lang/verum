@@ -8,6 +8,10 @@ Studio exposes its project model, diagnostics, definitions, edit proposals, oper
 
 The current Studio transport uses Codex. An author and an independent reviewer can work in separate conversations. The host owns each role and the review classification of each registered tool. Each live approval has a fresh host identifier and an originating conversation. A reviewer reads the task, saved project artifacts and selected receipts. Source writes and run, check or proof jobs require author authority and operator approval. The operator chooses what is sent to each provider. The browser bearer token grants workspace access to its holder. Conversation scoping prevents accidental cross-talk within that trust domain. Hosting mutually untrusted users requires distinct principals and access controls.
 
+**Action order** in the Collaborator checks the host's decisions, dispatches and tool outcomes for the selected conversation on this connection. A dispatch must follow approval of the same occurrence, turn and tool. A declined review must never dispatch. After approval the host can also refuse a request during admission. Each dispatch must produce a single outcome. For execution receipts the host checks the connection, conversation, turn and review ID. A failed tool can satisfy the ordering rule.
+
+The host retains the latest 128 steps per conversation in memory. Pending decisions, unfinished dispatches, missing receipt origins and an omitted prefix yield an incomplete report. An observed contradiction identifies the two steps when both are available. The report covers reviewed host tools and their returned outcomes. Provider assertions, manual editor actions and program behavior fall outside its scope. Both agent roles can request the same check using `verum_action_sequence` with empty arguments. The tool identifies its own in-flight review in `inspecting_review` and excludes it from that snapshot. The browser includes its outcome after the tool returns.
+
 ## The common model
 
 | Object | Identity and responsibility |

@@ -1,4 +1,5 @@
 //! Verum Studio: one local operation service, with browser and provider adapters.
+mod action_order;
 pub mod agent_tools;
 pub mod agent_runtime;
 pub mod codex;
@@ -13,6 +14,7 @@ pub mod runtime_diagnostics;
 pub mod workspace;
 
 use anyhow::{Context, Result, bail, ensure};
+use action_order::Step;
 use serde_json::{Value, json};
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use tokio::sync::Mutex;
@@ -189,10 +191,20 @@ impl Studio {
     async fn respond(&self, params: Value) -> Result<Value> {
         let provider = self.provider().await?;
         let thread = params["threadId"].as_str();
+        let approved = params["result"]["approved"].as_bool() == Some(true);
         let (request, role, scope) = {
             let mut events = provider.events.lock().await;
             let (request, scope) = events.take_review(field(&params, "reviewId")?, thread)?;
-            (request, thread.and_then(|id| events.role(id)), scope)
+            let role = thread.and_then(|id| events.role(id));
+            if let Some(scope) = &scope {
+                let tool = field(&request["params"], "tool")?;
+                if !approved {
+                    scope.record_action(tool, Step::Declined);
+                } else if role.and_then(|role| role.review_kind(tool)).is_some() {
+                    scope.record_action(tool, Step::Approved);
+                }
+            }
+            (request, role, scope)
         };
         let _guard = scope.as_ref().map(agent_runtime::Scope::guard);
         let id = &request["id"];
@@ -201,7 +213,7 @@ impl Studio {
             provider.send(json!({"id":id,"error":{"code":-32601,"message":"Studio exposes only reviewed Verum tools"}})).await?;
             return Ok(json!({"declined":true}));
         }
-        let result = if params["result"]["approved"].as_bool() != Some(true) {
+        let result = if !approved {
             Err(anyhow::anyhow!("User declined this operation"))
         } else if role.and_then(|role| role.review_kind(request["params"]["tool"].as_str()?)).is_none() {
             Err(anyhow::anyhow!("This conversation is not authorized to invoke the requested tool"))
@@ -228,8 +240,26 @@ impl Studio {
         Ok(self.tool_owned(params, None).await?.1)
     }
     async fn tool_owned(&self, params: &Value, owner: Option<&agent_runtime::Scope>) -> Result<(bool, Value)> {
-        let (method, args) = agent_tools::operation(params)?;
-        if let Some(owner) = owner { owner.admit(|| Ok(()))?; }
+        let tool = field(params, "tool")?;
+        let (method, args) = agent_tools::operation(params).inspect_err(|_| {
+            if let Some(owner) = owner { owner.record_action(tool, Step::RefusedBeforeDispatch); }
+        })?;
+        if let Some(owner) = owner {
+            owner.admit(|| { owner.record_action(tool, Step::Dispatched); Ok(()) })
+                .inspect_err(|_| owner.record_action(tool, Step::RefusedBeforeDispatch))?;
+        }
+        let outcome = self.dispatch_tool(method, args, owner).await;
+        if let Some(owner) = owner {
+            let step = match &outcome {
+                Ok((success, receipt)) if method == "operation.start" => action_order::receipt_outcome(&owner.review_origin()?, &receipt["agent"], *success),
+                Ok((true, _)) => Step::Succeeded,
+                _ => Step::Failed,
+            };
+            owner.record_action(tool, step);
+        }
+        outcome
+    }
+    async fn dispatch_tool(&self, method: &str, args: Value, owner: Option<&agent_runtime::Scope>) -> Result<(bool, Value)> {
         let operation = self.workspace_operation_owned(method, args, owner);
         let result = if let Some(owner) = owner {
             tokio::select! {
@@ -256,6 +286,14 @@ impl Studio {
     }
     async fn workspace_operation_owned(&self, method: &str, params: Value, owner: Option<&agent_runtime::Scope>) -> Result<Value> {
         match method {
+            "agent.action_sequence" => {
+                let review = owner.context("Sequence inspection requires a reviewed agent call")?.review_origin()?;
+                let provider = self.provider().await?;
+                let events = provider.events.lock().await;
+                ensure!(events.connection().to_string() == review.owner.connection.as_str(), "Provider connection changed");
+                Ok(json!({"connectionId":review.owner.connection,"threadId":review.owner.conversation,
+                    "actionSequence":events.action_sequence(&review.owner.conversation, review.review_id)}))
+            }
             "workspace.browse" | "workspace.search" | "workspace.changes" | "workspace.diff" => {
                 self.project_files(method, params).await
             }

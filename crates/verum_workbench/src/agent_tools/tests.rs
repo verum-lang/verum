@@ -142,7 +142,8 @@ while IFS= read -r line; do
             case "$started" in
                 1) printf '%s\n' '{"id":2,"result":{"thread":{"id":"author"}}}' ;;
                 2) printf '%s\n' '{"id":3,"result":{"thread":{"id":"critic"}}}'
-                printf '%s\n' '{"id":"go","method":"item/tool/call","params":{"threadId":"critic","turnId":"B","tool":"verum_analyze","arguments":{"path":"main.vr","method":"textDocument/definition","position":{"line":1,"character":21}}}}' ;;
+                printf '%s\n' '{"id":"go","method":"item/tool/call","params":{"threadId":"critic","turnId":"B","tool":"verum_analyze","arguments":{"path":"main.vr","method":"textDocument/definition","position":{"line":1,"character":21}}}}'
+                printf '%s\n' '{"id":"inspect-order","method":"item/tool/call","params":{"threadId":"critic","turnId":"B","tool":"verum_action_sequence","arguments":{}}}' ;;
                 3) printf '%s\n' '{"id":5,"result":{"thread":{"id":"author"}}}' ;;
             esac ;;
         *'"method":"account/read"'*)
@@ -202,6 +203,11 @@ done
         studio.call("agent.tools", json!({})).await.unwrap()
     );
     assert_eq!(sent(2)["dynamicTools"], Role::Reviewer.catalog());
+    for i in [1, 2] {
+        assert!(sent(i)["dynamicTools"].as_array().unwrap().iter().any(|t| t["name"] == "verum_action_sequence"));
+    }
+    assert!(operation(&json!({"tool":"verum_action_sequence","arguments":{"threadId":"author"}})).is_err());
+    assert!(studio.call("agent.action_sequence", json!({})).await.is_err());
     assert!(sent(2).get("role").is_none());
     assert!(
         sent(2)["dynamicTools"]
@@ -283,6 +289,20 @@ done
         editor
     );
     assert!(review(&studio, "critic", "go").await.is_err());
+    let key = review_key(&studio, "critic", "inspect-order").await.unwrap();
+    let inspection = review(&studio, "critic", "inspect-order").await.unwrap();
+    assert_eq!(inspection["success"], true, "{inspection}");
+    let report = &inspection["tool_result"];
+    assert_eq!(report["connectionId"], connection);
+    assert_eq!(report["threadId"], "critic");
+    assert_eq!(report["actionSequence"]["status"], "checked");
+    assert_eq!(report["actionSequence"]["succeeded"], 1);
+    assert_eq!(report["actionSequence"]["retained"], 3);
+    assert_eq!(report["actionSequence"]["inspecting_review"], key["reviewId"]);
+    let journal = studio.call("agent.events", json!({"threadId":"critic"})).await.unwrap();
+    assert_eq!(journal["actionSequence"]["succeeded"], 2);
+    assert_eq!(journal["actionSequence"]["retained"], 6);
+    assert!(journal["actionSequence"].get("inspecting_review").is_none());
     for (thread, call) in [
         ("critic", "run"),
         ("critic", "edit-critic"),
@@ -316,6 +336,11 @@ done
         assert_eq!(studio.tool_owned(&lookup, None).await.unwrap(), (true, receipt.clone()));
         observed.push((wire, receipt.clone()));
     }
+    let journal = studio.call("agent.events", json!({"threadId":"author"})).await.unwrap();
+    assert_eq!(journal["actionSequence"]["succeeded"], 1);
+    assert_eq!(journal["actionSequence"]["failed"], 2);
+    assert_eq!(journal["actionSequence"]["declined"], 1);
+    assert_eq!(journal["actionSequence"]["status"], "incomplete");
     assert!(
         studio.call("agent.request", author).await.is_err(),
         "recycled ID"

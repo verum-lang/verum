@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex, Weak};
 use tokio::sync::watch;
 use verum_common::{List, Map, Text};
+use crate::action_order::{Journal, Step};
 
 #[cfg(all(test, unix))]
 #[path = "agent_runtime_tests.rs"]
@@ -54,16 +55,18 @@ struct State {
 struct Inner {
     identity: TurnIdentity,
     parent_review: Option<(Scope, uuid::Uuid)>,
+    journal: Journal,
     state: Mutex<State>,
     ended: watch::Sender<Option<End>>,
 }
 #[derive(Clone)]
 pub(crate) struct Scope(Arc<Inner>);
 impl Scope {
-    fn new(identity: TurnIdentity, parent_review: Option<(Self, uuid::Uuid)>) -> Self {
+    fn new(identity: TurnIdentity, parent_review: Option<(Self, uuid::Uuid)>, journal: Journal) -> Self {
         Self(Arc::new(Inner {
             identity,
             parent_review,
+            journal,
             state: Mutex::new(State {
                 ended: None,
                 children: List::new(),
@@ -79,6 +82,13 @@ impl Scope {
     pub(crate) fn review_origin(&self) -> Result<ReviewOrigin> {
         let (_, id) = self.0.parent_review.as_ref().context("Execution requires an individual review")?;
         Ok(ReviewOrigin { owner: self.identity().clone(), review_id: Some(*id) })
+    }
+
+    pub(crate) fn record_action(&self, tool: &str, step: Step) {
+        if let Some((_, review_id)) = &self.0.parent_review {
+            let owner = self.identity();
+            self.0.journal.record(&owner.conversation, &owner.turn, *review_id, tool, step);
+        }
     }
 
     /// Mutation admission and cancellation share a lock. Callers must acquire
@@ -103,7 +113,7 @@ impl Scope {
         let mut state = self.0.state.lock().unwrap_or_else(|e| e.into_inner());
         ensure!(state.ended.is_none(), "Agent turn has expired");
         state.children.retain(|child| child.strong_count() != 0);
-        let child = Self::new(self.0.identity.clone(), Some((self.clone(), review)));
+        let child = Self::new(self.0.identity.clone(), Some((self.clone(), review)), self.0.journal.clone());
         state.children.push(Arc::downgrade(&child.0));
         Ok(child)
     }
@@ -156,11 +166,13 @@ struct Registry {
 pub(crate) struct Turns {
     connection: Text,
     registry: Arc<Mutex<Registry>>,
+    pub(crate) journal: Journal,
 }
 impl Turns {
     pub(crate) fn new(connection: uuid::Uuid) -> Self {
         Self {
             connection: connection.to_string().into(),
+            journal: Journal::default(),
             registry: Arc::new(Mutex::new(Registry {
                 closed: false,
                 turns: Map::new(),
@@ -195,6 +207,7 @@ impl Turns {
                 turn: key.1.clone(),
             },
             None,
+            self.journal.clone(),
         );
         registry.turns.insert(key, scope.clone());
         Ok(scope)
