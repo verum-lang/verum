@@ -402,6 +402,27 @@ const PACKED_BYTE: &str =
     "let mut values: [Int8; 3] = [0_i8; 3]; values[0] = -128; values[1] = -1; values[2] = 1;";
 
 #[test]
+fn native_slice_method_on_returned_array_uses_the_selected_storage() {
+    for producer in [
+        "let bytes:[Byte;3]=[6_u8,37_u8,99_u8]; bytes",
+        "[6_u8,37_u8,99_u8]",
+    ] {
+        let program = format!(
+            "implement<T> [T] {{ fn head(&self)->T {{ self[0] }} }} \
+             fn make()->[Byte;3] {{ {producer} }} \
+             fn probe()->Int {{ let bytes=make(); bytes.head() as Int }}"
+        );
+        let module = source(&program);
+        native(&module, |engine| {
+            // SAFETY: the source entry has no parameters and returns a Verum Int.
+            let value = unsafe { engine.get_function::<unsafe extern "C" fn() -> i64>("probe")
+                .expect("native probe").call() };
+            assert_eq!(value, 6, "{producer}");
+        });
+    }
+}
+
+#[test]
 fn native_actual_packed_byte_local() {
     elements("", "Int8", PACKED_BYTE, -128, -1, Boundary::Local);
 }
@@ -751,10 +772,23 @@ native_cleanup_case!(
 );
 #[test]
 fn native_indirect_array_result_refuses_unproved_storage() {
-    // T1710 does not establish a selected producer across CallClosure. The
-    // interpreter no-leak positive remains unchanged; native GetE must retain
-    // its existing refusal instead of guessing geometry from the return type.
-    let module = source(return_cleanup_fixtures::ARRAY_CLOSURE);
+    assert_unknown_array_storage(return_cleanup_fixtures::ARRAY_CLOSURE, "GetE");
+}
+
+#[test]
+fn native_indirect_array_view_refuses_unproved_storage() {
+    assert_unknown_array_storage(r#"
+        implement<T> [T] { fn head(&self)->T { self[0] } }
+        fn probe()->Int {
+            let create = || -> [Byte;3] { let bytes:[Byte;3]=[6_u8,37_u8,99_u8]; bytes };
+            let bytes=create();
+            bytes.head() as Int
+        }
+    "#, "RefSlice");
+}
+
+fn assert_unknown_array_storage(program: &str, instruction: &str) {
+    let module = source(program);
     let wire = decoded_wire(&module);
     for (route, module) in [("source", &module), ("wire", &wire)] {
         Target::initialize_native(&InitializationConfig::default()).expect("native target");
@@ -769,7 +803,7 @@ fn native_indirect_array_result_refuses_unproved_storage() {
         assert!(
             matches!(error,
             verum_codegen::llvm::LlvmLoweringError::UnprovenArrayStorage(ref detail)
-                if detail.contains("GetE") && detail.contains("no selected array storage")
+                if detail.contains(instruction) && detail.contains("no selected array storage")
                     && detail.contains("probe")),
             "{route}: unrelated refusal: {error:?}"
         );

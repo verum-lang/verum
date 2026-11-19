@@ -25693,26 +25693,22 @@ fn lower_cbgr_extended<'ctx>(
             // **SLICE-STATIC-ELEM-1 (T1213)** — when the frontend knew
             // the element stride, USE IT AND DO NOT PROBE.
             //
-            // The classification below reads the source's first word as
-            // a `type_id`. For a packed `[Byte; N]` that word is the
-            // ARRAY'S OWN DATA, so the CONTENT chooses the branch.
-            // Measured: three `[Byte; 16]`s differing only in byte 0 —
-            // first word 6 (TypeId::U8), 7 (U16), 99 (no case) — took
-            // three different arms and gave three different wrong
-            // answers, and two of them computed `data = src + HDR` on a
-            // pointer that already pointed AT the data, reading 24
-            // bytes past a 16-byte array. Byte buffers hold input.
-            //
-            // `src` for such a local is the DATA pointer already, which
-            // is why `data = base_int` is right here and why handing
-            // this pointer to a classifier that expects an object base
-            // is not. The stride comes from the declaration
-            // (`get_typed_array_elem_size`, operand 4); 0 means the
-            // frontend did not know and the probe below still runs.
-            // `op_reg` answers 0 for an operand that is not there, and 0
-            // is not a valid stride — so an instruction from an older
-            // archive takes the probe below exactly as before.
-            let static_elem = op_reg(operands, 4);
+            // Packed native allocations point directly to element data. The
+            // selected producer supplies their stride, including across calls.
+            // A storage-neutral fixed array must never probe its own bytes as
+            // an object header. Existing explicit raw views retain their stride.
+            let source = Reg(op_reg(operands, 1));
+            let supplied_stride = op_reg(operands, 4);
+            let static_elem = match ctx.array_storage_fact(source) {
+                Some(ArrayResultFact::Packed { width, .. }) => width as u16,
+                Some(ArrayResultFact::List) => 0,
+                _ if ctx.is_array_value(source) => {
+                    return Err(LlvmLoweringError::UnprovenArrayStorage(
+                        format!("RefSlice r{} has no selected array storage in {}", source.0, ctx.function_name()).into(),
+                    ));
+                }
+                _ => supplied_stride,
+            };
             if matches!(static_elem, 1 | 2 | 4 | 8) {
                 let elem_c = i64_ty.const_int(static_elem as u64, false);
                 let off = ctx
@@ -25737,17 +25733,9 @@ fn lower_cbgr_extended<'ctx>(
                 return Ok(());
             }
 
-            // AOT-SLICE-ELEMSIZE-CARRY-1 (#48): runtime-classify the
-            // SOURCE — the exact mirror of the interpreter's RefSlice
-            // generic path. Pre-fix this arm computed
-            // `new_base = src + start*8` with NO list-unwrap (the base
-            // then pointed INTO the List header/len slots, not element
-            // data) and NO element stride (byte sources walked 8x past
-            // their extent). Shape:
-            //   header.type_id == LIST      → data = *(src+HDR+16)+HDR, elem 8
-            //   header.type_id == BYTE_LIST → same backing walk, elem 1
-            //   header.type_id == U8/16/32/64 → data = src+HDR, elem 1/2/4/8
-            //   implausible ptr / other     → legacy identity (data=src, elem 8)
+            // Heap-backed values and existing slice descriptors carry their
+            // own layout. Lists use the runtime backing slot; byte packs use
+            // the pointer in their first payload field.
             let hdr = RuntimeLowering::OBJECT_HEADER_SIZE;
             let current_fn = ctx.function();
             let llvm_cx = ctx.llvm_context();
@@ -25755,7 +25743,7 @@ fn lower_cbgr_extended<'ctx>(
             let cell_bb = llvm_cx.append_basic_block(current_fn, "rs_cell");
             let sw_bb = llvm_cx.append_basic_block(current_fn, "rs_switch");
             let list_bb = llvm_cx.append_basic_block(current_fn, "rs_list");
-            let bytelist_bb = llvm_cx.append_basic_block(current_fn, "rs_bytelist");
+            let pack_bb = llvm_cx.append_basic_block(current_fn, "rs_pack");
             let typed_bb = llvm_cx.append_basic_block(current_fn, "rs_typed");
             let legacy_bb = llvm_cx.append_basic_block(current_fn, "rs_legacy");
             let merge_bb = llvm_cx.append_basic_block(current_fn, "rs_merge");
@@ -25863,41 +25851,11 @@ fn lower_cbgr_extended<'ctx>(
                     typed_bb,
                     &[
                         (t(TypeId::LIST.0), list_bb),
-                        (t(TypeId::BYTE_LIST.0), bytelist_bb),
-                        // RS-STAMPED-PACK-1 (T1192) — the two STAMPED PACK ids
-                        // belong here, and their absence was the whole remaining
-                        // tier divergence of docs/by-example/19-file-io.
-                        //
-                        // `Text.as_bytes()` produces the ARCH-P5 pack —
-                        // [24-byte header stamped BYTE_SLICE][ptr@24][len@32] —
-                        // the form introduced so that BOTH tiers stamp one
-                        // cross-tier byte view. This switch never learned it, so
-                        // every `&text_bytes[a..b]` fell through to the
-                        // unknown-header arm, whose contract is LEGACY IDENTITY:
-                        // data = src, elem 8.
-                        //
-                        // Measured at Tier 1 before this line, on a 32-byte text
-                        // where reading THROUGH the pack is already correct
-                        // (b[0]=65, b[16]=81):
-                        //
-                        //   (&b[0..16])[0]  = 528   — the stamp itself
-                        //   (&b[0..16])[1]  = 2^36  — header word at +8
-                        //   (&b[1..5])[0]   = 2^36  — stride 8, not 1
-                        //   (&b[16..32])[0] = 0     — 16*8 past a 32-byte text
-                        //
-                        // The sub-view walked the object's own header. Downstream
-                        // that is what reached `write`, so the written file carried
-                        // the DESCRIPTOR's bytes with the right LENGTH and the
-                        // wrong POINTER.
-                        //
-                        // `bytelist_bb` is already the right arm and needs no
-                        // change: it reads the data pointer at payload slot 0
-                        // (offset 24) — its own comment says it "now receives
-                        // STAMPED Pack shapes" — and yields elem 1, which is what
-                        // the ONE classifier (`emit_container_view`) answers for
-                        // both pack stamps.
-                        (t(TypeId::BYTE_SLICE.0), bytelist_bb),
-                        (t(TypeId::TUPLE.0), bytelist_bb),
+                        (t(TypeId::BYTE_LIST.0), list_bb),
+                        // Byte packs store the borrowed pointer in their first
+                        // payload slot. Both List encodings own a backing slot.
+                        (t(TypeId::BYTE_SLICE.0), pack_bb),
+                        (t(TypeId::TUPLE.0), pack_bb),
                         (t(TypeId::U8.0), scalar1_bb),
                         (t(TypeId::I8.0), scalar1_bb),
                         (t(TypeId::BOOL.0), scalar1_bb),
@@ -25941,17 +25899,13 @@ fn lower_cbgr_extended<'ctx>(
             let (sc4_data, sc4_end) = scalar_arm(scalar4_bb, "rs_sc4")?;
             let (sc8_data, sc8_end) = scalar_arm(scalar8_bb, "rs_sc8")?;
 
-            // LIST / BYTE_LIST: follow backing_ptr (payload slot 2).
-            let backing_of = |bb, tag: &str| -> Result<IntValue> {
+            let backing_of = |bb, offset: u64, tag: &str| -> Result<IntValue> {
                 ctx.builder().position_at_end(bb);
-                // These arms now receive STAMPED Pack shapes
-                // (TUPLE/BYTE_SLICE): their data pointer sits in
-                // payload slot 0 — offset 24.
                 let backing_addr = ctx
                     .builder()
                     .build_int_add(
                         base_int,
-                        i64_ty.const_int(24, false),
+                        i64_ty.const_int(offset, false),
                         &format!("{}_baddr", tag),
                     )
                     .or_llvm_err()?;
@@ -25981,16 +25935,22 @@ fn lower_cbgr_extended<'ctx>(
                     .or_llvm_err()?;
                 Ok(data)
             };
-            let list_data = backing_of(list_bb, "rs_l")?;
+            let list_data = backing_of(list_bb, super::runtime::LIST_PTR_OFFSET, "rs_l")?;
+            let byte_list = ctx.builder().build_int_compare(
+                IntPredicate::EQ, tid, t(TypeId::BYTE_LIST.0), "rs_byte_list",
+            ).or_llvm_err()?;
+            let list_elem = ctx.builder().build_select(
+                byte_list, i64_ty.const_int(1, false), i64_ty.const_int(8, false), "rs_list_elem",
+            ).or_llvm_err()?.into_int_value();
             ctx.builder()
                 .build_unconditional_branch(merge_bb)
                 .or_llvm_err()?;
             let list_end = ctx.builder().get_insert_block().unwrap();
-            let bl_data = backing_of(bytelist_bb, "rs_b")?;
+            let pack_data = backing_of(pack_bb, verum_common::layout::object_field_offset(0), "rs_pack")?;
             ctx.builder()
                 .build_unconditional_branch(merge_bb)
                 .or_llvm_err()?;
-            let bl_end = ctx.builder().get_insert_block().unwrap();
+            let pack_end = ctx.builder().get_insert_block().unwrap();
 
             // typed / unknown-header: U8/U16/U32/U64 → data=src+HDR with
             // matching stride; anything else → legacy identity via the
@@ -26097,7 +26057,7 @@ fn lower_cbgr_extended<'ctx>(
             let e4 = i64_ty.const_int(4, false);
             data_phi.add_incoming(&[
                 (&list_data, list_end),
-                (&bl_data, bl_end),
+                (&pack_data, pack_end),
                 (&typed_data, typed_end),
                 (&base_int, legacy_end),
                 (&sc1_data, sc1_end),
@@ -26108,8 +26068,8 @@ fn lower_cbgr_extended<'ctx>(
             ]);
             let elem_phi = ctx.builder().build_phi(i64_ty, "rs_elem").or_llvm_err()?;
             elem_phi.add_incoming(&[
-                (&e8, list_end),
-                (&e1, bl_end),
+                (&list_elem, list_end),
+                (&e1, pack_end),
                 (&typed_elem_v, typed_end),
                 (&e8, legacy_end),
                 (&e1, sc1_end),
