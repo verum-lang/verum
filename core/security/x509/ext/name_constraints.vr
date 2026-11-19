@@ -105,45 +105,32 @@ public fn parse(value: &[Byte]) -> Result<NameConstraints, DerError> {
     let mut seq = r.read_sequence()?;
     let mut out = NameConstraints.empty();
 
+    if seq.is_at_end() {
+        return Result.Err(DerError { kind: DerErrorKind.MalformedDer, position: seq.position(), message: "NameConstraints has no subtrees" });
+    }
+    let mut seen_permitted = false;
+    let mut seen_excluded = false;
     while !seq.is_at_end() {
-        let t = seq.peek_tag()?;
-        let is_ctx = match t.class_ { TagClass.ContextSpecific => true, _ => false };
-        if !is_ctx {
-            return Result.Err(DerError {
-                kind: DerErrorKind.UnexpectedTag,
-                position: 0,
-                message: "NameConstraints entry not context-tagged",
-            });
+        let position = seq.position();
+        let tag = seq.peek_tag()?;
+        if !(tag.class_ is TagClass.ContextSpecific) || !tag.constructed || tag.number > 1_u32 {
+            return Result.Err(DerError { kind: DerErrorKind.UnexpectedTag, position, message: "invalid NameConstraints field" });
         }
-        match t.number {
-            0_u32 => {
-                let mut inner = seq.read_explicit(0_u32)?;
-                // read a GeneralSubtrees
-                let mut gs_seq = inner.read_sequence()?;
-                while !gs_seq.is_at_end() {
-                    let st = parse_subtree(&mut gs_seq)?;
-                    out.permitted.push(st);
-                }
-                gs_seq.expect_end()?;
-                inner.expect_end()?;
-            },
-            1_u32 => {
-                let mut inner = seq.read_explicit(1_u32)?;
-                let mut gs_seq = inner.read_sequence()?;
-                while !gs_seq.is_at_end() {
-                    let st = parse_subtree(&mut gs_seq)?;
-                    out.excluded.push(st);
-                }
-                gs_seq.expect_end()?;
-                inner.expect_end()?;
-            },
-            _ => {
-                // Unknown context-tagged — skip.
-                let (_, len, _, _) = seq.peek_element_span()?;
-                let _ = seq.read_tag_length()?;
-                let _ = seq.take_bytes(len)?;
-            },
+        let permitted = tag.number == 0_u32;
+        if seen_excluded || (permitted && seen_permitted) {
+            return Result.Err(DerError { kind: DerErrorKind.MalformedDer, position, message: "duplicate or unordered NameConstraints field" });
         }
+        // The IMPLICIT tag replaces the SEQUENCE OF tag. Its contents are
+        // the GeneralSubtree elements themselves (RFC 5280 Appendix A.2).
+        let mut subtrees = seq.read_explicit(tag.number)?;
+        if subtrees.is_at_end() {
+            return Result.Err(DerError { kind: DerErrorKind.MalformedDer, position, message: "empty GeneralSubtrees" });
+        }
+        while !subtrees.is_at_end() {
+            let subtree = parse_subtree(&mut subtrees)?;
+            if permitted { out.permitted.push(subtree); } else { out.excluded.push(subtree); }
+        }
+        if permitted { seen_permitted = true; } else { seen_excluded = true; }
     }
     seq.expect_end()?;
     r.expect_end()?;
@@ -167,9 +154,9 @@ fn parse_subtree(r: &mut DerReader) -> Result<GeneralSubtree, DerError> {
             });
         }
         if t.number == 0_u32 {
-            let (_, len, _, _) = s.peek_element_span()?;
-            let _ = s.read_tag_length()?;
-            let bytes = s.take_bytes(len)?;
+            let (_, _, start, end) = s.peek_element_span()?;
+            s.skip_element()?;
+            let bytes = s.buffer_copy_region(start, end)?;
             if bytes.len() != 1 || bytes[0] != 0_u8 {
                 return Result.Err(DerError {
                     kind: DerErrorKind.MalformedDer,
@@ -221,20 +208,19 @@ fn dns_within_subtree(host: &Text, subtree: &Text) -> Bool {
     // names are ASCII-only in WebPKI (RFC 6125), so the ASCII fast
     // path is sufficient.
     let hb = host.as_bytes();
-    let mut sb = subtree.as_bytes();
+    let bytes = subtree.as_bytes();
     // Normalise: strip leading "." from subtree (RFC 5280 doesn't
     // recognise it, but common practice treats both forms identically).
-    if sb.len() > 0 && sb[0] == ('.' as Byte) {
-        sb = &sb[1..];
-    }
-    if sb.len() == 0 { return true; }    // Empty subtree matches everything
-    if hb.len() < sb.len() { return false; }
+    let start = if bytes.len() > 0 && bytes[0] == ('.' as Byte) { 1 } else { 0 };
+    let suffix_length = bytes.len() - start;
+    if suffix_length == 0 { return true; }
+    if hb.len() < suffix_length { return false; }
     // Suffix match; additionally require either exact equality or a
     // label boundary immediately before the suffix.
-    let offset = hb.len() - sb.len();
+    let offset = hb.len() - suffix_length;
     let mut i: Int = 0;
-    while i < sb.len() {
-        if !ascii_byte_eq_ci(hb[offset + i], sb[i]) { return false; }
+    while i < suffix_length {
+        if !ascii_byte_eq_ci(hb[offset + i], bytes[start + i]) { return false; }
         i = i + 1;
     }
     if offset == 0 { return true; }

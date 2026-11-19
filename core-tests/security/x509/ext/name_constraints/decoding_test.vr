@@ -1,0 +1,30 @@
+mount core.encoding.hex.{decode as hex_decode};
+mount core.security.x509.ext.name_constraints.parse;
+
+@test
+fn dns_subtrees_preserve_permitted_and_excluded_label_boundaries() {
+    // Raw extnValue from a local OpenSSL X.509 certificate with both DNS constraints.
+    let encoded = hex_decode(&"3026a00f300d820b6578616d706c652e636f6da1133011820f6261642e6578616d706c652e636f6d").unwrap();
+    let constraints = parse(encoded.as_slice()).unwrap();
+    assert(constraints.permits_dns(&"example.com"));
+    assert(constraints.permits_dns(&"service.EXAMPLE.com"));
+    assert(!constraints.permits_dns(&"notexample.com"));
+    assert(!constraints.permits_dns(&"bad.example.com"));
+    assert(!constraints.permits_dns(&"mail.bad.example.com"));
+}
+
+@test
+fn invalid_constraint_fields_are_rejected() {
+    for invalid in [
+        "3000", "3002a000", "3002a200", "30058003300100",
+        "300ca00430028200a00430028200",
+        "3010a006300482026161a006300482026262",
+        "3010a106300482026161a006300482026262",
+        "300ba009300782026161810100",
+        "300ba009300782026161800101",
+        "300aa0083006300482026161",
+    ] {
+        let encoded = hex_decode(&invalid).unwrap();
+        assert(parse(encoded.as_slice()).is_err());
+    }
+}

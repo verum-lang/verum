@@ -1,0 +1,30 @@
+mount core.encoding.der.DerReader;
+mount core.security.x509.name.parse_name;
+
+@test
+fn printable_and_bmp_common_names_decode_from_their_exact_der() {
+    let encoded: List<Byte> = [0x30_u8,0x0c_u8,0x31_u8,0x0a_u8,0x30_u8,0x08_u8,0x06_u8,0x03_u8,0x55_u8,0x04_u8,0x03_u8,0x13_u8,0x01_u8,0x41_u8];
+    let mut ascii = DerReader.new(encoded.as_slice());
+    let first = parse_name(&mut ascii).unwrap();
+    assert_eq(first.common_name().unwrap(), "A");
+    assert(ascii.is_at_end());
+
+    let encoded_bmp: List<Byte> = [0x30_u8,0x0d_u8,0x31_u8,0x0b_u8,0x30_u8,0x09_u8,0x06_u8,0x03_u8,0x55_u8,0x04_u8,0x03_u8,0x1e_u8,0x02_u8,0x00_u8,0x41_u8];
+    let mut bmp = DerReader.new(encoded_bmp.as_slice());
+    let second = parse_name(&mut bmp).unwrap();
+    assert_eq(second.common_name().unwrap(), "A");
+    assert(!first.raw_eq(&second));
+    assert(bmp.is_at_end());
+}
+
+@test
+fn an_unknown_attribute_oid_is_owned_and_constructed_strings_are_rejected() {
+    let mut encoded: List<Byte> = [0x30_u8,0x0c_u8,0x31_u8,0x0a_u8,0x30_u8,0x08_u8,0x06_u8,0x03_u8,0x2a_u8,0x03_u8,0x04_u8,0x0c_u8,0x01_u8,0x41_u8];
+    let mut reader = DerReader.new(encoded.as_slice());
+    let name = parse_name(&mut reader).unwrap();
+    assert(name.common_name().is_none());
+    assert(name.raw_eq(&name));
+    encoded[11] = 0x2c_u8;
+    let mut malformed = DerReader.new(encoded.as_slice());
+    assert(parse_name(&mut malformed).is_err());
+}

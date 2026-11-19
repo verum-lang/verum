@@ -161,7 +161,7 @@ fn parse_atv(r: &mut DerReader) -> Result<NameAttribute, DerError> {
     let value = read_directory_string(&mut sub)?;
     sub.expect_end()?;
 
-    let kind = kind_from_oid(&oid);
+    let kind = kind_from_oid(oid);
     Result.Ok(NameAttribute { kind: kind, value: value })
 }
 
@@ -179,13 +179,13 @@ fn read_directory_string(r: &mut DerReader) -> Result<Text, DerError> {
             message: "AttributeValue empty",
         });
     }
-    let tag = r.peek_tag()?;
+    let (tag, _, value_start, value_end) = r.peek_element_span()?;
     let is_universal = match tag.class_ { TagClass.Universal => true, _ => false };
-    if !is_universal {
+    if !is_universal || tag.constructed {
         return Result.Err(DerError {
             kind: DerErrorKind.UnexpectedTag,
             position: 0,
-            message: "AttributeValue not a universal tag",
+            message: "AttributeValue must be a primitive universal value",
         });
     }
     match tag.number {
@@ -194,25 +194,25 @@ fn read_directory_string(r: &mut DerReader) -> Result<Text, DerError> {
         n if n == der.TAG_IA5_STRING       => r.read_ia5_string(),
         n if n == der.TAG_T61_STRING       => {
             // Treat as Latin-1 (T.61 is ISO-8859-1 in practice for WebPKI).
-            let len = r.read_universal(der.TAG_T61_STRING, false)?;
-            let bytes = r.take_bytes(len)?;
+            r.skip_element()?;
+            let bytes = r.buffer_copy_region(value_start, value_end)?;
             Result.Ok(Text.from_utf8_lossy(bytes.as_slice()))
         },
         n if n == der.TAG_VISIBLE_STRING => {
-            let len = r.read_universal(der.TAG_VISIBLE_STRING, false)?;
-            let bytes = r.take_bytes(len)?;
+            r.skip_element()?;
+            let bytes = r.buffer_copy_region(value_start, value_end)?;
             Result.Ok(Text.from_utf8_lossy(bytes.as_slice()))
         },
         n if n == der.TAG_UNIVERSAL_STRING => {
             // UCS-4 big-endian → UTF-8
-            let len = r.read_universal(der.TAG_UNIVERSAL_STRING, false)?;
-            let bytes = r.take_bytes(len)?;
+            r.skip_element()?;
+            let bytes = r.buffer_copy_region(value_start, value_end)?;
             Result.Ok(decode_ucs4_be(bytes.as_slice()))
         },
         n if n == der.TAG_BMP_STRING => {
             // UCS-2 big-endian → UTF-8
-            let len = r.read_universal(der.TAG_BMP_STRING, false)?;
-            let bytes = r.take_bytes(len)?;
+            r.skip_element()?;
+            let bytes = r.buffer_copy_region(value_start, value_end)?;
             Result.Ok(decode_ucs2_be(bytes.as_slice()))
         },
         _ => Result.Err(DerError {
@@ -223,7 +223,7 @@ fn read_directory_string(r: &mut DerReader) -> Result<Text, DerError> {
     }
 }
 
-fn kind_from_oid(oid: &Oid) -> NameAttributeKind {
+fn kind_from_oid(oid: Oid) -> NameAttributeKind {
     if oid.eq(&pkix_oid.dn_common_name())         { return NameAttributeKind.CommonName; }
     if oid.eq(&pkix_oid.dn_surname())             { return NameAttributeKind.Surname; }
     if oid.eq(&pkix_oid.dn_serial_number())       { return NameAttributeKind.SerialNumber; }
@@ -237,7 +237,7 @@ fn kind_from_oid(oid: &Oid) -> NameAttributeKind {
     if oid.eq(&pkix_oid.dn_domain_component())    { return NameAttributeKind.DomainComponent; }
     if oid.eq(&pkix_oid.dn_user_id())             { return NameAttributeKind.UserId; }
     if oid.eq(&pkix_oid.dn_pseudonym())           { return NameAttributeKind.Pseudonym; }
-    NameAttributeKind.Other(oid.clone())
+    NameAttributeKind.Other(oid)
 }
 
 // =============================================================================
