@@ -969,11 +969,18 @@ implement<K: Hash + Eq, V> Map<K, V> {
     // Iterator over key-value pairs.
     public fn iter(&self) -> MapIter<K, V> {
         MapIter {
-            entries: self.entries,
+            map: self,
             cap: self.cap,
             idx: 0,
             remaining: self.len,
         }
+    }
+
+    // Read one occupied bucket without transferring either stored owner.
+    fn occupied_pair_at(&self, index: Int) -> Maybe<(&K, &V)> {
+        if index < 0 || index >= self.cap { return Maybe.None; }
+        let entry = unsafe { &*self.entries.offset(index) };
+        if entry.hash > 0 { Maybe.Some((&entry.key, &entry.value)) } else { Maybe.None }
     }
 
     // Iterator over keys.
@@ -2251,24 +2258,26 @@ implement<K: Hash + Eq, V> Extend<(K, V)> for Map<K, V> {
 // =============================================================================
 
 // Iterator over key-value pairs.
-public type MapIter<K, V> is {
-    entries: &unsafe Slot<K, V>,
+public type MapIter<K: Hash + Eq, V> is {
+    map: &Map<K, V>,
     cap: Int,
     idx: Int,
     remaining: Int,
 };
 
-implement<K, V> Iterator for MapIter<K, V> {
+implement<K: Hash + Eq, V> Iterator for MapIter<K, V> {
     type Item = (K, V);
 
     fn next(&mut self) -> Maybe<(K, V)> {
         while self.idx < self.cap {
-            let entry = unsafe { &*self.entries.offset(self.idx) };
+            let pos = self.idx;
             self.idx = self.idx + 1;
-
-            if (entry.hash > 0) {
-                self.remaining = self.remaining - 1;
-                return Maybe.Some((entry.key, entry.value));
+            match self.map.occupied_pair_at(pos) {
+                Maybe.Some(pair) => {
+                    self.remaining = self.remaining - 1;
+                    return Maybe.Some((*pair.0, *pair.1));
+                },
+                Maybe.None => {},
             }
         }
         Maybe.None
@@ -2279,16 +2288,16 @@ implement<K, V> Iterator for MapIter<K, V> {
     }
 }
 
-implement<K, V> ExactSizeIterator for MapIter<K, V> {
+implement<K: Hash + Eq, V> ExactSizeIterator for MapIter<K, V> {
     fn len(&self) -> Int { self.remaining }
 }
 
 // Iterator over keys.
-public type MapKeys<K, V> is {
+public type MapKeys<K: Hash + Eq, V> is {
     iter: MapIter<K, V>,
 };
 
-implement<K, V> Iterator for MapKeys<K, V> {
+implement<K: Hash + Eq, V> Iterator for MapKeys<K, V> {
     type Item = K;
 
     fn next(&mut self) -> Maybe<K> {
@@ -2304,11 +2313,11 @@ implement<K, V> Iterator for MapKeys<K, V> {
 }
 
 // Iterator over values.
-public type MapValues<K, V> is {
+public type MapValues<K: Hash + Eq, V> is {
     iter: MapIter<K, V>,
 };
 
-implement<K, V> Iterator for MapValues<K, V> {
+implement<K: Hash + Eq, V> Iterator for MapValues<K, V> {
     type Item = V;
 
     fn next(&mut self) -> Maybe<V> {
@@ -2323,11 +2332,11 @@ implement<K, V> Iterator for MapValues<K, V> {
     }
 }
 
-implement<K, V> ExactSizeIterator for MapKeys<K, V> {
+implement<K: Hash + Eq, V> ExactSizeIterator for MapKeys<K, V> {
     fn len(&self) -> Int { self.iter.remaining }
 }
 
-implement<K, V> ExactSizeIterator for MapValues<K, V> {
+implement<K: Hash + Eq, V> ExactSizeIterator for MapValues<K, V> {
     fn len(&self) -> Int { self.iter.remaining }
 }
 
@@ -2401,7 +2410,7 @@ implement<K, V> ExactSizeIterator for MapIterMut<K, V> {
 // IntoIterator for Iterator Types
 // =============================================================================
 
-implement<K, V> IntoIterator for MapIter<K, V> {
+implement<K: Hash + Eq, V> IntoIterator for MapIter<K, V> {
     type Item = (K, V);
     type IntoIter = MapIter<K, V>;
 
@@ -2410,7 +2419,7 @@ implement<K, V> IntoIterator for MapIter<K, V> {
     }
 }
 
-implement<K, V> IntoIterator for MapKeys<K, V> {
+implement<K: Hash + Eq, V> IntoIterator for MapKeys<K, V> {
     type Item = K;
     type IntoIter = MapKeys<K, V>;
 
@@ -2419,7 +2428,7 @@ implement<K, V> IntoIterator for MapKeys<K, V> {
     }
 }
 
-implement<K, V> IntoIterator for MapValues<K, V> {
+implement<K: Hash + Eq, V> IntoIterator for MapValues<K, V> {
     type Item = V;
     type IntoIter = MapValues<K, V>;
 
@@ -2571,9 +2580,9 @@ implement<K: Hash + Eq, V> ExactSizeIterator for MapIntoIter<K, V> {
 // FusedIterator implementations
 // =============================================================================
 
-implement<K, V> FusedIterator for MapIter<K, V> {}
-implement<K, V> FusedIterator for MapKeys<K, V> {}
-implement<K, V> FusedIterator for MapValues<K, V> {}
+implement<K: Hash + Eq, V> FusedIterator for MapIter<K, V> {}
+implement<K: Hash + Eq, V> FusedIterator for MapKeys<K, V> {}
+implement<K: Hash + Eq, V> FusedIterator for MapValues<K, V> {}
 implement<K, V> FusedIterator for MapValuesMut<K, V> {}
 implement<K, V> FusedIterator for MapIterMut<K, V> {}
 implement<K: Hash + Eq, V> FusedIterator for MapDrain<K, V> {}

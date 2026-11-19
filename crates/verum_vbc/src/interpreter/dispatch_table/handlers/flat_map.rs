@@ -170,6 +170,16 @@ impl<'heap> FlatMap<'heap> {
             .and_then(|(index, occupied)| occupied.then(|| self.pair(index)))
     }
 
+    /// Borrow the two live value slots of one checked bucket.
+    pub(super) fn occupied_pair_at(&self, index: usize) -> Option<[*mut Value; 2]> {
+        if index >= self.capacity {
+            return None;
+        }
+        let slots = self.pair(index);
+        // SAFETY: the checked backing owns the two Value slots at this index.
+        (!unsafe { *slots[0] }.is_vacant_hash_key()).then_some(slots)
+    }
+
     /// The checked allocation contains exactly two Values per bucket. Consume
     /// this view before executing user code that can mutate or release storage.
     pub(super) fn occupied(&self) -> impl Iterator<Item = [Value; 2]> + '_ {

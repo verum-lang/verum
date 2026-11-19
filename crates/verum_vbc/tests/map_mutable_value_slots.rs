@@ -746,3 +746,210 @@ fn raw_bytecode_cannot_export_a_live_managed_slot() {
         );
     }
 }
+
+// T1200 exercises the bodies reached by the declared cursor and its cleanup.
+// The complete Map owner is compiled independently by source() above.
+fn cursor_methods(
+    source: &str,
+    file: verum_ast::span::FileId,
+    methods: &[(&str, &[&str])],
+) -> verum_ast::Module {
+    use verum_ast::ItemKind;
+    use verum_ast::decl::{ImplItemKind, ImplKind};
+    let mut module = verum_fast_parser::FastParser::new()
+        .parse_module_str(source, file)
+        .expect("production collection grammar");
+    module.items.retain_mut(|item| match &mut item.kind {
+        ItemKind::Module(decl) => decl.items.is_none(),
+        ItemKind::Impl(decl) => {
+            let receiver = match &decl.kind {
+                ImplKind::Inherent(ty) | ImplKind::Protocol { for_type: ty, .. } => ty,
+            };
+            let name = verum_ast::pretty::format_type(receiver);
+            let base = name.as_str().split('<').next().unwrap();
+            let Some((_, selected)) = methods.iter().find(|(owner, _)| *owner == base) else {
+                return false;
+            };
+            decl.items.retain(|member| match &member.kind {
+                ImplItemKind::Function(f) => selected.contains(&f.name.as_str()),
+                ImplItemKind::Type { .. } => true,
+                _ => false,
+            });
+            !decl.items.is_empty()
+        }
+        _ => false,
+    });
+    module
+}
+
+#[test]
+fn public_map_cursors_report_remaining_entries_on_source_and_wire() {
+    let caller = Parser::new(
+        r#"
+module cursor_lengths;
+mount core.collections.map.Map;
+mount core.encoding.json.JsonValue;
+
+fn remaining() -> Int {
+    let mut values: Map<Text, JsonValue> = { "first": JsonValue.JsonInt(31) };
+    let mut keys = values.keys();
+    let mut items = values.values();
+    assert_eq(keys.len(), 1);
+    assert_eq(items.len(), 1);
+    let mut direct = values.iter();
+    match direct.next() {
+        Maybe.Some((key, JsonValue.JsonInt(n))) => { assert_eq(key, "first"); assert_eq(n, 31); },
+        _ => panic("expected pair on the direct cursor"),
+    }
+    assert_eq(direct.len(), 0);
+    match keys.next() {
+        Maybe.Some(key) => assert_eq(key, "first"),
+        _ => panic("expected first key"),
+    }
+    match items.next() {
+        Maybe.Some(JsonValue.JsonInt(n)) => assert_eq(n, 31),
+        _ => panic("expected JSON integer"),
+    }
+    assert_eq(keys.len(), 0);
+    assert_eq(items.len(), 0);
+    assert(keys.next() is Maybe.None);
+    assert(items.next() is Maybe.None);
+    values.clear();
+    assert_eq(values.keys().len(), 0);
+    assert_eq(values.values().len(), 0);
+    19
+}
+
+fn copies() -> Int {
+    let values: Map<Int, Int> = { 1: 11, 17: 19 };
+    let mut keys = values.keys();
+    let mut copied = keys;
+    let mut direct = values.iter();
+    assert(direct.next() is Maybe.Some(_));
+    let mut seen: Int = 0;
+    for (key, value) in direct { seen = seen + 1; assert(key == 1 || key == 17); assert(value == 11 || value == 19); }
+    assert_eq(seen, 1);
+    assert_eq(keys.len(), 2);
+    assert(keys.next() is Maybe.Some(_));
+    assert_eq(copied.len(), 2);
+    assert_eq(keys.len(), 1);
+    assert(copied.next() is Maybe.Some(_));
+    assert_eq(copied.len(), 1);
+    29
+}
+
+fn wrong_size() -> Int {
+    let values: Map<Text, JsonValue> = { "first": JsonValue.JsonInt(31) };
+    assert_eq(values.keys().len(), 0, "one occupied key");
+    0
+}
+"#,
+    )
+    .parse_module()
+    .expect("public caller grammar");
+    let mut codegen = VbcCodegen::new();
+    let declarations = codegen
+        .compile_module_with_mounts(
+            &caller,
+            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cursor_lengths.vr"),
+            concat!(env!("CARGO_MANIFEST_DIR"), "/../../core"),
+        )
+        .expect("real Map and JsonValue declarations and public caller");
+    let file = |name: &str| {
+        declarations
+            .types
+            .iter()
+            .find_map(|t| {
+                let decl = t.source_declaration.as_ref()?;
+                (decl.name.as_str() == name).then_some(decl.span.file_id)
+            })
+            .expect("mounted source file")
+    };
+    let map = cursor_methods(
+        PRODUCTION_MAP,
+        file("Map"),
+        &[
+            (
+                "Map",
+                &[
+                    "len",
+                    "iter",
+                    "keys",
+                    "values",
+                    "clear",
+                    "drop",
+                    "occupied_pair_at",
+                ],
+            ),
+            ("MapIter", &["len", "next", "size_hint"]),
+            ("MapKeys", &["len", "next", "size_hint"]),
+            ("MapValues", &["len", "next", "size_hint"]),
+        ],
+    );
+    let list = cursor_methods(
+        PRODUCTION_LIST,
+        file("ListIter"),
+        &[("List", &["drop", "clear", "truncate", "free_buffer"])],
+    );
+    codegen
+        .compile_unit_items(&[&map], ItemFailurePolicy::Strict)
+        .expect("production Map cursor bodies");
+    let source = codegen
+        .compile_function_bodies(&list)
+        .expect("production List lifecycle");
+    let encoded = verum_vbc::serialize::serialize_module(&source).expect("bytecode writer");
+    let wire = verum_vbc::deserialize::deserialize_module(&encoded).expect("bytecode reader");
+    for module in [source, wire] {
+        let image = Arc::new(module);
+        for body in [
+            "Map.keys",
+            "Map.values",
+            "Map.iter",
+            "Map.occupied_pair_at",
+            "MapIter.next",
+            "MapKeys.len",
+            "MapKeys.next",
+            "MapValues.len",
+            "MapValues.next",
+        ] {
+            let id = image
+                .find_function_by_name(&format!("core.collections.map.{body}"))
+                .expect(body);
+            let f = image.get_function(id).unwrap();
+            assert!(f.has_source_body && f.bytecode_length > 1, "{body}");
+        }
+        let run = |name: &str| {
+            let entry = image
+                .find_function_by_name(&format!("cursor_lengths.{name}"))
+                .expect(name);
+            Interpreter::new(image.clone()).execute_function(entry)
+        };
+        assert_eq!(
+            run("remaining").expect("key and value cursor").try_as_i64(),
+            Some(19)
+        );
+        assert_eq!(run("copies").expect("copied cursor").try_as_i64(), Some(29));
+        assert!(
+            matches!(run("wrong_size"), Err(verum_vbc::interpreter::InterpreterError::AssertionFailed {
+            ref message, ..
+        }) if message.contains("one occupied key"))
+        );
+        let mut malformed = (*image).clone();
+        let maker = malformed
+            .find_function_by_name("core.collections.map.Map.iter")
+            .unwrap();
+        malformed.get_function_mut(maker).unwrap().return_type =
+            verum_vbc::types::TypeRef::Concrete(verum_vbc::types::TypeId::BOOL);
+        let entry = malformed
+            .find_function_by_name("cursor_lengths.remaining")
+            .unwrap();
+        let error = Interpreter::new(Arc::new(malformed))
+            .execute_function(entry)
+            .unwrap_err();
+        assert!(
+            matches!(error, verum_vbc::interpreter::InterpreterError::InvalidOperand { ref message }
+            if message.contains("compatible source cursor layout")),
+            "{error}"
+        );
+    }
+}

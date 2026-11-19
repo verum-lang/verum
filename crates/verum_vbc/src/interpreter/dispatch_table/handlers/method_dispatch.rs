@@ -4966,6 +4966,71 @@ fn map_entries_data(header_ptr: *const Value, capacity: usize) -> *mut Value {
     std::ptr::null_mut()
 }
 
+/// A mounted Map may define its iterator as a source record borrowing the map.
+/// Bare bytecode and older archives use the native method cursor instead.
+fn declared_map_cursor(module: &crate::module::VbcModule) -> InterpreterResult<bool> {
+    use crate::types::{Mutability, TypeKind, TypeRef};
+
+    let Some(method) = module
+        .find_method_by_receiver_type(TypeId::MAP, "iter")
+        .and_then(|id| module.get_function(id))
+    else {
+        return Ok(false);
+    };
+    let Some(parent) = method.parent_type.and_then(|id| module.get_type(id)) else {
+        return Ok(false);
+    };
+    let owner = parent
+        .origin_module
+        .and_then(|id| module.get_string(id))
+        .unwrap_or(&module.name);
+    if module
+        .get_string(parent.name)
+        .and_then(|name| WKT::from_declaration(name, owner))
+        != Some(WKT::Map)
+        || !method.has_source_body
+        || !method.has_definition()
+    {
+        return Ok(false);
+    }
+    let invalid = || InterpreterError::InvalidOperand {
+        message: "the declared Map.iter result has no compatible source cursor layout".into(),
+    };
+    let cursor = method
+        .return_type
+        .base_type_id()
+        .and_then(|id| module.get_type(id))
+        .ok_or_else(invalid)?;
+    let [source, capacity, index, remaining] = cursor.fields.as_slice() else {
+        return Err(invalid());
+    };
+    if cursor.kind != TypeKind::Record {
+        return Err(invalid());
+    }
+    if module.get_string(source.name) == Some("entries") {
+        return Ok(false);
+    }
+    let Some(TypeRef::Reference {
+        inner,
+        mutability: Mutability::Immutable,
+        ..
+    }) = &source.declaration_type
+    else {
+        return Err(invalid());
+    };
+    if module.get_string(source.name) == Some("map")
+        && inner
+            .base_type_id()
+            .is_some_and(|id| id == parent.id || id == TypeId::MAP)
+        && [capacity, index, remaining]
+            .iter()
+            .all(|field| field.type_ref == TypeRef::Concrete(TypeId::I64))
+    {
+        return Ok(true);
+    }
+    Err(invalid())
+}
+
 /// Only failure to acquire the replacement backing is a recoverable Map
 /// allocation error. A malformed bytecode operand remains an interpreter error.
 fn fallible_map_result(
@@ -7226,6 +7291,11 @@ pub(super) fn dispatch_primitive_method(
                     let count = unsafe { (*data_ptr).as_i64() } as usize;
                     return Ok(Some(Value::from_i64(count as i64)));
                 }
+                "iter" if is_map && declared_map_cursor(&state.module)? => {
+                    // The source method constructs a typed cursor borrowing this map.
+                    // Its length and capacity occupy the two shared Map header fields.
+                    return Ok(None);
+                }
                 "iter" => {
                     // Return a proper 4-value iterator blob
                     // [source_ptr, front_idx=0, back_idx=capacity, iter_type=ITER_TYPE_MAP]
@@ -7499,13 +7569,23 @@ pub(super) fn dispatch_primitive_method(
                     return Ok(Some(previous));
                 }
 
-                "get" | "get_mut" | "get_key_value" if is_map => {
-                    let caller_base = state.reg_base();
-                    let key_raw = state.registers.get(caller_base, Reg(args.start.0));
-                    let key = resolve_arg_value(state, key_raw)?;
-                    let result = match map_entry_slots(state, *receiver, key)? {
+                "get" | "get_mut" | "get_key_value" | "occupied_pair_at" if is_map => {
+                    let operand = state.registers.get(state.reg_base(), Reg(args.start.0));
+                    let operand = resolve_arg_value(state, operand)?;
+                    let slots = if method == "occupied_pair_at" {
+                        let index = operand.try_as_i64().ok_or_else(|| {
+                            InterpreterError::InvalidOperand {
+                                message: "a Map bucket index must be an Int".into(),
+                            }
+                        })?;
+                        let table = super::flat_map::FlatMap::checked(state, *receiver)?;
+                        usize::try_from(index).ok().and_then(|i| table.occupied_pair_at(i))
+                    } else {
+                        map_entry_slots(state, *receiver, operand)?
+                    };
+                    let result = match slots {
                         None => make_none_value(state)?,
-                        Some(slots) if method == "get_key_value" => {
+                        Some(slots) if matches!(method, "get_key_value" | "occupied_pair_at") => {
                             let refs = [
                                 super::flat_map::borrow_slot(state, *receiver, slots[0], Capabilities::READ_ONLY)?,
                                 super::flat_map::borrow_slot(state, *receiver, slots[1], Capabilities::READ_ONLY)?,

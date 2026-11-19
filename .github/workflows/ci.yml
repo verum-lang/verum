@@ -563,6 +563,10 @@ jobs:
           cargo test --locked -p verum_vbc --features codegen --test deref_index_projection reference_field
           cargo test --locked -p verum_vbc --features codegen --test deref_index_projection wildcard_extent_loops
 
+      - name: Map cursor remaining lengths
+        timeout-minutes: 10
+        run: cargo test --locked -p verum_vbc --features codegen --test map_mutable_value_slots public_map_cursors_report_remaining_entries
+
       - name: Upload vbc test log
         if: failure()
         uses: actions/upload-artifact@v4
