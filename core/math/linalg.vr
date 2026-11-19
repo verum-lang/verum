@@ -1221,6 +1221,11 @@ public type EigenDecomposition<T> is {
     vectors: Matrix<T>,   // Eigenvectors (columns)
 };
 
+implement<T> EigenDecomposition<T> {
+    /// Take the ordered eigenvalues when the eigenvectors are no longer needed.
+    public fn into_eigenvalues(self) -> List<T> { self.values.data }
+}
+
 // Power iteration to find dominant eigenvalue/eigenvector
 public fn power_iteration<T: RealField>(
     a: &Matrix<T>,
@@ -1590,9 +1595,8 @@ public fn svd<T: RealField>(a: &Matrix<T>) -> SVDDecomposition<T> {
 
 // # Example
 // ```verum
-// let a = Matrix.from_data(list![4.0, 1.0, 1.0, 3.0], 2, 2);
-// let decomp = eigh(&a);
-// // decomp.values contains eigenvalues in descending order
+// let a = Matrix.from_data([4.0, 1.0, 1.0, 3.0], 2, 2);
+// let values = eigh(&a).into_eigenvalues();
 // ```
 public fn eigh<T: RealField>(a: &Matrix<T>) -> EigenDecomposition<T> {
     let n = a.rows;

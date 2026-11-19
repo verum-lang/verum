@@ -562,11 +562,7 @@ public fn laplacian_spectrum<V, G>(g: &G) -> List<Float>
 {
     let l: Matrix<Float> = laplacian_matrix(g);
     let decomp: EigenDecomposition<Float> = eigh(&l);
-    let mut out: List<Float> = List.new();
-    for i in 0..decomp.values.len() {
-        out.push(decomp.values.get(i));
-    }
-    out
+    decomp.into_eigenvalues()
 }
 
 /// **Algebraic connectivity** — the Fiedler eigenvalue.

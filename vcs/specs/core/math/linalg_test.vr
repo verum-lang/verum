@@ -1246,12 +1246,10 @@ fn test_eigh_symmetric() {
     A.set(1, 0, 1.0);
     A.set(1, 1, 3.0);
 
-    let decomp = eigh(&A);
-
-    // Eigenvalues should be real for symmetric matrix
-    let _ = decomp.values;
-    let _ = decomp.vectors;
-
+    let values: List<Float> = eigh(&A).into_eigenvalues();
+    assert_eq(values.len(), 2);
+    assert(values[0] >= values[1]);
+    assert((values[0] + values[1] - 7.0).abs() < 1e-9);
 
     print("eigh symmetric tests passed");
 }
