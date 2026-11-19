@@ -6,8 +6,8 @@ use verum_common::{List, Map, Maybe};
 
 #[derive(Clone, PartialEq, Eq)]
 pub(super) struct BoundProtocol {
-    application: TypeRef,
-    associated: std::collections::BTreeMap<String, TypeRef>,
+    pub(super) application: TypeRef,
+    pub(super) associated: std::collections::BTreeMap<String, TypeRef>,
 }
 
 impl From<TypeRef> for BoundProtocol {
@@ -217,19 +217,10 @@ impl VbcCodegen {
         Some(())
     }
 
-    /// A same-named member of another protocol is not an equality witness.
-    /// Keep both the entire application and the caller's actual subject.
-    fn declared_bound_associated_target(
-        &self, subject: &TypeRef, application: &TypeRef, member: &str,
+    pub(super) fn bound_member_owner(
+        &self, bounds: List<BoundProtocol>, subject: &TypeRef, member: &str,
     ) -> Maybe<TypeRef> {
-        let subject = self.body_declaration_type(subject)?;
-        let application = self.body_declaration_type(application)?;
-        let (owner, args) = match &application {
-            TypeRef::Concrete(id) => (*id, &[][..]),
-            TypeRef::Instantiated { base, args } => (*base, args.as_slice()),
-            _ => return None,
-        };
-        let hierarchy = self.protocol_hierarchy(List::from_iter([application.clone().into()]), Some(&subject))?;
+        let hierarchy = self.protocol_hierarchy(bounds, Some(subject))?;
         let mut member_owner = None;
         for bound in &hierarchy {
             let source = self.type_by_id(bound.application.base_type_id()?)?.source_declaration.as_ref()?;
@@ -242,7 +233,22 @@ impl VbcCodegen {
                 member_owner = Some(bound.application.clone());
             }
         }
-        let member_owner = member_owner?;
+        member_owner
+    }
+
+    /// A same-named member of another protocol is not an equality witness.
+    /// Keep both the entire application and the caller's actual subject.
+    pub(super) fn declared_bound_associated_target(
+        &self, subject: &TypeRef, application: &TypeRef, member: &str,
+    ) -> Maybe<TypeRef> {
+        let subject = self.body_declaration_type(subject)?;
+        let application = self.body_declaration_type(application)?;
+        let (owner, args) = match &application {
+            TypeRef::Concrete(id) => (*id, &[][..]),
+            TypeRef::Instantiated { base, args } => (*base, args.as_slice()),
+            _ => return None,
+        };
+        let member_owner = self.bound_member_owner(List::from_iter([application.clone().into()]), &subject, member)?;
         let mut selected = None;
         if let Some(bounds) = self.current_protocol_bounds.get(&subject) {
             for bound in bounds {
@@ -378,7 +384,7 @@ impl VbcCodegen {
     /// Traverse the declared applications shared by method and associated-member
     /// selection. Inherited arguments stay in their owner's telescope until the
     /// complete application is substituted; bare parent IDs cannot supply them.
-    fn protocol_hierarchy(
+    pub(super) fn protocol_hierarchy(
         &self, protocols: List<BoundProtocol>, subject: Maybe<&TypeRef>,
     ) -> Maybe<List<BoundProtocol>> {
         use super::formal_parameters::DeclarationTypeScope;

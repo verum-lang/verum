@@ -639,6 +639,56 @@ impl VbcCodegen {
         )
     }
 
+    /// Prove this assignment's own source row. Return its symbolic nominal
+    /// premises so projections in the equation keep their declaring protocols.
+    pub(super) fn proven_member_bounds(
+        &mut self, source: &AssociatedImplementationSource, subject: &TypeRef, protocol: TypeId,
+        arguments: &[TypeRef],
+    ) -> CodegenResult<Maybe<Map<TypeRef, List<super::protocol_results::BoundProtocol>>>> {
+        let declaration = source.declaration().map_err(|reason| invalid(reason, Span::default()))?;
+        let span = declaration.span;
+        let header = ImplementationHeader { source: source.clone(), declaration: Arc::new(declaration) };
+        let goal = Goal { subject: subject.clone(), protocol, arguments: arguments.iter().cloned().collect(), associated: List::new() };
+        goal.validate_size(span)?;
+        let mut assumptions = Premises::default();
+        for (subject, bounds) in &self.current_protocol_bounds {
+            let Some(hierarchy) = self.protocol_hierarchy(bounds.clone(), Some(subject)) else { continue; };
+            for bound in hierarchy {
+                let (protocol, arguments) = match bound.application {
+                    TypeRef::Concrete(id) => (id, List::new()),
+                    TypeRef::Instantiated { base, args } => (base, args.into()),
+                    _ => continue,
+                };
+                let associated = bound.associated.into_iter().map(|(name, ty)| (name.into(), ty)).collect();
+                assumptions.goals.push(Goal { subject: subject.clone(), protocol, arguments, associated });
+            }
+        }
+        assumptions.callables.extend(self.ctx.registers.callable_bound_signatures.iter()
+            .map(|(id, signature)| (TypeRef::Generic(*id), signature.clone())));
+        let mut prepared = None;
+        let Some(required) = self.implementation_alternative(&header, &mut prepared, &goal, &assumptions)? else {
+            return Ok(None);
+        };
+        if required.impossible || required.unknown.is_some()
+            || !required.callables.iter().all(|bound| callable_is_proven(bound, &assumptions.callables))
+            || !self.prove_implementation_goals(required.goals, &assumptions, span, &mut ImplementationPreparation::default())?
+        { return Ok(None); }
+
+        let Some(prepared) = prepared else { return Ok(None); };
+        let premises = self.with_protocol_source_scope(
+            Some(source.origin_module().into()), prepared.source_bindings, Some(prepared.receiver),
+            |cg| cg.implementation_premises(&header.declaration, &prepared.scope),
+        )?;
+        let mut bounds: Map<_, List<_>> = Map::new();
+        for goal in premises.goals {
+            let application = if goal.arguments.is_empty() { TypeRef::Concrete(goal.protocol) }
+                else { TypeRef::instantiated(goal.protocol, goal.arguments) };
+            let associated = goal.associated.into_iter().map(|(name, ty)| (name.to_string(), ty)).collect();
+            bounds.entry(goal.subject).or_default().push(super::protocol_results::BoundProtocol { application, associated });
+        }
+        Ok(Some(bounds))
+    }
+
     pub(super) fn blanket_requirements_hold(
         &mut self,
         blanket: &super::BlanketImpl,

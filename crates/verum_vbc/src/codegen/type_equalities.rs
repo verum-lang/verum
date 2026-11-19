@@ -144,7 +144,7 @@ impl Normalizer<'_> {
     }
 }
 
-fn map_children(
+pub(super) fn map_children(
     ty: &TypeRef, binders: u32,
     map: &mut impl FnMut(&TypeRef, u32) -> CodegenResult<TypeRef>,
 ) -> CodegenResult<TypeRef> {

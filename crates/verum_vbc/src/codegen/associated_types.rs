@@ -70,6 +70,12 @@ impl ConcreteImplType {
     }
 }
 
+struct ConditionalEquation {
+    source: verum_ast::source_implementation::AssociatedImplementationSource,
+    target: TypeRef,
+    bindings: TypeSubstitution,
+}
+
 impl VbcCodegen {
     /// An associated equation belongs to its complete implementation head.
     /// The nominal table deliberately omits equations of concrete instances;
@@ -80,13 +86,75 @@ impl VbcCodegen {
         protocol: verum_common::well_known_types::WellKnownProtocol,
         member: &str,
     ) -> Option<TypeRef> {
+        let selected = self.nominal_protocol_role(actual, protocol)?;
+        self.selected_protocol_implementation_member(actual, selected, &[], member)
+    }
+
+    fn nominal_protocol_role(
+        &self, actual: &TypeRef, protocol: verum_common::well_known_types::WellKnownProtocol,
+    ) -> Option<TypeId> {
         let owner = self.type_by_id(actual.base_type_id()?)?;
         let mut protocols = owner.protocols.iter().filter(|row|
             self.declared_protocol_role(TypeId(row.protocol.0)) == Some(protocol))
             .map(|row| TypeId(row.protocol.0));
         let selected = protocols.next()?;
         if protocols.any(|other| other != selected) { return None; }
-        self.selected_protocol_implementation_member(actual, selected, &[], member)
+        Some(selected)
+    }
+
+    /// A conditional assignment is usable only after checking the exact
+    /// retained implementation and its declaration-local projection owners.
+    pub(super) fn proven_implementation_member(
+        &mut self, actual: &TypeRef, role: verum_common::well_known_types::WellKnownProtocol, member: &str,
+    ) -> Option<TypeRef> {
+        let protocol = self.nominal_protocol_role(actual, role)?;
+        let mut remaining = crate::types::MAX_TYPE_REF_NODES;
+        self.proven_protocol_member(actual, protocol, &[], member, 0, &mut remaining)
+    }
+
+    fn proven_protocol_member(
+        &mut self, actual: &TypeRef, protocol: TypeId, args: &[TypeRef], member: &str,
+        depth: usize, remaining: &mut usize,
+    ) -> Option<TypeRef> {
+        *remaining = remaining.checked_sub(1)?;
+        if depth >= crate::types::MAX_TYPE_REF_DEPTH { return None; }
+        let (value, condition) = self.implementation_member_candidate(actual, protocol, args, member)?;
+        let Some(condition) = condition else { return Some(value); };
+        let bounds = self.proven_member_bounds(&condition.source, actual, protocol, args).ok()??;
+        self.instantiate_member_equation(&condition.target, &condition.bindings, &bounds, depth + 1, remaining)
+    }
+
+    fn instantiate_member_equation(
+        &mut self, ty: &TypeRef, bindings: &TypeSubstitution,
+        bounds: &Map<TypeRef, List<super::protocol_results::BoundProtocol>>,
+        depth: usize, remaining: &mut usize,
+    ) -> Option<TypeRef> {
+        *remaining = remaining.checked_sub(1)?;
+        if depth >= crate::types::MAX_TYPE_REF_DEPTH { return None; }
+        match ty {
+            TypeRef::AssociatedProjection { base, qualifier: None, assoc, args } if args.is_empty() => {
+                // Choose the member in the implementation's original binder
+                // space. Two unrelated parameters may later become the same type.
+                let protocol = self.bound_member_owner(bounds.get(base.as_ref())?.clone(), base, assoc)?;
+                let application = bindings.apply(&protocol).ok()?;
+                let actual = self.instantiate_member_equation(base, bindings, bounds, depth + 1, remaining)?;
+                if let Some(value) = self.declared_bound_associated_target(&actual, &application, assoc) {
+                    return Some(value);
+                }
+                let (owner, arguments) = match &application {
+                    TypeRef::Concrete(owner) => (*owner, &[][..]),
+                    TypeRef::Instantiated { base, args } => (*base, args.as_slice()),
+                    _ => return None,
+                };
+                self.proven_protocol_member(&actual, owner, arguments, assoc, depth + 1, remaining)
+            }
+            TypeRef::AssociatedProjection { .. } | TypeRef::RecordFieldProjection { .. } => None,
+            TypeRef::Generic(_) | TypeRef::Dynamic(_) | TypeRef::Rank2Function { .. } => bindings.apply(ty).ok(),
+            _ => super::type_equalities::map_children(ty, 0, &mut |part, _| {
+                self.instantiate_member_equation(part, bindings, bounds, depth + 1, remaining)
+                    .ok_or_else(|| super::CodegenError::internal("unresolved implementation equation"))
+            }).ok(),
+        }
     }
 
     /// The same retained implementation proof also serves ordinary declared
@@ -94,6 +162,13 @@ impl VbcCodegen {
     pub(super) fn selected_protocol_implementation_member(
         &self, actual: &TypeRef, protocol: TypeId, protocol_arguments: &[TypeRef], member: &str,
     ) -> Option<TypeRef> {
+        let (value, condition) = self.implementation_member_candidate(actual, protocol, protocol_arguments, member)?;
+        condition.is_none().then_some(value)
+    }
+
+    fn implementation_member_candidate(
+        &self, actual: &TypeRef, protocol: TypeId, protocol_arguments: &[TypeRef], member: &str,
+    ) -> Option<(TypeRef, Option<ConditionalEquation>)> {
         use super::{formal_parameters::DeclarationTypeScope, source_substitution::SourceTypeSubstitution};
         use crate::{mono::match_declared_types, types::TypeParamId};
         use verum_ast::{decl::{ImplItemKind, ImplKind}, ty::GenericParamKind};
@@ -164,12 +239,9 @@ impl VbcCodegen {
                 protocol, declared_arguments.into(), implementation.span, &[], Some(actual),
             ).ok()?;
             if declared_arguments != protocol_arguments { continue; }
-            // A registered conditional row is not a checked applicability
-            // judgment. Keep unsupported or unproved obligations unknown.
-            if conditional || implementation.specialize_attr.is_some()
-                || implementation.generic_where_clause.as_ref().is_some_and(|clause| !clause.predicates.is_empty())
-                || implementation.meta_where_clause.as_ref().is_some_and(|clause| !clause.predicates.is_empty())
-                || ids.iter().any(|id| bindings.get(*id).is_none())
+            conditional |= implementation.generic_where_clause.as_ref().is_some_and(|clause| !clause.predicates.is_empty())
+                || implementation.meta_where_clause.as_ref().is_some_and(|clause| !clause.predicates.is_empty());
+            if implementation.specialize_attr.is_some() || ids.iter().any(|id| bindings.get(*id).is_none())
             { return None; }
             let mut assignments = implementation.items.iter().filter_map(|item| match &item.kind {
                 ImplItemKind::Type { name, ty, type_params } if name.name.as_str() == member =>
@@ -191,7 +263,10 @@ impl VbcCodegen {
                     && TypeSubstitution::new(&owner.type_params, arguments).apply(carried).ok()? != result
                 { return None; }
             }
-            selected = Some(result);
+            let condition = conditional.then(|| ConditionalEquation {
+                source: source.clone(), target: body, bindings,
+            });
+            selected = Some((result, condition));
         }
         selected
     }

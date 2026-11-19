@@ -19505,7 +19505,7 @@ impl VbcCodegen {
             .or_internal("for iter has no value")?;
         let iterator = self.source_expression_declaration(iter, None, 0);
         let item = iterator.as_ref().and_then(|ty| {
-            self.declared_protocol_member(ty, verum_common::well_known_types::WellKnownProtocol::Iterator, "Item")
+            self.proven_implementation_member(ty, verum_common::well_known_types::WellKnownProtocol::Iterator, "Item")
         });
         let iter_reg = self.ctx.define_var("__for_iter", true);
         self.ctx.emit(Instruction::Mov {

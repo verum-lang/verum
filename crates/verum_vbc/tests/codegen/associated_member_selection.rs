@@ -183,6 +183,52 @@ fn a_registered_conditional_head_is_not_proof_of_its_requirements() {
 }
 
 #[test]
+fn a_proven_member_uses_its_implementation_parameter_protocol() {
+    source_and_wire(
+        &[r#"
+        module model; mount core.base.iterator.IntoIterator;
+        public type Carrier<I> is { value: I };
+        public type Value<T> is { value: T };
+        public type Other is { number: Int };
+        public type Source is protocol { type Item; };
+        public type Foreign is protocol { type Item; };
+        implement<T> Source for Value<T> { type Item = &T; }
+        implement<T> Foreign for Value<T> { type Item = Bool; }
+        implement Foreign for Other { type Item = Byte; }
+        implement<I: Source> IntoIterator for Carrier<I> { type Item = (Int, I.Item); }
+    "#],
+        |compiler| {
+            let carrier = compiler.type_name_to_id["model.Carrier"];
+            let value = compiler.type_name_to_id["model.Value"];
+            let other = compiler.type_name_to_id["model.Other"];
+            let byte = TypeRef::Concrete(TypeId::U8);
+            let borrowed = TypeRef::Reference {
+                inner: Box::new(byte.clone()), mutability: crate::types::Mutability::Immutable,
+                tier: crate::types::CbgrTier::Tier0,
+            };
+            let application = |ty| TypeRef::instantiated(carrier, [ty]);
+            let member = |compiler: &mut VbcCodegen, argument| compiler.proven_implementation_member(
+                &application(argument), WellKnownProtocol::IntoIterator, "Item");
+            let expected = TypeRef::Tuple(vec![TypeRef::Concrete(TypeId::INT), borrowed.clone()]);
+            assert_eq!(
+                member(compiler, TypeRef::instantiated(value, [byte])),
+                Some(expected.clone()),
+            );
+            assert_eq!(member(compiler, TypeRef::Concrete(other)), None);
+            let caller = TypeRef::Generic(crate::types::TypeParamId(7));
+            compiler.ctx.current_generic_param_ids.insert("Caller".into(), 7);
+            for (name, accepted) in [("model.Source", true), ("model.Foreign", false)] {
+                let application = TypeRef::Concrete(compiler.type_name_to_id[name]);
+                let associated = [("Item".into(), borrowed.clone())].into_iter().collect();
+                let bound = super::super::protocol_results::BoundProtocol { application, associated };
+                compiler.current_protocol_bounds.insert(caller.clone(), List::from_iter([bound]));
+                assert_eq!(member(compiler, caller.clone()), accepted.then(|| expected.clone()));
+            }
+        },
+    );
+}
+
+#[test]
 fn repeated_interface_rows_keep_one_source_identity() {
     source_and_wire(
         &[r#"
