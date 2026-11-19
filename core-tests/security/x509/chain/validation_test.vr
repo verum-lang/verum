@@ -1,0 +1,71 @@
+// Local Ed25519 test root and end-entity used by the TLS conformance suite.
+mount core.encoding.base64;
+mount core.security.x509.certificate.{X509Certificate, parse_certificate};
+mount core.security.x509.trust_store.TrustStore;
+mount core.security.x509.chain.{ChainError, validate_chain};
+
+fn leaf_der() -> List<Byte> {
+    base64.decode(&"MIIBLzCB4qADAgECAgECMAUGAytlcDAaMRgwFgYDVQQDDA9WZXJ1bSBUZXN0IFJvb3QwHhcNMjYxMTAzMjEyNzI4WhcNMjYxMTA1MjEyNzI4WjAYMRYwFAYDVQQDDA12ZXJ1bS5pbnZhbGlkMCowBQYDK2VwAyEAg3q+9yNJk1bHxZIdfw5veheTVuBUZp4WYXADw7ecBKajTzBNMAwGA1UdEwEB/wQCMAAwDgYDVR0PAQH/BAQDAgeAMBMGA1UdJQQMMAoGCCsGAQUFBwMBMBgGA1UdEQQRMA+CDXZlcnVtLmludmFsaWQwBQYDK2VwA0EA/zcVlie8boXjnNJhD19wmG0jZoxIkxDryNn/UmgDtp88aZefy0nZWZASyNGu7oz9u4Y2aiIjVf2x62yBX/yGAA==").unwrap()
+}
+
+fn root_der() -> List<Byte> {
+    base64.decode(&"MIIBJDCB16ADAgECAgEBMAUGAytlcDAaMRgwFgYDVQQDDA9WZXJ1bSBUZXN0IFJvb3QwHhcNMjYxMTAzMjEyNzI4WhcNMjYxMjAzMjEyNzI4WjAaMRgwFgYDVQQDDA9WZXJ1bSBUZXN0IFJvb3QwKjAFBgMrZXADIQC9kwkM7NS1fNIHT7+Z3n5V5VyrWl3H0UAu251nNEHvHqNCMEAwHQYDVR0OBBYEFArq9FRwwRJb/uwpUFaiYLTOmNjgMA8GA1UdEwEB/wQFMAMBAf8wDgYDVR0PAQH/BAQDAgEGMAUGAytlcANBACprbqytBojE+/kZwlR32pCO7QmTcXXIh5fvGB5RJfgcqsZAWJfCyoBv0/cFlKwz2uGHoTScQnZX1GXcMxwkEQk=").unwrap()
+}
+
+fn trust_anchor() -> TrustStore {
+    let roots: List<List<Byte>> = [root_der()];
+    TrustStore.from_der(roots.as_slice()).unwrap()
+}
+
+@test
+fn trust_store_requires_the_same_subject_and_public_key() {
+    let trust = trust_anchor();
+    let mut der = root_der();
+    let certificate = parse_certificate(der.as_slice()).unwrap();
+    assert(trust.contains(&certificate));
+    assert(!trust.contains(&parse_certificate(leaf_der().as_slice()).unwrap()));
+
+    // The test anchor's 32-byte Ed25519 subject public key begins at byte 122.
+    assert_eq(der[122], 0xbd_u8);
+    der[122] = der[122] ^ 1_u8;
+    let other_key = parse_certificate(der.as_slice()).unwrap();
+    assert(!trust.contains(&other_key));
+}
+
+@test
+fn empty_path_and_anchor_only_lack_an_end_entity() {
+    let trust = trust_anchor();
+    let empty: List<X509Certificate> = [];
+    assert(validate_chain(&empty, &trust, Maybe.None, 1793741248_i64) is Result.Err(ChainError.EmptyChain));
+    let anchor: List<X509Certificate> = [parse_certificate(root_der().as_slice()).unwrap()];
+    assert(validate_chain(&anchor, &trust, Maybe.None, 1793741248_i64) is Result.Err(ChainError.EmptyChain));
+}
+
+@test
+fn unknown_issuer_and_leaf_validity_report_distinct_errors() {
+    let leaf = parse_certificate(leaf_der().as_slice()).unwrap();
+    let (first, last) = leaf.validity_unix_bounds();
+    let chain: List<X509Certificate> = [leaf];
+    assert(validate_chain(&chain, &TrustStore.empty(), Maybe.None, first) is Result.Err(ChainError.UnknownIssuer));
+    let trust = trust_anchor();
+    assert(validate_chain(&chain, &trust, Maybe.None, first - 1) is Result.Err(ChainError.NotYetValid(0)));
+    assert(validate_chain(&chain, &trust, Maybe.None, last + 1) is Result.Err(ChainError.Expired(0)));
+}
+
+@test
+fn shortened_ed25519_signature_reports_the_leaf_index() {
+    let mut der = leaf_der();
+    // Shorten only the outer certificate and signature BIT STRING by one octet.
+    // The original 229-byte TBSCertificate and its AlgorithmIdentifier stay intact.
+    assert_eq(der.len(), 307);
+    assert_eq(der[3], 0x2f_u8);
+    assert_eq(der[240], 0x03_u8);
+    assert_eq(der[241], 0x41_u8);
+    der[3] = 0x2e_u8;
+    der[241] = 0x40_u8;
+    der.pop();
+    let shortened = parse_certificate(der.as_slice()).unwrap();
+    assert_eq(shortened.signature_bytes().len(), 63);
+    let chain: List<X509Certificate> = [shortened];
+    assert(validate_chain(&chain, &trust_anchor(), Maybe.None, 1793741248_i64) is Result.Err(ChainError.BadSignature(0)));
+}

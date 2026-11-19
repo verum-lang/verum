@@ -120,6 +120,20 @@ implement ExtensionSet {
         }
     }
 
+    public(in core.security.x509) fn allows_signing_certificates(&self) -> Bool {
+        match &self.key_usage {
+            Maybe.Some((_, usage)) => usage.allows_signing_certificates(),
+            Maybe.None => true,
+        }
+    }
+
+    public(in core.security.x509) fn name_limits(&self) -> Maybe<&NameConstraints> {
+        match &self.name_constraints {
+            Maybe.Some((_, limits)) => Maybe.Some(limits),
+            Maybe.None => Maybe.None,
+        }
+    }
+
     public(in core.security.x509) fn ca_limits(&self) -> (Bool, Maybe<Int>) {
         match &self.basic_constraints {
             Maybe.Some((_, constraints)) => constraints.ca_and_path_length(),

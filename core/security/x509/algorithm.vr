@@ -83,6 +83,11 @@ public type RsaPssParams is {
     salt_length: Int,
 };
 
+implement RsaPssParams {
+    public(in core.security.x509) fn hash_algorithm(&self) -> &RsaPssHash { &self.hash }
+    public(in core.security.x509) fn salt_length(&self) -> Int { self.salt_length }
+}
+
 public type RsaPssHash is Sha256Hash | Sha384Hash | Sha512Hash;
 
 fn rsa_pss_hash_eq(a: &RsaPssHash, b: &RsaPssHash) -> Bool {

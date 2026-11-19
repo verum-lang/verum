@@ -82,6 +82,11 @@ public type SpkiRsaPublicKey is {
     exponent: List<Byte>,    // big-endian, minimal encoding
 };
 
+implement SpkiRsaPublicKey {
+    public(in core.security.x509) fn modulus_bytes(&self) -> &[Byte] { self.modulus.as_slice() }
+    public(in core.security.x509) fn exponent_bytes(&self) -> &[Byte] { self.exponent.as_slice() }
+}
+
 /// Uncompressed EC point: first byte 0x04, followed by X||Y at
 /// coordinate length (32 for P-256, 48 for P-384, 66 for P-521).
 public type EcPublicKeyBytes is { bytes: List<Byte> };
@@ -110,6 +115,10 @@ public type Spki is {
 };
 
 implement Spki {
+    public(in core.security.x509) fn same_encoding(&self, other: &Spki) -> Bool {
+        self.raw_der.eq(&other.raw_der)
+    }
+
     public(in core.security.x509) fn parsed_key(&self) -> &SubjectPublicKey { &self.public_key }
 }
 

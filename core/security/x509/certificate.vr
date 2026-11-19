@@ -110,6 +110,10 @@ implement X509Certificate {
     /// Signature octets, excluding the leading unused-bit count in DER.
     public fn signature_bytes(&self) -> &[Byte] { self.signature_value.as_slice() }
 
+    public(in core.security.x509) fn issuer_name(&self) -> &DistinguishedName { &self.tbs.issuer }
+    public(in core.security.x509) fn subject_name(&self) -> &DistinguishedName { &self.tbs.subject }
+    public(in core.security.x509) fn subject_spki(&self) -> &Spki { &self.tbs.spki }
+    public(in core.security.x509) fn signature_algorithm(&self) -> &SignatureAlg { &self.signature_alg }
     public(in core.security) fn subject_public_key(&self) -> &SubjectPublicKey { self.tbs.spki.parsed_key() }
     public(in core.security) fn extensions(&self) -> &ExtensionSet { &self.tbs.extensions }
 

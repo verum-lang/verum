@@ -157,15 +157,8 @@ implement TrustStore {
         let mut i: Int = 0;
         while i < self.anchors.len() {
             let a = &self.anchors[i];
-            if a.tbs.subject.raw_eq(&cert.tbs.subject)
-                && a.tbs.spki.raw_der.len() == cert.tbs.spki.raw_der.len() {
-                let mut eq = true;
-                let mut j: Int = 0;
-                while j < a.tbs.spki.raw_der.len() {
-                    if a.tbs.spki.raw_der[j] != cert.tbs.spki.raw_der[j] { eq = false; break; }
-                    j = j + 1;
-                }
-                if eq { return true; }
+            if a.subject_name().raw_eq(cert.subject_name()) && a.subject_spki().same_encoding(cert.subject_spki()) {
+                return true;
             }
             i = i + 1;
         }
@@ -179,8 +172,8 @@ implement TrustStore {
     public fn find_by_subject(&self, issuer_dn: &DistinguishedName) -> Maybe<X509Certificate> {
         let mut i: Int = 0;
         while i < self.anchors.len() {
-            if self.anchors[i].tbs.subject.raw_eq(issuer_dn) {
-                return Maybe.Some(self.anchors[i].clone());
+            if self.anchors[i].subject_name().raw_eq(issuer_dn) {
+                return Maybe.Some(self.anchors[i]);
             }
             i = i + 1;
         }

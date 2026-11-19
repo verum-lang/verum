@@ -46,6 +46,8 @@ public type KeyUsage is {
 };
 
 implement KeyUsage {
+    public(in core.security.x509) fn allows_signing_certificates(&self) -> Bool { self.key_cert_sign }
+
     public fn empty() -> KeyUsage {
         KeyUsage {
             digital_signature:   false,
@@ -71,16 +73,17 @@ implement KeyUsage {
 
 public fn parse(value: &[Byte]) -> Result<KeyUsage, DerError> {
     let mut r = DerReader.new(value);
-    let bs = r.read_bit_string()?;
+    let bit_string = r.read_bit_string()?;
+    let (bits, _) = bit_string.into_parts();
     r.expect_end()?;
 
     // The BIT STRING contents has up to 2 bytes (9 bits).
-    if bs.bytes.len() == 0 {
+    if bits.len() == 0 {
         return Result.Ok(KeyUsage.empty());
     }
 
-    let b0 = bs.bytes[0];
-    let b1 = if bs.bytes.len() > 1 { bs.bytes[1] } else { 0_u8 };
+    let b0 = bits[0];
+    let b1 = if bits.len() > 1 { bits[1] } else { 0_u8 };
 
     // Big-endian bit convention: bit 0 is 0x80 of first byte.
     let ku = KeyUsage {
