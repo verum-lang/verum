@@ -40,7 +40,7 @@
 module core.configuration.error;
 
 mount base.{Result, Ok, Err, Maybe, Some, None, Text};
-mount core.base.protocols.{PartialEq, Eq, Hash, Hasher, Debug, Formatter, FormatError};
+mount core.base.protocols.{Clone, PartialEq, Eq, Hash, Hasher, Debug, Formatter, FormatError};
 
 // =============================================================================
 // Format identifier — stable across all configuration modules
@@ -73,28 +73,38 @@ fn is_format_id(value: &Text) -> Bool {
 }
 
 // These protocols observe the validated identifier through its Text carrier.
-// Their implementations neither construct nor mutate a FormatId.
+// Keeping the operations on Text values avoids redispatching to the refined receiver.
 implement PartialEq for FormatId {
     fn eq(&self, other: &FormatId) -> Bool {
         let value: &Text = self;
         let other_value: &Text = other;
-        value.eq(other_value)
+        value == other_value
     }
 }
 
 implement Eq for FormatId {}
 
+implement Clone for FormatId {
+    fn clone(&self) -> FormatId {
+        let text: &Text = self;
+        *text
+    }
+}
+
 implement Hash for FormatId {
     fn hash(&self, hasher: &mut Hasher) {
         let value: &Text = self;
-        value.hash(hasher);
+        hasher.write(value.as_bytes());
     }
 }
 
 implement Debug for FormatId {
     fn fmt_debug(&self, formatter: &mut Formatter) -> Result<(), FormatError> {
         let value: &Text = self;
-        value.fmt_debug(formatter)
+        // The validated alphabet contains no character requiring an escape.
+        formatter.write_char('"')?;
+        formatter.write_str(value)?;
+        formatter.write_char('"')
     }
 }
 

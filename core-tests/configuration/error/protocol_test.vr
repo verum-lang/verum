@@ -1,5 +1,5 @@
-mount core.configuration.error.{format_id_toml, format_id_json};
-mount core.base.protocols.{PartialEq, Eq, Hash, Debug, Formatter};
+mount core.configuration.error.{FormatId, format_id_toml, format_id_json};
+mount core.base.protocols.{Clone, PartialEq, Eq, Hash, Debug, Formatter};
 mount core.base.result.Result;
 
 fn equal_identifier<T: Eq>(left: &T, right: &T) -> Bool {
@@ -8,6 +8,22 @@ fn equal_identifier<T: Eq>(left: &T, right: &T) -> Bool {
 
 fn identifier_hash<T: Hash>(value: &T) -> Int {
     value.hash_value()
+}
+
+fn clone_identifier<T: Clone>(value: &T) -> T {
+    value.clone()
+}
+
+@test
+fn test_cloned_identifier_keeps_the_validated_text() {
+    let saved = {
+        let source = format_id_json();
+        clone_identifier(&source)
+    };
+    assert_eq(saved, format_id_json());
+    let source: FormatId = format_id_json();
+    assert_eq(source.clone(), saved);
+    assert(!equal_identifier(&saved, &format_id_toml()));
 }
 
 @test
