@@ -14,7 +14,14 @@ pub fn compile_module_with_stdlib(
     config: CodegenConfig,
     propagate_test_attr: bool,
 ) -> Result<VbcModule> {
-    compile_unit_with_stdlib(module, &[], config, propagate_test_attr)
+    compile_unit_with_stdlib(
+        module, &[], config, propagate_test_attr, |codegen| {
+            if let Some(protocols) = crate::pipeline::protocol_seed::embedded_protocols() {
+                codegen.collect_protocol_definitions(protocols);
+            }
+            Ok(())
+        },
+    )
 }
 
 /// Compile a selected entry and its sibling modules with embedded-stdlib
@@ -29,6 +36,7 @@ pub(crate) fn compile_unit_with_stdlib(
     siblings: &[Arc<Module>],
     config: CodegenConfig,
     propagate_test_attr: bool,
+    seed_protocols: impl FnOnce(&mut VbcCodegen) -> Result<()>,
 ) -> Result<VbcModule> {
     let mut codegen = VbcCodegen::with_config(config);
 
@@ -93,9 +101,7 @@ pub(crate) fn compile_unit_with_stdlib(
     // ordering: seed first, then collect protocols from the user
     // module itself (so any locally-defined protocols layer on top of
     // the seeded stdlib).
-    if let Some(protocols) = crate::pipeline::protocol_seed::embedded_protocols() {
-        codegen.collect_protocol_definitions(protocols);
-    }
+    seed_protocols(&mut codegen)?;
 
     emit_source_bodies(&mut codegen, module, siblings, propagate_test_attr, |_| {})?;
 

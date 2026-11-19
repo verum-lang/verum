@@ -2,7 +2,7 @@
 //! the same declaration and source coordinates as the session's normal imports.
 
 use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 use verum_ast::Module;
 
 use super::{BuildMode, CompilationPipeline};
@@ -26,16 +26,63 @@ impl CompilationPipeline<'_> {
         });
     }
 
-    pub(super) fn with_stdlib_protocols(&self, seed: impl FnOnce(&Module)) {
+    pub(super) fn seed_codegen_sources(
+        &self,
+        codegen: &mut verum_vbc::codegen::VbcCodegen,
+        entry: &Module,
+        siblings: &[Arc<Module>],
+    ) -> anyhow::Result<()> {
+        use verum_vbc::codegen::{CodegenError, SourceMountSession};
+        let Some(root) = self.stdlib_source_root() else {
+            self.with_stdlib_protocols(|module| codegen.collect_protocol_definitions(module));
+            return Ok(());
+        };
+        let root = root.to_str().ok_or_else(|| anyhow::anyhow!("invalid stdlib source path"))?;
+        let protocols = self.with_stdlib_protocols(Module::clone).filter(|module|
+            entry.file_id != module.file_id && siblings.iter().all(|sibling| sibling.file_id != module.file_id));
+        let mut roots = Vec::new();
+        for module in protocols.iter().chain(std::iter::once(entry)).chain(siblings.iter().map(Arc::as_ref)) {
+            let source = self.session.get_source(module.file_id)
+                .ok_or_else(|| anyhow::anyhow!("selected declaration has no session source: {:?}", module.file_id))?;
+            let path = source.path.as_ref().and_then(|path| path.to_str())
+                .ok_or_else(|| anyhow::anyhow!("selected declaration requires a source path: {}", source.name))?;
+            let mut selected = module.clone();
+            verum_ast::prelude::inject_implicit_prelude_mount(&mut selected);
+            roots.push((selected, path.to_owned()));
+        }
+        let files: Vec<_> = roots.iter().map(|(module, path)| (module, path.as_str())).collect();
+        let open = |path: &std::path::Path| {
+            let id = self.session.load_file(path).map_err(|error| CodegenError::internal(error.to_string()))?;
+            self.session.get_source(id).ok_or_else(|| CodegenError::internal(
+                format!("missing selected source for {}", path.display())))
+        };
+        codegen.resolve_unit_mounts(&files, root, Some(SourceMountSession {
+            open: &open, allocate_id: &|| self.session.allocate_file_id(),
+        }))?;
+        if protocols.is_some() {
+            // Root bodies are owned by the caller. Only the ambient protocol
+            // root is contributed by this phase, including its runtime slots.
+            codegen.collect_unit_declarations(&[files[0].0])?;
+        }
+        Ok(())
+    }
+
+    fn with_stdlib_protocols<R>(
+        &self,
+        seed: impl FnOnce(&Module) -> R,
+    ) -> Option<R> {
         let registered = self.session.module_registry().read().get_by_path(PROTOCOLS);
         let from_source = self.stdlib_source_root().is_some();
-        if let Some(module) = registered.as_ref()
+        let source = if let Some(module) = registered.as_ref()
             && (from_source || !module.source.is_empty())
         {
-            seed(&module.ast);
-        } else if !from_source && let Some(protocols) = embedded_protocols() {
-            seed(protocols);
-        }
+            Some(&module.ast)
+        } else if !from_source {
+            embedded_protocols()
+        } else {
+            None
+        };
+        source.map(seed)
     }
 }
 

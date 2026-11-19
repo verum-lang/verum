@@ -127,3 +127,44 @@ fn archived_dynamic_equalities_replay_the_selected_protocol_owner() {
     let error = archive_to_core_metadata(&builder.finish()).unwrap_err();
     assert!(error.contains("applied dynamic contract lacks"), "{error}");
 }
+
+#[test]
+fn checked_test_units_execute_the_default_from_the_selected_stdlib_source() {
+    let consumer = r#"
+        module app.probe;
+        mount core.base.protocols.Selected;
+        mount core.model.Badge;
+        type Receiver is {};
+        implement Selected for Receiver {}
+        fn observe(badge: Badge) -> Int { badge.value }
+        fn main() -> Int {
+            let receiver = Receiver {};
+            observe(Badge { value: receiver.probe() })
+        }
+    "#;
+    for answer in [73, 19] {
+        let root = tempfile::tempdir().unwrap();
+        let core = root.path().join("core");
+        std::fs::create_dir_all(core.join("base")).unwrap();
+        std::fs::write(core.join("mod.vr"), "module core; public module base; public module model; public module prelude { public mount super.base.protocols.*; }").unwrap();
+        std::fs::write(core.join("base/mod.vr"), "module core.base; public module protocols; public module tag;").unwrap();
+        std::fs::write(core.join("model.vr"), "module core.model; public type Badge is { public value: Int };").unwrap();
+        std::fs::write(core.join("base/tag.vr"), "module core.base.tag; public type Tag is { public seal: Stamp };").unwrap();
+        std::fs::write(core.join("base/protocols.vr"), format!(
+            "module core.base.protocols; mount core.base.tag.Tag; public type Stamp is {{ public value: Int }};
+             public fn take_tag(value: Tag) -> Int {{ value.seal.value }}
+             public type Selected is protocol {{ fn probe(&self) -> Int {{ {answer} }} }};"
+        )).unwrap();
+        let input = root.path().join("probe.vr");
+        let mut session = Session::new(CompilerOptions { input: input.clone(), ..Default::default() });
+        let file = session.load_source_string(consumer, input).unwrap();
+        let ast = verum_fast_parser::FastParser::new().parse_module_str(consumer, file).unwrap();
+        let module = CompilationPipeline::new_core(&mut session, CoreConfig::new(&core))
+            .compile_test_unit_to_vbc(ast).unwrap();
+        let bytes = verum_vbc::serialize::serialize_module(&module).unwrap();
+        let module = verum_vbc::deserialize::deserialize_module(&bytes).unwrap();
+        let entry = module.find_function_by_name("app.probe.main").unwrap();
+        let value = verum_vbc::interpreter::Interpreter::new(module.into()).execute_function(entry).unwrap();
+        assert_eq!(value.try_as_i64(), Some(answer));
+    }
+}

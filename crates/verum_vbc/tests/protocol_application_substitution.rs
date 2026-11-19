@@ -14,6 +14,49 @@ fn roundtrip(module: &VbcModule) -> VbcModule {
     .unwrap()
 }
 
+#[test]
+fn seeded_protocol_defaults_and_visibility_use_the_declaring_owner() {
+    let first = Parser::new(r#"
+        module sources.alpha;
+        public type Signal is protocol { fn code(&self) -> Int { 73 } };
+        private type Hidden is protocol {};
+    "#).parse_module().unwrap();
+    let second = Parser::new(r#"
+        module sources.beta;
+        public type Signal is protocol { fn code(&self) -> Int { 19 } };
+    "#).parse_module().unwrap();
+    for (mount, member, expected) in [
+        ("sources.alpha.Signal", "Signal", Some(73)),
+        ("sources.beta.Signal", "Signal", Some(19)),
+        ("sources.alpha.Hidden", "Hidden", None),
+    ] {
+        let caller = Parser::new(&format!(r#"
+            module reader;
+            mount {mount};
+            type Adapter is {{}};
+            implement {member} for Adapter {{}}
+            fn main() -> Int {{ Adapter{{}}.code() }}
+        "#)).parse_module().unwrap();
+        let mut codegen = VbcCodegen::with_config(CodegenConfig::new("reader"));
+        codegen.initialize();
+        codegen.collect_unit_declarations(&[&first, &second]).unwrap();
+        let declarations = codegen.collect_unit_declarations(&[&caller]);
+        let Some(expected) = expected else {
+            let error = declarations.expect_err("the private protocol must stay inaccessible");
+            assert!(error.to_string().contains("Hidden"), "{error}");
+            continue;
+        };
+        declarations.unwrap();
+        codegen.resolve_pending_imports();
+        codegen.compile_pending_default_methods().unwrap();
+        codegen.compile_unit_items(&[&caller], verum_vbc::codegen::ItemFailurePolicy::Strict).unwrap();
+        let module = roundtrip(&codegen.finalize_module().unwrap());
+        let function = module.find_function_by_name("reader.main").unwrap();
+        let result = verum_vbc::interpreter::Interpreter::new(module.into()).execute_function(function).unwrap();
+        assert_eq!(result.try_as_i64(), Some(expected));
+    }
+}
+
 fn nominal(module: &VbcModule, owner: &str, name: &str) -> TypeId {
     module
         .types

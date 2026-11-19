@@ -91,7 +91,7 @@ impl VbcCodegen {
             Some(info) => {
                 if selected.is_none() {
                     return Err(invalid(
-                        "inherited protocol application has no selected nominal identity",
+                        &format!("inherited protocol application '{written}' has no selected nominal identity for '{key}' in '{}'", self.lexical_type_scope()),
                         path.span,
                     ));
                 }

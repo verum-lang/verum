@@ -111,6 +111,7 @@ impl<'s> CompilationPipeline<'s> {
         let (entry, siblings) = self.materialize_codegen_sources(&checked, Some(&parsed))?;
         crate::single_module::compile_unit_with_stdlib(
             &entry, &siblings, CodegenConfig::new("test"), true,
+            |codegen| self.seed_codegen_sources(codegen, &entry, &siblings),
         ).map(Arc::new)
     }
 
@@ -358,9 +359,6 @@ impl<'s> CompilationPipeline<'s> {
             seed_reexport_type_aliases(&mut codegen, metadata);
         }
 
-        // Method bodies and their declarations come from the same stdlib as type checking.
-        self.with_stdlib_protocols(|protocols| codegen.collect_protocol_definitions(protocols));
-
         // Run CBGR tier analysis: escape analysis → tier determination
         // → RefChecked/RefUnsafe emission. Promotes non-escaping refs
         // from Tier 0 (~15ns) to Tier 1 (0ns).
@@ -539,6 +537,9 @@ impl<'s> CompilationPipeline<'s> {
                 }
             };
         }
+        // Match each selected source protocol and its defaults against the imported
+        // archive descriptor before a user implementation can select that head.
+        self.seed_codegen_sources(&mut codegen, module, &sibling_modules)?;
         crate::single_module::emit_source_bodies(
             &mut codegen, module, &sibling_modules, true, |phase| { step_mark!(phase); },
         )?;

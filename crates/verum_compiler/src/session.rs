@@ -1498,7 +1498,7 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
     }
 
     /// Allocate a new FileId
-    fn allocate_file_id(&self) -> FileId {
+    pub(crate) fn allocate_file_id(&self) -> FileId {
         // Use atomic fetch_add for lock-free file ID allocation
         let id = self.next_file_id.fetch_add(1, Ordering::Relaxed);
         FileId::new(id)

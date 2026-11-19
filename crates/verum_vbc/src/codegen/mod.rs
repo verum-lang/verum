@@ -618,26 +618,39 @@ pub enum ItemFailurePolicy {
     StubAndContinue,
 }
 
-/// Reachable source files contribute declarations under their own file modules,
-/// including a single-segment root header loaded by a nested consumer.
-struct MountedSourceFiles {
+/// File snapshots and synthetic identities from the compilation session.
+pub struct SourceMountSession<'a> {
+    /// Load the immutable source snapshot selected by the compiler session.
+    pub open: &'a dyn Fn(&std::path::Path) -> CodegenResult<verum_common::Shared<verum_ast::SourceFile>>,
+    /// Reserve an identity for a synthetic inline namespace.
+    pub allocate_id: &'a dyn Fn() -> verum_ast::FileId,
+}
+
+/// Reachable sources retain their physical owners independently of the output module.
+struct MountedSourceFiles<'a> {
     filesystem: mount_filesystem::MountFilesystem,
     modules: Vec<Module>,
     owners: std::collections::HashMap<verum_ast::FileId, String>,
     inline_globs: Set<Text>,
     root: Option<(std::path::PathBuf, String)>,
-    entry_id: verum_ast::FileId,
+    entry_ids: Set<verum_ast::FileId>,
+    session: Option<SourceMountSession<'a>>,
     next_id: u32,
 }
 
-impl MountedSourceFiles {
-    fn new(root: &str, entry_id: verum_ast::FileId) -> Self {
-        let root = std::fs::canonicalize(root).ok().and_then(|path| {
-            let source = std::fs::read_to_string(path.join("mod.vr")).ok()?;
-            let module = verum_fast_parser::Parser::new(&source).parse_module().ok()?;
-            VbcCodegen::extract_source_module_name(&module).map(|name| (path, name))
-        });
-        Self { filesystem: Default::default(), modules: Vec::new(), owners: Default::default(), inline_globs: Set::new(), root, entry_id, next_id: 0 }
+impl<'a> MountedSourceFiles<'a> {
+    fn new(root: &str, entry_ids: Set<verum_ast::FileId>, session: Option<SourceMountSession<'a>>) -> CodegenResult<Self> {
+        let mut files = Self { filesystem: Default::default(), modules: Vec::new(), owners: Default::default(),
+            inline_globs: Set::new(), root: None, entry_ids, session, next_id: 0 };
+        if let Ok(path) = std::fs::canonicalize(root) {
+            let header = path.join("mod.vr");
+            if header.is_file() {
+                let module = files.parse(header.to_str().ok_or_else(||
+                    CodegenError::internal("invalid root module source path"))?)?;
+                files.root = VbcCodegen::extract_source_module_name(&module).map(|name| (path, name));
+            }
+        }
+        Ok(files)
     }
 
     fn parent_for(&mut self, file: &str) -> Option<String> {
@@ -660,9 +673,10 @@ impl MountedSourceFiles {
     }
 
     fn register(&mut self) -> CodegenResult<verum_ast::FileId> {
+        if let Some(session) = &self.session { return Ok((session.allocate_id)()); }
         // The caller's AST already owns its ID, including a nonzero ID supplied
         // by a project source map. An imported parent must never replace it.
-        if self.next_id == self.entry_id.raw() {
+        while self.entry_ids.contains(&verum_ast::FileId::new(self.next_id)) {
             self.next_id = self.next_id.checked_add(1)
                 .ok_or_else(|| CodegenError::internal("too many mounted source files"))?;
         }
@@ -670,6 +684,23 @@ impl MountedSourceFiles {
         self.next_id = self.next_id.checked_add(1)
             .ok_or_else(|| CodegenError::internal("too many mounted source files"))?;
         Ok(id)
+    }
+
+    fn parse(&mut self, path: &str) -> CodegenResult<Module> {
+        let snapshot;
+        let disk;
+        let (source, id) = if let Some(session) = &self.session {
+            snapshot = (session.open)(std::path::Path::new(path))?;
+            (snapshot.source.as_str(), snapshot.id)
+        } else {
+            disk = std::fs::read_to_string(path).map_err(|error|
+                CodegenError::internal(format!("reading mounted file {path}: {error}")))?;
+            (disk.as_str(), self.register()?)
+        };
+        let start = std::time::Instant::now();
+        let module = verum_fast_parser::FastParser::new().parse_module_str(source, id);
+        mount_cost::add_parse(source.len(), start.elapsed());
+        module.map_err(|error| CodegenError::internal(format!("parsing mounted file {path}: {error:?}")))
     }
 }
 
@@ -8915,18 +8946,36 @@ impl VbcCodegen {
         source_path: &str,
         core_root: &str,
     ) -> CodegenResult<()> {
-        if !self.selected_source_module(module, &self.config.module_name)? { return Ok(()); }
+        self.resolve_unit_mounts(&[(module, source_path)], core_root, None)
+    }
+
+    /// Resolve all mounted declarations once across the selected source roots.
+    /// The roots retain their own implementation and body-registration pass.
+    pub fn resolve_unit_mounts(
+        &mut self,
+        roots: &[(&Module, &str)],
+        core_root: &str,
+        session: Option<SourceMountSession<'_>>,
+    ) -> CodegenResult<()> {
+        let mut entries = Vec::new();
         let mut resolved_files: std::collections::HashSet<String> =
             std::collections::HashSet::new();
-        // Prevent re-resolving the source file itself
-        if let Ok(canonical) = std::fs::canonicalize(source_path) {
-            resolved_files.insert(canonical.to_string_lossy().to_string());
+        for &(module, path) in roots {
+            if !self.selected_source_module(module, &self.config.module_name)? { continue; }
+            if let Ok(canonical) = std::fs::canonicalize(path) {
+                resolved_files.insert(canonical.to_string_lossy().to_string());
+            }
+            entries.push((module, path));
         }
+        let Some((_, source_path)) = entries.first() else { return Ok(()); };
         mount_cost::reset();
         let t0 = std::time::Instant::now();
         // Claim identities across the reachable graph before collecting any declaration.
-        let mut imported = MountedSourceFiles::new(core_root, module.file_id);
-        self.resolve_mounts_recursive(module, source_path, core_root, &mut resolved_files, &mut imported)?;
+        let ids = entries.iter().map(|(module, _)| module.file_id).collect();
+        let mut imported = MountedSourceFiles::new(core_root, ids, session)?;
+        for &(module, path) in &entries {
+            self.resolve_mounts_recursive(module, path, core_root, &mut resolved_files, &mut imported)?;
+        }
         let parent = self.config.module_name.clone();
         let mut files = Vec::new();
         for module in &imported.modules {
@@ -8936,7 +8985,7 @@ impl VbcCodegen {
             };
             if selected { files.push((parent.as_str(), module)); }
         }
-        let graph: Vec<_> = std::iter::once((parent.as_str(), module))
+        let graph: Vec<_> = entries.iter().map(|&(module, _)| (parent.as_str(), module))
             .chain(files.iter().copied()).collect();
         let collect = std::time::Instant::now();
         let previous = std::mem::replace(&mut self.mounted_file_owners, imported.owners);
@@ -8977,10 +9026,7 @@ impl VbcCodegen {
             if imported.filesystem.canonicalize(&candidate).is_none() {
                 continue;
             }
-            let source = std::fs::read_to_string(&candidate).map_err(|error|
-                CodegenError::internal(format!("reading mounted file {candidate}: {error}")))?;
-            let parent_module = verum_fast_parser::Parser::new(&source).parse_module().map_err(|error|
-                CodegenError::internal(format!("parsing mounted file {candidate}: {error:?}")))?;
+            let parent_module = imported.parse(&candidate)?;
             let parent = imported.parent_for(&candidate).unwrap_or_else(|| root_owner.clone());
             let mut owner = Self::source_file_module_path(
                 &parent, std::path::Path::new(&candidate), &parent_module,
@@ -9135,16 +9181,7 @@ impl VbcCodegen {
 
         // Parse each reachable module once, including transitive dependencies.
         for file_path in to_parse {
-            let source = std::fs::read_to_string(&file_path).map_err(|error| {
-                CodegenError::internal(format!("reading mounted file {file_path}: {error}"))
-            })?;
-            let t_parse = std::time::Instant::now();
-            let file_id = imported.register()?;
-            let parsed = verum_fast_parser::FastParser::new().parse_module_str(&source, file_id);
-            mount_cost::add_parse(source.len(), t_parse.elapsed());
-            let mut dependency = parsed.map_err(|error| {
-                CodegenError::internal(format!("parsing mounted file {file_path}: {error:?}"))
-            })?;
+            let mut dependency = imported.parse(&file_path)?;
             imported.retain_owner(&file_path, &dependency);
             self.resolve_mounts_recursive(
                 &dependency, &file_path, core_root, resolved_files, imported,
