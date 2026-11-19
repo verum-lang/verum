@@ -779,7 +779,7 @@ impl TypeChecker {
         self.read_value_origins(ty, origins, span, false)
     }
 
-    fn read_value_origins(
+    pub(super) fn read_value_origins(
         &mut self,
         mut ty: Type,
         mut origins: List<RecordReceiver>,

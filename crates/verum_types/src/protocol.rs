@@ -1855,6 +1855,9 @@ pub struct ProtocolChecker {
     /// Successful source publications retain one exact declaration, shared by
     /// pre-registration, imported source, and body checking.
     source_impls: Map<(Text, Span), (Arc<verum_ast::decl::ImplDecl>, usize)>,
+    /// Span lookup narrows the candidates. Only the registered implementation
+    /// identity can supply its concrete method body.
+    source_impl_owners: Map<Span, List<Text>>,
     /// Implementation index for fast lookup
     /// Coarse keys route to candidates; exact declarations remain authoritative.
     impl_index: Map<(Text, Text), List<usize>>,
@@ -2055,6 +2058,7 @@ impl ProtocolChecker {
             protocol_revisions: Map::new(),
             impls: List::new(),
             source_impls: Map::new(),
+            source_impl_owners: Map::new(),
             impl_index: Map::new(),
             impls_by_protocol: Map::new(),
             #[cfg(test)]
@@ -2095,6 +2099,7 @@ impl ProtocolChecker {
             protocol_revisions: Map::new(),
             impls: List::new(),
             source_impls: Map::new(),
+            source_impl_owners: Map::new(),
             impl_index: Map::new(),
             impls_by_protocol: Map::new(),
             #[cfg(test)]
@@ -5310,6 +5315,22 @@ impl ProtocolChecker {
             .map(|implementation| implementation.is_some())
     }
 
+    pub(crate) fn method_source_for_implementation(
+        &self, implementation: &ProtocolImpl, name: &Text,
+    ) -> Option<(Text, Arc<verum_ast::decl::ImplDecl>, usize)> {
+        for owner in self.source_impl_owners.get(&implementation.span)? {
+            let (source, index) = self.source_impls.get(&(owner.clone(), implementation.span))?;
+            if !std::ptr::eq(self.impls.get(*index)?, implementation) { continue; }
+            let mut matches = source.items.iter().enumerate().filter(|(_, member)| matches!(
+                &member.kind, verum_ast::decl::ImplItemKind::Function(function) if &function.name.name == name
+            ));
+            let (method, _) = matches.next()?;
+            if matches.next().is_some() { return None; }
+            return Some((owner.clone(), source.clone(), method));
+        }
+        None
+    }
+
     pub(crate) fn refine_source_method_contract(
         &mut self,
         owner: &Text,
@@ -5363,6 +5384,7 @@ impl ProtocolChecker {
             (owner.clone(), declaration.span),
             (Arc::new(declaration.clone()), index),
         );
+        self.source_impl_owners.entry(declaration.span).or_default().push(owner.clone());
         Ok(())
     }
 

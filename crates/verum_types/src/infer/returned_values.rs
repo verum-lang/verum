@@ -1,6 +1,6 @@
 //! Source-owned result derivations for direct values and structural projections.
 use super::TypeChecker;
-use crate::context::{InputFieldWrite, ReturnedValue, ReturnedValueNode};
+use crate::context::{CounterAccess, CounterAddress, InputFieldWrite, ReturnedValue, ReturnedValueNode};
 use crate::ty::{RecordReceiver, Type};
 use verum_ast::{
     BinOp, Expr, ExprKind, FunctionBody, FunctionDecl, FunctionParamKind, LiteralKind, PatternKind,
@@ -383,6 +383,47 @@ fn append_expression(
                     }
                     ReturnedValueNode::Literal(checker.infer_literal(literal))
                 }
+                ExprKind::Unsafe(block) if block.stmts.is_empty() => {
+                    let ExprKind::MetaFunction { name, args, parenthesized: true } =
+                        &unparen(block.expr.as_deref()?).kind else { return None; };
+                    let operation = super::callable_properties::intrinsic_operation_name(&name.name, args)?;
+                    let operation = verum_vbc::intrinsics::lookup_intrinsic(&operation)?;
+                    if !matches!(operation.intrinsic.strategy, verum_vbc::intrinsics::registry::CodegenStrategy::RetainCopy) {
+                        return None;
+                    }
+                    let [_, handle, counter] = args.as_slice() else { return None; };
+                    let binding = |value: &Expr| {
+                        let ExprKind::Path(path) = &unparen(value).kind else { return None; };
+                        match path.segments.as_slice() {
+                            [verum_ast::PathSegment::SelfValue] => bindings.get(&Text::from("self")).copied(),
+                            [verum_ast::PathSegment::Name(name)] => bindings.get(&name.name).copied(),
+                            _ => None,
+                        }
+                    };
+                    let handle = binding(handle)?;
+                    let (mut place, address) = match &unparen(counter).kind {
+                        ExprKind::Unary { op: verum_ast::UnOp::RefMut, expr } =>
+                            (expr.as_ref(), CounterAddress::MutableBorrow),
+                        _ => (counter, CounterAddress::Argument),
+                    };
+                    let mut access = List::new();
+                    loop {
+                        remaining = remaining.checked_sub(1)?;
+                        match &unparen(place).kind {
+                            ExprKind::Field { expr, field } => {
+                                access.push(CounterAccess::Field(field.name.clone()));
+                                place = expr;
+                            }
+                            ExprKind::Unary { op: verum_ast::UnOp::Deref, expr } => {
+                                access.push(CounterAccess::Dereference);
+                                place = expr;
+                            }
+                            _ => break,
+                        }
+                    }
+                    access.reverse();
+                    ReturnedValueNode::RetainedCopy { handle, counter: binding(place)?, access, address }
+                }
                 ExprKind::Binary { op, left, right } if !op.is_assignment() => {
                     pending.push(Step::Binary(*op));
                     pending.push(Step::Enter(right));
@@ -682,6 +723,7 @@ impl TypeChecker {
             match node {
                 ReturnedValueNode::Field { source, .. }
                 | ReturnedValueNode::TupleIndex { source, .. } => mark(*source)?,
+                ReturnedValueNode::RetainedCopy { handle, .. } => mark(*handle)?,
                 ReturnedValueNode::Tuple(parts)
                 | ReturnedValueNode::Variant { fields: parts, .. } => {
                     for part in parts { mark(*part)?; }
@@ -701,6 +743,11 @@ impl TypeChecker {
                         transferred == Some(*parameter))?
                 }
                 ReturnedValueNode::Receiver => self.closed_call_input_origins(receiver?, ty, false)?,
+                ReturnedValueNode::RetainedCopy { handle, .. } => {
+                    self.read_value_origins(
+                        facts.nodes.get(*handle)?.clone(), values.get(*handle)?.clone(), span, true,
+                    )?.1
+                }
                 ReturnedValueNode::Literal(_) | ReturnedValueNode::Compound { .. }
                 | ReturnedValueNode::ScalarBinary { .. } | ReturnedValueNode::Condition(_)
                 | ReturnedValueNode::Index { .. } | ReturnedValueNode::SelectedCall { .. } => List::new(),
@@ -889,6 +936,43 @@ impl TypeChecker {
                 }
                 ReturnedValueNode::Receiver => self.unifier.apply(receiver?),
                 ReturnedValueNode::Literal(ty) => ty.clone(),
+                ReturnedValueNode::RetainedCopy { handle, counter, access, address } => {
+                    // The registered operation copies the borrowed handle and writes only
+                    // its scalar counter. Resolve each place component in the selected
+                    // signature. Calls and user-defined dereference have no such proof.
+                    let mut counter_type = nodes.get(*counter)?.clone();
+                    let mut writable = self.reference_mode(&counter_type, span).ok()? == Some(true);
+                    for step in access {
+                        let head = self.place_reference_head(&counter_type, span).ok()?;
+                        let permission = self.reference_mode(&head, span).ok()?;
+                        writable &= permission != Some(false);
+                        counter_type = match step {
+                            CounterAccess::Dereference => {
+                                permission?;
+                                self.read_value_origins(head, List::new(), span, true)?.0
+                            }
+                            CounterAccess::Field(name) => {
+                                let head = if permission.is_some() {
+                                    self.read_value_origins(head, List::new(), span, true)?.0
+                                } else { head };
+                                if self.reference_mode(&head, span).ok()?.is_some() { return None; }
+                                self.unifier.apply(&self.lookup_field_type(&head, name)?)
+                            }
+                        };
+                    }
+                    match address {
+                        CounterAddress::Argument => {
+                            if self.reference_mode(&counter_type, span).ok()? != Some(true) { return None; }
+                            counter_type = self.read_value_origins(counter_type, List::new(), span, true)?.0;
+                        }
+                        CounterAddress::MutableBorrow if !writable => return None,
+                        CounterAddress::MutableBorrow => (),
+                    }
+                    if counter_type != Type::u32_refined(0) { return None; }
+                    let handle_type = nodes.get(*handle)?;
+                    if self.reference_mode(handle_type, span).ok()?.is_none() { return None; }
+                    self.read_value_origins(handle_type.clone(), List::new(), span, true)?.0
+                }
                 ReturnedValueNode::Field { source, name } => {
                     let (head, _) = self.projected_origins_for_type(
                         nodes.get(*source)?.clone(),

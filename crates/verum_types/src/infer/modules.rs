@@ -19614,6 +19614,7 @@ impl TypeChecker {
         // snapshots (ordinal, substituted fn type) for the
         // defer-by-return step at the ambiguity gate below.
         let mut own_method_ordinal: usize = 0;
+        let mut source_method = None;
         let mut overload_candidates: Vec<(Path, usize, Type, Option<crate::context::InstantiatedScheme>)> = Vec::new();
 
         // Scope the read guard tightly to avoid borrow conflicts later
@@ -20050,12 +20051,20 @@ impl TypeChecker {
                         let signature = instance.as_ref().map_or(substituted_method_ty, |i| i.ty.clone());
                         if own_method_ordinal_here > 0 {
                             overload_candidates.push((source_protocol.clone(), own_method_ordinal_here, signature.clone(), instance.clone()));
+                            if own_method_ordinal_here == 1 {
+                                source_method = protocol_checker_guard.method_source_for_implementation(impl_, &method_name);
+                            }
                         }
                         candidates.push((source_protocol, signature, instance));
                     }
                 }
             }
         } // protocol_checker_guard dropped here
+
+        // A protocol signature also serves dynamic, default and overloaded
+        // calls. Only one applicable, explicitly implemented source member
+        // can establish the concrete body's return and write footprint.
+        let source_method = source_method.filter(|_| own_method_ordinal == 1 && candidates.len() == 1);
 
         if crate::ctor_trace_enabled() {
             eprintln!(
@@ -20352,7 +20361,21 @@ impl TypeChecker {
 
         // Step 5: Extract the unique method signature
         let (protocol_path, method_ty, instance) = &candidates[0];
-        self.type_registry.register_call_target(span, method_ty.clone());
+        if let Some((owner, implementation, index)) = source_method
+            && let verum_ast::decl::ImplItemKind::Function(source) = &implementation.items[index].kind
+            && let Some(kind) = instance.as_ref().and_then(|candidate| candidate.receiver_kind)
+            && kind == crate::core_metadata::ReceiverKind::from_declaration(source)
+            && let Some(body) = self.with_source_signature_scope(&owner, |checker|
+                super::returned_values::returned_value(checker, source))
+        {
+            let mut scheme = crate::TypeScheme::mono(method_ty.clone());
+            scheme.receiver_kind = Some(kind);
+            scheme.callable_source = Some((owner, Shared::new(source.clone())));
+            scheme.returned_value = Some(body);
+            self.type_registry.register_declared_method_target(span, method_ty.clone(), resolved_ty.clone(), &scheme);
+        } else {
+            self.type_registry.register_call_target(span, method_ty.clone());
+        }
         if let Some(instance) = instance {
             self.bind_explicit_method_arguments(
                 instance.explicit_method_vars.as_ref(), type_args, method, span,

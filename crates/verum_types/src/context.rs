@@ -199,6 +199,19 @@ pub(crate) enum ReturnedValueNode {
     Condition(usize),
     Index { source: usize, index: usize },
     SelectedCall { span: Span, receiver: Option<usize>, arguments: List<usize> },
+    RetainedCopy { handle: usize, counter: usize, access: List<CounterAccess>, address: CounterAddress },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum CounterAddress {
+    Argument,
+    MutableBorrow,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum CounterAccess {
+    Field(Text),
+    Dereference,
 }
 
 impl ReturnedValue {
