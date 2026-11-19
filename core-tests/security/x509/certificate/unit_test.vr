@@ -5,6 +5,8 @@
 // `core/security/x509/certificate.vr` — X.509 version tag.
 // =============================================================================
 
+mount core.hash.crypto.sha256.Sha256;
+mount core.encoding.hex.{encode as hex_encode};
 mount core.security.x509.certificate.{X509Version, parse_certificate};
 mount core.encoding.base64;
 mount core.base.maybe.{Maybe, Some, None};
@@ -63,6 +65,19 @@ fn test_certificate_validity_is_read_from_its_der() {
     let encoded = "MIIBLzCB4qADAgECAgECMAUGAytlcDAaMRgwFgYDVQQDDA9WZXJ1bSBUZXN0IFJvb3QwHhcNMjYxMTAzMjEyNzI4WhcNMjYxMTA1MjEyNzI4WjAYMRYwFAYDVQQDDA12ZXJ1bS5pbnZhbGlkMCowBQYDK2VwAyEAg3q+9yNJk1bHxZIdfw5veheTVuBUZp4WYXADw7ecBKajTzBNMAwGA1UdEwEB/wQCMAAwDgYDVR0PAQH/BAQDAgeAMBMGA1UdJQQMMAoGCCsGAQUFBwMBMBgGA1UdEQQRMA+CDXZlcnVtLmludmFsaWQwBQYDK2VwA0EA/zcVlie8boXjnNJhD19wmG0jZoxIkxDryNn/UmgDtp88aZefy0nZWZASyNGu7oz9u4Y2aiIjVf2x62yBX/yGAA==";
     let mut der = base64.decode(&encoded).unwrap();
     let certificate = parse_certificate(der.as_slice()).unwrap();
+    // OpenSSL asn1parse locates TBS at [4,233) and signature bytes at [243,307).
+    let full = certificate.der_bytes();
+    let signed = certificate.tbs_der_bytes();
+    let signature = certificate.signature_bytes();
+    assert_eq(full.len(), 307);
+    assert_eq(signed.len(), 229);
+    assert_eq(signature.len(), 64);
+    for i in 0..full.len() { assert_eq(full[i], der[i]); }
+    for i in 0..signed.len() { assert_eq(signed[i], der[4 + i]); }
+    for i in 0..signature.len() { assert_eq(signature[i], der[243 + i]); }
+    assert_eq(hex_encode(&Sha256.digest(full)), "dd456ffacc4333c4a39c0221461b9bd35d9590314cd0085e9d2f8d3701b0b315");
+    assert_eq(hex_encode(&Sha256.digest(signed)), "585b4e910dd04898f80aa8ca2ba981310ddbfdba055a3fb18b0d67a2f61f6060");
+    assert_eq(hex_encode(&Sha256.digest(signature)), "0b578dc64a816ff806437e7323554df0ec46580b1ed1e19ed2aa892344e35ca0");
     assert(!certificate.is_ca(), "the leaf must have cA false");
     assert(certificate.matches_hostname(&"verum.invalid"), "the DNS SAN must match verum.invalid");
     assert(!certificate.matches_hostname(&"different.invalid"), "the DNS SAN must reject different.invalid");

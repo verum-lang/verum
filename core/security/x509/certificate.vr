@@ -101,7 +101,15 @@ public type X509Certificate is {
 };
 
 implement X509Certificate {
-    public(in core.security) fn der_bytes(&self) -> &List<Byte> { &self.raw_der }
+    /// Original certificate DER, including its outer SEQUENCE.
+    public fn der_bytes(&self) -> &[Byte] { self.raw_der.as_slice() }
+
+    /// Original encoded TBSCertificate covered by the signature.
+    public fn tbs_der_bytes(&self) -> &[Byte] { self.tbs_der.as_slice() }
+
+    /// Signature octets, excluding the leading unused-bit count in DER.
+    public fn signature_bytes(&self) -> &[Byte] { self.signature_value.as_slice() }
+
     public(in core.security) fn subject_public_key(&self) -> &SubjectPublicKey { self.tbs.spki.parsed_key() }
     public(in core.security) fn extensions(&self) -> &ExtensionSet { &self.tbs.extensions }
 

@@ -310,7 +310,7 @@ fn parse_pem_chain(pems: &List<Text>) -> Result<List<X509Certificate>, SigstoreV
 
 fn authenticated_anchor(
     entries: &List<LogEntry>, trust: &SigstoreTrustRoot, payload_type: &Text,
-    payload_hash: &Text, signature: &Text, cert_der: &List<Byte>, nb: Int, na: Int,
+    payload_hash: &Text, signature: &Text, cert_der: &[Byte], nb: Int, na: Int,
 ) -> Result<LogAnchor, SigstoreVerifyError> {
     let mut outside_window: Maybe<Int> = Maybe.None;
     for entry in entries.iter() {

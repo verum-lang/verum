@@ -39,12 +39,12 @@ fn logged_signer_matches(record: &JsonValue, is_intoto: Bool,
 /// carries a structured DSSE envelope, so verify its actual PAE signature,
 /// decoded payload hash and signing certificate instead of reserializing it.
 public fn matches_logged_dsse(body: &JsonValue, payload_type: &Text, payload_hash: &Text,
-    signature: &Text, cert_der: &List<Byte>) -> Bool {
+    signature: &Text, cert_der: &[Byte]) -> Bool {
     logged_dsse_body(body, payload_type, payload_hash, signature, cert_der).unwrap_or(false)
 }
 
 fn logged_dsse_body(body: &JsonValue, payload_type: &Text, payload_hash: &Text,
-    signature: &Text, cert_der: &List<Byte>) -> Maybe<Bool> {
+    signature: &Text, cert_der: &[Byte]) -> Maybe<Bool> {
     let kind = string_field(body, &"kind")?;
     let version = string_field(body, &"apiVersion")?;
     let is_intoto = kind == "intoto" && version == "0.0.2";
@@ -66,7 +66,7 @@ fn logged_dsse_body(body: &JsonValue, payload_type: &Text, payload_hash: &Text,
     } else { content };
     // Canonical Rekor x509 verifier material is a PEM certificate encoded
     // as standard base64. Compare the exact DER under its certificate label.
-    let certificate = encode_block(&"CERTIFICATE", cert_der.as_slice());
+    let certificate = encode_block(&"CERTIFICATE", cert_der);
     let verifier_b64 = base64.encode(certificate.as_bytes());
     let list = json_field(&signed, &"signatures")?;
     let records = list.as_array()?;

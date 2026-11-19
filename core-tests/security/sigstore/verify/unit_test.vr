@@ -101,7 +101,7 @@ fn matches_record(json: &Text) -> Bool {
     der.push(48_u8);
     der.push(0_u8);
     matches_logged_dsse(&body, &"application/vnd.in-toto+json",
-        &PAYLOAD_DIGEST, &"AQI=", &der)
+        &PAYLOAD_DIGEST, &"AQI=", der.as_slice())
 }
 
 fn digest_field(hex: &Text) -> Text {
