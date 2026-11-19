@@ -560,6 +560,7 @@ jobs:
         run: |
           cargo test --locked -p verum_vbc --features codegen --test target_capabilities --test target_platform_constants --test type_identity --test type_information
           cargo test --locked -p verum_vbc --features codegen --test generic_layout_witness layout_intrinsics
+          cargo test --locked -p verum_vbc --features codegen --test deref_index_projection reference_field
 
       - name: Upload vbc test log
         if: failure()

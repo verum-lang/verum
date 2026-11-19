@@ -154,69 +154,62 @@ impl VbcCodegen {
     /// permission. Layout knowledge cannot turn a shared path into a mutable one.
     pub(super) fn mutable_projection_place(&self, base: &Expr, depth: usize) -> bool {
         use crate::types::{Mutability, TypeRef};
-        if depth >= 64 {
-            return false;
-        }
-        let base = Self::normalized_place(base);
-        let Some(mut owner) = self.projection_operand_declaration(base) else {
-            return false;
-        };
-        let mut borrowed = false;
-        while let TypeRef::Reference {
-            inner, mutability, ..
-        } = owner
-        {
-            if mutability != Mutability::Mutable {
-                return false;
-            }
-            let Some(next) = self.expand_declared_alias(*inner) else {
+        let mut place = base;
+        let mut writes_referent = false;
+        for _ in depth..64 {
+            place = Self::normalized_place(place);
+            let Some(mut owner) = self.projection_operand_declaration(place) else {
                 return false;
             };
-            owner = next;
-            borrowed = true;
-        }
-        match &base.kind {
-            ExprKind::Field { expr, field } => {
-                self.mutable_projection_place(expr, depth + 1)
-                    && self.projection_operand_declaration(expr)
-                        .and_then(|owner| self.field_projection(owner, &field.name, true))
-                        .is_some()
-            }
-            ExprKind::TupleIndex { expr, .. } => self.mutable_projection_place(expr, depth + 1),
-            ExprKind::Index { expr, index } => self.index_projection(expr, index, true).is_some(),
-            ExprKind::Unary {
-                op: UnOp::Deref,
-                expr,
-            } => {
-                matches!(
-                    self.projection_operand_declaration(expr),
-                    Some(TypeRef::Reference {
-                        mutability: Mutability::Mutable,
-                        ..
-                    })
-                ) && self.mutable_projection_place(expr, depth + 1)
-            }
-            ExprKind::Path(path) => {
-                let name = match path.segments.as_slice() {
-                    [verum_ast::PathSegment::Name(name)] => Some(name.name.as_str()),
-                    [verum_ast::PathSegment::SelfValue] => Some("self"),
-                    _ => None,
+            while let TypeRef::Reference { inner, mutability, .. } = owner {
+                if mutability != Mutability::Mutable {
+                    return false;
+                }
+                let Some(next) = self.expand_declared_alias(*inner) else {
+                    return false;
                 };
-                borrowed
-                    || name
-                        .and_then(|name| self.ctx.lookup_var(name))
-                        .is_some_and(|binding| binding.is_mutable)
+                owner = next;
+                writes_referent = true;
             }
-            // An exact owned temporary has its own storage. A borrowed result
-            // has already passed the reference check above.
-            ExprKind::Call { .. }
-            | ExprKind::MethodCall { .. }
-            | ExprKind::Record { .. }
-            | ExprKind::Array(_)
-            | ExprKind::Block(_)
-            | ExprKind::Cast { .. } => true,
-            _ => borrowed,
+            match &place.kind {
+                ExprKind::Field { expr, field } => {
+                    if self.projection_operand_declaration(expr)
+                        .and_then(|owner| self.field_projection(owner, &field.name, true))
+                        .is_none()
+                    {
+                        return false;
+                    }
+                    place = expr;
+                }
+                ExprKind::TupleIndex { expr, .. } => place = expr,
+                ExprKind::Index { expr, index } => {
+                    return self.index_projection(expr, index, true).is_some();
+                }
+                ExprKind::Unary { op: UnOp::Deref, expr } => {
+                    if !matches!(self.projection_operand_declaration(expr),
+                        Some(TypeRef::Reference { mutability: Mutability::Mutable, .. }))
+                    {
+                        return false;
+                    }
+                    place = expr;
+                }
+                ExprKind::Path(path) => {
+                    let name = match path.segments.as_slice() {
+                        [verum_ast::PathSegment::Name(name)] => Some(name.name.as_str()),
+                        [verum_ast::PathSegment::SelfValue] => Some("self"),
+                        _ => None,
+                    };
+                    // The referenced storage can be changed without replacing the
+                    // binding holding its owner. Every intervening borrow was checked.
+                    return writes_referent || name.and_then(|name| self.ctx.lookup_var(name))
+                        .is_some_and(|binding| binding.is_mutable);
+                }
+                ExprKind::Call { .. } | ExprKind::MethodCall { .. } | ExprKind::Record { .. }
+                | ExprKind::Array(_) | ExprKind::Block(_) | ExprKind::Cast { .. } => return true,
+                _ => return writes_referent,
+            }
         }
+        false
     }
 
     pub(super) fn require_mutable_index_projection(
@@ -432,7 +425,11 @@ impl VbcCodegen {
             return self.compile_expr(pointer)?.or_internal("record pointer has no value");
         }
         if mutable && let ExprKind::Field { expr, field } = &Self::normalized_place(base).kind {
-            let (owner, _, ordinal) = self.compile_field_storage(expr, &field.name, true)?;
+            // Reborrowing a reference field reads that field's slot. Replacing
+            // an owned field still needs writable storage all the way to its owner.
+            let writes_field = !matches!(self.projection_operand_declaration(base),
+                Some(crate::types::TypeRef::Reference { .. }));
+            let (owner, _, ordinal) = self.compile_field_storage(expr, &field.name, writes_field)?;
             let value = self.ctx.alloc_temp();
             self.ctx.emit(Instruction::GetF { dst: value, obj: owner, field_idx: ordinal });
             self.ctx.free_temp(owner);

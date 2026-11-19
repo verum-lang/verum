@@ -135,6 +135,42 @@ fn probe() -> Int {
 }
 
 #[test]
+fn owned_reference_field_mutates_its_referent_without_replacing_the_entry() {
+    value(
+        r#"
+type Entry is { current: &mut Cell };
+type Nested is { entry: Entry };
+implement Entry {
+    fn replace(self, n: Int) { self.current.value = n; }
+}
+fn nested(owner: Nested) { owner.entry.current.value += 4; }
+fn probe() -> Int {
+    let mut cell = Cell { padding: 3, value: 5 };
+    let entry = Entry { current: &mut cell };
+    entry.replace(19);
+    nested(Nested { entry: Entry { current: &mut cell } });
+    cell.value
+}
+"#,
+        23,
+    );
+}
+
+#[test]
+fn reference_fields_preserve_shared_paths_and_immutable_storage() {
+    for body in [
+        "type Entry is { current: &mut Cell }; fn probe(e: &Entry) { e.current.value = 9; }",
+        "type Entry is { current: &Cell }; fn probe(e: Entry) { e.current.value = 9; }",
+        "type Entry is { current: Cell }; fn probe(e: Entry) { e.current.value = 9; }",
+        "type Entry is { current: &mut Cell }; fn probe(e: Entry, n: &mut Cell) { e.current = n; }",
+        "type Entry is { current: &mut Cell }; type Holder is { entry: &Entry }; fn probe(h: Holder) { h.entry.current.value = 9; }",
+    ] {
+        let error = compile(body).err().expect("path must refuse mutation");
+        assert!(error.to_string().contains("no declared mutable projection"), "{error}");
+    }
+}
+
+#[test]
 fn an_unrelated_generic_record_is_not_an_index_carrier() {
     let body = r#"
 type Heap<T> is { marker: Int, value: T };
