@@ -161,15 +161,24 @@ fn truncated_applied_projection_bytecode_is_rejected_at_every_boundary() {
 
 #[cfg(feature = "codegen")]
 fn projected_receiver() -> verum_vbc::VbcModule {
+    projected_receiver_with(None).unwrap()
+}
+
+#[cfg(feature = "codegen")]
+fn projected_receiver_with(
+    replacement: Option<(&str, &str)>,
+) -> verum_vbc::codegen::CodegenResult<verum_vbc::VbcModule> {
+    use verum_ast::ItemKind;
+    use verum_vbc::codegen::{CodegenConfig, ItemFailurePolicy, VbcCodegen};
     let source = r#"
 module app;
+mount core.base.protocols.Deref;
 type Measure is protocol { type Product; };
 type Numeric is ();
 type Logical is ();
 implement Measure for Numeric { type Product = Int; }
 implement Measure for Logical { type Product = Bool; }
 
-type Deref is protocol { type Target; fn deref(&self) -> &Self.Target; };
 type Envelope<T> is { slot: T };
 implement<T> Deref for Envelope<T> {
     type Target = T;
@@ -194,9 +203,44 @@ fn main() -> Int {
         && number.identity() != flag.identity() { 73 } else { -1 }
 }
 "#;
-    let ast = verum_fast_parser::Parser::new(source).parse_module().unwrap();
-    verum_vbc::codegen::VbcCodegen::with_config(verum_vbc::codegen::CodegenConfig::new("app"))
-        .compile_module(&ast).unwrap()
+    let source = match replacement {
+        Some((from, to)) => source.replace(from, to),
+        None => source.to_owned(),
+    };
+    let ast = verum_fast_parser::Parser::new(&source).parse_module().unwrap();
+    let mut protocols =
+        verum_fast_parser::Parser::new(include_str!("../../../core/base/protocols.vr"))
+            .parse_module()
+            .unwrap();
+    protocols.items.retain(|item| match &item.kind {
+        ItemKind::Module(module) => module.items.is_none(),
+        ItemKind::Type(declaration) => declaration.name.as_str() == "Deref",
+        _ => false,
+    });
+    let mut compiler = VbcCodegen::with_config(CodegenConfig::new("app"));
+    let files = [&protocols, &ast];
+    compiler.collect_unit_declarations(&files)?;
+    compiler.resolve_pending_imports();
+    compiler.compile_unit_items(&files, ItemFailurePolicy::Strict)?;
+    compiler.finalize_module_from_state()
+}
+
+#[test]
+#[cfg(feature = "codegen")]
+fn a_local_deref_namesake_does_not_authorize_an_implicit_projection() {
+    let error = projected_receiver_with(Some((
+        "mount core.base.protocols.Deref;",
+        "type Deref is protocol { type Target; fn deref(&self) -> &Self.Target; };",
+    ))).unwrap_err();
+    assert!(error.to_string().contains("Deref method must return its declared Target"), "{error}");
+}
+
+#[test]
+#[cfg(feature = "codegen")]
+fn symbolic_deref_target_must_match_the_selected_implementations_result() {
+    let error = projected_receiver_with(Some(("type Target = T;", "type Target = Bool;")))
+        .unwrap_err();
+    assert!(error.to_string().contains("Deref method must return its declared Target"), "{error}");
 }
 
 #[cfg(feature = "codegen")]
@@ -212,7 +256,8 @@ fn replay_receiver(module: verum_vbc::VbcModule) -> verum_vbc::interpreter::Inte
 #[cfg(feature = "codegen")]
 fn dereferenced_method_witness_selects_its_concrete_receivers_associated_member() {
     let module = projected_receiver();
-    let fun = module.functions.iter().find(|f| module.get_string(f.name) == Some("Job.identity")).unwrap();
+    let job = module.find_function_by_name("app.Job.identity").unwrap();
+    let fun = module.get_function(job).unwrap();
     let start = fun.bytecode_offset as usize;
     let body = &module.bytecode[start..start + fun.bytecode_length as usize];
     let instructions = verum_vbc::bytecode::decode_instructions(body).unwrap();

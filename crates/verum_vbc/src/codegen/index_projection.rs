@@ -239,7 +239,12 @@ impl VbcCodegen {
         index: Option<&Expr>,
     ) -> Option<ProjectionMethod> {
         use crate::types::TypeRef;
-        let owner_name = self.declaration_type_name(owner, 0)?;
+        // The nominal declaration selects the method even when an argument
+        // is an associated type that the caller will supply at runtime.
+        let owner_name = owner.base_type_id().and_then(|id| self.type_by_id(id))
+            .and_then(|declaration| self.type_declaration_identity(declaration))
+            .map(|name| name.into_string())
+            .or_else(|| self.declaration_type_name(owner, 0))?;
         let name = self.registered_receiver_method(&owner_name, method)?;
         let info = self.ctx.lookup_qualified_function(&name)?;
         let TypeRef::Function {
@@ -277,7 +282,11 @@ impl VbcCodegen {
             return None;
         }
         let result = bindings.apply(return_type).ok()?;
-        let result = self.resolve_declared_associated_types(&result)?;
+        let result = if index.is_some() {
+            self.resolve_declared_associated_types(&result)?
+        } else {
+            self.body_declaration_type(&result)?
+        };
         Some(ProjectionMethod {
             name,
             id: info.id,
@@ -322,6 +331,7 @@ impl VbcCodegen {
         // argument and reference capability; equal nominal carriers alone are
         // not evidence that the method borrows the declared target.
         let expected = self.declared_protocol_member(owner, WellKnownProtocol::Deref, "Target")?;
+        let expected = self.body_declaration_type(&expected)?;
         let target = (**inner).clone();
         if expected != target {
             return None;
