@@ -138,3 +138,72 @@ fn relative_inline_export_uses_the_declaring_module_instead_of_the_file_director
     write(root, "token.vr", "module core.token; public type Token is { public value:Bool };");
     assert_source_and_wire(compile(root, "mount core.facade.selected.*;", false).unwrap(), "core.facade.token");
 }
+
+#[test]
+fn inherited_bodies_resolve_globbed_callables_in_the_protocols_lexical_scope() {
+    use verum_vbc::codegen::ItemFailurePolicy;
+
+    let parse = |source: &str| Parser::new(source).parse_module().unwrap();
+    let provider = parse("module api.helpers; public fn picked() -> Int { 37 }");
+    let facade = parse("module api.facade; public mount super.helpers.picked;");
+    let rival = parse("module rival; public fn picked() -> Int { 81 }");
+    let hidden = parse("module hidden; private fn picked() -> Int { 63 }");
+    let prelude = parse("module core.prelude; public fn picked() -> Int { 77 }");
+    let owner = parse(r#"
+        module consumer;
+        mount api.contract.Read;
+        type Cell is { value: Int };
+        fn picked() -> Int { 91 }
+        implement Read for Cell {}
+        fn run() -> Int { Cell { value: 0 }.read() }
+    "#);
+    for (attribute, mounts, local, expected) in [
+        ("", "mount super.facade.*;", "", Ok(74)),
+        ("", "mount super.helpers.*; mount super.facade.*;", "", Ok(74)),
+        ("", "mount super.facade.*; mount rival.*;", "fn picked()->Int { 11 }", Ok(22)),
+        ("", "mount super.facade.*; mount rival.picked;", "", Ok(162)),
+        ("", "mount hidden.*; mount super.facade.*;", "", Ok(74)),
+        ("@no_implicit_prelude", "mount hidden.*;", "", Err("inaccessible")),
+        ("", "mount super.facade.*; mount rival.*;", "", Err("api.helpers.picked, rival.picked")),
+        ("", "mount super.facade.*; mount core.prelude.*;", "", Err("api.helpers.picked, core.prelude.picked")),
+        ("", "", "", Ok(154)),
+        ("@no_implicit_prelude", "", "", Err("picked")),
+    ] {
+        let protocol = parse(&format!(r#"
+            {attribute} module api.contract;
+            {mounts}
+            {local}
+            public type Read is protocol {{
+                fn read(self) -> Int {{
+                    let supplier: fn() -> Int = picked;
+                    supplier() + picked()
+                }}
+            }};
+        "#));
+        for files in [
+            [&provider, &hidden, &rival, &facade, &protocol, &owner, &prelude],
+            [&prelude, &owner, &protocol, &facade, &rival, &hidden, &provider],
+        ] {
+            let mut generator = VbcCodegen::with_config(CodegenConfig::new("main"));
+            generator.collect_unit_declarations(&files).unwrap();
+            generator.resolve_pending_imports();
+            let result = generator.compile_unit_items(&files, ItemFailurePolicy::Strict);
+            let want = match expected {
+                Ok(want) => want,
+                Err(reason) => {
+                    let error = result.expect_err("unavailable lexical value selected an unrelated method");
+                    assert!(error.to_string().contains(reason), "{mounts}: {error}");
+                    continue;
+                }
+            };
+            result.unwrap_or_else(|error| panic!("{mounts}: {error}"));
+            let module = generator.finalize_module_from_state().unwrap();
+            let encoded = serialize_module(&module).unwrap();
+            for module in [module, deserialize_module(&encoded).unwrap()] {
+                let entry = module.find_function_by_name("consumer.run").unwrap();
+                let result = Interpreter::new(Arc::new(module)).execute_function(entry).unwrap();
+                assert_eq!(result.try_as_i64(), Some(want), "{mounts}");
+            }
+        }
+    }
+}

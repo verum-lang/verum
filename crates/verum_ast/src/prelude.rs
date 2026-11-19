@@ -18,6 +18,9 @@ use crate::span::Span;
 use crate::{Ident, Item, ItemKind, MountTree, MountTreeKind, Path, PathSegment};
 use verum_common::{Maybe, Text};
 
+/// Canonical module mounted by the implicit prelude policy.
+pub const IMPLICIT_PRELUDE: &str = "core.prelude";
+
 /// Select the implicit `mount core.prelude.*;` unless the module
 /// opted out, the process opted out, or the module already mounts
 /// `core.prelude` itself (idempotence — the explicit declaration
@@ -44,7 +47,7 @@ pub fn implicit_prelude_path(module: &crate::Module) -> Option<&'static str> {
         });
         names.next() == Some("core") && names.next() == Some("prelude")
     });
-    (!already_mounted).then_some("core.prelude")
+    (!already_mounted).then_some(IMPLICIT_PRELUDE)
 }
 
 /// Insert the selected mount for consumers that walk syntax directly.

@@ -66,7 +66,7 @@ struct ModuleExports {
     declarations: HashMap<String, Vec<DeclaredExport>>,
     named: HashMap<String, BTreeSet<WrittenMountPath>>,
     globs: BTreeSet<WrittenMountPath>,
-    lexical_globs: BTreeSet<WrittenMountPath>,
+    lexical_globs: BTreeMap<WrittenMountPath, GlobOrigin>,
     public_children: BTreeSet<String>,
 }
 
@@ -79,7 +79,7 @@ enum DeclarationCategory { Type, Callable, Value, Context, ContextProtocol, Name
 enum DeclarationNamespace { Type, Value, Module }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum SourceValueKind { Callable, Value, Constructor }
+pub(super) enum SourceValueKind { Callable, Value, Constructor, NominalConstructor }
 
 pub(super) struct SourceValueSelection<'a> {
     pub(super) key: String,
@@ -104,7 +104,15 @@ struct DeclaredExport {
     visibility: verum_ast::Visibility,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum GlobOrigin { ImplicitPrelude, Written }
+
 impl ModuleExports {
+    fn mount_glob(&mut self, path: WrittenMountPath, origin: GlobOrigin) {
+        self.lexical_globs.entry(path)
+            .and_modify(|previous| *previous = (*previous).max(origin)).or_insert(origin);
+    }
+
     fn declare(&mut self, name: &str, target: String, category: DeclarationCategory,
         visibility: &verum_ast::Visibility) {
         let declaration = DeclaredExport { target, category, visibility: visibility.clone() };
@@ -169,7 +177,7 @@ impl SourceExports {
             scope.named.entry(alias).or_default().extend(targets);
         }
         scope.globs.extend(exports.globs);
-        scope.lexical_globs.extend(exports.lexical_globs);
+        for (path, origin) in exports.lexical_globs { scope.mount_glob(path, origin); }
         scope.public_children.extend(exports.public_children);
         scope.lexical_parents.extend(exports.lexical_parents);
     }
@@ -203,7 +211,7 @@ impl VbcCodegen {
         self.collect_callable_exports(owner, &module.items);
         if let Some(path) = verum_ast::prelude::implicit_prelude_path(module) {
             self.source_exports.modules.entry(owner.to_owned()).or_default()
-                .lexical_globs.insert(WrittenMountPath(path.into()));
+                .mount_glob(WrittenMountPath(path.into()), GlobOrigin::ImplicitPrelude);
         }
     }
 
@@ -279,7 +287,7 @@ impl VbcCodegen {
                 )),
                 None => {
                     if let Some(source) = self.source_export_scope(scope) {
-                        for root in &source.lexical_globs {
+                        for root in source.lexical_globs.keys() {
                             select(&format!("{}.{written}", root.select(self, scope)))?;
                         }
                     }
@@ -418,7 +426,7 @@ impl VbcCodegen {
                     SourceMountBinding::Targets(targets) => Some(targets.iter().cloned().collect()),
                     SourceMountBinding::Blocked => None,
                 })).collect(),
-                globs: source.into_iter().flat_map(|scope| scope.lexical_globs.iter())
+                globs: source.into_iter().flat_map(|scope| scope.lexical_globs.keys())
                     .map(|path| path.0.clone()).collect(),
             });
             current = self.lexical_type_parent(owner).flatten();
@@ -460,7 +468,7 @@ impl VbcCodegen {
             }).collect();
 
         let Some(exports) = self.source_export_scope(owner) else { return Some(bindings) };
-        let mut pending: Vec<_> = exports.lexical_globs.iter()
+        let mut pending: Vec<_> = exports.lexical_globs.keys()
             .map(|path| path.select(self, owner).into_string()).collect();
         let mut visited = HashSet::new();
         let mut candidates = BTreeSet::new();
@@ -622,7 +630,10 @@ impl VbcCodegen {
                         if mount.visibility.is_public() {
                             exports.globs.insert(path.clone());
                         }
-                        exports.lexical_globs.insert(path);
+                        let origin = if mount.span.is_empty()
+                            && path.0.as_str() == verum_ast::prelude::IMPLICIT_PRELUDE
+                        { GlobOrigin::ImplicitPrelude } else { GlobOrigin::Written };
+                        exports.mount_glob(path, origin);
                     }
                     if !mount.visibility.is_public() {
                         continue;
@@ -911,7 +922,7 @@ impl VbcCodegen {
         let mut found = None;
         let mut inaccessible = false;
         let mut unresolved = false;
-        for root in roots {
+        for root in roots.keys() {
             let path = format!("{}.{name}", root.select(self, scope));
             let candidates = self.source_export_candidates_in(&path, Some(scope), Some(DeclarationNamespace::Type));
             inaccessible |= candidates.inaccessible || candidates.unresolved;
@@ -979,6 +990,21 @@ impl VbcCodegen {
             .map(|selected| selected.map(|selected| (selected.key, selected.function.clone())))
     }
 
+    fn source_value_declaration<'a>(
+        &'a self, key: &str, kinds: &BTreeSet<DeclarationCategory>,
+    ) -> Option<SourceValueSelection<'a>> {
+        let function = self.ctx.lookup_function(key)?;
+        let kind = if kinds.contains(&DeclarationCategory::Callable) {
+            if function.variant_tag.is_some() { SourceValueKind::Constructor }
+            else { SourceValueKind::Callable }
+        } else if kinds.contains(&DeclarationCategory::Value) && function.is_const {
+            SourceValueKind::Value
+        } else {
+            return None;
+        };
+        Some(SourceValueSelection { key: key.to_owned(), function, kind })
+    }
+
     /// Use the live declaration for call-site queries; registration callers
     /// explicitly take their own snapshot through resolve_source_value_export.
     fn resolve_source_value_export_ref(
@@ -1001,18 +1027,8 @@ impl VbcCodegen {
                 candidates.declarations.keys().cloned().collect::<Vec<_>>().join(", ")));
         }
         if let Some((key, kinds)) = candidates.declarations.first_key_value() {
-            if let Some(info) = self.ctx.lookup_function(key)
-                && (kinds.contains(&DeclarationCategory::Callable)
-                    || kinds.contains(&DeclarationCategory::Value) && info.is_const)
-            {
-                return Ok(Some(SourceValueSelection {
-                    key: key.clone(), function: info,
-                    // Sum arms have callable table entries for construction;
-                    // their selected producer is never a first-class function family.
-                    kind: if info.variant_tag.is_some() { SourceValueKind::Constructor }
-                        else if kinds.contains(&DeclarationCategory::Callable) { SourceValueKind::Callable }
-                        else { SourceValueKind::Value },
-                }));
+            if let Some(selected) = self.source_value_declaration(key, kinds) {
+                return Ok(Some(selected));
             }
             if !kinds.contains(&DeclarationCategory::Callable) { return Ok(None); }
         } else {
@@ -1023,7 +1039,7 @@ impl VbcCodegen {
             if nominal.inaccessible { return Err(format!("type mount `{path}` is inaccessible from `{consumer}`")); }
             if let Some(key) = nominal.nominal() {
                 return Ok(self.ctx.lookup_function(key).map(|info| SourceValueSelection {
-                    key: key.clone(), function: info, kind: SourceValueKind::Constructor,
+                    key: key.clone(), function: info, kind: SourceValueKind::NominalConstructor,
                 }));
             }
             if !nominal.declarations.is_empty() { return Ok(None); }
@@ -1033,7 +1049,7 @@ impl VbcCodegen {
         Err(format!("no callable declaration for mount `{path}`"))
     }
 
-    /// Resolve a named value import in the body owner's namespace. The mount
+    /// Resolve a value import in the body owner's namespace. The mount
     /// inventory is shared with type lookup, but a value binding is not a type
     /// binding. Missing, private and conflicting declarations cannot supply an
     /// ambient builtin or another source unit's same-named function.
@@ -1050,24 +1066,71 @@ impl VbcCodegen {
         &self, name: &str,
     ) -> Option<super::CodegenResult<SourceValueSelection<'_>>> {
         let owner = self.lexical_type_scope();
-        let binding = self.source_type_mounts.get(&Text::from(owner))?.get(&Text::from(name))?;
+        let binding = self.source_type_mounts.get(&Text::from(owner))
+            .and_then(|bindings| bindings.get(&Text::from(name)));
+        let Some(binding) = binding else { return self.source_glob_value(name, owner); };
         let invalid = |message: String| super::CodegenError::new(
             super::CodegenErrorKind::InvalidSourceMount([message].into_iter().collect()));
         let SourceMountBinding::Targets(targets) = binding else {
             return Some(Err(invalid(format!("conflicting callable binding `{name}` in `{owner}`"))));
         };
-        let mut selected: Option<SourceValueSelection<'_>> = None;
+        let mut candidates = Vec::new();
         for path in targets {
-            let candidate = match self.resolve_source_value_export_ref(path, owner) {
-                Ok(Some(candidate)) => candidate,
-                Ok(None) => continue,
+            match self.resolve_source_value_export_ref(path, owner) {
+                Ok(Some(candidate)) => candidates.push(candidate),
+                Ok(None) => {}
                 Err(message) => return Some(Err(invalid(message))),
-            };
-            if selected.as_ref().is_some_and(|selected| selected.key != candidate.key || selected.kind != candidate.kind) {
-                return Some(Err(invalid(format!("ambiguous callable binding `{name}` in `{owner}`"))));
             }
-            selected = Some(candidate);
         }
-        selected.map(Ok)
+        // Separate named mounts may bind a type and a value under one name.
+        // The type contributes its constructor only in the absence of a value.
+        let has_value = candidates.iter().any(|c| c.kind != SourceValueKind::NominalConstructor);
+        let mut candidates = candidates.into_iter().filter(|c| !has_value || c.kind != SourceValueKind::NominalConstructor);
+        let Some(selected) = candidates.next() else { return self.source_glob_value(name, owner); };
+        if candidates.any(|c| c.key != selected.key || c.kind != selected.kind) {
+            return Some(Err(invalid(format!("ambiguous callable binding `{name}` in `{owner}`"))));
+        }
+        Some(Ok(selected))
+    }
+
+    fn source_glob_value(
+        &self, name: &str, owner: &str,
+    ) -> Option<super::CodegenResult<SourceValueSelection<'_>>> {
+        let scope = self.source_export_scope(owner)?;
+        if name.contains('.') || scope.lexical_globs.is_empty()
+            || scope.declarations.get(name).is_some_and(|declarations| declarations.iter()
+                .any(|d| d.category.namespace() == DeclarationNamespace::Value))
+        {
+            return None;
+        }
+        let invalid = |reason: &str| super::CodegenError::new(
+            super::CodegenErrorKind::InvalidSourceMount(vec![
+                format!("{reason} wildcard value `{name}` in `{owner}`")
+            ]));
+        for rank in [GlobOrigin::Written, GlobOrigin::ImplicitPrelude] {
+            let mut found = BTreeMap::<String, BTreeSet<DeclarationCategory>>::new();
+            let mut inaccessible = false;
+            for (root, origin) in &scope.lexical_globs {
+                if *origin != rank { continue; }
+                let path = format!("{}.{name}", root.select(self, owner));
+                let candidates = self.source_export_candidates_in(&path, Some(owner), Some(DeclarationNamespace::Value));
+                if candidates.unresolved { return Some(Err(invalid("unresolved"))); }
+                inaccessible |= candidates.inaccessible;
+                for (key, kinds) in candidates.declarations {
+                    found.entry(key).or_default().extend(kinds);
+                }
+            }
+            if found.len() > 1 {
+                let names = found.keys().cloned().collect::<Vec<_>>().join(", ");
+                return Some(Err(super::CodegenError::new(super::CodegenErrorKind::InvalidSourceMount(
+                    vec![format!("ambiguous wildcard value `{name}` in `{owner}`: {names}")]))));
+            }
+            if let Some((key, kinds)) = found.first_key_value() {
+                return self.source_value_declaration(key, kinds).map(Ok).or_else(||
+                    kinds.contains(&DeclarationCategory::Callable).then(|| Err(invalid("unlinked"))));
+            }
+            if inaccessible { return Some(Err(invalid("inaccessible"))); }
+        }
+        None
     }
 }
