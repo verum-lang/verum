@@ -61,6 +61,9 @@ module core.configuration;
 
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Maybe, Some, None, Text};
+mount core.sync.once.OnceLock;
+mount core.configuration.toml.{register as register_toml};
+mount core.configuration.json.{register as register_json};
 
 // Re-export the universal types so callers `mount core.configuration.*`
 // and have everything in scope.
@@ -116,26 +119,22 @@ public mount configuration.convert.{
 // Built-in registry — singleton populated on first access
 // =============================================================================
 //
-// Lazy-initialised singleton holding all built-in format adapters.
-// Custom formats are registered via `core.configuration.register_format`
-// against this same registry.
-const BUILTIN_REGISTRY: Lazy<FormatRegistry> = Lazy.new(|| {
-    let reg = registry_new();
-    // Built-in adapters self-register here:
-    // configuration.toml.register(&reg);
-    // configuration.yaml.register(&reg);
-    // configuration.ini.register(&reg);
-    // ... etc.
-    // (Each format module exposes a `register(reg: &FormatRegistry)`
-    // function that constructs its singleton adapter and inserts it.)
-    reg
-});
+// The static owns storage; OnceLock publishes the fully populated registry
+// once. Custom registrations mutate this same registry after publication.
+static BUILTIN_REGISTRY: OnceLock<FormatRegistry> = OnceLock.new();
 
-/// Access the global format registry. Built-in formats are registered
-/// on first access; user code may register additional formats by calling
-/// `register_format(&builtin_registry(), ...)`.
+fn initialize_builtin_registry() -> FormatRegistry {
+    let reg = registry_new();
+    register_toml(&reg).expect("built-in TOML adapter registration failed");
+    register_json(&reg).expect("built-in JSON adapter registration failed");
+    reg
+}
+
+/// Access the global format registry. TOML and JSON are registered on first
+/// access; `register_format(builtin_registry(), ...)` adds custom formats to
+/// the same registry. The borrowed value is owned by static OnceLock storage.
 public fn builtin_registry() -> &'static FormatRegistry {
-    BUILTIN_REGISTRY.get()
+    BUILTIN_REGISTRY.get_or_init(initialize_builtin_registry)
 }
 
 // =============================================================================

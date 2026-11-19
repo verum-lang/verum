@@ -3,11 +3,12 @@
 module core.configuration.json;
 
 mount core.collections.{List, Map};
+mount core.base.memory.Shared;
 mount core.base.protocols.{Send, Sync};
 mount core.encoding.json.{JsonValue, JsonError, JsonErrorKind, parse as json_parse, stringify as json_stringify};
 mount core.configuration.value.{ConfigValue, type_name};
 mount core.configuration.error.{ConfigError, ConfigErrorKind, FormatId, format_id_json, config_err};
-mount core.configuration.format.{ConfigFormat, ConfigFormatOptions, FormatCapabilities, default_capabilities};
+mount core.configuration.format.{ConfigFormat, ConfigFormatOptions, FormatCapabilities, FormatRegistry, default_capabilities, register_format};
 
 public type JsonFormat is {};
 
@@ -138,4 +139,8 @@ public fn from_json_error(error: JsonError) -> ConfigError {
         JsonErrorKind.InvalidLimit => ConfigErrorKind.ValueOutOfRange,
     };
     config_err(format_id_json(), kind, error.line, error.column, error.byte_offset, error.message)
+}
+
+public fn register(registry: &FormatRegistry) -> Result<(), Text> {
+    register_format(registry, Shared.new(json_format()) as Shared<dyn ConfigFormat>)
 }

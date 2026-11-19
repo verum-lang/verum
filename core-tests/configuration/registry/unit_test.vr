@@ -1,0 +1,99 @@
+mount core.configuration.{builtin_registry, register_format, get_format, registered_ids, load_text, format_id_toml, format_id_json};
+mount core.configuration.format.{ConfigFormat, ConfigFormatOptions, FormatCapabilities, default_capabilities};
+mount core.configuration.error.{ConfigError, ConfigErrorKind, FormatId, config_err};
+mount core.configuration.value.ConfigValue;
+mount core.base.memory.Shared;
+mount core.base.protocols.{Send, Sync};
+mount core.collections.List;
+
+type RegistryProbe is {};
+implement Send for RegistryProbe {}
+implement Sync for RegistryProbe {}
+
+implement ConfigFormat for RegistryProbe {
+    fn format_id(&self) -> FormatId { "registry_probe".to_text() }
+    fn display_name(&self) -> Text { "registry lifecycle probe".to_text() }
+    fn extensions(&self) -> List<Text> { List.new() }
+    fn mime_types(&self) -> List<Text> { List.new() }
+    fn capabilities(&self) -> FormatCapabilities { default_capabilities() }
+    fn parse(&self, source: &Text) -> Result<ConfigValue, ConfigError> {
+        Result.Ok(ConfigValue.ConfigString(source.clone()))
+    }
+    fn parse_with_options(&self, source: &Text, _options: &ConfigFormatOptions) -> Result<ConfigValue, ConfigError> {
+        self.parse(source)
+    }
+    fn stringify(&self, value: &ConfigValue) -> Result<Text, ConfigError> {
+        match value {
+            ConfigValue.ConfigString(text) => Result.Ok(text.clone()),
+            _ => Result.Err(config_err(self.format_id(), ConfigErrorKind.UnsupportedFeature,
+                0, 0, 0, "probe expects text".to_text())),
+        }
+    }
+    fn stringify_with_options(&self, value: &ConfigValue, _options: &ConfigFormatOptions) -> Result<Text, ConfigError> {
+        self.stringify(value)
+    }
+}
+
+@test
+fn test_registry_preserves_adapter_identity_and_user_registration() {
+    let first_registry = builtin_registry();
+    let first_toml = get_format(first_registry, &format_id_toml()).unwrap();
+    let before = registered_ids(first_registry).len();
+    let custom: Shared<dyn ConfigFormat> = Shared.new(RegistryProbe {}) as Shared<dyn ConfigFormat>;
+    register_format(first_registry, custom.clone()).unwrap();
+
+    let second_registry = builtin_registry();
+    assert_eq(registered_ids(second_registry).len(), before + 1);
+    let second_toml = get_format(second_registry, &format_id_toml()).unwrap();
+    assert(first_toml.ptr_eq(&second_toml));
+    let observed = get_format(second_registry, &"registry_probe".to_text()).unwrap();
+    assert(custom.ptr_eq(&observed));
+    assert(register_format(second_registry, custom.clone()).is_err());
+    assert_eq(registered_ids(builtin_registry()).len(), before + 1);
+
+    match load_text(&"retained".to_text(), &"registry_probe".to_text()).unwrap() {
+        ConfigValue.ConfigString(text) => assert_eq(text, "retained"),
+        _ => panic("custom adapter did not execute through the public registry"),
+    }
+}
+
+@test
+fn test_registry_executes_toml_and_json_codecs() {
+    let toml = load_text(&"answer = 42\n".to_text(), &format_id_toml()).unwrap();
+    let json = load_text(&"{\"answer\":42,\"enabled\":true}".to_text(), &format_id_json()).unwrap();
+    for document in [toml, json] {
+        match document {
+            ConfigValue.ConfigTable(table) => {
+                match table.get(&"answer".to_text()).unwrap() {
+                    ConfigValue.ConfigInt(value) => assert_eq(*value, 42),
+                    _ => panic("integer payload changed in configuration adapter"),
+                }
+            }
+            _ => panic("configuration parser did not return a table"),
+        }
+    }
+    let error = match load_text(&"{".to_text(), &format_id_json()) {
+        Result.Err(error) => error,
+        Result.Ok(_) => panic("malformed JSON was accepted"),
+    };
+    assert_eq(error.format_id, format_id_json());
+    assert(error.kind is ConfigErrorKind.UnexpectedEof);
+    assert_eq(error.byte_offset, 1);
+}
+
+@test
+fn test_json_adapter_refuses_lossy_values_and_unknown_options() {
+    let json = get_format(builtin_registry(), &format_id_json()).unwrap();
+    let mut bytes: List<Byte> = List.new();
+    bytes.push(42);
+    let error = json.stringify(&ConfigValue.ConfigBytes(bytes)).unwrap_err();
+    assert(error.kind is ConfigErrorKind.UnsupportedFeature);
+    let error = json.stringify(&ConfigValue.ConfigFloat(Float.infinity())).unwrap_err();
+    assert(error.kind is ConfigErrorKind.InvalidNumber);
+    let options = ConfigFormatOptions { payload: ConfigValue.ConfigBool(true) };
+    let error = match json.parse_with_options(&"42".to_text(), &options) {
+        Result.Err(error) => error,
+        Result.Ok(_) => panic("unsupported JSON options were accepted"),
+    };
+    assert(error.kind is ConfigErrorKind.UnsupportedFeature);
+}

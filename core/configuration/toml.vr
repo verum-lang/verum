@@ -68,6 +68,7 @@ module core.configuration.toml;
 
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Maybe, Some, None, Text};
+mount core.base.memory.Shared;
 mount core.base.protocols.{Send, Sync};
 mount time.rfc3339.{Rfc3339Time};
 mount time.rfc3339.{parse as rfc3339_parse, format_with_offset as rfc3339_format_with_offset};
@@ -1618,5 +1619,5 @@ fn toml_to_cfg_err(e: TomlError) -> ConfigError {
 /// Self-register this format with a registry. Called by
 /// `core.configuration.mod` during built-in registry initialisation.
 public fn register(reg: &FormatRegistry) -> Result<(), Text> {
-    register_format(reg, Heap.new(toml_format()) as Heap<dyn ConfigFormat>)
+    register_format(reg, Shared.new(toml_format()) as Shared<dyn ConfigFormat>)
 }

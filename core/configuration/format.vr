@@ -45,6 +45,8 @@ mount collections.{List, Map};
 mount base.{Result, Ok, Err, Maybe, Some, None, Text};
 mount configuration.value.{ConfigValue};
 mount configuration.error.{ConfigError, ConfigErrorKind, FormatId, config_err};
+mount core.base.memory.Shared;
+mount core.base.protocols.{Send, Sync};
 // Mounted rather than inherited: §4ter — the prelude carries only what
 // the LANGUAGE requires, and this is library API.
 mount core.sync.{RwLock};
@@ -140,7 +142,7 @@ public fn default_capabilities() -> FormatCapabilities {
 //
 // The universal interface for every configuration format. Implementations
 // live in `core/configuration/<format>.vr`.
-public type ConfigFormat is protocol {
+public type ConfigFormat is protocol extends Send + Sync {
     /// Stable identifier. Must match `format_id_<name>()` in error.vr if
     /// the format is built-in.
     fn format_id(&self) -> FormatId;
@@ -182,15 +184,15 @@ public type ConfigFormat is protocol {
 // FormatRegistry — runtime registry of format implementations
 // =============================================================================
 //
-// Singleton-managed map from `FormatId` to `&ConfigFormat`. Built-in
+// Singleton-managed map from FormatId to shared format adapters. Built-in
 // formats register on first access; user code may register custom
 // formats via `register_format`.
 //
-// **Thread safety.** The registry is held in a `Shared<RwLock<...>>` —
-// reads are lock-free in the common case (after warmup), writes acquire
-// a write lock. New format registration is rare (usually once at startup).
+// The map is protected by a read/write lock. Lookup clones a Shared handle
+// before releasing the read lock, so user parser code runs outside the lock
+// while its adapter stays alive. ConfigFormat requires Send and Sync.
 public type FormatRegistry is {
-    formats: Shared<RwLock<Map<FormatId, Heap<dyn ConfigFormat>>>>,
+    formats: Shared<RwLock<Map<FormatId, Shared<dyn ConfigFormat>>>>,
 };
 
 public fn registry_new() -> FormatRegistry {
@@ -203,11 +205,15 @@ public fn registry_new() -> FormatRegistry {
 /// is already registered, returns `Err` with a duplicate-id message.
 public fn register_format(
     reg: &FormatRegistry,
-    fmt: Heap<dyn ConfigFormat>,
+    fmt: Shared<dyn ConfigFormat>,
 ) -> Result<(), Text> {
     let id = fmt.format_id();
-    let mut guard = reg.formats.write();
-    if guard.contains_key(&id) {
+    let mut guard = match reg.formats.write() {
+        Result.Ok(guard) => guard,
+        Result.Err(_) => panic("configuration registry write lock poisoned"),
+    };
+    if guard.contains_key(id) {
+        drop(guard);
         return Result.Err("format already registered: ".to_text().concat(&id));
     }
     guard.insert(id, fmt);
@@ -218,12 +224,22 @@ public fn register_format(
 public fn get_format(
     reg: &FormatRegistry,
     id: &FormatId,
-) -> Maybe<Heap<dyn ConfigFormat>> {
-    let guard = reg.formats.read();
-    match guard.get(id) {
-        Maybe.Some(f) => Maybe.Some(f.clone()),
-        Maybe.None    => Maybe.None,
-    }
+) -> Maybe<Shared<dyn ConfigFormat>> {
+    let guard = match reg.formats.read() {
+        Result.Ok(guard) => guard,
+        Result.Err(_) => panic("configuration registry read lock poisoned"),
+    };
+    guard.get(id.clone())
+}
+
+// Take an owned snapshot before invoking adapter code. An adapter may register
+// another format while reporting capabilities or parsing a document.
+fn registered_formats(reg: &FormatRegistry) -> List<Shared<dyn ConfigFormat>> {
+    let guard = match reg.formats.read() {
+        Result.Ok(guard) => guard,
+        Result.Err(_) => panic("configuration registry read lock poisoned"),
+    };
+    guard.values_list()
 }
 
 /// Detect format by file extension. Returns the first registered format
@@ -231,18 +247,17 @@ public fn get_format(
 public fn detect_by_extension(
     reg: &FormatRegistry,
     ext: &Text,
-) -> Maybe<Heap<dyn ConfigFormat>> {
+) -> Maybe<Shared<dyn ConfigFormat>> {
     let ext_lower = ext.to_lowercase();
-    let guard = reg.formats.read();
-    let keys = guard.keys();
+    let formats = registered_formats(reg);
     let mut i = 0;
-    while i < keys.len() {
-        let f = guard.get(keys.get(i).unwrap()).unwrap();
+    while i < formats.len() {
+        let f = formats.get(i).unwrap();
         let exts = f.extensions();
         let mut j = 0;
         while j < exts.len() {
             if exts.get(j).unwrap().to_lowercase() == ext_lower {
-                return Maybe.Some(f.clone());
+                return Maybe.Some(f);
             }
             j = j + 1;
         }
@@ -255,7 +270,7 @@ public fn detect_by_extension(
 public fn detect_by_path(
     reg: &FormatRegistry,
     path: &Text,
-) -> Maybe<Heap<dyn ConfigFormat>> {
+) -> Maybe<Shared<dyn ConfigFormat>> {
     let bs = path.as_bytes();
     let mut last_dot: Int = -1;
     let mut i = 0;
@@ -275,18 +290,17 @@ public fn detect_by_path(
 public fn detect_by_mime(
     reg: &FormatRegistry,
     mime: &Text,
-) -> Maybe<Heap<dyn ConfigFormat>> {
+) -> Maybe<Shared<dyn ConfigFormat>> {
     let mime_lower = mime.to_lowercase();
-    let guard = reg.formats.read();
-    let keys = guard.keys();
+    let formats = registered_formats(reg);
     let mut i = 0;
-    while i < keys.len() {
-        let f = guard.get(keys.get(i).unwrap()).unwrap();
+    while i < formats.len() {
+        let f = formats.get(i).unwrap();
         let mimes = f.mime_types();
         let mut j = 0;
         while j < mimes.len() {
             if mimes.get(j).unwrap().to_lowercase() == mime_lower {
-                return Maybe.Some(f.clone());
+                return Maybe.Some(f);
             }
             j = j + 1;
         }
@@ -297,11 +311,12 @@ public fn detect_by_mime(
 
 /// List all registered format ids.
 public fn registered_ids(reg: &FormatRegistry) -> List<FormatId> {
-    let guard = reg.formats.read();
-    let mut ids: List<FormatId> = List.new();
-    let keys = guard.keys();
-    let mut i = 0;
-    while i < keys.len() { ids.push(keys.get(i).unwrap().clone()); i = i + 1; }
+    let guard = match reg.formats.read() {
+        Result.Ok(guard) => guard,
+        Result.Err(_) => panic("configuration registry read lock poisoned"),
+    };
+    let mut ids: List<FormatId> = List.with_capacity(guard.len());
+    for (id, _) in guard.iter() { ids.push(id); }
     ids
 }
 
