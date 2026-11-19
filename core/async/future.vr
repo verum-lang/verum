@@ -19,6 +19,7 @@
 )
 module core.async.future;
 mount core.base.protocols.Send;
+mount core.runtime.thread.Thread;
 mount super.poll.*;
 mount super.waker.*;
 
@@ -231,7 +232,7 @@ public type FutureExt is protocol extends Future {
     /// this method intentionally stays minimal.
     ///
 
-    /// On Pending we call `thread.yield_now()` so the OS scheduler
+    /// On Pending we call `Thread.yield_now()` so the OS scheduler
     /// gets a chance to run other threads — keeps the CPU from
     /// pinning at 100% in the (already-incorrect) async-future
     /// case while a synchronous-completion future converges.
@@ -248,7 +249,7 @@ public type FutureExt is protocol extends Future {
                     // Synchronous-completion futures resolve on
                     // the next iteration; genuine async futures
                     // hang here, which is the documented limit.
-                    super.super.runtime.thread.yield_now();
+                    Thread.yield_now();
                 }
             }
         }

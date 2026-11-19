@@ -10,11 +10,12 @@
 // =============================================================================
 
 mount core.async.future.{
-    Future, ReadyFuture, PendingFuture, Lazy, MapFuture, AndThenFuture,
+    Future, FutureExt, ReadyFuture, PendingFuture, Lazy, MapFuture, AndThenFuture,
     Join2, Join3, Select2, SelectResult,
     ready, pending, lazy, join, select, join3,
 };
 mount core.async.poll.{Poll};
+mount core.async.waker.Context;
 mount core.base.maybe.{Maybe, Some, None};
 mount core.collections.list.List;
 
@@ -39,6 +40,22 @@ mount core.collections.list.List;
 fn regression_future_ready_block_returns_value() {
     let r = ready(42);
     assert(r.block() == 42);
+}
+
+type ReadyAfterYield is { polls: Int };
+
+implement Future for ReadyAfterYield {
+    type Output = Int;
+
+    fn poll(&mut self, _cx: &mut Context) -> Poll<Int> {
+        self.polls += 1;
+        if self.polls == 1 { Poll.Pending } else { Poll.Ready(self.polls) }
+    }
+}
+
+@test
+fn regression_future_block_polls_again_after_yield() {
+    assert(ReadyAfterYield { polls: 0 }.block() == 2);
 }
 
 @test
