@@ -11,25 +11,7 @@
 //   * Variant disjointness via `is`-pattern testing
 //   * Payload round-trip for UnsupportedValue
 //
-// THE DEFERRAL HERE NAMED THE WRONG CAUSE, which mattered because it
-// pointed at a fix nobody was going to make for this. It read: "the
-// canonicalize_value / canonicalize_str surfaces produce Text via the
-// json.vr stringification path which trips the same lenient-stub
-// cascade as other Text builders".
-//
-// Re-run 2026-09-12 under a plain `verum run`, the failure is not a
-// stub cascade and has nothing to do with Text:
-//
-//     canonicalize_str("{\"b\":1,\"a\":2}")
-//     -> Null pointer dereference: op=opcode 0x62 at MapIter.next
-//
-// That is the Map-iterator family — the same opcode and the same site
-// shape as `Map.entry`, `Map.get_mut` and `Map.values_mut`, all three
-// of which this repo already pins. JCS canonicalisation has to walk an
-// object's keys in sorted order, so it reaches a map iterator on every
-// input that contains an object; nothing about the sibling PEM
-// deferral applied here, and that one turned out to be simply stale.
-// Section 5 pins it at the measured cause.
+// Object canonicalization covers member order, nested values and duplicate-key rejection.
 // =============================================================================
 
 mount core.encoding.jcs.{JcsError, canonicalize_str};
@@ -122,25 +104,24 @@ fn test_jcs_error_unsupported_value_payload_round_trip() {
     }
 }
 
-@ignore("Nested record-field access through match-binding (inner_err.kind) trips the field-index resolver — sister of [[btree_pattern_match_ref_generic_class]]. Workaround: bind via typed local + re-deref.")
 @test
 fn test_jcs_error_json_parse_failed_payload_kind_round_trip() {
     let inner = mk_json_err(JsonErrorKind.TrailingGarbage, "extra".to_text());
     let e: JcsError = JcsError.JsonParseFailed(inner);
     match e {
         JcsError.JsonParseFailed(inner_err) => {
-            assert(inner_err.kind is JsonErrorKind.TrailingGarbage);
+            let cause: JsonError = inner_err;
+            assert(cause.kind is JsonErrorKind.TrailingGarbage);
         },
         _ => panic("expected JsonParseFailed"),
     }
 }
 
 // =============================================================================
-// Section 5: canonicalize_str — pinned at the measured cause
+// Section 5: canonical JSON objects
 // =============================================================================
 
 @test
-@ignore("canonicalize_str dies with `Null pointer dereference: op=opcode 0x62 at MapIter.next`. Measured 2026-09-12 at Tier 0 on {\"b\":1,\"a\":2}. NOT the lenient-stub cascade the old header blamed: it is the Map-iterator family, same opcode and site shape as Map.entry / Map.get_mut / Map.values_mut. Canonicalisation walks an object's keys in sorted order, so it reaches a map iterator on any input containing an object.")
 fn test_canonicalize_str_sorts_object_keys() {
     // RFC 8785 §3.2.3: object members are serialised ordered by their
     // UTF-16 code units, so `b` before `a` on the wire comes back `a`
@@ -152,7 +133,6 @@ fn test_canonicalize_str_sorts_object_keys() {
 }
 
 @test
-@ignore("Same MapIter.next null dereference as the sibling test above; see its note. Measured 2026-09-12 (A125 family).")
 fn test_canonicalize_str_is_idempotent() {
     // Canonical form applied twice is the canonical form. A serialiser
     // that merely reordered without normalising whitespace or number
@@ -170,12 +150,18 @@ fn test_canonicalize_str_is_idempotent() {
 
 @test
 fn test_canonicalize_str_refuses_malformed_json() {
-    // The ERROR path does not reach a map iterator, so it runs today
-    // and is the half of this surface that can be pinned green.
     match canonicalize_str(&Text.from("{not json")) {
         Result.Ok(_) => panic("malformed input must not canonicalise"),
         Result.Err(_) => assert(true),
     };
+}
+
+@test
+fn test_nested_object_and_utf16_key_order() {
+    let input = "{\"\":1,\"😀\":2,\"a\":[{\"z\":true,\"b\":null}]}";
+    let expected = "{\"a\":[{\"b\":null,\"z\":true}],\"😀\":2,\"\":1}";
+    assert_eq(canonicalize_str(&input).unwrap(), expected);
+    assert(canonicalize_str(&"{\"a\":1,\"\\u0061\":2}").is_err());
 }
 
 fn main() {}

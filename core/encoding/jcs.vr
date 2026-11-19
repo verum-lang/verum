@@ -73,7 +73,7 @@ module core.encoding.jcs;
 
 mount core.collections.list.{List};
 mount core.collections.map.{Map};
-mount core.encoding.json.{JsonValue, JsonError, parse_value};
+mount core.encoding.json.{JsonValue, JsonError, parse_strict};
 
 // =============================================================================
 // Error surface
@@ -138,7 +138,10 @@ public fn canonicalize_value(v: &JsonValue) -> Result<Text, JcsError> {
 /// Parse `input` as JSON then canonicalise — the "canonicalise a
 /// wire blob" single-call form.
 public fn canonicalize_str(input: &Text) -> Result<Text, JcsError> {
-    let v = parse_value(input).map_err(|e| JcsError.JsonParseFailed(e))?;
+    let v = match parse_strict(input, input.len()) {
+        Result.Ok(value) => value,
+        Result.Err(error) => return Result.Err(JcsError.JsonParseFailed(error)),
+    };
     canonicalize_value(&v)
 }
 
@@ -178,15 +181,8 @@ fn emit(v: &JsonValue, out: &mut List<Byte>) -> Result<(), JcsError> {
 }
 
 fn emit_object(m: &Map<Text, JsonValue>, out: &mut List<Byte>) -> Result<(), JcsError> {
-    // Collect keys.
-    let mut keys: List<Text> = [];
-    let mut iter = m.keys();
-    loop {
-        match iter.next() {
-            Maybe.Some(k) => keys.push(k.clone()),
-            Maybe.None    => break,
-        }
-    }
+    let mut keys: List<Text> = List.with_capacity(m.len());
+    for (key, _) in m.iter() { keys.push(key); }
     // Sort by UTF-16 code-unit order (§3.2.3). For ASCII-only keys
     // this equals byte-lex; for multi-byte UTF-8 we decode to
     // code points and compare as UTF-16 surrogate-aware sequence.
@@ -198,9 +194,9 @@ fn emit_object(m: &Map<Text, JsonValue>, out: &mut List<Byte>) -> Result<(), Jcs
         if i > 0 { out.push(',' as Byte); }
         emit_string(out, &keys[i]);
         out.push(':' as Byte);
-        match m.get(&keys[i]) {
-            Maybe.Some(v) => emit(v, out)?,
-            Maybe.None    => push_bytes(out, b"null"),
+        match m.get(keys[i].clone()) {
+            Maybe.Some(value) => emit(&value, out)?,
+            Maybe.None => return Result.Err(JcsError.UnsupportedValue("object key disappeared during canonicalization")),
         }
         i = i + 1;
     }
