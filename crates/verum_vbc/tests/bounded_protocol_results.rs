@@ -1045,3 +1045,108 @@ fn a_custom_for_loop_delivers_its_iterator_application_to_next() {
     "#);
     execute_source_and_wire(compile(&[&maybe, &iterator, &consumer]).unwrap(), 93);
 }
+
+fn actual_enumeration() -> (Module, Module) {
+    use verum_ast::decl::{ImplItemKind, ImplKind};
+
+    let mut iterator = actual_iterator(&["enumerate"]);
+    iterator.items.extend(parse("mount core.base.maybe.Maybe;").items);
+    let mut actual = parse(include_str!("../../../core/base/iterator.vr"));
+    actual.items.retain_mut(|item| match &mut item.kind {
+        ItemKind::Type(declaration) => declaration.name.as_str() == "EnumerateIter",
+        ItemKind::Impl(declaration) if matches!(&declaration.kind,
+            ImplKind::Protocol { protocol, for_type, .. }
+                if protocol.to_string() == "Iterator"
+                    && verum_ast::pretty::format_type(for_type) == "EnumerateIter<I>") =>
+        {
+            declaration.items.retain(|item| match &item.kind {
+                ImplItemKind::Type { name, .. } => name.as_str() == "Item",
+                ImplItemKind::Function(function) => function.name.as_str() == "next",
+                _ => false,
+            });
+            true
+        }
+        _ => false,
+    });
+    assert_eq!(actual.items.len(), 2);
+    iterator.items.extend(actual.items);
+    let maybe = parse("module core.base.maybe; public type Maybe<T> is None | Some(T);");
+    (iterator, maybe)
+}
+
+#[test]
+fn enumeration_binds_the_index_and_the_declared_borrowed_item() {
+    let (iterator, maybe) = actual_enumeration();
+    let source = r#"
+        module consumer;
+        mount core.base.iterator.Iterator;
+        mount core.base.maybe.Maybe;
+        type Source<T> is { first: T, second: T, at: Int };
+        type Other is protocol { type Item; };
+        implement<T> Other for Source<T> { type Item = Bool; }
+        implement<T> Iterator for Source<T> {
+            type Item = &T;
+            fn next(&mut self) -> Maybe<&T> {
+                self.at += 1;
+                if self.at == 1 { Maybe.Some(&self.first) }
+                else if self.at == 2 { Maybe.Some(&self.second) }
+                else { Maybe.None }
+            }
+        }
+        fn accept<T>(value: T, exemplar: T) -> T { value }
+        fn run() -> Int {
+            let rows = Source { first: 37_u8, second: 55_u8, at: 0 };
+            let mut total = 0;
+            for (i, b) in rows.enumerate() { total += i + (accept(*b, 7_u8) as Int); }
+            total
+        }
+    "#;
+    let consumer = parse(source);
+    execute_source_and_wire(compile(&[&maybe, &iterator, &consumer]).unwrap(), 93);
+    let incompatible = parse(&source.replace("accept(*b, 7_u8)", "accept(*b, false)"));
+    let error = compile(&[&maybe, &iterator, &incompatible]).unwrap_err();
+    assert!(error.to_string().contains("source argument evidence"), "{error}");
+}
+
+#[test]
+fn the_slice_iterator_keeps_its_borrow_through_enumerate() {
+    use verum_ast::decl::{ImplItemKind, ImplKind};
+
+    let (mut iterator, maybe) = actual_enumeration();
+    let actual = parse(include_str!("../../../core/base/iterator.vr"));
+    iterator.items.extend(actual.items.into_iter().filter(|item| matches!(&item.kind,
+        ItemKind::Type(declaration) if declaration.name.as_str() == "IntoIterator")));
+    let mut slice = parse(include_str!("../../../core/collections/slice.vr"));
+    slice.items.retain_mut(|item| match &mut item.kind {
+        ItemKind::Module(declaration) => declaration.items.is_none(),
+        ItemKind::Type(declaration) => declaration.name.as_str() == "SliceIter",
+        ItemKind::Impl(declaration) if matches!(&declaration.kind,
+            ImplKind::Protocol { protocol, for_type, .. }
+                if matches!(protocol.to_string().as_str(), "Iterator" | "IntoIterator")
+                    && verum_ast::pretty::format_type(for_type) == "SliceIter<T>") =>
+        {
+            declaration.items.retain(|item| match &item.kind {
+                ImplItemKind::Type { .. } => true,
+                ImplItemKind::Function(function) => matches!(function.name.as_str(), "next" | "into_iter"),
+                _ => false,
+            });
+            true
+        }
+        _ => false,
+    });
+    slice.items.extend(parse("mount core.base.iterator.{Iterator, IntoIterator}; mount core.base.maybe.Maybe;").items);
+    let consumer = parse(r#"
+        module consumer;
+        mount core.base.iterator.Iterator;
+        mount core.collections.slice.SliceIter;
+        fn accept<T>(value: T, exemplar: T) -> T { value }
+        fn sum(bytes: &[Byte]) -> Int {
+            let rows = SliceIter { slice: bytes, front: 0, back: 2 };
+            let mut total = 0;
+            for (i, b) in rows.enumerate() { total += i + (accept(*b, 7_u8) as Int); }
+            total
+        }
+        fn run() -> Int { let input = [37_u8, 55_u8]; sum(&input) }
+    "#);
+    execute_source_and_wire(compile(&[&maybe, &iterator, &slice, &consumer]).unwrap(), 93);
+}

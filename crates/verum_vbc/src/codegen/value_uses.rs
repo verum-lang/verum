@@ -364,6 +364,7 @@ impl super::VbcCodegen {
     /// Establish a receiving value before clearing an affine source. The shared
     /// VBC producer emits the same branch for interpretation and specialization.
     pub(super) fn emit_generic_value_handoff(&mut self, source: Reg, ty: TypeRef, copy: bool) -> Reg {
+        let ty = self.runtime_member_witness(ty);
         let result = self.ctx.registers.alloc_fresh();
         let unrestricted = self.resource_is_unrestricted(ty.clone());
         let copy_label = self.ctx.new_label("resource_copy");

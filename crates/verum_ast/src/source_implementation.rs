@@ -1,9 +1,9 @@
 //! A bounded, immutable source authority for an implementation's declaration.
 //! Equality and hashing use its canonical encoding; no unhashable AST field is
 //! omitted from identity. Decoding remains typed and validated before replay.
-use crate::decl::ImplDecl;
+use crate::decl::{ImplDecl, ImplItemKind, ImplKind};
 use serde::{Deserialize, Deserializer, Serialize};
-use verum_common::Text;
+use verum_common::{List, Map, Text};
 
 const MAX_BYTES: usize = 1024 * 1024;
 
@@ -13,6 +13,9 @@ pub struct AssociatedImplementationSource {
     /// required field is distinct from absent declaration ownership on the wire.
     origin_module: Text,
     declaration: Text,
+    /// Rebuilt from the validated source on every decode.
+    #[serde(skip)]
+    unconditional_members: List<Text>,
 }
 
 fn parse(payload: &str) -> Result<ImplDecl, Text> {
@@ -60,6 +63,7 @@ impl AssociatedImplementationSource {
         Ok(Self {
             origin_module,
             declaration: payload.into(),
+            unconditional_members: Self::unconditional_members(declaration),
         })
     }
 
@@ -69,6 +73,56 @@ impl AssociatedImplementationSource {
 
     pub fn declaration(&self) -> Result<ImplDecl, Text> {
         parse(self.declaration.as_str())
+    }
+
+    /// The owner-scoped runtime table can use a plain assignment without
+    /// reopening the source AST at each element of a generic iterator.
+    pub fn has_unconditional_member(&self, name: &str) -> bool {
+        self.unconditional_members.binary_search_by(|member| member.as_str().cmp(name)).is_ok()
+    }
+
+    fn unconditional_members(declaration: &ImplDecl) -> List<Text> {
+        use crate::ty::{GenericParamKind, PathSegment, TypeKind};
+        let ImplKind::Protocol { protocol_args, for_type, .. } = &declaration.kind else { return List::new(); };
+        if !protocol_args.is_empty() || declaration.specialize_attr.is_some()
+            || declaration.generic_where_clause.iter().chain(&declaration.meta_where_clause)
+                .any(|clause| !clause.predicates.is_empty())
+        { return List::new(); }
+        let mut parameters = verum_common::Set::new();
+        for parameter in &declaration.generics {
+            match &parameter.kind {
+                GenericParamKind::Type { name, bounds, .. } if bounds.is_empty() => {
+                    if !parameters.insert(name.name.clone()) { return List::new(); }
+                }
+                GenericParamKind::Lifetime { .. } => {}
+                _ => return List::new(),
+            }
+        }
+        // The receiver must cover every argument of the nominal owner.
+        // A repeated parameter or a concrete specialization covers only part.
+        match &for_type.kind {
+            TypeKind::Path(_) if parameters.is_empty() => {}
+            TypeKind::Generic { base, args } if matches!(base.kind, TypeKind::Path(_)) => {
+                for argument in args {
+                    let Some(argument) = argument.type_for_declared_slot() else { return List::new(); };
+                    let TypeKind::Path(path) = argument.kind else { return List::new(); };
+                    let [PathSegment::Name(name)] = path.segments.as_slice() else { return List::new(); };
+                    if !parameters.remove(&name.name) { return List::new(); }
+                }
+                if !parameters.is_empty() { return List::new(); }
+            }
+            _ => return List::new(),
+        }
+        let mut plain = Map::new();
+        for item in &declaration.items {
+            if let ImplItemKind::Type { name, type_params, .. } = &item.kind {
+                plain.entry(name.name.clone()).and_modify(|unique| *unique = false)
+                    .or_insert(type_params.is_empty());
+            }
+        }
+        let mut members: List<_> = plain.into_iter().filter_map(|(name, unique)| unique.then_some(name)).collect();
+        members.sort();
+        members
     }
 }
 

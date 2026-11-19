@@ -15,10 +15,7 @@ pub fn resolve_projection(
     assoc: &str,
     arguments: &[TypeRef],
 ) -> VbcResult<Option<TypeRef>> {
-    // The legacy assignment map has no local family binders. Even zero supplied
-    // arguments can mean a defaulted family, so a qualified application also
-    // waits for its complete declaration-owned assignment carrier.
-    if qualifier.is_some() || !arguments.is_empty() { return Ok(None); }
+    if !arguments.is_empty() { return Ok(None); }
     let (id, arguments) = match base {
         TypeRef::Concrete(id) => (*id, &[][..]),
         TypeRef::Instantiated { base, args } => (*base, args.as_slice()),
@@ -28,9 +25,26 @@ pub fn resolve_projection(
     if owner.type_params.len() != arguments.len() {
         return Err(VbcError::AssociatedType("associated receiver argument count differs from its declaration".into()));
     }
+    let selected = if let Some(application) = qualifier {
+        // Source-qualified bindings here have no protocol or family arguments.
+        // A parameterized protocol requires its full application on the row.
+        let Some(protocol) = module.get_type(crate::types::TypeId(application.protocol.0)) else {
+            return Ok(None);
+        };
+        if !application.args.is_empty() || !protocol.type_params.is_empty() { return Ok(None); }
+        let mut rows = owner.protocols.iter().filter(|row| row.protocol == application.protocol);
+        let Some(first) = rows.next() else { return Ok(None); };
+        let Some(source) = &first.source_implementation else { return Ok(None); };
+        if !source.has_unconditional_member(assoc)
+            || rows.any(|row| row.source_implementation.as_ref() != Some(source)
+            || row.associated_types != first.associated_types)
+        { return Ok(None); }
+        Some(first)
+    } else { None };
     let substitution = TypeSubstitution::new(&owner.type_params, arguments);
     let mut result = None;
     for implementation in &owner.protocols {
+        if selected.is_some_and(|row| !std::ptr::eq(row, implementation)) { continue; }
         for (name, body) in &implementation.associated_types {
             if module.get_string(*name) != Some(assoc) { continue; }
             let Some(protocol) = module.get_type(crate::types::TypeId(implementation.protocol.0)) else { return Ok(None); };

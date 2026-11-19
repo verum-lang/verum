@@ -228,6 +228,58 @@ fn dereferenced_method_witness_selects_its_concrete_receivers_associated_member(
 
 #[test]
 #[cfg(feature = "codegen")]
+fn qualified_runtime_members_require_the_selected_unconditional_row() {
+    use verum_vbc::{associated_types::resolve_projection, codegen::{CodegenConfig, VbcCodegen}};
+    let ast = verum_fast_parser::Parser::new(r#"
+        module app;
+        type P is protocol { type Item; };
+        type Q is protocol { type Item; };
+        type Required is protocol {};
+        type Value<T> is { value: T };
+        type Special<T> is { value: T };
+        type Conditional<T> is { value: T };
+        implement<T> P for Value<T> { type Item = T; }
+        implement<T> Q for Value<T> { type Item = Bool; }
+        implement P for Special<Int> { type Item = Bool; }
+        implement<T: Required> P for Conditional<T> { type Item = Bool; }
+    "#).parse_module().unwrap();
+    let mut module = VbcCodegen::with_config(CodegenConfig::new("app"))
+        .collect_declaration_interface(&[&ast]).unwrap();
+    let id = |name| module.types.iter().find(|ty| module.get_string(ty.name) == Some(name)).unwrap().id;
+    let (p, q, value, special, conditional) = (id("P"), id("Q"), id("Value"), id("Special"), id("Conditional"));
+    let item = module.intern_string("Item");
+    // A carried equation cannot make the source head cover a different
+    // argument or discharge an implementation requirement.
+    for ty in [special, conditional] {
+        let owner = module.types.iter_mut().find(|owner| owner.id == ty).unwrap();
+        owner.protocols[0].associated_types = vec![(item, TypeRef::Concrete(TypeId::BOOL))];
+    }
+    let wire = verum_vbc::deserialize::deserialize_module(
+        &verum_vbc::serialize::serialize_module(&module).unwrap()).unwrap();
+    let qualified = |id: TypeId| ProtocolApplication { protocol: ProtocolId(id.0), args: vec![] };
+    let (selected_p, selected_q) = (qualified(p), qualified(q));
+    let byte = TypeRef::Concrete(TypeId::U8);
+    fn resolve(
+        module: &verum_vbc::VbcModule, ty: &TypeRef, qualifier: Option<&ProtocolApplication>, args: &[TypeRef],
+    ) -> Option<TypeRef> {
+        resolve_projection(module, ty, qualifier, "Item", args).unwrap()
+    }
+    for module in [module, wire] {
+        let base = TypeRef::instantiated(value, [byte.clone()]);
+        assert_eq!(resolve(&module, &base, None, &[]), None);
+        assert_eq!(resolve(&module, &base, Some(&selected_p), &[]), Some(byte.clone()));
+        assert_eq!(resolve(&module, &base, Some(&selected_q), &[]), Some(TypeRef::Concrete(TypeId::BOOL)));
+        assert_eq!(resolve(&module, &base, Some(&selected_p), std::slice::from_ref(&byte)), None);
+        let wrong = ProtocolApplication { protocol: ProtocolId(p.0), args: vec![byte.clone()] };
+        assert_eq!(resolve(&module, &base, Some(&wrong), &[]), None);
+        for owner in [special, conditional] {
+            assert_eq!(resolve(&module, &TypeRef::instantiated(owner, [byte.clone()]), Some(&selected_p), &[]), None);
+        }
+    }
+}
+
+#[test]
+#[cfg(feature = "codegen")]
 fn erased_and_ambiguous_receiver_assignments_cannot_supply_witnesses() {
     use verum_vbc::interpreter::InterpreterError;
     for ambiguous in [false, true] {

@@ -236,6 +236,37 @@ impl VbcCodegen {
         member_owner
     }
 
+    /// Carry the declaring protocol into a frame operation whose result
+    /// depends on the caller's substitution for a bound type parameter.
+    pub(super) fn runtime_member_witness(&self, ty: TypeRef) -> TypeRef {
+        fn qualify(
+            cg: &VbcCodegen, ty: &TypeRef, depth: usize, remaining: &mut usize,
+        ) -> CodegenResult<TypeRef> {
+            if depth >= crate::types::MAX_TYPE_REF_DEPTH || *remaining == 0 {
+                return Err(CodegenError::internal("runtime member witness exceeds its type budget"));
+            }
+            *remaining -= 1;
+            let mut ty = super::type_equalities::map_children(ty, 0, &mut |part, binders| {
+                if binders == 0 { qualify(cg, part, depth + 1, remaining) } else { Ok(part.clone()) }
+            })?;
+            if let TypeRef::AssociatedProjection { base, qualifier, assoc, args } = &mut ty
+                && qualifier.is_none() && args.is_empty()
+                && let Some(bounds) = cg.current_protocol_bounds.get(base.as_ref())
+                && let Some(TypeRef::Concrete(protocol)) = cg.bound_member_owner(bounds.clone(), base, assoc)
+            {
+                *qualifier = Some(crate::types::ProtocolApplication {
+                    protocol: crate::types::ProtocolId(protocol.0), args: vec![],
+                });
+            }
+            Ok(ty)
+        }
+        if self.current_protocol_bounds.is_empty() || matches!(ty, TypeRef::Generic(_) | TypeRef::Concrete(_)) {
+            return ty;
+        }
+        let mut remaining = crate::types::MAX_TYPE_REF_NODES;
+        qualify(self, &ty, 0, &mut remaining).unwrap_or(ty)
+    }
+
     /// A same-named member of another protocol is not an equality witness.
     /// Keep both the entire application and the caller's actual subject.
     pub(super) fn declared_bound_associated_target(
