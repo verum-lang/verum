@@ -56,6 +56,8 @@ module core.runtime.recovery;
 mount sys.{monotonic_nanos};
 mount core.{Result, Text, Maybe, TypeId, Display};
 mount core.time.Duration;
+mount core.async.future.Future;
+mount core.async.timer.sleep;
 mount core.sync.{AtomicU8, AtomicU16, AtomicU32, AtomicU64, MemoryOrdering};
 
 // =============================================================================
@@ -129,7 +131,7 @@ implement RecoveryRetryPolicy {
     public fn record_retry(&mut self, error_msg: &Text) {
         self.current_attempt += 1;
         self.total_retries += 1;
-        self.last_error = Some(error_msg.clone());
+        self.last_error = Maybe.Some(error_msg.clone());
     }
 
     /// Reset policy for new operation
@@ -139,57 +141,52 @@ implement RecoveryRetryPolicy {
     }
 }
 
-/// Execute with retry policy
-///
+implement RetryPredicate {
+    fn accepts(&self, message: &Text) -> Bool {
+        match self {
+            AllErrors => true,
+            TransientOnly => is_transient_error(message),
+            Custom(predicate) => predicate(message),
+        }
+    }
+}
 
-/// Automatically retries failed operations according to the policy.
-///
+implement RecoveryRetryPolicy {
+    /// Record an eligible error and return the delay before the next attempt.
+    fn retry_after(&mut self, message: Text) -> Maybe<Duration> {
+        if !self.config.retry_on.accepts(&message) {
+            return Maybe.None;
+        }
+        self.record_retry(&message);
+        let delay_ms = self.next_delay_ms();
+        if delay_ms > Duration.max_value().as_millis() as UInt64 {
+            panic("retry delay exceeds Duration range");
+        }
+        Maybe.Some(Duration.from_millis(delay_ms as Int))
+    }
+}
 
-/// ## Performance
-/// - Overhead per attempt: ~50ns (policy check + timing)
-/// - Sleep implementation: uses sys.nanosleep
-public async fn execute_with_retry<F, T, E>(
+/// Invoke the factory once per attempt and wait only before retrying.
+public async fn execute_with_retry<F: Future<Output = Result<T, E>>, T, E: Display>(
     policy: &mut RecoveryRetryPolicy,
-    operation: fn() -> Future<Result<T, E>>,
-) -> Result<T, E>
-where E: Display
-{
+    operation: fn() -> F,
+) -> Result<T, E> {
     loop {
-        match operation().await {
+        let outcome: Result<T, E> = operation().await;
+        match outcome {
             Ok(value) => {
                 policy.reset();
                 return Ok(value);
             }
             Err(error) => {
-                // Check if we should retry
                 if !policy.should_retry() {
                     return Err(error);
                 }
-
-                // Convert error to text for predicate matching
-                let error_msg: Text = f"{error}";
-
-                // Check if this error type is retriable
-                match policy.config.retry_on {
-                    AllErrors => {},
-                    TransientOnly => {
-                        if !is_transient_error(&error_msg) {
-                            return Err(error);
-                        }
-                    }
-                    Custom(predicate) => {
-                        if !predicate(&error_msg) {
-                            return Err(error);
-                        }
-                    }
+                let message: Text = f"{error}";
+                match policy.retry_after(message) {
+                    Maybe.None => return Err(error),
+                    Maybe.Some(delay) => { sleep(delay).await; },
                 }
-
-                // Record retry and calculate delay
-                policy.record_retry(&error_msg);
-                let delay_ms = policy.next_delay_ms();
-
-                // Sleep before retry
-                sys.sleep_ms(delay_ms).await;
             }
         }
     }
@@ -386,6 +383,19 @@ public type ErrorPredicate is
     | Specific(List<TypeId>)
     /// Custom predicate
     | Custom(fn(&Text) -> Bool);
+
+implement ErrorPredicate {
+    fn counts<E: Display>(&self, error: &E) -> Bool {
+        match self {
+            AllErrors => true,
+            Specific(types) => types.contains(&TypeId.of_val(error)),
+            Custom(predicate) => {
+                let message: Text = f"{error}";
+                predicate(&message)
+            },
+        }
+    }
+}
 
 // =============================================================================
 // Recovery Strategy
@@ -659,35 +669,30 @@ public type CircuitBreakerError<E> is
 
 /// ## Performance
 /// - Overhead: ~20-30ns (state check + recording)
-public async fn execute_with_circuit_breaker<F, T, E>(
+public async fn execute_with_circuit_breaker<F: Future<Output = Result<T, E>>, T, E: Display>(
     breaker: &RecoveryCircuitBreaker,
-    operation: fn() -> Future<Result<T, E>>,
-) -> Result<T, CircuitBreakerError<E>>
-where E: Display
-{
+    operation: fn() -> F,
+) -> Result<T, CircuitBreakerError<E>> {
     // Check if request is allowed
     if !breaker.allow_request() {
         return Err(CircuitBreakerError.Open);
     }
 
-    // Execute operation
-    match operation().await {
+    let outcome = operation().await;
+    record_breaker_outcome(breaker, outcome)
+}
+
+fn record_breaker_outcome<T, E: Display>(
+    breaker: &RecoveryCircuitBreaker,
+    outcome: Result<T, E>,
+) -> Result<T, CircuitBreakerError<E>> {
+    match outcome {
         Ok(value) => {
             breaker.record_success();
             Ok(value)
         }
         Err(error) => {
-            // Convert error to text for predicate matching
-            let error_msg: Text = f"{error}";
-
-            // Check if this error should count
-            let should_count = match breaker.config.error_predicate {
-                AllErrors => true,
-                Specific(types) => types.contains(&TypeId.of_val(&error)),
-                Custom(predicate) => predicate(&error_msg),
-            };
-
-            if should_count {
+            if breaker.config.error_predicate.counts(&error) {
                 breaker.record_failure();
             }
 
