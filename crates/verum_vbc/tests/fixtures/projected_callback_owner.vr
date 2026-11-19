@@ -1,0 +1,12 @@
+type Payload is { value: Int };
+type Stage<T> is { value: T };
+
+implement<T> Stage<T> {
+    fn apply<R, F: fn(T) -> R>(self, f: F) -> R { f(self.value) }
+}
+
+fn probe() -> Int {
+    let stage: Stage<Payload> = Stage { value: Payload { value: 7 } };
+    let output: Payload = stage.apply(|x| x);
+    output.value
+}

@@ -420,7 +420,11 @@ impl VbcCodegen {
                 Err(CodegenError::with_span(super::error::CodegenErrorKind::UnsupportedExpr(
                     "dereference copy requires an unrestricted value; an exclusive borrowed owner cannot be copied or transferred".into(),
                 ), span)),
-            verum_common::ResourceDiscipline::Unknown => Ok(false),
+            // The enclosing place still owns this value. A generic field may
+            // become a reference, scalar, owned record or exclusive resource
+            // in its caller. CloneTyped uses that witness and refuses a copy
+            // when ownership cannot authorize one.
+            verum_common::ResourceDiscipline::Unknown => Ok(true),
         }
     }
 

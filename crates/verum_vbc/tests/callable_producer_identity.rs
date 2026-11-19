@@ -1,15 +1,17 @@
 #![cfg(feature = "codegen")]
 
 use verum_fast_parser::Parser;
-use verum_vbc::codegen::{CodegenConfig, VbcCodegen};
+use verum_vbc::codegen::{CodegenConfig, CodegenErrorKind, CodegenResult, VbcCodegen};
 use verum_vbc::module::{FunctionDescriptor, VbcModule};
 use verum_vbc::types::{TypeId, TypeRef};
 
 fn compile(source: &str) -> VbcModule {
+    lower(source).expect("compile")
+}
+
+fn lower(source: &str) -> CodegenResult<VbcModule> {
     let ast = Parser::new(source).parse_module().expect("parse");
-    VbcCodegen::with_config(CodegenConfig::new("callable"))
-        .compile_module(&ast)
-        .expect("compile")
+    VbcCodegen::with_config(CodegenConfig::new("callable")).compile_module(&ast)
 }
 
 fn nominal(module: &VbcModule, name: &str) -> TypeRef {
@@ -378,49 +380,83 @@ fn probe(stage: Stage<Payload>) -> Int { let f = stage.transform(|x| x); 0 }
 
 #[test]
 fn untyped_callable_abi_fallback_is_not_a_generic_binding() {
-    let module = compile(
-        r#"
+    let source = r#"
 type Stage<T> is { value: T };
 implement<T> Stage<T> { fn transform<F>(self, f: F) -> F { f } }
 fn probe(stage: Stage<Int>) -> Int { let f = stage.transform(|x| x); 0 }
-"#,
-    );
-    let calls = method_calls(&module, "Stage.transform");
-    assert_eq!(calls.len(), 1);
-    assert_eq!(
-        calls[0][1],
-        TypeRef::Generic(verum_vbc::types::TypeParamId(1))
-    );
+"#;
+    assert_missing_closure_owner(source);
+    let module = compile(&source.replace("|x|", "|x: Int|"));
+    assert_callable_witness(&module, "Stage.transform", TypeRef::Concrete(TypeId::INT), false);
+}
+
+fn assert_missing_closure_owner(source: &str) {
+    let error = lower(source).expect_err("a closure with an unknown owned parameter was admitted");
+    assert!(matches!(&error.kind, CodegenErrorKind::UnsupportedExpr(reason)
+        if reason == "owned closure parameter requires a complete declaration and binding inventory"), "{error}");
+}
+
+fn assert_callable_witness(module: &VbcModule, method: &str, ty: TypeRef, is_async: bool) {
+    let wire = verum_vbc::deserialize::deserialize_module(
+        &verum_vbc::serialize::serialize_module(module).expect("serialize"),
+    ).expect("deserialize");
+    let expected = TypeRef::Function {
+        is_async,
+        params: vec![ty.clone()],
+        return_type: Box::new(ty),
+        contexts: Default::default(),
+    };
+    for artifact in [module, &wire] {
+        let calls = method_calls(artifact, method);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0][1], expected);
+    }
+}
+
+#[test]
+fn generic_projection_arguments_preserve_borrows_and_refuse_an_exclusive_copy() {
+    let module = compile(r#"
+        type affine Ticket is { number: Int };
+        type Slot<T> is { item: T };
+        implement<T> Slot<T> {
+            fn read<R, F: fn(T) -> R>(&self, f: F) -> R { f(self.item) }
+            fn edit<F: fn(&mut T) -> Int>(&mut self, f: F) -> Int { f(&mut self.item) }
+        }
+        fn consume(ticket: Ticket) -> Int { ticket.number }
+        fn change(ticket: &mut Ticket) -> Int { ticket.number = 73; 0 }
+        fn borrowed() -> Int {
+            let mut slot: Slot<Ticket> = Slot { item: Ticket { number: 7 } };
+            slot.edit(change);
+            slot.item.number
+        }
+        fn exclusive() -> Int {
+            let slot: Slot<Ticket> = Slot { item: Ticket { number: 7 } };
+            slot.read(consume)
+        }
+    "#);
+    let wire = verum_vbc::deserialize::deserialize_module(&verum_vbc::serialize::serialize_module(&module).unwrap()).unwrap();
+    for module in [module, wire] {
+        let borrowed = module.find_function_by_name("callable.borrowed").unwrap();
+        let exclusive = module.find_function_by_name("callable.exclusive").unwrap();
+        let mut vm = verum_vbc::interpreter::Interpreter::new(module.into());
+        assert_eq!(vm.execute_function(borrowed).unwrap().try_as_i64(), Some(73));
+        let error = vm.execute_function(exclusive).unwrap_err();
+        assert!(error.to_string().contains("Affine"), "{error}");
+    }
 }
 
 #[test]
 fn callback_value_executes_with_the_same_proven_nominal_signature() {
-    let module = compile(
-        r#"
-type Payload is { value: Int };
-type Stage<T> is { value: T };
-implement<T> Stage<T> { fn apply<R, F: fn(T) -> R>(self, f: F) -> R { f(self.value) } }
-fn probe() -> Int {
-    let stage: Stage<Payload> = Stage { value: Payload { value: 7 } };
-    let output: Payload = stage.apply(|x| x);
-    output.value
-}
-"#,
-    );
-    let entry = module
-        .functions
-        .iter()
-        .find(|f| {
-            module
-                .get_string(f.name)
-                .is_some_and(|n| n.ends_with(".probe"))
-        })
-        .expect("entry")
-        .id;
-    let result = verum_vbc::interpreter::Interpreter::new(std::sync::Arc::new(module))
-        .execute_function(entry)
-        .expect("execute callback");
-    assert_eq!(result.as_i64(), 7);
+    let module = compile(include_str!("fixtures/projected_callback_owner.vr"));
+    let bytes = verum_vbc::serialize::serialize_module(&module).unwrap();
+    let wire = verum_vbc::deserialize::deserialize_module(&bytes).unwrap();
+    for module in [module, wire] {
+        let entry = module.find_function_by_name("callable.probe").unwrap();
+        let result = verum_vbc::interpreter::Interpreter::new(module.into())
+            .execute_function(entry)
+            .expect("execute callback after the source stage was dropped");
+        assert_eq!(result.try_as_i64(), Some(7));
+    }
 }
 
 #[test]
@@ -554,17 +590,14 @@ fn ambiguous_legacy_parameter_names_do_not_invent_scope_ownership() {
 
 #[test]
 fn async_callable_is_not_certified_as_an_ordinary_function() {
-    let module = compile(
-        r#"
+    let source = r#"
 type Stage<T> is { value: T };
 implement<T> Stage<T> { fn transform<F>(self, f: F) -> F { f } }
 fn probe(stage: Stage<Int>) -> Int { let f = stage.transform(async |x: Int| x); 0 }
-"#,
-    );
-    assert_eq!(
-        method_calls(&module, "Stage.transform")[0][1],
-        TypeRef::Generic(verum_vbc::types::TypeParamId(1))
-    );
+"#;
+    let integer = TypeRef::Concrete(TypeId::INT);
+    assert_callable_witness(&compile(source), "Stage.transform", integer.clone(), true);
+    assert_callable_witness(&compile(&source.replace("async |", "|")), "Stage.transform", integer, false);
 }
 
 #[test]
@@ -650,8 +683,7 @@ fn probe(stage: Stage<Payload>) -> Int {
 
 #[test]
 fn unknown_callable_in_chain_cannot_bind_an_unrelated_nominal_f() {
-    let module = compile(
-        r#"
+    let source = r#"
 type F is { decoy: Int };
 type Stage<T> is { value: T };
 type Wrapped<I, F> is { owner: I, callback: F };
@@ -660,12 +692,10 @@ implement<T> Stage<T> {
 }
 implement<I, F> Wrapped<I, F> { fn keep(self) -> Self { self } fn finish<C>(self) -> C { C.default() } }
 fn probe(stage: Stage<Int>) -> Int { stage.transform(|x| x).keep().keep().finish<Int>() }
-"#,
-    );
-    assert_eq!(
-        method_calls(&module, "Wrapped.finish")[0][1],
-        TypeRef::Generic(verum_vbc::types::TypeParamId(1))
-    );
+"#;
+    assert_missing_closure_owner(source);
+    let module = compile(&source.replace("|x|", "|x: Int|"));
+    assert_callable_witness(&module, "Wrapped.finish", TypeRef::Concrete(TypeId::INT), false);
 }
 
 #[test]
@@ -740,8 +770,7 @@ fn probe() -> Int { Factory.make(|x| x).finish<Int>() }
 fn overlong_explicit_roster_does_not_partially_certify_a_callable_result() {
     // Public VBC lowering can be invoked without the source checker. An
     // invalid explicit roster must not become a partial semantic proof here.
-    let module = compile(
-        r#"
+    let source = r#"
 type Payload is { value: Int };
 type Stage<T> is { value: T };
 type Wrapped<I, F> is { owner: I, callback: F };
@@ -752,10 +781,10 @@ implement<I, F> Wrapped<I, F> { fn finish<C>(self) -> C { C.default() } }
 fn probe(stage: Stage<Payload>) -> Int {
     stage.transform<Payload, _, Bool>(|x| x).finish<Int>()
 }
-"#,
-    );
-    assert_eq!(
-        method_calls(&module, "Wrapped.finish")[0][1],
-        TypeRef::Generic(verum_vbc::types::TypeParamId(1))
-    );
+"#;
+    let error = lower(source).expect_err("an excess explicit argument was admitted");
+    assert!(matches!(&error.kind, CodegenErrorKind::TypeInference(reason)
+        if reason == "explicit generic argument exceeds the selected declaration's roster"), "{error}");
+    let module = compile(&source.replace("<Payload, _, Bool>", "<Payload, _>"));
+    assert_callable_witness(&module, "Wrapped.finish", nominal(&module, "Payload"), false);
 }
