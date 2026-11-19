@@ -129,6 +129,10 @@ impl VbcCodegen {
         }
         let nested = |value, emitted| self.copy_source_type_inner(value, emitted, depth + 1);
         match &expr.kind {
+            ExprKind::InterpolatedString { .. }
+            | ExprKind::Literal(verum_ast::Literal {
+                kind: verum_ast::LiteralKind::InterpolatedString(_), ..
+            }) => Some(TypeRef::Concrete(crate::types::TypeId::TEXT)),
             ExprKind::Literal(verum_ast::literal::Literal {
                 kind: verum_ast::literal::LiteralKind::ByteString(_),
                 ..

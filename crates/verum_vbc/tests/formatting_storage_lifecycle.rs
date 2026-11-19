@@ -85,6 +85,31 @@ fn printing_a_formatted_temporary_preserves_named_text() {
 }
 
 #[test]
+fn an_inline_interpolation_supplies_its_text_type_to_a_generic_method() {
+    exercise(r#"
+        type Holder<T> is { sample: T };
+        implement<T> Holder<T> {
+            fn accept(&self, value: T) -> T { value }
+        }
+        fn probe() -> Int {
+            let holder: Holder<Text> = Holder { sample: "original" };
+            let received = holder.accept(f"answer {73}");
+            if received == "answer 73" { 73 } else { 0 }
+        }
+    "#);
+
+    let source = r#"
+        type Holder<T> is { sample: T };
+        implement<T> Holder<T> { fn accept(&self, value: T) -> T { value } }
+        fn reject(holder: Holder<Int>) -> Int { holder.accept(f"answer {73}") }
+    "#;
+    let ast = Parser::new(source).parse_module().expect("fixture grammar");
+    let error = VbcCodegen::with_config(CodegenConfig::new("format_lifetime"))
+        .compile_module(&ast).expect_err("formatted Text cannot satisfy the receiver's Int slot");
+    assert!(error.to_string().contains("conflicting source argument evidence"), "{error}");
+}
+
+#[test]
 fn binary_concat_retires_temporary_operands_and_observes_shared_places() {
     exercise(r#"
         type Packet is { text: Text };
