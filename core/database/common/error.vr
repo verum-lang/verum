@@ -768,8 +768,11 @@ implement Debug for DbError {
                 f.write_str(f"PoolFailure {{ kind: {kind} }}".as_str()),
             AuthFailed { kind } =>
                 f.write_str(f"AuthFailed {{ kind: {kind} }}".as_str()),
-            Adapter(spec) =>
-                f.write_str(f"Adapter({spec})".as_str()),
+            Adapter(spec) => {
+                f.write_str("Adapter(")?;
+                spec.fmt_debug(f)?;
+                f.write_str(")")
+            },
         }
     }
 }

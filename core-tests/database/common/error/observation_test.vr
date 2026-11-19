@@ -29,6 +29,10 @@ fn test_adapter_observations_preserve_the_vendor_payload() {
     assert_eq(*packet.code(), "1213");
     assert_eq(*packet.message(), "deadlock");
     let error = DbError.Adapter(packet);
+    let diagnostic = f"{error:?}";
+    assert(diagnostic.contains(&"1213"));
+    assert(diagnostic.contains(&"deadlock"));
+    assert(diagnostic.contains(&"retryable: true"));
     assert(error.is_retryable());
     assert(error.category() is ErrorCategory.EcTransient);
     assert(error.as_constraint_violation().is_none());

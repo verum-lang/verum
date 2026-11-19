@@ -11,8 +11,7 @@
 //   * Toposort produces a deterministic order
 //   * Journal records pending → applied transitions
 //   * Drift detection on checksum mismatch
-//   * Runner dry-run produces decisions without executing
-//   * Strict-mode rollback on failure (LIFO)
+//   * Dry-run and strict decision planning
 
 // Migration framework now lifted to core.database.common.migrations.*;
 // SQLite still re-exports the same surface plus its SqliteMigrationStore.
@@ -150,12 +149,6 @@ fn test_checksum_sensitivity() {
 // runner
 // -----------------------------------------------------------------------------
 
-fn no_op_runner(_sql: &Text) -> Maybe<Text> { None }
-fn fail_at_v2_runner(sql: &Text) -> Maybe<Text> {
-    if sql == &"CREATE TABLE b".clone() { Some("simulated failure".clone()) }
-    else { None }
-}
-
 fn build_three_step_plan() -> MigrationPlan {
     let mut steps: List<Migration> = List.new();
     steps.push(migration_new(1, "a".clone(), "CREATE TABLE a".clone()).with_down("DROP TABLE a".clone()));
@@ -164,35 +157,8 @@ fn build_three_step_plan() -> MigrationPlan {
     build(steps).unwrap()
 }
 
-fn test_dry_run_skips_everything() {
-    let plan = build_three_step_plan();
-    let mut journal = journal_new();
-    let runner = runner_new(RmDryRun);
-    let report = runner.execute(&plan, &mut journal, 1000 as Int64, no_op_runner);
-    assert_eq(report.applied, 0);
-    assert_eq(report.skipped, 3);
-}
-
-fn test_strict_applies_three() {
-    let plan = build_three_step_plan();
-    let mut journal = journal_new();
-    let runner = runner_new(RmStrict);
-    let report = runner.execute(&plan, &mut journal, 2000 as Int64, no_op_runner);
-    assert_eq(report.applied, 3);
-    assert(!report.aborted);
-    assert_eq(journal.high_water(), 3);
-}
-
-fn test_strict_rolls_back_on_failure() {
-    let plan = build_three_step_plan();
-    let mut journal = journal_new();
-    let runner = runner_new(RmStrict);
-    let report = runner.execute(&plan, &mut journal, 3000 as Int64, fail_at_v2_runner);
-    assert(report.aborted);
-    assert_eq(report.applied, 1);
-    // a was applied, b failed → rollback should drop a
-    assert(report.rolled_back >= 1);
-}
+// Actual async MigrationStore execution and failure/release controls are in
+// database/migration_runner_lifecycle.vr. This file checks pure planning.
 
 fn test_decisions_preview() {
     let plan = build_three_step_plan();
@@ -230,9 +196,6 @@ fn main() {
     test_journal_records_status();
     test_journal_drift_detection();
     test_checksum_sensitivity();
-    test_dry_run_skips_everything();
-    test_strict_applies_three();
-    test_strict_rolls_back_on_failure();
     test_decisions_preview();
     test_run_mode_names();
 }

@@ -1,0 +1,229 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L2
+// @tags: database, migrations, runner, errors, lifecycle
+// @timeout: 30000
+// @expected-exit: 0
+// @expected-stdout: migration runner: atomic dispatch and lifecycle failures passed
+
+mount core.database.common.error.{DbError, AdapterId, AdPostgres, AdapterSpecific, SqlState};
+mount core.database.common.migrations.store.{
+    MigrationStore, MigrationStoreConfig, store_config_default, combine_migration_errors,
+};
+mount core.database.common.migrations.migration.{
+    MigrationStatus, MsPending, MsApplied, MsRolledBack, MsFailed, migration_new,
+};
+mount core.database.common.migrations.journal.{
+    MigrationJournal, JournalEntry, clone_entry, journal_from_entries, checksum_for_sql,
+};
+mount core.database.common.migrations.plan.{MigrationPlan, build};
+mount core.database.common.migrations.runner.{runner_new, RmStrict, RmDryRun};
+
+// A fault-injecting protocol peer records the actual runner's calls. It does
+// not implement SQL or replace the separate real PostgreSQL acceptance test.
+type FaultStore is {
+    config: MigrationStoreConfig,
+    entries: List<JournalEntry>,
+    faults: List<Text>,
+    events: List<Text>,
+};
+
+fn store(faults: List<Text>) -> FaultStore {
+    FaultStore { config: store_config_default(), entries: List.new(),
+        faults: faults, events: List.new() }
+}
+
+fn failure(phase: &Text) -> DbError {
+    DbError.Adapter(AdapterSpecific.new(AdPostgres, phase.clone(),
+        f"diagnostic for {phase}", false))
+}
+
+implement FaultStore {
+    fn observe(&mut self, phase: Text) -> Result<(), DbError> {
+        self.events.push(phase.clone());
+        if self.faults.contains(&phase) { return Result.Err(failure(&phase)); }
+        Result.Ok(())
+    }
+
+    fn record(&mut self, entry: &JournalEntry) {
+        let mut i = 0;
+        while i < self.entries.len() {
+            if self.entries[i].version == entry.version {
+                self.entries[i] = clone_entry(entry);
+                return;
+            }
+            i = i + 1;
+        }
+        self.entries.push(clone_entry(entry));
+    }
+}
+
+implement MigrationStore for FaultStore {
+    fn adapter_id(&self) -> AdapterId { AdPostgres }
+    fn dialect(&self) -> Text { "postgres" }
+    fn config(&self) -> &MigrationStoreConfig { &self.config }
+    async fn init(&mut self) -> Result<(), DbError> { self.observe("init") }
+    async fn acquire_lock(&mut self) -> Result<(), DbError> { self.observe("acquire") }
+    async fn release_lock(&mut self) -> Result<(), DbError> { self.observe("release") }
+    async fn drop_tracking_table(&mut self) -> Result<(), DbError> {
+        panic("runner must not drop the tracking table")
+    }
+    async fn execute_sql(&mut self, _sql: &Text) -> Result<(), DbError> {
+        panic("runner must use the atomic execute_step contract")
+    }
+    async fn load_journal(&mut self) -> Result<MigrationJournal, DbError> {
+        self.observe("load")?;
+        let mut entries: List<JournalEntry> = List.new();
+        for entry in self.entries.iter() { entries.push(clone_entry(entry)); }
+        Result.Ok(journal_from_entries(entries))
+    }
+    async fn upsert_entry(&mut self, entry: &JournalEntry) -> Result<(), DbError> {
+        let status = match &entry.status {
+            MsPending => "pending",
+            MsFailed(_) => "failed",
+            _ => panic("applied/rolled-back entries must go through execute_step"),
+        };
+        self.observe(f"{status}:{entry.version}")?;
+        self.record(entry);
+        Result.Ok(())
+    }
+    async fn execute_step(&mut self, sql: &Text, entry: &JournalEntry) -> Result<(), DbError> {
+        let direction = match &entry.status {
+            MsApplied(t) => { assert_eq(*t, 123_i64); "up" },
+            MsRolledBack(t) => { assert_eq(*t, 123_i64); "down" },
+            _ => panic("execute_step requires the resulting journal status"),
+        };
+        assert_eq(*sql, f"{direction}{entry.version}");
+        self.observe(f"step:{direction}:{entry.version}")?;
+        self.record(entry);
+        Result.Ok(())
+    }
+}
+
+fn plan(count: Int) -> MigrationPlan {
+    let mut migrations = List.new();
+    let mut version = 1;
+    while version <= count {
+        migrations.push(migration_new(version, f"migration{version}", f"up{version}")
+            .with_down(f"down{version}"));
+        version = version + 1;
+    }
+    build(migrations).unwrap()
+}
+
+fn assert_error(error: &DbError, marker: &Text) {
+    assert(error.message().contains(marker));
+}
+
+async fn main() {
+    // Display omits the server message and predicate. The combined error
+    // must retain Debug details from both causes, not just their categories.
+    let primary = DbError.QueryFailed { sql_state: SqlState.parse(&"23514").unwrap(),
+        message: "journal CHECK payload", position: Maybe.Some(7) };
+    let secondary = DbError.RefinementViolated { column: "applied_at", predicate: "cleanup predicate payload" };
+    let joined = combine_migration_errors(AdPostgres, primary, &"cleanup", secondary);
+    assert_error(&joined, &"journal CHECK payload");
+    assert_error(&joined, &"cleanup predicate payload");
+    assert(!joined.is_retryable());
+
+    let runner = runner_new(RmStrict);
+    let mut positive = store(List.new());
+    let report = runner.execute(&plan(2), &mut positive, 123_i64).await.unwrap();
+    assert_eq(report.applied, 2);
+    assert(!report.aborted);
+    assert_eq(positive.events, ["init", "acquire", "load", "pending:1", "step:up:1",
+        "pending:2", "step:up:2", "release"]);
+    positive.events.clear();
+    let retry = runner.execute(&plan(2), &mut positive, 123_i64).await.unwrap();
+    assert_eq(retry.applied, 0);
+    assert_eq(retry.skipped, 2);
+    assert_eq(positive.events, ["init", "acquire", "load", "release"]);
+
+    let mut dry = store(["init", "acquire", "release"]);
+    let preview = runner_new(RmDryRun).execute(&plan(2), &mut dry, 123_i64).await.unwrap();
+    assert_eq(preview.applied, 0);
+    assert_eq(preview.skipped, 2);
+    assert_eq(dry.events, ["load"]);
+
+    // Drift in a later step is known before the first mutation. Both actual
+    // execution and read-only preview must expose the aborted plan.
+    let mut drift = store(List.new());
+    drift.entries.push(JournalEntry { version: 2, name: "migration2",
+        status: MsApplied(122_i64), checksum: checksum_for_sql(&"previous SQL") });
+    let aborted = runner.execute(&plan(2), &mut drift, 123_i64).await.unwrap();
+    assert(aborted.aborted);
+    assert_eq(aborted.applied, 0);
+    assert(aborted.abort_reason is Maybe.Some(_));
+    assert_eq(drift.events, ["init", "acquire", "load", "release"]);
+    drift.events.clear();
+    let preview_abort = runner_new(RmDryRun).execute(&plan(2), &mut drift, 123_i64).await.unwrap();
+    assert(preview_abort.aborted);
+    assert_eq(preview_abort.applied, 0);
+    assert_eq(preview_abort.skipped, 1);
+    assert_eq(drift.events, ["load"]);
+
+    let phases: List<Text> = ["init", "acquire", "load", "release"];
+    for phase in phases.iter() {
+        let mut broken = store([phase.clone()]);
+        let result = runner.execute(&plan(0), &mut broken, 123_i64).await;
+        match result {
+            Result.Err(error) => assert_eq(error, failure(phase)),
+            _ => panic("store lifecycle failure became success"),
+        }
+        let expected: List<Text> = if phase == "init" { ["init"] }
+            else if phase == "acquire" { ["init", "acquire"] }
+            else { ["init", "acquire", "load", "release"] };
+        assert_eq(broken.events, expected);
+    }
+
+    let mut pending = store(["pending:1"]);
+    assert(runner.execute(&plan(1), &mut pending, 123_i64).await is Result.Err(_));
+    assert_eq(pending.events, ["init", "acquire", "load", "pending:1", "failed:1", "release"]);
+
+    let mut step = store(["step:up:2"]);
+    match runner.execute(&plan(2), &mut step, 123_i64).await {
+        Result.Err(error) => assert_eq(error, failure(&"step:up:2")),
+        _ => panic("failed SQL became a successful report"),
+    }
+    assert_eq(step.events, ["init", "acquire", "load", "pending:1", "step:up:1",
+        "pending:2", "step:up:2", "failed:2", "step:down:1", "release"]);
+    assert(step.entries[0].status is MsRolledBack(_));
+    assert(step.entries[1].status is MsFailed(_));
+
+    let mut combined = store(["step:up:2", "failed:2", "step:down:1", "failed:1", "release"]);
+    match runner.execute(&plan(2), &mut combined, 123_i64).await {
+        Result.Err(error) => {
+            assert(!error.is_retryable());
+            for marker in combined.faults.iter() { assert_error(&error, marker); }
+            assert_error(&error, &"diagnostic for step:up:2");
+            assert_error(&error, &"diagnostic for release");
+        }
+        _ => panic("combined execution/recovery errors became success"),
+    }
+    assert_eq(combined.events, ["init", "acquire", "load", "pending:1", "step:up:1",
+        "pending:2", "step:up:2", "failed:2", "step:down:1", "failed:1", "release"]);
+
+    let mut load_release = store(["load", "release"]);
+    match runner.execute(&plan(0), &mut load_release, 123_i64).await {
+        Result.Err(error) => {
+            assert_error(&error, &"diagnostic for load");
+            assert_error(&error, &"diagnostic for release");
+        }
+        _ => panic("load and release failures disappeared"),
+    }
+
+    let mut lifo = store(["step:up:4", "step:down:3", "step:down:1"]);
+    assert(runner.execute(&plan(4), &mut lifo, 123_i64).await is Result.Err(_));
+    assert_eq(lifo.events, ["init", "acquire", "load", "pending:1", "step:up:1",
+        "pending:2", "step:up:2", "pending:3", "step:up:3", "pending:4", "step:up:4", "failed:4",
+        "step:down:3", "failed:3", "step:down:2", "step:down:1", "failed:1", "release"]);
+    assert(lifo.entries[1].status is MsRolledBack(_));
+
+    let mut disabled = store(["step:up:2"]);
+    assert(runner_new(RmStrict).disable_rollback().execute(&plan(2), &mut disabled, 123_i64).await
+        is Result.Err(_));
+    assert_eq(disabled.events, ["init", "acquire", "load", "pending:1", "step:up:1",
+        "pending:2", "step:up:2", "failed:2", "release"]);
+    assert(disabled.entries[0].status is MsApplied(_));
+    print("migration runner: atomic dispatch and lifecycle failures passed");
+}
