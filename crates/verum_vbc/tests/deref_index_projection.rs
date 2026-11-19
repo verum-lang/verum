@@ -520,6 +520,43 @@ fn probe() -> Int { element([3, 71]) }
 }
 
 #[test]
+fn wildcard_extent_loops_preserve_tuple_item_types_at_generic_calls() {
+    let helpers = r#"
+fn same<T>(first: T, second: T) -> T { first }
+fn accept<Key, Value>(pairs: [(Key, Value); _], key: Key, value: Value) {
+    for pair in pairs {
+        same(pair.0, key);
+        same(pair.1, value);
+    }
+}
+"#;
+    let valid = r#"
+fn select(pairs: &[(Int, Bool); _]) -> Int {
+    let mut total = 0;
+    for pair in pairs {
+        if same(pair.1, true) { total = total + same(pair.0, 0); }
+    }
+    total
+}
+fn probe() -> Int {
+    let input = [(23, true), (99, false), (31, true)];
+    select(&input)
+}
+"#;
+    value(&format!("{helpers}\n{valid}"), 54);
+
+    let invalid = r#"
+fn bad(pairs: [(Int, Bool); _]) {
+    for pair in pairs { same(pair.0, pair.1); }
+}
+"#;
+    let error = compile(&format!("{helpers}\n{invalid}"))
+        .err()
+        .expect("Int and Bool cannot bind the same parameter");
+    assert!(error.to_string().contains("conflicting"), "{error}");
+}
+
+#[test]
 fn declared_constant_extents_are_evaluated_in_their_owner_scope() {
     value(
         r#"

@@ -19646,7 +19646,7 @@ impl VbcCodegen {
             }
             match owner {
                 Some(TypeRef::Instantiated { base, args })
-                    if matches!(*base, TypeId::LIST | TypeId::SET | TypeId::DEQUE) && args.len() == 1 => {
+                    if matches!(*base, TypeId::ARRAY | TypeId::LIST | TypeId::SET | TypeId::DEQUE) && args.len() == 1 => {
                         args.first().cloned()
                     }
                 Some(TypeRef::Array { element, .. } | TypeRef::Slice(element)) => Some(element.as_ref().clone()),
