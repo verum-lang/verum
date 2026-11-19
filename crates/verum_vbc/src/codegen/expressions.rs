@@ -13786,6 +13786,12 @@ impl VbcCodegen {
             }
         }
 
+        if let Some(member) = self.default_static_member(receiver, method.name.as_str(), args.len())? {
+            let (function, witnesses) = self.default_static_implementation(&member, method)?;
+            self.ctx.pending_static_call_type_args = (!witnesses.is_empty()).then_some(witnesses);
+            return self.compile_static_method_call(&function, args, type_args);
+        }
+
         // Static calls on declaration-owned type parameters and associated
         // projections use the same witness as a type annotation in this frame.
         if let Some(type_ref) = self.type_parameter_static_receiver(receiver)? {

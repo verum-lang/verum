@@ -11,6 +11,132 @@ pub(super) struct ImplMethodRegistration {
 }
 
 impl VbcCodegen {
+    /// Bind a default's associated call to the exact implementation of the
+    /// protocol slot in the caller's receiver and protocol argument space.
+    pub(super) fn default_static_implementation(
+        &mut self,
+        member: &super::protocol_results::ProtocolMethod,
+        name: &verum_ast::Ident,
+    ) -> CodegenResult<(FunctionInfo, Vec<TypeRef>)> {
+        let invalid = || {
+            CodegenError::with_span(
+                CodegenErrorKind::InvalidSourceSignature(format!(
+                    "Self.{} has no unique declared protocol implementation",
+                    name.name
+                )),
+                name.span,
+            )
+        };
+        let receiver = self
+            .current_impl_receiver
+            .as_ref()
+            .filter(|receiver| receiver.semantic)
+            .map(|receiver| receiver.ty.clone())
+            .ok_or_else(invalid)?;
+        let owner = receiver.base_type_id().ok_or_else(invalid)?;
+        let owner = if let Some(scalar) = self
+            .ctx
+            .current_impl_type_name
+            .as_deref()
+            .filter(|name| crate::types::TypeId::from_well_known_scalar_name(name) == Some(owner))
+        {
+            self.types.iter().find(|ty| {
+                ty.id == owner
+                    && self
+                        .ctx
+                        .strings
+                        .get(ty.name.0 as usize)
+                        .is_some_and(|name| name == scalar)
+            })
+        } else {
+            self.type_by_id(owner)
+        }
+        .ok_or_else(invalid)?;
+        let arguments = match &member.application {
+            TypeRef::Concrete(_) => &[][..],
+            TypeRef::Instantiated { args, .. } => args.as_slice(),
+            _ => return Err(invalid()),
+        };
+        let rows: Vec<_> = owner
+            .protocols
+            .iter()
+            .filter(|row| row.protocol.0 == member.owner.0)
+            .map(|row| {
+                (
+                    row.source_implementation.clone(),
+                    row.methods.get(member.slot as usize).copied(),
+                )
+            })
+            .collect();
+        let mut selected: Option<(FunctionInfo, Vec<TypeRef>)> = None;
+        for (source, slot) in rows {
+            let source = source.ok_or_else(invalid)?;
+            if self
+                .proven_member_bounds(&source, &receiver, member.owner, arguments)?
+                .is_none()
+            {
+                continue;
+            }
+            let id = FunctionId(slot.filter(|id| *id != u32::MAX).ok_or_else(invalid)?);
+            let function = self
+                .ctx
+                .lookup_function_by_id(id)
+                .filter(|info| info.has_source_body)
+                .ok_or_else(invalid)?;
+            let descriptor = self.declared_callable_descriptors.get(&id).ok_or_else(invalid)?;
+            let signature = descriptor.source_signature.as_ref().ok_or_else(invalid)?;
+            if signature.name.name != name.name || signature.is_method() {
+                return Err(invalid());
+            }
+            if self.default_method_protocols.get(&id) != Some(&member.owner) {
+                let declaration = source.declaration().map_err(|_| invalid())?;
+                if descriptor
+                    .origin_module
+                    .and_then(|id| self.ctx.strings.get(id.0 as usize))
+                    .map(String::as_str)
+                    != Some(source.origin_module())
+                    || !declaration.items.iter().any(|item| {
+                        matches!(&item.kind,
+                        verum_ast::decl::ImplItemKind::Function(declared) if declared == signature)
+                    })
+                {
+                    return Err(invalid());
+                }
+            }
+            let mut bindings = TypeSubstitution::empty();
+            self.bind_static_receiver_declaration(function, &receiver, &mut bindings)
+                .ok_or_else(invalid)?;
+            let Some(TypeRef::Function {
+                params, return_type, ..
+            }) = function.callable_signature.as_ref()
+            else {
+                return Err(invalid());
+            };
+            if params.len() != member.inputs.len()
+                || !params.iter().zip(&member.inputs).all(|(pattern, actual)| {
+                    self.bind_source_declaration(pattern, actual, &mut bindings)
+                })
+                || !self.bind_source_declaration(return_type, &member.output, &mut bindings)
+            {
+                return Err(invalid());
+            }
+            let witnesses = function
+                .type_param_ids
+                .iter()
+                .map(|id| bindings.get(*id).cloned())
+                .collect::<Option<Vec<_>>>()
+                .ok_or_else(invalid)?;
+            if selected
+                .as_ref()
+                .is_some_and(|(prior, args)| prior.id != id || args != &witnesses)
+            {
+                return Err(invalid());
+            }
+            selected = Some((function.clone(), witnesses));
+        }
+        selected.ok_or_else(invalid)
+    }
+
     /// Sibling methods may share both name and operand types while implementing
     /// different protocols. Their source declaration chooses the operator body.
     pub(super) fn declared_operator_linkage(

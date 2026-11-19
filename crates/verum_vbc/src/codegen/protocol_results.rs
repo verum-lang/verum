@@ -25,6 +25,8 @@ enum Receiver<'a> {
 
 pub(super) struct ProtocolMethod {
     pub owner: crate::types::TypeId,
+    pub application: TypeRef,
+    pub slot: u32,
     pub receiver: verum_ast::method_dispatch::ReceiverKind,
     pub output: TypeRef,
     pub inputs: Vec<TypeRef>,
@@ -32,6 +34,59 @@ pub(super) struct ProtocolMethod {
 }
 
 impl VbcCodegen {
+    /// In a protocol default, a bare `Self` in expression position denotes the
+    /// implementing type. The lexical protocol selects the associated function.
+    pub(super) fn default_static_member(
+        &self,
+        receiver: &Expr,
+        method: &str,
+        arity: usize,
+    ) -> CodegenResult<Maybe<ProtocolMethod>> {
+        if !matches!(&receiver.kind, ExprKind::Path(path)
+            if path.as_ident().is_some_and(|name| name.as_str() == "Self"))
+        {
+            return Ok(None);
+        }
+        let Some(scope) = &self.current_deferred_impl else {
+            return Ok(None);
+        };
+        let Some(application) = &scope.protocol else {
+            return Ok(None);
+        };
+        let Some(protocol) = application.protocol.and_then(|id| self.type_by_id(id)) else {
+            return Ok(None);
+        };
+        let args = protocol
+            .type_params
+            .iter()
+            .map(|param| {
+                let name = self.ctx.strings.get(param.name.0 as usize)?;
+                let value = application.substitution.get(name)?;
+                value.semantic.then(|| value.ty.clone())
+            })
+            .collect::<Maybe<List<_>>>()
+            .ok_or_else(|| {
+                CodegenError::with_span(
+                    CodegenErrorKind::InvalidSourceSignature(format!(
+                        "incomplete protocol application for Self.{method}"
+                    )),
+                    receiver.span,
+                )
+            })?;
+        let declared = if args.is_empty() {
+            TypeRef::Concrete(protocol.id)
+        } else {
+            TypeRef::instantiated(protocol.id, args)
+        };
+        self.protocol_method(
+            List::from_iter([declared.into()]),
+            method,
+            arity,
+            Receiver::Static(&scope.receiver.ty),
+        )
+        .transpose()
+    }
+
     /// Resolve an object's complete protocol applications without reparsing
     /// display names or assuming that a particular wrapper owns the object.
     pub(super) fn declared_dynamic_method(
@@ -565,6 +620,8 @@ impl VbcCodegen {
                 };
                 output = Some(ProtocolMethod {
                     owner,
+                    application: protocol.application.clone(),
+                    slot: member.tag,
                     receiver: dispatch.receiver,
                     inputs,
                     output: instantiated,

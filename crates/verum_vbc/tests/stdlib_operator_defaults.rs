@@ -116,3 +116,145 @@ fn actual_operator_defaults_and_explicit_rhs_execute() {
         }
     }
 }
+
+#[test]
+fn the_semiring_identity_defaults_call_their_numeric_owners_zero_and_one() {
+    use verum_ast::decl::{ImplKind, ProtocolItemKind};
+
+    let parse = |source: &str| Parser::new(source).parse_module().unwrap();
+    let mut protocols = parse(include_str!("../../../core/base/protocols.vr"));
+    protocols.items.retain(|item| match &item.kind {
+        ItemKind::Module(module) => module.items.is_none(),
+        ItemKind::Type(declaration) => {
+            matches!(declaration.name.as_str(), "Add" | "Mul" | "Zero" | "One")
+        }
+        _ => false,
+    });
+    let mut algebra = parse(include_str!("../../../core/math/algebra.vr"));
+    algebra.items.retain_mut(|item| match &mut item.kind {
+        ItemKind::Module(module) => module.items.is_none(),
+        ItemKind::Type(declaration) if declaration.name.as_str() == "Semiring" => {
+            let verum_ast::TypeDeclBody::Protocol(body) = &mut declaration.body else {
+                panic!("Semiring")
+            };
+            body.items.retain(|item| {
+                matches!(&item.kind, ProtocolItemKind::Function { decl, .. }
+                if matches!(decl.name.as_str(), "add_identity" | "mul_identity"))
+            });
+            assert_eq!(body.items.len(), 2);
+            true
+        }
+        ItemKind::Impl(implementation) => matches!(&implementation.kind,
+            ImplKind::Protocol { protocol, for_type, .. } if protocol.to_string() == "Semiring"
+                && verum_ast::pretty::format_type(for_type) == "Int"),
+        _ => false,
+    });
+    let mut primitives = parse(include_str!("../../../core/base/primitives.vr"));
+    primitives.items.retain(|item| match &item.kind {
+        ItemKind::Module(module) => module.items.is_none(),
+        ItemKind::Impl(implementation) => matches!(&implementation.kind,
+            ImplKind::Protocol { protocol, for_type, .. }
+                if matches!(protocol.to_string().as_str(), "Zero" | "One")
+                && verum_ast::pretty::format_type(for_type) == "Int"),
+        _ => false,
+    });
+    let imports = "mount core.base.protocols.{Add, Mul, Zero, One};";
+    primitives.items.extend(parse(imports).items);
+    algebra.items.extend(parse(imports).items);
+    let consumer = parse(
+        r#"
+        module consumer;
+        mount core.math.algebra.Semiring;
+        type Decoy is ();
+        implement Decoy { fn zero() -> Int { 79 } fn one() -> Int { 83 } }
+        type Impostor is protocol { fn zero() -> Self; };
+        implement Impostor for Int { fn zero() -> Int { 79 } }
+        fn run() -> Int {
+            let n: Int = 7;
+            if n.add_identity() && n.mul_identity() { 73 } else { -1 }
+        }
+    "#,
+    );
+    for (omit_zero, omit_method) in [(false, false), (true, false), (false, true)] {
+        let mut numbers = primitives.clone();
+        if omit_zero {
+            numbers.items.retain(|item| !matches!(&item.kind, ItemKind::Impl(implementation)
+                if matches!(&implementation.kind, ImplKind::Protocol { protocol, .. } if protocol.to_string() == "Zero")));
+        } else if omit_method {
+            for item in &mut numbers.items {
+                if let ItemKind::Impl(implementation) = &mut item.kind
+                    && matches!(&implementation.kind, ImplKind::Protocol { protocol, .. } if protocol.to_string() == "Zero")
+                {
+                    implementation.items.retain(|item| !matches!(&item.kind,
+                        verum_ast::decl::ImplItemKind::Function(function) if function.name.as_str() == "zero"));
+                }
+            }
+        }
+        let files = [&protocols, &numbers, &algebra, &consumer];
+        let mut cg = VbcCodegen::with_config(CodegenConfig::new("consumer"));
+        cg.collect_unit_declarations(&files).unwrap();
+        cg.resolve_pending_imports();
+        let compiled = cg.compile_unit_items(&files, ItemFailurePolicy::Strict);
+        if omit_zero || omit_method {
+            let error = compiled.unwrap_err();
+            assert!(error.to_string().contains("zero"), "{error}");
+            continue;
+        }
+        compiled.unwrap();
+        let module = cg.finalize_module_from_state().unwrap();
+        let encoded = verum_vbc::serialize::serialize_module(&module).unwrap();
+        for module in [
+            module,
+            verum_vbc::deserialize::deserialize_module(&encoded).unwrap(),
+        ] {
+            let run = module.find_function_by_name("consumer.run").unwrap();
+            let value = Interpreter::new(Arc::new(module)).execute_function(run).unwrap();
+            assert_eq!(value.try_as_i64(), Some(73));
+        }
+    }
+}
+
+#[test]
+fn self_associated_calls_follow_applied_parents_and_declared_defaults() {
+    let source = r#"
+        module chooser;
+        type ReadAs<A> is protocol { fn read() -> Int; };
+        type Select<A> is protocol extends ReadAs<A> {
+            fn selected(self) -> Int { Self.read() }
+        };
+        type Local is protocol {
+            fn seed() -> Int { 41 }
+            fn seeded(self) -> Int { Self.seed() + 1 }
+        };
+        type Cell is { value: Int };
+        implement ReadAs<Int> for Cell { fn read() -> Int { 79 } }
+        implement ReadAs<Bool> for Cell { fn read() -> Int { 31 } }
+        implement Select<Bool> for Cell {}
+        implement Local for Cell {}
+        fn run() -> Int { Cell { value: 0 }.selected() + Cell { value: 0 }.seeded() }
+    "#;
+    for omit_match in [false, true] {
+        let source = if omit_match {
+            source.replace("implement ReadAs<Bool> for Cell { fn read() -> Int { 31 } }", "")
+        } else {
+            source.to_owned()
+        };
+        let unit = Parser::new(&source).parse_module().unwrap();
+        let mut generator = VbcCodegen::new();
+        let result = generator.compile_module(&unit);
+        if omit_match {
+            assert!(result.unwrap_err().to_string().contains("read"));
+            continue;
+        }
+        let module = result.unwrap();
+        let encoded = verum_vbc::serialize::serialize_module(&module).unwrap();
+        for module in [
+            module,
+            verum_vbc::deserialize::deserialize_module(&encoded).unwrap(),
+        ] {
+            let run = module.find_function_by_name("chooser.run").unwrap();
+            let value = Interpreter::new(Arc::new(module)).execute_function(run).unwrap();
+            assert_eq!(value.try_as_i64(), Some(73));
+        }
+    }
+}

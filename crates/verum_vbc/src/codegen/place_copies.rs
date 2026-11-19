@@ -284,6 +284,12 @@ impl VbcCodegen {
                 },
             }),
             ExprKind::MethodCall { receiver, method, type_args, args } => {
+                if type_args.is_empty()
+                    && let Some(member) = self.default_static_member(receiver, method.name.as_str(), args.len()).ok()?
+                    && !member.is_async
+                {
+                    return Some(member.output);
+                }
                 if args.len() == 1 && type_args.is_empty()
                     && matches!(method.name.as_str(), "offset" | "add" | "sub")
                     && let Some(pointer @ TypeRef::Reference { tier: CbgrTier::Tier2, .. }) = nested(receiver, None)

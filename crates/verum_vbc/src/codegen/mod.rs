@@ -360,6 +360,8 @@ struct ImplReceiverWitness {
 #[derive(Debug, Clone)]
 struct DeferredImplScope {
     receiver: ImplReceiverWitness,
+    /// Lexical protocol application before a method's binders shadow its parameters.
+    protocol: Option<std::sync::Arc<protocol_applications::ProtocolApplication>>,
     source_substitution: source_substitution::SourceTypeSubstitution,
     dense: HashMap<String, u16>,
     shadow: HashMap<String, u16>,
@@ -385,10 +387,13 @@ struct DeferredDefaultMethod {
     lexical_owner: Option<String>,
     implementation: DeferredImplScope,
     constraints: Option<DefaultConstraintScope>,
-    /// The protocol that declares this retained body, distinct from the
-    /// implementation whose superprotocol traversal discovered it.
-    protocol_owner: Option<crate::types::TypeId>,
     directly_implemented: bool,
+}
+
+impl DeferredDefaultMethod {
+    fn protocol_owner(&self) -> Option<crate::types::TypeId> {
+        self.implementation.protocol.as_ref()?.protocol
+    }
 }
 
 /// A blanket protocol implementation waiting to be monomorphized onto
@@ -1061,6 +1066,8 @@ pub struct VbcCodegen {
     /// compiled — compile_function's name lookup bound every sibling
     /// to the slot-winner's id and the dedupe kept one).
     impl_method_registrations: HashMap<String, Vec<impl_method_registrations::ImplMethodRegistration>>,
+    /// The declaring protocol of each locally registered default body.
+    default_method_protocols: HashMap<FunctionId, crate::types::TypeId>,
 
     /// FN-BOUND-CARRY (T0701 next-leg): the CURRENT impl block's AST
     /// generic params, armed around the impl-item compile loop.  The
@@ -2349,6 +2356,7 @@ impl VbcCodegen {
             type_name_first_qualifier: std::collections::HashMap::new(),
             ambiguous_bare_type_names: std::collections::HashSet::new(),
             impl_method_registrations: HashMap::new(),
+            default_method_protocols: HashMap::new(),
             current_impl_ast_generics: None,
             current_impl_definition: None,
             current_impl_where_clause: None,
@@ -3477,6 +3485,7 @@ impl VbcCodegen {
         // it once using the same binder prefix as ordinary method lowering.
         let deferred_scope = DeferredImplScope {
             receiver: receiver.clone(),
+            protocol: None,
             dense: scope,
             shadow: Default::default(),
             source_substitution: Default::default(),
@@ -3624,6 +3633,7 @@ impl VbcCodegen {
                     protocols_to_check.push(parent);
                 }
 
+                if protocol_info.default_methods.is_empty() { continue; }
                 let empty = std::collections::HashSet::new();
                 let overrides = per_proto_overrides.get(&application.key).unwrap_or(&empty);
 
@@ -3641,6 +3651,7 @@ impl VbcCodegen {
                     protocol_info.default_methods.iter().collect();
                 sorted_methods.sort_by(|a, b| a.0.cmp(b.0));
 
+                let application = std::sync::Arc::new(application);
                 for (method_name, default_func) in sorted_methods {
                     if overrides.contains(method_name) {
                         continue;
@@ -3676,7 +3687,7 @@ impl VbcCodegen {
                         default_func, type_name, &deferred_scope,
                         Some(protocol_info.source_module.clone()), constraints,
                     );
-                    method.protocol_owner = application.protocol;
+                    method.implementation.protocol = Some(application.clone());
                     method.directly_implemented = application.protocol.is_some()
                         && application.protocol == root_protocol;
                     method.implementation.source_substitution = application.substitution.for_function(default_func);
@@ -3700,9 +3711,9 @@ impl VbcCodegen {
             receiver_name: receiver_name.to_owned(),
             lexical_owner,
             constraints,
-            protocol_owner: None,
             directly_implemented: false,
             implementation: DeferredImplScope {
+                protocol: implementation.protocol.clone(),
                 dense,
                 shadow,
                 receiver: implementation.receiver.clone(),
@@ -3827,14 +3838,14 @@ impl VbcCodegen {
         let deferred = std::mem::take(&mut self.pending_default_registrations);
         let mut direct = HashMap::<_, Vec<usize>>::new();
         let key = |method: &DeferredDefaultMethod| (
-            method.implementation.receiver.ty.base_type_id(), method.protocol_owner,
+            method.implementation.receiver.ty.base_type_id(), method.protocol_owner(),
             method.lexical_owner.clone(), method.function.name.name.clone(),
         );
         for (index, method) in deferred.iter().enumerate() {
             if method.directly_implemented { direct.entry(key(method)).or_default().push(index); }
         }
         let superseded: Vec<_> = deferred.iter().map(|method| {
-            !method.directly_implemented && method.protocol_owner.is_some()
+            !method.directly_implemented && method.protocol_owner().is_some()
                 && direct.get(&key(method)).is_some_and(|candidates| candidates.iter().any(|&index| {
                     let candidate = &deferred[index];
                     candidate.function == method.function
@@ -3874,6 +3885,9 @@ impl VbcCodegen {
             let id = self.with_deferred_method_scope(&method, |codegen| {
                 codegen.register_impl_function(default_func, type_name, &method.implementation.declaration.ordered_generics)
             }).map_err(|error| error.with_context(format!("in inherited signature {full_method_name}")))?;
+            if let Some(protocol) = method.protocol_owner() {
+                self.default_method_protocols.insert(id, protocol);
+            }
             self.pending_default_methods.push((id, method));
         }
 
