@@ -72,7 +72,7 @@ mount core.security.sigstore.types.{
     EntryKind, ApiVersion, EntryBody, HashedRekordBody, IntotoBody, DsseBody,
     IntotoEnvelopeRef, EnvelopeSignature,
     LogEntry, SignedEntryTimestamp, RekorInclusionProof, Digest,
-    entry_kind_to_text, validate_digest,
+    entry_kind_to_text, validate_digest, http_error_body,
     REKOR_PUBLIC_URL,
 };
 
@@ -229,7 +229,7 @@ async fn send_entry_request<C: HttpClient>(
     let status = response.status_code();
     let body = response.into_body();
     if !status.is_success() {
-        return Result.Err(RekorError.HttpStatus { status, body: text_of_body_lossy(&body) });
+        return Result.Err(RekorError.HttpStatus { status, body: http_error_body(body.as_slice()) });
     }
     let size = body.len();
     if size > MAX_ENTRY_RESPONSE_BYTES {
@@ -556,16 +556,6 @@ fn compose_url(base: &Text, path: &Text) -> Text {
     }
 }
 
-fn text_of_body_lossy(body: &List<Byte>) -> Text {
-    let bytes = body.as_slice();
-    match Text.from_utf8(bytes) {
-        Result.Ok(message) => message,
-        Result.Err(_) => {
-            let end = if bytes.len() < 256 { bytes.len() } else { 256 };
-            hex_encode(&bytes[..end])
-        }
-    }
-}
 
 // =============================================================================
 // Tests

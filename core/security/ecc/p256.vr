@@ -120,6 +120,11 @@ public type P256PublicKey is {
     /// to pre-canonicalise.
     bytes: List<Byte>,
 };
+implement P256PublicKey {
+    /// Return the exact SEC 1 encoding of this public point.
+    public fn into_bytes(self) -> List<Byte> { self.bytes }
+}
+
 public type P256SharedSecret is [Byte; 32];
 
 /// ECDSA signature as fixed-width `r || s` (32 + 32 bytes). For

@@ -8,6 +8,9 @@
 mount core.security.sigstore.fulcio.{
     MAX_FULCIO_RESPONSE_BYTES, CONTENT_TYPE_JSON,
 };
+mount core.security.sigstore.fulcio.{parse_signing_cert_response, FulcioError};
+mount core.hash.crypto.sha256.Sha256;
+mount core.encoding.hex.{encode as hex_encode};
 mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 
@@ -44,6 +47,62 @@ fn test_fulcio_max_response_positive() {
 fn test_fulcio_max_response_power_of_two() {
     let n = MAX_FULCIO_RESPONSE_BYTES;
     assert_eq(n & (n - 1), 0);
+}
+
+@test
+fn test_detached_certificate_response() {
+    let detached = "{\"signedCertificateDetachedSct\":{\"chain\":{\"certificates\":[\"-----BEGIN CERTIFICATE-----\\nAQI=\\n-----END CERTIFICATE-----\\n\"]},\"signedCertificateTimestamp\":\"AwQ=\"}}".into_bytes();
+    let result = parse_signing_cert_response(detached.as_slice()).unwrap();
+    assert_eq(result.cert_chain.len(), 1);
+    assert_eq(result.cert_chain[0][1], 2_u8);
+    let timestamp = result.scts_raw.unwrap();
+    assert_eq(timestamp.len(), 2);
+    assert_eq(timestamp[0], 3_u8);
+    let ambiguous = "{\"signedCertificateEmbeddedSct\":{},\"signedCertificateDetachedSct\":{}}".into_bytes();
+    assert(parse_signing_cert_response(ambiguous.as_slice()).is_err());
+    let malformed = "{\"signedCertificateDetachedSct\":{\"chain\":{},\"signedCertificateTimestamp\":\"!\"}}".into_bytes();
+    match parse_signing_cert_response(malformed.as_slice()) {
+        Result.Err(FulcioError.InvalidJson(_)) => {},
+        _ => panic("invalid detached SCT base64 must fail"),
+    }
+}
+
+
+@test
+fn test_embedded_response_preserves_both_certificate_fingerprints_in_order() {
+    // Public Fulcio intermediate and root from its trust bundle, carried in the v2 response shape.
+    let wire = """{
+    "signedCertificateEmbeddedSct": {
+        "chain": {
+            "certificates": [
+                "-----BEGIN CERTIFICATE-----\nMIICGjCCAaGgAwIBAgIUALnViVfnU0brJasmRkHrn/UnfaQwCgYIKoZIzj0EAwMw\nKjEVMBMGA1UEChMMc2lnc3RvcmUuZGV2MREwDwYDVQQDEwhzaWdzdG9yZTAeFw0y\nMjA0MTMyMDA2MTVaFw0zMTEwMDUxMzU2NThaMDcxFTATBgNVBAoTDHNpZ3N0b3Jl\nLmRldjEeMBwGA1UEAxMVc2lnc3RvcmUtaW50ZXJtZWRpYXRlMHYwEAYHKoZIzj0C\nAQYFK4EEACIDYgAE8RVS/ysH+NOvuDZyPIZtilgUF9NlarYpAd9HP1vBBH1U5CV7\n7LSS7s0ZiH4nE7Hv7ptS6LvvR/STk798LVgMzLlJ4HeIfF3tHSaexLcYpSASr1kS\n0N/RgBJz/9jWCiXno3sweTAOBgNVHQ8BAf8EBAMCAQYwEwYDVR0lBAwwCgYIKwYB\nBQUHAwMwEgYDVR0TAQH/BAgwBgEB/wIBADAdBgNVHQ4EFgQU39Ppz1YkEZb5qNjp\nKFWixi4YZD8wHwYDVR0jBBgwFoAUWMAeX5FFpWapesyQoZMi0CrFxfowCgYIKoZI\nzj0EAwMDZwAwZAIwPCsQK4DYiZYDPIaDi5HFKnfxXx6ASSVmERfsynYBiX2X6SJR\nnZU84/9DZdnFvvxmAjBOt6QpBlc4J/0DxvkTCqpclvziL6BCCPnjdlIB3Pu3BxsP\nmygUY7Ii2zbdCdliiow=\n-----END CERTIFICATE-----\n",
+                "-----BEGIN CERTIFICATE-----\nMIIB9zCCAXygAwIBAgIUALZNAPFdxHPwjeDloDwyYChAO/4wCgYIKoZIzj0EAwMw\nKjEVMBMGA1UEChMMc2lnc3RvcmUuZGV2MREwDwYDVQQDEwhzaWdzdG9yZTAeFw0y\nMTEwMDcxMzU2NTlaFw0zMTEwMDUxMzU2NThaMCoxFTATBgNVBAoTDHNpZ3N0b3Jl\nLmRldjERMA8GA1UEAxMIc2lnc3RvcmUwdjAQBgcqhkjOPQIBBgUrgQQAIgNiAAT7\nXeFT4rb3PQGwS4IajtLk3/OlnpgangaBclYpsYBr5i+4ynB07ceb3LP0OIOZdxex\nX69c5iVuyJRQ+Hz05yi+UF3uBWAlHpiS5sh0+H2GHE7SXrk1EC5m1Tr19L9gg92j\nYzBhMA4GA1UdDwEB/wQEAwIBBjAPBgNVHRMBAf8EBTADAQH/MB0GA1UdDgQWBBRY\nwB5fkUWlZql6zJChkyLQKsXF+jAfBgNVHSMEGDAWgBRYwB5fkUWlZql6zJChkyLQ\nKsXF+jAKBggqhkjOPQQDAwNpADBmAjEAj1nHeXZp+13NWBNa+EDsDP8G1WWg1tCM\nWP/WHPqpaVo0jhsweNFZgSs0eE7wYI4qAjEA2WB9ot98sIkoF3vZYdd3/VtWB5b9\nTNMea7Ix/stJ5TfcLLeABLE4BNJOsQ4vnBHJ\n-----END CERTIFICATE-----\n"
+            ]
+        }
+    }
+}""";
+    let decoded = parse_signing_cert_response(wire.as_bytes()).unwrap();
+    assert(decoded.scts_raw.is_none());
+    assert_eq(decoded.cert_chain.len(), 2);
+    let fingerprint_0 = Sha256.digest(decoded.cert_chain[0].as_slice());
+    assert_eq(hex_encode(&fingerprint_0[..]), "15d795348226b4649f750f5802592c393bee7cc53c3b86982175b7ad087efe47");
+    let fingerprint_1 = Sha256.digest(decoded.cert_chain[1].as_slice());
+    assert_eq(hex_encode(&fingerprint_1[..]), "3ba7b6cc4e95469d4d334b49cb257ad8537076fa84b0ca87ff4ecfe6a54680c1");
+}
+
+@test
+fn test_fulcio_rejects_invalid_certificate_chains() {
+    for wire in [
+        """{"signedCertificateEmbeddedSct":{"chain":{"certificates":[]}}}""",
+        """{"signedCertificateEmbeddedSct":{"chain":{"certificates":[null]}}}""",
+        """{"signedCertificateEmbeddedSct":{"chain":{"certificates":["-----BEGIN PUBLIC KEY-----\nAQI=\n-----END PUBLIC KEY-----"]}}}""",
+        """{"signedCertificateEmbeddedSct":{"chain":{"certificates":["-----BEGIN CERTIFICATE-----\n!\n-----END CERTIFICATE-----"]}}}""",
+        """{"signedCertificateDetachedSct":{"chain":{"certificates":[]},"signedCertificateTimestamp":""}}""",
+        """{"signedCertificateEmbeddedSct":{},"signedCertificateEmbeddedSct":{}}""",
+        """{"chain":{"certificates":[]}}""",
+    ] {
+        assert(parse_signing_cert_response(wire.as_bytes()).is_err());
+    }
 }
 
 fn main() {}

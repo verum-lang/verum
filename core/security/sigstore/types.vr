@@ -395,6 +395,17 @@ implement Debug for SigstoreTypeError {
 // Helpers
 // =============================================================================
 
+/// Format an HTTP error body as text or, for binary data, the first 256 octets in hexadecimal.
+public(in core.security.sigstore) fn http_error_body(bytes: &[Byte]) -> Text {
+    match Text.from_utf8(bytes) {
+        Result.Ok(message) => message,
+        Result.Err(_) => {
+            let end = if bytes.len() < 256 { bytes.len() } else { 256 };
+            core.encoding.hex.encode(&bytes[..end])
+        }
+    }
+}
+
 public fn digest_sha256_hex(hex: Text) -> Digest {
     Digest.new("sha256", hex)
 }
