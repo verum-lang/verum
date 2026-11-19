@@ -40,21 +40,18 @@
 module core.net.tls13.handshake.client_sm;
 
 mount core.collections.list.{List};
+mount core.base.memory.Shared;
 mount core.time.instant.{Instant};
+mount core.time.system_time.now_unix_s;
 mount core.hash.crypto.sha256.{Sha256};
 mount core.hash.crypto.sha384.{Sha384};
-mount core.hash.crypto.sha512.{Sha512};
 mount core.mac.hmac.{HmacSha256, HmacSha384, hmac_sha256, hmac_sha384};
 mount core.security.x509.{X509Certificate, TrustStore, ChainError, parse_certificate, validate_chain};
-mount core.security.x509.spki.{SubjectPublicKey, EcPublicKeyBytes, Ed25519PublicKeyBytes};
+mount core.security.x509.algorithm.{SignatureAlg, RsaPssParams, RsaPssHash};
+mount core.security.x509.chain.verify_subject_signature;
 mount core.security.ecc.x25519.{X25519, X25519SecretKey, X25519PublicKey};
 mount core.security.ecc.p256.{P256, P256PrivateKey, P256PublicKey, P256Signature};
-mount core.security.ecc.ed25519.{Ed25519, Ed25519PublicKey as Ed25519Pk, Ed25519Signature};
 mount core.subtle.constant_time.{constant_time_eq};
-mount core.security.sig.rsa.{
-    RsaHash,
-    verify_pkcs1_v15_prehashed, verify_pss_prehashed,
-};
 mount core.net.tls13.version.{ProtocolVersion, LEGACY_VERSION_TLS_1_2, TLS_1_3, DOWNGRADE_SENTINEL_TLS12, DOWNGRADE_SENTINEL_TLS11};
 mount core.net.tls13.cipher_suite.{CipherSuite, HashKind};
 mount core.net.tls13.named_group.{NamedGroup};
@@ -81,7 +78,8 @@ mount core.net.tls13.handshake.resumption.{
     ClientSession, client_session_from_nst,
 };
 mount core.net.tls13.handshake.transcript.{Transcript};
-mount core.net.tls13.handshake.codec.{Tls13HandshakeReader};
+mount core.net.tls13.handshake.codec.{CodecError, Tls13HandshakeReader};
+mount core.net.tls13.handshake.dhe_pool.{DhePool, LocalDhePool, generate_offered_keyshares};
 
 // =============================================================================
 // Client configuration
@@ -98,10 +96,25 @@ public type Tls13ClientConfig is {
     /// 32 random bytes — MUST be CSPRNG-sourced. Handshake SM uses
     /// these as ClientHello.random.
     random:      [Byte; 32],
-    /// Client's offered key-share per group. Caller is responsible for
-    /// generating ECDHE keypairs and providing the public halves here.
+    /// Public halves of the ephemeral keypairs produced for this handshake.
     key_shares:  List<KeyShareEntry>,
 };
+
+implement Tls13ClientConfig {
+    /// Configure an authenticated client. Supply a fresh CSPRNG ClientHello.random.
+    public fn new(server_name: Text, trust: TrustStore, random: [Byte; 32],
+                  groups: List<NamedGroup>, suites: List<CipherSuite>,
+                  sig_schemes: List<SignatureScheme>, alpn: List<List<Byte>>)
+                  -> Result<Tls13ClientConfig, TlsError> {
+        if server_name.is_empty() || groups.is_empty() || suites.is_empty() || sig_schemes.is_empty() {
+            return Result.Err(TlsError.IllegalParameter);
+        }
+        Result.Ok(Tls13ClientConfig {
+            server_name, alpn, trust, groups, suites, sig_schemes, verify_hostname: true,
+            random, key_shares: [],
+        })
+    }
+}
 
 // =============================================================================
 // Phantom state markers — each is a distinct type
@@ -123,7 +136,8 @@ public type StateConnected is ();
 public type WaitServerHello is {
     config:     Tls13ClientConfig,
     transcript: Transcript,
-    saw_hrr:    Bool,
+    first_hello: List<Byte>,
+    retry_suite: Maybe<CipherSuite>,
     /// DHE private keys keyed by group — caller matches ServerHello.key_share.group.
     /// We store them as raw bytes here; caller resolved them from an external
     /// DHE keystore on construction.
@@ -150,13 +164,35 @@ public type WaitCertVerify is {
     peer_chain_der:   List<List<Byte>>,
 };
 
+implement WaitCertVerify {
+    /// Parsed leaf received in Certificate and awaiting CertificateVerify.
+    public fn received_certificate(&self) -> &X509Certificate { &self.peer_certificate }
+
+    /// DER entries in their original peer-supplied order, leaf first.
+    public fn received_chain_der(&self) -> &[List<Byte>] { self.peer_chain_der.as_slice() }
+}
+
 public type WaitFinished is {
     inner:            WaitEncryptedExtensions,
     cert_request:     Maybe<CertificateRequest>,
     peer_certificate: X509Certificate,
 };
 
-public type Connected is {
+public type Connected is { state: Shared<ConnectedData> };
+
+implement Clone for Connected {
+    fn clone(&self) -> Connected { Connected { state: self.state.clone() } }
+}
+
+implement Connected {
+    public(in core.net) fn negotiated_suite(&self) -> &CipherSuite { &self.state.get().suite }
+    public(in core.net) fn application_traffic(&self) -> (&TrafficSecret, &TrafficSecret) {
+        let connection = self.state.get();
+        (&connection.client_ap_traffic, &connection.server_ap_traffic)
+    }
+}
+
+type ConnectedData is {
     config:     Tls13ClientConfig,
     suite:      CipherSuite,
     hash:       HashKind,
@@ -190,10 +226,15 @@ public type ClientSm is
 public type StepOutput is {
     /// Bytes of outbound handshake messages to transmit. Empty if no
     /// response is required at this step.
-    outbound_handshake: List<Byte>,
+    public(in core.net) outbound_handshake: List<Byte>,
     /// If non-Maybe.None, the handshake is done — application traffic can flow.
-    connected:          Maybe<Connected>,
+    public(in core.net) connected: Maybe<Connected>,
 };
+
+implement StepOutput {
+    /// Whether this step produced the completed connection state.
+    public fn is_connected(&self) -> Bool { self.connected.is_some() }
+}
 
 implement ClientSm {
     /// Initial state; emit ClientHello.
@@ -204,18 +245,24 @@ implement ClientSm {
     /// Drive the initial ClientHello emission. Transitions
     /// Start → WaitServerHello.
     public fn start(self) -> Result<(ClientSm, List<Byte>), TlsError> {
+        let mut pool = LocalDhePool.new();
+        self.start_with_key_pool(&mut pool)
+    }
+
+    /// Start with a caller-owned source of fresh ephemeral keypairs.
+    public fn start_with_key_pool(self, pool: &mut dyn DhePool) -> Result<(ClientSm, List<Byte>), TlsError> {
         match self {
             ClientSm.StartSm { config } => {
-                let (ch, transcript, dhe_privs) = build_client_hello(&config);
+                let mut prepared = config;
+                let (shares, dhe_privs) = generate_offered_keyshares(pool, List.from_slice(prepared.groups.as_slice()))?;
+                prepared.key_shares = shares;
+                let ch = build_client_hello(&prepared);
                 let msg = HandshakeMessage.ClientHelloMsg(ch);
                 let mut wire: List<Byte> = [];
-                encode_handshake(&msg, &mut wire)
-                    .map_err(|_| TlsError.InternalError(Text.from("encode CH failed")))?;
-                // Transcript absorbs the wire-level message body.
-                let mut t = transcript;
-                t.append(wire.as_slice());
+                with_tls_error(encode_handshake(&msg, &mut wire), TlsError.InternalError(Text.from("encode CH failed")))?;
                 let next = ClientSm.WaitServerHelloSm(WaitServerHello {
-                    config: config, transcript: t, saw_hrr: false, dhe_privs: dhe_privs,
+                    config: prepared, transcript: Transcript.new(HashKind.Sha256),
+                    first_hello: wire.clone(), retry_suite: Maybe.None, dhe_privs: dhe_privs,
                 });
                 Result.Ok((next, wire))
             },
@@ -228,8 +275,8 @@ implement ClientSm {
     /// that must be transmitted in response.
     public fn on_handshake(self, wire: &[Byte]) -> Result<(ClientSm, StepOutput), TlsError> {
         let mut r = Tls13HandshakeReader.new(wire);
-        let msg = decode_handshake(&mut r)
-            .map_err(|_| TlsError.DecodeError)?;
+        let msg = decode_handshake(&mut r).map_err(decode_error)?;
+        if !r.is_at_end() { return Result.Err(TlsError.DecodeError); }
 
         match self {
             ClientSm.WaitServerHelloSm(ws) => on_server_hello(ws, msg, wire),
@@ -266,14 +313,14 @@ implement ClientSm {
         match self {
             ClientSm.ConnectedSm(c) => {
                 let mut r = Tls13HandshakeReader.new(wire);
-                let msg = decode_handshake(&mut r)
-                    .map_err(|_| TlsError.DecodeError)?;
+                let msg = with_tls_error(decode_handshake(&mut r), TlsError.DecodeError)?;
                 match msg {
                     HandshakeMessage.NewSessionTicketMsg(nst) => {
                         // Copy resumption_master bytes; the helper
                         // takes ownership so the connection keeps
                         // its own copy intact for subsequent tickets.
-                        let slice = c.resumption_master.as_slice();
+                        let established = c.state.get();
+                        let slice = established.resumption_master.as_slice();
                         let mut rm_bytes: List<Byte> = [];
                         let mut i: Int = 0;
                         while i < slice.len() {
@@ -282,7 +329,7 @@ implement ClientSm {
                         }
                         let session = client_session_from_nst(
                             &nst,
-                            c.suite.clone(),
+                            established.suite.clone(),
                             rm_bytes,
                             now,
                         );
@@ -327,23 +374,24 @@ fn on_server_hello(
 ) -> Result<(ClientSm, StepOutput), TlsError> {
     match msg {
         HandshakeMessage.HelloRetryRequestMsg(sh) => {
-            if ws.saw_hrr {
+            if ws.retry_suite.is_some() {
                 // Only one HRR per handshake (RFC 8446 §4.1.4).
                 return Result.Err(TlsError.UnexpectedMessage);
             }
-            // Reseed transcript per §4.4.1: message_hash(CH1).
+            validate_server_hello(&ws.config, &sh)?;
+            ws.transcript = Transcript.new(sh.cipher_suite.hash_kind());
+            ws.transcript.append(ws.first_hello.as_slice());
             ws.transcript.reseed_for_hrr();
             ws.transcript.append(wire);
             // Build a fresh ClientHello matching HRR-selected group.
             let new_ch = rebuild_client_hello_for_hrr(&ws.config, &sh)?;
             let new_msg = HandshakeMessage.ClientHelloMsg(new_ch);
             let mut out_wire: List<Byte> = [];
-            encode_handshake(&new_msg, &mut out_wire)
-                .map_err(|_| TlsError.InternalError(Text.from("encode CH2 failed")))?;
+            with_tls_error(encode_handshake(&new_msg, &mut out_wire), TlsError.InternalError(Text.from("encode CH2 failed")))?;
             ws.transcript.append(out_wire.as_slice());
             let next = ClientSm.WaitServerHelloSm(WaitServerHello {
                 config: ws.config, transcript: ws.transcript,
-                saw_hrr: true, dhe_privs: ws.dhe_privs,
+                first_hello: ws.first_hello, retry_suite: Maybe.Some(sh.cipher_suite), dhe_privs: ws.dhe_privs,
             });
             Result.Ok((next, StepOutput {
                 outbound_handshake: out_wire,
@@ -363,34 +411,36 @@ fn on_server_hello(
 
             // Cipher suite
             let suite = sh.cipher_suite.clone();
-            if !suite.is_supported() { return Result.Err(TlsError.HandshakeFailure); }
+            validate_server_hello(&ws.config, &sh)?;
+            if let Maybe.Some(previous) = &ws.retry_suite {
+                if previous.to_u16() != suite.to_u16() { return Result.Err(TlsError.IllegalParameter); }
+            }
             let hash = suite.hash_kind();
 
             // key_share from server — match against our keypair.
             let server_share = select_server_key_share(&sh.extensions)?;
-            let dhe_priv = find_dhe_priv(&ws.dhe_privs, &server_share.group)?;
+            let dhe_priv = find_dhe_priv(&ws.dhe_privs, server_share.named_group())?;
 
             // Compute the DHE shared secret via core.security.ecc.* —
             // X25519 / secp256r1 / secp384r1 all dispatched below in
             // compute_dhe(). Returns an H-group-sized shared secret.
-            let dhe_shared = compute_dhe(&server_share.group, &dhe_priv, &server_share.key_exchange)?;
+            let dhe_shared = compute_dhe(server_share.named_group(), dhe_priv.as_slice(), server_share.public_bytes())?;
 
             // Absorb SH into transcript.
             let mut transcript = ws.transcript;
+            if ws.retry_suite.is_none() {
+                transcript = Transcript.new(hash);
+                transcript.append(ws.first_hello.as_slice());
+            }
             transcript.append(wire);
             let transcript_after_sh = transcript.snapshot();
 
             // Derive Early → Handshake secrets.
-            let early = EarlySecret.derive_no_psk(hash)
-                .map_err(|_| TlsError.InternalError(Text.from("early secret")))?;
-            let derived = early.to_handshake_input()
-                .map_err(|_| TlsError.InternalError(Text.from("derive handshake")))?;
-            let handshake_secret = HandshakeSecret.derive(hash, derived.as_slice(), dhe_shared.as_slice())
-                .map_err(|_| TlsError.InternalError(Text.from("handshake secret")))?;
-            let client_hs = handshake_secret.client_traffic(transcript_after_sh.as_slice())
-                .map_err(|_| TlsError.InternalError(Text.from("client hs traffic")))?;
-            let server_hs = handshake_secret.server_traffic(transcript_after_sh.as_slice())
-                .map_err(|_| TlsError.InternalError(Text.from("server hs traffic")))?;
+            let early = with_tls_error(EarlySecret.derive_no_psk(hash), TlsError.InternalError(Text.from("early secret")))?;
+            let derived = with_tls_error(early.to_handshake_input(), TlsError.InternalError(Text.from("derive handshake")))?;
+            let handshake_secret = with_tls_error(HandshakeSecret.derive(hash, derived.as_slice(), dhe_shared.as_slice()), TlsError.InternalError(Text.from("handshake secret")))?;
+            let client_hs = with_tls_error(handshake_secret.client_traffic(transcript_after_sh.as_slice()), TlsError.InternalError(Text.from("client hs traffic")))?;
+            let server_hs = with_tls_error(handshake_secret.server_traffic(transcript_after_sh.as_slice()), TlsError.InternalError(Text.from("server hs traffic")))?;
 
             let next = ClientSm.WaitEncryptedExtensionsSm(WaitEncryptedExtensions {
                 config: ws.config,
@@ -467,12 +517,11 @@ fn on_certificate_inner(
     cm: CertificateMessage,
     cert_request: Maybe<CertificateRequest>,
 ) -> Result<(ClientSm, StepOutput), TlsError> {
-    if cm.certificate_list.len() == 0 {
+    if !cm.certificate_request_context.is_empty() || cm.certificate_list.is_empty() {
         return Result.Err(TlsError.BadCertificate);
     }
     let ee_entry = &cm.certificate_list[0];
-    let peer_cert = parse_certificate(ee_entry.cert_data.as_slice())
-        .map_err(|_| TlsError.BadCertificate)?;
+    let peer_cert = with_tls_error(parse_certificate(ee_entry.cert_data.as_slice()), TlsError.BadCertificate)?;
 
     let mut chain_der: List<List<Byte>> = [];
     let mut i: Int = 0;
@@ -504,19 +553,21 @@ fn on_certificate_verify(
                 transcript_hash.as_slice(),
                 /* is_server = */ true,
             );
-            verify_certificate_signature(
-                &inner.peer_certificate, &cv, signed_input.as_slice(),
-            )?;
-
-            // Hostname + chain validation.
-            if inner.inner.config.verify_hostname {
-                let parsed_chain = parse_chain(&inner.peer_chain_der)?;
-                let _ = validate_chain(
-                    &parsed_chain,
-                    &inner.inner.config.trust,
-                    Maybe.Some(&inner.inner.config.server_name),
-                    current_unix_time(),
-                ).map_err(map_chain_error)?;
+            let mut offered = false;
+            for scheme in &inner.inner.config.sig_schemes {
+                if scheme.to_u16() == cv.algorithm.to_u16() { offered = true; }
+            }
+            if !offered || !cv.algorithm.is_valid_for_certificate_verify() {
+                return Result.Err(TlsError.IllegalParameter);
+            }
+            verify_certificate_signature(&inner.peer_certificate, &cv, signed_input.as_slice())?;
+            let parsed_chain = parse_chain(&inner.peer_chain_der)?;
+            let hostname = if inner.inner.config.verify_hostname {
+                Maybe.Some(&inner.inner.config.server_name)
+            } else { Maybe.None };
+            match validate_chain(&parsed_chain, &inner.inner.config.trust, hostname, now_unix_s() as Int64) {
+                Result.Ok(_) => {},
+                Result.Err(e) => return Result.Err(map_chain_error(e)),
             }
 
             let mut inside = inner.inner;
@@ -540,8 +591,7 @@ fn on_finished(
         HandshakeMessage.FinishedMsg(fin) => {
             // Verify server Finished = HMAC(finished_key_server,
             //  Transcript-Hash(ClientHello..CertificateVerify))
-            let srv_fin_key = inner.inner.server_hs_traffic.finished_key()
-                .map_err(|_| TlsError.InternalError(Text.from("server finished key")))?;
+            let srv_fin_key = with_tls_error(inner.inner.server_hs_traffic.finished_key(), TlsError.InternalError(Text.from("server finished key")))?;
             let th = inner.inner.transcript.snapshot();
             let expected = hmac_for_hash(inner.inner.hash, srv_fin_key.as_slice(), th.as_slice());
             if !constant_time_bytes_eq(expected.as_slice(), fin.verify_data.as_slice()) {
@@ -552,34 +602,26 @@ fn on_finished(
             transcript.append(wire);
 
             // Derive application traffic secrets + exporter + resumption.
-            let master_input = inner.inner.handshake_secret.to_master_input()
-                .map_err(|_| TlsError.InternalError(Text.from("master input")))?;
-            let master_secret = MasterSecret.derive(inner.inner.hash, master_input.as_slice())
-                .map_err(|_| TlsError.InternalError(Text.from("master secret")))?;
+            let master_input = with_tls_error(inner.inner.handshake_secret.to_master_input(), TlsError.InternalError(Text.from("master input")))?;
+            let master_secret = with_tls_error(MasterSecret.derive(inner.inner.hash, master_input.as_slice()), TlsError.InternalError(Text.from("master secret")))?;
 
             let transcript_after_sfin = transcript.snapshot();
-            let client_ap = master_secret.client_traffic(transcript_after_sfin.as_slice())
-                .map_err(|_| TlsError.InternalError(Text.from("client ap traffic")))?;
-            let server_ap = master_secret.server_traffic(transcript_after_sfin.as_slice())
-                .map_err(|_| TlsError.InternalError(Text.from("server ap traffic")))?;
-            let exporter = master_secret.exporter_master(transcript_after_sfin.as_slice())
-                .map_err(|_| TlsError.InternalError(Text.from("exporter master")))?;
+            let client_ap = with_tls_error(master_secret.client_traffic(transcript_after_sfin.as_slice()), TlsError.InternalError(Text.from("client ap traffic")))?;
+            let server_ap = with_tls_error(master_secret.server_traffic(transcript_after_sfin.as_slice()), TlsError.InternalError(Text.from("server ap traffic")))?;
+            let exporter = with_tls_error(master_secret.exporter_master(transcript_after_sfin.as_slice()), TlsError.InternalError(Text.from("exporter master")))?;
 
             // Build client Finished = HMAC(finished_key_client, transcript-hash-so-far)
-            let cli_fin_key = inner.inner.client_hs_traffic.finished_key()
-                .map_err(|_| TlsError.InternalError(Text.from("client finished key")))?;
+            let cli_fin_key = with_tls_error(inner.inner.client_hs_traffic.finished_key(), TlsError.InternalError(Text.from("client finished key")))?;
             let cli_fin_verify = hmac_for_hash(inner.inner.hash, cli_fin_key.as_slice(), transcript_after_sfin.as_slice());
 
             let cli_fin = HandshakeMessage.FinishedMsg(Finished { verify_data: cli_fin_verify });
             let mut out_wire: List<Byte> = [];
-            encode_handshake(&cli_fin, &mut out_wire)
-                .map_err(|_| TlsError.InternalError(Text.from("encode CFin")))?;
+            with_tls_error(encode_handshake(&cli_fin, &mut out_wire), TlsError.InternalError(Text.from("encode CFin")))?;
             transcript.append(out_wire.as_slice());
             let transcript_after_cfin = transcript.snapshot();
-            let resumption_master = master_secret.resumption_master(transcript_after_cfin.as_slice())
-                .map_err(|_| TlsError.InternalError(Text.from("resumption master")))?;
+            let resumption_master = with_tls_error(master_secret.resumption_master(transcript_after_cfin.as_slice()), TlsError.InternalError(Text.from("resumption master")))?;
 
-            let connected = Connected {
+            let connected = Connected { state: Shared.new(ConnectedData {
                 config: inner.inner.config,
                 suite:  inner.inner.chosen_suite,
                 hash:   inner.inner.hash,
@@ -589,7 +631,7 @@ fn on_finished(
                 resumption_master: resumption_master,
                 exporter_master:   exporter,
                 peer_certificate:  inner.peer_certificate,
-            };
+            }) };
 
             Result.Ok((ClientSm.ConnectedSm(connected.clone()),
                 StepOutput { outbound_handshake: out_wire, connected: Maybe.Some(connected) }))
@@ -602,7 +644,7 @@ fn on_finished(
 // Helpers
 // =============================================================================
 
-fn build_client_hello(config: &Tls13ClientConfig) -> (ClientHello, Transcript, List<(NamedGroup, List<Byte>)>) {
+fn build_client_hello(config: &Tls13ClientConfig) -> ClientHello {
     let mut exts: List<Extension> = [];
     // server_name
     let mut names: List<ServerName> = [];
@@ -623,35 +665,64 @@ fn build_client_hello(config: &Tls13ClientConfig) -> (ClientHello, Transcript, L
         exts.push(Extension.AlpnExt { protocols: config.alpn.clone() });
     }
 
-    let ch = ClientHello {
+    ClientHello {
         legacy_version:      LEGACY_VERSION_TLS_1_2,
         random:              config.random,
         legacy_session_id:   [],  // empty per RFC 8446 (no middlebox compat optional)
         cipher_suites:       config.suites.clone(),
         legacy_compression_methods: [0_u8],
         extensions:          exts,
-    };
-
-    // Start transcript with SHA-256 by default; SH will disclose the
-    // real hash via cipher_suite — the SM re-seeds if needed.
-    let transcript = Transcript.new(HashKind.Sha256);
-    // Empty `dhe_privs` placeholder; caller supplies keypairs before start().
-    (ch, transcript, [])
+    }
 }
 
 fn rebuild_client_hello_for_hrr(
     config: &Tls13ClientConfig,
     sh: &ServerHello,
 ) -> Result<ClientHello, TlsError> {
-    // Per RFC 8446 §4.1.4, the retry ClientHello must:
-    //  - preserve everything EXCEPT key_share (and early_data if present)
-    //  - restrict key_share to the HRR-selected group
-    let _ = sh;
-    // Simplified: re-emit the same ClientHello. A full impl pulls the
-    // HRR selected_group, trims key_shares accordingly, and echoes the
-    // server's cookie if any.
-    let (ch, _, _) = build_client_hello(config);
-    Result.Ok(ch)
+    let mut cookie: Maybe<List<Byte>> = Maybe.None;
+    for ext in &sh.extensions {
+        match ext {
+            // Every supported group already has a share in the initial hello.
+            Extension.KeyShareHelloRetryRequest { .. } => return Result.Err(TlsError.IllegalParameter),
+            Extension.CookieExt { cookie: received } => {
+                if cookie.is_some() || received.is_empty() { return Result.Err(TlsError.IllegalParameter); }
+                cookie = Maybe.Some(received.clone());
+            },
+            Extension.SupportedVersionsServer { .. } => {},
+            _ => return Result.Err(TlsError.IllegalParameter),
+        }
+    }
+    match cookie {
+        Maybe.Some(bytes) => {
+            let mut ch = build_client_hello(config);
+            ch.extensions.push(Extension.CookieExt { cookie: bytes });
+            Result.Ok(ch)
+        },
+        Maybe.None => Result.Err(TlsError.IllegalParameter),
+    }
+}
+
+fn with_tls_error<T, E>(result: Result<T, E>, error: TlsError) -> Result<T, TlsError> {
+    match result { Result.Ok(value) => Result.Ok(value), Result.Err(_) => Result.Err(error) }
+}
+
+fn decode_error(_error: CodecError) -> TlsError { TlsError.DecodeError }
+
+fn validate_server_hello(config: &Tls13ClientConfig, sh: &ServerHello) -> Result<(), TlsError> {
+    let selected = select_server_version(&sh.extensions)?;
+    if sh.legacy_version.to_u16() != LEGACY_VERSION_TLS_1_2.to_u16()
+        || sh.legacy_compression_method != 0_u8 || !sh.legacy_session_id_echo.is_empty()
+        || selected.to_u16() != TLS_1_3.to_u16() {
+        return Result.Err(TlsError.IllegalParameter);
+    }
+    let mut i: Int = 0;
+    while i < config.suites.len() {
+        if config.suites[i].to_u16() == sh.cipher_suite.to_u16() && sh.cipher_suite.is_supported() {
+            return Result.Ok(());
+        }
+        i = i + 1;
+    }
+    Result.Err(TlsError.IllegalParameter)
 }
 
 fn check_downgrade_sentinel(random: &[Byte; 32]) -> Result<(), TlsError> {
@@ -718,8 +789,8 @@ fn find_dhe_priv(privs: &List<(NamedGroup, List<Byte>)>, g: &NamedGroup) -> Resu
 /// `peer_pub_bytes` is ServerHello.key_share's key_exchange field.
 fn compute_dhe(
     group: &NamedGroup,
-    priv_bytes: &List<Byte>,
-    peer_pub_bytes: &List<Byte>,
+    priv_bytes: &[Byte],
+    peer_pub_bytes: &[Byte],
 ) -> Result<List<Byte>, TlsError> {
     match group {
         NamedGroup.X25519 => {
@@ -754,15 +825,13 @@ fn compute_dhe(
             let mut sk_raw: [Byte; 32] = [0_u8; 32];
             let mut i: Int = 0;
             while i < 32 { sk_raw[i] = priv_bytes[i]; i = i + 1; }
-            let sk = P256.private_key_from_bytes(&sk_raw)
-                .map_err(|_| TlsError.IllegalParameter)?;
-            let pk = P256.public_key_from_bytes(peer_pub_bytes.as_slice())
-                .map_err(|_| TlsError.IllegalParameter)?;
+            let sk = with_tls_error(P256.private_key_from_bytes(&sk_raw), TlsError.IllegalParameter)?;
+            let pk = with_tls_error(P256.public_key_from_bytes(peer_pub_bytes), TlsError.IllegalParameter)?;
             match P256.ecdh(&sk, &pk) {
                 Result.Ok(shared) => {
                     // P256SharedSecret is a [Byte; 32] — same shape as X25519.
                     let mut out: List<Byte> = List.with_capacity(32);
-                    out.extend_from_slice(shared.as_slice());
+                    out.extend_from_slice(&shared[..]);
                     Result.Ok(out)
                 },
                 Result.Err(_) => Result.Err(TlsError.IllegalParameter),
@@ -797,90 +866,23 @@ fn verify_certificate_signature(
     cv: &CertificateVerify,
     signed: &[Byte],
 ) -> Result<(), TlsError> {
-    // RFC 8446 §4.4.3: CertificateVerify.algorithm MUST be in the
-    // client's signature_algorithms extension AND valid for
-    // CertificateVerify (no SHA-1, no PKCS#1 v1.5 in TLS 1.3).
-    if !cv.algorithm.is_valid_for_certificate_verify() {
-        return Result.Err(TlsError.BadCertificate);
-    }
-
-    // The certificate was parsed on receipt and retained by the state machine.
-    let pk = &cert.tbs.spki.public_key;
-    match cv.algorithm {
-        // EdDSA — raw 64-byte signature, message is `signed`.
-        SignatureScheme.Ed25519Scheme => match pk {
-            SubjectPublicKey.Ed25519(ed) => {
-                if cv.signature.len() != 64 { return Result.Err(TlsError.DecryptError); }
-                let mut sig: Ed25519Signature = [0_u8; 64];
-                let mut i: Int = 0;
-                while i < 64 { sig[i] = cv.signature[i]; i = i + 1; }
-                let pk_arr: Ed25519Pk = ed.bytes;
-                match Ed25519.verify(&pk_arr, signed, &sig) {
-                    Result.Ok(()) => Result.Ok(()),
-                    Result.Err(_) => Result.Err(TlsError.DecryptError),
-                }
-            },
-            _ => Result.Err(TlsError.BadCertificate),
-        },
-
-        // ECDSA P-256 / SHA-256 — DER-encoded SEQUENCE of two INTEGERs.
-        SignatureScheme.EcdsaSecp256r1Sha256 => match pk {
-            SubjectPublicKey.EcP256(ec) => {
-                let pk_ec = P256.public_key_from_bytes(ec.bytes.as_slice())
-                    .map_err(|_| TlsError.BadCertificate)?;
-                let sig = P256.signature_from_der(cv.signature.as_slice())
-                    .map_err(|_| TlsError.DecryptError)?;
-                let digest = Sha256.digest(signed);
-                match P256.verify_prehashed(&pk_ec, &digest, &sig) {
-                    Result.Ok(()) => Result.Ok(()),
-                    Result.Err(_) => Result.Err(TlsError.DecryptError),
-                }
-            },
-            _ => Result.Err(TlsError.BadCertificate),
-        },
-
-        // RSA-PSS (RSAE-keyed) — most common TLS 1.3 signature
-        // algorithm on production WebPKI certificates in 2026.
-        SignatureScheme.RsaPssRsaeSha256 => verify_rsa_pss_cv(pk, signed, cv, RsaHash.Sha256_),
-        SignatureScheme.RsaPssRsaeSha384 => verify_rsa_pss_cv(pk, signed, cv, RsaHash.Sha384_),
-        SignatureScheme.RsaPssRsaeSha512 => verify_rsa_pss_cv(pk, signed, cv, RsaHash.Sha512_),
-
-        // RSA-PSS with a PSS-dedicated key — identical verify, different
-        // key OID; we accept the same RsaVerifyKey shape.
-        SignatureScheme.RsaPssPssSha256 => verify_rsa_pss_cv(pk, signed, cv, RsaHash.Sha256_),
-        SignatureScheme.RsaPssPssSha384 => verify_rsa_pss_cv(pk, signed, cv, RsaHash.Sha384_),
-        SignatureScheme.RsaPssPssSha512 => verify_rsa_pss_cv(pk, signed, cv, RsaHash.Sha512_),
-
-        // ECDSA P-384 / SHA-384 — accepted schema but the P-384
-        // primitive is not in v1 stdlib; reject cleanly.
-        SignatureScheme.EcdsaSecp384r1Sha384 => Result.Err(TlsError.UnsupportedCertificate),
-
-        // Any other scheme (shouldn't appear after is_valid_for_certificate_verify).
-        _ => Result.Err(TlsError.UnsupportedCertificate),
-    }
-}
-
-fn verify_rsa_pss_cv(
-    pk: &SubjectPublicKey,
-    signed: &[Byte],
-    cv: &CertificateVerify,
-    hash: RsaHash,
-) -> Result<(), TlsError> {
-    match pk {
-        SubjectPublicKey.Rsa(rsa) => {
-            let vk = RsaVerifyKey.new(rsa.modulus.clone(), rsa.exponent.clone());
-            // Pre-hash the signed input.
-            let digest = match hash {
-                RsaHash.Sha256_ => Sha256.digest(signed).to_list(),
-                RsaHash.Sha384_ => Sha384.digest(signed).to_list(),
-                RsaHash.Sha512_ => Sha512.digest(signed).to_list(),
-            };
-            match verify_pss_prehashed(&vk, hash, digest.as_slice(), cv.signature.as_slice()) {
-                Result.Ok(()) => Result.Ok(()),
-                Result.Err(_) => Result.Err(TlsError.DecryptError),
-            }
-        },
-        _ => Result.Err(TlsError.BadCertificate),
+    let algorithm = match cv.algorithm {
+        SignatureScheme.Ed25519Scheme => SignatureAlg.Ed25519Sig,
+        SignatureScheme.EcdsaSecp256r1Sha256 => SignatureAlg.EcdsaWithSha256,
+        SignatureScheme.RsaPssRsaeSha256 =>
+            SignatureAlg.RsaPss(RsaPssParams.digest_length_salt(RsaPssHash.Sha256Hash)),
+        SignatureScheme.RsaPssRsaeSha384 =>
+            SignatureAlg.RsaPss(RsaPssParams.digest_length_salt(RsaPssHash.Sha384Hash)),
+        SignatureScheme.RsaPssRsaeSha512 =>
+            SignatureAlg.RsaPss(RsaPssParams.digest_length_salt(RsaPssHash.Sha512Hash)),
+        // The X.509 decoder currently recognizes RSAE public keys. A PSS-only
+        // scheme requires an id-RSASSA-PSS key with compatible parameters.
+        _ => return Result.Err(TlsError.UnsupportedCertificate),
+    };
+    match verify_subject_signature(cert, &algorithm, signed, cv.signature.as_slice()) {
+        Result.Ok(()) => Result.Ok(()),
+        Result.Err(ChainError.BadSignature(_)) => Result.Err(TlsError.DecryptError),
+        Result.Err(_) => Result.Err(TlsError.BadCertificate),
     }
 }
 
@@ -888,8 +890,7 @@ fn parse_chain(der: &List<List<Byte>>) -> Result<List<X509Certificate>, TlsError
     let mut out: List<X509Certificate> = [];
     let mut i: Int = 0;
     while i < der.len() {
-        let c = parse_certificate(der[i].as_slice())
-            .map_err(|_| TlsError.BadCertificate)?;
+        let c = with_tls_error(parse_certificate(der[i].as_slice()), TlsError.BadCertificate)?;
         out.push(c);
         i = i + 1;
     }
@@ -898,7 +899,7 @@ fn parse_chain(der: &List<List<Byte>>) -> Result<List<X509Certificate>, TlsError
 
 fn map_chain_error(e: ChainError) -> TlsError {
     match e {
-        ChainError.EmptyChain => TlsError.BadCertificate,
+        ChainError.EmptyChain | ChainError.ChainTooLong { .. } => TlsError.BadCertificate,
         ChainError.UnknownIssuer => TlsError.UnknownCa,
         ChainError.IssuerSubjectMismatch(_) => TlsError.BadCertificate,
         ChainError.NotYetValid(_) => TlsError.CertificateExpired,
@@ -914,21 +915,17 @@ fn map_chain_error(e: ChainError) -> TlsError {
     }
 }
 
-fn current_unix_time() -> Int64 {
-    core.time.system_time.SystemTime.now().timestamp() as Int64
-}
-
 fn hmac_for_hash(hash: HashKind, key: &[Byte], msg: &[Byte]) -> List<Byte> {
     match hash {
         HashKind.Sha256 => {
             let mut mac = HmacSha256.new(key);
             mac.update(msg);
-            mac.finalize().to_list()
+            List.from_slice(&mac.finalize()[..])
         },
         HashKind.Sha384 => {
             let mut mac = HmacSha384.new(key);
             mac.update(msg);
-            mac.finalize().to_list()
+            List.from_slice(&mac.finalize()[..])
         },
     }
 }

@@ -298,15 +298,14 @@ implement TlsClient<Closed> {
 // =============================================================================
 
 fn derive_aead_pair(conn: &Connected) -> Result<(AeadState, AeadState), TlsError> {
-    let aead_kind = match conn.suite {
-        _ => conn.suite.aead(),
-    };
+    let aead_kind = conn.negotiated_suite().aead_kind();
+    let (client_traffic, server_traffic) = conn.application_traffic();
     let key_len = aead_kind.key_len();
     let iv_len  = aead_kind.iv_len();
-    let client_keys: TrafficKeys = conn.client_ap_traffic
+    let client_keys: TrafficKeys = client_traffic
         .derive_keys(key_len, iv_len)
         .map_err(|_| TlsError.InternalError(Text.from("client traffic derive")))?;
-    let server_keys: TrafficKeys = conn.server_ap_traffic
+    let server_keys: TrafficKeys = server_traffic
         .derive_keys(key_len, iv_len)
         .map_err(|_| TlsError.InternalError(Text.from("server traffic derive")))?;
     let out_aead = AeadState.new(aead_kind.clone(), client_keys.key.clone(), client_keys.iv);

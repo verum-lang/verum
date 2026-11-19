@@ -67,20 +67,10 @@ fn check_handshake_encode_decode() -> Result<(), CodecError> {
 
 fn check_client_sm_start() -> Result<(), TlsError> {
     let server_name: Text = "example.com";
-    let config = Tls13ClientConfig {
-        server_name: server_name,
-        alpn:        [],
-        trust:       TrustStore.empty(),
-        groups:      [NamedGroup.X25519, NamedGroup.Secp256r1],
-        suites:      [
-            CipherSuite.TlsAes128GcmSha256,
-            CipherSuite.TlsChaCha20Poly1305Sha256,
-        ],
-        sig_schemes: SignatureScheme.default_offer_list(),
-        verify_hostname: true,
-        random:      [0_u8; 32],
-        key_shares:  [],
-    };
+    let config = Tls13ClientConfig.new(server_name, TrustStore.empty(), [0_u8; 32],
+        [NamedGroup.X25519, NamedGroup.Secp256r1],
+        [CipherSuite.TlsAes128GcmSha256, CipherSuite.TlsChaCha20Poly1305Sha256],
+        SignatureScheme.default_offer_list(), [])?;
     let sm = ClientSm.new(config);
     let (sm2, _ch_wire) = sm.start()?;
     // Expect to be in WaitServerHello now.

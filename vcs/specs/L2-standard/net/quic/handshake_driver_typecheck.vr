@@ -27,17 +27,9 @@ fn check_crypto_stream_reassembly() {
 }
 
 fn check_driver_construction() {
-    let config = Tls13ClientConfig {
-        server_name: "example.com",
-        alpn:        [],
-        trust:       TrustStore.empty(),
-        groups:      [NamedGroup.X25519],
-        suites:      [CipherSuite.TlsAes128GcmSha256],
-        sig_schemes: SignatureScheme.default_offer_list(),
-        verify_hostname: true,
-        random:      [0_u8; 32],
-        key_shares:  [],
-    };
+    let config = Tls13ClientConfig.new("example.com", TrustStore.empty(), [0_u8; 32],
+        [NamedGroup.X25519], [CipherSuite.TlsAes128GcmSha256],
+        SignatureScheme.default_offer_list(), []).unwrap();
     let sm = ClientSm.new(config);
     let _ = HandshakeDriver.client(sm);
 }
