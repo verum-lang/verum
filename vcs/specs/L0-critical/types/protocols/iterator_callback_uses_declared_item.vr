@@ -1,0 +1,11 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L0
+// @tags: protocols, associated-types, iterators, closures
+// @description: A callback on a nested standard iterator can destructure its item.
+
+mount core.collections.list.List;
+
+fn first_indices(values: List<(USize, Float)>) -> List<USize> {
+    values.into_iter().take(2).map(|(position, _)| position).collect()
+}

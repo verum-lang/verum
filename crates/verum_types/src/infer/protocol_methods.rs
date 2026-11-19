@@ -440,12 +440,13 @@ impl TypeChecker {
                     )
                 })?;
             if let Some(method) = protocol.methods.get(method) {
+                let method = checker.apply_protocol_method_callback_bounds(
+                    method, &protocol.constraints, name, receiver, arguments, span,
+                )?;
                 return Ok(List::from_iter([AppliedProtocolMethod {
                     owner: name.clone(),
                     arguments: arguments.iter().cloned().collect(),
-                    method: method
-                        .apply_owner(arguments, receiver)
-                        .map_err(|message| invalid(span, message))?,
+                    method,
                 }]));
             }
             if protocol.super_protocols.is_empty() {
@@ -535,6 +536,80 @@ impl TypeChecker {
             ));
         }
         Ok(methods.into_iter().next().map(|selected| selected.method))
+    }
+
+    pub(super) fn has_callback_projection(&self, bound: &Type) -> bool {
+        bound.contains_type(|part| {
+            super::associated_family_applications::checked_projection_parts(part).is_some()
+                || matches!(part, Type::Generic { name, args }
+                    if !args.is_empty() && self.ctx.lookup_type(name).is_none()
+                    && self.protocol_checker.read().is_associated_type_name(name))
+        })
+    }
+
+    /// Callback arguments use the associated members of the method's declaration.
+    /// Select their owners before substituting `Self` and the protocol parameters:
+    /// two distinct binders can receive the same concrete argument.
+    fn apply_protocol_method_callback_bounds(
+        &self,
+        method: &ProtocolMethod,
+        constraints: &ProtocolConstraints,
+        owner: &Text,
+        receiver: &Type,
+        arguments: &[Type],
+        span: Span,
+    ) -> Result<ProtocolMethod> {
+        let mut applied = method
+            .apply_owner(arguments, receiver)
+            .map_err(|message| invalid(span, message))?;
+        if !method.type_param_bounds.values().flatten()
+            .any(|bound| self.has_callback_projection(bound))
+        {
+            return Ok(applied);
+        }
+        let ProtocolConstraints::Declared {
+            self_type, parameters, parameter_bounds, ..
+        } = constraints else {
+            return Ok(applied);
+        };
+        let declared_arguments: List<_> = parameters
+            .iter()
+            .map(|binder| binder.declaration_type())
+            .collect::<std::result::Result<_, _>>()
+            .map_err(|message| invalid(span, message))?;
+        let declared_self = Type::Var(*self_type);
+        let declared = method
+            .apply_owner(&declared_arguments, &declared_self)
+            .map_err(|message| invalid(span, message))?;
+        let mut premises = parameter_bounds.clone();
+        premises.push(crate::protocol::WhereClause {
+            ty: declared_self,
+            bounds: List::from_single(crate::protocol::ProtocolBound::positive(
+                Self::text_to_path(owner), declared_arguments,
+            )),
+        });
+        if let Some(scope) = &declared.scope {
+            premises.extend(super::call_obligations::declaration_premises(
+                &scope.protocol_bounds, &scope.where_clauses,
+            ));
+        }
+        let substitution = constraints
+            .application(receiver, arguments)
+            .map_err(|message| invalid(span, message))?;
+        let scope = super::call_obligations::CallProjectionScope {
+            declaration: &premises,
+            arguments: &substitution,
+            caller: None,
+            span,
+        };
+        for (parameter, bounds) in &declared.type_param_bounds {
+            let resolved: List<_> = bounds
+                .iter()
+                .map(|bound| self.resolve_call_output_projections(bound, &scope))
+                .collect::<Result<_>>()?;
+            applied.type_param_bounds.insert(parameter.clone(), resolved);
+        }
+        Ok(applied)
     }
 
     /// Prepare a protocol candidate without granting its requirements. The

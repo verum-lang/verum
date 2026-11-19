@@ -161,6 +161,12 @@ impl TypeChecker {
         name: &Text,
         scheme: crate::context::TypeScheme,
     ) {
+        // An inherent-method cache entry has no declaring protocol. Its callback
+        // cannot select an associated type until the actual implementation exists.
+        // Let ordinary protocol dispatch retain the declaration and receiver.
+        if scheme.var_type_bounds.values().flatten().any(|bound| self.has_callback_projection(bound)) {
+            return;
+        }
         let same_receiver = self.inherent_methods.read().get(owner)
             .and_then(|methods| methods.get(name))
             .is_some_and(|existing| existing.impl_self_type == scheme.impl_self_type);

@@ -1,0 +1,12 @@
+// @test: typecheck-fail
+// @expected-error: E400 "expected 'Bool', found 'USize'"
+// @tier: 0
+// @level: L0
+// @tags: protocols, associated-types, iterators, closures
+// @description: A projected tuple index retains its declared integer type.
+
+mount core.collections.list.List;
+
+fn first_indices(values: List<(USize, Float)>) -> List<USize> {
+    values.into_iter().take(2).map(|(position, _)| if position { position } else { 0 }).collect()
+}

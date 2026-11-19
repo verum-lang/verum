@@ -233,3 +233,49 @@ fn a_declared_clone_does_not_grant_structural_raw_pointer_copy() {
         "{errors:#?}"
     );
 }
+
+#[test]
+fn callback_projects_the_member_declared_by_its_inherited_method() {
+    let declarations = r#"
+        type Reader is protocol {
+            type Item;
+            fn item(&self) -> Self.Item;
+            fn inspect<F: fn(Self.Item) -> Int>(&self, callback: F) -> Int { callback(self.item()) }
+        };
+        type AlsoReader is protocol extends Reader {};
+        type Other is protocol { type Item; };
+        type Entry is ();
+        implement Reader for Entry {
+            type Item = (Int, Bool);
+            fn item(&self) -> (Int, Bool) { (17, true) }
+        }
+        implement AlsoReader for Entry {}
+        implement Other for Entry { type Item = Bool; }
+    "#;
+    let caller = r#"fn projected(value: &Entry) -> Int {
+        value.inspect(|(number, enabled)| if enabled { number } else { 0 })
+    }"#;
+    accepts(&format!("{declarations} {caller}"));
+    let rejected = errors(&format!("{declarations} {}", caller.replace("if enabled", "if number")));
+    assert!(rejected.iter().any(|error| error.contains("Mismatch")), "{rejected:#?}");
+}
+
+#[test]
+fn callback_keeps_distinct_member_owners_when_two_binders_receive_the_same_type() {
+    let declarations = r#"
+        type Other is protocol { type Item; };
+        type Reader<T: Other> is protocol {
+            type Item;
+            fn inspect<F: fn(Self.Item, T.Item) -> Int>(&self, callback: F) -> Int { 0 }
+        };
+        type Entry is ();
+        implement Other for Entry { type Item = Bool; }
+        implement Reader<Entry> for Entry { type Item = (Int, Int); }
+    "#;
+    let caller = r#"fn projected(value: &Entry) -> Int {
+        value.inspect(|(first, second), enabled| if enabled { first } else { second })
+    }"#;
+    accepts(&format!("{declarations} {caller}"));
+    let rejected = errors(&format!("{declarations} {}", caller.replace("if enabled", "if first")));
+    assert!(rejected.iter().any(|error| error.contains("Mismatch")), "{rejected:#?}");
+}
