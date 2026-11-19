@@ -136,10 +136,11 @@ fn test_parse_trailing_bytes_is_malformed() {
 
 @test
 fn test_parse_leap_second_collapsed() {
-    // Seconds = 60 → collapsed to 59
-    let t = parse(&"1998-12-31T23:59:60Z".to_text());
-    // Must either parse OK (collapsed) or return Err — must NOT panic
-    assert(t.is_ok() || t.is_err());
+    let leap = parse(&"1998-12-31T23:59:60.125Z".to_text()).unwrap();
+    let previous = parse(&"1998-12-31T23:59:59.125Z".to_text()).unwrap();
+    assert_eq(leap.unix_seconds, previous.unix_seconds);
+    assert_eq(leap.nanos, 125_000_000);
+    assert(parse(&"1998-12-31T23:59:61Z".to_text()).unwrap_err() is Rfc3339Error.OutOfRange(_));
 }
 
 // =============================================================================

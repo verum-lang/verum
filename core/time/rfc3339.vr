@@ -67,13 +67,19 @@ mount core.time.system_time.SystemTime;
 
 public type Rfc3339Time is {
     /// Seconds since 1970-01-01T00:00:00Z (UTC).
-    unix_seconds:    Int,
+    public unix_seconds: Int,
     /// Sub-second nanoseconds (0..999_999_999).
-    nanos:           Int,
+    public nanos: Int,
     /// Offset of the original input in minutes (-1439..=1439).
     /// 0 for Z-suffixed inputs.
-    offset_minutes:  Int,
+    public offset_minutes: Int,
 };
+
+implement Debug for Rfc3339Time {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(&format_rfc3339(self))
+    }
+}
 
 public type Rfc3339Error is
       Malformed(Text)
@@ -135,7 +141,7 @@ public fn parse(s: &Text) -> Result<Rfc3339Time, Rfc3339Error> {
     if b[13] != (':' as Byte) { return Result.Err(Rfc3339Error.Malformed(Text.from("expected ':'"))); }
     let minute = take_digits(b, 14, 2)?;
     if b[16] != (':' as Byte) { return Result.Err(Rfc3339Error.Malformed(Text.from("expected ':'"))); }
-    let mut second = take_digits(b, 17, 2)?;
+    let input_second = take_digits(b, 17, 2)?;
 
     // Range checks.
     if month < 1 || month > 12 {
@@ -147,8 +153,8 @@ public fn parse(s: &Text) -> Result<Rfc3339Time, Rfc3339Error> {
     }
     if hour > 23 { return Result.Err(Rfc3339Error.OutOfRange(Text.from("hour"))); }
     if minute > 59 { return Result.Err(Rfc3339Error.OutOfRange(Text.from("minute"))); }
-    if second > 60 { return Result.Err(Rfc3339Error.OutOfRange(Text.from("second"))); }
-    if second == 60 { second = 59; }   // leap-second collapse
+    if input_second > 60 { return Result.Err(Rfc3339Error.OutOfRange(Text.from("second"))); }
+    let second = if input_second == 60 { 59 } else { input_second };
 
     let mut i: Int = 19;
     let mut nanos: Int = 0;
@@ -395,10 +401,10 @@ fn push_padded(dst: &mut List<Byte>, n: Int, width: Int) {
 /// audit-row creation, certificate validity windows, replication
 /// timestamps, etc.
 public fn now_utc() -> Rfc3339Time {
-    let st = SystemTime.now();
+    let elapsed = SystemTime.now().duration_since_epoch();
     Rfc3339Time {
-        unix_seconds:   st.secs,
-        nanos:          st.nanos,
+        unix_seconds:   elapsed.as_secs(),
+        nanos:          elapsed.subsec_nanos(),
         offset_minutes: 0,
     }
 }

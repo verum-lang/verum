@@ -101,12 +101,12 @@ fn test_add_one_hour_then_diff() {
 @test
 fn test_now_utc_unix_seconds_close_to_system_time() {
     let rfc_t = now_utc();
-    let sys_t = SystemTime.now();
+    let sys_seconds = SystemTime.now().duration_since_epoch().as_secs();
     // Both read the same wall clock; allow ±1 second for two separate reads
-    let diff = if rfc_t.unix_seconds > sys_t.secs {
-        rfc_t.unix_seconds - sys_t.secs
+    let diff = if rfc_t.unix_seconds > sys_seconds {
+        rfc_t.unix_seconds - sys_seconds
     } else {
-        sys_t.secs - rfc_t.unix_seconds
+        sys_seconds - rfc_t.unix_seconds
     };
     assert(diff <= 1, "now_utc and SystemTime.now diverged by more than 1 second");
 }
