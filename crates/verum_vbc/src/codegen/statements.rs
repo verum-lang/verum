@@ -938,190 +938,34 @@ impl VbcCodegen {
                 None => None,
             },
         };
-        if let Some(byte_array_size) = byte_array_size
-            && let Some(expr) = value
-        {
-            // Determine the initialization value
-            let init_value = self.get_byte_array_init_value(expr);
-
-            if let Some(init_byte) = init_value {
-                // Allocate byte array with the determined init value
-                let result = self.ctx.alloc_temp();
-                let size_reg = self.ctx.alloc_temp();
-                let init_reg = self.ctx.alloc_temp();
-
-                // Load size
-                self.ctx.emit(Instruction::LoadI {
-                    dst: size_reg,
-                    value: byte_array_size as i64,
-                });
-
-                // Load init value
-                self.ctx.emit(Instruction::LoadI {
-                    dst: init_reg,
-                    value: init_byte as i64,
-                });
-
-                // Emit NewByteArray instruction via FfiExtended
-                // Format: dst:reg, size:reg, init:reg
-                let operands = vec![result.0 as u8, size_reg.0 as u8, init_reg.0 as u8];
-                self.ctx.emit(Instruction::MemExtended {
-                    sub_op: 0x30, // MemSubOpcode::NewByteArray
-                    operands,
-                });
-
-                self.ctx.free_temp(size_reg);
-                self.ctx.free_temp(init_reg);
-
-                // Bind to pattern
+        if let (Some(count), Some(expr)) = (byte_array_size, value) {
+            use verum_ast::{ArrayExpr, ExprKind};
+            let fill = match &expr.kind {
+                ExprKind::Array(ArrayExpr::Repeat { value, .. }) => Some((Some(value.as_ref()), None)),
+                ExprKind::Array(ArrayExpr::List(elements)) => Some((None, Some(elements))),
+                _ if self.get_typed_array_init_value(expr) == Some(0) => Some((None, None)),
+                _ => None,
+            };
+            if let Some((repeat, elements)) = fill {
+                // Resolve the initializer before introducing a possibly shadowing name.
+                // The packed layout alone cannot distinguish Byte from Int8.
+                let inferred = if ty.is_none() {
+                    self.declared_expression_result(expr, None, 0, 0)
+                } else {
+                    None
+                };
+                let count_reg = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::LoadI { dst: count_reg, value: count as i64 });
+                let result = self.emit_packed_array_alloc(1, false, count_reg, repeat, elements)?;
+                self.ctx.free_temp(count_reg);
                 self.compile_pattern_bind(pattern, result)?;
-
-                // Mark the variable as a byte array for address computation
                 if let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind {
+                    if let Some(declared) = inferred {
+                        self.publish_resolved_binding_type(name.as_str(), &declared);
+                    }
                     self.ctx.mark_byte_array_var(&name.name);
-                    // T1192: the count as well as the fact.
-                    self.ctx
-                        .set_fixed_array_count(&name.name, byte_array_size);
+                    self.ctx.set_fixed_array_count(&name.name, count);
                 }
-
-                return Ok(None);
-            }
-
-            // Check for array list initialization like [1, 2, 3, 4]
-            let list_elements = self.get_byte_array_literal_elements(expr);
-            if let Some(elements) = list_elements {
-                // Allocate byte array with zeros, then fill with values
-                let result = self.ctx.alloc_temp();
-                let size_reg = self.ctx.alloc_temp();
-                let init_reg = self.ctx.alloc_temp();
-
-                // Load size
-                self.ctx.emit(Instruction::LoadI {
-                    dst: size_reg,
-                    value: byte_array_size as i64,
-                });
-
-                // Load init value (0)
-                self.ctx.emit(Instruction::LoadI {
-                    dst: init_reg,
-                    value: 0,
-                });
-
-                // Emit NewByteArray instruction
-                let operands = vec![result.0 as u8, size_reg.0 as u8, init_reg.0 as u8];
-                self.ctx.emit(Instruction::MemExtended {
-                    sub_op: 0x30, // MemSubOpcode::NewByteArray
-                    operands,
-                });
-
-                self.ctx.free_temp(size_reg);
-                self.ctx.free_temp(init_reg);
-
-                // Fill in the values using ByteArrayStore
-                for (idx, byte_val) in elements.into_iter().enumerate() {
-                    let idx_reg = self.ctx.alloc_temp();
-                    let val_reg = self.ctx.alloc_temp();
-
-                    self.ctx.emit(Instruction::LoadI {
-                        dst: idx_reg,
-                        value: idx as i64,
-                    });
-                    self.ctx.emit(Instruction::LoadI {
-                        dst: val_reg,
-                        value: byte_val as i64,
-                    });
-
-                    // Emit ByteArrayStore: arr[idx] = val
-                    let operands = vec![result.0 as u8, idx_reg.0 as u8, val_reg.0 as u8];
-                    self.ctx.emit(Instruction::MemExtended {
-                        sub_op: 0x33, // MemSubOpcode::ByteArrayStore
-                        operands,
-                    });
-
-                    self.ctx.free_temp(idx_reg);
-                    self.ctx.free_temp(val_reg);
-                }
-
-                // Bind to pattern
-                self.compile_pattern_bind(pattern, result)?;
-
-                // Mark the variable as a byte array
-                if let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind {
-                    self.ctx.mark_byte_array_var(&name.name);
-                    // T1192: the count as well as the fact.
-                    self.ctx
-                        .set_fixed_array_count(&name.name, byte_array_size);
-                }
-
-                return Ok(None);
-            }
-
-            // Check for repeat syntax with variable value like [value; N]
-            // where value is not a literal (e.g., a variable)
-            if let Some(value_expr) = self.get_byte_array_repeat_expr(expr) {
-                // Allocate byte array with zeros first
-                let result = self.ctx.alloc_temp();
-                let size_reg = self.ctx.alloc_temp();
-                let init_reg = self.ctx.alloc_temp();
-
-                // Load size
-                self.ctx.emit(Instruction::LoadI {
-                    dst: size_reg,
-                    value: byte_array_size as i64,
-                });
-
-                // Load init value (0 - will be overwritten)
-                self.ctx.emit(Instruction::LoadI {
-                    dst: init_reg,
-                    value: 0,
-                });
-
-                // Emit NewByteArray instruction
-                let operands = vec![result.0 as u8, size_reg.0 as u8, init_reg.0 as u8];
-                self.ctx.emit(Instruction::MemExtended {
-                    sub_op: 0x30, // MemSubOpcode::NewByteArray
-                    operands,
-                });
-
-                self.ctx.free_temp(size_reg);
-                self.ctx.free_temp(init_reg);
-
-                // Compile the value expression
-                let val_reg = self.compile_expr(value_expr)?.ok_or_else(|| {
-                    CodegenError::internal("byte array repeat value has no result")
-                })?;
-
-                // Fill all elements with the value (unrolled loop since size is known)
-                for idx in 0..byte_array_size {
-                    let idx_reg = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::LoadI {
-                        dst: idx_reg,
-                        value: idx as i64,
-                    });
-
-                    // Emit ByteArrayStore: arr[idx] = val
-                    let operands = vec![result.0 as u8, idx_reg.0 as u8, val_reg.0 as u8];
-                    self.ctx.emit(Instruction::MemExtended {
-                        sub_op: 0x33, // MemSubOpcode::ByteArrayStore
-                        operands,
-                    });
-
-                    self.ctx.free_temp(idx_reg);
-                }
-
-                self.ctx.free_temp(val_reg);
-
-                // Bind to pattern
-                self.compile_pattern_bind(pattern, result)?;
-
-                // Mark the variable as a byte array
-                if let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind {
-                    self.ctx.mark_byte_array_var(&name.name);
-                    // T1192: the count as well as the fact.
-                    self.ctx
-                        .set_fixed_array_count(&name.name, byte_array_size);
-                }
-
                 return Ok(None);
             }
         }
@@ -1933,91 +1777,6 @@ impl VbcCodegen {
             }
             return Some(values);
         }
-        None
-    }
-
-    /// Gets the init value for byte array from various initialization patterns.
-    /// Returns Some(byte_value) for:
-    /// - uninit() -> 0
-    /// - zeroed() -> 0
-    /// - [value; N] -> value (if value is a literal integer)
-    fn get_byte_array_init_value(&self, expr: &verum_ast::Expr) -> Option<u8> {
-        use verum_ast::ExprKind;
-        use verum_ast::literal::LiteralKind;
-        use verum_ast::ty::PathSegment;
-
-        // Check for uninit() or zeroed()
-        if let ExprKind::Call { func, .. } = &expr.kind
-            && let ExprKind::Path(path) = &func.kind
-            && let Some(PathSegment::Name(ident)) = path.segments.last()
-        {
-            let name = ident.as_str();
-            if name == "uninit" || name == "zeroed" {
-                return Some(0);
-            }
-        }
-
-        // Check for [value; N] repeat syntax
-        if let ExprKind::Array(verum_ast::ArrayExpr::Repeat { value, .. }) = &expr.kind {
-            // Check if value is a literal integer
-            if let ExprKind::Literal(lit) = &value.kind
-                && let LiteralKind::Int(int_lit) = &lit.kind
-            {
-                // Truncate to u8
-                return Some((int_lit.value & 0xFF) as u8);
-            }
-            // Check if value is a path to a variable (like `let value: Byte = 42; [value; 4]`)
-            // For now, only support literal values
-        }
-
-        None
-    }
-
-    /// Gets the literal byte values from an array list expression like [1, 2, 3, 4].
-    /// Returns Some(Vec<u8>) if all elements are integer literals, None otherwise.
-    fn get_byte_array_literal_elements(&self, expr: &verum_ast::Expr) -> Option<Vec<u8>> {
-        use verum_ast::ExprKind;
-        use verum_ast::literal::LiteralKind;
-
-        if let ExprKind::Array(verum_ast::ArrayExpr::List(elements)) = &expr.kind {
-            let mut bytes = Vec::new();
-            for elem in elements.iter() {
-                if let ExprKind::Literal(lit) = &elem.kind
-                    && let LiteralKind::Int(int_lit) = &lit.kind
-                {
-                    bytes.push((int_lit.value & 0xFF) as u8);
-                    continue;
-                }
-                // Non-literal element, can't optimize
-                return None;
-            }
-            return Some(bytes);
-        }
-
-        None
-    }
-
-    /// Gets the value expression from repeat syntax [value; N] when value is NOT a literal.
-    /// Returns Some(expr) for variable repeat patterns, None for literals or non-repeat patterns.
-    fn get_byte_array_repeat_expr<'a>(
-        &self,
-        expr: &'a verum_ast::Expr,
-    ) -> Option<&'a verum_ast::Expr> {
-        use verum_ast::ExprKind;
-        use verum_ast::literal::LiteralKind;
-
-        if let ExprKind::Array(verum_ast::ArrayExpr::Repeat { value, .. }) = &expr.kind {
-            // Only return if value is NOT a literal (literals are handled elsewhere)
-            if let ExprKind::Literal(lit) = &value.kind
-                && matches!(&lit.kind, LiteralKind::Int(_))
-            {
-                // This is a literal - handled by get_byte_array_init_value
-                return None;
-            }
-            // Value is a variable or other expression
-            return Some(value.as_ref());
-        }
-
         None
     }
 

@@ -78,6 +78,31 @@ fn mutable_slice_argument_updates_the_original_collection() {
 }
 
 #[test]
+fn inherited_method_borrows_an_inferred_fixed_buffer() {
+    run(
+        r#"
+        type Reader is protocol {
+            fn read(&mut self, bytes: &mut [Byte]) -> Int;
+            fn buffered(&mut self) -> Int {
+                let mut tmp = [0_u8; 1024];
+                let count = self.read(&mut tmp);
+                count + (tmp[1023] as Int)
+            }
+        };
+        type Source is { marker: Byte };
+        implement Reader for Source {
+            fn read(&mut self, bytes: &mut [Byte]) -> Int {
+                bytes[1023] = self.marker;
+                bytes.len()
+            }
+        }
+        fn probe() -> Int { let mut source = Source { marker: 73_u8 }; source.buffered() }
+        "#,
+        1097,
+    );
+}
+
+#[test]
 fn existing_subslices_keep_their_offset_when_forwarded() {
     run(
         r#"
@@ -200,6 +225,16 @@ fn incompatible_elements_mutability_and_lookalike_storage_are_rejected() {
         73,
     );
     for (source, reason) in [
+        (
+            r#"fn accept(value: &mut [Byte]) -> Int { value.len() }
+            fn probe() -> Int { let mut value = [0_i8; 8]; accept(&mut value) }"#,
+            "element differs",
+        ),
+        (
+            r#"fn accept(value: &mut [Byte]) -> Int { value.len() }
+            fn probe() -> Int { let value = [0_u8; 8]; accept(&value) }"#,
+            "mutable source borrow",
+        ),
         (
             r#"fn accept(value: &[Int]) -> Int { value.len() }
             fn probe() -> Int { let value = [true, false]; accept(&value) }"#,

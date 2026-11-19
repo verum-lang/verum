@@ -25848,8 +25848,8 @@ impl VbcCodegen {
     ///
     /// `repeat_init` is the `[v; N]` fill value broadcast to every slot;
     /// `list_elems` is a `[a, b, c]` literal stored positionally after a
-    /// zero alloc.  Exactly one is `Some`.
-    fn emit_packed_array_alloc(
+    /// zero alloc. With neither input the allocation is zero-filled.
+    pub(super) fn emit_packed_array_alloc(
         &mut self,
         elem_size: usize,
         is_float: bool,
