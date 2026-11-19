@@ -37,9 +37,17 @@ impl VbcCodegen {
             let Some(owner) = self.type_declaration_identity(catalogue) else {
                 continue;
             };
-            let Some(key) = self.registered_receiver_method(&owner, method) else {
-                continue;
-            };
+            // A synthesized structural catalogue can be registered under its
+            // local name. It may supply a method only while that name still
+            // denotes this exact descriptor in the caller's type table.
+            let key = self.registered_receiver_method(&owner, method).or_else(|| {
+                let name = self.ctx.strings.get(catalogue.name.0 as usize)?;
+                if self.type_name_to_id.get(name.as_str()) != Some(&catalogue.id) {
+                    return None;
+                }
+                self.registered_receiver_method(name, method)
+            });
+            let Some(key) = key else { continue };
             let specialized = self.receiver_specialization(&key, Some(actual), arity)?;
             let Some(function) = specialized.or_else(|| self.ctx.lookup_qualified_function(&key))
             else {

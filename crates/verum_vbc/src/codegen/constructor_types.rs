@@ -618,15 +618,16 @@ impl VbcCodegen {
                 eprintln!("[declared-operand] function={:?} slot={index} formal={formal:?} actual={actual:?}", info.id);
             }
             let actual = actual?;
-            let (mut formal, mut actual) = (formal, &actual);
-            if index == 0 && info.param_names.first().is_some_and(|name| name == "self") {
-                // A method's receiver can borrow implicitly. Its nested
-                // arguments retain all reference and ownership distinctions.
-                if let TypeRef::Reference { inner, .. } = formal {
-                    formal = inner;
-                    if let TypeRef::Reference { inner, .. } = actual { actual = inner; }
-                }
-            }
+            // Only an owned receiver needs an implicit borrow. An existing
+            // reference goes through the ordinary argument adaptation, which
+            // preserves permission and can borrow a fixed array as a slice.
+            let formal = match formal {
+                TypeRef::Reference { inner, .. } if index == 0
+                    && !matches!(actual, TypeRef::Reference { .. })
+                    && self.has_declared_method_receiver(info).ok()? => inner.as_ref(),
+                _ => formal,
+            };
+            let actual = &actual;
             let accepted = self.bind_declared_operand(info, index, formal, actual, &mut bindings);
             if std::env::var_os("VERUM_TRACE_MONO").is_some() {
                 let bound: verum_common::List<_> = info.type_param_ids.iter().map(|id| (id, bindings.get(*id))).collect();

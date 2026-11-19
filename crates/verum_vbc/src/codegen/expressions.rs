@@ -13400,57 +13400,60 @@ impl VbcCodegen {
             ));
         }
 
-        // A packed array has no List owner fields. Its borrowed carrier keeps
-        // the known count and stride. Select an actual array implementation
-        // before considering the slice method surface; a storage adjustment
-        // must not discard the declaration's extent or generic parameters.
-        let mut array_receiver = receiver;
-        while let ExprKind::Paren(inner) = &array_receiver.kind {
-            array_receiver = inner;
-        }
+        // A fixed array and a slice expose distinct method declarations. The
+        // receiver's type supplies the element and extent. Its producer alone
+        // can establish a packed stride for the view.
+        let array_receiver = Self::normalized_place(receiver);
         if let ExprKind::Path(path) = &array_receiver.kind
-            && path.segments.len() == 1
-            && let PathSegment::Name(name) = &path.segments[0]
-            && let Some(stride) = self.ctx.get_typed_array_elem_size(&name.name)
-            && let Some(count) = self.ctx.fixed_array_count(&name.name)
+            && let [PathSegment::Name(name)] = path.segments.as_slice()
+            && let Some(binding) = self.ctx.lookup_var(&name.name)
+            && let Some(declaration) = self.ctx.registers.value_uses.captured_declaration(binding)
+            && let crate::types::TypeRef::Array { element, length: count } = &declaration
         {
-            let declaration = self.declared_expression_result(array_receiver, None, 0, 0);
-            let array_method = declaration.as_ref().map(|receiver|
-                self.structural_receiver_method_key(receiver, method.name.as_str(), args.len() + 1))
-                .transpose()?.flatten();
-            let retained = if array_method.is_some() {
-                declaration.as_ref().and_then(|receiver|
-                    self.scoped_callable_type_name(receiver, Some(&self.ctx.current_generic_param_ids)))
-                    .map(|name| (name.to_string(), declaration.clone()))
-                    .ok_or_else(|| CodegenError::internal("selected array receiver lost its declaration"))?
-            } else {
-                let target = self.ctx.array_element_type_name(name.name.as_str())
-                    .map_or_else(|| "Slice".to_string(), |element| format!("Slice<{element}>"));
-                let semantic = self.semantic_type_in_current_scope(&target);
-                (target, semantic)
-            };
-            let value = self.compile_expr(array_receiver)?
-                .or_internal("fixed-array receiver has no value")?;
-            let start = self.ctx.alloc_temp();
-            self.ctx.emit(Instruction::LoadSmallI { dst: start, value: 0 });
-            let length = self.ctx.alloc_temp();
-            self.ctx.emit(Instruction::LoadI { dst: length, value: count as i64 });
-            let slice = self.ctx.alloc_temp();
-            let mut operands = verum_common::List::<u8>::new().into();
-            for reg in [slice.0, value.0, start.0, length.0, stride as u16] {
-                Self::write_reg(&mut operands, reg);
+            let stride = self.ctx.get_typed_array_elem_size(&name.name);
+            let array_method = self.structural_receiver_method_key(&declaration, method.name.as_str(), args.len() + 1)?;
+            let slice_type = crate::types::TypeRef::Slice(element.clone());
+            let slice_method = array_method.is_none()
+                && self.structural_receiver_method_key(&slice_type, method.name.as_str(), args.len() + 1)?.is_some();
+            // An already-adjusted array receiver has no packed producer in its
+            // temporary binding. Dispatch its exact array implementation once.
+            if stride.is_some() || slice_method {
+                let (target, semantic) = if array_method.is_some() {
+                    let name = self.scoped_callable_type_name(&declaration, Some(&self.ctx.current_generic_param_ids))
+                        .ok_or_else(|| CodegenError::internal("selected array receiver lost its declaration"))?;
+                    (name.to_string(), declaration.clone())
+                } else {
+                    let target = self.ctx.array_element_type_name(name.name.as_str())
+                        .map_or_else(|| "Slice".to_string(), |element| format!("Slice<{element}>"));
+                    (target, slice_type)
+                };
+                let value = self.compile_expr(array_receiver)?
+                    .or_internal("fixed-array receiver has no value")?;
+                let start = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::LoadSmallI { dst: start, value: 0 });
+                let length = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::LoadI { dst: length, value: i64::try_from(*count)
+                    .map_err(|_| CodegenError::internal("array extent exceeds the slice length range"))? });
+                let slice = self.ctx.alloc_temp();
+                let mut operands = verum_common::List::<u8>::new().into();
+                for reg in [slice, value, start, length] {
+                    Self::write_reg(&mut operands, reg.0);
+                }
+                if let Some(stride) = stride {
+                    Self::write_reg(&mut operands, stride as u16);
+                }
+                self.ctx.emit(Instruction::CbgrExtended {
+                    sub_op: crate::instruction::CbgrSubOpcode::RefSlice as u8,
+                    operands,
+                });
+                self.ctx.free_temp(value);
+                self.ctx.free_temp(start);
+                self.ctx.free_temp(length);
+                return self.compile_method_on_adjusted_value(
+                    slice, &target, Some(semantic), receiver.span,
+                    method, args, resolved_target, type_args, false,
+                );
             }
-            self.ctx.emit(Instruction::CbgrExtended {
-                sub_op: crate::instruction::CbgrSubOpcode::RefSlice as u8,
-                operands,
-            });
-            self.ctx.free_temp(value);
-            self.ctx.free_temp(start);
-            self.ctx.free_temp(length);
-            return self.compile_method_on_adjusted_value(
-                slice, &retained.0, retained.1, receiver.span,
-                method, args, resolved_target, type_args, false,
-            );
         }
 
         // An explicit user dereference in receiver position is still a place.
