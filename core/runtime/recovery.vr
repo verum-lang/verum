@@ -1011,13 +1011,7 @@ implement Clone for RuntimeRecoveryStrategy {
             Retry(config) => RuntimeRecoveryStrategy.Retry(config.clone()),
             UseBreaker(config) => RuntimeRecoveryStrategy.UseBreaker(config.clone()),
             Supervision => RuntimeRecoveryStrategy.Supervision,
-            Composed(strategies) => {
-                let mut cloned: List<RuntimeRecoveryStrategy> = [];
-                for i in range(0, strategies.len()) {
-                    cloned.push(strategies[i].clone());
-                }
-                RuntimeRecoveryStrategy.Composed(cloned)
-            }
+            Composed(strategies) => RuntimeRecoveryStrategy.Composed(strategies.clone()),
         }
     }
 }

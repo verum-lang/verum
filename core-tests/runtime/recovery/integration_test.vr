@@ -171,6 +171,29 @@ fn rcv_it_strategy_composed_nesting() {
 // =============================================================================
 
 @test
+fn rcv_it_composed_clone_outlives_all_source_lists() {
+    let snapshot: RuntimeRecoveryStrategy = {
+        let children: List<RuntimeRecoveryStrategy> = [
+            RuntimeRecoveryStrategy.Supervision, RuntimeRecoveryStrategy.None,
+        ];
+        let root: List<RuntimeRecoveryStrategy> = [RuntimeRecoveryStrategy.Composed(children)];
+        let strategy = RuntimeRecoveryStrategy.Composed(root);
+        strategy.clone()
+    };
+    match snapshot {
+        RuntimeRecoveryStrategy.Composed(outer) => match outer[0] {
+            RuntimeRecoveryStrategy.Composed(inner) => {
+                assert_eq(inner.len(), 2);
+                assert(inner[0] is RuntimeRecoveryStrategy.Supervision);
+                assert(inner[1] is RuntimeRecoveryStrategy.None);
+            },
+            _ => assert(false),
+        },
+        _ => assert(false),
+    }
+}
+
+@test
 fn rcv_it_strategy_clone_preserves_payload() {
     let s = RuntimeRecoveryStrategy.retry(7);
     let c = s.clone();
