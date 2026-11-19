@@ -1212,60 +1212,13 @@ fn get_thread_id() -> UInt32 {
 // Public API
 // =============================================================================
 
-/// Allocate memory with CBGR tracking.
-/// Returns pointer, generation, and epoch.
-///
-
-/// Mapped to the `cbgr_alloc` intrinsic at codegen time. The Verum body
-/// below is the SEMANTIC specification — interpreters / AOT backends
-/// replace the call with `FfiExtended(CbgrAlloc, 0xA0)` which bypasses
-/// the stdlib page allocator and hands back a host-allocated block
-/// registered with the CBGR tracker. This lets `Shared<T>`, `Heap<T>`,
-/// `List`, `Map`, and every allocation-bearing stdlib module run under
-/// the Tier 0 interpreter without requiring the FFI-backed page
-/// machinery to bootstrap.
+/// Allocate a fresh writable block and return its pointer, generation, and epoch.
 @intrinsic("cbgr_alloc")
-@inline
-public fn cbgr_alloc(size: Int, align: Int) -> Result<(&unsafe Byte, UInt32, UInt16), AllocError> {
-    if size <= 0 {
-        return Result.Err(AllocError.InvalidSize { size: size });
-    }
-    if align <= 0 || (align & (align - 1)) != 0 {
-        return Result.Err(AllocError.InvalidAlignment { alignment: align });
-    }
+public fn cbgr_alloc(size: Int, align: Int) -> Result<(&unsafe mut Byte, UInt32, UInt16), AllocError>;
 
-    let heap = get_local_heap();
-    match heap.alloc(size, align) {
-        Result.Ok(result) => Result.Ok(result),
-        Result.Err(e) => Result.Err(AllocError.OutOfMemory { requested: size }),
-    }
-}
-
-/// Allocate zeroed memory with CBGR tracking.
-/// Mapped to the `cbgr_alloc_zeroed` intrinsic (FfiSubOpcode 0xA1).
-///
-
-/// Earlier revisions zeroed via a per-byte
-/// `for i in 0..size { ptr_write(ptr_offset(ptr, i), 0) }`
-/// loop — for any allocation larger than a single cache line
-/// this is 50–100× slower than `memset_addr(ptr, 0, size)` because
-/// the per-byte version emits a serial dependency chain that
-/// the CPU can't vectorize, while `memset` lowers to LLVM's
-/// `memset` intrinsic (rep stosb / NEON / SVE / AVX-512). The
-/// stdlib `List`/`Map`/`Heap` zero-init paths feed straight
-/// into this function so the perf gap was paid by every
-/// container construction.
+/// Allocate a zero-filled writable block with the same tracking metadata.
 @intrinsic("cbgr_alloc_zeroed")
-@inline
-public fn cbgr_alloc_zeroed(size: Int, align: Int) -> Result<(&unsafe Byte, UInt32, UInt16), AllocError> {
-    match cbgr_alloc(size, align) {
-        Result.Ok(result) => {
-            memset_addr(result.0, 0, size);
-            Result.Ok(result)
-        }
-        Result.Err(e) => Result.Err(e),
-    }
-}
+public fn cbgr_alloc_zeroed(size: Int, align: Int) -> Result<(&unsafe mut Byte, UInt32, UInt16), AllocError>;
 
 /// Deallocate memory.
 ///

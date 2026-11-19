@@ -1,0 +1,39 @@
+module allocator_writable;
+
+mount core.base.result.Result;
+mount core.mem.allocator.{cbgr_alloc, cbgr_alloc_zeroed};
+mount core.intrinsics.runtime.cbgr.cbgr_deallocate;
+mount core.intrinsics.runtime.mem_raw.load_byte;
+
+type FreshBlock is { strong: UInt32, adjacent: UInt32 };
+
+fn allocation_control() -> Int {
+    let (first, first_gen, _) = match cbgr_alloc(16, 8) {
+        Result.Ok(block) => block,
+        Result.Err(_) => return 1,
+    };
+    let (second, second_gen, _) = match cbgr_alloc_zeroed(16, 8) {
+        Result.Ok(block) => block,
+        Result.Err(_) => return 2,
+    };
+    let initial = load_byte(second as Int) + load_byte(second as Int + 15);
+    let left = first as &unsafe mut FreshBlock;
+    let right = second as &unsafe mut FreshBlock;
+    let observed = unsafe {
+        (*left).strong = 19;
+        (*left).adjacent = 11;
+        (*right).strong = 43;
+        (*left).strong + (*left).adjacent + (*right).strong
+    };
+    unsafe {
+        cbgr_deallocate(first as Int);
+        cbgr_deallocate(second as Int);
+    }
+    if initial != 0 || first_gen == second_gen { return 3; }
+    observed as Int
+}
+
+@test
+fn test_fresh_default_allocations_have_distinct_writable_storage() {
+    assert_eq(allocation_control(), 73);
+}
