@@ -1346,6 +1346,9 @@ impl VbcCodegen {
         // A nullary variant read is also a constructor, despite having no call
         // syntax. Retain its selected producer and contextual owner together;
         // an expected type alone cannot establish the variant's declaration.
+        if matches!(expr.kind, ExprKind::Path(_) | ExprKind::Field { .. }) {
+            self.ctx.nullary_result_variants.remove(&expr.span);
+        }
         if matches!(expr.kind, ExprKind::Path(_) | ExprKind::Field { .. })
             && let Ok(Some(reg)) = &result
             && let Some((_, Instruction::MakeVariantTyped { type_id, tag, field_count: 0, .. })) =
@@ -1355,6 +1358,9 @@ impl VbcCodegen {
             let expected = (self.ctx.expected_value_span == Some(expr.span))
                 .then_some(self.ctx.expected_value_type.as_ref()).flatten();
             let declaration = self.selected_variant_declaration(owner, tag, &[], expected);
+            if declaration.is_none() && expected.is_none() && expr.span.start < expr.span.end {
+                self.ctx.nullary_result_variants.insert(expr.span, (owner, tag));
+            }
             self.ctx.declared_result_types.insert(expr.span, declaration);
         }
         self.ctx.selected_call_result_span = outer;

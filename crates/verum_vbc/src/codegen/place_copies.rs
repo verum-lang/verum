@@ -164,10 +164,18 @@ impl VbcCodegen {
                 self.ctx.declared_result_types.get(&block.span).cloned().flatten(),
             ExprKind::Cast { ty, .. } => self.source_type_in_current_scope(ty),
             ExprKind::Match { .. } | ExprKind::Select { .. } | ExprKind::Await(_) | ExprKind::Try(_) => self.ctx.declared_result_types.get(&expr.span).cloned().flatten(),
-            ExprKind::If { then_branch, else_branch, .. } => join_result_types(
-                self.ctx.declared_result_types.get(&then_branch.span).cloned().flatten(),
-                else_branch.as_ref().map_or(Some(TypeRef::Concrete(crate::types::TypeId::UNIT)), |branch| nested(branch, None)),
-            ),
+            ExprKind::If { then_branch, else_branch, .. } => {
+                let left = self.ctx.declared_result_types.get(&then_branch.span).cloned().flatten();
+                let right = else_branch.as_ref().map_or(
+                    Some(TypeRef::Concrete(crate::types::TypeId::UNIT)),
+                    |branch| nested(branch, None),
+                );
+                match (left, right) {
+                    (Some(known), None) => self.bind_nullary_branch(else_branch.as_deref()?, known),
+                    (None, Some(known)) => self.bind_nullary_branch(then_branch.expr.as_deref()?, known),
+                    (left, right) => join_result_types(left, right),
+                }
+            }
             ExprKind::Closure { .. } => self.compiled_callable_signature(expr).cloned(),
             ExprKind::Path(_) => {
                 if let Some(function) = self.selected_function_value(expr).ok()? {
@@ -321,7 +329,9 @@ impl VbcCodegen {
     /// unknown writes still end the proof instead of guessing a prior producer.
     pub(super) fn copy_result_producer(&self, mut reg: Reg, start: usize, end: usize) -> Maybe<(usize, &Instruction)> {
         let instructions = self.ctx.instructions.get(start..end)?;
-        if self.ctx.has_label_in_instruction_range(start, end) { return None; }
+        // Entry at the first evaluated instruction still executes the producer.
+        // A jump into the expression or past its last instruction can bypass it.
+        if start == end || self.ctx.has_label_in_instruction_range(start + 1, end) { return None; }
         for (offset, instruction) in instructions.iter().enumerate().rev().take(128) {
             match instruction {
                 Instruction::Mov { dst, src } if *dst == reg => reg = *src,
@@ -357,6 +367,39 @@ impl VbcCodegen {
             }
         }
         None
+    }
+
+    /// Fill otherwise unconstrained parameters of a selected empty sum arm
+    /// from the other result. Every returning edge must agree, including
+    /// nested conditionals. An arbitrary unknown value supplies no evidence.
+    fn bind_nullary_branch(&self, branch: &Expr, expected: TypeRef) -> Maybe<TypeRef> {
+        let never = TypeRef::Concrete(crate::types::TypeId::NEVER);
+        if expected == never { return None; }
+        let mut pending = verum_common::List::from_iter([branch]);
+        let mut remaining = 4096_usize;
+        while let Some(value) = pending.pop() {
+            remaining = remaining.checked_sub(1)?;
+            let value = Self::normalized_place(value);
+            if let Some(Some(ty)) = self.ctx.declared_result_types.get(&value.span) {
+                if ty != &expected && ty != &never { return None; }
+                continue;
+            }
+            if let Some(&(owner, tag)) = self.ctx.nullary_result_variants.get(&value.span) {
+                if self.selected_variant_declaration(owner, tag, &[], Some(&expected))? != expected {
+                    return None;
+                }
+                continue;
+            }
+            match &value.kind {
+                ExprKind::Block(block) | ExprKind::Unsafe(block) => pending.push(block.expr.as_deref()?),
+                ExprKind::If { then_branch, else_branch, .. } => {
+                    pending.push(then_branch.expr.as_deref()?);
+                    pending.push(else_branch.as_deref()?);
+                }
+                _ => return None,
+            }
+        }
+        Some(expected)
     }
 
     fn copy_active_declaration(&self, reg: Reg) -> Maybe<TypeRef> {

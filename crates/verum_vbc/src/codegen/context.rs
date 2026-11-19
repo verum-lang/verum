@@ -453,6 +453,9 @@ pub struct CodegenContext {
         Map<verum_ast::Span, verum_common::Maybe<verum_common::Text>>,
     /// Semantic result declarations captured while branch-local bindings exist.
     pub(super) declared_result_types: Map<verum_ast::Span, Option<TypeRef>>,
+    /// A selected nullary constructor can acquire its generic arguments from a
+    /// sibling branch. Its actual owner and tag still constrain that choice.
+    pub(super) nullary_result_variants: Map<verum_ast::Span, (crate::types::TypeId, u32)>,
     /// Current source call boundary; only its selected producer may publish a
     /// semantic result here. Nested expressions save and restore this scope.
     pub(super) selected_call_result_span: Option<verum_ast::Span>,
@@ -983,6 +986,7 @@ pub struct ClosureCompilationContext {
         Map<verum_ast::Span, verum_common::Maybe<verum_common::Text>>,
     /// Semantic result declarations captured while branch-local bindings exist.
     pub(super) declared_result_types: Map<verum_ast::Span, Option<TypeRef>>,
+    pub(super) nullary_result_variants: Map<verum_ast::Span, (crate::types::TypeId, u32)>,
     /// Compiled closure identities belong to the enclosing declaration scope.
     pub compiled_closures: Map<verum_ast::Span, FunctionId>,
     /// Pending sibling callbacks retain the enclosing callable's declarations.
@@ -1711,6 +1715,7 @@ impl CodegenContext {
             variable_type_names: HashMap::new(),
             compiled_block_result_types: Map::new(),
             declared_result_types: Map::new(),
+            nullary_result_variants: Map::new(),
             selected_call_result_span: None,
             array_result_facts: Default::default(),
             array_element_type_names: HashMap::new(),
@@ -2807,6 +2812,7 @@ impl CodegenContext {
         self.variable_type_names.clear();
         self.compiled_block_result_types.clear();
         self.declared_result_types.clear();
+        self.nullary_result_variants.clear();
         self.compiled_closures.clear();
         self.closure_param_type_hints.clear();
         self.closure_return_type_hints.clear();
@@ -4832,6 +4838,7 @@ impl CodegenContext {
             variable_type_names: self.variable_type_names.clone(),
             compiled_block_result_types: self.compiled_block_result_types.clone(),
             declared_result_types: self.declared_result_types.clone(),
+            nullary_result_variants: self.nullary_result_variants.clone(),
             compiled_closures: self.compiled_closures.clone(),
             closure_param_type_hints: self.closure_param_type_hints.clone(),
             closure_return_type_hints: self.closure_return_type_hints.clone(),
@@ -4873,6 +4880,7 @@ impl CodegenContext {
         self.variable_type_names = saved.variable_type_names;
         self.compiled_block_result_types = saved.compiled_block_result_types;
         self.declared_result_types = saved.declared_result_types;
+        self.nullary_result_variants = saved.nullary_result_variants;
         self.compiled_closures = saved.compiled_closures;
         self.closure_param_type_hints = saved.closure_param_type_hints;
         self.closure_return_type_hints = saved.closure_return_type_hints;
@@ -5040,6 +5048,7 @@ impl CodegenContext {
         self.generic_type_params.clear();
         self.compiled_block_result_types.clear();
         self.declared_result_types.clear();
+        self.nullary_result_variants.clear();
         self.selected_call_result_span = None;
         self.array_result_facts.clear();
         self.generic_type_params_ordered.clear();

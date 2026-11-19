@@ -129,3 +129,66 @@ fn borrowed_affine_payload_cannot_be_copied_into_a_sum() {
         assert!(error.to_string().contains("exclusive borrowed owner"), "{error}");
     }
 }
+
+#[test]
+fn an_inferred_conditional_sum_preserves_its_payload_declaration() {
+    run(r#"
+        type Signal<T> is NoSignal | Finished | Sample(T);
+        fn sample(value: Int) -> Signal<Int> {
+            let selected = if value < 0 {
+                if value < -8 { Signal.Finished } else { Signal.NoSignal }
+            } else if value < 10 {
+                Signal.Sample(value)
+            } else {
+                Signal.NoSignal
+            };
+            match selected {
+                Signal.Sample(item) => Signal.Sample(item),
+                Signal.Finished => Signal.Finished,
+                _ => Signal.NoSignal,
+            }
+        }
+        fn probe() -> Int {
+            let valid = match sample(3) { Signal.Sample(item) => item, _ => 0 };
+            let empty = match sample(15) { Signal.NoSignal => 30, _ => 0 };
+            let finished = match sample(-9) { Signal.Finished => 40, _ => 0 };
+            valid + empty + finished
+        }
+    "#);
+}
+
+#[test]
+fn an_inferred_conditional_sum_retains_its_borrowed_affine_payload() {
+    let source = r#"
+        type affine Ticket is { number: Int };
+        type Signal<T> is NoSignal | Sample(T);
+        fn duplicate(input: &Ticket, choose: Bool) -> Signal<Ticket> {
+            let selected = if choose { Signal.NoSignal } else { Signal.Sample(input) };
+            match selected {
+                Signal.Sample(borrowed) => Signal.Sample(*borrowed),
+                Signal.NoSignal => Signal.NoSignal,
+            }
+        }
+    "#;
+    for unit in [false, true] {
+        let error = compile(source, unit).expect_err("the selected payload is still borrowed");
+        assert!(error.to_string().contains("exclusive borrowed owner"), "{error}");
+    }
+}
+
+#[test]
+fn a_nullary_variant_of_another_sum_cannot_supply_ownership_evidence() {
+    let source = r#"
+        type Signal<T> is Empty | Sample(T);
+        type Different<T> is Empty | Other(T);
+        type Container<T> is One(T);
+        fn mixed(choose: Bool) -> Container<Signal<Int>> {
+            let selected = if choose { Different.Empty } else { Signal.Sample(73) };
+            Container.One(selected)
+        }
+    "#;
+    for unit in [false, true] {
+        let error = compile(source, unit).expect_err("the empty variant belongs to a different sum");
+        assert!(error.to_string().contains("retained source declaration"), "{error}");
+    }
+}
