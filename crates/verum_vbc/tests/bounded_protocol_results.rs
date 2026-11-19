@@ -1016,3 +1016,32 @@ fn actual_chain_iterator_max_completes_its_associated_implementation_parameter()
     "#);
     execute_source_and_wire(compile(&[&ordering, &maybe, &protocols, &iterator, &consumer]).unwrap(), 7);
 }
+
+#[test]
+fn a_custom_for_loop_delivers_its_iterator_application_to_next() {
+    let mut iterator = actual_iterator(&[]);
+    iterator.items.extend(parse("mount core.base.maybe.Maybe;").items);
+    let maybe = parse("module core.base.maybe; public type Maybe<T> is None | Some(T);");
+    let consumer = parse(r#"
+        module consumer;
+        mount core.base.iterator.Iterator;
+        mount core.base.maybe.Maybe;
+        type Values<T> is { value: T, pending: Bool };
+        implement<T> Iterator for Values<T> {
+            type Item = T;
+            fn next(&mut self) -> Maybe<T> {
+                if !self.pending { return Maybe.None; }
+                self.pending = false;
+                let value = self.value;
+                Maybe.Some(value)
+            }
+        }
+        fn sum<U>(other: U, rows: Values<Int>) -> Int {
+            let mut total = 0;
+            for value in rows { total = total + value; }
+            total
+        }
+        fn run() -> Int { sum(false, Values { value: 93, pending: true }) }
+    "#);
+    execute_source_and_wire(compile(&[&maybe, &iterator, &consumer]).unwrap(), 93);
+}

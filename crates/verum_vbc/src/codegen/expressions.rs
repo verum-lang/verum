@@ -19503,8 +19503,9 @@ impl VbcCodegen {
         let iter_val = self
             .compile_expr(iter)?
             .or_internal("for iter has no value")?;
-        let item = self.source_expression_declaration(iter, None, 0).and_then(|ty| {
-            self.declared_protocol_member(&ty, verum_common::well_known_types::WellKnownProtocol::Iterator, "Item")
+        let iterator = self.source_expression_declaration(iter, None, 0);
+        let item = iterator.as_ref().and_then(|ty| {
+            self.declared_protocol_member(ty, verum_common::well_known_types::WellKnownProtocol::Iterator, "Item")
         });
         let iter_reg = self.ctx.define_var("__for_iter", true);
         self.ctx.emit(Instruction::Mov {
@@ -19549,7 +19550,13 @@ impl VbcCodegen {
         // Loop start
         self.ctx.define_label(&loop_ctx.continue_label);
 
-        // Call next(&mut self) -> Maybe<T>
+        // The selected next body receives the iterator's implementation
+        // arguments in its own binder order.
+        if let Some(receiver) = iterator.as_ref().map(crate::receiver_methods::pointee)
+            && matches!(receiver, crate::types::TypeRef::Generic(_) | crate::types::TypeRef::Instantiated { .. })
+        {
+            self.ctx.emit(Instruction::BindMethodReceiver { type_ref: receiver.clone() });
+        }
         self.ctx.emit(Instruction::CallM {
             dst: opt_reg,
             receiver: iter_reg,
