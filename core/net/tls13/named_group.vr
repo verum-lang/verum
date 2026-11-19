@@ -40,6 +40,10 @@ public type NamedGroup is
     | Ffdhe4096        // 0x0102
     | Unknown(UInt16);
 
+implement Clone for NamedGroup {
+    fn clone(&self) -> NamedGroup { *self }
+}
+
 implement NamedGroup {
     public fn to_u16(&self) -> UInt16 {
         match self {

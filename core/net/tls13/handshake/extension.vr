@@ -99,13 +99,31 @@ public type KeyShareEntry is {
     key_exchange: List<Byte>,
 };
 
+implement Clone for KeyShareEntry {
+    fn clone(&self) -> KeyShareEntry {
+        KeyShareEntry { group: self.group.clone(), key_exchange: self.key_exchange.clone() }
+    }
+}
+
+implement KeyShareEntry {
+    public(in core.net.tls13.handshake) fn from_parts(group: NamedGroup, public_bytes: List<Byte>) -> KeyShareEntry {
+        KeyShareEntry { group: group, key_exchange: public_bytes }
+    }
+
+    public(in core.net.tls13.handshake) fn named_group(&self) -> &NamedGroup { &self.group }
+
+    public(in core.net.tls13.handshake) fn public_bytes(&self) -> &[Byte] {
+        self.key_exchange.as_slice()
+    }
+}
+
 // =============================================================================
 // Server name
 // =============================================================================
 
 public type ServerName is {
     /// name_type = 0 (host_name); we reject other types.
-    host_name: Text,
+    public(in core.net.tls13.handshake) host_name: Text,
 };
 
 // =============================================================================
@@ -144,19 +162,19 @@ public type EarlyDataIndication is
 // =============================================================================
 
 public type Extension is
-    | ServerNameExt { names: List<ServerName> }
-    | SupportedGroupsExt { groups: List<NamedGroup> }
-    | SignatureAlgorithmsExt { schemes: List<SignatureScheme> }
-    | SignatureAlgorithmsCertExt { schemes: List<SignatureScheme> }
-    | AlpnExt { protocols: List<List<Byte>> }
-    | SupportedVersionsClient { versions: List<ProtocolVersion> }
-    | SupportedVersionsServer { selected: ProtocolVersion }
-    | KeyShareClient { shares: List<KeyShareEntry> }
-    | KeyShareServer { share: KeyShareEntry }
-    | KeyShareHelloRetryRequest { selected_group: NamedGroup }
+    | ServerNameExt { public(in core.net.tls13.handshake) names: List<ServerName> }
+    | SupportedGroupsExt { public(in core.net.tls13.handshake) groups: List<NamedGroup> }
+    | SignatureAlgorithmsExt { public(in core.net.tls13.handshake) schemes: List<SignatureScheme> }
+    | SignatureAlgorithmsCertExt { public(in core.net.tls13.handshake) schemes: List<SignatureScheme> }
+    | AlpnExt { public(in core.net.tls13.handshake) protocols: List<List<Byte>> }
+    | SupportedVersionsClient { public(in core.net.tls13.handshake) versions: List<ProtocolVersion> }
+    | SupportedVersionsServer { public(in core.net.tls13.handshake) selected: ProtocolVersion }
+    | KeyShareClient { public(in core.net.tls13.handshake) shares: List<KeyShareEntry> }
+    | KeyShareServer { public(in core.net.tls13.handshake) share: KeyShareEntry }
+    | KeyShareHelloRetryRequest { public(in core.net.tls13.handshake) selected_group: NamedGroup }
     | PskKeyExchangeModesExt { modes: List<PskKeMode> }
     | EarlyDataExt(EarlyDataIndication)
-    | CookieExt { cookie: List<Byte> }
+    | CookieExt { public(in core.net.tls13.handshake) cookie: List<Byte> }
     | StatusRequestExt                     // content opaque — we don't act on OCSP v1
     | QuicTransportParametersExt { params: List<Byte> }
     | RecordSizeLimitExt { limit: UInt16 }

@@ -76,21 +76,21 @@ public const HST_MESSAGE_HASH:        UInt8 = 254_u8;  // synthetic HRR transcri
 // =============================================================================
 
 public type ClientHello is {
-    legacy_version:      ProtocolVersion,  // always 0x0303
-    random:              [Byte; 32],
-    legacy_session_id:   List<Byte>,        // 0..=32 bytes; empty for brand-new 1.3
-    cipher_suites:       List<CipherSuite>,
-    legacy_compression_methods: List<Byte>, // always [0x00]
-    extensions:          List<Extension>,
+    public(in core.net.tls13.handshake) legacy_version:      ProtocolVersion,  // always 0x0303
+    public(in core.net.tls13.handshake) random:              [Byte; 32],
+    public(in core.net.tls13.handshake) legacy_session_id:   List<Byte>,        // 0..=32 bytes; empty for brand-new 1.3
+    public(in core.net.tls13.handshake) cipher_suites:       List<CipherSuite>,
+    public(in core.net.tls13.handshake) legacy_compression_methods: List<Byte>, // always [0x00]
+    public(in core.net.tls13.handshake) extensions:          List<Extension>,
 };
 
 public type ServerHello is {
-    legacy_version:      ProtocolVersion,  // always 0x0303
-    random:              [Byte; 32],       // check DOWNGRADE_SENTINEL tail
-    legacy_session_id_echo: List<Byte>,     // echoes ClientHello session_id
-    cipher_suite:        CipherSuite,
-    legacy_compression_method: UInt8,      // always 0
-    extensions:          List<Extension>,
+    public(in core.net.tls13.handshake) legacy_version:      ProtocolVersion,  // always 0x0303
+    public(in core.net.tls13.handshake) random:              [Byte; 32],       // check DOWNGRADE_SENTINEL tail
+    public(in core.net.tls13.handshake) legacy_session_id_echo: List<Byte>,     // echoes ClientHello session_id
+    public(in core.net.tls13.handshake) cipher_suite:        CipherSuite,
+    public(in core.net.tls13.handshake) legacy_compression_method: UInt8,      // always 0
+    public(in core.net.tls13.handshake) extensions:          List<Extension>,
 };
 
 /// HRR is structurally a ServerHello with a specific `random` value
@@ -108,16 +108,29 @@ public type EncryptedExtensions is {
 
 public type CertificateEntry is {
     /// DER-encoded certificate.
-    cert_data:  List<Byte>,
+    public(in core.net.tls13.handshake) cert_data:  List<Byte>,
     /// Per-entry extensions (SCT, status_request).
     extensions: List<Extension>,
 };
 
 public type CertificateMessage is {
     /// Certificate request context (empty for TLS 1.3 server auth).
-    certificate_request_context: List<Byte>,
-    certificate_list:            List<CertificateEntry>,
+    public(in core.net.tls13.handshake) certificate_request_context: List<Byte>,
+    public(in core.net.tls13.handshake) certificate_list:            List<CertificateEntry>,
 };
+
+implement CertificateMessage {
+    /// Construct the server Certificate message with DER entries in wire order.
+    public fn server_chain(ders: &[List<Byte>]) -> CertificateMessage {
+        let mut entries: List<CertificateEntry> = List.with_capacity(ders.len());
+        let mut i: Int = 0;
+        while i < ders.len() {
+            entries.push(CertificateEntry { cert_data: ders[i].clone(), extensions: [] });
+            i = i + 1;
+        }
+        CertificateMessage { certificate_request_context: [], certificate_list: entries }
+    }
+}
 
 public type CertificateRequest is {
     certificate_request_context: List<Byte>,
@@ -125,12 +138,12 @@ public type CertificateRequest is {
 };
 
 public type CertificateVerify is {
-    algorithm: SignatureScheme,
-    signature: List<Byte>,
+    public(in core.net.tls13.handshake) algorithm: SignatureScheme,
+    public(in core.net.tls13.handshake) signature: List<Byte>,
 };
 
 public type Finished is {
-    verify_data: List<Byte>,    // HMAC-Hash-length bytes (32 for SHA-256, 48 for SHA-384)
+    public(in core.net.tls13.handshake) verify_data: List<Byte>,    // HMAC-Hash-length bytes (32 for SHA-256, 48 for SHA-384)
 };
 
 public type NewSessionTicket is {
@@ -311,6 +324,9 @@ public fn decode_handshake(r: &mut Tls13HandshakeReader) -> Result<HandshakeMess
         5_u8  /* HST_END_OF_EARLY_DATA */   => HandshakeMessage.EndOfEarlyDataMsg,
         _ => return Result.Err(CodecError.InvalidValue(Text.from("unknown HandshakeType"))),
     };
+    if !body.is_at_end() {
+        return Result.Err(CodecError.InvalidValue("trailing bytes in handshake message"));
+    }
     Result.Ok(msg)
 }
 

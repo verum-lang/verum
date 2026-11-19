@@ -32,10 +32,11 @@
 module core.net.tls13.handshake.dhe_pool;
 
 mount core.collections.list.{List};
-mount core.security.ecc.x25519.{X25519, X25519SecretKey, X25519PublicKey};
-mount core.security.ecc.p256.{P256, P256PrivateKey, P256PublicKey};
+mount core.security.ecc.x25519.{X25519, X25519PublicKey};
+mount core.security.ecc.p256.{P256};
 mount core.net.tls13.named_group.{NamedGroup};
 mount core.net.tls13.error.{TlsError};
+mount core.net.tls13.handshake.extension.KeyShareEntry;
 
 // =============================================================================
 // Keypair container
@@ -50,6 +51,19 @@ public type DheKeyPair is {
     /// raw 32-byte value for X25519.
     public_bytes:  List<Byte>,
 };
+
+implement DheKeyPair {
+    /// Derive a TLS key share from a fresh, caller-supplied X25519 private key.
+    public fn from_x25519_secret(raw: &[Byte; 32]) -> DheKeyPair {
+        let sk = X25519.secret_key_from_bytes(raw);
+        let pk: X25519PublicKey = X25519.public_key(&sk);
+        DheKeyPair {
+            group: NamedGroup.X25519,
+            private_bytes: List.from_slice(&sk[..]),
+            public_bytes: List.from_slice(&pk[..]),
+        }
+    }
+}
 
 // =============================================================================
 // DhePool protocol
@@ -66,10 +80,10 @@ public type DhePool is protocol {
 // LocalDhePool — in-process default
 // =============================================================================
 
-public type LocalDhePool is ();
+public type LocalDhePool is {};
 
 implement LocalDhePool {
-    public fn new() -> LocalDhePool { () }
+    public fn new() -> LocalDhePool { LocalDhePool {} }
 }
 
 implement DhePool for LocalDhePool {
@@ -77,39 +91,19 @@ implement DhePool for LocalDhePool {
         match group {
             NamedGroup.X25519 => {
                 let sk = X25519.generate_secret_key();
-                let pk: X25519PublicKey = X25519.public_key(&sk);
-                let mut priv_v: List<Byte> = [];
-                let mut pub_v:  List<Byte> = [];
-                let mut i: Int = 0;
-                while i < 32 {
-                    priv_v.push(sk[i]);
-                    pub_v.push(pk[i]);
-                    i = i + 1;
-                }
-                Result.Ok(DheKeyPair {
-                    group: NamedGroup.X25519,
-                    private_bytes: priv_v,
-                    public_bytes:  pub_v,
-                })
+                Result.Ok(DheKeyPair.from_x25519_secret(&sk))
             },
 
             NamedGroup.Secp256r1 => {
                 let sk = P256.generate_private_key();
-                let pk = P256.public_key(&sk)
-                    .map_err(|_| TlsError.InternalError(Text.from("P256 pubkey gen")))?;
-                // P256PrivateKey is a type alias for [Byte; 32] — copy raw.
-                let mut priv_v: List<Byte> = [];
-                let mut i: Int = 0;
-                while i < 32 { priv_v.push(sk[i]); i = i + 1; }
-                // P256PublicKey.bytes carries the SEC1 encoding; TLS 1.3
-                // §4.2.8.2 + RFC 5480 §2.2 require uncompressed (0x04
-                // prefix) on the wire — the key generator produces that
-                // by default.
-                Result.Ok(DheKeyPair {
-                    group: NamedGroup.Secp256r1,
-                    private_bytes: priv_v,
-                    public_bytes:  pk.bytes.clone(),
-                })
+                match P256.public_key(&sk) {
+                    Result.Ok(pk) => Result.Ok(DheKeyPair {
+                        group: NamedGroup.Secp256r1,
+                        private_bytes: List.from_slice(&sk[..]),
+                        public_bytes: pk.into_bytes(),
+                    }),
+                    Result.Err(_) => Result.Err(TlsError.InternalError(Text.from("P256 pubkey gen"))),
+                }
             },
 
             _ => Result.Err(TlsError.IllegalParameter),
@@ -128,18 +122,31 @@ implement DhePool for LocalDhePool {
 public fn generate_client_keyshares(
     pool: &mut dyn DhePool,
     groups: &List<NamedGroup>,
-) -> Result<(List<core.net.tls13.handshake.extension.KeyShareEntry>,
+) -> Result<(List<KeyShareEntry>,
              List<(NamedGroup, List<Byte>)>), TlsError> {
-    let mut shares: List<core.net.tls13.handshake.extension.KeyShareEntry> = [];
+    generate_offered_keyshares(pool, List.from_slice(groups.as_slice()))
+}
+
+public(in core.net.tls13.handshake) fn generate_offered_keyshares(
+    pool: &mut dyn DhePool, groups: List<NamedGroup>,
+) -> Result<(List<KeyShareEntry>, List<(NamedGroup, List<Byte>)>), TlsError> {
+    let mut shares: List<KeyShareEntry> = [];
     let mut privs:  List<(NamedGroup, List<Byte>)> = [];
     let mut i: Int = 0;
     while i < groups.len() {
         let g = groups[i].clone();
+        let mut previous: Int = 0;
+        while previous < i {
+            if groups[previous].to_u16() == g.to_u16() {
+                return Result.Err(TlsError.IllegalParameter);
+            }
+            previous = previous + 1;
+        }
         let kp = pool.take(g.clone())?;
-        shares.push(core.net.tls13.handshake.extension.KeyShareEntry {
-            group:        kp.group.clone(),
-            key_exchange: kp.public_bytes.clone(),
-        });
+        if kp.group.to_u16() != g.to_u16() {
+            return Result.Err(TlsError.IllegalParameter);
+        }
+        shares.push(KeyShareEntry.from_parts(kp.group.clone(), kp.public_bytes));
         privs.push((kp.group, kp.private_bytes));
         i = i + 1;
     }

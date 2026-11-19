@@ -69,6 +69,10 @@ public type SignatureScheme is
     | EcdsaSha1               // legacy only
     | Unknown(UInt16);
 
+implement Clone for SignatureScheme {
+    fn clone(&self) -> SignatureScheme { *self }
+}
+
 implement SignatureScheme {
     public fn to_u16(&self) -> UInt16 {
         match self {

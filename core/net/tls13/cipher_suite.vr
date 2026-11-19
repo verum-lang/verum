@@ -43,6 +43,10 @@ public type CipherSuite is
     | Unknown(UInt16);
 
 /// IANA u16 ID per RFC 8446 §B.4.
+implement Clone for CipherSuite {
+    fn clone(&self) -> CipherSuite { *self }
+}
+
 implement CipherSuite {
     public fn to_u16(&self) -> UInt16 {
         match self {
