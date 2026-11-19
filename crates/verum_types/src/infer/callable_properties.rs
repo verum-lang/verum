@@ -303,7 +303,8 @@ impl TypeChecker {
     pub(super) fn callable_declaration_bound(&mut self, function: &FunctionDecl) -> PropertyRequirement {
         let mut bound = match &function.body {
             Some(body) => self.callable_function_body_bound(body),
-            None => PropertyRequirement::declared_function(function.is_pure, function.is_meta),
+            None => intrinsic_declaration_bound(function).unwrap_or_else(||
+                PropertyRequirement::declared_function(function.is_pure, function.is_meta)),
         };
         for parameter in &function.params {
             if let verum_ast::FunctionParamKind::Regular { default_value: Some(value), .. } = &parameter.kind {

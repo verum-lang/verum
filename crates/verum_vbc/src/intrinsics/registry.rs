@@ -1387,8 +1387,14 @@ impl Intrinsic {
             // These lowerings cannot invoke a user callable or suspend a task.
             // This establishes only absence of suspension, not a complete
             // computational footprint or a proof of purity.
+            CodegenStrategy::OpcodeWithSize(Opcode::AtomicLoad | Opcode::AtomicStore | Opcode::AtomicCas, width)
+            | CodegenStrategy::InlineSequenceWithWidth(
+                InlineSequenceId::AtomicFetchAdd | InlineSequenceId::AtomicFetchSub
+                | InlineSequenceId::AtomicFetchAnd | InlineSequenceId::AtomicFetchOr
+                | InlineSequenceId::AtomicFetchXor | InlineSequenceId::AtomicExchange, width,
+            ) if supports_atomic_storage(u32::from(width) * 8) => IntrinsicCallBound::Synchronous,
             CodegenStrategy::RetainCopy
-            | CodegenStrategy::DirectOpcode(Opcode::Panic) => IntrinsicCallBound::Synchronous,
+            | CodegenStrategy::DirectOpcode(Opcode::Panic | Opcode::AtomicFence) => IntrinsicCallBound::Synchronous,
             _ => IntrinsicCallBound::Unknown,
         }
     }

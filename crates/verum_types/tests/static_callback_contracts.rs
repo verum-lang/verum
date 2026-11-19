@@ -257,7 +257,17 @@ fn intrinsic_hints_and_annotations_cannot_fabricate_callable_evidence() {
     }
     let source = "@intrinsic(\"text_as_bytes\") fn bytes(value: &Text) -> &[Byte];
                   pure fn inspect(value: &Text) -> Int { let data = bytes(value); 7 }";
-    assert!(!errors(source).is_empty(), "synchronous must not imply pure");
+    // This view has a proved finite footprint. Pure functions allow
+    // deterministic allocation and failure during value construction.
+    let accepted = errors(source);
+    assert!(accepted.is_empty(), "{accepted:?}");
+    let mutation = r#"
+        @intrinsic("atomic_store_u8") fn write_address(ptr:*mut UInt8,value:UInt8,order:UInt8);
+        pure fn inspect(ptr:*mut UInt8,value:UInt8,order:UInt8) { write_address(ptr,value,order); }
+    "#;
+    let rejected = errors(mutation);
+    assert!(rejected.iter().any(|error| error.contains("ImpurePureFunction") || error.contains("pure function")),
+        "a synchronous store cannot satisfy a pure contract: {rejected:?}");
 }
 
 #[test]
@@ -342,8 +352,26 @@ fn checked_method_contracts_do_not_leak_to_sibling_owners() {
              implement First {{ fn package(value: Int) -> Event {{ Event.Value(value) }} }}
              fn result() -> Event {{ apply(|value| Second.package(value)) }}"
         );
+        let first = errors(&source.replace("Second.package(value)", "First.package(value)"));
+        assert!(first.is_empty(), "the selected synchronous sibling: {first:?}");
         let rejected = errors(&source);
-        assert!(rejected.iter().any(|e| e.contains("Mismatch") && e.contains("async")),
-            "a sibling method supplied false evidence: {source}: {rejected:?}");
+        assert!(rejected.iter().any(|error| {
+            let message = error.to_lowercase();
+            message.contains("mismatch") && message.contains("async")
+        }), "the unproved sibling must fail its callback contract: {source}: {rejected:?}");
     }
+}
+
+#[test]
+fn typed_atomic_store_can_run_in_a_synchronous_callback() {
+    let declarations = r#"
+        @intrinsic("atomic_store_u8") fn publish(ptr:*mut UInt8,value:UInt8,order:UInt8);
+        fn accept(callback:fn(*mut UInt8,UInt8,UInt8)) {}
+    "#;
+    let sync = format!("{declarations} fn install() {{ accept(|p,v,o| publish(p,v,o)); }}");
+    let found = errors(&sync);
+    assert!(found.is_empty(), "{found:?}");
+    let suspending = format!("{declarations} async fn publish_later(p:*mut UInt8,v:UInt8,o:UInt8) {{ publish(p,v,o); }} fn install() {{ accept(publish_later); }}");
+    let found = errors(&suspending);
+    assert!(found.iter().any(|error| error.contains("Async") || error.contains("async")), "{found:?}");
 }

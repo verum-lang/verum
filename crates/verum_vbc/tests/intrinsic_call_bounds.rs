@@ -58,3 +58,16 @@ fn metadata_views_bound_only_their_own_lowering() {
     length.strategy = lookup_intrinsic("text_parse_int").unwrap().intrinsic.strategy.clone();
     assert_eq!(length.call_bound(), IntrinsicCallBound::Unknown);
 }
+
+#[test]
+fn atomic_contract_depends_on_the_operation_and_supported_width() {
+    use verum_vbc::instruction::Opcode;
+    for name in ["atomic_load_u8", "atomic_store_u16", "atomic_cas_u32",
+                 "atomic_fetch_and_u64", "atomic_exchange_u8", "atomic_fence"] {
+        let mut intrinsic = lookup_intrinsic(name).expect(name).intrinsic.clone();
+        intrinsic.name = "unrelated_surface_name";
+        assert_eq!(intrinsic.call_bound(), IntrinsicCallBound::Synchronous, "{name}");
+        intrinsic.strategy = CodegenStrategy::OpcodeWithSize(Opcode::AtomicStore, 3);
+        assert_eq!(intrinsic.call_bound(), IntrinsicCallBound::Unknown);
+    }
+}
