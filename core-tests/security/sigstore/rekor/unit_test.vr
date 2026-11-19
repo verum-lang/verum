@@ -6,8 +6,10 @@
 // =============================================================================
 
 mount core.security.sigstore.rekor.{
-    MAX_ENTRY_RESPONSE_BYTES, CONTENT_TYPE_JSON,
+    MAX_ENTRY_RESPONSE_BYTES, CONTENT_TYPE_JSON, decode_entry_body, parse_log_entry_response,
 };
+mount core.security.sigstore.types.{EntryBody};
+mount core.encoding.json.{decode_bytes_strict, encode, JsonValue};
 mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 
@@ -54,3 +56,71 @@ fn test_rekor_response_cap_larger_than_fulcio() {
 }
 
 fn main() {}
+
+fn body_json(text: Text) -> JsonValue {
+    decode_bytes_strict(text.as_bytes(), MAX_ENTRY_RESPONSE_BYTES).unwrap()
+}
+
+@test
+fn test_intoto_retains_response_fields_without_inventing_payload() {
+    let value = body_json("{\"kind\":\"intoto\",\"apiVersion\":\"0.0.2\",\"spec\":{\"content\":{\"envelope\":{\"payloadType\":\"application/vnd.in-toto+json\",\"signatures\":[{\"sig\":\"AQI=\",\"publicKey\":\"AwQ=\",\"keyid\":\"signer-a\"}]},\"hash\":{\"algorithm\":\"sha256\",\"value\":\"0000000000000000000000000000000000000000000000000000000000000000\"},\"payloadHash\":{\"algorithm\":\"sha256\",\"value\":\"1111111111111111111111111111111111111111111111111111111111111111\"}}}}");
+    match decode_entry_body(value).unwrap() {
+        EntryBody.Intoto_(body) => {
+            assert(body.envelope.payload_b64.is_none());
+            assert_eq(body.envelope.payload_type, "application/vnd.in-toto+json");
+            assert_eq(body.envelope.signatures.len(), 1);
+            assert_eq(body.envelope.signatures[0].sig_b64, "AQI=");
+            assert_eq(body.envelope.signatures[0].public_key_pem_b64, "AwQ=");
+            assert_eq(*body.envelope.signatures[0].key_id.as_ref().unwrap(), "signer-a");
+            assert_eq(*body.envelope_hash.hex(), "0000000000000000000000000000000000000000000000000000000000000000");
+            assert_eq(*body.payload_hash.hex(), "1111111111111111111111111111111111111111111111111111111111111111");
+        },
+        _ => panic("expected intoto response"),
+    }
+}
+
+@test
+fn test_dsse_response_retains_each_signature_and_digest() {
+    let value = body_json("{\"kind\":\"dsse\",\"apiVersion\":\"0.0.1\",\"spec\":{\"signatures\":[{\"signature\":\"AQI=\",\"verifier\":\"AwQ=\"},{\"signature\":\"BQY=\",\"verifier\":\"Bwg=\"}],\"envelopeHash\":{\"algorithm\":\"sha256\",\"value\":\"2222222222222222222222222222222222222222222222222222222222222222\"},\"payloadHash\":{\"algorithm\":\"sha256\",\"value\":\"3333333333333333333333333333333333333333333333333333333333333333\"}}}");
+    match decode_entry_body(value).unwrap() {
+        EntryBody.Dsse_(body) => {
+            assert_eq(body.signatures.len(), 2);
+            assert_eq(body.signatures[1].sig_b64, "BQY=");
+            assert_eq(body.signatures[1].public_key_pem_b64, "Bwg=");
+            assert(body.signatures[0].key_id.is_none());
+            assert_eq(*body.envelope_hash.hex(), "2222222222222222222222222222222222222222222222222222222222222222");
+            assert_eq(*body.payload_hash.hex(), "3333333333333333333333333333333333333333333333333333333333333333");
+        },
+        _ => panic("expected dsse response"),
+    }
+}
+
+@test
+fn test_supported_malformed_bodies_never_become_placeholder_successes() {
+    for text in [
+        "{\"kind\":\"intoto\",\"apiVersion\":\"0.0.2\",\"spec\":{}}",
+        "{\"kind\":\"dsse\",\"apiVersion\":\"0.0.1\",\"spec\":{}}",
+        "{\"kind\":\"hashedrekord\",\"apiVersion\":\"0.0.1\",\"spec\":{\"data\":{\"hash\":{\"algorithm\":\"sha256\",\"value\":\"00\"}},\"signature\":{\"content\":\"AQI=\",\"publicKey\":{\"content\":\"AwQ=\"}}}}",
+        "{\"kind\":\"dsse\",\"spec\":{}}",
+    ] {
+        assert(decode_entry_body(body_json(text)).is_err());
+    }
+}
+
+@test
+fn test_unknown_schema_retains_the_original_json() {
+    for spec in ["""{"newField":42}""", """[42,"new"]""", "null"] {
+        let original = body_json(f"{{\"kind\":\"intoto\",\"apiVersion\":\"99.0.0\",\"spec\":{spec}}}");
+        let expected = encode(&original);
+        match decode_entry_body(original).unwrap() {
+            EntryBody.Raw(value) => assert_eq(encode(&value), expected),
+            _ => panic("unknown schema cannot claim a decoded known body"),
+        }
+    }
+}
+
+@test
+fn test_log_response_does_not_choose_one_of_multiple_entries() {
+    assert(parse_log_entry_response(&"{\"first\":{},\"second\":{}}".into_bytes()).is_err());
+    assert(parse_log_entry_response(&"{}".into_bytes()).is_err());
+}

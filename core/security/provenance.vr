@@ -115,6 +115,13 @@ public type Digest is {
     hex: Text,
 };
 
+implement Digest {
+    /// Store an encoded digest. The consuming protocol validates the algorithm and width.
+    public fn new(algorithm: Text, hex: Text) -> Digest { Digest { algorithm, hex } }
+    public fn algorithm(&self) -> &Text { &self.algorithm }
+    public fn hex(&self) -> &Text { &self.hex }
+}
+
 public fn digest_sha256(bytes: &List<Byte>) -> Digest {
     Digest {
         algorithm: "sha256".to_text(),

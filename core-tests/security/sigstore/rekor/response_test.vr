@@ -1,0 +1,111 @@
+// Response decoding and Merkle-path controls; parsing does not authenticate a SET.
+mount core.security.sigstore.rekor.{parse_log_entry_response, verify_inclusion_proof};
+mount core.encoding.json.{JsonValue, JsonMap, json_object, json_string, json_int, json_array, encode};
+mount core.encoding.base64;
+mount core.base.result.{Result};
+mount core.base.maybe.{Maybe};
+mount core.collections.list.{List};
+
+const BODY_ZERO: Text = "{\"kind\":\"test-entry\",\"apiVersion\":\"99.0.0\",\"spec\":{\"sequence\":0}}";
+const BODY_TWO: Text = "{\"kind\":\"test-entry\",\"apiVersion\":\"99.0.0\",\"spec\":{\"sequence\":2}}";
+// Independent SHA-256 fixtures: leaf = H(0x00 || body), node = H(0x01 || left || right).
+const LEAF_ZERO: Text = "694c152bd375c3a3a74bcc425280cb87235a212909a4e062845a26036cc0921d";
+const LEAF_TWO: Text = "d192b3cfe6a800fb4581ba08fa571067137b34564bbb9b7859607e6f379872c5";
+// The middle body is BODY_ZERO with sequence 1. Leaf 2 is promoted in a three-leaf tree.
+const LEFT_PAIR: Text = "4ccd5a451cf0c180b0e77a1ff3a7d0b88b1e6f7ddb87d1bb25b60a22b9e5fc70";
+const THREE_ROOT: Text = "0be99ed014c6a564b7ccb19a79a3ff09de268d37b0b3dc334ba0fef627f405f6";
+
+fn proof_json(index: Int, size: Int, root: &Text, hashes: List<Text>, checkpoint: Maybe<Text>) -> JsonValue {
+    let mut obj: JsonMap = JsonMap.new();
+    obj.insert("logIndex", json_int(index));
+    obj.insert("treeSize", json_int(size));
+    obj.insert("rootHash", json_string(root.clone()));
+    let mut siblings: List<JsonValue> = [];
+    for hash in hashes.iter() { siblings.push(json_string(hash.clone())); }
+    obj.insert("hashes", json_array(siblings));
+    if let Maybe.Some(note) = checkpoint { obj.insert("checkpoint", json_string(note)); }
+    json_object(obj)
+}
+
+fn response_json(body: &Text, uuid: &Text, index: Int, proof: Maybe<JsonValue>) -> List<Byte> {
+    let mut verification: JsonMap = JsonMap.new();
+    verification.insert("signedEntryTimestamp", json_string("AQI="));
+    if let Maybe.Some(value) = proof { verification.insert("inclusionProof", value); }
+    let mut entry: JsonMap = JsonMap.new();
+    entry.insert("body", json_string(base64.encode(body.as_bytes())));
+    entry.insert("integratedTime", json_int(1_700_000_000));
+    entry.insert("logIndex", json_int(index));
+    entry.insert("logID", json_string("0000000000000000000000000000000000000000000000000000000000000000"));
+    entry.insert("verification", json_object(verification));
+    let mut response: JsonMap = JsonMap.new();
+    response.insert(uuid.clone(), json_object(entry));
+    encode(&json_object(response)).into_bytes()
+}
+
+@test
+fn test_plain_and_sharded_uuid_bind_exact_leaf_bytes() {
+    for uuid in [LEAF_ZERO.clone(), f"1122334455667788{LEAF_ZERO}"] {
+        let bytes = response_json(&BODY_ZERO, &uuid, 9_007_199_254_740_993, Maybe.None);
+        let entry = parse_log_entry_response(&bytes).unwrap();
+        assert_eq(entry.uuid, uuid);
+        assert_eq(entry.log_index, 9_007_199_254_740_993);
+        assert_eq(entry.body_b64, base64.encode(BODY_ZERO.as_bytes()));
+        assert(entry.inclusion_proof.is_none());
+    }
+}
+
+@test
+fn test_mismatched_or_malformed_uuid_cannot_identify_a_body() {
+    for uuid in [
+        "0000000000000000000000000000000000000000000000000000000000000000",
+        "694c152bd375c3a3a74bcc425280cb87235a212909a4e062845a26036cc0921",
+        "z94c152bd375c3a3a74bcc425280cb87235a212909a4e062845a26036cc0921d",
+    ] {
+        assert(parse_log_entry_response(&response_json(&BODY_ZERO, &uuid, 0, Maybe.None)).is_err());
+    }
+    assert(parse_log_entry_response(&response_json(&BODY_TWO, &LEAF_ZERO, 0, Maybe.None)).is_err());
+}
+
+@test
+fn test_checkpoint_note_is_optional_and_preserved_exactly() {
+    let note = "test-log\n1\nroot-text\n\n— signer signature\n";
+    for checkpoint in [Maybe.None, Maybe.Some(note.clone())] {
+        let proof = proof_json(0, 1, &LEAF_ZERO, [], checkpoint.clone());
+        let bytes = response_json(&BODY_ZERO, &LEAF_ZERO, 100, Maybe.Some(proof));
+        let entry = parse_log_entry_response(&bytes).unwrap();
+        assert_eq(entry.inclusion_proof.as_ref().unwrap().checkpoint, checkpoint);
+        assert(verify_inclusion_proof(&entry).is_ok());
+    }
+}
+
+@test
+fn test_odd_tree_proof_uses_local_index_not_virtual_log_index() {
+    let proof = proof_json(2, 3, &THREE_ROOT, [LEFT_PAIR.clone()], Maybe.None);
+    let bytes = response_json(&BODY_TWO, &f"1122334455667788{LEAF_TWO}", 1002, Maybe.Some(proof));
+    let entry = parse_log_entry_response(&bytes).unwrap();
+    assert_eq(entry.log_index, 1002);
+    assert_eq(entry.inclusion_proof.as_ref().unwrap().log_index, 2);
+    assert(verify_inclusion_proof(&entry).is_ok());
+    for index in [0, 1] {
+        let wrong = proof_json(index, 3, &THREE_ROOT, [LEFT_PAIR.clone()], Maybe.None);
+        let entry = parse_log_entry_response(&response_json(&BODY_TWO, &LEAF_TWO, 1002, Maybe.Some(wrong))).unwrap();
+        assert(verify_inclusion_proof(&entry).is_err());
+    }
+    let extra = proof_json(2, 3, &THREE_ROOT, [LEFT_PAIR.clone(), LEAF_ZERO.clone()], Maybe.None);
+    let entry = parse_log_entry_response(&response_json(&BODY_TWO, &LEAF_TWO, 1002, Maybe.Some(extra))).unwrap();
+    assert(verify_inclusion_proof(&entry).is_err());
+}
+
+@test
+fn test_inclusion_proof_position_and_hash_width_are_checked() {
+    for proof in [
+        proof_json(-1, 3, &THREE_ROOT, [LEFT_PAIR.clone()], Maybe.None),
+        proof_json(3, 3, &THREE_ROOT, [LEFT_PAIR.clone()], Maybe.None),
+        proof_json(2, 3, &THREE_ROOT, ["00"], Maybe.None),
+        proof_json(2, 3, &"00", [LEFT_PAIR.clone()], Maybe.None),
+    ] {
+        assert(parse_log_entry_response(&response_json(&BODY_TWO, &LEAF_TWO, 1002, Maybe.Some(proof))).is_err());
+    }
+}
+
+fn main() {}

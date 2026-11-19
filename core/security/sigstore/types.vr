@@ -21,7 +21,7 @@
 //   - `core.security.oidc`             — OIDC token used for Fulcio
 //     keyless signing.
 //
-// **Entry types (Rekor v2 supported).**
+// **Entry types (Rekor v1 API).**
 //
 //   - `HashedRekord v0.0.1` — for plain detached signatures over a
 //     hash. Body carries: signature, public key, hashed payload.
@@ -35,13 +35,8 @@
 // has been integrated into the log. The SET is an ECDSA-P-256
 // signature over the canonical-JSON representation of the entry
 // body + integration time + log id + log index. Verifying the SET
-// is sufficient evidence of inclusion without fetching an inclusion
-// proof.
-//
-// **Categorical structure.** Entries form a sheaf over the Rekor
-// log: each entry has a unique (log_index, body_sha256) coordinate;
-// the integrated_time + SET form the gluing data that lets verifiers
-// reconstruct integration order without re-fetching the log.
+// is a signed promise, not a Merkle inclusion or consistency proof.
+// Inclusion requires an audit path and an authenticated checkpoint.
 // =============================================================================
 
 @arch_module(
@@ -128,7 +123,7 @@ public type ApiVersion is (Text);
 // HashedRekord (v0.0.1) — detached signature over a hash
 // =============================================================================
 //
-// JSON wire form (Rekor v2):
+// JSON wire form (Rekor v1):
 //
 //   {
 //     "kind":      "hashedrekord",
@@ -147,18 +142,18 @@ public type ApiVersion is (Text);
 @derive(Eq, Clone, Debug)
 public type HashedRekordBody is {
     /// Hash of the detached payload.
-    payload_hash:      Digest,
+    public payload_hash:      Digest,
     /// Base64-encoded signature bytes.
-    signature_b64:     Text,
+    public signature_b64:     Text,
     /// Base64-encoded PEM public key (or raw key per algorithm).
-    public_key_pem_b64: Text,
+    public public_key_pem_b64: Text,
 };
 
 // =============================================================================
 // Intoto (v0.0.2) — in-toto Statement attestation
 // =============================================================================
 //
-// JSON wire form (Rekor v2):
+// JSON wire form (Rekor v1):
 //
 //   {
 //     "kind":       "intoto",
@@ -172,35 +167,34 @@ public type HashedRekordBody is {
 //         },
 //         "hash":           { "algorithm": "sha256", "value": "<hex>" },
 //         "payloadHash":    { "algorithm": "sha256", "value": "<hex>" }
-//       },
-//       "publicKey": "<base64 PEM>"
+//       }
 //     }
 //   }
 
 @derive(Eq, Clone, Debug)
 public type IntotoEnvelopeRef is {
-    payload_b64:       Text,
-    payload_type:      Text,
-    signatures:        List<EnvelopeSignature>,
+    /// Optional in log responses: Rekor may retain only the payload hash.
+    public payload_b64:       Maybe<Text>,
+    public payload_type:      Text,
+    public signatures:        List<EnvelopeSignature>,
 };
 
 @derive(Eq, Clone, Debug)
 public type EnvelopeSignature is {
-    sig_b64:           Text,
+    public sig_b64:           Text,
     /// Per-signer public key (base64-encoded PEM).
-    public_key_pem_b64: Text,
+    public public_key_pem_b64: Text,
+    /// Optional in-toto signer hint; never a substitute for the public key.
+    public key_id:            Maybe<Text>,
 };
 
 @derive(Eq, Clone, Debug)
 public type IntotoBody is {
-    envelope:        IntotoEnvelopeRef,
+    public envelope:        IntotoEnvelopeRef,
     /// SHA-256 over the entire serialized envelope.
-    envelope_hash:   Digest,
+    public envelope_hash:   Digest,
     /// SHA-256 over the decoded payload.
-    payload_hash:    Digest,
-    /// Verification material — typically the same as the envelope's
-    /// signer public key, deduplicated for fast lookup.
-    public_key_pem_b64: Text,
+    public payload_hash:    Digest,
 };
 
 // =============================================================================
@@ -210,12 +204,11 @@ public type IntotoBody is {
 @derive(Eq, Clone, Debug)
 public type DsseBody is {
     /// SHA-256 of the canonical envelope body.
-    envelope_hash:    Digest,
+    public envelope_hash:    Digest,
     /// Per-signature record (signer + base64 sig).
-    signatures:       List<EnvelopeSignature>,
+    public signatures:       List<EnvelopeSignature>,
     /// SHA-256 of the underlying payload.
-    payload_hash:     Digest,
-    payload_type:     Text,
+    public payload_hash:     Digest,
 };
 
 // =============================================================================
@@ -247,11 +240,11 @@ public type EntryBody is
 @derive(Eq, Clone, Debug)
 public type SignedEntryTimestamp is {
     /// Base64-encoded ECDSA-P-256 signature.
-    signature_b64: Text,
+    public signature_b64: Text,
 };
 
 // =============================================================================
-// LogEntry — full Rekor v2 entry envelope
+// LogEntry — full Rekor v1 entry envelope
 // =============================================================================
 //
 // JSON wire form (one map entry, key = entry UUID, value = body):
@@ -269,7 +262,7 @@ public type SignedEntryTimestamp is {
 //           "treeSize":   8675309,
 //           "rootHash":   "<hex>",
 //           "hashes":     ["<hex>", "<hex>", ...],
-//           "checkpoint": "<base64-encoded checkpoint>"
+//           "checkpoint": "<signed checkpoint note>"
 //         }
 //       },
 //     }
@@ -277,59 +270,54 @@ public type SignedEntryTimestamp is {
 
 @derive(Clone, Debug)
 public type LogEntry is {
-    /// Entry UUID — `tree_id || hash`, as the Rekor v2 docs call it.
-    uuid:            Text,
+    /// Entry UUID, optionally prefixed with the sharded tree identifier.
+    public uuid:            Text,
     /// Base64-encoded canonical entry body (the bytes the SET
     /// signs over).
-    body_b64:        Text,
+    public body_b64:        Text,
     /// Decoded body (the JSON content of `body_b64` after base64
     /// + JSON decode).
-    body:            EntryBody,
+    public body:            EntryBody,
     /// Unix-epoch seconds at which the entry was integrated.
-    integrated_time: Int,
+    public integrated_time: Int,
     /// Hex-encoded SHA-256 of Rekor's public key — disambiguates
     /// log instances.
-    log_id_hex:      Text,
+    public log_id_hex:      Text,
     /// Sequence number within the log.
-    log_index:       Int,
-    /// Always present for entries returned by Rekor v2.
-    set:             SignedEntryTimestamp,
-    /// Optional Merkle inclusion proof — present when explicitly
-    /// requested via `?verification=inclusion`.
-    inclusion_proof: Maybe<RekorInclusionProof>,
+    public log_index:       Int,
+    /// Signed promise returned by Rekor v1.
+    public set:             SignedEntryTimestamp,
+    /// Optional Merkle inclusion proof returned by the server.
+    public inclusion_proof: Maybe<RekorInclusionProof>,
 };
 
 @derive(Clone, Debug)
 public type RekorInclusionProof is {
-    log_index:    Int,
-    tree_size:    Int,
+    public log_index:    Int,
+    public tree_size:    Int,
     /// Hex-encoded root hash at `tree_size`.
-    root_hash:    Text,
-    /// Audit hashes (root → leaf order, hex-encoded).
-    hashes_hex:   List<Text>,
-    /// Base64-encoded signed checkpoint binding the root hash to
-    /// the log's signing key.
-    checkpoint_b64: Text,
+    public root_hash:    Text,
+    /// Audit hashes in bottom-up verification order, hex-encoded.
+    public hashes_hex:   List<Text>,
+    /// Exact signed checkpoint note. Parsing does not authenticate it.
+    public checkpoint: Maybe<Text>,
 };
 
 // =============================================================================
 // Fulcio
 // =============================================================================
 //
-// Fulcio responses come in two shapes: a PEM-encoded chain (legacy
-// API), or a JSON object wrapping the chain (current `/api/v2/
-// signingCert`). This module exposes both round-trip-safe.
+// Fulcio v2 wraps the PEM chain in either the embedded or detached SCT variant.
 
 @derive(Clone, Debug)
 public type FulcioCertResponse is {
     /// Newly-issued ephemeral cert chain, leaf-first (the EE cert
     /// followed by intermediates up to the root).  Each entry is
     /// the raw DER of one certificate.
-    cert_chain:    List<List<Byte>>,
-    /// SCTs (Signed Certificate Timestamps) embedded in the EE cert
-    /// or returned as a side-channel. The raw bytes are surfaced
-    /// for callers that want to verify CT inclusion separately.
-    scts_raw:      Maybe<List<Byte>>,
+    public cert_chain:    List<List<Byte>>,
+    /// Detached signedCertificateTimestamp bytes, when supplied. Embedded
+    /// timestamps remain in the certificate DER.
+    public scts_raw:      Maybe<List<Byte>>,
 };
 
 /// Fulcio CSR identity hint — the OIDC-derived subject the requested
@@ -362,16 +350,16 @@ mount core.security.provenance.{
 @derive(Clone, Debug)
 public type SigstoreBundle is {
     /// Versioned Sigstore bundle media type.
-    media_type:    Text,
+    public media_type:    Text,
     /// PEM-encoded cert chain leaf-first (or raw DER lifted into
     /// PEM). The first cert is the Fulcio EE cert with the OIDC
     /// identity in SAN + the embedded SCT.
-    cert_chain_pem: List<Text>,
+    public cert_chain_pem: List<Text>,
     /// The signed DSSE envelope. Verifiers extract Statement →
     /// SLSA / in-toto / SBOM predicate.
-    envelope:      DsseEnvelope,
+    public envelope:      DsseEnvelope,
     /// Rekor inclusion proofs — at least one required for SLSA L3.
-    tlog_entries:  List<LogEntry>,
+    public tlog_entries:  List<LogEntry>,
 };
 
 public const SIGSTORE_BUNDLE_MEDIA_TYPE: Text = "application/vnd.dev.sigstore.bundle.v0.3+json";
@@ -408,20 +396,20 @@ implement Debug for SigstoreTypeError {
 // =============================================================================
 
 public fn digest_sha256_hex(hex: Text) -> Digest {
-    Digest { algorithm: "sha256".to_text(), hex }
+    Digest.new("sha256", hex)
 }
 
 public fn validate_digest(d: &Digest) -> Result<(), SigstoreTypeError> {
-    let expected_len: Int = match d.algorithm.as_str() {
+    let expected_len: Int = match d.algorithm().as_str() {
         "sha256" => 64,
         "sha384" => 96,
         "sha512" => 128,
-        _ => return Result.Err(MalformedDigest(f"unknown algorithm '{d.algorithm}'")),
+        _ => return Result.Err(MalformedDigest(f"unknown algorithm '{d.algorithm()}'")),
     };
-    if d.hex.len() != expected_len {
-        return Result.Err(MalformedDigest(f"{d.algorithm} digest must be {expected_len} hex chars, got {d.hex.len()}"));
+    if d.hex().len() != expected_len {
+        return Result.Err(MalformedDigest(f"{d.algorithm()} digest must be {expected_len} hex chars, got {d.hex().len()}"));
     }
-    if !is_hex_lowercase(&d.hex) {
+    if !is_hex_lowercase(d.hex()) {
         return Result.Err(MalformedDigest("digest must be lowercase hex".to_text()));
     }
     Result.Ok(())

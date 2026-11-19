@@ -2,7 +2,7 @@
 /// an eight-byte tree identifier before it.
 module core.security.sigstore.entry_id;
 
-mount core.encoding.hex.{decode};
+mount core.encoding.hex.{decode as hex_decode};
 mount core.encoding.base64.{decode as decode_base64, Base64Error};
 mount core.encoding.json.{JsonValue};
 mount core.security.merkle.{leaf_hash};
@@ -49,7 +49,7 @@ implement Debug for RekorEntryBodyError {
 implement RekorEntryId {
     public fn parse(text: &Text) -> Maybe<RekorEntryId> {
         if text.len() != 64 && text.len() != 80 { return Maybe.None; }
-        match decode(text) {
+        match hex_decode(text) {
             Result.Ok(bytes) => Maybe.Some(RekorEntryId { bytes }),
             Result.Err(_) => Maybe.None,
         }
