@@ -1200,7 +1200,7 @@ public fn stringify(value: &TomlValue) -> Text {
 public fn stringify_pretty(value: &TomlValue) -> Text {
     let mut out = Text.new();
     match value {
-        TomlValue.TomlTable(t) => stringify_table_pretty(t, &List.new(), &mut out),
+        TomlValue.TomlTable(t) => stringify_table_pretty(t, &mut out),
         _                      => out.push_str(&stringify_inline_value(value)),
     }
     out
@@ -1261,7 +1261,7 @@ fn stringify_array_inline(items: &List<TomlValue>) -> Text {
     let mut i = 0;
     while i < items.len() {
         if i > 0 { out.push_str(&", ".to_text()); }
-        out.push_str(&stringify_inline_value(items.get(i).unwrap()));
+        out.push_str(&stringify_inline_value(&items.get(i).unwrap()));
         i = i + 1;
     }
     out.push_byte(0x5D_u8);
@@ -1271,15 +1271,13 @@ fn stringify_array_inline(items: &List<TomlValue>) -> Text {
 fn stringify_table_inline(t: &Map<Text, TomlValue>) -> Text {
     let mut out = Text.new();
     out.push_byte(0x7B_u8);
-    let keys = t.keys_list();
-    let mut i = 0;
-    while i < keys.len() {
-        if i > 0 { out.push_str(&", ".to_text()); }
-        let k = keys.get(i).unwrap();
-        out.push_str(&render_key(k));
+    let mut first = true;
+    for (key, value) in t.iter() {
+        if !first { out.push_str(&", ".to_text()); }
+        first = false;
+        out.push_str(&render_key(&key));
         out.push_str(&" = ".to_text());
-        out.push_str(&stringify_inline_value(t.get(k).unwrap()));
-        i = i + 1;
+        out.push_str(&stringify_inline_value(&value));
     }
     out.push_byte(0x7D_u8);
     out
@@ -1296,94 +1294,79 @@ fn render_key(k: &Text) -> Text {
     if all_bare { k.clone() } else { stringify_string(k) }
 }
 
-fn stringify_table_pretty(
-    t: &Map<Text, TomlValue>,
-    path: &List<Text>,
-    out: &mut Text,
-) {
-    // 1) Emit scalar / array / inline-table fields first.
-    let keys = t.keys_sorted();
-    let mut sub_tables: List<Text> = List.new();
-    let mut sub_aots: List<Text> = List.new();
-    let mut i = 0;
-    while i < keys.len() {
-        let k = keys.get(i).unwrap();
-        let v = t.get(k).unwrap();
-        match v {
-            TomlValue.TomlTable(_) => sub_tables.push(k.clone()),
-            TomlValue.TomlArray(items) => {
-                if !items.is_empty() && all_tables(items) {
-                    sub_aots.push(k.clone());
-                } else {
-                    out.push_str(&render_key(k));
-                    out.push_str(&" = ".to_text());
-                    out.push_str(&stringify_inline_value(v));
-                    out.push_byte(0x0A_u8);
-                }
-            }
-            _ => {
-                out.push_str(&render_key(k));
-                out.push_str(&" = ".to_text());
-                out.push_str(&stringify_inline_value(v));
-                out.push_byte(0x0A_u8);
-            }
+type PrettyTable is {
+    entries: Map<Text, TomlValue>,
+    path: Text,
+    array_element: Bool,
+};
+
+fn stringify_table_pretty(t: &Map<Text, TomlValue>, out: &mut Text) {
+    let mut pending: List<PrettyTable> = List.new();
+    collect_pretty_fields(t, &Text.new(), &mut pending, out);
+    while let Maybe.Some(current) = pending.pop() {
+        if !current.path.is_empty() {
+            out.push_byte(0x0A_u8);
+            out.push_byte(0x5B_u8);
+            if current.array_element { out.push_byte(0x5B_u8); }
+            out.push_str(&current.path);
+            if current.array_element { out.push_byte(0x5D_u8); }
+            out.push_byte(0x5D_u8);
+            out.push_byte(0x0A_u8);
         }
-        i = i + 1;
-    }
-    // 2) Emit sub-tables.
-    let mut j = 0;
-    while j < sub_tables.len() {
-        let k = sub_tables.get(j).unwrap();
-        let mut new_path = path.clone();
-        new_path.push(k.clone());
-        out.push_byte(0x0A_u8);
-        out.push_byte(0x5B_u8);
-        out.push_str(&render_path(&new_path));
-        out.push_byte(0x5D_u8);
-        out.push_byte(0x0A_u8);
-        match t.get(k).unwrap() {
-            TomlValue.TomlTable(sub) => stringify_table_pretty(sub, &new_path, out),
-            _ => unreachable(),
-        }
-        j = j + 1;
-    }
-    // 3) Emit array-of-tables.
-    let mut a = 0;
-    while a < sub_aots.len() {
-        let k = sub_aots.get(a).unwrap();
-        let mut new_path = path.clone();
-        new_path.push(k.clone());
-        match t.get(k).unwrap() {
-            TomlValue.TomlArray(arr) => {
-                let mut x = 0;
-                while x < arr.len() {
-                    out.push_byte(0x0A_u8);
-                    out.push_str(&"[[".to_text());
-                    out.push_str(&render_path(&new_path));
-                    out.push_str(&"]]".to_text());
-                    out.push_byte(0x0A_u8);
-                    match arr.get(x).unwrap() {
-                        TomlValue.TomlTable(t2) => stringify_table_pretty(t2, &new_path, out),
-                        _ => unreachable(),
-                    }
-                    x = x + 1;
-                }
-            }
-            _ => unreachable(),
-        }
-        a = a + 1;
+
+        collect_pretty_fields(&current.entries, &current.path, &mut pending, out);
     }
 }
 
-fn render_path(path: &List<Text>) -> Text {
-    let mut out = Text.new();
-    let mut i = 0;
-    while i < path.len() {
-        if i > 0 { out.push_byte(0x2E_u8); }
-        out.push_str(&render_key(path.get(i).unwrap()));
-        i = i + 1;
+fn collect_pretty_fields(
+    entries: &Map<Text, TomlValue>,
+    prefix: &Text,
+    pending: &mut List<PrettyTable>,
+    out: &mut Text,
+) {
+    let mut keys: List<Text> = List.with_capacity(entries.len());
+    for (key, _) in entries.iter() { keys.push(key.clone()); }
+    keys.sort();
+    let mut tables: List<PrettyTable> = List.new();
+    let mut arrays: List<PrettyTable> = List.new();
+    for key in keys {
+        let value = entries.get(key).unwrap();
+        match value {
+            TomlValue.TomlTable(table) => {
+                let path = append_pretty_key(prefix, &key);
+                tables.push(PrettyTable { entries: table, path: path, array_element: false });
+            }
+            TomlValue.TomlArray(items) if !items.is_empty() && all_tables(&items) => {
+                let path = append_pretty_key(prefix, &key);
+                let mut index = 0;
+                while index < items.len() {
+                    match items.get(index).unwrap() {
+                        TomlValue.TomlTable(table) => {
+                            arrays.push(PrettyTable { entries: table, path: path, array_element: true });
+                        }
+                        _ => unreachable(),
+                    }
+                    index = index + 1;
+                }
+            }
+            scalar => {
+                out.push_str(&render_key(&key));
+                out.push_str(&" = ".to_text());
+                out.push_str(&stringify_inline_value(&scalar));
+                out.push_byte(0x0A_u8);
+            }
+        }
     }
-    out
+    // A LIFO work list emits sorted subtables first and preserves the
+    // source order of each array of tables, including its descendants.
+    while let Maybe.Some(child) = arrays.pop() { pending.push(child); }
+    while let Maybe.Some(child) = tables.pop() { pending.push(child); }
+}
+
+fn append_pretty_key(prefix: &Text, key: &Text) -> Text {
+    let rendered = render_key(key);
+    if prefix.is_empty() { return rendered; }
+    prefix.concat(&".").concat(&rendered)
 }
 
 fn all_tables(items: &List<TomlValue>) -> Bool {
@@ -1453,27 +1436,23 @@ public fn to_config_value(t: &TomlValue) -> ConfigValue {
         TomlValue.TomlInt(i)               => ConfigValue.ConfigInt(*i),
         TomlValue.TomlFloat(f)             => ConfigValue.ConfigFloat(*f),
         TomlValue.TomlBool(b)              => ConfigValue.ConfigBool(*b),
-        TomlValue.TomlOffsetDateTime(d)    => ConfigValue.ConfigOffsetDateTime(d.clone()),
-        TomlValue.TomlLocalDateTime(d)     => ConfigValue.ConfigLocalDateTime(d.clone()),
-        TomlValue.TomlLocalDate(d)         => ConfigValue.ConfigLocalDate(d.clone()),
-        TomlValue.TomlLocalTime(d)         => ConfigValue.ConfigLocalTime(d.clone()),
+        TomlValue.TomlOffsetDateTime(d)    => ConfigValue.ConfigOffsetDateTime(*d),
+        TomlValue.TomlLocalDateTime(d)     => ConfigValue.ConfigLocalDateTime(*d),
+        TomlValue.TomlLocalDate(d)         => ConfigValue.ConfigLocalDate(*d),
+        TomlValue.TomlLocalTime(d)         => ConfigValue.ConfigLocalTime(*d),
         TomlValue.TomlArray(items) => {
             let mut out: List<ConfigValue> = List.new();
             let mut i = 0;
             while i < items.len() {
-                out.push(to_config_value(items.get(i).unwrap()));
+                out.push(to_config_value(&items.get(i).unwrap()));
                 i = i + 1;
             }
             ConfigValue.ConfigArray(out)
         }
         TomlValue.TomlTable(t2) => {
             let mut out: Map<Text, ConfigValue> = Map.new();
-            let keys = t2.keys_list();
-            let mut i = 0;
-            while i < keys.len() {
-                let k = keys.get(i).unwrap();
-                out.insert(k.clone(), to_config_value(t2.get(k).unwrap()));
-                i = i + 1;
+            for (key, value) in t2.iter() {
+                out.insert(key.clone(), to_config_value(&value));
             }
             ConfigValue.ConfigTable(out)
         }
@@ -1491,28 +1470,24 @@ public fn from_config_value(v: &ConfigValue) -> Result<TomlValue, ConfigError> {
         ConfigValue.ConfigFloat(f)             => Result.Ok(TomlValue.TomlFloat(*f)),
         ConfigValue.ConfigString(s)            => Result.Ok(TomlValue.TomlString(s.clone())),
         ConfigValue.ConfigBytes(_)             => Result.Err(unsupported("bytes")),
-        ConfigValue.ConfigOffsetDateTime(d)    => Result.Ok(TomlValue.TomlOffsetDateTime(d.clone())),
-        ConfigValue.ConfigLocalDateTime(d)     => Result.Ok(TomlValue.TomlLocalDateTime(d.clone())),
-        ConfigValue.ConfigLocalDate(d)         => Result.Ok(TomlValue.TomlLocalDate(d.clone())),
-        ConfigValue.ConfigLocalTime(d)         => Result.Ok(TomlValue.TomlLocalTime(d.clone())),
+        ConfigValue.ConfigOffsetDateTime(d)    => Result.Ok(TomlValue.TomlOffsetDateTime(*d)),
+        ConfigValue.ConfigLocalDateTime(d)     => Result.Ok(TomlValue.TomlLocalDateTime(*d)),
+        ConfigValue.ConfigLocalDate(d)         => Result.Ok(TomlValue.TomlLocalDate(*d)),
+        ConfigValue.ConfigLocalTime(d)         => Result.Ok(TomlValue.TomlLocalTime(*d)),
         ConfigValue.ConfigDuration(_)          => Result.Err(unsupported("duration")),
         ConfigValue.ConfigArray(items) => {
             let mut out: List<TomlValue> = List.new();
             let mut i = 0;
             while i < items.len() {
-                out.push(from_config_value(items.get(i).unwrap())?);
+                out.push(from_config_value(&items.get(i).unwrap())?);
                 i = i + 1;
             }
             Result.Ok(TomlValue.TomlArray(out))
         }
         ConfigValue.ConfigTable(t) => {
             let mut out: Map<Text, TomlValue> = Map.new();
-            let keys = t.keys_list();
-            let mut i = 0;
-            while i < keys.len() {
-                let k = keys.get(i).unwrap();
-                out.insert(k.clone(), from_config_value(t.get(k).unwrap())?);
-                i = i + 1;
+            for (key, value) in t.iter() {
+                out.insert(key.clone(), from_config_value(&value)?);
             }
             Result.Ok(TomlValue.TomlTable(out))
         }
@@ -1579,16 +1554,18 @@ implement ConfigFormat for TomlFormat {
     }
 
     fn parse(&self, source: &Text) -> Result<ConfigValue, ConfigError> {
-        let parsed = parse(source).map_err(toml_to_cfg_err)?;
-        Result.Ok(to_config_value(&parsed))
+        match parse(source) {
+            Result.Ok(parsed) => Result.Ok(to_config_value(&parsed)),
+            Result.Err(error) => Result.Err(toml_to_cfg_err(error)),
+        }
     }
 
     fn parse_with_options(
         &self,
         source: &Text,
-        _options: &ConfigFormatOptions,
+        options: &ConfigFormatOptions,
     ) -> Result<ConfigValue, ConfigError> {
-        // Phase 1: no options; ignore.
+        options.require_empty(self.format_id())?;
         self.parse(source)
     }
 
@@ -1600,8 +1577,9 @@ implement ConfigFormat for TomlFormat {
     fn stringify_with_options(
         &self,
         value: &ConfigValue,
-        _options: &ConfigFormatOptions,
+        options: &ConfigFormatOptions,
     ) -> Result<Text, ConfigError> {
+        options.require_empty(self.format_id())?;
         self.stringify(value)
     }
 }

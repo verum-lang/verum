@@ -1,4 +1,7 @@
-mount core.configuration.toml.{TomlValue, parse, parse_table};
+mount core.configuration.toml.{TomlValue, parse, parse_table, stringify_pretty, toml_format};
+mount core.configuration.value.ConfigValue;
+mount core.configuration.error.ConfigErrorKind;
+mount core.configuration.format.ConfigFormat;
 
 @test
 fn test_toml_document_and_table_entry_points() {
@@ -39,4 +42,37 @@ fn test_toml_token_slices_keep_utf8_byte_boundaries() {
     };
     assert(table.get("number").unwrap() is TomlValue.TomlInt(-17));
     assert(parse_table(&"broken = 'λ").is_err());
+}
+
+@test
+fn test_pretty_emits_sorted_subtables_and_preserves_array_order() {
+    let source = "enabled = true\n[z]\ns = 3\n[a]\ns = 1\n[a.child]\ns = 2\n[[rows]]\nid = 4\n[[rows]]\nid = 5\n";
+    let rendered = stringify_pretty(&parse(&source).unwrap());
+    let expected = "enabled = true\n\n[a]\ns = 1\n\n[a.child]\ns = 2\n\n[z]\ns = 3\n\n[[rows]]\nid = 4\n\n[[rows]]\nid = 5\n";
+    assert_eq(rendered, expected);
+    assert_eq(stringify_pretty(&parse(&rendered).unwrap()), expected);
+}
+
+@test
+fn test_toml_adapter_round_trips_table_values_and_preserves_typed_errors() {
+    let codec = toml_format();
+    let source = "[server]\nport = 4321\n";
+    let parsed = codec.parse(&source).unwrap();
+    match parsed {
+        ConfigValue.ConfigTable(top) => {
+            match top.get("server").unwrap() {
+                ConfigValue.ConfigTable(server) => {
+                    assert(server.get("port").unwrap() is ConfigValue.ConfigInt(4321));
+                }
+                _ => panic("server must be a table"),
+            }
+        }
+        _ => panic("document must be a table"),
+    }
+    let rendered = codec.stringify(&parsed).unwrap();
+    assert_eq(rendered, "\n[server]\nport = 4321\n");
+    let error = codec.parse(&"a = 1\na = 2").unwrap_err();
+    assert(error.kind is ConfigErrorKind.DuplicateKey);
+    assert_eq(error.line, 2);
+    assert(codec.stringify(&ConfigValue.ConfigNull).unwrap_err().kind is ConfigErrorKind.UnsupportedFeature);
 }
