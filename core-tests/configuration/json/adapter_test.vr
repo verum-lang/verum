@@ -1,0 +1,50 @@
+mount core.configuration.json.json_format;
+mount core.configuration.value.ConfigValue;
+mount core.configuration.error.{ConfigErrorKind, format_id_json};
+mount core.configuration.format.{ConfigFormat, ConfigFormatOptions};
+
+@test
+fn test_json_adapter_exposes_its_canonical_identifier() {
+    assert_eq(json_format().format_id(), format_id_json());
+}
+
+@test
+fn test_json_adapter_round_trips_a_nested_object() {
+    let codec = json_format();
+    let document = codec.parse(&"{\"answer\":42,\"items\":[true,null]}").unwrap();
+    match document {
+        ConfigValue.ConfigTable(table) => {
+            assert(table.get("answer").unwrap() is ConfigValue.ConfigInt(42));
+            match table.get("items").unwrap() {
+                ConfigValue.ConfigArray(items) => {
+                    assert_eq(items.len(), 2);
+                    assert(items.get(0).unwrap() is ConfigValue.ConfigBool(true));
+                    assert(items.get(1).unwrap() is ConfigValue.ConfigNull);
+                }
+                _ => panic("expected an array"),
+            }
+        }
+        _ => panic("expected an object"),
+    }
+    let encoded = codec.stringify(&document).unwrap();
+    match codec.parse(&encoded).unwrap() {
+        ConfigValue.ConfigTable(table) => {
+            assert_eq(table.len(), 2);
+            assert(table.get("answer").unwrap() is ConfigValue.ConfigInt(42));
+            assert(table.get("items").unwrap() is ConfigValue.ConfigArray(_));
+        }
+        _ => panic("round trip lost the object"),
+    }
+}
+
+@test
+fn test_json_adapter_preserves_codec_errors_and_rejects_unsupported_values() {
+    let codec = json_format();
+    let error = codec.parse(&"{").unwrap_err();
+    assert_eq(error.format_id, format_id_json());
+    assert(error.kind is ConfigErrorKind.UnexpectedEof);
+    assert_eq(error.byte_offset, 1);
+    let options = ConfigFormatOptions { payload: ConfigValue.ConfigBool(true) };
+    assert(codec.parse_with_options(&"42", &options).unwrap_err().kind is ConfigErrorKind.UnsupportedFeature);
+    assert(codec.stringify(&ConfigValue.ConfigFloat(Float.infinity())).unwrap_err().kind is ConfigErrorKind.InvalidNumber);
+}

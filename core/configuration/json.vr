@@ -1,9 +1,124 @@
-// Shared diagnostics for the JSON configuration format.
+// JSON configuration adapter using the canonical JSON codec.
 @arch_module(lifecycle = Lifecycle.Definition)
 module core.configuration.json;
 
-mount core.configuration.error.{ConfigError, ConfigErrorKind, config_err, format_id_json};
-mount core.encoding.json.{JsonError, JsonErrorKind};
+mount core.collections.{List, Map};
+mount core.base.protocols.{Send, Sync};
+mount core.encoding.json.{JsonValue, JsonError, JsonErrorKind, parse as json_parse, stringify as json_stringify};
+mount core.configuration.value.{ConfigValue, type_name};
+mount core.configuration.error.{ConfigError, ConfigErrorKind, FormatId, format_id_json, config_err};
+mount core.configuration.format.{ConfigFormat, ConfigFormatOptions, FormatCapabilities, default_capabilities};
+
+public type JsonFormat is {};
+
+implement Send for JsonFormat {}
+implement Sync for JsonFormat {}
+
+public fn json_format() -> JsonFormat { JsonFormat {} }
+
+/// Embed every JSON value without coercing integers, strings or null.
+public fn to_config_value(value: &JsonValue) -> ConfigValue {
+    match value {
+        JsonValue.JsonNull => ConfigValue.ConfigNull,
+        JsonValue.JsonBool(value) => ConfigValue.ConfigBool(*value),
+        JsonValue.JsonInt(value) => ConfigValue.ConfigInt(*value),
+        JsonValue.JsonFloat(value) => ConfigValue.ConfigFloat(*value),
+        JsonValue.JsonString(value) => ConfigValue.ConfigString(value.clone()),
+        JsonValue.JsonArray(values) => {
+            let mut converted: List<ConfigValue> = List.new();
+            let mut i = 0;
+            while i < values.len() {
+                converted.push(to_config_value(&values.get(i).unwrap()));
+                i = i + 1;
+            }
+            ConfigValue.ConfigArray(converted)
+        }
+        JsonValue.JsonObject(values) => {
+            let mut converted: Map<Text, ConfigValue> = Map.new();
+            for (key, item) in values.iter() {
+                converted.insert(key.clone(), to_config_value(&item));
+            }
+            ConfigValue.ConfigTable(converted)
+        }
+    }
+}
+
+/// Reject configuration values that JSON cannot represent faithfully.
+public fn from_config_value(value: &ConfigValue) -> Result<JsonValue, ConfigError> {
+    match value {
+        ConfigValue.ConfigNull => Result.Ok(JsonValue.JsonNull),
+        ConfigValue.ConfigBool(value) => Result.Ok(JsonValue.JsonBool(*value)),
+        ConfigValue.ConfigInt(value) => Result.Ok(JsonValue.JsonInt(*value)),
+        ConfigValue.ConfigFloat(value) => {
+            if value.is_finite() {
+                Result.Ok(JsonValue.JsonFloat(*value))
+            } else {
+                Result.Err(config_err(format_id_json(), ConfigErrorKind.InvalidNumber, 0, 0, 0,
+                    "JSON cannot represent a non-finite number".to_text()))
+            }
+        }
+        ConfigValue.ConfigString(value) => Result.Ok(JsonValue.JsonString(value.clone())),
+        ConfigValue.ConfigArray(values) => {
+            let mut converted: List<JsonValue> = List.new();
+            let mut i = 0;
+            while i < values.len() {
+                converted.push(from_config_value(&values.get(i).unwrap())?);
+                i = i + 1;
+            }
+            Result.Ok(JsonValue.JsonArray(converted))
+        }
+        ConfigValue.ConfigTable(values) => {
+            let mut converted: Map<Text, JsonValue> = Map.new();
+            for (key, item) in values.iter() {
+                converted.insert(key.clone(), from_config_value(&item)?);
+            }
+            Result.Ok(JsonValue.JsonObject(converted))
+        }
+        _ => Result.Err(config_err(format_id_json(), ConfigErrorKind.UnsupportedFeature, 0, 0, 0,
+            "JSON cannot represent ".to_text().concat(&type_name(value)))),
+    }
+}
+
+implement ConfigFormat for JsonFormat {
+    fn format_id(&self) -> FormatId { format_id_json() }
+    fn display_name(&self) -> Text { "JSON".to_text() }
+
+    fn extensions(&self) -> List<Text> {
+        let mut extensions: List<Text> = List.new();
+        extensions.push("json".to_text());
+        extensions
+    }
+
+    fn mime_types(&self) -> List<Text> {
+        let mut mime_types: List<Text> = List.new();
+        mime_types.push("application/json".to_text());
+        mime_types
+    }
+
+    fn capabilities(&self) -> FormatCapabilities { default_capabilities() }
+
+    fn parse(&self, source: &Text) -> Result<ConfigValue, ConfigError> {
+        match json_parse(source) {
+            Result.Ok(parsed) => Result.Ok(to_config_value(&parsed)),
+            Result.Err(error) => Result.Err(from_json_error(error)),
+        }
+    }
+
+    fn parse_with_options(&self, source: &Text, options: &ConfigFormatOptions) -> Result<ConfigValue, ConfigError> {
+        options.require_empty(self.format_id())?;
+        self.parse(source)
+    }
+
+    fn stringify(&self, value: &ConfigValue) -> Result<Text, ConfigError> {
+        let converted = from_config_value(value)?;
+        Result.Ok(json_stringify(&converted))
+    }
+
+    fn stringify_with_options(&self, value: &ConfigValue, options: &ConfigFormatOptions) -> Result<Text, ConfigError> {
+        options.require_empty(self.format_id())?;
+        self.stringify(value)
+    }
+}
 
 /// Translate the JSON diagnostic while preserving its original byte position.
 public fn from_json_error(error: JsonError) -> ConfigError {
