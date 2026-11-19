@@ -1071,7 +1071,7 @@ implement<E> Cause<E> {
     fn collect_defects(&self, out: &mut List<DefectInfo>) {
         match self {
             Fail(_) => {}
-            Die(d) => out.push(d),
+            Die(defect) => out.push(defect.clone()),
             Then(first, second) => {
                 first.collect_defects(out);
                 second.collect_defects(out);

@@ -51,6 +51,7 @@ mount core.base.maybe.{Maybe, Some, None};
 mount core.base.protocols.PartialEq;
 mount core.base.ordering.{Ordering, Less, Equal, Greater};
 mount core.collections.list.{List};
+mount core.text.format.format_debug;
 
 // =============================================================================
 // SECTION 1: Type Construction Tests
@@ -1255,6 +1256,23 @@ fn test_cause_die() {
     let defects = cause.defects();
     assert_eq(defects.len(), 1);
     assert_eq(defects[0].message, "bug!");
+}
+
+@test
+fn test_cause_defects_outlive_the_source_tree() {
+    let saved = {
+        let located_cause: Cause<Text> = Cause.Die(DefectInfo.new("first").with_location("a.vr"));
+        let other_cause: Cause<Text> = Cause.die("second");
+        let tree = located_cause.then(other_cause);
+        let snapshot = tree.defects();
+        assert_eq(tree.defects().len(), 2);
+        snapshot
+    };
+    assert_eq(saved.len(), 2);
+    let first = saved.get(0).unwrap();
+    let second = saved.get(1).unwrap();
+    assert_eq(format_debug(&first), "Defect { message: \"first\", location: \"a.vr\" }");
+    assert_eq(format_debug(&second), "Defect { message: \"second\" }");
 }
 
 /// Test Cause.Empty
