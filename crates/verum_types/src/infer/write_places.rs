@@ -242,6 +242,22 @@ impl TypeChecker {
         method_receiver: Option<&Type>,
         write_site: Span,
     ) -> Result<()> {
+        self.check_place_write(place, method_receiver, write_site, None)
+    }
+
+    /// A replace and a mutable borrow share permission and alias checks. Only
+    /// replacement retires an initialized value reached through the reference.
+    pub(super) fn check_place_replacement(&mut self, place: &Expr, stored: &Type) -> Result<()> {
+        self.check_place_write(place, None, place.span, Some(stored))
+    }
+
+    fn check_place_write(
+        &mut self,
+        place: &Expr,
+        method_receiver: Option<&Type>,
+        write_site: Span,
+        replacement: Option<&Type>,
+    ) -> Result<()> {
         if let Some(ty) = method_receiver {
             self.check_write_through_reference(ty, true, place.span)?;
             if let Some(&hops) = self.deref_adjustments.get(&place.span) {
@@ -260,6 +276,7 @@ impl TypeChecker {
         let mut step = unparen(place);
         let mut target = true;
         let mut projects_through_reference = false;
+        let mut replaces_referent = false;
         while let Some((operand, auto_deref)) = place_operand(step) {
             // A selected member of a declared type is a produced value, not
             // storage reached through that type name. Receiver borrows may
@@ -278,7 +295,8 @@ impl TypeChecker {
             if tracks_indices && matches!(unparen(operand).kind, ExprKind::Path(_)) {
                 projects_through_reference = self.reference_mode(&ty, operand.span)?.is_some();
             }
-            self.check_write_through_reference(&ty, auto_deref, operand.span)?;
+            let crossed_reference = self.check_write_through_reference(&ty, auto_deref, operand.span)?;
+            replaces_referent |= crossed_reference || !auto_deref;
             if auto_deref && self.projection_carrier(&ty, operand.span)?.refined {
                 return Err(TypeError::OtherWithCodeSpanned {
                     code: "E405".into(),
@@ -323,6 +341,9 @@ impl TypeChecker {
             if let Some(conflict) = conflict {
                 return Err(conflict);
             }
+        }
+        if replaces_referent && let Some(ty) = replacement {
+            self.check_referent_overwrite(ty, write_site)?;
         }
         Ok(())
     }
@@ -455,9 +476,9 @@ impl TypeChecker {
 
     /// Only the outer reference is crossed by an explicit dereference.
     /// An implicit field, index or method borrow crosses the full chain.
-    fn check_write_through_reference(&self, ty: &Type, auto_deref: bool, span: Span) -> Result<()> {
+    fn check_write_through_reference(&self, ty: &Type, auto_deref: bool, span: Span) -> Result<bool> {
         let mut current = self.place_reference_head(ty, span)?;
-        for _ in 0..64 {
+        for depth in 0..64 {
             if !auto_deref && matches!(
                 current,
                 Type::Pointer { mutable: false, .. } | Type::VolatilePointer { mutable: false, .. }
@@ -468,13 +489,13 @@ impl TypeChecker {
             | Type::CheckedReference { mutable, inner }
             | Type::UnsafeReference { mutable, inner }) = current
             else {
-                return Ok(());
+                return Ok(depth != 0);
             };
             if !mutable {
                 return Err(TypeError::SharedReferenceWrite { span });
             }
             if !auto_deref {
-                return Ok(());
+                return Ok(true);
             }
             current = self.place_reference_head(&inner, span)?;
         }

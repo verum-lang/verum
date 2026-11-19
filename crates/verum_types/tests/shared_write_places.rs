@@ -115,13 +115,13 @@ fn a_live_shared_alias_blocks_method_activation_and_compound_writes() {
         type Witness<A> is { value: A };
         type Pack is { carrier: Type, witness: Witness<carrier> };
         implement Pack {
-            fn swap_in(&mut self, y: Pack) { *self = y; }
+            fn swap_in(&mut self, y: &mut Pack) { @intrinsic(\"swap\", self, y); }
             fn inspect(&self) -> Int { 1 }
         }";
-    for mutation in ["x.swap_in(y);", "x.inspect(); x.swap_in(y);"] {
+    for mutation in ["x.swap_in(&mut y);", "x.inspect(); x.swap_in(&mut y);"] {
         let body = format!(
             "{declarations}
-            fn stale(x: Pack, y: Pack) -> Pack {{ let r = &x; let w = r.witness;
+            fn stale(x: Pack, mut y: Pack) -> Pack {{ let r = &x; let w = r.witness;
                 {mutation} Pack {{ carrier: r.carrier, witness: w }}
             }}"
         );
@@ -145,7 +145,7 @@ fn a_live_shared_alias_blocks_method_activation_and_compound_writes() {
     }
     for body in [
         "fn f(x: Pack) -> Pack { let r = &x; let w = r.witness; x.inspect(); Pack { carrier: r.carrier, witness: w } }",
-        "fn f(x: Pack, y: Pack) { { let r = &x; r.inspect(); } x.swap_in(y); }",
+        "fn f(x: Pack, mut y: Pack) { { let r = &x; r.inspect(); } x.swap_in(&mut y); }",
         "fn f(mut n: Int) -> Int { let w = &mut n; *w += 1; *w }",
     ] {
         let messages = errors(&format!("{declarations}\n{body}"));

@@ -2394,11 +2394,17 @@ impl TypeChecker {
     // initialization; it must not narrow the storage to its current contents.
     fn assignment_target_type(
         &mut self,
-        expr: &Expr,
+        mut expr: &Expr,
     ) -> Result<InferResult> {
         use verum_ast::expr::ExprKind;
 
+        while let ExprKind::Paren(inner) = &expr.kind { expr = inner; }
         match &expr.kind {
+            ExprKind::Unary { op: verum_ast::UnOp::Deref, .. } => {
+                // The pointer supplies an initialized destination. Replacing
+                // its contents discards the old value without reading it.
+                self.synth_place_use(expr, super::expr::PlaceUse::Operand)
+            }
             // For simple paths (variable assignment), skip init checking
             ExprKind::Path(path) if path.segments.len() == 1 => {
                 if let verum_ast::ty::PathSegment::Name(id) = &path.segments[0] {
@@ -12021,13 +12027,15 @@ with .to_float() or .to_int() (at {:?})",
                 self.handle_assignment(left, _span);
 
                 let right_result = self.synth_expr(right)?;
-                let stored_type = self.with_checked_write(left, |tc| {
+                let stored_type = self.with_place_types(left, |tc| {
                     let target = tc.assignment_target_type(left)?;
                     tc.check_synthesized_value(right, &target.ty, right_result.clone())?;
                     if target.ty.contains_record_field() {
                         tc.check_record_family_agreement(&right_result.ty, &target.ty, right.span)?;
                     }
-                    Ok(tc.unifier.apply(&target.ty))
+                    let stored = tc.unifier.apply(&target.ty);
+                    tc.check_place_replacement(left, &stored)?;
+                    Ok(stored)
                 })?;
                 // Loan retention follows the checked destination value. Copying
                 // a scalar through a reference stores no reference to its input.

@@ -1,13 +1,18 @@
-//! Admission for the declaration-owned copy operation selected by the checker.
-//! Owned components are copied; borrowed components retain their permission.
+//! Structural resource operations use the declared layout of each owned component.
 use super::TypeChecker;
 use crate::{Result, TypeError, ty::Type};
 use verum_ast::Span;
 use verum_common::{List, ResourceDiscipline, Text};
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum StructuralUse {
+    Clone,
+    Overwrite,
+}
+
 impl TypeChecker {
     pub(super) fn check_structural_clone(&self, ty: &Type, span: Span) -> Result<()> {
-        self.check_clone_layout(ty)
+        self.check_resource_layout(ty, StructuralUse::Clone)
             .map_err(|reason| TypeError::OtherWithCodeSpanned {
                 code: "E400".into(),
                 msg: format!("No implicit clone for `{ty}`: {reason}").into(),
@@ -15,7 +20,16 @@ impl TypeChecker {
             })
     }
 
-    fn check_clone_layout(&self, ty: &Type) -> std::result::Result<(), Text> {
+    pub(super) fn check_referent_overwrite(&self, ty: &Type, span: Span) -> Result<()> {
+        self.check_resource_layout(ty, StructuralUse::Overwrite)
+            .map_err(|reason| TypeError::OtherWithCodeSpanned {
+                code: "E310".into(),
+                msg: format!("cannot overwrite `{ty}`: {reason}").into(),
+                span,
+            })
+    }
+
+    fn check_resource_layout(&self, ty: &Type, operation: StructuralUse) -> std::result::Result<(), Text> {
         // Consume expanded components instead of recursively cloning a subtree
         // at each edge. Bound both expansion depth and total work, including
         // cycles and nonregular generic declarations.
@@ -23,12 +37,12 @@ impl TypeChecker {
         let mut remaining = 4096usize;
         while let Some((ty, depth)) = pending.pop() {
             if depth >= 64 || remaining == 0 {
-                return Err(Text::from("copy layout exceeds the finite declaration boundary"));
+                return Err(Text::from("resource layout exceeds the finite declaration boundary"));
             }
             remaining -= 1;
             let mut enqueue = |component| {
                 if pending.len() >= remaining {
-                    return Err(Text::from("copy layout exceeds the finite declaration boundary"));
+                    return Err(Text::from("resource layout exceeds the finite declaration boundary"));
                 }
                 pending.push((component, depth + 1));
                 Ok(())
@@ -43,6 +57,10 @@ impl TypeChecker {
                 | Type::Text
                 | Type::Reference { mutable: false, .. }
                 | Type::CheckedReference { mutable: false, .. } => {}
+                Type::Reference { .. } | Type::CheckedReference { .. } | Type::UnsafeReference { .. }
+                | Type::Pointer { .. } | Type::VolatilePointer { .. } | Type::Function { .. }
+                | Type::Universe { .. }
+                    if operation == StructuralUse::Overwrite => {}
                 Type::Record(fields) | Type::Variant(fields) => {
                     for field in fields.into_values() {
                         enqueue(field)?;
@@ -76,8 +94,22 @@ impl TypeChecker {
                         name
                     };
                     let discipline = self.declared_resource_discipline(&key);
-                    if discipline != ResourceDiscipline::Unrestricted {
+                    if operation == StructuralUse::Overwrite && discipline == ResourceDiscipline::Linear {
+                        return Err(format!("linear value `{key}` must be consumed exactly once").into());
+                    }
+                    if discipline == ResourceDiscipline::Unknown
+                        || (operation == StructuralUse::Clone && discipline != ResourceDiscipline::Unrestricted) {
                         return Err(format!("`{key}` has {discipline:?} resource discipline").into());
+                    }
+                    if operation == StructuralUse::Overwrite
+                        && let Some(carrier) = self.declared_runtime_storage_carrier(&key)
+                    {
+                        if carrier.retained_storage_parameters().len() != args.len() {
+                            return Err(format!("storage argument count does not match `{key}`").into());
+                        }
+                        for &position in carrier.owned_storage_parameters() {
+                            enqueue(args[position].clone())?;
+                        }
                     }
                     let fields: Text = format!("__struct_fields_{key}").into();
                     let layout = self
@@ -94,7 +126,10 @@ impl TypeChecker {
                     }
                     enqueue(instantiated)?;
                 }
-                _ => return Err(format!("component `{ty}` requires a declared clone").into()),
+                _ => return Err(match operation {
+                    StructuralUse::Clone => format!("component `{ty}` requires a declared clone").into(),
+                    StructuralUse::Overwrite => format!("cannot establish that component `{ty}` may be discarded").into(),
+                }),
             }
         }
         Ok(())

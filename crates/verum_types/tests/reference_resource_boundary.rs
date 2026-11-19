@@ -90,6 +90,62 @@ fn reference_lifetimes_and_exclusive_access_are_still_checked() {
 }
 
 #[test]
+fn replacing_an_affine_referent_is_a_write_to_storage() {
+    let types = "type affine Token is {value:Int}; type Choice is Empty | Full(Token);";
+    for (reference, place) in [
+        ("&mut Choice", "*dst"),
+        ("&checked mut Choice", "(*dst)"),
+        ("&unsafe mut Choice", "*dst"),
+        ("&mut &mut Choice", "**dst"),
+    ] {
+        let source = format!("{types} fn store(dst:{reference}, item:Token) {{{place}=Choice.Full(item);}}");
+        let found = errors(&source);
+        assert!(found.is_empty(), "{source}: {found:?}");
+    }
+    for (body, reason) in [
+        ("fn bad(dst:&Choice,item:Token){*dst=Choice.Full(item);}", "shared"),
+        ("fn bad(dst:&mut Choice){let held=&*dst;*dst=Choice.Empty;match held {_=>()};}", "borrow"),
+        ("fn bad(dst:&mut Choice)->Choice {*dst}", "out of borrowed storage"),
+        ("fn bad(dst:&mut Choice,item:Token){*dst=Choice.Full(item);*dst=Choice.Full(item);}", "moved"),
+        ("fn bad(dst:&mut Choice){*dst=73;}", "mismatch"),
+    ] {
+        let found = errors(&format!("{types} {body}"));
+        assert!(found.iter().any(|error| error.to_lowercase().contains(reason)), "{body}: {found:?}");
+    }
+}
+
+#[test]
+fn replacing_a_live_linear_referent_cannot_drop_the_old_obligation() {
+    for (declarations, name) in [
+        ("", "Ticket"),
+        ("type Envelope is {payload:Ticket};", "Envelope"),
+        ("type Packet is Missing | Present(Ticket);", "Packet"),
+        ("type Envelope<T> is {payload:T};", "Envelope<Ticket>"),
+        ("type Alias is Ticket;", "Alias"),
+    ] {
+        let source = format!("type linear Ticket is {{id:Int}}; {declarations} fn lose(dst:&mut {name}, replacement:{name}) {{*dst=replacement;}}");
+        let found = errors(&source);
+        assert!(found.iter().any(|error| error.contains("linear") && error.contains("overwrite")), "{source}: {found:?}");
+    }
+    let generic = errors("fn lose<T>(dst:&mut T,replacement:T){*dst=replacement;}");
+    assert!(generic.iter().any(|error| error.contains("cannot overwrite")), "{generic:?}");
+    for (carrier, place) in [
+        ("Envelope", "dst.payload"),
+        ("Envelope", "(*dst).payload"),
+        ("(Ticket,Int)", "dst.0"),
+        ("RefEnvelope", "dst.inner.payload"),
+    ] {
+        let source = format!("type linear Ticket is {{id:Int}}; type Envelope is {{payload:Ticket}}; type RefEnvelope is {{inner:&mut Envelope}}; fn lose(dst:&mut {carrier}, replacement:Ticket) {{{place}=replacement;}}");
+        let found = errors(&source);
+        assert!(found.iter().any(|error| error.contains("linear") && error.contains("overwrite")), "{source}: {found:?}");
+    }
+    let erased = errors("type Witness<A> is {value:A}; type Pack is {carrier:Type,witness:Witness<carrier>}; fn lose(dst:&mut Pack,replacement:Pack){*dst=replacement;}");
+    assert!(erased.iter().any(|error| error.contains("cannot overwrite")), "{erased:?}");
+    let phantom = errors("type linear Ticket is {id:Int}; type Tag<T> is {id:Int}; fn update(dst:&mut Tag<Ticket>,next:Tag<Ticket>){*dst=next;}");
+    assert!(phantom.is_empty(), "{phantom:?}");
+}
+
+#[test]
 fn resource_reads_from_borrowed_places_require_ownership() {
     for reference in ["&", "&checked", "&unsafe", "&mut", "&checked mut", "&unsafe mut"] {
         for body in [
