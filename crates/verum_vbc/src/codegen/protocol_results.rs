@@ -542,35 +542,32 @@ impl VbcCodegen {
                     Receiver::Value(value) => value,
                     Receiver::Static(ty) | Receiver::Operator { value: ty, .. } => Some(ty),
                 };
-                if let Some(actual) = actual
-                    && let Some(self_id) = declaration.source_declaration.as_ref()
-                        .and_then(|source| crate::types::TypeParamId::protocol_self(source.generics.len()))
-                {
+                let self_id = declaration.source_declaration.as_ref()
+                    .and_then(|source| crate::types::TypeParamId::protocol_self(source.generics.len()));
+                let members = if let (Some(actual), Some(self_id)) = (actual, self_id) {
                     ids.push(self_id);
                     substitution.bind(self_id, actual.clone());
-                }
+                    Some((self_id, &protocol.associated))
+                } else {
+                    None
+                };
                 if !super::formal_parameters::resolved(return_type, &ids, 0) {
                     return None;
                 }
-                let instantiated = match substitution.apply(return_type)
-                {
+                let specialize = |ty| substitution.apply_with_members(ty, members);
+                let instantiated = match specialize(return_type) {
                     Ok(output) => output,
                     Err(error) => return Some(Err(CodegenError::internal(error.to_string()))),
                 };
-                let specialize = |ty: TypeRef| {
-                    if let TypeRef::AssociatedProjection { base, qualifier: None, assoc, args } = &ty
-                        && args.is_empty() && actual == Some(&**base)
-                        && let Some(binding) = protocol.associated.get(assoc)
-                    { return binding.clone(); }
-                    ty
+                let inputs = match params.iter().map(specialize).collect::<Result<_, _>>() {
+                    Ok(inputs) => inputs,
+                    Err(error) => return Some(Err(CodegenError::internal(error.to_string()))),
                 };
-                let inputs = params.iter().map(|ty| substitution.apply(ty).ok().map(&specialize))
-                    .collect::<Option<Vec<_>>>()?;
                 output = Some(ProtocolMethod {
                     owner,
                     receiver: dispatch.receiver,
                     inputs,
-                    output: specialize(instantiated),
+                    output: instantiated,
                     is_async: dispatch.is_async,
                 });
             }

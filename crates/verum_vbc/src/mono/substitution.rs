@@ -74,11 +74,19 @@ impl TypeSubstitution {
     ///
     /// Check the complete output shape before constructing any replacements.
     pub fn apply(&self, type_ref: &TypeRef) -> Result<TypeRef, SubstitutionError> {
-        validate_mapped_shape(type_ref, ParameterMapping::Substitute(self))?;
-        map_free_parameters(type_ref, 0, &mut |id, depth| match self.bindings.get(&id) {
-            Some(replacement) => lift_free_parameters_checked(replacement, depth),
-            None => lifted_parameter(id, depth),
-        })
+        self.apply_with_members(type_ref, None)
+    }
+
+    /// Apply the selected protocol's equations in its declaration telescope.
+    /// A member's caller-side value is lifted once, just like a type argument.
+    pub(crate) fn apply_with_members(
+        &self,
+        ty: &TypeRef,
+        members: Option<(TypeParamId, &std::collections::BTreeMap<String, TypeRef>)>,
+    ) -> Result<TypeRef, SubstitutionError> {
+        let mapping = ParameterMapping::Substitute { parameters: self, members };
+        validate_mapped_shape(ty, mapping)?;
+        map_free_parameters(ty, 0, mapping)
     }
 
     /// Returns the number of bindings.
@@ -150,18 +158,33 @@ pub fn lift_free_parameters(ty: &TypeRef, amount: u32) -> Result<TypeRef, Substi
 }
 
 fn lift_free_parameters_checked(ty: &TypeRef, amount: u32) -> Result<TypeRef, SubstitutionError> {
-    map_free_parameters(ty, 0, &mut |id, depth| {
-        let shift = depth
-            .checked_add(amount)
-            .ok_or(SubstitutionError::BinderDepthOverflow)?;
-        lifted_parameter(id, shift)
-    })
+    map_free_parameters(ty, 0, ParameterMapping::Lift(amount))
 }
 
 #[derive(Clone, Copy)]
 enum ParameterMapping<'a> {
-    Substitute(&'a TypeSubstitution),
+    Substitute {
+        parameters: &'a TypeSubstitution,
+        members: Option<(TypeParamId, &'a std::collections::BTreeMap<String, TypeRef>)>,
+    },
     Lift(u32),
+}
+
+impl<'a> ParameterMapping<'a> {
+    fn replacement(self, ty: &TypeRef, scope: u32) -> Option<&'a TypeRef> {
+        let Self::Substitute { parameters, members } = self else { return None; };
+        let free = |id: TypeParamId| u32::from(id.0).checked_sub(scope)
+            .and_then(|index| u16::try_from(index).ok()).map(TypeParamId);
+        match ty {
+            TypeRef::Generic(id) => parameters.get(free(*id)?),
+            TypeRef::AssociatedProjection { base, qualifier: None, assoc, args } if args.is_empty() => {
+                let (subject, bindings) = members?;
+                let TypeRef::Generic(id) = base.as_ref() else { return None; };
+                (free(*id)? == subject).then(|| bindings.get(assoc.as_str())).flatten()
+            }
+            _ => None,
+        }
+    }
 }
 
 /// Walk the prospective result without cloning its inputs. A replacement is
@@ -183,24 +206,15 @@ fn validate_mapped_shape<'a>(
                 .validate()
                 .map_err(|_| SubstitutionError::ConstSequenceLimit)?;
         }
+        if let Some(replacement) = mapping.replacement(ty, scope) {
+            pending.push((replacement, depth, 0, ParameterMapping::Lift(scope)));
+            continue;
+        }
         if let TypeRef::Generic(id) = ty
             && u32::from(id.0) >= scope
+            && let ParameterMapping::Lift(amount) = mapping
         {
-            let free = TypeParamId((u32::from(id.0) - scope) as u16);
-            match mapping {
-                ParameterMapping::Substitute(substitution) => {
-                    if let Some(replacement) = substitution.get(free) {
-                        pending.push((replacement, depth, 0, ParameterMapping::Lift(scope)));
-                        continue;
-                    }
-                }
-                ParameterMapping::Lift(amount) => {
-                    let shift = scope
-                        .checked_add(amount)
-                        .ok_or(SubstitutionError::BinderDepthOverflow)?;
-                    lifted_parameter(free, shift)?;
-                }
-            }
+            lifted_parameter(*id, amount)?;
         }
         remaining = remaining
             .checked_sub(1)
@@ -244,12 +258,16 @@ fn validate_mapped_shape<'a>(
 fn map_free_parameters(
     ty: &TypeRef,
     depth: u32,
-    map: &mut impl FnMut(TypeParamId, u32) -> Result<TypeRef, SubstitutionError>,
+    map: ParameterMapping<'_>,
 ) -> Result<TypeRef, SubstitutionError> {
+    if let Some(replacement) = map.replacement(ty, depth) {
+        return lift_free_parameters_checked(replacement, depth);
+    }
     Ok(match ty {
-        TypeRef::Generic(id) if u32::from(id.0) >= depth => {
-            map(TypeParamId((u32::from(id.0) - depth) as u16), depth)?
-        }
+        TypeRef::Generic(id) if u32::from(id.0) >= depth => match map {
+            ParameterMapping::Lift(amount) => lifted_parameter(*id, amount)?,
+            ParameterMapping::Substitute { .. } => ty.clone(),
+        },
         TypeRef::Concrete(_)
         | TypeRef::Generic(_)
         | TypeRef::ConstValue(_) | TypeRef::ConstSequence(_)

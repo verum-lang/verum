@@ -55,3 +55,29 @@ fn equality_normalization_is_bounded_on_the_ordinary_test_stack() {
     let error = equalities.normalize(&codegen, &wide).unwrap_err().to_string();
     assert!(error.contains("declared type equality exceeds the component limit"), "{error}");
 }
+
+#[test]
+fn protocol_member_substitution_uses_the_formal_receiver_before_instantiation() {
+    use crate::mono::TypeSubstitution;
+    let mut substitution = TypeSubstitution::empty();
+    for id in [0, 1] {
+        substitution.bind(TypeParamId(id), TypeRef::Concrete(TypeId::INT));
+    }
+    let members = [("Member".to_owned(), generic(0))].into();
+    let receiver = TypeParamId(1);
+    // Both outer parameters become Int. Only the second declared the equation.
+    // The local binder keeps its own projection. The caller's replacement
+    // becomes slot 1 underneath it and does not undergo the Int substitution.
+    let ty = TypeRef::Rank2Function {
+        is_async: false,
+        type_param_count: 1,
+        params: vec![projection(generic(0)), projection(generic(1)), projection(generic(2))],
+        return_type: Box::new(TypeRef::Tuple(vec![projection(generic(2))])),
+        contexts: Default::default(),
+    };
+    let TypeRef::Rank2Function { params, return_type, .. } =
+        substitution.apply_with_members(&ty, Some((receiver, &members))).unwrap()
+    else { panic!("rank-2 signature"); };
+    assert_eq!(params, [projection(generic(0)), projection(TypeRef::Concrete(TypeId::INT)), generic(1)]);
+    assert_eq!(*return_type, TypeRef::Tuple(vec![generic(1)]));
+}

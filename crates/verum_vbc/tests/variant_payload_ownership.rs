@@ -192,3 +192,54 @@ fn a_nullary_variant_of_another_sum_cannot_supply_ownership_evidence() {
         assert!(error.to_string().contains("retained source declaration"), "{error}");
     }
 }
+
+#[test]
+fn a_nested_associated_result_keeps_the_payload_under_its_selected_protocol() {
+    run(r#"
+        type Envelope<T> is Empty | Wrapped(T);
+        type Reader is protocol {
+            type Value;
+            fn read(&mut self) -> Envelope<Self.Value>;
+        };
+        type Source is {};
+        implement Reader for Source {
+            type Value = Envelope<Int>;
+            fn read(&mut self) -> Envelope<Envelope<Int>> {
+                Envelope.Wrapped(Envelope.Wrapped(73))
+            }
+        }
+        fn keep<T>(value: T) -> T { value }
+        fn extract<T, R: Reader<Value = Envelope<T>>>(mut source: R, fallback: T) -> T {
+            match source.read() {
+                Envelope.Wrapped(item) => match item {
+                    Envelope.Wrapped(payload) => keep(payload),
+                    Envelope.Empty => fallback,
+                },
+                Envelope.Empty => fallback,
+            }
+        }
+        fn probe() -> Int { extract<Int, Source>(Source {}, 0) }
+    "#);
+}
+
+#[test]
+fn an_unrelated_nested_sum_cannot_supply_the_protocol_payload() {
+    let source = r#"
+        type Envelope<T> is Empty | Wrapped(T);
+        type Other<T> is Absent | Value(T);
+        type Reader is protocol { type Value; fn read(&self) -> Envelope<Self.Value>; };
+        fn reject<T, R: Reader<Value = Other<T>>>(source: R, fallback: T) -> T {
+            match source.read() {
+                Envelope.Wrapped(item) => match item {
+                    Envelope.Wrapped(payload) => payload,
+                    _ => fallback,
+                },
+                _ => fallback,
+            }
+        }
+    "#;
+    for unit in [false, true] {
+        let error = compile(source, unit).err().expect("foreign variant must be refused");
+        assert!(error.to_string().contains("variant"), "{error}");
+    }
+}
