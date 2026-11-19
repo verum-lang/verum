@@ -66,6 +66,8 @@
 )
 module core.security.provenance;
 
+mount core.encoding.json.decode_bytes_strict;
+
 mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount collections.{List, Map};
 mount core.security.ecc.ed25519.{
@@ -125,7 +127,7 @@ implement Digest {
 public fn digest_sha256(bytes: &List<Byte>) -> Digest {
     Digest {
         algorithm: "sha256".to_text(),
-        hex: hex_encode(&hash.crypto.sha256.digest(bytes)),
+        hex: hex_encode(&hash.crypto.sha256.digest(bytes.as_slice())),
     }
 }
 
@@ -196,43 +198,36 @@ public fn statement_to_json(s: &Statement) -> JsonValue {
     obj.insert("subject".to_text(), json_array(subjects_arr));
 
     obj.insert("predicateType".to_text(), json_string(s.predicate_type.clone()));
-    obj.insert("predicate".to_text(), s.predicate.clone());
+    obj.insert("predicate".to_text(), s.predicate);
     json_object(obj)
 }
 
 public fn statement_from_json(value: &JsonValue) -> Result<Statement, Text> {
-    let obj = value.as_object().ok_or_else(|| "statement: not an object".to_text())?;
-    let type_uri = obj.get("_type").and_then(|v| v.as_string())
-        .ok_or_else(|| "statement: missing _type".to_text())?;
-    if type_uri != STATEMENT_TYPE_V1 {
-        return Result.Err(f"statement: unknown _type {type_uri}");
-    }
-    let subjects_arr = obj.get("subject").and_then(|v| v.as_array())
-        .ok_or_else(|| "statement: missing subject".to_text())?;
-    let mut subjects: List<Subject> = List.new();
-    let mut i: Int = 0;
-    while i < subjects_arr.len() {
-        let s_obj = subjects_arr[i].as_object()
-            .ok_or_else(|| f"statement: subject[{i}] not an object".to_text())?;
-        let name = s_obj.get("name").and_then(|v| v.as_string())
-            .ok_or_else(|| f"statement: subject[{i}] missing name".to_text())?;
-        let digest_obj = s_obj.get("digest").and_then(|v| v.as_object())
-            .ok_or_else(|| f"statement: subject[{i}] missing digest".to_text())?;
-        let mut digests: List<Digest> = List.new();
-        for (alg, hex_v) in digest_obj.iter() {
-            let hex = hex_v.as_string().ok_or_else(|| f"statement: subject[{i}].digest.{alg} not a string".to_text())?;
-            digests.push(Digest { algorithm: alg.clone(), hex });
+    let obj = value.as_object().ok_or("statement: not an object".to_text())?;
+    let type_uri = object_text(obj, &"_type").ok_or("statement: missing _type".to_text())?;
+    if type_uri != STATEMENT_TYPE_V1 { return Result.Err(f"statement: unknown _type {type_uri}"); }
+    let items = match obj.get("subject") {
+        Maybe.Some(JsonValue.JsonArray(items)) => items,
+        _ => return Result.Err("statement: missing subject"),
+    };
+    let mut subjects: List<Subject> = List.with_capacity(items.len());
+    for i in 0..items.len() {
+        let member = items[i].as_object().ok_or(f"statement: subject[{i}] not an object")?;
+        let name = object_text(member, &"name").ok_or(f"statement: subject[{i}] missing name")?;
+        let digest_obj = match member.get("digest") {
+            Maybe.Some(JsonValue.JsonObject(digests)) => digests,
+            _ => return Result.Err(f"statement: subject[{i}] missing digest"),
+        };
+        let mut digests: List<Digest> = List.with_capacity(digest_obj.len());
+        for (algorithm, value) in digest_obj.iter() {
+            let hex = value.as_string().ok_or(f"statement: subject[{i}].digest.{algorithm} not a string")?;
+            digests.push(Digest { algorithm, hex });
         }
-        if digests.is_empty() {
-            return Result.Err(f"statement: subject[{i}] has no digests".to_text());
-        }
+        if digests.is_empty() { return Result.Err(f"statement: subject[{i}] has no digests"); }
         subjects.push(Subject { name, digests });
-        i = i + 1;
     }
-    let predicate_type = obj.get("predicateType").and_then(|v| v.as_string())
-        .ok_or_else(|| "statement: missing predicateType".to_text())?;
-    let predicate = obj.get("predicate").cloned()
-        .ok_or_else(|| "statement: missing predicate".to_text())?;
+    let predicate_type = object_text(obj, &"predicateType").ok_or("statement: missing predicateType".to_text())?;
+    let predicate = obj.get("predicate").ok_or("statement: missing predicate".to_text())?;
     Result.Ok(Statement { type_uri, subjects, predicate_type, predicate })
 }
 
@@ -315,8 +310,8 @@ public fn slsa_provenance_to_json(p: &SlsaProvenance) -> JsonValue {
 fn build_definition_to_json(bd: &BuildDefinition) -> JsonValue {
     let mut obj: JsonMap = JsonMap.new();
     obj.insert("buildType".to_text(), json_string(bd.build_type.clone()));
-    obj.insert("externalParameters".to_text(), bd.external_parameters.clone());
-    obj.insert("internalParameters".to_text(), bd.internal_parameters.clone());
+    obj.insert("externalParameters".to_text(), bd.external_parameters);
+    obj.insert("internalParameters".to_text(), bd.internal_parameters);
     let mut deps: List<JsonValue> = List.new();
     let mut i: Int = 0;
     while i < bd.resolved_dependencies.len() {
@@ -380,7 +375,7 @@ fn resource_descriptor_to_json(rd: &ResourceDescriptor) -> JsonValue {
     obj.insert("digest".to_text(), json_object(digest_obj));
     if !rd.annotations.is_empty() {
         let mut ann_obj: JsonMap = JsonMap.new();
-        for (k, v) in rd.annotations.iter() { ann_obj.insert(k.clone(), v.clone()); }
+        for (k, v) in rd.annotations.iter() { ann_obj.insert(k, v); }
         obj.insert("annotations".to_text(), json_object(ann_obj));
     }
     json_object(obj)
@@ -465,6 +460,17 @@ public type DsseEnvelope is {
     signatures: List<DsseSignature>,
 };
 
+implement DsseEnvelope {
+    public(in core.security) fn payload_type(&self) -> &Text { &self.payload_type }
+    public(in core.security) fn encoded_payload(&self) -> &Text { &self.payload_b64 }
+
+    /// A keyless bundle must identify exactly one signature and its signer.
+    public(in core.security) fn single_encoded_signature(&self) -> Maybe<&Text> {
+        if self.signatures.len() != 1 { return Maybe.None; }
+        Maybe.Some(&self.signatures[0].sig_b64)
+    }
+}
+
 /// Compute the DSSE PAE (Pre-Authentication Encoding) — what gets
 /// signed. The encoding is byte-exact and ASCII-safe.
 public fn dsse_pae(payload_type: &Text, payload: &List<Byte>) -> List<Byte> {
@@ -499,18 +505,18 @@ pub fn dsse_sign_statement(
     let payload_bytes = encoding.jcs.canonicalize(&payload_json)
         .map_err(|e| f"dsse: jcs canonicalise: {e}")?;
     let pae = dsse_pae(&DSSE_PAYLOAD_TYPE_INTOTO.to_text(), &payload_bytes);
-    let sig = security.ecc.ed25519.sign(seed, &pae);
+    let sig = security.ecc.ed25519.sign(seed, pae.as_slice());
     let mut sig_bytes: List<Byte> = List.with_capacity(64);
     let mut i: Int = 0;
     while i < 64 { sig_bytes.push(sig[i]); i = i + 1; }
     Result.Ok(DsseEnvelope {
-        payload_b64: core.encoding.base64.encode(&payload_bytes),
+        payload_b64: core.encoding.base64.encode(payload_bytes.as_slice()),
         payload_type: DSSE_PAYLOAD_TYPE_INTOTO.to_text(),
         signatures: {
             let mut sigs: List<DsseSignature> = List.new();
             sigs.push(DsseSignature {
                 keyid: keyid.clone(),
-                sig_b64: core.encoding.base64.encode(&sig_bytes),
+                sig_b64: core.encoding.base64.encode(sig_bytes.as_slice()),
             });
             sigs
         },
@@ -563,7 +569,7 @@ pub fn dsse_verify_statement(
                     let mut arr: [Byte; 64] = [0_u8; 64];
                     let mut k: Int = 0;
                     while k < 64 { arr[k] = sig_bytes[k]; k = k + 1; }
-                    if security.ecc.ed25519.verify(pubkey, &pae, &arr).is_ok() {
+                    if security.ecc.ed25519.verify(pubkey, pae.as_slice(), &arr).is_ok() {
                         verified = true;
                         break;
                     }
@@ -575,7 +581,7 @@ pub fn dsse_verify_statement(
     }
     if !verified { return Result.Err(DsseVerifyError.InvalidSignature); }
 
-    let payload_json = encoding.json.decode(&payload_bytes)
+    let payload_json = decode_bytes_strict(payload_bytes.as_slice(), payload_bytes.len())
         .map_err(|e| DsseVerifyError.InvalidPayload(f"json decode: {e}"))?;
     statement_from_json(&payload_json)
         .map_err(|e| DsseVerifyError.InvalidPayload(e))
@@ -599,25 +605,27 @@ public fn dsse_envelope_to_json(env: &DsseEnvelope) -> JsonValue {
     json_object(obj)
 }
 
+fn object_text(object: &JsonMap, key: &Text) -> Maybe<Text> {
+    match object.get(key) {
+        Maybe.Some(JsonValue.JsonString(text)) => Maybe.Some(text),
+        _ => Maybe.None,
+    }
+}
+
 public fn dsse_envelope_from_json(value: &JsonValue) -> Result<DsseEnvelope, Text> {
-    let obj = value.as_object().ok_or_else(|| "dsse: not an object".to_text())?;
-    let payload_b64 = obj.get("payload").and_then(|v| v.as_string())
-        .ok_or_else(|| "dsse: missing payload".to_text())?;
-    let payload_type = obj.get("payloadType").and_then(|v| v.as_string())
-        .ok_or_else(|| "dsse: missing payloadType".to_text())?;
-    let sigs_arr = obj.get("signatures").and_then(|v| v.as_array())
-        .ok_or_else(|| "dsse: missing signatures".to_text())?;
-    let mut signatures: List<DsseSignature> = List.new();
-    let mut i: Int = 0;
-    while i < sigs_arr.len() {
-        let s_obj = sigs_arr[i].as_object()
-            .ok_or_else(|| f"dsse: signatures[{i}] not an object".to_text())?;
-        let keyid = s_obj.get("keyid").and_then(|v| v.as_string())
-            .ok_or_else(|| f"dsse: signatures[{i}] missing keyid".to_text())?;
-        let sig_b64 = s_obj.get("sig").and_then(|v| v.as_string())
-            .ok_or_else(|| f"dsse: signatures[{i}] missing sig".to_text())?;
+    let obj = value.as_object().ok_or("dsse: not an object".to_text())?;
+    let payload_b64 = object_text(obj, &"payload").ok_or("dsse: missing payload".to_text())?;
+    let payload_type = object_text(obj, &"payloadType").ok_or("dsse: missing payloadType".to_text())?;
+    let records = match obj.get("signatures") {
+        Maybe.Some(JsonValue.JsonArray(records)) => records,
+        _ => return Result.Err("dsse: missing signatures"),
+    };
+    let mut signatures: List<DsseSignature> = List.with_capacity(records.len());
+    for i in 0..records.len() {
+        let s_obj = records[i].as_object().ok_or(f"dsse: signatures[{i}] not an object")?;
+        let keyid = object_text(s_obj, &"keyid").ok_or(f"dsse: signatures[{i}] missing keyid")?;
+        let sig_b64 = object_text(s_obj, &"sig").ok_or(f"dsse: signatures[{i}] missing sig")?;
         signatures.push(DsseSignature { keyid, sig_b64 });
-        i = i + 1;
     }
     Result.Ok(DsseEnvelope { payload_b64, payload_type, signatures })
 }

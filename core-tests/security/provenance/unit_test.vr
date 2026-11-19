@@ -6,6 +6,10 @@
 // provenance type-identifier constants.
 // =============================================================================
 
+mount core.encoding.json.{decode_bytes_strict, json_string};
+mount core.encoding.jcs.canonicalize_value;
+mount core.security.provenance.{digest_sha256, dsse_pae, dsse_envelope_from_json, dsse_envelope_to_json,
+    statement_from_json, statement_to_json};
 mount core.security.provenance.{
     PREDICATE_TYPE_SLSA_PROVENANCE_V1,
     PREDICATE_TYPE_SLSA_VERIFICATION_SUMMARY_V1,
@@ -74,6 +78,42 @@ fn test_statement_type_distinct_from_predicate_types() {
     assert(STATEMENT_TYPE_V1 != PREDICATE_TYPE_SLSA_PROVENANCE_V1);
     assert(STATEMENT_TYPE_V1 != PREDICATE_TYPE_SPDX_V2_3);
     assert(STATEMENT_TYPE_V1 != DSSE_PAYLOAD_TYPE_INTOTO);
+}
+
+@test
+fn test_statement_roundtrip_preserves_independent_nested_predicate() {
+    let wire = "{\"_type\":\"https://in-toto.io/Statement/v1\",\"subject\":[{\"name\":\"example\",\"digest\":{\"sha256\":\"abc\"}}],\"predicateType\":\"local\",\"predicate\":{\"nested\":[true,1,\"π\"]}}";
+    let mut raw = decode_bytes_strict(wire.as_bytes(), wire.len()).unwrap();
+    let statement = statement_from_json(&raw).unwrap();
+    let normalized = "{\"_type\":\"https://in-toto.io/Statement/v1\",\"predicate\":{\"nested\":[true,1,\"π\"]},\"predicateType\":\"local\",\"subject\":[{\"digest\":{\"sha256\":\"abc\"},\"name\":\"example\"}]}";
+    let parsed = statement_to_json(&statement);
+    assert_eq(canonicalize_value(&parsed).unwrap(), normalized);
+    raw.as_object_mut().unwrap().insert("predicate", json_string("changed"));
+    assert_eq(canonicalize_value(&statement_to_json(&statement)).unwrap(), normalized);
+    assert(canonicalize_value(&raw).unwrap() != normalized);
+    let missing = "{\"_type\":\"https://in-toto.io/Statement/v1\",\"subject\":[{\"name\":\"example\",\"digest\":{}}],\"predicateType\":\"local\",\"predicate\":null}";
+    assert(statement_from_json(&decode_bytes_strict(missing.as_bytes(), missing.len()).unwrap()).is_err());
+}
+
+@test
+fn test_dsse_wire_requires_strings_and_preserves_opaque_base64() {
+    let wire = "{\"payload\":\"AAE=\",\"payloadType\":\"test\",\"signatures\":[{\"keyid\":\"\",\"sig\":\"Af8=\"}]}";
+    let input = decode_bytes_strict(wire.as_bytes(), wire.len()).unwrap();
+    let envelope = dsse_envelope_from_json(&input).unwrap();
+    assert_eq(canonicalize_value(&dsse_envelope_to_json(&envelope)).unwrap(), wire);
+    for malformed in [
+        "{\"payload\":1,\"payloadType\":\"test\",\"signatures\":[]}",
+        "{\"payload\":\"AAE=\",\"payloadType\":\"test\",\"signatures\":[{}]}",
+        "{\"payload\":\"AAE=\",\"payloadType\":\"test\",\"signatures\":[{\"keyid\":\"id\",\"sig\":true}]}",
+    ] {
+        let value = decode_bytes_strict(malformed.as_bytes(), malformed.len()).unwrap();
+        assert(dsse_envelope_from_json(&value).is_err());
+    }
+    let abc = "abc".into_bytes();
+    let digest = digest_sha256(&abc);
+    assert_eq(*digest.hex(), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+    let pae = dsse_pae(&"test", &abc);
+    assert_eq(Text.from_utf8(pae.as_slice()).unwrap(), "DSSEv1 4 test 3 abc");
 }
 
 fn main() {}
