@@ -15,7 +15,7 @@ fn source(text: &str) -> Module {
     Parser::new(text).parse_module().expect("actual library source grammar")
 }
 
-fn execute(input: &str) -> Result<i64, InterpreterError> {
+fn execute(input: &str, method: bool) -> Result<i64, InterpreterError> {
     let mut configuration = source(include_str!("../../../core/configuration/error.vr"));
     configuration.items.retain(|item| match &item.kind {
         ItemKind::Module(decl) => decl.items.is_none(),
@@ -40,11 +40,16 @@ fn execute(input: &str) -> Result<i64, InterpreterError> {
     intrinsic.items.retain(|item| matches!(&item.kind,
         ItemKind::Module(decl) if decl.items.is_none()) || matches!(&item.kind,
         ItemKind::Function(decl) if decl.name.name.as_str() == "text_as_bytes"));
+    let call = if method { "Adapter{}.format_id" } else { "accept" };
     let consumer = source(&format!(r#"
         module consumer;
         mount core.configuration.error.FormatId;
+        type Adapter is {{}};
+        implement Adapter {{
+            fn format_id(&self, value: Text) -> FormatId {{ value }}
+        }}
         fn accept(value: Text) -> FormatId {{ value }}
-        fn main() -> Int {{ let identifier = accept({input:?}); 73 }}
+        fn main() -> Int {{ let identifier = {call}({input:?}); 73 }}
     "#));
     let units: List<_> = [&configuration, &text, &intrinsic, &consumer].into_iter().collect();
     let mut compiler = VbcCodegen::with_config(CodegenConfig::new("consumer"));
@@ -65,7 +70,7 @@ fn execute(input: &str) -> Result<i64, InterpreterError> {
 #[test]
 fn actual_format_identifier_accepts_the_declared_ascii_language() {
     for input in ["a", "json", "toml", "a0-_z", "abcdefghijklmnopqrstuvwxyz012345"] {
-        assert_eq!(execute(input).unwrap_or_else(|error| panic!("{input:?}: {error:?}")), 73);
+        assert_eq!(execute(input, false).unwrap_or_else(|error| panic!("{input:?}: {error:?}")), 73);
     }
 }
 
@@ -74,8 +79,14 @@ fn actual_format_identifier_refuses_each_invalid_boundary() {
     for input in ["", "0abc", "_abc", "-abc", "Json", "aZ", "a b", "a.b",
         "a/b", "a\n", "a\0", "я", "aé", "abcdefghijklmnopqrstuvwxyz0123456"]
     {
-        let error = execute(input).expect_err("invalid identifier must fail its predicate");
+        let error = execute(input, false).expect_err("invalid identifier must fail its predicate");
         assert!(matches!(&error, InterpreterError::AssertionFailed { message, .. }
             if message.contains("refinement violation")), "{input:?}: {error:?}");
     }
+}
+
+#[test]
+fn adapter_return_validates_the_identifier_while_the_receiver_is_live() {
+    assert_eq!(execute("json", true).unwrap(), 73);
+    assert!(matches!(execute("Json", true), Err(InterpreterError::AssertionFailed { .. })));
 }

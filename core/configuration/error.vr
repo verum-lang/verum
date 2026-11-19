@@ -46,9 +46,7 @@ mount core.base.protocols.{PartialEq, Eq, Hash, Hasher, Debug, Formatter, Format
 // Format identifier — stable across all configuration modules
 // =============================================================================
 
-public type FormatId is Text {
-    is_format_id(&self)
-};
+public type FormatId is Text where |identifier| is_format_id(&identifier);
 
 // Identifiers have one to 32 ASCII bytes: a lowercase letter followed by
 // lowercase letters, digits, underscores or hyphens. Validate the bytes
