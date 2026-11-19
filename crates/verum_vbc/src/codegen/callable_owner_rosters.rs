@@ -169,13 +169,8 @@ impl VbcCodegen {
         remap: &std::collections::HashMap<u32, u32>, owned: &Set<TypeParamId>,
         structural_parameter: Option<&TypeRef>,
     ) -> CodegenResult<Map<TypeParamId, DeclaredGenericParameter>> {
-        // None is the descriptor contract for a declaration at this archive
-        // entry's top level. A present but invalid string ID is not that case.
-        let owner = match descriptor.origin_module {
-            None => module.name.as_str(),
-            Some(id) => module.strings.get(id).ok_or_else(|| CodegenError::new(
-                CodegenErrorKind::InvalidSourceSignature("invalid declaration owner string".into())))?,
-        };
+        let owner = crate::callable_identity::declaring_module(module, descriptor)
+            .map_err(|message| CodegenError::new(CodegenErrorKind::InvalidSourceSignature(message.into())))?;
         let identity = format!("{}.{}", owner,
             module.strings.get(descriptor.name).unwrap_or("<missing name>"));
         let invalid = |message: &str| CodegenError::new(CodegenErrorKind::InvalidSourceSignature(

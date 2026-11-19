@@ -49,10 +49,10 @@ pub fn validate_module(module: &VbcModule) -> Result<(), Text> {
     Ok(())
 }
 
-fn declaring_module<'a>(module: &'a VbcModule, function: &FunctionDescriptor) -> Result<&'a str, Text> {
+pub(crate) fn declaring_module<'a>(module: &'a VbcModule, function: &FunctionDescriptor) -> Result<&'a str, Text> {
+    // Only an absent origin inherits the containing archive entry.
     match function.origin_module {
-        Some(owner) => module.strings.get(owner)
-            .ok_or_else(|| Text::from("callable declaration has invalid source module")),
         None => Ok(module.name.as_str()),
+        origin => crate::module::declaration_origin(&module.name, origin, |id| module.strings.get(id)),
     }
 }

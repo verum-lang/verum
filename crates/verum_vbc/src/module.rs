@@ -34,7 +34,7 @@ pub fn declaration_origin<'a>(
     module: &'a str, origin: Option<StringId>, string: impl FnOnce(StringId) -> Option<&'a str>,
 ) -> Result<&'a str, Text> {
     let owner = match origin {
-        Some(id) => string(id).ok_or_else(|| Text::from("declaration has invalid source module"))?,
+        Some(id) => string(id).ok_or_else(|| Text::from(format!("invalid declaration owner string {} in module '{module}'", id.0)))?,
         None if !module.is_empty() => module,
         None => return Err("declaration has no source module".into()),
     };

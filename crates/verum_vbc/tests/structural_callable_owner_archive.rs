@@ -507,7 +507,7 @@ fn archive_entry_owner_is_distinct_from_an_invalid_owner_id() {
     }
     let mut invalid = source;
     method_mut(&mut invalid).origin_module = Some(verum_vbc::types::StringId(u32::MAX));
-    assert_import_refuses(&invalid, "invalid declaration owner string");
+    assert_import_refuses(&invalid, &format!("invalid declaration owner string {}", u32::MAX));
 }
 
 #[test]
