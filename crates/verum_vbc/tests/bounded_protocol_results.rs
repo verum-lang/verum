@@ -1150,3 +1150,38 @@ fn the_slice_iterator_keeps_its_borrow_through_enumerate() {
     "#);
     execute_source_and_wire(compile(&[&maybe, &iterator, &slice, &consumer]).unwrap(), 93);
 }
+
+#[test]
+fn the_receiver_selects_its_unparameterized_protocol_with_a_byte_argument() {
+    let module = constrained(r#"
+        type Reader is protocol { fn decode(&self, marker: Byte) -> Int; };
+        type Source is { offset: Int };
+        implement Reader for Source {
+            fn decode(&self, marker: Byte) -> Int { self.offset + (marker as Int) }
+        }
+        implement Source { fn other(&self, marker: Byte) -> Int { 0 } }
+        fn read<R: Reader>(reader: &R, marker: Byte) -> Int { reader.decode(marker) }
+        fn run() -> Int { read(&Source { offset: 3 }, 23_u8) }
+    "#).unwrap();
+    execute_source_and_wire(module.clone(), 26);
+
+    let source = module.types.iter()
+        .position(|owner| module.get_string(owner.name) == Some("Source")).unwrap();
+    let alternate = module.find_function_by_name("consumer.Source.other").unwrap();
+    for competing in [false, true] {
+        let mut altered = module.clone();
+        let rows = &mut altered.types[source].protocols;
+        if competing {
+            let mut row = rows[0].clone();
+            row.methods[0] = alternate.0;
+            rows.push(row);
+        } else {
+            rows.clear();
+        }
+        let entry = altered.find_function_by_name("consumer.run").unwrap();
+        let error = verum_vbc::interpreter::Interpreter::new(altered.into())
+            .execute_function(entry).unwrap_err();
+        let reason = if competing { "multiple implementations" } else { "no implementation" };
+        assert!(error.to_string().contains(reason), "{error}");
+    }
+}

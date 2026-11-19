@@ -66,7 +66,7 @@ fn declared_protocol_method(
     receiver: TypeId,
     qualifiers: &str,
     method: &str,
-    operand: Option<TypeId>,
+    args: RegRange,
 ) -> InterpreterResult<FunctionId> {
     let invalid = |message| InterpreterError::InvalidBytecode {
         pc: state.pc() as usize,
@@ -94,17 +94,28 @@ fn declared_protocol_method(
         if !protocol.variants.iter().any(|member| state.module.get_string(member.name) == Some(method)) {
             continue;
         }
-        if selected.is_some_and(|previous| previous != implementation.protocol) {
+        if selected.is_some_and(|(previous, _)| previous != implementation.protocol) {
             return Err(invalid(format!(
                 "ambiguous declared protocol call `{qualifiers}.{method}` for {receiver:?}",
             )));
         }
-        selected = Some(implementation.protocol);
+        selected = Some((implementation.protocol, !protocol.type_params.is_empty()));
     }
     let missing = || invalid(format!(
         "no implementation of declared protocol member `{qualifiers}.{method}` for {receiver:?}",
     ));
-    let protocol = selected.ok_or_else(missing)?;
+    let (protocol, parameterized) = selected.ok_or_else(missing)?;
+    // Only a parameterized protocol can have distinct applications on this
+    // receiver. A fixed Byte parameter shares its immediate carrier with Int.
+    let operand = if parameterized && args.count > 0 {
+        let raw = state.registers.get(state.reg_base(), args.start);
+        let value = resolve_arg_value(state, raw)?;
+        Some(super::object_dispatch::runtime_type_for_dispatch(&value, state)
+            .map(|(id, _)| TypeId(id))
+            .unwrap_or_else(|| super::calls::get_builtin_type_id(value)))
+    } else {
+        None
+    };
     state.module.implementation_method(receiver, protocol, method, operand)
         .map_err(invalid)?.ok_or_else(missing)
 }
@@ -2751,14 +2762,7 @@ fn execute_method_call(
                     )
                 {
                     let target = if let Some(protocol) = dyn_protocol.as_deref() {
-                        let operand = if args.count == 0 { None } else {
-                            let raw = state.registers.get(state.reg_base(), args.start);
-                            let value = resolve_arg_value(state, raw)?;
-                            Some(super::object_dispatch::runtime_type_for_dispatch(&value, state)
-                                .map(|(id, _)| TypeId(id))
-                                .unwrap_or_else(|| super::calls::get_builtin_type_id(value)))
-                        };
-                        Some(declared_protocol_method(state, tid, protocol, &bare_method_name, operand)?)
+                        Some(declared_protocol_method(state, tid, protocol, &bare_method_name, args)?)
                     } else {
                         state.module.resolve_protocol_method_by_name(tid.0, &bare_method_name)
                     };
