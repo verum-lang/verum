@@ -69,7 +69,7 @@ mount core.security.x509.algorithm.{
     SignatureAlg, parse_signature_alg, signature_alg_matches,
 };
 mount core.security.x509.name.{DistinguishedName, parse_name};
-mount core.security.x509.spki.{Spki, parse_spki};
+mount core.security.x509.spki.{Spki, SubjectPublicKey, parse_spki};
 mount core.security.x509.time.{CertValidity};
 mount core.security.x509.ext.{ExtensionSet, parse_extensions};
 
@@ -101,6 +101,10 @@ public type X509Certificate is {
 };
 
 implement X509Certificate {
+    public(in core.security) fn der_bytes(&self) -> &List<Byte> { &self.raw_der }
+    public(in core.security) fn subject_public_key(&self) -> &SubjectPublicKey { self.tbs.spki.parsed_key() }
+    public(in core.security) fn extensions(&self) -> &ExtensionSet { &self.tbs.extensions }
+
     /// Return the inclusive notBefore and notAfter dates as Unix seconds.
     public fn validity_unix_bounds(&self) -> (Int64, Int64) { self.tbs.validity.unix_bounds() }
 }

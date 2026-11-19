@@ -59,6 +59,7 @@ module core.security.x509.ext;
 
 mount core.collections.list.{List};
 mount core.encoding.der.{DerReader, DerError, DerErrorKind};
+mount core.encoding.hex.{encode as hex_encode};
 mount core.security.x509.oid.{Oid};
 mount core.security.x509.oid as pkix_oid;
 
@@ -105,6 +106,20 @@ public type ExtensionSet is {
 };
 
 implement ExtensionSet {
+    public(in core.security) fn unparsed_value(&self, oid: &Oid) -> Maybe<&[Byte]> {
+        for extension in self.others.iter() {
+            if extension.oid.eq(oid) { return Maybe.Some(extension.value_der.as_slice()); }
+        }
+        Maybe.None
+    }
+
+    public(in core.security) fn alternative_names(&self) -> Maybe<&SubjectAltName> {
+        match &self.subject_alt_name {
+            Maybe.Some((_, san)) => Maybe.Some(san),
+            Maybe.None => Maybe.None,
+        }
+    }
+
     public(in core.security.x509) fn ca_limits(&self) -> (Bool, Maybe<Int>) {
         match &self.basic_constraints {
             Maybe.Some((_, constraints)) => constraints.ca_and_path_length(),
@@ -154,8 +169,16 @@ implement ExtensionSet {
 public fn parse_extensions(r: &mut DerReader) -> Result<ExtensionSet, DerError> {
     let mut seq = r.read_sequence()?;
     let mut out = ExtensionSet.empty();
+    let mut seen: Map<Text, Bool> = Map.new();
     while !seq.is_at_end() {
+        let position = seq.position();
         let ext = parse_one_extension(&mut seq)?;
+        let encoded_oid = ext.oid.encoded_der()?;
+        let key = hex_encode(encoded_oid.as_slice());
+        if seen.contains_key(key.clone()) {
+            return Result.Err(DerError { kind: DerErrorKind.MalformedDer, position, message: "duplicate X.509 extension OID" });
+        }
+        seen.insert(key, true);
         dispatch(ext, &mut out)?;
     }
     seq.expect_end()?;

@@ -49,6 +49,8 @@ public type SubjectAltName is {
 };
 
 implement SubjectAltName {
+    public(in core.security) fn names(&self) -> &[GeneralName] { self.names.as_slice() }
+
     /// Match a DNS hostname against the SAN per RFC 6125 §6.4.
     /// Wildcard handling: a leftmost `*.` label matches one DNS label;
     /// `*` alone is forbidden; mid-label wildcards (`foo*.bar`) are
@@ -106,7 +108,7 @@ public fn parse(value: &[Byte]) -> Result<SubjectAltName, DerError> {
 
 public fn parse_general_name(r: &mut DerReader) -> Result<GeneralName, DerError> {
     let save = r.position();
-    let (tag, len, val_start, elem_end) = r.peek_element_span()?;
+    let (tag, _, val_start, elem_end) = r.peek_element_span()?;
     let is_ctx = match tag.class_ { TagClass.ContextSpecific => true, _ => false };
     if !is_ctx {
         // Per RFC 5280, every GeneralName alternative is context-tagged.
@@ -117,50 +119,39 @@ public fn parse_general_name(r: &mut DerReader) -> Result<GeneralName, DerError>
             message: "GeneralName not context-specific",
         });
     }
-    // Consume the tag+length; cursor now at value.
-    let _ = r.read_tag_length()?;
-
-    match tag.number {
-        0_u32 => {
-            // OtherName — preserve raw DER of the [0] explicit value.
-            let raw = r.take_bytes(len)?;
-            let _ = val_start; let _ = elem_end;
-            Result.Ok(GeneralName.OtherName(raw))
-        },
-        1_u32 => {
-            let bytes = r.take_bytes(len)?;
-            Result.Ok(GeneralName.Rfc822Name(Text.from_utf8_lossy(bytes.as_slice())))
-        },
-        2_u32 => {
-            let bytes = r.take_bytes(len)?;
-            Result.Ok(GeneralName.DnsName(Text.from_utf8_lossy(bytes.as_slice())))
-        },
-        4_u32 => {
-            // directoryName is [4] EXPLICIT Name; value contains full
-            // SEQUENCE Name DER.
-            let bytes = r.take_bytes(len)?;
-            Result.Ok(GeneralName.DirectoryName(bytes))
-        },
-        6_u32 => {
-            let bytes = r.take_bytes(len)?;
-            Result.Ok(GeneralName.Uri(Text.from_utf8_lossy(bytes.as_slice())))
-        },
-        7_u32 => {
-            let bytes = r.take_bytes(len)?;
-            if bytes.len() != 4 && bytes.len() != 16 {
-                return Result.Err(DerError {
-                    kind: DerErrorKind.MalformedDer,
-                    position: save,
-                    message: "iPAddress must be 4 or 16 bytes",
-                });
-            }
-            Result.Ok(GeneralName.IpAddress(bytes))
-        },
-        _ => {
-            // Skip unsupported kinds (x400Address, ediPartyName, registeredID).
-            let _ = r.take_bytes(len)?;
-            Result.Ok(GeneralName.Unsupported)
-        },
+    r.skip_element()?;
+    let number = tag.number;
+    if number == 0_u32 || number == 4_u32 {
+        if !tag.constructed {
+            return Result.Err(DerError { kind: DerErrorKind.UnexpectedTag, position: save, message: "expected constructed GeneralName" });
+        }
+        let bytes = r.buffer_copy_region(val_start, elem_end)?;
+        if number == 0_u32 { return Result.Ok(GeneralName.OtherName(bytes)); }
+        return Result.Ok(GeneralName.DirectoryName(bytes));
+    }
+    if number != 1_u32 && number != 2_u32 && number != 6_u32 && number != 7_u32 {
+        return Result.Ok(GeneralName.Unsupported);
+    }
+    if tag.constructed {
+        return Result.Err(DerError { kind: DerErrorKind.UnexpectedTag, position: save, message: "expected primitive GeneralName" });
+    }
+    let bytes = r.buffer_copy_region(val_start, elem_end)?;
+    if number == 7_u32 {
+        if bytes.len() != 4 && bytes.len() != 16 {
+            return Result.Err(DerError { kind: DerErrorKind.MalformedDer, position: save, message: "iPAddress must be 4 or 16 bytes" });
+        }
+        return Result.Ok(GeneralName.IpAddress(bytes));
+    }
+    for octet in bytes.iter() {
+        if *octet > 127_u8 {
+            return Result.Err(DerError { kind: DerErrorKind.MalformedDer, position: save, message: "GeneralName is not IA5String" });
+        }
+    }
+    let text = Text.from_utf8_lossy(bytes.as_slice());
+    match number {
+        1_u32 => Result.Ok(GeneralName.Rfc822Name(text)),
+        2_u32 => Result.Ok(GeneralName.DnsName(text)),
+        _ => Result.Ok(GeneralName.Uri(text)),
     }
 }
 

@@ -1,0 +1,17 @@
+mount core.encoding.der.DerReader;
+mount core.security.x509.ext.parse_extensions;
+
+@test
+fn test_extension_ids_are_unique_even_when_the_contents_differ() {
+    // Two Extension sequences with OIDs 1.2.3 and 1.2.4 and different opaque contents.
+    let mut bytes: List<Byte> = [48_u8, 18_u8, 48_u8, 7_u8, 6_u8, 2_u8, 42_u8, 3_u8, 4_u8, 1_u8, 65_u8,
+        48_u8, 7_u8, 6_u8, 2_u8, 42_u8, 4_u8, 4_u8, 1_u8, 66_u8];
+    let mut reader = DerReader.new(bytes.as_slice());
+    assert(parse_extensions(&mut reader).is_ok());
+    assert(reader.expect_end().is_ok());
+    bytes[16] = 3_u8;
+    let mut repeated = DerReader.new(bytes.as_slice());
+    assert(parse_extensions(&mut repeated).is_err());
+}
+
+fn main() {}

@@ -53,6 +53,8 @@
 )
 module core.security.x509.oid;
 
+mount core.encoding.der.{DerError, encode_oid};
+
 mount core.base.protocols.{PartialEq, Eq, Hash, Hasher};
 
 // =============================================================================
@@ -76,6 +78,10 @@ implement Oid {
             i = i + 1;
         }
         Oid { arcs: v }
+    }
+
+    public(in core.security.x509) fn encoded_der(&self) -> Result<List<Byte>, DerError> {
+        encode_oid(self.arcs.as_slice())
     }
 
     /// Number of arcs in the identifier.

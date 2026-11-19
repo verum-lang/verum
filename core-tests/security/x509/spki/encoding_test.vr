@@ -1,0 +1,38 @@
+mount core.encoding.der.DerReader;
+mount core.encoding.hex.{decode as hex_decode, encode as hex_encode};
+mount core.security.x509.oid.Oid;
+mount core.security.x509.spki.{encode_spki_key, parse_spki};
+
+@test
+fn test_ed25519_and_p256_exact_spki_encodings() {
+    let ed = Oid.from(&[1_u32, 3_u32, 101_u32, 112_u32]);
+    let ed_key = "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a";
+    let public_bytes = hex_decode(&ed_key).unwrap();
+    let der = encode_spki_key(&ed, Maybe.None, public_bytes.as_slice()).unwrap();
+    assert_eq(hex_encode(der.as_slice()), f"302a300506032b6570032100{ed_key}");
+    let mut reader = DerReader.new(der.as_slice());
+    assert(parse_spki(&mut reader).is_ok());
+    assert(reader.expect_end().is_ok());
+
+    let ec = Oid.from(&[1_u32, 2_u32, 840_u32, 10045_u32, 2_u32, 1_u32]);
+    let curve = Oid.from(&[1_u32, 2_u32, 840_u32, 10045_u32, 3_u32, 1_u32, 7_u32]);
+    let point = "046b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c2964fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5";
+    let octets = hex_decode(&point).unwrap();
+    let der = encode_spki_key(&ec, Maybe.Some(&curve), octets.as_slice()).unwrap();
+    assert_eq(hex_encode(der.as_slice()), f"3059301306072a8648ce3d020106082a8648ce3d030107034200{point}");
+    let mut reader = DerReader.new(der.as_slice());
+    assert(parse_spki(&mut reader).is_ok());
+    assert(reader.expect_end().is_ok());
+}
+
+@test
+fn test_spki_rejects_invalid_bit_counts_and_wrong_ed25519_width() {
+    let key = "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a";
+    for wire in [f"302a300506032b6570032101{key}", "300b300506032b657003020000"] {
+        let octets = hex_decode(&wire).unwrap();
+        let mut reader = DerReader.new(octets.as_slice());
+        assert(parse_spki(&mut reader).is_err());
+    }
+}
+
+fn main() {}

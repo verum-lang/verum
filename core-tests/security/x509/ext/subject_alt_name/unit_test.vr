@@ -6,7 +6,7 @@
 // Name extension (RFC 5280 §4.2.1.6).
 // =============================================================================
 
-mount core.security.x509.ext.subject_alt_name.GeneralName;
+mount core.security.x509.ext.subject_alt_name.{GeneralName, parse};
 mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 
@@ -101,6 +101,17 @@ fn test_general_name_unsupported_disjoint_from_all() {
     assert(!(n is GeneralName.Uri));
     assert(!(n is GeneralName.DirectoryName));
     assert(!(n is GeneralName.OtherName));
+}
+
+@test
+fn test_dns_name_reads_ia5_and_rejects_invalid_bytes_or_der() {
+    let valid: List<Byte> = [48_u8, 3_u8, 130_u8, 1_u8, 120_u8];
+    assert(parse(valid.as_slice()).unwrap().matches_dns(&"x"));
+    for invalid in [
+        [48_u8, 3_u8, 130_u8, 1_u8, 255_u8],
+        [48_u8, 3_u8, 162_u8, 1_u8, 120_u8],
+        [48_u8, 3_u8, 130_u8, 2_u8, 120_u8],
+    ] { assert(parse(invalid.as_slice()).is_err()); }
 }
 
 fn main() {}
