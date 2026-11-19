@@ -371,6 +371,30 @@ fn check_cleanup(body: &str, expected: i64) {
 }
 
 #[test]
+fn replacing_an_affine_referent_retires_the_old_value_before_scope_exit() {
+    let module = compile_cleanup_source(include_str!(
+        "../../verum_vbc/tests/fixtures/referent_replacement.vr"
+    ));
+    with_native(&module, |library| {
+        // SAFETY: the compiled probe takes no arguments and returns a Verum Int.
+        let probe = unsafe { library.get::<unsafe extern "C" fn() -> i64>(b"invoke_probe").unwrap() };
+        assert_eq!(unsafe { probe() }, 733);
+    });
+}
+
+#[test]
+fn replacement_through_a_reference_preserves_owned_text() {
+    let module = compile(include_str!(
+        "../../verum_vbc/tests/fixtures/text_referent_replacement.vr"
+    ));
+    with_native(&module, |library| {
+        // SAFETY: probe is a nullary Verum function returning Int.
+        let probe = unsafe { library.get::<unsafe extern "C" fn() -> i64>(b"invoke_probe").unwrap() };
+        assert_eq!(unsafe { probe() }, 73);
+    });
+}
+
+#[test]
 fn typed_cleanup_native_owned_generic_sum_and_record() {
     check_cleanup(r#"
 type Packet<T> is Empty | Held(T);

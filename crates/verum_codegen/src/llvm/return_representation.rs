@@ -523,6 +523,15 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                 | I::LoadSmallI { dst, .. }
                 | I::New { dst, .. }
                 | I::NewG { dst, .. } => write = Some((*dst, R::Value)),
+                I::BinaryI { dst, a, b, .. } | I::BinaryF { dst, a, b, .. }
+                | I::CmpI { dst, a, b, .. } | I::CmpF { dst, a, b, .. }
+                | I::CmpU { dst, a, b, .. } | I::Bitwise { dst, a, b, .. } => {
+                    // The instruction reads these scalar words. It neither
+                    // changes storage nor consumes any other parameter.
+                    use_input(*a, 8, &state);
+                    use_input(*b, 8, &state);
+                    write = Some((*dst, R::Value));
+                }
                 I::GetVariantDataRef { dst, variant, .. } => {
                     use_input(*variant, 1, &state);
                     write = Some((
@@ -730,7 +739,9 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                 }
                 I::RefLocal { dst, src } => {
                     use_input(*src, 8, &state);
-                    write = Some((*dst, R::Unknown));
+                    let issued_slot = sites.get(&pc).is_some_and(|sites|
+                        sites.contains(&ReferenceSiteKind::SlotOutput(dst.0)));
+                    write = Some((*dst, if issued_slot { R::Slot } else { R::Unknown }));
                 }
                 I::SetF { obj, value, .. } => {
                     use_input(*obj, 1, &state);
@@ -743,6 +754,24 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                     use_input(*value, 4, &state);
                     may_write = true;
                     state.invalidate_storage();
+                }
+                I::MemExtended { sub_op, operands }
+                    if *sub_op == verum_vbc::instruction::MemSubOpcode::Replace as u8 => {
+                    let mut pos = 0;
+                    let mut reg = || verum_vbc::encoding::decode_reg(operands, &mut pos);
+                    let (Ok(dst), Ok(place), Ok(value)) = (reg(), reg(), reg()) else {
+                        return BodyFacts::unknown(instructions.len());
+                    };
+                    if pos != operands.len() { return BodyFacts::unknown(instructions.len()); }
+                    use_input(place, 2, &state);
+                    use_input(value, 4, &state);
+                    may_write = true;
+                    state.invalidate_storage();
+                    write = Some((dst, R::Unknown));
+                }
+                I::DropTyped { src, type_ref } if verum_vbc::drop_plan::has_trivial_cleanup(type_ref) => {
+                    // Retiring this register observes neither its bits nor any other parameter.
+                    write = Some((*src, R::Value));
                 }
                 I::DropRef { src } => {
                     use_input(*src, 8, &state);

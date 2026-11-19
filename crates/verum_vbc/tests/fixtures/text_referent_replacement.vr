@@ -1,0 +1,8 @@
+fn replace_text(slot: &mut Text, next: Text) { *slot = next; }
+
+fn probe() -> Int {
+    let original = f"{123456789}";
+    let mut dest = f"{42}";
+    replace_text(&mut dest, original);
+    if original.len() == 9 && dest.len() == 9 { 73 } else { 0 }
+}

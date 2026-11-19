@@ -308,6 +308,20 @@ impl super::VbcCodegen {
         Self::named_place_binding(expr).is_some_and(|name| self.consumes_named_binding(name, reg))
     }
 
+    /// A binding owning an indirect value stores the handle itself. Borrow
+    /// that slot so replacing the entire value preserves its allocator data.
+    pub(super) fn borrows_handle_binding(&self, expr: &verum_ast::Expr, reg: Reg) -> bool {
+        Self::named_place_binding(expr)
+            .and_then(|name| self.named_binding_fact(name, reg))
+            .and_then(|fact| fact.declaration_type.as_ref()?.base_type_id())
+            .is_some_and(|id| match id.builtin_value_storage() {
+                Some(crate::types::BuiltinValueStorage::Text) => true,
+                Some(crate::types::BuiltinValueStorage::Immediate) => false,
+                None => self.type_by_id(id).is_some_and(|decl|
+                    matches!(decl.kind, crate::types::TypeKind::Record | crate::types::TypeKind::Sum)),
+            })
+    }
+
     /// A generic source retains its exact declared parameter identity.
     /// The frame witness selects copy or transfer; missing witnesses grant neither.
     pub(super) fn generic_named_place(&self, expr: &verum_ast::Expr, reg: Reg) -> Maybe<TypeRef> {
@@ -689,22 +703,45 @@ impl super::VbcCodegen {
         read: impl FnOnce(Reg) -> Instruction,
         write: impl FnOnce(Reg) -> Instruction,
     ) -> super::CodegenResult<()> {
+        self.retire_displaced_value(declared, |codegen, previous| {
+            if let Some(dst) = previous { codegen.ctx.emit(read(dst)); }
+            codegen.ctx.emit(write(value));
+        })
+    }
+
+    pub(super) fn replace_referent(
+        &mut self, reference: Reg, value: Reg, declared: Option<&TypeRef>,
+    ) -> super::CodegenResult<()> {
+        self.retire_displaced_value(declared, |codegen, previous| {
+            if let Some(dst) = previous {
+                codegen.emit_value_exchange(dst, reference, value);
+            } else {
+                codegen.ctx.emit(Instruction::DerefMut { ref_reg: reference, value });
+            }
+        })
+    }
+
+    /// Both assignment and the source-level exchange intrinsic address one
+    /// initialized slot. Retain its old owner before invoking any cleanup.
+    pub(super) fn emit_value_exchange(&mut self, dst: Reg, place: Reg, value: Reg) {
+        let mut operands = Default::default();
+        for reg in [dst, place, value] { crate::encoding::encode_reg(reg, &mut operands); }
+        self.ctx.emit(Instruction::MemExtended {
+            sub_op: crate::instruction::MemSubOpcode::Replace as u8, operands,
+        });
+    }
+
+    fn retire_displaced_value(
+        &mut self, declared: Option<&TypeRef>, exchange: impl FnOnce(&mut Self, Option<Reg>),
+    ) -> super::CodegenResult<()> {
         let declared = declared.map(|ty| self.local_drop_declaration(ty))
             .ok_or_else(|| super::CodegenError::new(
                 super::CodegenErrorKind::InvalidSourceSignature(
                     "replacement requires its destination declaration".into(),
                 ),
             ))?;
-        let trivial = matches!(declared, TypeRef::Reference { .. })
-            || matches!(declared, TypeRef::Concrete(owner)
-                if matches!(crate::drop_plan::builtin_drop_plan(owner),
-                    Some(crate::drop_plan::DropPlan::Ignore)));
-        let previous = if trivial { None } else {
-            let previous = self.ctx.alloc_temp();
-            self.ctx.emit(read(previous));
-            Some(previous)
-        };
-        self.ctx.emit(write(value));
+        let previous = (!crate::drop_plan::has_trivial_cleanup(&declared)).then(|| self.ctx.alloc_temp());
+        exchange(self, previous);
         if let Some(previous) = previous {
             self.emit_local_drop(previous, Some(&declared));
             self.ctx.free_temp(previous);
@@ -743,12 +780,7 @@ impl super::VbcCodegen {
     /// copyable value may own Text or invoke Drop. Only the shared primitive
     /// storage plan and an explicit reference establish trivial cleanup here.
     fn declaration_requires_drop(&self, declaration: &TypeRef) -> bool {
-        match self.local_drop_declaration(declaration) {
-            TypeRef::Reference { .. } => false,
-            TypeRef::Concrete(owner) => !matches!(crate::drop_plan::builtin_drop_plan(owner),
-                Some(crate::drop_plan::DropPlan::Ignore)),
-            _ => true,
-        }
+        !crate::drop_plan::has_trivial_cleanup(&self.local_drop_declaration(declaration))
     }
     /// Emit the exit edge without popping compile-time scopes shared with
     /// the untaken path. A result must survive deferred code that changes a local.

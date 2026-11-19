@@ -4112,7 +4112,8 @@ impl VbcCodegen {
     }
 
     /// Compiles simple assignment.
-    fn compile_assignment(&mut self, target: &Expr, value: &Expr) -> CodegenResult<Option<Reg>> {
+    fn compile_assignment(&mut self, mut target: &Expr, value: &Expr) -> CodegenResult<Option<Reg>> {
+        while let ExprKind::Paren(inner) = &target.kind { target = inner; }
         // Before compiling the value, push the target's nominal type as
         // `current_return_type_name` so that a bare variant constructor in
         // the RHS (e.g. `f.value = None;` where `f.value: Maybe<Int>`)
@@ -4544,11 +4545,7 @@ impl VbcCodegen {
                         });
                     }
 
-                    // Write through mutable reference using DerefMut
-                    self.ctx.emit(Instruction::DerefMut {
-                        ref_reg: final_ref_reg,
-                        value: value_reg,
-                    });
+                    self.replace_referent(final_ref_reg, value_reg, destination_declaration.as_ref())?;
                 }
 
                 if let Some(inner) = inner_ref_reg {
@@ -6282,7 +6279,11 @@ impl VbcCodegen {
                 // Mutable reference - check tier_context for promotion
                 let tier = self.get_ref_tier_for_expr(inner);
                 let stable_src = self.stabilize_ref_source(inner, inner_reg);
-                self.emit_ref_instruction(dest, stable_src, tier, true);
+                if tier == CbgrTier::Tier0 && self.borrows_handle_binding(inner, stable_src) {
+                    self.emit_local_mut_borrow(dest, stable_src);
+                } else {
+                    self.emit_ref_instruction(dest, stable_src, tier, true);
+                }
             }
             UnOp::RefCheckedMut => {
                 // Explicitly Tier 1 mutable from source
@@ -16870,51 +16871,18 @@ impl VbcCodegen {
                 None => eprintln!("[selfmut] key='{}' => NOT FOUND", effective_method_name),
             }
         }
-        let actual_receiver =
-            if receiver_is_borrowed {
-                // The synthetic receiver already addresses the indexed slot.
-                // Borrowing its temporary again would replace that reference
-                // when a method assigns to *self, leaving the element intact.
-                receiver_reg
-            } else if let Some(func_info) = resolved_method.as_ref() {
-                if func_info.takes_self_mut_ref {
-                    // Create a mutable reference to the receiver.
-                    //
-                    // Pillar 1 (typed refs): when the receiver register is a
-                    // ref-typed OBJECT param (`f: &mut Formatter` — the
-                    // body-side Display leg: `f.write_str(s)` inside
-                    // `fmt(&self, f)` re-refs the param), the referent class
-                    // is statically known — emit the typed `RefObj` so
-                    // Tier-1 passes the object pointer through BY OPCODE
-                    // instead of re-guessing via the heuristic mark family
-                    // (the archived-body re-ref lowered as an ALLOCA
-                    // address, so write_str received fmt's stack and every
-                    // AOT Display interpolation printed "").  Tier-0
-                    // executes RefObj on the RefMut path unchanged.
-                    let ref_reg = self.ctx.alloc_temp();
-                    if typed_refs_enabled() && self.ctx.is_object_ref_param_reg(receiver_reg.0) {
-                        self.ctx.emit(Instruction::RefObj {
-                            dst: ref_reg,
-                            src: receiver_reg,
-                        });
-                    } else {
-                        self.ctx.emit(Instruction::RefMut {
-                            dst: ref_reg,
-                            src: receiver_reg,
-                        });
-                    }
-                    // The original receiver_reg will be freed below, but ref_reg is the actual receiver
-                    ref_reg
-                } else {
-                    receiver_reg
-                }
-            } else {
-                receiver_reg
-            };
+        let actual_receiver = if !receiver_is_borrowed
+            && resolved_method.as_ref().is_some_and(|method| method.takes_self_mut_ref)
+        {
+            self.borrow_mutable_receiver(receiver, receiver_reg)?
+        } else {
+            receiver_reg
+        };
 
         // A by-value self parameter consumes the same declared owner as an
         // ordinary argument. Borrow adjustments preserve the caller's binding.
         let actual_receiver = if receiver_slots == 1 && actual_receiver == receiver_reg && !receiver_is_borrowed
+            && !resolved_method.as_ref().is_some_and(|method| method.takes_self_mut_ref)
             && let Some(callable) = resolved_method.as_ref()
             && (devirt_func_id.is_some() || type_prefix_intercepted_by_runtime(&effective_method_name))
         {
@@ -18518,48 +18486,11 @@ impl VbcCodegen {
                 if let Some(saved) = saved_disambig {
                     self.ctx.pop_disambig_context(saved);
                 }
-                // `&mut self` receiver wrapping — when this call shape
-                // is an instance method dispatched via the static-call
-                // path (typechecker pre-resolved
-                // `c.make_ascii_uppercase()` to
-                // `ResolvedCallTarget::StaticCall { qualified: "Char.make_ascii_uppercase" }`
-                // then prepended `c` as args[0] at the call-site at
-                // `compile_resolved_call_target_with_receiver`), the
-                // body's `*self = X` writeback only persists if the
-                // callee receives `self` as a CBGR ref to the caller's
-                // slot.  Without this RefMut, every `*self = X` in a
-                // precompiled stdlib `&mut self` body silently fails
-                // to persist — this was the residual char §A defect
-                // class (and every primitive-receiver `&mut self`
-                // stdlib body besides; the user-side `&mut self` path
-                // already passes through the CallM dispatch at
-                // line 8748 where the wrapping was applied).
-                //
-                // Mirror the CallM-path wrapping at
-                // `expressions.rs:8762`.  Tier-0 DerefMut handler at
-                // `cbgr.rs:273` already decodes CBGR refs correctly.
                 let wrapped = if i == 0 && func_info.takes_self_mut_ref {
-                    let ref_reg = self.ctx.alloc_temp();
-                    // Pillar 1 (typed refs): mirror the CallM-path receiver
-                    // wrapping — a ref-typed OBJECT param re-ref carries its
-                    // referent class in the opcode (RefObj = Tier-1 pointer
-                    // passthrough; Tier-0 unchanged on the RefMut path).
-                    if typed_refs_enabled() && self.ctx.is_object_ref_param_reg(arg_val.0) {
-                        self.ctx.emit(Instruction::RefObj {
-                            dst: ref_reg,
-                            src: arg_val,
-                        });
-                    } else {
-                        self.ctx.emit(Instruction::RefMut {
-                            dst: ref_reg,
-                            src: arg_val,
-                        });
-                    }
-                    self.ctx.free_temp(arg_val);
-                    ref_reg
-                } else {
-                    arg_val
-                };
+                    let receiver = self.borrow_mutable_receiver(arg, arg_val)?;
+                    if receiver != arg_val { self.ctx.free_temp(arg_val); }
+                    receiver
+                } else { arg_val };
                 arg_results.push(wrapped);
             }
 
@@ -33205,6 +33136,35 @@ impl VbcCodegen {
         }
     }
 
+    /// Reborrow the selected receiver place. A parameter or a pattern payload
+    /// already containing a reference keeps its original storage identity.
+    fn borrow_mutable_receiver(&mut self, expr: &Expr, src: Reg) -> CodegenResult<Reg> {
+        if let Some(crate::types::TypeRef::Reference { mutability, .. }) = Self::named_place_binding(expr)
+            .and_then(|name| self.declared_named_binding_type(name, src))
+        {
+            if mutability == crate::types::Mutability::Immutable {
+                return Err(CodegenError::with_span(
+                    CodegenErrorKind::InvalidSourceSignature("a mutable receiver requires writable storage".into()),
+                    expr.span,
+                ));
+            }
+            return Ok(src);
+        }
+        let dst = self.ctx.alloc_temp();
+        if self.borrows_handle_binding(expr, src) {
+            self.emit_local_mut_borrow(dst, src);
+        } else {
+            self.emit_ref_instruction(dst, src, CbgrTier::Tier0, true);
+        }
+        Ok(dst)
+    }
+
+    fn emit_local_mut_borrow(&mut self, dst: Reg, src: Reg) {
+        self.ctx.record_ref_tier(CbgrTier::Tier0);
+        self.ctx.ref_pinned_regs.insert(src.0);
+        self.ctx.emit(Instruction::RefLocal { dst, src });
+    }
+
     /// Emits a dereference instruction based on tier.
     ///
     /// - Tier 0: `Deref` with preceding `ChkRef` validation
@@ -40072,16 +40032,10 @@ impl VbcCodegen {
                 });
             }
             InlineSequenceId::Replace => {
-                // args: [dest, src], returns old value
-                let mut operands = Vec::<u8>::new();
-                Self::write_reg(&mut operands, dest.0);
-                for &arg in args.iter().take(2) {
-                    Self::write_reg(&mut operands, arg.0);
-                }
-                self.ctx.emit(Instruction::MemExtended {
-                    sub_op: 0x05, // replace
-                    operands,
-                });
+                let [place, value] = args else {
+                    return Err(CodegenError::unsupported_expr("replace requires a mutable place and a replacement"));
+                };
+                self.emit_value_exchange(dest, *place, *value);
             }
             // CBGR allocation intrinsics — emit as FfiExtended calls with
             // the CBGR-specific sub-opcodes (0xA0-0xA2). The old stubs at

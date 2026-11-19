@@ -27877,7 +27877,12 @@ fn lower_mem_extended<'ctx>(
             let ptr = ctx.get_register(ptr_reg)?;
             let new_val = ctx.get_register(new_val_reg)?;
             // Load old value, store new value
-            let ptr_val = as_ptr(ctx, ptr, "repl_ptr")?;
+            let ptr_val = if ptr.is_struct_value() {
+                ctx.builder().build_extract_value(ptr.into_struct_value(), 0, "repl_ptr")
+                    .or_llvm_err()?.into_pointer_value()
+            } else {
+                untag_slot_ptr(ctx, ptr, "repl_ptr")?
+            };
             let i64_ty = ctx.types().i64_type();
             let old_val = ctx
                 .builder()
@@ -45353,6 +45358,9 @@ fn lower_ref_mut_family<'ctx>(
                     .build_ptr_to_int(alloca_ptr, ctx.types().i64_type(), "refmut_alloca")
                     .or_llvm_err()?;
                 ctx.set_register(dst.0, slot_i64.into());
+                if referent == RefMutReferent::ForcedLocal {
+                    ctx.record_reference_site(super::native_call::ReferenceSiteKind::SlotOutput(dst.0));
+                }
                 // #18: scalar-slot ref — mark for compare-time deref
                 // (deref_if_lone_ref), mirroring scalar-&-param marking.
                 ctx.mark_ref_param_register(dst.0);

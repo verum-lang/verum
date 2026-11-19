@@ -120,6 +120,16 @@ pub fn builtin_drop_plan(owner: TypeId) -> Option<DropPlan> {
     })
 }
 
+/// References and immediate values can retire their register without
+/// observing a payload or running cleanup. Unknown declarations grant no such right.
+pub fn has_trivial_cleanup(ty: &TypeRef) -> bool {
+    match ty {
+        TypeRef::Reference { .. } => true,
+        TypeRef::Concrete(owner) => matches!(builtin_drop_plan(*owner), Some(DropPlan::Ignore)),
+        _ => false,
+    }
+}
+
 /// Refuse unresolved/legacy ownership instead of interpreting layout carriers.
 pub fn build(module: &VbcModule, ty: &TypeRef) -> Result<DropPlan, Text> {
     // The ownership of a reference is known even in an unspecialized function.

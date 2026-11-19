@@ -1,0 +1,35 @@
+type affine Counted is { sink: &mut Int, digit: Int };
+implement Drop for Counted {
+    fn drop(&mut self) { *self.sink = *self.sink * 10 + self.digit; }
+}
+
+type SlotValue is Absent | Live(Counted);
+implement Drop for SlotValue {
+    fn drop(&mut self) {
+        match &mut self {
+            SlotValue.Live(item) => item.drop(),
+            SlotValue.Absent => {},
+        }
+    }
+}
+
+fn replace(slot: &mut SlotValue, next: Counted) { *slot = SlotValue.Live(next); }
+fn forward(slot: &mut SlotValue, next: Counted) { replace(slot, next); }
+fn set_digit(counter: &mut Counted, digit: Int) { counter.digit = digit; }
+fn read(slot: &SlotValue) -> Int {
+    if let SlotValue.Live(ref item) = *slot { item.digit } else { 0 }
+}
+fn probe() -> Int {
+    let mut first = 0;
+    let mut second = 0;
+    let mut observed = 0;
+    {
+        let mut slot = SlotValue.Live(Counted {sink: &mut first, digit: 7});
+        let mut next = Counted {sink: &mut second, digit: 9};
+        set_digit(&mut next, 3);
+        forward(&mut slot, next);
+        if first != 7 || second != 0 { return 0; }
+        observed = read(&slot);
+    }
+    first * 100 + observed * 10 + second
+}

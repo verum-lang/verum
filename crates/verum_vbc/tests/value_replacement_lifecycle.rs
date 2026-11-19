@@ -37,6 +37,11 @@ fn exercise(source: &str) {
 }
 
 #[test]
+fn replacement_through_a_reference_preserves_owned_text() {
+    exercise(include_str!("fixtures/text_referent_replacement.vr"));
+}
+
+#[test]
 fn local_text_replacement_preserves_named_sources_and_self_assignment() {
     exercise(r#"
         fn probe() -> Int {

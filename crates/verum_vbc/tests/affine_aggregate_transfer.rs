@@ -104,6 +104,14 @@ fn probe() -> Int {{
 }
 
 #[test]
+fn replacing_an_affine_referent_retires_each_owner_exactly_once() {
+    let source = include_str!("fixtures/referent_replacement.vr");
+    for bootstrap in [false, true] {
+        assert_eq!(run(source, bootstrap), 733, "bootstrap={bootstrap}");
+    }
+}
+
+#[test]
 fn aggregate_transfer_clears_only_the_executed_branch() {
     for flag in ["true", "false"] {
         let source = format!(
