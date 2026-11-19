@@ -35629,13 +35629,7 @@ impl VbcCodegen {
             return self.compile_retain_copy(&args.as_slice()[1..], dest);
         }
 
-        // Compile remaining arguments
-        let mut arg_regs = Vec::with_capacity(args.len().saturating_sub(1));
-        for arg in args.iter().skip(1) {
-            if let Some(reg) = self.compile_expr(arg)? {
-                arg_regs.push(reg);
-            }
-        }
+        let arg_regs = self.compile_intrinsic_operands(&intrinsic_info, &args.as_slice()[1..])?;
 
         // Emit instructions based on codegen strategy.  For `@intrinsic`
         // form args[0] is the name literal and args[1] (when present) is
@@ -35784,13 +35778,7 @@ impl VbcCodegen {
             return Ok(Some(dest));
         }
 
-        // Compile remaining arguments (skip the intrinsic name)
-        let mut arg_regs = Vec::with_capacity(args.len().saturating_sub(1));
-        for arg in args.iter().skip(1) {
-            if let Some(reg) = self.compile_expr(arg)? {
-                arg_regs.push(reg);
-            }
-        }
+        let arg_regs = self.compile_intrinsic_operands(&intrinsic_info, &args.as_slice()[1..])?;
 
         // Emit instructions based on codegen strategy.  args[1] (when
         // present) is the pointer operand for a ptr-arithmetic intrinsic.
@@ -36169,13 +36157,7 @@ impl VbcCodegen {
             return self.compile_retain_copy(args.as_slice(), dest);
         }
 
-        // Compile arguments
-        let mut arg_regs = Vec::with_capacity(args.len());
-        for arg in args.iter() {
-            if let Some(reg) = self.compile_expr(arg)? {
-                arg_regs.push(reg);
-            }
-        }
+        let arg_regs = self.compile_intrinsic_operands(info, args)?;
 
         // Emit instructions based on codegen strategy.  For an imported
         // intrinsic call args[0] IS the pointer operand (no name literal),
@@ -36194,6 +36176,29 @@ impl VbcCodegen {
         }
 
         Ok(Some(dest))
+    }
+
+    fn compile_intrinsic_operands(
+        &mut self, info: &crate::intrinsics::IntrinsicInfo, args: &[Expr],
+    ) -> CodegenResult<verum_common::List<Reg>> {
+        let mut registers = verum_common::List::with_capacity(args.len());
+        let stored = info.intrinsic.stored_value_operand();
+        for (index, arg) in args.iter().enumerate() {
+            let start = self.ctx.instructions.len();
+            let Some(value) = self.compile_expr(arg)? else {
+                if stored == Some(index) {
+                    return Err(CodegenError::unsupported_expr("a stored intrinsic operand must produce a value"));
+                }
+                continue;
+            };
+            let received = if stored == Some(index) {
+                let declared = self.copy_source_type(arg, value, start, self.ctx.instructions.len());
+                self.receive_owned_place(arg, value, declared.as_ref(), ResultDemand::Used)?
+            } else { value };
+            if received != value { self.ctx.free_temp(value); }
+            registers.push(received);
+        }
+        Ok(registers)
     }
 
     /// Leaf identifier of a possibly-qualified call name — both

@@ -1354,6 +1354,15 @@ pub enum IntrinsicCallBound {
 }
 
 impl Intrinsic {
+    /// Source operand installed as a complete owned value by a memory operation.
+    /// The exchange's first operand is the destination reference.
+    pub(crate) fn stored_value_operand(&self) -> Option<usize> {
+        match self.strategy {
+            CodegenStrategy::InlineSequence(InlineSequenceId::Replace) => Some(1),
+            _ => None,
+        }
+    }
+
     /// The operation, not its surface spelling or `Pure` hint, owns this bound.
     pub fn call_bound(&self) -> IntrinsicCallBound {
         match self.strategy {

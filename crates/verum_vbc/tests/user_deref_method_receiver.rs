@@ -465,6 +465,23 @@ fn replacing_a_reborrowed_record_updates_the_guard_and_returns_the_old_record() 
     "#, Some(749));
 }
 
+#[test]
+fn exchanging_a_named_value_preserves_independent_storage() {
+    for operation in ["@intrinsic(\"replace\", place, value)", "@vbc(replace, place, value)"] {
+        let body = format!(r#"
+            fn exchange<T>(place: &mut T, value: T) -> T {{ {operation} }}
+            fn probe() -> Int {{
+                let mut slot = Cell {{ padding: 0, value: 7 }};
+                let mut source = Cell {{ padding: 0, value: 3 }};
+                let old = exchange(&mut slot, source);
+                source.value = 9;
+                old.value * 100 + slot.value * 10 + source.value
+            }}
+        "#);
+        check(&body, Some(739));
+    }
+}
+
 const MUTATING_TARGET: &str = r#"
 implement Cell {
     fn overwrite(&mut self, value: Int) {

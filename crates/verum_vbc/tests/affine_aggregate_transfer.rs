@@ -112,6 +112,26 @@ fn replacing_an_affine_referent_retires_each_owner_exactly_once() {
 }
 
 #[test]
+fn generic_exchange_installs_an_owner_independent_of_the_callee_frame() {
+    let source = r#"
+        fn exchange<T>(slot: &mut T, value: T) -> T { @intrinsic("replace", slot, value) }
+        fn probe() -> Int {
+            let mut first = Count { value: 0 };
+            let mut second = Count { value: 0 };
+            {
+                let mut current = Handle { counter: &mut first, digit: 7 };
+                let next = Handle { counter: &mut second, digit: 3 };
+                let old = exchange(&mut current, next);
+                if old.digit != 7 || current.digit != 3 { return 0; }
+                if first.value != 0 || second.value != 0 { return 0; }
+            }
+            first.value * 10 + second.value
+        }
+    "#;
+    for bootstrap in [false, true] { assert_eq!(run(source, bootstrap), 73); }
+}
+
+#[test]
 fn aggregate_transfer_clears_only_the_executed_branch() {
     for flag in ["true", "false"] {
         let source = format!(
