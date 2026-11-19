@@ -80,7 +80,7 @@ public fn parse(value: &[Byte]) -> Result<ExtKeyUsage, DerError> {
     while !seq.is_at_end() {
         let arcs = seq.read_oid()?;
         let oid = Oid.from(arcs.as_slice());
-        let p = classify(&oid);
+        let p = classify(oid);
         out.push(p);
     }
     seq.expect_end()?;
@@ -88,7 +88,7 @@ public fn parse(value: &[Byte]) -> Result<ExtKeyUsage, DerError> {
     Result.Ok(ExtKeyUsage { purposes: out })
 }
 
-fn classify(oid: &Oid) -> ExtKeyUsagePurpose {
+fn classify(oid: Oid) -> ExtKeyUsagePurpose {
     if oid.eq(&pkix_oid.eku_server_auth())      { return ExtKeyUsagePurpose.ServerAuth; }
     if oid.eq(&pkix_oid.eku_client_auth())      { return ExtKeyUsagePurpose.ClientAuth; }
     if oid.eq(&pkix_oid.eku_code_signing())     { return ExtKeyUsagePurpose.CodeSigning; }
@@ -96,5 +96,5 @@ fn classify(oid: &Oid) -> ExtKeyUsagePurpose {
     if oid.eq(&pkix_oid.eku_time_stamping())    { return ExtKeyUsagePurpose.TimeStamping; }
     if oid.eq(&pkix_oid.eku_ocsp_signing())     { return ExtKeyUsagePurpose.OcspSigning; }
     if oid.eq(&pkix_oid.eku_any())              { return ExtKeyUsagePurpose.AnyPurpose; }
-    ExtKeyUsagePurpose.Other(oid.clone())
+    ExtKeyUsagePurpose.Other(oid)
 }

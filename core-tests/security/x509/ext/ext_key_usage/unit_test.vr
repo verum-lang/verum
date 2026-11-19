@@ -104,3 +104,11 @@ fn test_decoded_eku_distinguishes_server_and_client_oids() {
     assert(client.allows_client_auth(), "clientAuth missing from decoded usage");
     assert(!client.allows_server_auth(), "clientAuth incorrectly grants serverAuth");
 }
+
+@test
+fn test_unknown_eku_oid_does_not_grant_server_or_client_auth() {
+    let encoded: List<Byte> = [48_u8, 4_u8, 6_u8, 2_u8, 42_u8, 3_u8];
+    let usage = parse(encoded.as_slice()).unwrap();
+    assert(!usage.allows_server_auth());
+    assert(!usage.allows_client_auth());
+}
