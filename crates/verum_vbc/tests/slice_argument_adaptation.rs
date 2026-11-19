@@ -338,3 +338,49 @@ fn list_borrow_does_not_replace_an_existing_element_or_guess_one_from_a_slice() 
         }
     }
 }
+
+#[test]
+fn a_bounded_method_on_a_field_establishes_its_fresh_output_list() {
+    let source = r#"
+        type Reader is protocol {
+            fn fill(&mut self, marker: Byte, out: &mut List<Byte>) -> Int;
+        };
+        type Other is protocol {
+            fn fill(&mut self, marker: Byte, out: &mut List<Bool>) -> Int;
+        };
+        type Source is ();
+        implement Reader for Source {
+            fn fill(&mut self, marker: Byte, out: &mut List<Byte>) -> Int {
+                out.push(marker);
+                1
+            }
+        }
+        type FlagSource is ();
+        implement Other for FlagSource {
+            fn fill(&mut self, marker: Byte, out: &mut List<Bool>) -> Int {
+                out.push(marker != 0_u8);
+                1
+            }
+        }
+        type Chunk<R: Reader> is { reader: R };
+        implement<R: Reader> Chunk<R> {
+            fn collect(&mut self) -> Int {
+                let mut buf = List.new();
+                let count = self.reader.fill(97_u8, &mut buf);
+                count + inspect(&buf)
+            }
+        }
+        fn inspect(bytes: &[Byte]) -> Int { bytes[0] as Int }
+        fn probe() -> Int {
+            let mut chunk = Chunk { reader: Source() };
+            chunk.collect()
+        }
+    "#;
+    run(source, 98);
+    let wrong = source.replace("R: Reader", "R: Other")
+        .replace("reader: Source()", "reader: FlagSource()");
+    for unit in [false, true] {
+        let error = compile(&wrong, unit).unwrap_err();
+        assert!(error.to_string().contains("slice"), "unit={unit}: {error}");
+    }
+}

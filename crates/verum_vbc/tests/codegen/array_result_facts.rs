@@ -325,6 +325,20 @@ fn dynamic_integer_conversion_forgets_only_its_destination() {
     );
 }
 
+#[test]
+fn reading_a_record_field_preserves_only_unrelated_list_freshness() {
+    let mut facts = ArrayResultFacts::default();
+    let fresh = Reg(7);
+    let record = Reg(8);
+    let field = Reg(9);
+    facts.observe(&Instruction::NewList { dst: fresh, capacity_hint: 0 });
+    assert!(facts.observe(&Instruction::GetF { dst: field, obj: record, field_idx: 0 }));
+    assert!(facts.is_fresh_list(fresh));
+    assert!(!facts.is_fresh_list(field));
+    assert!(facts.observe(&Instruction::GetF { dst: fresh, obj: record, field_idx: 0 }));
+    assert!(!facts.is_fresh_list(fresh));
+}
+
 fn sign_extend(dst: Reg, source: Reg, from_bits: u8) -> Instruction {
     let mut operands = vec![];
     encode_reg(dst, &mut operands);

@@ -16766,8 +16766,10 @@ impl VbcCodegen {
         let mut copy_arguments = verum_common::List::new();
         let args_start = if !args.is_empty() {
             let mut arg_vals: Vec<Reg> = Vec::with_capacity(args.len());
-            let contexts = resolved_method.as_ref()
-                .map(|method| self.contextual_call_parameters(method, type_args, args)).transpose()?.flatten();
+            let contexts = if dynamic.is_none() {
+                resolved_method.as_ref().map(|method| self.contextual_call_parameters(method, type_args, args))
+                    .transpose()?.flatten()
+            } else { None };
             for (i, arg) in args.iter().enumerate() {
                 // Skip self (param index 0): callsite `args` already
                 // excludes the receiver — so closure arg at callsite
@@ -16783,8 +16785,10 @@ impl VbcCodegen {
                     None
                 };
                 let copy_start = self.ctx.instructions.len();
+                let expected = dynamic.as_ref().and_then(|member| member.inputs.get(i))
+                    .or_else(|| contexts.as_ref().and_then(|types| types.get(i + receiver_slots)?.as_ref()));
                 let arg_val = self
-                    .compile_call_operand(arg, contexts.as_ref().and_then(|types| types.get(i + receiver_slots)?.as_ref()))?
+                    .compile_call_operand(arg, expected)?
                     .or_internal("method arg has no value")?;
                 let copy_type = self.copy_source_type(arg, arg_val, copy_start, self.ctx.instructions.len());
                 // Builtin storage uses CallM for its native layout. The selected
