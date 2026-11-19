@@ -1,0 +1,52 @@
+mount core.configuration.toml.{TomlValue, parse_table};
+
+@test
+fn test_dotted_keys_and_nested_headers_retain_their_fields() {
+    let source = "[cog]\nname = 'codec'\npackage.version = '1.2'\n[cog.metadata]\nauthors = ['Ada']\n[cog.package.details]\nlicense = 'MIT'\n";
+    let root = parse_table(&source).unwrap();
+    match root.get("cog").unwrap() {
+        TomlValue.TomlTable(cog_table) => {
+            assert(cog_table.get("name").unwrap() is TomlValue.TomlString("codec"));
+            match cog_table.get("package").unwrap() {
+                TomlValue.TomlTable(package) => {
+                    assert(package.get("version").unwrap() is TomlValue.TomlString("1.2"));
+                    match package.get("details").unwrap() {
+                        TomlValue.TomlTable(details) => assert(details.get("license").unwrap() is TomlValue.TomlString("MIT")),
+                        _ => panic("details must be a nested table"),
+                    }
+                }
+                _ => panic("package must be a nested table"),
+            }
+            assert(cog_table.get("metadata").unwrap() is TomlValue.TomlTable(_));
+        }
+        _ => panic("cog must be a table"),
+    }
+}
+
+@test
+fn test_array_headers_populate_the_last_table() {
+    let root = parse_table(&"[[rows]]\nid = 4\n[[rows]]\nid = 5\n[rows.extra]\nenabled = true\n").unwrap();
+    match root.get("rows").unwrap() {
+        TomlValue.TomlArray(rows) => {
+            assert_eq(rows.len(), 2);
+            match rows.get(0).unwrap() {
+                TomlValue.TomlTable(first) => {
+                    assert(first.get("id").unwrap() is TomlValue.TomlInt(4));
+                    assert(!first.contains_key("extra"));
+                }
+                _ => panic("first array element must be a table"),
+            }
+            match rows.get(1).unwrap() {
+                TomlValue.TomlTable(second) => {
+                    assert(second.get("id").unwrap() is TomlValue.TomlInt(5));
+                    match second.get("extra").unwrap() {
+                        TomlValue.TomlTable(extra) => assert(extra.get("enabled").unwrap() is TomlValue.TomlBool(true)),
+                        _ => panic("missing nested array table"),
+                    }
+                }
+                _ => panic("second array element must be a table"),
+            }
+        }
+        _ => panic("rows must be an array of tables"),
+    }
+}

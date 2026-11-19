@@ -225,34 +225,30 @@ const MAX_TOML_TABLE_KEYS: Int = 1_000_000;
 // Parser scaffolding
 // =============================================================================
 
+// The cursor can move while the input remains borrowed by the caller.
 type Parser is {
-    bytes: &[Byte],
     pos: Int,
     line: Int,
     column: Int,
     depth: Int,
 };
 
-fn new_parser(bytes: &[Byte]) -> Parser {
-    Parser { bytes: bytes, pos: 0, line: 1, column: 1, depth: 0 }
-}
-
 fn mk_err(p: &Parser, kind: TomlErrorKind, msg: &Text) -> TomlError {
     TomlError { kind: kind, line: p.line, column: p.column, message: msg.clone() }
 }
 
-fn peek(p: &Parser) -> Maybe<Byte> {
-    if p.pos < p.bytes.len() { Maybe.Some(p.bytes[p.pos]) } else { Maybe.None }
+fn peek(bytes: &[Byte], p: &Parser) -> Maybe<Byte> {
+    if p.pos < bytes.len() { Maybe.Some(bytes[p.pos]) } else { Maybe.None }
 }
 
-fn peek_at(p: &Parser, offset: Int) -> Maybe<Byte> {
+fn peek_at(bytes: &[Byte], p: &Parser, offset: Int) -> Maybe<Byte> {
     let i = p.pos + offset;
-    if i < p.bytes.len() { Maybe.Some(p.bytes[i]) } else { Maybe.None }
+    if i < bytes.len() { Maybe.Some(bytes[i]) } else { Maybe.None }
 }
 
-fn advance(p: &mut Parser) {
-    if p.pos < p.bytes.len() {
-        let b = p.bytes[p.pos];
+fn advance(bytes: &[Byte], p: &mut Parser) {
+    if p.pos < bytes.len() {
+        let b = bytes[p.pos];
         p.pos = p.pos + 1;
         if b == 0x0A_u8 {
             p.line = p.line + 1;
@@ -265,24 +261,24 @@ fn advance(p: &mut Parser) {
 
 // Whitespace per §"Whitespace": space (0x20) or horizontal tab (0x09).
 // (Not LF/CR — those are line terminators.)
-fn skip_ws(p: &mut Parser) {
-    while p.pos < p.bytes.len() {
-        let b = p.bytes[p.pos];
-        if b == 0x20_u8 || b == 0x09_u8 { advance(p); } else { break; }
+fn skip_ws(bytes: &[Byte], p: &mut Parser) {
+    while p.pos < bytes.len() {
+        let b = bytes[p.pos];
+        if b == 0x20_u8 || b == 0x09_u8 { advance(bytes, p); } else { break; }
     }
 }
 
 // Skip whitespace AND comments AND line endings — used between top-level
 // table headers and key-value pairs.
-fn skip_ws_and_comments(p: &mut Parser) {
-    while p.pos < p.bytes.len() {
-        let b = p.bytes[p.pos];
+fn skip_ws_and_comments(bytes: &[Byte], p: &mut Parser) {
+    while p.pos < bytes.len() {
+        let b = bytes[p.pos];
         if b == 0x20_u8 || b == 0x09_u8 || b == 0x0A_u8 || b == 0x0D_u8 {
-            advance(p);
+            advance(bytes, p);
         } else if b == 0x23_u8 { // '#'
             // comment until end-of-line
-            while p.pos < p.bytes.len() && p.bytes[p.pos] != 0x0A_u8 {
-                advance(p);
+            while p.pos < bytes.len() && bytes[p.pos] != 0x0A_u8 {
+                advance(bytes, p);
             }
         } else {
             break;
@@ -291,21 +287,21 @@ fn skip_ws_and_comments(p: &mut Parser) {
 }
 
 // Skip optional inline comment + LF/CRLF; require either end-of-line or eof.
-fn require_newline_or_eof(p: &mut Parser, ctx: &Text) -> Result<(), TomlError> {
-    skip_ws(p);
-    if p.pos >= p.bytes.len() { return Result.Ok(()); }
-    let b = p.bytes[p.pos];
+fn require_newline_or_eof(bytes: &[Byte], p: &mut Parser, ctx: &Text) -> Result<(), TomlError> {
+    skip_ws(bytes, p);
+    if p.pos >= bytes.len() { return Result.Ok(()); }
+    let b = bytes[p.pos];
     if b == 0x23_u8 { // comment
-        while p.pos < p.bytes.len() && p.bytes[p.pos] != 0x0A_u8 { advance(p); }
+        while p.pos < bytes.len() && bytes[p.pos] != 0x0A_u8 { advance(bytes, p); }
     }
-    if p.pos >= p.bytes.len() { return Result.Ok(()); }
-    let c = p.bytes[p.pos];
+    if p.pos >= bytes.len() { return Result.Ok(()); }
+    let c = bytes[p.pos];
     if c == 0x0A_u8 {
-        advance(p);
+        advance(bytes, p);
         Result.Ok(())
     } else if c == 0x0D_u8 {
-        advance(p);
-        if p.pos < p.bytes.len() && p.bytes[p.pos] == 0x0A_u8 { advance(p); }
+        advance(bytes, p);
+        if p.pos < bytes.len() && bytes[p.pos] == 0x0A_u8 { advance(bytes, p); }
         Result.Ok(())
     } else {
         Result.Err(mk_err(p, UnexpectedChar, ctx))
@@ -324,8 +320,8 @@ public fn parse(source: &Text) -> Result<TomlValue, TomlError> {
 
 // Parse a TOML document and return the typed root table directly.
 public fn parse_table(source: &Text) -> Result<Map<Text, TomlValue>, TomlError> {
-    let mut parser = new_parser(source.as_bytes());
-    parse_document(&mut parser)
+    let mut parser = Parser { pos: 0, line: 1, column: 1, depth: 0 };
+    parse_document(source.as_bytes(), &mut parser)
 }
 
 // =============================================================================
@@ -339,65 +335,65 @@ public fn parse_table(source: &Text) -> Result<Map<Text, TomlValue>, TomlError> 
 //
 // The parser maintains a "current path" pointing into root, and applies
 // each subsequent key-value pair to the table at that path.
-fn parse_document(p: &mut Parser) -> Result<Map<Text, TomlValue>, TomlError> {
+fn parse_document(bytes: &[Byte], p: &mut Parser) -> Result<Map<Text, TomlValue>, TomlError> {
     let mut root: Map<Text, TomlValue> = Map.new();
     // current_path is the dotted-key path of the active table.
     // Empty list means root.
     let mut current_path: List<Text> = List.new();
 
-    skip_ws_and_comments(p);
-    while p.pos < p.bytes.len() {
-        let b = p.bytes[p.pos];
+    skip_ws_and_comments(bytes, p);
+    while p.pos < bytes.len() {
+        let b = bytes[p.pos];
         if b == 0x5B_u8 { // '['
             // Either [table] or [[array-of-tables]]
-            if peek_at(p, 1) == Maybe.Some(0x5B_u8) {
+            if peek_at(bytes, p, 1) == Maybe.Some(0x5B_u8) {
                 // [[array-of-tables]]
-                advance(p); advance(p); // consume "[["
-                let path = parse_key_path(p)?;
-                expect_byte(p, 0x5D_u8, &"expected ']' after array-of-tables key")?;
-                expect_byte(p, 0x5D_u8, &"expected ']]' after array-of-tables key")?;
-                require_newline_or_eof(p, &"trailing garbage after [[header]]")?;
+                advance(bytes, p); advance(bytes, p); // consume "[["
+                let path = parse_key_path(bytes, p)?;
+                expect_byte(bytes, p, 0x5D_u8, &"expected ']' after array-of-tables key")?;
+                expect_byte(bytes, p, 0x5D_u8, &"expected ']]' after array-of-tables key")?;
+                require_newline_or_eof(bytes, p, &"trailing garbage after [[header]]")?;
                 push_aot(&mut root, &path, p)?;
                 current_path = path;
             } else {
                 // [table]
-                advance(p); // consume '['
-                let path = parse_key_path(p)?;
-                expect_byte(p, 0x5D_u8, &"expected ']' after table key")?;
-                require_newline_or_eof(p, &"trailing garbage after [header]")?;
+                advance(bytes, p); // consume '['
+                let path = parse_key_path(bytes, p)?;
+                expect_byte(bytes, p, 0x5D_u8, &"expected ']' after table key")?;
+                require_newline_or_eof(bytes, p, &"trailing garbage after [header]")?;
                 define_table(&mut root, &path, p)?;
                 current_path = path;
             }
         } else {
             // key-value pair
-            let key_path = parse_key_path(p)?;
-            skip_ws(p);
-            expect_byte(p, 0x3D_u8, &"expected '=' after key")?;
-            skip_ws(p);
-            let value = parse_value(p)?;
-            require_newline_or_eof(p, &"trailing garbage after value")?;
+            let key_path = parse_key_path(bytes, p)?;
+            skip_ws(bytes, p);
+            expect_byte(bytes, p, 0x3D_u8, &"expected '=' after key")?;
+            skip_ws(bytes, p);
+            let value = parse_value(bytes, p)?;
+            require_newline_or_eof(bytes, p, &"trailing garbage after value")?;
 
             // Resolve target table by current_path, then set key_path inside it.
             let target = resolve_target(&mut root, &current_path, p)?;
             insert_dotted(target, &key_path, value, p)?;
         }
-        skip_ws_and_comments(p);
+        skip_ws_and_comments(bytes, p);
     }
     Result.Ok(root)
 }
 
 // Parse a dotted key-path: bare-key | quoted-key (. bare-key | quoted-key)*
-fn parse_key_path(p: &mut Parser) -> Result<List<Text>, TomlError> {
+fn parse_key_path(bytes: &[Byte], p: &mut Parser) -> Result<List<Text>, TomlError> {
     let mut parts: List<Text> = List.new();
-    skip_ws(p);
-    let first = parse_key_segment(p)?;
+    skip_ws(bytes, p);
+    let first = parse_key_segment(bytes, p)?;
     parts.push(first);
     loop {
-        skip_ws(p);
-        if peek(p) == Maybe.Some(0x2E_u8) { // '.'
-            advance(p);
-            skip_ws(p);
-            parts.push(parse_key_segment(p)?);
+        skip_ws(bytes, p);
+        if peek(bytes, p) == Maybe.Some(0x2E_u8) { // '.'
+            advance(bytes, p);
+            skip_ws(bytes, p);
+            parts.push(parse_key_segment(bytes, p)?);
         } else {
             break;
         }
@@ -405,15 +401,15 @@ fn parse_key_path(p: &mut Parser) -> Result<List<Text>, TomlError> {
     Result.Ok(parts)
 }
 
-fn parse_key_segment(p: &mut Parser) -> Result<Text, TomlError> {
-    match peek(p) {
+fn parse_key_segment(bytes: &[Byte], p: &mut Parser) -> Result<Text, TomlError> {
+    match peek(bytes, p) {
         Maybe.Some(b) => {
             if b == 0x22_u8 {       // basic string '"'
-                parse_basic_string(p, false)
+                parse_basic_string(bytes, p, false)
             } else if b == 0x27_u8 { // literal string "'"
-                parse_literal_string(p, false)
+                parse_literal_string(bytes, p, false)
             } else if is_bare_key_char(b) {
-                parse_bare_key(p)
+                parse_bare_key(bytes, p)
             } else {
                 Result.Err(mk_err(p, EmptyKey, &"expected key"))
             }
@@ -430,15 +426,15 @@ fn is_bare_key_char(b: Byte) -> Bool {
         || b == 0x5F_u8                     // '_'
 }
 
-fn parse_bare_key(p: &mut Parser) -> Result<Text, TomlError> {
+fn parse_bare_key(bytes: &[Byte], p: &mut Parser) -> Result<Text, TomlError> {
     let start = p.pos;
-    while p.pos < p.bytes.len() && is_bare_key_char(p.bytes[p.pos]) {
-        advance(p);
+    while p.pos < bytes.len() && is_bare_key_char(bytes[p.pos]) {
+        advance(bytes, p);
     }
     if p.pos == start {
         return Result.Err(mk_err(p, EmptyKey, &"empty bare key"));
     }
-    Result.Ok(slice_text(p.bytes, start, p.pos))
+    Result.Ok(slice_text(bytes, start, p.pos))
 }
 
 // Token boundaries in the input text fall between UTF-8 code points.
@@ -447,10 +443,10 @@ fn slice_text(bytes: &[Byte], start: Int, end: Int) -> Text {
 }
 
 // Expect a single byte, advance.
-fn expect_byte(p: &mut Parser, b: Byte, ctx: &Text) -> Result<(), TomlError> {
-    match peek(p) {
+fn expect_byte(bytes: &[Byte], p: &mut Parser, b: Byte, ctx: &Text) -> Result<(), TomlError> {
+    match peek(bytes, p) {
         Maybe.Some(c) => {
-            if c == b { advance(p); Result.Ok(()) }
+            if c == b { advance(bytes, p); Result.Ok(()) }
             else { Result.Err(mk_err(p, UnexpectedChar, ctx)) }
         }
         Maybe.None => Result.Err(mk_err(p, UnexpectedEof, ctx)),
@@ -461,41 +457,41 @@ fn expect_byte(p: &mut Parser, b: Byte, ctx: &Text) -> Result<(), TomlError> {
 // Value parser
 // =============================================================================
 
-fn parse_value(p: &mut Parser) -> Result<TomlValue, TomlError> {
+fn parse_value(bytes: &[Byte], p: &mut Parser) -> Result<TomlValue, TomlError> {
     if p.depth >= MAX_TOML_DEPTH {
         return Result.Err(mk_err(p, DepthLimit, &"TOML nesting too deep"));
     }
-    skip_ws(p);
-    match peek(p) {
+    skip_ws(bytes, p);
+    match peek(bytes, p) {
         Maybe.None => Result.Err(mk_err(p, UnexpectedEof, &"expected value")),
         Maybe.Some(b) => {
             if b == 0x22_u8 {        // '"' — basic or multiline-basic string
-                if peek_at(p, 1) == Maybe.Some(0x22_u8) && peek_at(p, 2) == Maybe.Some(0x22_u8) {
-                    Result.Ok(TomlValue.TomlString(parse_multiline_basic_string(p)?))
+                if peek_at(bytes, p, 1) == Maybe.Some(0x22_u8) && peek_at(bytes, p, 2) == Maybe.Some(0x22_u8) {
+                    Result.Ok(TomlValue.TomlString(parse_multiline_basic_string(bytes, p)?))
                 } else {
-                    Result.Ok(TomlValue.TomlString(parse_basic_string(p, true)?))
+                    Result.Ok(TomlValue.TomlString(parse_basic_string(bytes, p, true)?))
                 }
             } else if b == 0x27_u8 { // "'" — literal or multiline-literal
-                if peek_at(p, 1) == Maybe.Some(0x27_u8) && peek_at(p, 2) == Maybe.Some(0x27_u8) {
-                    Result.Ok(TomlValue.TomlString(parse_multiline_literal_string(p)?))
+                if peek_at(bytes, p, 1) == Maybe.Some(0x27_u8) && peek_at(bytes, p, 2) == Maybe.Some(0x27_u8) {
+                    Result.Ok(TomlValue.TomlString(parse_multiline_literal_string(bytes, p)?))
                 } else {
-                    Result.Ok(TomlValue.TomlString(parse_literal_string(p, true)?))
+                    Result.Ok(TomlValue.TomlString(parse_literal_string(bytes, p, true)?))
                 }
             } else if b == 0x5B_u8 { // '[' — array
                 p.depth = p.depth + 1;
-                let v = parse_array(p)?;
+                let v = parse_array(bytes, p)?;
                 p.depth = p.depth - 1;
                 Result.Ok(v)
             } else if b == 0x7B_u8 { // '{' — inline table
                 p.depth = p.depth + 1;
-                let v = parse_inline_table(p)?;
+                let v = parse_inline_table(bytes, p)?;
                 p.depth = p.depth - 1;
                 Result.Ok(v)
             } else if b == 0x74_u8 || b == 0x66_u8 { // 't'/'f' — bool
-                parse_bool(p)
+                parse_bool(bytes, p)
             } else {
                 // Number or datetime — disambiguate by lookahead.
-                parse_number_or_datetime(p)
+                parse_number_or_datetime(bytes, p)
             }
         }
     }
@@ -508,27 +504,27 @@ fn parse_value(p: &mut Parser) -> Result<TomlValue, TomlError> {
 // Basic string: "..." with escape sequences per §"String".
 // `consume_value` controls whether the surrounding quotes are consumed
 // (true) or already consumed by the caller (false — for keys).
-fn parse_basic_string(p: &mut Parser, consume_value: Bool) -> Result<Text, TomlError> {
-    expect_byte(p, 0x22_u8, &"expected '\"'")?;
+fn parse_basic_string(bytes: &[Byte], p: &mut Parser, consume_value: Bool) -> Result<Text, TomlError> {
+    expect_byte(bytes, p, 0x22_u8, &"expected '\"'")?;
     let mut out = Text.new();
     let mut bytes_collected = 0;
     loop {
-        match peek(p) {
+        match peek(bytes, p) {
             Maybe.None => return Result.Err(mk_err(p, UnexpectedEof, &"unterminated basic string")),
             Maybe.Some(b) => {
                 if b == 0x22_u8 {       // closing '"'
-                    advance(p);
+                    advance(bytes, p);
                     return Result.Ok(out);
                 } else if b == 0x5C_u8 { // '\'
-                    advance(p);
-                    parse_basic_escape(p, &mut out)?;
+                    advance(bytes, p);
+                    parse_basic_escape(bytes, p, &mut out)?;
                 } else if b == 0x0A_u8 || b == 0x0D_u8 {
                     return Result.Err(mk_err(p, UnexpectedChar, &"newline in basic string"));
                 } else if b < 0x20_u8 && b != 0x09_u8 {
                     return Result.Err(mk_err(p, UnexpectedChar, &"control char in basic string"));
                 } else {
                     out.push_byte(b);
-                    advance(p);
+                    advance(bytes, p);
                     bytes_collected = bytes_collected + 1;
                     if bytes_collected > MAX_TOML_STRING_BYTES {
                         return Result.Err(mk_err(p, StringTooLong, &"basic string exceeds limit"));
@@ -540,56 +536,56 @@ fn parse_basic_string(p: &mut Parser, consume_value: Bool) -> Result<Text, TomlE
 }
 
 // Multiline basic string: """...""" with optional immediate newline trim.
-fn parse_multiline_basic_string(p: &mut Parser) -> Result<Text, TomlError> {
-    advance(p); advance(p); advance(p); // consume opening """
+fn parse_multiline_basic_string(bytes: &[Byte], p: &mut Parser) -> Result<Text, TomlError> {
+    advance(bytes, p); advance(bytes, p); advance(bytes, p); // consume opening """
     // §"String": A newline immediately following the opening delimiter
     // will be trimmed.
-    if peek(p) == Maybe.Some(0x0D_u8) {
-        advance(p);
-        if peek(p) == Maybe.Some(0x0A_u8) { advance(p); }
-    } else if peek(p) == Maybe.Some(0x0A_u8) {
-        advance(p);
+    if peek(bytes, p) == Maybe.Some(0x0D_u8) {
+        advance(bytes, p);
+        if peek(bytes, p) == Maybe.Some(0x0A_u8) { advance(bytes, p); }
+    } else if peek(bytes, p) == Maybe.Some(0x0A_u8) {
+        advance(bytes, p);
     }
     let mut out = Text.new();
     loop {
-        match peek(p) {
+        match peek(bytes, p) {
             Maybe.None => return Result.Err(mk_err(p, UnexpectedEof, &"unterminated \"\"\" string")),
             Maybe.Some(b) => {
-                if b == 0x22_u8 && peek_at(p, 1) == Maybe.Some(0x22_u8) && peek_at(p, 2) == Maybe.Some(0x22_u8) {
+                if b == 0x22_u8 && peek_at(bytes, p, 1) == Maybe.Some(0x22_u8) && peek_at(bytes, p, 2) == Maybe.Some(0x22_u8) {
                     // Look ahead — TOML allows up to two extra " before closing.
-                    advance(p); advance(p); advance(p);
+                    advance(bytes, p); advance(bytes, p); advance(bytes, p);
                     let mut extra = 0;
-                    while extra < 2 && peek(p) == Maybe.Some(0x22_u8) {
+                    while extra < 2 && peek(bytes, p) == Maybe.Some(0x22_u8) {
                         out.push_byte(0x22_u8);
-                        advance(p);
+                        advance(bytes, p);
                         extra = extra + 1;
                     }
                     return Result.Ok(out);
                 } else if b == 0x5C_u8 {
-                    advance(p);
+                    advance(bytes, p);
                     // Line-ending backslash: trims whitespace+newlines.
-                    let q = peek(p);
+                    let q = peek(bytes, p);
                     if q == Maybe.Some(0x20_u8) || q == Maybe.Some(0x09_u8) || q == Maybe.Some(0x0A_u8) || q == Maybe.Some(0x0D_u8) {
                         // Per §"String": when the last non-whitespace char is `\`,
                         // it joins next line. Trim until non-whitespace.
                         // First skip remaining whitespace-on-line + newline
                         let mut saw_nl = false;
-                        while p.pos < p.bytes.len() {
-                            let c = p.bytes[p.pos];
-                            if c == 0x20_u8 || c == 0x09_u8 { advance(p); }
-                            else if c == 0x0A_u8 { advance(p); saw_nl = true; }
-                            else if c == 0x0D_u8 { advance(p); }
+                        while p.pos < bytes.len() {
+                            let c = bytes[p.pos];
+                            if c == 0x20_u8 || c == 0x09_u8 { advance(bytes, p); }
+                            else if c == 0x0A_u8 { advance(bytes, p); saw_nl = true; }
+                            else if c == 0x0D_u8 { advance(bytes, p); }
                             else { break; }
                         }
                         if !saw_nl {
                             return Result.Err(mk_err(p, InvalidEscape, &"line-ending backslash without newline"));
                         }
                     } else {
-                        parse_basic_escape(p, &mut out)?;
+                        parse_basic_escape(bytes, p, &mut out)?;
                     }
                 } else {
                     out.push_byte(b);
-                    advance(p);
+                    advance(bytes, p);
                 }
             }
         }
@@ -597,21 +593,21 @@ fn parse_multiline_basic_string(p: &mut Parser) -> Result<Text, TomlError> {
 }
 
 // Literal string: '...' — no escapes, no multiline.
-fn parse_literal_string(p: &mut Parser, _consume_value: Bool) -> Result<Text, TomlError> {
-    expect_byte(p, 0x27_u8, &"expected '\\''")?;
+fn parse_literal_string(bytes: &[Byte], p: &mut Parser, _consume_value: Bool) -> Result<Text, TomlError> {
+    expect_byte(bytes, p, 0x27_u8, &"expected '\\''")?;
     let start = p.pos;
     loop {
-        match peek(p) {
+        match peek(bytes, p) {
             Maybe.None => return Result.Err(mk_err(p, UnexpectedEof, &"unterminated literal string")),
             Maybe.Some(b) => {
                 if b == 0x27_u8 {
-                    let s = slice_text(p.bytes, start, p.pos);
-                    advance(p);
+                    let s = slice_text(bytes, start, p.pos);
+                    advance(bytes, p);
                     return Result.Ok(s);
                 } else if b == 0x0A_u8 || b == 0x0D_u8 {
                     return Result.Err(mk_err(p, UnexpectedChar, &"newline in literal string"));
                 } else {
-                    advance(p);
+                    advance(bytes, p);
                 }
             }
         }
@@ -619,68 +615,68 @@ fn parse_literal_string(p: &mut Parser, _consume_value: Bool) -> Result<Text, To
 }
 
 // Multiline literal string: '''...''' — no escapes; immediate newline trim.
-fn parse_multiline_literal_string(p: &mut Parser) -> Result<Text, TomlError> {
-    advance(p); advance(p); advance(p); // consume opening '''
-    if peek(p) == Maybe.Some(0x0D_u8) {
-        advance(p);
-        if peek(p) == Maybe.Some(0x0A_u8) { advance(p); }
-    } else if peek(p) == Maybe.Some(0x0A_u8) {
-        advance(p);
+fn parse_multiline_literal_string(bytes: &[Byte], p: &mut Parser) -> Result<Text, TomlError> {
+    advance(bytes, p); advance(bytes, p); advance(bytes, p); // consume opening '''
+    if peek(bytes, p) == Maybe.Some(0x0D_u8) {
+        advance(bytes, p);
+        if peek(bytes, p) == Maybe.Some(0x0A_u8) { advance(bytes, p); }
+    } else if peek(bytes, p) == Maybe.Some(0x0A_u8) {
+        advance(bytes, p);
     }
     let start = p.pos;
     loop {
-        match peek(p) {
+        match peek(bytes, p) {
             Maybe.None => return Result.Err(mk_err(p, UnexpectedEof, &"unterminated ''' string")),
             Maybe.Some(b) => {
-                if b == 0x27_u8 && peek_at(p, 1) == Maybe.Some(0x27_u8) && peek_at(p, 2) == Maybe.Some(0x27_u8) {
+                if b == 0x27_u8 && peek_at(bytes, p, 1) == Maybe.Some(0x27_u8) && peek_at(bytes, p, 2) == Maybe.Some(0x27_u8) {
                     let s_end = p.pos;
-                    advance(p); advance(p); advance(p);
-                    let mut out = slice_text(p.bytes, start, s_end);
+                    advance(bytes, p); advance(bytes, p); advance(bytes, p);
+                    let mut out = slice_text(bytes, start, s_end);
                     let mut extra = 0;
-                    while extra < 2 && peek(p) == Maybe.Some(0x27_u8) {
+                    while extra < 2 && peek(bytes, p) == Maybe.Some(0x27_u8) {
                         out.push_byte(0x27_u8);
-                        advance(p);
+                        advance(bytes, p);
                         extra = extra + 1;
                     }
                     return Result.Ok(out);
                 } else {
-                    advance(p);
+                    advance(bytes, p);
                 }
             }
         }
     }
 }
 
-fn parse_basic_escape(p: &mut Parser, out: &mut Text) -> Result<(), TomlError> {
-    match peek(p) {
+fn parse_basic_escape(bytes: &[Byte], p: &mut Parser, out: &mut Text) -> Result<(), TomlError> {
+    match peek(bytes, p) {
         Maybe.None => Result.Err(mk_err(p, UnexpectedEof, &"unterminated escape")),
         Maybe.Some(b) => {
-            if      b == 0x62_u8 { advance(p); out.push_byte(0x08_u8); Result.Ok(()) } // \b
-            else if b == 0x74_u8 { advance(p); out.push_byte(0x09_u8); Result.Ok(()) } // \t
-            else if b == 0x6E_u8 { advance(p); out.push_byte(0x0A_u8); Result.Ok(()) } // \n
-            else if b == 0x66_u8 { advance(p); out.push_byte(0x0C_u8); Result.Ok(()) } // \f
-            else if b == 0x72_u8 { advance(p); out.push_byte(0x0D_u8); Result.Ok(()) } // \r
-            else if b == 0x22_u8 { advance(p); out.push_byte(0x22_u8); Result.Ok(()) } // \"
-            else if b == 0x5C_u8 { advance(p); out.push_byte(0x5C_u8); Result.Ok(()) } // \\
-            else if b == 0x75_u8 { advance(p); parse_unicode_escape(p, out, 4) } // \uXXXX
-            else if b == 0x55_u8 { advance(p); parse_unicode_escape(p, out, 8) } // \UXXXXXXXX
+            if      b == 0x62_u8 { advance(bytes, p); out.push_byte(0x08_u8); Result.Ok(()) } // \b
+            else if b == 0x74_u8 { advance(bytes, p); out.push_byte(0x09_u8); Result.Ok(()) } // \t
+            else if b == 0x6E_u8 { advance(bytes, p); out.push_byte(0x0A_u8); Result.Ok(()) } // \n
+            else if b == 0x66_u8 { advance(bytes, p); out.push_byte(0x0C_u8); Result.Ok(()) } // \f
+            else if b == 0x72_u8 { advance(bytes, p); out.push_byte(0x0D_u8); Result.Ok(()) } // \r
+            else if b == 0x22_u8 { advance(bytes, p); out.push_byte(0x22_u8); Result.Ok(()) } // \"
+            else if b == 0x5C_u8 { advance(bytes, p); out.push_byte(0x5C_u8); Result.Ok(()) } // \\
+            else if b == 0x75_u8 { advance(bytes, p); parse_unicode_escape(bytes, p, out, 4) } // \uXXXX
+            else if b == 0x55_u8 { advance(bytes, p); parse_unicode_escape(bytes, p, out, 8) } // \UXXXXXXXX
             else { Result.Err(mk_err(p, InvalidEscape, &"unknown escape char")) }
         }
     }
 }
 
-fn parse_unicode_escape(p: &mut Parser, out: &mut Text, hex_digits: Int) -> Result<(), TomlError> {
+fn parse_unicode_escape(bytes: &[Byte], p: &mut Parser, out: &mut Text, hex_digits: Int) -> Result<(), TomlError> {
     let mut code: Int = 0;
     let mut i = 0;
     while i < hex_digits {
-        match peek(p) {
+        match peek(bytes, p) {
             Maybe.None => return Result.Err(mk_err(p, UnexpectedEof, &"truncated unicode escape")),
             Maybe.Some(b) => {
                 let d = hex_digit_value(b);
                 match d {
                     Maybe.Some(v) => {
                         code = code * 16 + v;
-                        advance(p);
+                        advance(bytes, p);
                     }
                     Maybe.None => return Result.Err(mk_err(p, InvalidUnicode, &"non-hex in unicode escape")),
                 }
@@ -706,28 +702,28 @@ fn hex_digit_value(b: Byte) -> Maybe<Int> {
 // Bool parser
 // =============================================================================
 
-fn parse_bool(p: &mut Parser) -> Result<TomlValue, TomlError> {
-    if peek(p) == Maybe.Some(0x74_u8) {
+fn parse_bool(bytes: &[Byte], p: &mut Parser) -> Result<TomlValue, TomlError> {
+    if peek(bytes, p) == Maybe.Some(0x74_u8) {
         // "true"
-        if expect_keyword(p, &"true") { Result.Ok(TomlValue.TomlBool(true)) }
+        if expect_keyword(bytes, p, &"true") { Result.Ok(TomlValue.TomlBool(true)) }
         else { Result.Err(mk_err(p, UnexpectedChar, &"expected 'true'")) }
-    } else if peek(p) == Maybe.Some(0x66_u8) {
-        if expect_keyword(p, &"false") { Result.Ok(TomlValue.TomlBool(false)) }
+    } else if peek(bytes, p) == Maybe.Some(0x66_u8) {
+        if expect_keyword(bytes, p, &"false") { Result.Ok(TomlValue.TomlBool(false)) }
         else { Result.Err(mk_err(p, UnexpectedChar, &"expected 'false'")) }
     } else {
         Result.Err(mk_err(p, UnexpectedChar, &"expected boolean"))
     }
 }
 
-fn expect_keyword(p: &mut Parser, kw: &Text) -> Bool {
+fn expect_keyword(bytes: &[Byte], p: &mut Parser, kw: &Text) -> Bool {
     let kb = kw.as_bytes();
     let mut i = 0;
     while i < kb.len() {
-        if peek_at(p, i) != Maybe.Some(kb[i]) { return false; }
+        if peek_at(bytes, p, i) != Maybe.Some(kb[i]) { return false; }
         i = i + 1;
     }
     let mut j = 0;
-    while j < kb.len() { advance(p); j = j + 1; }
+    while j < kb.len() { advance(bytes, p); j = j + 1; }
     true
 }
 
@@ -741,74 +737,74 @@ fn expect_keyword(p: &mut Parser, kw: &Text) -> Bool {
 // Disambiguation: scan ahead for ':' (time component) or '-' followed by
 // digits (date), without crossing line endings.
 
-fn parse_number_or_datetime(p: &mut Parser) -> Result<TomlValue, TomlError> {
+fn parse_number_or_datetime(bytes: &[Byte], p: &mut Parser) -> Result<TomlValue, TomlError> {
     // Look at first char + a few bytes ahead to decide.
     // Datetime patterns:
     //   YYYY-MM-DD          (local-date — 10 bytes)
     //   YYYY-MM-DDTHH:MM:SS (datetime — '-' at index 4 AND ':' at index 13)
     //   HH:MM:SS            (local-time — ':' at index 2)
-    let p0 = peek(p).unwrap_or(0);
-    let p2 = peek_at(p, 2).unwrap_or(0);
-    let p4 = peek_at(p, 4).unwrap_or(0);
+    let p0 = peek(bytes, p).unwrap_or(0);
+    let p2 = peek_at(bytes, p, 2).unwrap_or(0);
+    let p4 = peek_at(bytes, p, 4).unwrap_or(0);
 
     // Local-time: HH:MM:SS — first byte is ASCII digit, third byte is ':'.
     if is_digit(p0) && p2 == 0x3A_u8 {
-        return parse_local_time_value(p);
+        return parse_local_time_value(bytes, p);
     }
     // Date / datetime: YYYY-MM-DD with '-' at offset 4.
     if is_digit(p0) && p4 == 0x2D_u8 {
-        return parse_date_or_datetime(p);
+        return parse_date_or_datetime(bytes, p);
     }
     // Otherwise: number.
-    parse_number(p)
+    parse_number(bytes, p)
 }
 
 fn is_digit(b: Byte) -> Bool {
     b >= 0x30_u8 && b <= 0x39_u8
 }
 
-fn parse_number(p: &mut Parser) -> Result<TomlValue, TomlError> {
+fn parse_number(bytes: &[Byte], p: &mut Parser) -> Result<TomlValue, TomlError> {
     let start = p.pos;
 
     // Optional sign
     let mut sign: Int = 1;
-    if peek(p) == Maybe.Some(0x2B_u8) { advance(p); }
-    else if peek(p) == Maybe.Some(0x2D_u8) { advance(p); sign = -1; }
+    if peek(bytes, p) == Maybe.Some(0x2B_u8) { advance(bytes, p); }
+    else if peek(bytes, p) == Maybe.Some(0x2D_u8) { advance(bytes, p); sign = -1; }
 
     // Special floats: inf, nan
-    if peek(p) == Maybe.Some(0x69_u8) || peek(p) == Maybe.Some(0x6E_u8) {
-        if expect_keyword(p, &"inf") {
+    if peek(bytes, p) == Maybe.Some(0x69_u8) || peek(bytes, p) == Maybe.Some(0x6E_u8) {
+        if expect_keyword(bytes, p, &"inf") {
             let f = if sign < 0 { Float.neg_infinity() } else { Float.infinity() };
             return Result.Ok(TomlValue.TomlFloat(f));
         }
-        if expect_keyword(p, &"nan") { return Result.Ok(TomlValue.TomlFloat(Float.nan())); }
+        if expect_keyword(bytes, p, &"nan") { return Result.Ok(TomlValue.TomlFloat(Float.nan())); }
         // Reset and fail
         p.pos = start; p.column = p.column - 0; // (column reset is approximate; ok for diag)
         return Result.Err(mk_err(p, InvalidNumber, &"unexpected token where number expected"));
     }
 
     // Hex/oct/bin prefixes — only allowed without a sign (TOML 1.0 §"Integer").
-    if sign == 1 && peek(p) == Maybe.Some(0x30_u8) {
-        let nx = peek_at(p, 1);
+    if sign == 1 && peek(bytes, p) == Maybe.Some(0x30_u8) {
+        let nx = peek_at(bytes, p, 1);
         if nx == Maybe.Some(0x78_u8) {       // 0x — hex
-            advance(p); advance(p);
-            return parse_radix_int(p, 16);
+            advance(bytes, p); advance(bytes, p);
+            return parse_radix_int(bytes, p, 16);
         } else if nx == Maybe.Some(0x6F_u8) { // 0o — oct
-            advance(p); advance(p);
-            return parse_radix_int(p, 8);
+            advance(bytes, p); advance(bytes, p);
+            return parse_radix_int(bytes, p, 8);
         } else if nx == Maybe.Some(0x62_u8) { // 0b — bin
-            advance(p); advance(p);
-            return parse_radix_int(p, 2);
+            advance(bytes, p); advance(bytes, p);
+            return parse_radix_int(bytes, p, 2);
         }
     }
 
     // Plain decimal — may be int or float.
     let int_start = p.pos;
     let mut saw_digit = false;
-    while p.pos < p.bytes.len() {
-        let b = p.bytes[p.pos];
-        if is_digit(b) { saw_digit = true; advance(p); }
-        else if b == 0x5F_u8 && saw_digit { advance(p); } // '_' separator
+    while p.pos < bytes.len() {
+        let b = bytes[p.pos];
+        if is_digit(b) { saw_digit = true; advance(bytes, p); }
+        else if b == 0x5F_u8 && saw_digit { advance(bytes, p); } // '_' separator
         else { break; }
     }
     if !saw_digit {
@@ -816,45 +812,45 @@ fn parse_number(p: &mut Parser) -> Result<TomlValue, TomlError> {
     }
 
     // Float if next char is '.', 'e', or 'E'
-    let nx = peek(p);
+    let nx = peek(bytes, p);
     let is_float = nx == Maybe.Some(0x2E_u8) || nx == Maybe.Some(0x65_u8) || nx == Maybe.Some(0x45_u8);
     if is_float {
         if nx == Maybe.Some(0x2E_u8) {
-            advance(p);
+            advance(bytes, p);
             let mut frac_digit = false;
-            while p.pos < p.bytes.len() {
-                let b = p.bytes[p.pos];
-                if is_digit(b) { frac_digit = true; advance(p); }
-                else if b == 0x5F_u8 && frac_digit { advance(p); }
+            while p.pos < bytes.len() {
+                let b = bytes[p.pos];
+                if is_digit(b) { frac_digit = true; advance(bytes, p); }
+                else if b == 0x5F_u8 && frac_digit { advance(bytes, p); }
                 else { break; }
             }
             if !frac_digit {
                 return Result.Err(mk_err(p, InvalidNumber, &"missing fractional digits"));
             }
         }
-        let nx2 = peek(p);
+        let nx2 = peek(bytes, p);
         if nx2 == Maybe.Some(0x65_u8) || nx2 == Maybe.Some(0x45_u8) {
-            advance(p);
-            if peek(p) == Maybe.Some(0x2B_u8) || peek(p) == Maybe.Some(0x2D_u8) { advance(p); }
+            advance(bytes, p);
+            if peek(bytes, p) == Maybe.Some(0x2B_u8) || peek(bytes, p) == Maybe.Some(0x2D_u8) { advance(bytes, p); }
             let mut exp_digit = false;
-            while p.pos < p.bytes.len() {
-                let b = p.bytes[p.pos];
-                if is_digit(b) { exp_digit = true; advance(p); }
-                else if b == 0x5F_u8 && exp_digit { advance(p); }
+            while p.pos < bytes.len() {
+                let b = bytes[p.pos];
+                if is_digit(b) { exp_digit = true; advance(bytes, p); }
+                else if b == 0x5F_u8 && exp_digit { advance(bytes, p); }
                 else { break; }
             }
             if !exp_digit {
                 return Result.Err(mk_err(p, InvalidNumber, &"missing exponent digits"));
             }
         }
-        let raw = slice_text(p.bytes, start, p.pos);
+        let raw = slice_text(bytes, start, p.pos);
         let cleaned = strip_underscores(&raw);
         match cleaned.parse_float() {
             Result.Ok(f) => Result.Ok(TomlValue.TomlFloat(f)),
             Result.Err(_) => Result.Err(mk_err(p, InvalidNumber, &"float parse failed")),
         }
     } else {
-        let raw = slice_text(p.bytes, start, p.pos);
+        let raw = slice_text(bytes, start, p.pos);
         let cleaned = strip_underscores(&raw);
         match cleaned.parse_int() {
             Result.Ok(i) => Result.Ok(TomlValue.TomlInt(i)),
@@ -863,23 +859,23 @@ fn parse_number(p: &mut Parser) -> Result<TomlValue, TomlError> {
     }
 }
 
-fn parse_radix_int(p: &mut Parser, radix: Int) -> Result<TomlValue, TomlError> {
+fn parse_radix_int(bytes: &[Byte], p: &mut Parser, radix: Int) -> Result<TomlValue, TomlError> {
     let mut acc: Int = 0;
     let mut saw_digit = false;
     let mut last_was_digit = false;
-    while p.pos < p.bytes.len() {
-        let b = p.bytes[p.pos];
+    while p.pos < bytes.len() {
+        let b = bytes[p.pos];
         let d_opt = digit_value(b, radix);
         match d_opt {
             Maybe.Some(v) => {
                 acc = acc * radix + v;
-                advance(p);
+                advance(bytes, p);
                 saw_digit = true;
                 last_was_digit = true;
             }
             Maybe.None => {
                 if b == 0x5F_u8 && last_was_digit {
-                    advance(p);
+                    advance(bytes, p);
                     last_was_digit = false;
                 } else {
                     break;
@@ -924,22 +920,22 @@ fn strip_underscores(s: &Text) -> Text {
 // Datetime parsers
 // =============================================================================
 
-fn parse_date_or_datetime(p: &mut Parser) -> Result<TomlValue, TomlError> {
+fn parse_date_or_datetime(bytes: &[Byte], p: &mut Parser) -> Result<TomlValue, TomlError> {
     let start = p.pos;
     // Consume YYYY-MM-DD
     let mut i = 0;
     while i < 10 {
-        if p.pos >= p.bytes.len() { return Result.Err(mk_err(p, InvalidDateTime, &"truncated date")); }
-        advance(p);
+        if p.pos >= bytes.len() { return Result.Err(mk_err(p, InvalidDateTime, &"truncated date")); }
+        advance(bytes, p);
         i = i + 1;
     }
     // If next is 'T' / 't' / ' ' followed by digit, datetime; otherwise local-date.
-    let sep = peek(p);
-    let after_sep = peek_at(p, 1);
+    let sep = peek(bytes, p);
+    let after_sep = peek_at(bytes, p, 1);
     let has_time = (sep == Maybe.Some(0x54_u8) || sep == Maybe.Some(0x74_u8) || sep == Maybe.Some(0x20_u8))
                    && after_sep.map_or(false, |b| is_digit(b));
     if !has_time {
-        let raw = slice_text(p.bytes, start, p.pos);
+        let raw = slice_text(bytes, start, p.pos);
         // Pad to a full RFC 3339 by appending T00:00:00Z and parse — date-only.
         let padded = raw.concat(&"T00:00:00Z".to_text());
         match rfc3339_parse(&padded) {
@@ -947,11 +943,11 @@ fn parse_date_or_datetime(p: &mut Parser) -> Result<TomlValue, TomlError> {
             Result.Err(_) => Result.Err(mk_err(p, InvalidDateTime, &"invalid local-date")),
         }
     } else {
-        advance(p); // separator
+        advance(bytes, p); // separator
         // Consume HH:MM:SS[.fffff][Z|±HH:MM]
         // Accumulate until non-datetime byte.
-        while p.pos < p.bytes.len() && is_datetime_char(p.bytes[p.pos]) { advance(p); }
-        let raw = slice_text(p.bytes, start, p.pos);
+        while p.pos < bytes.len() && is_datetime_char(bytes[p.pos]) { advance(bytes, p); }
+        let raw = slice_text(bytes, start, p.pos);
         // Normalise space separator to 'T' for RFC 3339.
         let bytes = raw.as_bytes();
         let mut norm = Text.new();
@@ -981,10 +977,10 @@ fn parse_date_or_datetime(p: &mut Parser) -> Result<TomlValue, TomlError> {
     }
 }
 
-fn parse_local_time_value(p: &mut Parser) -> Result<TomlValue, TomlError> {
+fn parse_local_time_value(bytes: &[Byte], p: &mut Parser) -> Result<TomlValue, TomlError> {
     let start = p.pos;
-    while p.pos < p.bytes.len() && is_datetime_char(p.bytes[p.pos]) { advance(p); }
-    let raw = slice_text(p.bytes, start, p.pos);
+    while p.pos < bytes.len() && is_datetime_char(bytes[p.pos]) { advance(bytes, p); }
+    let raw = slice_text(bytes, start, p.pos);
     // Pad with 1970-01-01T prefix and Z to use RFC 3339 parser.
     let padded = "1970-01-01T".to_text().concat(&raw).concat(&"Z".to_text());
     match rfc3339_parse(&padded) {
@@ -1015,24 +1011,24 @@ fn bytes_contains_after(bs: &[Byte], from: Int, target: Byte) -> Bool {
 // Array / inline-table parsers
 // =============================================================================
 
-fn parse_array(p: &mut Parser) -> Result<TomlValue, TomlError> {
-    expect_byte(p, 0x5B_u8, &"expected '['")?;
+fn parse_array(bytes: &[Byte], p: &mut Parser) -> Result<TomlValue, TomlError> {
+    expect_byte(bytes, p, 0x5B_u8, &"expected '['")?;
     let mut items: List<TomlValue> = List.new();
-    skip_ws_and_comments(p);
-    if peek(p) == Maybe.Some(0x5D_u8) { advance(p); return Result.Ok(TomlValue.TomlArray(items)); }
+    skip_ws_and_comments(bytes, p);
+    if peek(bytes, p) == Maybe.Some(0x5D_u8) { advance(bytes, p); return Result.Ok(TomlValue.TomlArray(items)); }
     loop {
-        let v = parse_value(p)?;
+        let v = parse_value(bytes, p)?;
         items.push(v);
         if items.len() > MAX_TOML_ARRAY_ITEMS {
             return Result.Err(mk_err(p, ArrayTooLarge, &"array exceeds size limit"));
         }
-        skip_ws_and_comments(p);
-        if peek(p) == Maybe.Some(0x2C_u8) {
-            advance(p);
-            skip_ws_and_comments(p);
-            if peek(p) == Maybe.Some(0x5D_u8) { advance(p); return Result.Ok(TomlValue.TomlArray(items)); }
-        } else if peek(p) == Maybe.Some(0x5D_u8) {
-            advance(p);
+        skip_ws_and_comments(bytes, p);
+        if peek(bytes, p) == Maybe.Some(0x2C_u8) {
+            advance(bytes, p);
+            skip_ws_and_comments(bytes, p);
+            if peek(bytes, p) == Maybe.Some(0x5D_u8) { advance(bytes, p); return Result.Ok(TomlValue.TomlArray(items)); }
+        } else if peek(bytes, p) == Maybe.Some(0x5D_u8) {
+            advance(bytes, p);
             return Result.Ok(TomlValue.TomlArray(items));
         } else {
             return Result.Err(mk_err(p, UnexpectedChar, &"expected ',' or ']' in array"));
@@ -1040,27 +1036,27 @@ fn parse_array(p: &mut Parser) -> Result<TomlValue, TomlError> {
     }
 }
 
-fn parse_inline_table(p: &mut Parser) -> Result<TomlValue, TomlError> {
-    expect_byte(p, 0x7B_u8, &"expected '{'")?;
+fn parse_inline_table(bytes: &[Byte], p: &mut Parser) -> Result<TomlValue, TomlError> {
+    expect_byte(bytes, p, 0x7B_u8, &"expected '{'")?;
     let mut tbl: Map<Text, TomlValue> = Map.new();
-    skip_ws(p);
-    if peek(p) == Maybe.Some(0x7D_u8) { advance(p); return Result.Ok(TomlValue.TomlTable(tbl)); }
+    skip_ws(bytes, p);
+    if peek(bytes, p) == Maybe.Some(0x7D_u8) { advance(bytes, p); return Result.Ok(TomlValue.TomlTable(tbl)); }
     loop {
-        let key_path = parse_key_path(p)?;
-        skip_ws(p);
-        expect_byte(p, 0x3D_u8, &"expected '=' in inline table")?;
-        skip_ws(p);
-        let value = parse_value(p)?;
+        let key_path = parse_key_path(bytes, p)?;
+        skip_ws(bytes, p);
+        expect_byte(bytes, p, 0x3D_u8, &"expected '=' in inline table")?;
+        skip_ws(bytes, p);
+        let value = parse_value(bytes, p)?;
         insert_dotted(&mut tbl, &key_path, value, p)?;
         if tbl.len() > MAX_TOML_TABLE_KEYS {
             return Result.Err(mk_err(p, TableTooLarge, &"inline table exceeds key limit"));
         }
-        skip_ws(p);
-        if peek(p) == Maybe.Some(0x2C_u8) {
-            advance(p);
-            skip_ws(p);
-        } else if peek(p) == Maybe.Some(0x7D_u8) {
-            advance(p);
+        skip_ws(bytes, p);
+        if peek(bytes, p) == Maybe.Some(0x2C_u8) {
+            advance(bytes, p);
+            skip_ws(bytes, p);
+        } else if peek(bytes, p) == Maybe.Some(0x7D_u8) {
+            advance(bytes, p);
             return Result.Ok(TomlValue.TomlTable(tbl));
         } else {
             return Result.Err(mk_err(p, UnexpectedChar, &"expected ',' or '}' in inline table"));
@@ -1071,6 +1067,25 @@ fn parse_inline_table(p: &mut Parser) -> Result<TomlValue, TomlError> {
 // =============================================================================
 // Path / table-resolution helpers
 // =============================================================================
+
+fn table_mut(value: &mut TomlValue) -> Maybe<&mut Map<Text, TomlValue>> {
+    match *value {
+        TomlValue.TomlTable(ref mut table) => Maybe.Some(table),
+        _ => Maybe.None,
+    }
+}
+
+fn array_mut(value: &mut TomlValue) -> Maybe<&mut List<TomlValue>> {
+    match *value {
+        TomlValue.TomlArray(ref mut items) => Maybe.Some(items),
+        _ => Maybe.None,
+    }
+}
+
+fn last_table_mut(items: &mut List<TomlValue>) -> Maybe<&mut Map<Text, TomlValue>> {
+    let index = items.len() - 1;
+    table_mut(&mut items[index])
+}
 
 // Walk root by current_path; create intermediate tables as needed.
 fn resolve_target<'a>(
@@ -1083,30 +1098,25 @@ fn resolve_target<'a>(
     let mut cur = root;
     let mut i = 0;
     while i < path.len() {
-        let k = path.get(i).unwrap();
-        let last = i == path.len() - 1;
-        if !cur.contains_key(k) {
-            cur.insert(k.clone(), TomlValue.TomlTable(Map.new()));
+        let key = &path[i];
+        if !cur.contains_key(*key) {
+            cur.insert(key.clone(), TomlValue.TomlTable(Map.new()));
         }
-        let v = cur.get_mut(k).unwrap();
-        match v {
-            TomlValue.TomlTable(t) => { cur = t; }
-            TomlValue.TomlArray(arr) => {
-                // For [[aot]], the path resolves to the last-pushed table.
-                if arr.is_empty() {
-                    return Result.Err(mk_err(p, RedefineSuperTable, &"path traverses empty array-of-tables"));
-                }
-                let last_idx = arr.len() - 1;
-                match arr.get_mut(last_idx).unwrap() {
-                    TomlValue.TomlTable(t) => { cur = t; }
-                    _ => return Result.Err(mk_err(p, RedefineSuperTable, &"non-table element in array-of-tables")),
-                }
+        let value = cur.get_mut(key).unwrap();
+        if let Maybe.Some(table) = table_mut(value) {
+            cur = table;
+        } else if let Maybe.Some(items) = array_mut(value) {
+            if items.is_empty() {
+                return Result.Err(mk_err(p, RedefineSuperTable, &"path traverses empty array-of-tables"));
             }
-            _ => return Result.Err(mk_err(p, RedefineSuperTable, &"path traverses non-table")),
+            match last_table_mut(items) {
+                Maybe.Some(table) => { cur = table; }
+                _ => return Result.Err(mk_err(p, RedefineSuperTable, &"non-table element in array-of-tables")),
+            }
+        } else {
+            return Result.Err(mk_err(p, RedefineSuperTable, &"path traverses non-table"));
         }
         i = i + 1;
-        // unused 'last' but kept for clarity
-        let _ = last;
     }
     Result.Ok(cur)
 }
@@ -1131,9 +1141,9 @@ fn push_aot(
     if path.is_empty() { return Result.Err(mk_err(p, EmptyKey, &"empty array-of-tables header")); }
     // Walk to parent of last segment.
     let parent_path = path.slice(0, path.len() - 1);
-    let last_key = path.get(path.len() - 1).unwrap().clone();
+    let last_key = path.get(path.len() - 1).unwrap();
     let parent = resolve_target(root, &parent_path, p)?;
-    if !parent.contains_key(&last_key) {
+    if !parent.contains_key(last_key) {
         parent.insert(last_key.clone(), TomlValue.TomlArray(List.new()));
     }
     match parent.get_mut(&last_key).unwrap() {
@@ -1166,8 +1176,8 @@ fn insert_dotted(
     if !target.contains_key(head) {
         target.insert(head.clone(), TomlValue.TomlTable(Map.new()));
     }
-    match target.get_mut(head).unwrap() {
-        TomlValue.TomlTable(t) => {
+    match target.get_mut(&head).unwrap() {
+        TomlValue.TomlTable(ref mut t) => {
             insert_dotted(t, &key_path.slice(1, key_path.len()), value, p)
         }
         _ => Result.Err(mk_err(p, RedefineSuperTable, &"dotted key traverses non-table")),
