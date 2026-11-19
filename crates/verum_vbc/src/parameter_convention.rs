@@ -1,6 +1,38 @@
 //! Executable calling-convention compatibility, independent of source typing.
-use crate::{module::FunctionDescriptor, types::TypeRef};
+use crate::{module::{FunctionDescriptor, FunctionId, VbcModule}, types::TypeRef};
 use verum_common::{List, Text};
+
+/// An executable declaration paired with the signature instantiated from it.
+pub struct CallableDeclaration<'a> {
+    /// The exact descriptor selected by the formation instruction.
+    pub function: &'a FunctionDescriptor,
+    /// Its semantic callable type after substituting the lexical witnesses.
+    pub signature: TypeRef,
+}
+
+impl VbcModule {
+    /// The producer selected at formation owns the environment arity, semantic
+    /// signature and lexical parameter roster used by both execution tiers.
+    pub fn resolve_callable_producer(
+        &self, function: FunctionId, captures: usize, witnesses: &[TypeRef],
+    ) -> Result<CallableDeclaration<'_>, Text> {
+        let declaration = self.get_function(function).filter(|entry| entry.id == function)
+            .ok_or_else(|| Text::from("callable ownership function identity is not declared"))?;
+        declaration.validate_closure_environment(captures)?;
+        let signature = declaration.semantic_callable_signature()
+            .ok_or_else(|| Text::from("callable ownership function lacks its semantic signature"))?;
+        if witnesses.len() != declaration.type_params.len() {
+            return Err("callable ownership has incomplete lexical witnesses".into());
+        }
+        let substitution = crate::mono::TypeSubstitution::new(&declaration.type_params, witnesses);
+        let signature = crate::associated_types::instantiate_witness(self, &substitution, &signature)
+            .map_err(|_| Text::from("callable ownership cannot instantiate its declared signature"))?;
+        if !crate::mono::closed_signature(&signature) {
+            return Err("callable ownership has an unresolved semantic signature".into());
+        }
+        Ok(CallableDeclaration { function: declaration, signature })
+    }
+}
 
 /// Check a producer against the callable contract it is stored under. Async
 /// annotations permit an async computation; a synchronous producer satisfies

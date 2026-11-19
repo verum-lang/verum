@@ -3579,7 +3579,7 @@ fn lower_instruction_impl<'ctx>(
         }
 
         Instruction::CallClosure { dst, closure, args } => {
-            ctx.require_closure_parameter_convention(*closure, usize::from(args.count))?;
+            let known = ctx.check_closure_parameter_convention(*closure, usize::from(args.count))?;
             let closure_val = ctx.get_register(closure.0)?;
             let closure_ptr = match closure_val {
                 BasicValueEnum::PointerValue(p) => p,
@@ -3589,15 +3589,13 @@ fn lower_instruction_impl<'ctx>(
                         .build_int_to_ptr(i, ctx.types().ptr_type(), "closure_from_int")
                         .or_llvm_err()?
                 }
-                _ => {
-                    // Non-pointer, non-int value (e.g., unit struct from parameter typing)
-                    // This can happen when VBC parameter types default to UNIT.
-                    // Treat as a null closure and skip the call, returning unit.
-                    let unit_type = ctx.types().context().struct_type(&[], false);
-                    ctx.set_register(dst.0, unit_type.const_zero().into());
-                    return Ok(());
-                }
+                _ => return Err(LlvmLoweringError::unsupported(
+                    "native closure call requires a callable carrier")),
             };
+            if !known {
+                let present = ctx.builder().build_is_not_null(closure_ptr, "closure_present").or_llvm_err()?;
+                callable_lifecycle::guard(ctx, present, "native closure call received a null carrier")?;
+            }
             let mut call_args = verum_common::List::with_capacity(args.count as usize);
             for register in args.iter() {
                 call_args.push(native_slot_value(

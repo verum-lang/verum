@@ -14,22 +14,34 @@ pub(crate) fn concrete(ty: &TypeRef) -> bool {
 }
 
 pub(crate) fn concrete_for(ty: &TypeRef, scope: crate::associated_types::WitnessUse) -> bool {
+    closed(ty, scope, false)
+}
+
+/// A signature can quantify its own parameters. Such a binder does not
+/// provide a monomorphic specialization for the implementation of its body.
+pub(crate) fn closed_signature(ty: &TypeRef) -> bool {
+    closed(ty, crate::associated_types::WitnessUse::Signature, true)
+}
+
+fn closed(ty: &TypeRef, scope: crate::associated_types::WitnessUse, accepts_quantifiers: bool) -> bool {
     let mut pending = verum_common::List::from_iter([(ty, 0u32, 0usize, scope)]);
     let mut remaining = crate::types::MAX_TYPE_REF_NODES - 1;
     while let Some((ty, binders, depth, scope)) = pending.pop() {
         if depth >= crate::types::MAX_TYPE_REF_DEPTH { return false; }
-        match ty {
+        let child_binders = match ty {
             TypeRef::Generic(id) if u32::from(id.0) >= binders => return false,
             TypeRef::AssociatedProjection { .. }
-            | TypeRef::RecordFieldProjection { .. }
-            | TypeRef::Rank2Function { .. } => return false,
-            _ => {},
-        }
+            | TypeRef::RecordFieldProjection { .. } => return false,
+            TypeRef::Rank2Function { type_param_count, .. } if accepts_quantifiers =>
+                binders + u32::from(*type_param_count),
+            TypeRef::Rank2Function { .. } => return false,
+            TypeRef::Dynamic(_) => binders + 1,
+            _ => binders,
+        };
         let Some(child_scope) = scope.child_scope(ty) else { continue; };
         // A closed existential is an exact semantic argument. Its hidden
         // subject is local; free caller slots in every bound and equality
         // still require evidence. Layout is checked independently.
-        let child_binders = binders + u32::from(matches!(ty, TypeRef::Dynamic(_)));
         let mut exhausted = false;
         ty.for_each_child(|child| {
             if remaining == 0 { exhausted = true; }

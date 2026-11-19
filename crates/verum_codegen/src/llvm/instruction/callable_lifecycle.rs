@@ -15,7 +15,7 @@ fn counter<'ctx>(ctx: &FunctionContext<'_, 'ctx>, value: BasicValueEnum<'ctx>)
     Ok((pointer, slot))
 }
 
-fn guard(ctx: &FunctionContext<'_, '_>, valid: IntValue<'_>, message: &str) -> Result<()> {
+pub(super) fn guard(ctx: &FunctionContext<'_, '_>, valid: IntValue<'_>, message: &str) -> Result<()> {
     let accepted = ctx.llvm_context().append_basic_block(ctx.function(), "callable_owner_valid");
     let refused = ctx.llvm_context().append_basic_block(ctx.function(), "callable_owner_refused");
     ctx.builder().build_conditional_branch(valid, accepted, refused).or_llvm_err()?;

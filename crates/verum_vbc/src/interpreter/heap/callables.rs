@@ -29,21 +29,6 @@ fn invalid(message: &str) -> InterpreterError {
     }
 }
 
-fn declared_signature(module: &VbcModule, function: FunctionId, captures: usize,
-    witnesses: &[TypeRef]) -> InterpreterResult<TypeRef> {
-    let declaration = module.get_function(function)
-        .ok_or_else(|| invalid("callable ownership function identity is not declared"))?;
-    declaration.validate_closure_environment(captures).map_err(|message| invalid(&message))?;
-    let signature = declaration.semantic_callable_signature()
-        .ok_or_else(|| invalid("callable ownership function lacks its semantic signature"))?;
-    if witnesses.len() != declaration.type_params.len() {
-        return Err(invalid("callable ownership has incomplete lexical witnesses"));
-    }
-    let substitution = crate::mono::TypeSubstitution::new(&declaration.type_params, witnesses);
-    crate::associated_types::instantiate_witness(module, &substitution, &signature)
-        .map_err(|_| invalid("callable ownership cannot instantiate its declared signature"))
-}
-
 impl Heap {
     pub(crate) fn record_callable(
         &mut self,
@@ -117,8 +102,9 @@ impl Heap {
                 "callable ownership requires a declared function carrier",
             ));
         };
-        let signature = declared_signature(module, function, captures, witnesses)?;
-        crate::parameter_convention::validate_callable_contract(&signature, expected)
+        let producer = module.resolve_callable_producer(function, captures, witnesses)
+            .map_err(|message| invalid(&message))?;
+        crate::parameter_convention::validate_callable_contract(&producer.signature, expected)
             .map_err(|message| invalid(&message))?;
         Ok(owner)
     }
@@ -130,10 +116,11 @@ impl Heap {
         if !value.is_regular_ptr() { return Ok(None); }
         let Some(receipt) = self.callables.get(&(value.as_ptr::<u8>() as usize))
             .filter(|receipt| receipt.owners.is_some()) else { return Ok(None); };
-        let signature = declared_signature(module, receipt.function, receipt.capture_types.len(),
-            &receipt.lexical_types)?;
-        self.validate_callable(module, value, &signature)?;
-        Ok(Some(signature))
+        let producer = module.resolve_callable_producer(
+            receipt.function, receipt.capture_types.len(), &receipt.lexical_types,
+        ).map_err(|message| invalid(&message))?;
+        self.validate_callable(module, value, &producer.signature)?;
+        Ok(Some(producer.signature))
     }
 
     fn callable_receipt(&self, owner: CallableOwner) -> InterpreterResult<&CallableReceipt> {

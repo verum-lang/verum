@@ -32,7 +32,7 @@ pub struct ExceptionHandler<'ctx> {
 }
 
 use super::cbgr::CbgrLowering;
-use super::error::{BuildExt, LlvmLoweringError, Result};
+use super::error::{BuildExt, LlvmLoweringError, OptionExt, Result};
 use super::register_types::{MethodDispatchTable, RegisterType, RegisterTypeMap};
 use super::types::{RefTier, TypeLowering};
 use std::sync::Arc;
@@ -1258,7 +1258,9 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
         Ok(())
     }
 
-    pub(super) fn require_closure_parameter_convention(&self, register: Reg, argument_count: usize) -> Result<()> {
+    /// A selected producer proves the allocated carrier is non-null. Legacy
+    /// indirect calls still need to check their incoming carrier at runtime.
+    pub(super) fn check_closure_parameter_convention(&self, register: Reg, argument_count: usize) -> Result<bool> {
         if let Some(target) = self.selected_callable_target(register)
             && let Some(declaration) = self.vbc_module.and_then(|module| module.get_function(target))
         {
@@ -1268,9 +1270,10 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             }
             // Reuse the actual direct-call check, including both body seals.
             self.resolve_declared_function(declaration)?;
-            return Ok(());
+            return Ok(true);
         }
-        self.require_indirect_parameter_convention()
+        self.require_indirect_parameter_convention()?;
+        Ok(false)
     }
 
     pub(super) fn selected_callable_target(&self, register: Reg) -> Option<verum_vbc::module::FunctionId> {
@@ -1286,15 +1289,15 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
     }
 
     pub(super) fn callable_signature(&self, register: Reg) -> Result<verum_vbc::TypeRef> {
-        let declaration = self.selected_callable_target(register)
-            .and_then(|target| self.vbc_module.and_then(|module| module.get_function(target)))
+        let producer = self.selected_callable_targets.get(&register.0)
             .ok_or_else(|| LlvmLoweringError::unsupported(
                 "native callable copy requires its exact environment producer"))?;
-        let signature = declaration.semantic_callable_signature()
-            .ok_or_else(|| LlvmLoweringError::unsupported(
-                "native callable copy producer lacks its semantic signature"))?;
-        self.resolve_declared_function(declaration)?;
-        Ok(signature)
+        let module = self.vbc_module.or_internal("native callable producer requires a VBC module")?;
+        let captures = producer.owned_captures.as_ref().map_or(0, |types| types.len());
+        let declared = module.resolve_callable_producer(producer.target, captures, &[])
+            .map_err(LlvmLoweringError::unsupported)?;
+        self.resolve_declared_function(declared.function)?;
+        Ok(declared.signature)
     }
 
     pub(super) fn require_callable_copy(&self, register: Reg, expected: &verum_vbc::TypeRef) -> Result<()> {

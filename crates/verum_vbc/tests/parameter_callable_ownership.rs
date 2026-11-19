@@ -52,6 +52,44 @@ fn empty_callable_copies_preserve_the_selected_function() {
 }
 
 #[test]
+fn callable_declarations_distinguish_lexical_witnesses_from_local_quantifiers() {
+    use verum_vbc::types::{TypeParamId, TypeRef};
+    let mut module = compile("fn echo<T>(value:T)->T { value }", false);
+    let id = module.find_function_by_name("callable_parameter.echo").unwrap();
+    let integer = TypeRef::Concrete(TypeId::INT);
+    let witness = std::slice::from_ref(&integer);
+    let actual = module.resolve_callable_producer(id, 0, witness).unwrap();
+    assert_eq!(actual.function.id, id);
+    assert!(matches!(actual.signature, TypeRef::Function { params, return_type, .. }
+        if params.as_slice() == witness && *return_type == integer));
+    assert!(module.resolve_callable_producer(id, 0, &[]).is_err());
+    assert!(module.resolve_callable_producer(id, 1, witness).is_err());
+
+    let locally_bound = TypeRef::Generic(TypeParamId(0));
+    let family = TypeRef::Rank2Function {
+        is_async: false, type_param_count: 1, params: vec![locally_bound.clone()],
+        return_type: Box::new(locally_bound), contexts: Default::default(),
+    };
+    module.functions[id.0 as usize].semantic_return = Some(family.clone());
+    let actual = module.resolve_callable_producer(id, 0, witness).unwrap();
+    assert!(matches!(actual.signature, TypeRef::Function { return_type, .. } if *return_type == family));
+
+    for missing in [
+        TypeRef::Generic(TypeParamId(9)),
+        TypeRef::AssociatedProjection {
+            base: Box::new(integer.clone()), qualifier: None, assoc: "Absent".into(), args: vec![],
+        },
+    ] {
+        module.functions[id.0 as usize].semantic_return = Some(missing);
+        assert!(matches!(module.resolve_callable_producer(id, 0, witness),
+            Err(reason) if reason.contains("unresolved semantic signature")));
+    }
+    module.functions[id.0 as usize].id = FunctionId(id.0 + 1);
+    assert!(matches!(module.resolve_callable_producer(id, 0, witness),
+        Err(reason) if reason.contains("function identity is not declared")));
+}
+
+#[test]
 fn copying_a_callable_requires_the_actual_producer_and_signature() {
     for unit in [false, true] {
         let module = compile(COPIES, unit);
@@ -71,11 +109,28 @@ fn copying_a_callable_requires_the_actual_producer_and_signature() {
 
 #[test]
 fn copying_a_captured_environment_requires_its_owned_lifecycle() {
-    for unit in [false, true] {
-        let module = compile(&format!("{COPIES} fn probe()->Int {{let value=73;duplicate(|| value)}}"), unit);
-        let entry = module.find_function_by_name("callable_parameter.probe").unwrap();
-        let error = Interpreter::new(module.into()).execute_function(entry).unwrap_err();
-        assert!(error.to_string().contains("captured environment requires an owned lifecycle"), "{error}");
+    check_capture_lifecycle(COPIES, "duplicate", "");
+}
+
+// An immutable capture has an owned environment. A writable capture cell
+// still borrows storage, and its carrier cannot cross an owning boundary.
+fn check_capture_lifecycle(declarations: &str, consumer: &str, tail: &str) {
+    for (capture, closure, owned) in [
+        ("let value: Int = 73;", "|| value", true),
+        ("let mut value: Int = 72;", "|| { value = value + 1; value }", false),
+    ] {
+        let source = format!("{declarations} fn probe()->Int {{ {capture} {consumer}({closure}){tail} }}");
+        for unit in [false, true] {
+            let module = compile(&source, unit);
+            let entry = module.find_function_by_name("callable_parameter.probe").unwrap();
+            let result = Interpreter::new(module.into()).execute_function(entry);
+            if owned {
+                assert_eq!(result.unwrap().try_as_i64(), Some(73));
+            } else {
+                let error = result.expect_err("accepted a borrowed mutable environment");
+                assert!(error.to_string().contains("captured environment requires an owned lifecycle"), "{error}");
+            }
+        }
     }
 }
 
@@ -156,23 +211,5 @@ fn an_unissued_object_or_pointer_is_not_a_callable_receipt() {
 
 #[test]
 fn a_captured_callable_refuses_without_an_owned_environment_lifecycle() {
-    let source = "
-        fn consume<F: fn() -> Int>(selected: F) {}
-        fn probe() -> Int { let captured = 11; consume(|| captured); 73 }
-    ";
-    for unit in [false, true] {
-        let module = compile(source, unit);
-        let entry = module
-            .find_function_by_name("callable_parameter.probe")
-            .unwrap();
-        let error = Interpreter::new(module.into())
-            .execute_function(entry)
-            .unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .contains("captured environment requires an owned lifecycle"),
-            "{error}"
-        );
-    }
+    check_capture_lifecycle("fn consume<F:fn()->Int>(selected:F) {}", "consume", "; 73");
 }

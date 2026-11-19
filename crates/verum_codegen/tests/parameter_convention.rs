@@ -5,6 +5,8 @@ use verum_llvm::{context::Context, values::AnyValue};
 use verum_vbc::{
     codegen::VbcCodegen, deserialize::deserialize_module, serialize::serialize_module,
 };
+#[path = "support/native_library.rs"]
+mod native_library;
 
 fn compile(source: &str) -> verum_vbc::VbcModule {
     let module = VbcCodegen::new()
@@ -91,12 +93,11 @@ fn native_callable_cleanup_has_an_explicit_executable_refusal() {
     assert!(body.contains("unreachable"), "{body}");
 }
 
-#[test]
-fn a_known_callable_producer_does_not_authorize_an_overwritten_register() {
+fn overwritten_callable() -> verum_vbc::VbcModule {
     let mut module = compile(
-        "fn known()->Int {73} fn main()->Int {let callback:fn()->Int=known; callback()}",
+        "fn known()->Int {73} fn probe()->Int {let callback:fn()->Int=known; callback()}",
     );
-    let entry = module.find_function_by_name("main").unwrap();
+    let entry = module.find_function_by_name("probe").unwrap();
     let function = module.functions.iter_mut().find(|function| function.id == entry).unwrap();
     let instructions = function.instructions.as_mut().unwrap();
     let (index, register) = instructions.iter().enumerate().find_map(|(index, instruction)| {
@@ -105,12 +106,44 @@ fn a_known_callable_producer_does_not_authorize_an_overwritten_register() {
         } else { None }
     }).expect("ordinary source callable call");
     instructions.insert(index, verum_vbc::Instruction::LoadUnit { dst: register });
+    module
+}
+
+#[test]
+fn a_known_callable_producer_does_not_authorize_an_overwritten_register() {
+    let module = overwritten_callable();
     let context = Context::create();
     let mut lowering = VbcToLlvmLowering::new(
         &context, LoweringConfig::debug("overwritten_callable").with_debug_info(false),
     );
     let error = lowering.lower_module(&module).unwrap_err();
     assert!(error.to_string().contains("producer-issued parameter convention"), "{error}");
+
+}
+
+#[test]
+fn a_null_legacy_closure_refuses_before_reading_its_environment() {
+    const CHILD: &str = "VERUM_TEST_NULL_LEGACY_CLOSURE";
+    if std::env::var_os(CHILD).is_none() {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "a_null_legacy_closure_refuses_before_reading_its_environment", "--nocapture"])
+            .env(CHILD, "1").output().unwrap();
+        assert!(!output.status.success());
+        let stderr = verum_common::Text::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("native closure call received a null carrier"), "{stderr}");
+        return;
+    }
+    let mut module = overwritten_callable();
+    for function in &mut module.functions {
+        function.owned_value_parameters = false;
+        function.value_uses = None;
+    }
+    native_library::with_library(&module, &[("probe", "invoke_probe")], |library| {
+        // SAFETY: the adapter exports the declared probe() -> Int ABI.
+        let probe = unsafe { library.get::<unsafe extern "C" fn() -> i64>(b"invoke_probe").unwrap() };
+        let returned = unsafe { probe() };
+        panic!("invalid callback unexpectedly returned {returned}");
+    });
 }
 
 #[test]
