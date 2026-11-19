@@ -118,6 +118,16 @@ public type InclusionProof is {
     siblings: List<[Byte; 32]>,
 };
 
+implement InclusionProof {
+    /// Read a bottom-up audit path. Verification checks its length and root.
+    public fn from_siblings(siblings: List<[Byte; 32]>) -> InclusionProof {
+        InclusionProof { siblings }
+    }
+
+    /// Return the path in verification order for serialization or transport.
+    public fn into_siblings(self) -> List<[Byte; 32]> { self.siblings }
+}
+
 // =============================================================================
 // Tree
 // =============================================================================
@@ -219,11 +229,13 @@ public fn leaf_hash(leaf: &[Byte]) -> [Byte; 32] {
 }
 
 public fn node_hash(left: &[Byte; 32], right: &[Byte; 32]) -> [Byte; 32] {
-    let mut buf: List<Byte> = List.with_capacity(1 + 32 + 32);
-    buf.push(0x01_u8);
-    buf.extend_from_slice(&left[..]);
-    buf.extend_from_slice(&right[..]);
-    Sha256.digest(buf.as_slice())
+    let mut block: [Byte; 65] = [0_u8; 65];
+    block[0] = 1_u8;
+    for i in 0..32 {
+        block[1 + i] = left[i];
+        block[33 + i] = right[i];
+    }
+    Sha256.digest(&block[..])
 }
 
 // =============================================================================
