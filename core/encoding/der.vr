@@ -216,6 +216,28 @@ public type DerTime is {
     second: UInt8,      // 0..=59 — leap seconds are NOT represented (X.509 profile bans them)
 };
 
+implement DerTime {
+    /// UTC seconds since 1970-01-01, including negative values before the epoch.
+    public fn unix_seconds(&self) -> Int64 {
+        let days = days_from_civil(self.year as Int64, self.month, self.day);
+        days * 86400_i64 + (self.hour as Int64) * 3600_i64
+            + (self.minute as Int64) * 60_i64 + (self.second as Int64)
+    }
+}
+
+/// Convert (year, month, day) to days since Unix epoch (1970-01-01).
+/// Correct for any year in [-9999, 9999]. Source: Howard Hinnant,
+/// "chrono-Compatible Low-Level Date Algorithms".
+fn days_from_civil(y: Int64, m: UInt8, d: UInt8) -> Int64 {
+    let ym: Int64 = if (m as Int64) <= 2_i64 { y - 1_i64 } else { y };
+    let era: Int64 = if ym >= 0_i64 { ym / 400_i64 } else { (ym - 399_i64) / 400_i64 };
+    let yoe: Int64 = ym - era * 400_i64;                       // 0..=399
+    let mo:  Int64 = if (m as Int64) > 2_i64 { (m as Int64) - 3_i64 } else { (m as Int64) + 9_i64 };
+    let doy: Int64 = (153_i64 * mo + 2_i64) / 5_i64 + (d as Int64) - 1_i64;
+    let doe: Int64 = yoe * 365_i64 + yoe / 4_i64 - yoe / 100_i64 + doy;
+    era * 146097_i64 + doe - 719468_i64
+}
+
 // =============================================================================
 // DerReader — forward-only cursor
 // =============================================================================
@@ -737,7 +759,14 @@ fn validate_time(
     if month < 1_u32 || month > 12_u32 {
         return Result.Err(err(InvalidTime, pos, "month out of range"));
     }
-    if day < 1_u32 || day > 31_u32 {
+    let last_day: UInt32 = match month {
+        2_u32 => if year % 4_u32 == 0_u32 && (year % 100_u32 != 0_u32 || year % 400_u32 == 0_u32) {
+            29_u32
+        } else { 28_u32 },
+        4_u32 | 6_u32 | 9_u32 | 11_u32 => 30_u32,
+        _ => 31_u32,
+    };
+    if day < 1_u32 || day > last_day {
         return Result.Err(err(InvalidTime, pos, "day out of range"));
     }
     if hour > 23_u32 {
@@ -750,7 +779,6 @@ fn validate_time(
     if second > 59_u32 {
         return Result.Err(err(InvalidTime, pos, "second out of range (leap seconds banned)"));
     }
-    let _ = year;  // no upper bound; callers enforce certificate validity window
     Result.Ok(())
 }
 

@@ -1,0 +1,46 @@
+mount core.encoding.der.{DerTime, DerError, DerErrorKind, DerReader};
+mount core.security.x509.time.{CertValidity, time_to_unix, time_cmp, is_valid_at};
+
+fn utc_time(text: &Text, generalized: Bool) -> Result<DerTime, DerError> {
+    let tag: Byte = if generalized { 0x18_u8 } else { 0x17_u8 };
+    let mut wire: List<Byte> = [tag, text.len() as Byte];
+    for byte in text.as_bytes() { wire.push(byte); }
+    let mut reader = DerReader.new(wire.as_slice());
+    if generalized { reader.read_generalized_time() } else { reader.read_utc_time() }
+}
+
+@test
+fn x509_validity_preserves_the_utc_pivot_and_epoch_boundaries() {
+    let first = utc_time(&"500101000000Z", false).unwrap();
+    let before_epoch = utc_time(&"691231235959Z", false).unwrap();
+    let epoch = utc_time(&"700101000000Z", false).unwrap();
+    let last = utc_time(&"491231235959Z", false).unwrap();
+    let next = utc_time(&"20500101000000Z", true).unwrap();
+    assert_eq(time_to_unix(&first), -631152000_i64);
+    assert_eq(time_to_unix(&last), 2524607999_i64);
+    assert_eq(next.unix_seconds(), 2524608000_i64);
+    assert_eq(time_cmp(&before_epoch, &epoch), -1);
+    let validity = CertValidity.new(before_epoch, epoch);
+    let (lower, upper) = validity.unix_bounds();
+    assert_eq(lower, -1_i64);
+    assert_eq(upper, 0_i64);
+    assert(is_valid_at(&validity, -1_i64));
+    assert(is_valid_at(&validity, 0_i64));
+    assert(!is_valid_at(&validity, -2_i64));
+    assert(!is_valid_at(&validity, 1_i64));
+}
+
+@test
+fn x509_validity_checks_gregorian_dates_before_converting_them() {
+    let leap = utc_time(&"20000229000000Z", true).unwrap();
+    assert_eq(leap.unix_seconds(), 951782400_i64);
+    for text in ["19000229000000Z", "21000229000000Z", "20260431000000Z",
+                 "20260100000000Z", "20260101240000Z", "20260101000060Z"] {
+        match utc_time(&text, true) {
+            Result.Err(error) => assert(error.kind is DerErrorKind.InvalidTime),
+            Result.Ok(_) => panic("accepted an invalid Gregorian date or time"),
+        }
+    }
+    assert(utc_time(&"230229000000Z", false).is_err());
+    assert(utc_time(&"240229000000Z", false).is_ok());
+}
