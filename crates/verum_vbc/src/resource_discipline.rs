@@ -1,10 +1,11 @@
 //! Effective usage constraints follow exact descriptors and owned components.
 //! This query supplies no duplication operation or cleanup obligation.
 
+use crate::associated_types::{DeclarationLookup, instantiate_witness, normalize_projections};
 use crate::module::VbcModule;
 use crate::mono::TypeSubstitution;
 use crate::types::{
-    MAX_TYPE_REF_DEPTH, MAX_TYPE_REF_NODES, StringId, TypeDescriptor, TypeId, TypeKind,
+    MAX_TYPE_REF_DEPTH, MAX_TYPE_REF_NODES, StringId, TypeId, TypeKind,
     TypeParamId, TypeRef,
 };
 use verum_common::{List, Map, ResourceDiscipline, Text, well_known_types::WellKnownType};
@@ -111,8 +112,8 @@ impl VbcModule {
         ty: &TypeRef,
     ) -> Result<ResolvedDiscipline, DisciplineError> {
         resolve_discipline(
+            self,
             ty,
-            |id| self.get_type(id),
             |id| self.declared_runtime_carrier(id),
         )
     }
@@ -185,19 +186,18 @@ impl VbcModule {
 }
 
 /// The same bounded query used by a complete module and by source production.
-/// Both callbacks resolve the same exact declaration ID.
-pub fn resource_discipline_with<'a>(
+pub(crate) fn resource_discipline_with(
+    declarations: &impl DeclarationLookup,
     ty: &TypeRef,
-    resolve: impl Fn(TypeId) -> Option<&'a TypeDescriptor>,
     carrier: impl Fn(TypeId) -> Option<WellKnownType>,
 ) -> ResourceDiscipline {
-    resolve_discipline(ty, resolve, carrier)
+    resolve_discipline(declarations, ty, carrier)
         .map_or(ResourceDiscipline::Unknown, |resolved| resolved.kind())
 }
 
-fn resolve_discipline<'a>(
+fn resolve_discipline(
+    declarations: &impl DeclarationLookup,
     ty: &TypeRef,
-    resolve: impl Fn(TypeId) -> Option<&'a TypeDescriptor>,
     carrier: impl Fn(TypeId) -> Option<WellKnownType>,
 ) -> Result<ResolvedDiscipline, DisciplineError> {
     if is_reference_or_callable(ty) {
@@ -208,9 +208,11 @@ fn resolve_discipline<'a>(
     }
 
     let mut types = List::new();
-    types.push(ty.clone());
+    let mut root = ty.clone();
+    normalize_projections(declarations, &mut root).map_err(|_| DisciplineError::InvalidTypeShape)?;
     let mut indices = Map::new();
-    indices.insert(ty.clone(), 0usize);
+    indices.insert(root.clone(), 0usize);
+    types.push(root);
     let mut direct_edges: List<List<usize>> = List::new();
     let mut remaining = MAX_TYPE_REF_NODES;
     let mut result = ResolvedDiscipline::Unrestricted;
@@ -242,7 +244,7 @@ fn resolve_discipline<'a>(
                     return Err(DisciplineError::Arity(id, 0, args.len()));
                 }
             } else {
-                let descriptor = resolve(id).ok_or(DisciplineError::MissingDeclaration(id))?;
+                let descriptor = declarations.descriptor(id).ok_or(DisciplineError::MissingDeclaration(id))?;
                 let combined = result.kind().with_component(descriptor.resource_discipline);
                 if combined == ResourceDiscipline::Unknown {
                     return Err(DisciplineError::UndeclaredDiscipline(id));
@@ -273,7 +275,8 @@ fn resolve_discipline<'a>(
                     if !bounded_type_shape(declared) {
                         return Err(DisciplineError::InvalidTypeShape);
                     }
-                    let value = substitution.apply(declared).map_err(|_| invalid())?;
+                    let value = instantiate_witness(declarations, &substitution, declared)
+                        .map_err(|_| invalid())?;
                     if !bounded_type_shape(&value) {
                         return Err(DisciplineError::InvalidTypeShape);
                     }

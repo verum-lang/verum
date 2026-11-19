@@ -1,6 +1,7 @@
 //! Declaration-owned destruction shared by interpreted and native execution.
 //! Runtime tags select a declared sum branch; they never establish ownership.
 use crate::{
+    associated_types::instantiate_witness,
     module::{FunctionId, VbcModule},
     mono::TypeSubstitution,
     types::{BuiltinValueStorage, TypeId, TypeKind, TypeRef},
@@ -136,10 +137,17 @@ pub fn build(module: &VbcModule, ty: &TypeRef) -> Result<DropPlan, Text> {
     if matches!(ty, TypeRef::Reference { .. }) {
         return Ok(DropPlan::Ignore);
     }
-    if !crate::mono::is_concrete_type(ty) {
+    if let TypeRef::Concrete(id) = ty
+        && let Some(plan) = builtin_drop_plan(*id)
+    {
+        return Ok(plan);
+    }
+    let root = instantiate_witness(module, &TypeSubstitution::empty(), ty)
+        .map_err(|error| Text::from(error.to_string()))?;
+    if !crate::mono::is_concrete_type(&root) {
         return Err("typed destruction has unresolved declaration witnesses".into());
     }
-    build_inner(module, ty, &mut List::new(), &mut 4096)
+    build_inner(module, &root, &mut List::new(), &mut 4096)
 }
 
 fn build_inner(
@@ -208,7 +216,7 @@ fn build_inner(
             return Err("typed destruction of a transparent value requires a carrier-aware explicit Drop call".into());
         }
         let substitution = TypeSubstitution::new(&declaration.type_params, args);
-        let payload = substitution.apply(payload)
+        let payload = instantiate_witness(module, &substitution, payload)
             .map_err(|error| Text::from(error.to_string()))?;
         active.push(ty.clone());
         let result = build_inner(module, &payload, active, budget);
@@ -269,7 +277,7 @@ fn build_inner(
                 let declared = field.declaration_type.as_ref().ok_or_else(|| {
                     Text::from("typed destruction field lacks declaration evidence")
                 })?;
-                let declared = substitution.apply(declared)
+                let declared = instantiate_witness(module, &substitution, declared)
                     .map_err(|error| Text::from(error.to_string()))?;
                 build_inner(module, &declared, active, budget)
             })
@@ -289,7 +297,7 @@ fn build_inner(
                     return Err("typed destruction alias target lacks scalar declaration evidence".into());
                 }
             }
-            let target = substitution.apply(target)
+            let target = instantiate_witness(module, &substitution, target)
                 .map_err(|error| Text::from(error.to_string()))?;
             build_inner(module, &target, active, budget)
         }

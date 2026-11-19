@@ -278,10 +278,19 @@ impl ValueUseRecorder {
     }
 }
 
+impl crate::associated_types::DeclarationLookup for super::VbcCodegen {
+    fn descriptor(&self, id: crate::types::TypeId) -> Option<&crate::types::TypeDescriptor> {
+        self.type_by_id(id)
+    }
+    fn spelling(&self, id: crate::types::StringId) -> Option<&str> {
+        self.ctx.strings.get(id.0 as usize).map(|name| name.as_str())
+    }
+}
+
 impl super::VbcCodegen {
     pub(super) fn value_resource_discipline(&self, ty: &TypeRef) -> ResourceDiscipline {
         crate::resource_discipline::resource_discipline_with(
-            ty, |id| self.type_by_id(id), |id| self.declared_runtime_carrier(id),
+            self, ty, |id| self.declared_runtime_carrier(id),
         )
     }
 

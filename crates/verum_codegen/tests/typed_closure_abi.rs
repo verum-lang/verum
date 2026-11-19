@@ -395,6 +395,33 @@ fn replacement_through_a_reference_preserves_owned_text() {
 }
 
 #[test]
+fn copying_a_record_preserves_independent_associated_storage() {
+    let source = r#"
+        type Producer is protocol { type Output; };
+        type Source is ();
+        type Receipt is { number: Int };
+        implement Producer for Source { type Output = Receipt; }
+        type Slot<P: Producer> is { producer: P, value: P.Output };
+        fn change(receipt: &mut Receipt) { receipt.number = 3; }
+        fn probe() -> Int {
+            let original: Slot<Source> = Slot { producer: Source(), value: Receipt { number: 7 } };
+            let mut second = original;
+            change(&mut second.value);
+            original.value.number * 10 + second.value.number
+        }
+    "#;
+    let module = compile(source);
+    let probe = module.find_function_by_name("probe").unwrap();
+    let interpreted = Interpreter::new(Arc::new(module.clone())).execute_function(probe).unwrap();
+    assert_eq!(interpreted.try_as_i64(), Some(73));
+    with_native(&module, |library| {
+        // SAFETY: the compiled probe takes no arguments and returns a Verum Int.
+        let probe = unsafe { library.get::<unsafe extern "C" fn() -> i64>(b"invoke_probe").unwrap() };
+        assert_eq!(unsafe { probe() }, 73);
+    });
+}
+
+#[test]
 fn typed_cleanup_native_owned_generic_sum_and_record() {
     check_cleanup(r#"
 type Packet<T> is Empty | Held(T);

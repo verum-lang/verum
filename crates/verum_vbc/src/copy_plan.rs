@@ -1,6 +1,7 @@
 //! Declaration-owned copy operations. Recursive types form a finite graph;
 //! interpreting that graph must never traverse borrowed storage.
 use crate::{
+    associated_types::instantiate_witness,
     module::{FunctionId, VbcModule},
     mono::TypeSubstitution,
     types::{BuiltinValueStorage, FieldDescriptor, MAX_TYPE_REF_NODES, TypeId, TypeKind, TypeRef, VariantKind},
@@ -154,8 +155,7 @@ impl Builder<'_> {
                     .declaration_type
                     .as_ref()
                     .ok_or_else(|| Text::from("typed copy field lacks its declaration type"))?;
-                let ty = substitution
-                    .apply(ty)
+                let ty = instantiate_witness(self.module, substitution, ty)
                     .map_err(|error| Text::from(error.to_string()))?;
                 self.intern(ty)
             })
@@ -208,7 +208,7 @@ impl Builder<'_> {
         if let Some(payload) = crate::source_declaration_integrity::transparent_value_type(
             declaration, &self.module.strings,
         )? {
-            let payload = substitution.apply(payload)
+            let payload = instantiate_witness(self.module, &substitution, payload)
                 .map_err(|error| Text::from(error.to_string()))?;
             return Ok(CopyNode::Alias(self.intern(payload)?));
         }
@@ -253,8 +253,7 @@ impl Builder<'_> {
                         .semantic_return
                         .as_ref()
                         .ok_or_else(|| Text::from("Shared Clone lacks its result declaration"))?;
-                    if selected
-                        .apply(output)
+                    if instantiate_witness(self.module, &selected, output)
                         .map_err(|error| Text::from(error.to_string()))?
                         != *ty
                     {
@@ -309,8 +308,7 @@ impl Builder<'_> {
                     .alias_target
                     .as_ref()
                     .ok_or_else(|| Text::from("typed copy alias has no declaration target"))?;
-                let target = substitution
-                    .apply(target)
+                let target = instantiate_witness(self.module, &substitution, target)
                     .map_err(|error| Text::from(error.to_string()))?;
                 Ok(CopyNode::Alias(self.intern(target)?))
             }
@@ -350,13 +348,15 @@ pub fn build(module: &VbcModule, ty: &TypeRef) -> Result<CopyPlan, Text> {
         nodes.push(CopyNode::Identity);
         return Ok(CopyPlan { nodes });
     }
-    module.require_unrestricted_ownership(ty)?;
+    let root = instantiate_witness(module, &TypeSubstitution::empty(), ty)
+        .map_err(|error| Text::from(error.to_string()))?;
+    module.require_unrestricted_ownership(&root)?;
     let mut builder = Builder {
         module,
         types: List::new(),
         indices: Map::new(),
     };
-    builder.intern(ty.clone())?;
+    builder.intern(root)?;
     let mut nodes = List::new();
     while nodes.len() < builder.types.len() {
         let ty = builder.types[nodes.len()].clone();

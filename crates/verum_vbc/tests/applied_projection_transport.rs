@@ -87,6 +87,14 @@ fn applied_projection_roundtrips_in_instruction_and_archive() {
 }
 
 #[cfg(feature = "codegen")]
+fn member_implementation(target: &str) -> verum_ast::source_implementation::AssociatedImplementationSource {
+    let source = format!("implement Source for Carrier {{ type Item = {target}; }}");
+    let ast = verum_fast_parser::Parser::new(&source).parse_module().unwrap();
+    let verum_ast::ItemKind::Impl(declaration) = &ast.items[0].kind else { panic!("source implementation"); };
+    verum_ast::source_implementation::AssociatedImplementationSource::new("projection_runtime".into(), declaration).unwrap()
+}
+
+#[cfg(feature = "codegen")]
 fn load_projection(binding: Option<TypeRef>, args: Vec<TypeRef>) -> verum_vbc::module::VbcModule {
     use verum_vbc::{Instruction, bytecode::encode_instruction, instruction::Reg,
         module::{FunctionDescriptor, VbcModule}, types::{ProtocolImpl, TypeDescriptor, TypeKind}};
@@ -95,7 +103,7 @@ fn load_projection(binding: Option<TypeRef>, args: Vec<TypeRef>) -> verum_vbc::m
     let mut carrier = TypeDescriptor { id: TypeId(3000), name, kind: TypeKind::Record, ..Default::default() };
     if let Some(body) = binding {
         let assoc = module.intern_string("Item");
-        carrier.protocols.push(ProtocolImpl { source_implementation: None, protocol: ProtocolId(3100), methods: vec![],
+        carrier.protocols.push(ProtocolImpl { source_implementation: Some(member_implementation("Text")), protocol: ProtocolId(3100), methods: vec![],
             associated_types: vec![(assoc, body)], protocol_args_text: vec![], type_param_fn_bounds: vec![] });
     }
     module.types.push(carrier);
@@ -135,11 +143,13 @@ fn missing_or_unrepresented_family_never_loads_the_receiver_as_its_type() {
     use verum_vbc::interpreter::{Interpreter, InterpreterError};
     let mut erased = load_projection(Some(TypeRef::Concrete(TypeId::TEXT)), vec![]);
     erased.types.iter_mut().find(|ty| ty.id == TypeId(3100)).unwrap().source_declaration = None;
+    let mut no_implementation = load_projection(Some(TypeRef::Concrete(TypeId::TEXT)), vec![]);
+    no_implementation.types.iter_mut().find(|ty| ty.id == TypeId(3000)).unwrap().protocols[0].source_implementation = None;
     let mut defaulted = load_projection(Some(TypeRef::Concrete(TypeId::TEXT)), vec![]);
     let parsed = verum_fast_parser::Parser::new("type Source is protocol { type Item<T = Int>; };").parse_module().unwrap();
     let verum_ast::ItemKind::Type(source) = &parsed.items[0].kind else { panic!("family declaration") };
     defaulted.types.iter_mut().find(|ty| ty.id == TypeId(3100)).unwrap().source_declaration = Some(source.clone());
-    for module in [load_projection(None, vec![]), erased, defaulted,
+    for module in [load_projection(None, vec![]), erased, no_implementation, defaulted,
         load_projection(Some(TypeRef::Concrete(TypeId::TEXT)), vec![TypeRef::Concrete(TypeId::INT)])] {
         let error = Interpreter::new(std::sync::Arc::new(module)).execute_function(FunctionId(0)).unwrap_err();
         assert!(matches!(error, InterpreterError::InvalidBytecode { message, .. }
@@ -365,7 +375,7 @@ fn nested_associated_witness_cycles_fail_before_loading_a_type_head() {
     };
     let owner = module.types.iter_mut().find(|ty| ty.id == TypeId(3000)).unwrap();
     owner.protocols.push(verum_vbc::types::ProtocolImpl {
-        source_implementation: None, protocol: ProtocolId(3100), methods: vec![],
+        source_implementation: Some(member_implementation("(Carrier.Item, Carrier.Item)")), protocol: ProtocolId(3100), methods: vec![],
         associated_types: vec![(member, TypeRef::Tuple(vec![projection.clone(), projection]))],
         protocol_args_text: vec![], type_param_fn_bounds: vec![],
     });

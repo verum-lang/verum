@@ -146,9 +146,80 @@ fn archive_import_reinterns_identity_without_changing_the_constraint() {
 }
 
 #[test]
+fn associated_storage_follows_its_receiver_and_requires_an_applicable_equation() {
+    use verum_vbc::{copy_plan, drop_plan};
+    let module = compile(r#"
+        type Producer is protocol { type Output; };
+        type Other is protocol { type Output; };
+        type Required is protocol {};
+        type affine Ticket is { id: Int };
+        type Plain is ();
+        type Restricted is ();
+        type Ambiguous is ();
+        type Conditional<T> is { value: T };
+        implement Producer for Plain { type Output = Text; }
+        implement Producer for Restricted { type Output = Ticket; }
+        implement Producer for Ambiguous { type Output = Int; }
+        implement Other for Ambiguous { type Output = Ticket; }
+        implement<T: Required> Producer for Conditional<T> { type Output = Int; }
+        type Cell<P: Producer> is { value: P.Output };
+    "#);
+    let mut module = roundtrip(&module);
+    let cell = declared(&module, "Cell").id;
+    let conditional = declared(&module, "Conditional").id;
+    let named = |name| TypeRef::Concrete(declared(&module, name).id);
+    let plain = TypeRef::instantiated(cell, [named("Plain")]);
+    let restricted = TypeRef::instantiated(cell, [named("Restricted")]);
+    let ambiguous_owner = declared(&module, "Ambiguous").id;
+    let other = declared(&module, "Other").id;
+    let project = |qualifier| TypeRef::AssociatedProjection {
+        base: Box::new(TypeRef::Concrete(ambiguous_owner)),
+        qualifier,
+        assoc: "Output".into(),
+        args: vec![],
+    };
+    let ambiguous = project(None);
+    let qualified = project(Some(verum_vbc::types::ProtocolApplication {
+        protocol: verum_vbc::types::ProtocolId(declared(&module, "Producer").id.0),
+        args: vec![],
+    }));
+    let blocked = TypeRef::instantiated(cell, [TypeRef::instantiated(conditional, [TypeRef::Concrete(TypeId::INT)])]);
+    assert_eq!(module.resource_discipline(&plain), D::Unrestricted);
+    assert!(copy_plan::build(&module, &plain).is_ok());
+    let drop_plan::DropPlan::Record { fields, .. } = drop_plan::build(&module, &plain).unwrap()
+        else { panic!("expected structural cleanup"); };
+    assert!(matches!(fields.as_slice(), [drop_plan::DropPlan::Text]));
+    assert_eq!(module.resource_discipline(&restricted), D::Affine);
+    assert!(copy_plan::build(&module, &restricted).is_err());
+
+    // A carried result cannot prove the source implementation's requirement.
+    let name = module.intern_string("Output");
+    let owner = module.types.iter_mut().find(|ty| ty.id == conditional).unwrap();
+    owner.protocols[0].associated_types = vec![(name, TypeRef::Concrete(TypeId::INT))];
+    let plain_id = declared(&module, "Plain").id;
+    let plain_owner = module.types.iter_mut().find(|ty| ty.id == plain_id).unwrap();
+    plain_owner.protocols[0].associated_types.clear();
+    let owner = module.types.iter_mut().find(|ty| ty.id == ambiguous_owner).unwrap();
+    owner.protocols.iter_mut().find(|row| row.protocol.0 == other.0).unwrap().associated_types.clear();
+    for module in [&module, &roundtrip(&module)] {
+        assert_eq!(module.resource_discipline(&qualified), D::Unrestricted);
+        assert!(copy_plan::build(module, &qualified).is_ok());
+        assert!(matches!(drop_plan::build(module, &qualified), Ok(drop_plan::DropPlan::Ignore)));
+        for ty in [&blocked, &plain, &ambiguous] {
+            assert_eq!(module.resource_discipline(ty), D::Unknown);
+            assert!(copy_plan::build(module, ty).is_err());
+            assert!(drop_plan::build(module, ty).is_err());
+        }
+    }
+}
+
+#[test]
 fn missing_or_recursive_provenance_does_not_become_copy_permission() {
-    let mut module =
-        compile("type Holder is { missing: Unresolved }; type Cycle is { next: Cycle };");
+    let syntax = Parser::new("type Holder is { missing: Unresolved };").parse_module().unwrap();
+    assert!(VbcCodegen::new().compile_module(&syntax).is_err());
+    let mut module = compile("type Element is (); type Holder is { missing: Element }; type Cycle is { next: Cycle };");
+    let element = declared(&module, "Element").id;
+    module.types.retain(|declaration| declaration.id != element);
     assert_eq!(effective(&module, "Holder"), D::Unknown);
     assert_eq!(effective(&module, "Cycle"), D::Unknown);
     let id = declared(&module, "Holder").id;
@@ -168,40 +239,56 @@ fn missing_or_recursive_provenance_does_not_become_copy_permission() {
     );
 }
 
+// Frozen type-descriptor wire from v2.17 (204121137) and v2.18 (803158916).
+// Both archives contain one unit type. Only v2.18 carries resource discipline.
+fn historical_owner(discipline: Option<u8>) -> verum_common::List<u8> {
+    const HEADER: usize = 96;
+    let mut bytes = verum_common::List::from(vec![0; HEADER]);
+    bytes.extend_from_slice(&0u32.to_le_bytes()); // reserved empty string
+    bytes.extend_from_slice(&5u32.to_le_bytes());
+    bytes.extend_from_slice(b"Owned");
+    let start = bytes.len() as u32;
+    bytes.extend_from_slice(&3000u32.to_le_bytes()); // declaration id
+    bytes.extend_from_slice(&4u32.to_le_bytes()); // Owned
+    bytes.extend_from_slice(&[6, 1]); // unit, public
+    bytes.extend_from_slice(&0u32.to_le_bytes()); // size
+    bytes.extend_from_slice(&1u32.to_le_bytes()); // alignment
+    // No parameters, fields, variants, drop, clone, protocols, alias, wrapper,
+    // alias name, declaring submodule or explicit target layout.
+    bytes.extend_from_slice(&[0; 11]);
+    bytes.extend(discipline);
+    let code = bytes.len() as u32;
+    bytes.push(0); // uncompressed empty bytecode
+    let end = bytes.len() as u32;
+    let wire = bytes.as_mut_slice();
+    wire[..4].copy_from_slice(b"VBC1");
+    wire[4..6].copy_from_slice(&2u16.to_le_bytes());
+    wire[6..8].copy_from_slice(&(if discipline.is_some() { 18u16 } else { 17u16 }).to_le_bytes());
+    for (offset, value) in [
+        (12, 4), (16, start), (20, 1), (24, code), (32, code), (40, HEADER as u32),
+        (44, start - HEADER as u32), (48, code), (52, 1), (56, end),
+    ] {
+        wire[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+    }
+    let hash = blake3::hash(&wire[HEADER..]);
+    wire[72..80].copy_from_slice(&hash.as_bytes()[..8]);
+    wire[80..88].copy_from_slice(&blake3::hash(&[]).as_bytes()[..8]);
+    bytes
+}
+
 #[test]
 fn legacy_descriptor_without_resource_byte_remains_unknown() {
-    let mut module = compile("type affine Owned is ();");
-    // Isolate the pre-resource type descriptor wire. Source lowering also
-    // generates a constructor; unrelated newer function tails are not v2.17.
-    module.functions.clear();
-    module.bytecode.clear();
-    assert_eq!(module.types.len(), 1);
-    let mut bytes = serialize_module(&module).unwrap();
-    let read_u32 = |bytes: &[u8], at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
-    let end = read_u32(&bytes, 24) as usize;
-    assert_eq!(bytes[end - 1], D::Affine as u8);
-    bytes.remove(end - 1);
-    bytes[6..8].copy_from_slice(&17u16.to_le_bytes());
-    for at in [24, 32, 48, 56, 64, 88] {
-        let offset = read_u32(&bytes, at);
-        if offset >= end as u32 {
-            bytes[at..at + 4].copy_from_slice(&(offset - 1).to_le_bytes());
-        }
-    }
-    let hash = blake3::hash(&bytes[verum_vbc::format::HEADER_SIZE..]);
-    bytes[72..80].copy_from_slice(&hash.as_bytes()[..8]);
-    let legacy = deserialize_module(&bytes).unwrap();
+    let legacy = deserialize_module(&historical_owner(None)).unwrap();
     assert_eq!(declared(&legacy, "Owned").resource_discipline, D::Unknown);
     assert_eq!(effective(&legacy, "Owned"), D::Unknown);
+    let explicit = deserialize_module(&historical_owner(Some(D::Affine as u8))).unwrap();
+    assert_eq!(effective(&explicit, "Owned"), D::Affine);
 }
 
 #[test]
 fn invalid_resource_wire_value_is_rejected() {
-    let mut bytes = serialize_module(&compile("type Owned is { id: Int };")).unwrap();
-    let end = u32::from_le_bytes(bytes[24..28].try_into().unwrap()) as usize;
-    bytes[end - 1] = 255;
-    let error = deserialize_module(&bytes).unwrap_err();
-    assert!(format!("{error:?}").contains("resource_discipline"));
+    let error = deserialize_module(&historical_owner(Some(255))).unwrap_err();
+    assert!(matches!(error, verum_vbc::VbcError::InvalidHeader { field: "resource_discipline", .. }), "{error}");
 }
 
 #[test]

@@ -4,12 +4,34 @@
 //! is present, consumers retain the full projection instead of guessing from a
 //! method name or replacing the projection with its receiver.
 use crate::{VbcError, VbcResult, module::VbcModule, mono::TypeSubstitution,
-    types::{ProtocolApplication, TypeRef}};
+    types::{ProtocolApplication, StringId, TypeDescriptor, TypeId, TypeRef}};
+
+/// Declaration and name IDs belong to one table. Source production and the
+/// serialized module use different name pools but interpret equations alike.
+pub(crate) trait DeclarationLookup {
+    fn descriptor(&self, id: TypeId) -> Option<&TypeDescriptor>;
+    fn spelling(&self, id: StringId) -> Option<&str>;
+}
+
+impl DeclarationLookup for VbcModule {
+    fn descriptor(&self, id: TypeId) -> Option<&TypeDescriptor> { self.get_type(id) }
+    fn spelling(&self, id: StringId) -> Option<&str> { self.get_string(id) }
+}
 
 /// Resolve a plain associated assignment from the receiver's exact descriptor.
 /// Missing or ambiguous evidence remains unresolved. Invalid carriers fail.
 pub fn resolve_projection(
     module: &VbcModule,
+    base: &TypeRef,
+    qualifier: Option<&ProtocolApplication>,
+    assoc: &str,
+    arguments: &[TypeRef],
+) -> VbcResult<Option<TypeRef>> {
+    projection_in(module, base, qualifier, assoc, arguments)
+}
+
+fn projection_in(
+    declarations: &impl DeclarationLookup,
     base: &TypeRef,
     qualifier: Option<&ProtocolApplication>,
     assoc: &str,
@@ -21,68 +43,63 @@ pub fn resolve_projection(
         TypeRef::Instantiated { base, args } => (*base, args.as_slice()),
         _ => return Ok(None),
     };
-    let Some(owner) = module.get_type(id) else { return Ok(None); };
+    let Some(owner) = declarations.descriptor(id) else { return Ok(None); };
     if owner.type_params.len() != arguments.len() {
         return Err(VbcError::AssociatedType("associated receiver argument count differs from its declaration".into()));
     }
-    let selected = if let Some(application) = qualifier {
-        // Source-qualified bindings here have no protocol or family arguments.
-        // A parameterized protocol requires its full application on the row.
-        let Some(protocol) = module.get_type(crate::types::TypeId(application.protocol.0)) else {
-            return Ok(None);
+    if qualifier.is_some_and(|application| !application.args.is_empty()) { return Ok(None); }
+    let mut selected: Option<&crate::types::ProtocolImpl> = None;
+    for row in &owner.protocols {
+        if qualifier.is_some_and(|application| application.protocol != row.protocol) { continue; }
+        let Some(protocol) = declarations.descriptor(TypeId(row.protocol.0)) else { return Ok(None); };
+        let Some(source) = &protocol.source_declaration else { return Ok(None); };
+        let declaration = match &source.body {
+            verum_ast::TypeDeclBody::Protocol(body) | verum_ast::TypeDeclBody::Coinductive(body) => body,
+            _ => return Ok(None),
         };
-        if !application.args.is_empty() || !protocol.type_params.is_empty() { return Ok(None); }
-        let mut rows = owner.protocols.iter().filter(|row| row.protocol == application.protocol);
-        let Some(first) = rows.next() else { return Ok(None); };
-        let Some(source) = &first.source_implementation else { return Ok(None); };
-        if !source.has_unconditional_member(assoc)
-            || rows.any(|row| row.source_implementation.as_ref() != Some(source)
-            || row.associated_types != first.associated_types)
+        let member = declaration.items.iter().find_map(|item| match &item.kind {
+            verum_ast::decl::ProtocolItemKind::Type { name, type_params, .. } if name.name.as_str() == assoc => Some(type_params),
+            _ => None,
+        });
+        let Some(parameters) = member else { continue; };
+        // An erased equation is still a declaration of this member. It cannot
+        // make a competing protocol the unique owner of an unqualified name.
+        if !protocol.type_params.is_empty() || !parameters.is_empty()
+            || !row.source_implementation.as_ref().is_some_and(|source| source.has_unconditional_member(assoc))
         { return Ok(None); }
-        Some(first)
-    } else { None };
-    let substitution = TypeSubstitution::new(&owner.type_params, arguments);
-    let mut result = None;
-    for implementation in &owner.protocols {
-        if selected.is_some_and(|row| !std::ptr::eq(row, implementation)) { continue; }
-        for (name, body) in &implementation.associated_types {
-            if module.get_string(*name) != Some(assoc) { continue; }
-            let Some(protocol) = module.get_type(crate::types::TypeId(implementation.protocol.0)) else { return Ok(None); };
-            let Some(source) = &protocol.source_declaration else { return Ok(None); };
-            let declaration = match &source.body {
-                verum_ast::TypeDeclBody::Protocol(body) | verum_ast::TypeDeclBody::Coinductive(body) => body,
-                _ => return Ok(None),
-            };
-            let Some(parameters) = declaration.items.iter().find_map(|item| match &item.kind {
-                verum_ast::decl::ProtocolItemKind::Type { name, type_params, .. } if name.name.as_str() == assoc => Some(type_params),
-                _ => None,
-            }) else { return Ok(None); };
-            if !parameters.is_empty() { return Ok(None); }
-            if result.is_some() { return Ok(None); }
-            result = Some(substitution.apply(body)?);
+        if let Some(previous) = selected {
+            if row.protocol != previous.protocol || row.source_implementation != previous.source_implementation
+                || row.associated_types != previous.associated_types
+            { return Ok(None); }
+        } else {
+            selected = Some(row);
         }
     }
-    Ok(result)
+    let Some(row) = selected else { return Ok(None); };
+    let mut equations = row.associated_types.iter().filter(|(name, _)| declarations.spelling(*name) == Some(assoc));
+    let Some((_, body)) = equations.next() else { return Ok(None); };
+    if equations.next().is_some() { return Ok(None); }
+    Ok(Some(TypeSubstitution::new(&owner.type_params, arguments).apply(body)?))
 }
 
 /// Instantiate the declaration's binders before reducing their associated members.
 /// VM frame arguments and native specializations share this exact boundary.
 pub(crate) fn instantiate_witness(
-    module: &VbcModule,
+    declarations: &impl DeclarationLookup,
     substitution: &TypeSubstitution,
     ty: &TypeRef,
 ) -> VbcResult<TypeRef> {
     let mut result = substitution.apply(ty)?;
-    normalize_projections(module, &mut result)?;
+    normalize_projections(declarations, &mut result)?;
     Ok(result)
 }
 
 /// Normalize declaration-backed associated assignments throughout a witness.
 /// An unresolved member stays explicit for the consumer that requires it.
 /// Bound both depth and expansion work, including branching recursive families.
-pub(crate) fn normalize_projections(module: &VbcModule, ty: &mut TypeRef) -> VbcResult<()> {
+pub(crate) fn normalize_projections(declarations: &impl DeclarationLookup, ty: &mut TypeRef) -> VbcResult<()> {
     fn normalize(
-        module: &VbcModule,
+        declarations: &impl DeclarationLookup,
         ty: &mut TypeRef,
         depth: usize,
         remaining: &mut usize,
@@ -91,7 +108,7 @@ pub(crate) fn normalize_projections(module: &VbcModule, ty: &mut TypeRef) -> Vbc
             return Err(VbcError::AssociatedType("associated-type expansion exceeds the type nesting or work limit".into()));
         }
         *remaining -= 1;
-        let mut child = |ty: &mut TypeRef| normalize(module, ty, depth + 1, remaining);
+        let mut child = |ty: &mut TypeRef| normalize(declarations, ty, depth + 1, remaining);
         match ty {
             TypeRef::AssociatedProjection { base, qualifier, assoc, args } => {
                 child(base)?;
@@ -99,7 +116,7 @@ pub(crate) fn normalize_projections(module: &VbcModule, ty: &mut TypeRef) -> Vbc
                     qualifier.args.iter_mut().try_for_each(&mut child)?;
                 }
                 args.iter_mut().try_for_each(&mut child)?;
-                if let Some(result) = resolve_projection(module, base, qualifier.as_ref(), assoc, args)? {
+                if let Some(result) = projection_in(declarations, base, qualifier.as_ref(), assoc, args)? {
                     if result == *ty {
                         return Err(VbcError::AssociatedType("cyclic associated-type binding".into()));
                     }
@@ -123,5 +140,5 @@ pub(crate) fn normalize_projections(module: &VbcModule, ty: &mut TypeRef) -> Vbc
     }
     const MAX_EXPANSION_NODES: usize = 16_384;
     let mut remaining = MAX_EXPANSION_NODES;
-    normalize(module, ty, 0, &mut remaining)
+    normalize(declarations, ty, 0, &mut remaining)
 }

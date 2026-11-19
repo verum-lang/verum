@@ -3086,7 +3086,7 @@ impl InterpreterState {
         {
             crate::mono::TypeSubstitution::from_function(function, args)
         } else { crate::mono::TypeSubstitution::empty() };
-        let resolved = crate::associated_types::instantiate_witness(&self.module, &substitution, ty)
+        let resolved = crate::associated_types::instantiate_witness(self.module.as_ref(), &substitution, ty)
             .map_err(|error| InterpreterError::InvalidBytecode { pc: self.pc() as usize, message: error.to_string() })?;
         require_runtime_witness(&resolved)?;
         Ok(resolved)
