@@ -394,10 +394,17 @@ implement ChainError {
 }
 
 public(in core.security.x509) fn verify_signature(cert: &X509Certificate, issuer_spki: &Spki) -> Result<(), ChainError> {
-    let key = issuer_spki.parsed_key();
-    let message = cert.tbs_der_bytes();
-    let signature = cert.signature_bytes();
-    match cert.signature_algorithm() {
+    verify_with_key(issuer_spki.parsed_key(), cert.signature_algorithm(), cert.tbs_der_bytes(), cert.signature_bytes())
+}
+
+public(in core) fn verify_subject_signature(cert: &X509Certificate, algorithm: &SignatureAlg,
+        message: &[Byte], signature: &[Byte]) -> Result<(), ChainError> {
+    verify_with_key(cert.subject_public_key(), algorithm, message, signature)
+}
+
+fn verify_with_key(key: &SubjectPublicKey, algorithm: &SignatureAlg,
+        message: &[Byte], signature: &[Byte]) -> Result<(), ChainError> {
+    match algorithm {
         SignatureAlg.Sha256WithRsa => verify_rsa_pkcs1(key, RsaHash.Sha256_, message, signature),
         SignatureAlg.Sha384WithRsa => verify_rsa_pkcs1(key, RsaHash.Sha384_, message, signature),
         SignatureAlg.Sha512WithRsa => verify_rsa_pkcs1(key, RsaHash.Sha512_, message, signature),

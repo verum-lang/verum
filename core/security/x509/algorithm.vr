@@ -84,6 +84,14 @@ public type RsaPssParams is {
 };
 
 implement RsaPssParams {
+    /// PSS parameters with an MGF1 hash and salt length matching the message digest.
+    public(in core) fn digest_length_salt(hash: RsaPssHash) -> RsaPssParams {
+        let salt_length = match hash {
+            RsaPssHash.Sha256Hash => 32, RsaPssHash.Sha384Hash => 48, RsaPssHash.Sha512Hash => 64,
+        };
+        RsaPssParams { hash, salt_length }
+    }
+
     public(in core.security.x509) fn hash_algorithm(&self) -> &RsaPssHash { &self.hash }
     public(in core.security.x509) fn salt_length(&self) -> Int { self.salt_length }
 }
