@@ -6,6 +6,8 @@
 // =============================================================================
 
 mount core.security.sigstore.verify.IdentityMatcher;
+mount core.encoding.json.decode_bytes_strict;
+mount core.security.sigstore.attestation.matches_logged_dsse;
 mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 
@@ -94,11 +96,11 @@ const ENVELOPE_DIGEST: Text = "fffffffffffffffffffffffffffffffffffffffffffffffff
 const VERIFIER: Text = "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1BQT0KLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLQo=";
 
 fn matches_record(json: &Text) -> Bool {
-    let body = core.encoding.json.decode_bytes_strict(json.as_bytes(), json.len()).unwrap();
+    let body = decode_bytes_strict(json.as_bytes(), json.len()).unwrap();
     let mut der: List<Byte> = List.new();
     der.push(48_u8);
     der.push(0_u8);
-    core.security.sigstore.attestation.matches_logged_dsse(&body, &"application/vnd.in-toto+json",
+    matches_logged_dsse(&body, &"application/vnd.in-toto+json",
         &PAYLOAD_DIGEST, &"AQI=", &der)
 }
 
@@ -144,6 +146,31 @@ fn test_different_signer_records_cannot_supply_one_signature_and_key() {
     let first = "{\"signature\":\"AQI=\",\"verifier\":\"AQ==\"}";
     let second = f"{{\"signature\":\"AwQ=\",\"verifier\":\"{VERIFIER}\"}}";
     assert(!matches_record(&dsse_record(&"dsse", &"0.0.1", &PAYLOAD_DIGEST, &f"{first},{second}")));
+}
+
+@test
+fn test_subject_domain_matches_the_uri_authority_or_email_domain() {
+    let policy = IdentityMatcher.Domain("issuer.example");
+    assert(policy.matches(&"person@issuer.example"));
+    assert(policy.matches(&"https://user@issuer.example:443/path@other.example"));
+    assert(!policy.matches(&"https://other.example/path@issuer.example"));
+    assert(!policy.matches(&"https://issuer.example@other.example/path"));
+    assert(!policy.matches(&"https://issuer.example:wrong/path"));
+    assert(!policy.matches(&"a@b@issuer.example"));
+    assert(!policy.matches(&"mailto:a@issuer.example"));
+    assert(!IdentityMatcher.Domain("").matches(&"user@"));
+}
+
+@test
+fn test_subject_glob_matches_unicode_scalars_and_long_subjects() {
+    assert(IdentityMatcher.Glob("a?b").matches(&"aπb"));
+    assert(!IdentityMatcher.Glob("a?b").matches(&"aπμb"));
+    assert(IdentityMatcher.Glob("*π?z").matches(&"πxxπμz"));
+    assert(!IdentityMatcher.Glob("π?z").matches(&"xπμz"));
+    assert(IdentityMatcher.Glob("**").matches(&""));
+    let subject = "a".repeat(4096);
+    assert(IdentityMatcher.Glob(f"{subject}*").matches(&subject));
+    assert(!IdentityMatcher.Glob("*b").matches(&subject));
 }
 
 fn main() {}

@@ -54,6 +54,7 @@ module core.security.sigstore;
 
 public module types;
 public module entry_id;
+public module checkpoint;
 public module attestation;
 public module rekor;
 public module fulcio;
@@ -90,9 +91,11 @@ public mount .fulcio.{
     request_signing_cert,
 };
 
+public mount .checkpoint.TrustedCheckpoint;
+
 // Re-exports — Verify
 public mount .verify.{
-    SigstoreTrustRoot, TrustedCheckpoint, LogAnchor, ExpectedIdentity, IdentityMatcher,
+    SigstoreTrustRoot, LogAnchor, ExpectedIdentity, IdentityMatcher,
     ValidationResult, SigstoreVerifyError,
     verify_bundle, extract_oidc_issuer, extract_oidc_subjects,
 };

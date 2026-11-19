@@ -1,0 +1,41 @@
+mount core.encoding.json.decode_bytes_strict;
+mount core.net.http.{HttpClient, Request, Response, HttpError};
+mount core.security.provenance.dsse_envelope_from_json;
+mount core.security.sigstore.types.{SigstoreBundle, SIGSTORE_BUNDLE_MEDIA_TYPE};
+mount core.security.sigstore.verify.{SigstoreTrustRoot, ExpectedIdentity, IdentityMatcher, SigstoreVerifyError, verify_bundle};
+mount core.security.x509.trust_store.TrustStore;
+
+type NoNetwork is {};
+implement HttpClient for NoNetwork {
+    async fn send(&self, _request: Request) -> Result<Response, HttpError> { panic("unexpected HTTP access") }
+}
+
+fn bundle_with(media_type: Text, payload_type: &Text, signatures: &Text, cert_chain_pem: List<Text>) -> SigstoreBundle {
+    let json = "{\"payload\":\"e30=\",\"payloadType\":\"" + *payload_type + "\",\"signatures\":" + *signatures + "}";
+    let value = decode_bytes_strict(json.as_bytes(), json.len()).unwrap();
+    SigstoreBundle {
+        media_type, cert_chain_pem, envelope: dsse_envelope_from_json(&value).unwrap(), tlog_entries: [],
+    }
+}
+
+@test
+async fn test_public_bundle_entry_rejects_untrusted_shapes_before_network() {
+    let client = NoNetwork {};
+    let empty = SigstoreTrustRoot.new(TrustStore.empty(), [], [], []);
+    let expected = ExpectedIdentity.new("https://issuer.example", IdentityMatcher.Exact("person@issuer.example"));
+    let media = SIGSTORE_BUNDLE_MEDIA_TYPE;
+    let intoto = "application/vnd.in-toto+json";
+    let one = "[{\"keyid\":\"\",\"sig\":\"AQI=\"}]";
+    let wrong_media = bundle_with("wrong", &intoto, &one, []);
+    assert(verify_bundle(&client, &wrong_media, &empty, &expected).await is Result.Err(SigstoreVerifyError.InvalidBundle(_)));
+    let wrong_type = bundle_with(media, &"other", &one, []);
+    assert(verify_bundle(&client, &wrong_type, &empty, &expected).await is Result.Err(SigstoreVerifyError.InvalidBundle(_)));
+    let unsigned = bundle_with(media, &intoto, &"[]", []);
+    assert(verify_bundle(&client, &unsigned, &empty, &expected).await is Result.Err(SigstoreVerifyError.InvalidBundle(_)));
+    let no_chain = bundle_with(media, &intoto, &one, []);
+    assert(verify_bundle(&client, &no_chain, &empty, &expected).await is Result.Err(SigstoreVerifyError.NoCertsInBundle));
+    let malformed = bundle_with(media, &intoto, &one, ["not a certificate"]);
+    assert(verify_bundle(&client, &malformed, &empty, &expected).await is Result.Err(SigstoreVerifyError.InvalidPem(_)));
+}
+
+fn main() {}

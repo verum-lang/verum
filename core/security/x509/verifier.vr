@@ -169,6 +169,14 @@ public type VerifierConfig is {
     now_override:      Maybe<Int>,
 };
 
+implement VerifierConfig {
+    public(in core.security) fn at_time_with_revocation(mut self, when: Int, policy: RevocationPolicy) -> VerifierConfig {
+        self.now_override = Maybe.Some(when);
+        self.revocation = policy;
+        self
+    }
+}
+
 public fn verifier_config_for_tls_server_auth() -> VerifierConfig {
     VerifierConfig {
         purpose:      CertPurpose.ServerAuth,

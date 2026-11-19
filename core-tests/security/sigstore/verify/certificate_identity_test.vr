@@ -1,0 +1,52 @@
+// A locally generated Ed25519 certificate contains identical legacy raw and
+// current DER UTF8String issuers plus email, URI and DNS SANs. These tests
+// exercise certificate parsing and identity extraction before authentication.
+mount core.encoding.base64.{decode as decode_base64};
+mount core.security.x509.certificate.parse_certificate;
+mount core.security.sigstore.verify.{extract_oidc_issuer, extract_oidc_subjects};
+
+const CERTIFICATE: Text = "MIIC6TCCApugAwIBAgICAaIwBQYDK2VwMC4xLDAqBgNVBAMMI1ZlcnVtIGxvY2FsIFNpZ3N0b3JlIHBhcnNlciBmaXh0dXJlMB4XDTI2MTExOTA4MjE0NVoXDTI2MTEyMDA4MjE0NVowLjEsMCoGA1UEAwwjVmVydW0gbG9jYWwgU2lnc3RvcmUgcGFyc2VyIGZpeHR1cmUwKjAFBgMrZXADIQDaomqQET9xpzNC+zp3esjaCw6ZTxe9oWeThZAAM77oj6OCAdswggHXMB0GA1UdDgQWBBQ5qJPn+wZzCLDT7rKc/DjplZXQADAPBgNVHRMBAf8EBTADAQH/ME4GA1UdEQRHMEWBFXBlcnNvbkBpc3N1ZXIuZXhhbXBsZYYeaHR0cHM6Ly9pc3N1ZXIuZXhhbXBsZS9yZWxlYXNlggxleGFtcGxlLnRlc3QwgacGCisGAQQBg78wAQEEgZhodHRwczovL2lzc3Vlci5leGFtcGxlL3NlZ21lbnQvc2VnbWVudC9zZWdtZW50L3NlZ21lbnQvc2VnbWVudC9zZWdtZW50L3NlZ21lbnQvc2VnbWVudC9zZWdtZW50L3NlZ21lbnQvc2VnbWVudC9zZWdtZW50L3NlZ21lbnQvc2VnbWVudC9zZWdtZW50L2F1dGhvcml0eTCBqgYKKwYBBAGDvzABCASBmwyBmGh0dHBzOi8vaXNzdWVyLmV4YW1wbGUvc2VnbWVudC9zZWdtZW50L3NlZ21lbnQvc2VnbWVudC9zZWdtZW50L3NlZ21lbnQvc2VnbWVudC9zZWdtZW50L3NlZ21lbnQvc2VnbWVudC9zZWdtZW50L3NlZ21lbnQvc2VnbWVudC9zZWdtZW50L3NlZ21lbnQvYXV0aG9yaXR5MAUGAytlcANBAE32LsyBtxuyYBdjybHL5c8yhj/2GSkA9/Hng24Vl3RPOtVOR2ifX5FQbEni9j257Zz1r16AimBn7tYggu+P5AU=";
+const ISSUER: Text = "https://issuer.example/segment/segment/segment/segment/segment/segment/segment/segment/segment/segment/segment/segment/segment/segment/segment/authority";
+
+@test
+fn test_real_certificate_preserves_long_form_issuer_and_san_order() {
+    let der = decode_base64(&CERTIFICATE).unwrap();
+    let cert = parse_certificate(der.as_slice()).unwrap();
+    assert_eq(extract_oidc_issuer(&cert).unwrap(), ISSUER);
+    let subjects = extract_oidc_subjects(&cert);
+    assert_eq(subjects.len(), 3);
+    assert_eq(subjects[0], "person@issuer.example");
+    assert_eq(subjects[1], "https://issuer.example/release");
+    assert_eq(subjects[2], "example.test");
+}
+
+@test
+fn test_conflicting_issuer_extensions_are_refused() {
+    let mut conflict = decode_base64(&CERTIFICATE).unwrap();
+    assert_eq(conflict[350], 104_u8);
+    conflict[350] = 106_u8;
+    let cert = parse_certificate(conflict.as_slice()).unwrap();
+    assert(extract_oidc_issuer(&cert).is_none());
+}
+
+@test
+fn test_current_issuer_with_trailing_der_is_refused() {
+    let mut trailing = decode_base64(&CERTIFICATE).unwrap();
+    // Original long-form UTF8String length is 152. Leave one unconsumed octet.
+    assert_eq(trailing[520], 12_u8);
+    assert_eq(trailing[522], 152_u8);
+    trailing[522] = 151_u8;
+    let cert = parse_certificate(trailing.as_slice()).unwrap();
+    assert(extract_oidc_issuer(&cert).is_none());
+}
+
+@test
+fn test_duplicate_extension_oid_is_refused() {
+    let mut duplicate = decode_base64(&CERTIFICATE).unwrap();
+    // Rename the legacy extension to the current OID without changing its length.
+    assert_eq(duplicate[346], 1_u8);
+    duplicate[346] = 8_u8;
+    assert(parse_certificate(duplicate.as_slice()).is_err());
+}
+
+fn main() {}

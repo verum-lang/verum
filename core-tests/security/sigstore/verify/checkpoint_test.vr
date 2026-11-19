@@ -1,0 +1,34 @@
+mount core.security.sigstore.checkpoint.TrustedCheckpoint;
+
+const LOG_ID: Text = "ab31dfc6e1290eec397c01d706987c8475fd1a5cdec41bb88f0a17d4948ba4a4";
+const ROOT: Text = "4d006aa46efcb607dd51d900b1213754c50cc9251c3405c6c2561d9d6a2f3239";
+
+@test
+fn test_shard_offset_binds_both_positions_to_the_pin() {
+    let zero = TrustedCheckpoint.new(LOG_ID, 0, 3, ROOT).unwrap();
+    let shifted = TrustedCheckpoint.new(LOG_ID, 1000, 3, ROOT).unwrap();
+    assert(zero.matches_log_position(&LOG_ID, 2, 2, 3, &ROOT));
+    assert(shifted.matches_log_position(&LOG_ID, 1000, 0, 3, &ROOT));
+    assert(shifted.matches_log_position(&LOG_ID, 1002, 2, 3, &ROOT));
+    assert(!shifted.matches_log_position(&LOG_ID, 1001, 2, 3, &ROOT));
+    assert(!shifted.matches_log_position(&LOG_ID, 999, 0, 3, &ROOT));
+    assert(!shifted.matches_log_position(&LOG_ID, 1003, 3, 3, &ROOT));
+    assert(!shifted.matches_log_position(&LOG_ID, 1000, -1, 3, &ROOT));
+    assert(!shifted.matches_log_position(&LOG_ID, 1002, 2, 4, &ROOT));
+    assert(!shifted.matches_log_position(&ROOT, 1002, 2, 3, &ROOT));
+    assert(!shifted.matches_log_position(&LOG_ID, 1002, 2, 3, &LOG_ID));
+}
+
+@test
+fn test_invalid_pins_and_unrepresentable_ranges_are_refused() {
+    assert(TrustedCheckpoint.new("not-hex", 0, 1, ROOT).is_none());
+    assert(TrustedCheckpoint.new(LOG_ID, 0, 1, "g0006aa46efcb607dd51d900b1213754c50cc9251c3405c6c2561d9d6a2f3239").is_none());
+    assert(TrustedCheckpoint.new(LOG_ID, -1, 1, ROOT).is_none());
+    assert(TrustedCheckpoint.new(LOG_ID, 0, 0, ROOT).is_none());
+    assert(TrustedCheckpoint.new(LOG_ID, Int.MAX, 2, ROOT).is_none());
+    let last = TrustedCheckpoint.new(LOG_ID, Int.MAX - 1, 2, ROOT).unwrap();
+    assert(last.matches_log_position(&LOG_ID, Int.MAX, 1, 2, &ROOT));
+    assert(!last.matches_log_position(&LOG_ID, Int.MIN, 1, 2, &ROOT));
+}
+
+fn main() {}

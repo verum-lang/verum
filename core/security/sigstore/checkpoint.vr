@@ -1,0 +1,37 @@
+/// A Rekor shard root and its global index range, authenticated by the caller.
+module core.security.sigstore.checkpoint;
+
+mount core.encoding.hex.{decode as hex_decode};
+
+@derive(Clone, Debug)
+public type TrustedCheckpoint is {
+    log_id_hex: Text,
+    first_log_index: Int,
+    tree_size: Int,
+    root_hash: Text,
+};
+
+implement TrustedCheckpoint {
+    /// The shard's first virtual index comes from authenticated log configuration.
+    /// Both hashes are 32 bytes represented as hexadecimal text.
+    public fn new(log_id_hex: Text, first_log_index: Int, tree_size: Int, root_hash: Text) -> Maybe<TrustedCheckpoint> {
+        if first_log_index < 0 || tree_size <= 0 { return Maybe.None; }
+        if tree_size - 1 > Int.MAX - first_log_index { return Maybe.None; }
+        if log_id_hex.len() != 64 || root_hash.len() != 64 { return Maybe.None; }
+        if hex_decode(&log_id_hex).is_err() || hex_decode(&root_hash).is_err() {
+            return Maybe.None;
+        }
+        Maybe.Some(TrustedCheckpoint {
+            log_id_hex: log_id_hex.to_ascii_lowercase(), first_log_index, tree_size,
+            root_hash: root_hash.to_ascii_lowercase(),
+        })
+    }
+
+    /// Bind the signed Rekor index and the RFC 6962 proof position to this shard.
+    public fn matches_log_position(&self, log_id_hex: &Text, signed_index: Int,
+        proof_index: Int, tree_size: Int, root_hash: &Text) -> Bool {
+        if tree_size != self.tree_size || proof_index < 0 || proof_index >= tree_size { return false; }
+        if signed_index < self.first_log_index || signed_index - self.first_log_index != proof_index { return false; }
+        self.log_id_hex == log_id_hex.to_ascii_lowercase() && self.root_hash == root_hash.to_ascii_lowercase()
+    }
+}

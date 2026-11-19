@@ -100,6 +100,16 @@ public type RekorClientConfig is {
     log_id_hex:         Text,
 };
 
+implement RekorClientConfig {
+    /// The public key and log ID are supplied by the caller's authenticated metadata.
+    public fn new(base_url: Text, log_public_key: P256PublicKey, log_id_hex: Text) -> Result<RekorClientConfig, RekorError> {
+        decode_merkle_hash(&log_id_hex)?;
+        Result.Ok(RekorClientConfig { base_url, log_public_key, log_id_hex })
+    }
+
+    public(in core.security.sigstore) fn log_id(&self) -> &Text { &self.log_id_hex }
+}
+
 // =============================================================================
 // Errors
 // =============================================================================
