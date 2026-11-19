@@ -142,6 +142,9 @@ implement Eq for UrlError {}
 public const MAX_URL_LENGTH_BYTES: Int = 64 * 1024;
 
 implement Url {
+    /// Host from the parsed authority, excluding the user information and port.
+    public fn host(&self) -> Maybe<&Text> { self.host.as_ref() }
+
     // Parse a URL string into its components.
     //
 

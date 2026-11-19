@@ -1,0 +1,14 @@
+mount core.net.url.Url;
+
+@test
+fn test_host_excludes_userinfo_port_and_path() {
+    let url = Url.parse(&"https://first@real.example:443/path@elsewhere?q=@third#frag").unwrap();
+    assert_eq(*url.host().unwrap(), "real.example");
+    let path = Url.parse(&"urn:example:object").unwrap();
+    assert(path.host().is_none());
+    let empty = Url.parse(&"http:///path").unwrap();
+    assert_eq(*empty.host().unwrap(), "");
+    assert(Url.parse(&"https://real.example:invalid/path").is_err());
+}
+
+fn main() {}
