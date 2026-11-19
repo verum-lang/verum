@@ -23,14 +23,14 @@
 // ```
 // // Parse → unix seconds (UTC) + sub-second nanos + offset.
 // let ts: Rfc3339Time = rfc3339.parse(&Text.from("2026-04-22T14:30:00.123Z"))?;
-// assert(ts.unix_seconds == 1777213800);
+// assert(ts.unix_seconds == 1776868200);
 // assert(ts.nanos == 123_000_000);
 // assert(ts.offset_minutes == 0);
 //
 
 // // Build from unix seconds, emit UTC Z form.
-// let s: Text = rfc3339.format_utc(1777213800, 0); // "2026-04-22T14:30:00Z"
-// let s: Text = rfc3339.format_utc_with_nanos(1777213800, 123_000_000);
+// let s: Text = rfc3339.format_utc(1776868200, 0); // "2026-04-22T14:30:00Z"
+// let s: Text = rfc3339.format_utc_with_nanos(1776868200, 123_000_000);
 //  // "2026-04-22T14:30:00.123000000Z"
 // ```
 //

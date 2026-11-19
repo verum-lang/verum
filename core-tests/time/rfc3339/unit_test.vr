@@ -16,6 +16,7 @@ mount core.time.rfc3339.{Rfc3339Time, Rfc3339Error, parse, format_utc, format_ut
 fn test_parse_utc_z_timestamp() {
     // 2026-04-22T14:30:00Z
     let t = parse(&"2026-04-22T14:30:00Z".to_text()).unwrap();
+    assert_eq(t.unix_seconds, 1_776_868_200);
     assert_eq(t.nanos, 0);
     assert_eq(t.offset_minutes, 0);
 }
