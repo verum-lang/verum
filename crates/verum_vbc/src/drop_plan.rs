@@ -1,7 +1,7 @@
 //! Declaration-owned destruction shared by interpreted and native execution.
 //! Runtime tags select a declared sum branch; they never establish ownership.
 use crate::{
-    associated_types::instantiate_witness,
+    associated_types::{WitnessUse, instantiate_storage},
     module::{FunctionId, VbcModule},
     mono::TypeSubstitution,
     types::{BuiltinValueStorage, TypeId, TypeKind, TypeRef},
@@ -142,9 +142,9 @@ pub fn build(module: &VbcModule, ty: &TypeRef) -> Result<DropPlan, Text> {
     {
         return Ok(plan);
     }
-    let root = instantiate_witness(module, &TypeSubstitution::empty(), ty)
+    let root = instantiate_storage(module, &TypeSubstitution::empty(), ty)
         .map_err(|error| Text::from(error.to_string()))?;
-    if !crate::mono::is_concrete_type(&root) {
+    if !crate::mono::concrete_for(&root, WitnessUse::Storage) {
         return Err("typed destruction has unresolved declaration witnesses".into());
     }
     build_inner(module, &root, &mut List::new(), &mut 4096)
@@ -216,7 +216,7 @@ fn build_inner(
             return Err("typed destruction of a transparent value requires a carrier-aware explicit Drop call".into());
         }
         let substitution = TypeSubstitution::new(&declaration.type_params, args);
-        let payload = instantiate_witness(module, &substitution, payload)
+        let payload = instantiate_storage(module, &substitution, payload)
             .map_err(|error| Text::from(error.to_string()))?;
         active.push(ty.clone());
         let result = build_inner(module, &payload, active, budget);
@@ -224,6 +224,7 @@ fn build_inner(
         return result;
     }
     if let Some(reference) = declaration.drop_fn {
+        let receiver_type = module.lifecycle_receiver(ty)?;
         let function = module.resolved_function_id(reference);
         let descriptor = module
             .get_function(function)
@@ -244,7 +245,7 @@ fn build_inner(
             return Err("typed destruction Drop receiver is not a borrowed owner".into());
         };
         let mut substitution = TypeSubstitution::empty();
-        if !crate::mono::unify_declared_types(receiver, ty, &mut substitution) {
+        if !crate::mono::unify_declared_types(receiver, &receiver_type, &mut substitution) {
             return Err("typed destruction Drop receiver belongs to another owner".into());
         }
         let type_args = descriptor
@@ -263,7 +264,10 @@ fn build_inner(
         }
         return Ok(DropPlan::Glue {
             owner,
-            owner_args: args.iter().cloned().collect(),
+            owner_args: match receiver_type.as_ref() {
+                TypeRef::Instantiated { args, .. } => args.iter().cloned().collect(),
+                _ => List::new(),
+            },
             function,
             type_args,
         });
@@ -277,7 +281,7 @@ fn build_inner(
                 let declared = field.declaration_type.as_ref().ok_or_else(|| {
                     Text::from("typed destruction field lacks declaration evidence")
                 })?;
-                let declared = instantiate_witness(module, &substitution, declared)
+                let declared = instantiate_storage(module, &substitution, declared)
                     .map_err(|error| Text::from(error.to_string()))?;
                 build_inner(module, &declared, active, budget)
             })
@@ -297,7 +301,7 @@ fn build_inner(
                     return Err("typed destruction alias target lacks scalar declaration evidence".into());
                 }
             }
-            let target = instantiate_witness(module, &substitution, target)
+            let target = instantiate_storage(module, &substitution, target)
                 .map_err(|error| Text::from(error.to_string()))?;
             build_inner(module, &target, active, budget)
         }

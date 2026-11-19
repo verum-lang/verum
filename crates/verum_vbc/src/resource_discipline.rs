@@ -1,7 +1,7 @@
 //! Effective usage constraints follow exact descriptors and owned components.
 //! This query supplies no duplication operation or cleanup obligation.
 
-use crate::associated_types::{DeclarationLookup, instantiate_witness, normalize_projections};
+use crate::associated_types::{DeclarationLookup, WitnessUse, instantiate_storage, instantiate_witness, normalize_for};
 use crate::module::VbcModule;
 use crate::mono::TypeSubstitution;
 use crate::types::{
@@ -100,6 +100,20 @@ impl DisciplineError {
 }
 
 impl VbcModule {
+    /// User-defined lifecycle methods may inspect any part of their receiver's
+    /// semantic type, including type arguments reached through a reference.
+    pub(crate) fn lifecycle_receiver<'a>(&self, ty: &'a TypeRef) -> Result<std::borrow::Cow<'a, TypeRef>, Text> {
+        if crate::mono::is_concrete_type(ty) {
+            return Ok(std::borrow::Cow::Borrowed(ty));
+        }
+        let receiver = instantiate_witness(self, &TypeSubstitution::empty(), ty)
+            .map_err(|error| Text::from(error.to_string()))?;
+        if !crate::mono::is_concrete_type(&receiver) {
+            return Err("lifecycle method requires a complete receiver witness".into());
+        }
+        Ok(std::borrow::Cow::Owned(receiver))
+    }
+
     /// Resolve usage discipline from exact declarations and substituted owned fields.
     /// Unknown components or missing/legacy descriptors never imply unrestricted use.
     pub fn resource_discipline(&self, ty: &TypeRef) -> ResourceDiscipline {
@@ -200,7 +214,7 @@ fn resolve_discipline(
     ty: &TypeRef,
     carrier: impl Fn(TypeId) -> Option<WellKnownType>,
 ) -> Result<ResolvedDiscipline, DisciplineError> {
-    if is_reference_or_callable(ty) {
+    if is_reference_or_callable(ty) || matches!(ty, TypeRef::Concrete(id) if has_builtin_discipline(*id)) {
         return Ok(ResolvedDiscipline::Unrestricted);
     }
     if !bounded_type_shape(ty) {
@@ -209,7 +223,7 @@ fn resolve_discipline(
 
     let mut types = List::new();
     let mut root = ty.clone();
-    normalize_projections(declarations, &mut root).map_err(|_| DisciplineError::InvalidTypeShape)?;
+    normalize_for(declarations, &mut root, WitnessUse::Storage).map_err(|_| DisciplineError::InvalidTypeShape)?;
     let mut indices = Map::new();
     indices.insert(root.clone(), 0usize);
     types.push(root);
@@ -239,7 +253,7 @@ fn resolve_discipline(
             _ => return Err(DisciplineError::UnresolvedType),
         };
         if let Some((id, args)) = nominal {
-            if id.is_builtin() && id != TypeId::PTR && id != TypeId::RESERVED {
+            if has_builtin_discipline(id) {
                 if !args.is_empty() {
                     return Err(DisciplineError::Arity(id, 0, args.len()));
                 }
@@ -275,7 +289,7 @@ fn resolve_discipline(
                     if !bounded_type_shape(declared) {
                         return Err(DisciplineError::InvalidTypeShape);
                     }
-                    let value = instantiate_witness(declarations, &substitution, declared)
+                    let value = instantiate_storage(declarations, &substitution, declared)
                         .map_err(|_| invalid())?;
                     if !bounded_type_shape(&value) {
                         return Err(DisciplineError::InvalidTypeShape);
@@ -374,6 +388,10 @@ fn resolve_discipline(
     } else {
         Err(DisciplineError::InlineCycle)
     }
+}
+
+fn has_builtin_discipline(id: TypeId) -> bool {
+    id.is_builtin() && id != TypeId::PTR && id != TypeId::RESERVED
 }
 
 fn is_reference_or_callable(ty: &TypeRef) -> bool {

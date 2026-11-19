@@ -1,7 +1,7 @@
 //! Declaration-owned copy operations. Recursive types form a finite graph;
 //! interpreting that graph must never traverse borrowed storage.
 use crate::{
-    associated_types::instantiate_witness,
+    associated_types::{instantiate_storage, instantiate_witness},
     module::{FunctionId, VbcModule},
     mono::TypeSubstitution,
     types::{BuiltinValueStorage, FieldDescriptor, MAX_TYPE_REF_NODES, TypeId, TypeKind, TypeRef, VariantKind},
@@ -155,7 +155,7 @@ impl Builder<'_> {
                     .declaration_type
                     .as_ref()
                     .ok_or_else(|| Text::from("typed copy field lacks its declaration type"))?;
-                let ty = instantiate_witness(self.module, substitution, ty)
+                let ty = instantiate_storage(self.module, substitution, ty)
                     .map_err(|error| Text::from(error.to_string()))?;
                 self.intern(ty)
             })
@@ -208,7 +208,7 @@ impl Builder<'_> {
         if let Some(payload) = crate::source_declaration_integrity::transparent_value_type(
             declaration, &self.module.strings,
         )? {
-            let payload = instantiate_witness(self.module, &substitution, payload)
+            let payload = instantiate_storage(self.module, &substitution, payload)
                 .map_err(|error| Text::from(error.to_string()))?;
             return Ok(CopyNode::Alias(self.intern(payload)?));
         }
@@ -225,6 +225,7 @@ impl Builder<'_> {
                     });
                 }
                 Some(WellKnownType::Shared) => {
+                    let receiver = self.module.lifecycle_receiver(ty)?;
                     let reference = declaration.clone_fn.ok_or_else(|| {
                         Text::from("Shared copy requires its declared Clone body")
                     })?;
@@ -246,7 +247,7 @@ impl Builder<'_> {
                         return Err("Shared Clone requires a read-only receiver declaration".into());
                     };
                     let mut selected = TypeSubstitution::empty();
-                    if !crate::mono::unify_declared_types(inner, ty, &mut selected) {
+                    if !crate::mono::unify_declared_types(inner, &receiver, &mut selected) {
                         return Err("Shared Clone belongs to a different receiver".into());
                     }
                     let output = descriptor
@@ -255,7 +256,7 @@ impl Builder<'_> {
                         .ok_or_else(|| Text::from("Shared Clone lacks its result declaration"))?;
                     if instantiate_witness(self.module, &selected, output)
                         .map_err(|error| Text::from(error.to_string()))?
-                        != *ty
+                        != *receiver
                     {
                         return Err("Shared Clone returns a different declaration".into());
                     }
@@ -271,7 +272,7 @@ impl Builder<'_> {
                         self.module,
                         function,
                         &type_args,
-                        ty,
+                        &receiver,
                     )?;
                     return Ok(CopyNode::Shared {
                         owner,
@@ -308,7 +309,7 @@ impl Builder<'_> {
                     .alias_target
                     .as_ref()
                     .ok_or_else(|| Text::from("typed copy alias has no declaration target"))?;
-                let target = instantiate_witness(self.module, &substitution, target)
+                let target = instantiate_storage(self.module, &substitution, target)
                     .map_err(|error| Text::from(error.to_string()))?;
                 Ok(CopyNode::Alias(self.intern(target)?))
             }
@@ -343,12 +344,15 @@ impl Builder<'_> {
 /// Build every owned component before touching runtime storage. Unresolved
 /// descriptors, affine owners and nonregular expanding types are refused.
 pub fn build(module: &VbcModule, ty: &TypeRef) -> Result<CopyPlan, Text> {
-    if matches!(ty, TypeRef::Reference { .. }) {
-        let mut nodes = List::new();
-        nodes.push(CopyNode::Identity);
-        return Ok(CopyPlan { nodes });
+    let direct = match ty {
+        TypeRef::Reference { .. } => Some(CopyNode::Identity),
+        TypeRef::Concrete(id) => builtin_copy_node(*id),
+        _ => None,
+    };
+    if let Some(node) = direct {
+        return Ok(CopyPlan { nodes: List::from_single(node) });
     }
-    let root = instantiate_witness(module, &TypeSubstitution::empty(), ty)
+    let root = instantiate_storage(module, &TypeSubstitution::empty(), ty)
         .map_err(|error| Text::from(error.to_string()))?;
     module.require_unrestricted_ownership(&root)?;
     let mut builder = Builder {

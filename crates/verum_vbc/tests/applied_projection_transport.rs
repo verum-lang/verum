@@ -376,11 +376,29 @@ fn nested_associated_witness_cycles_fail_before_loading_a_type_head() {
     let owner = module.types.iter_mut().find(|ty| ty.id == TypeId(3000)).unwrap();
     owner.protocols.push(verum_vbc::types::ProtocolImpl {
         source_implementation: Some(member_implementation("(Carrier.Item, Carrier.Item)")), protocol: ProtocolId(3100), methods: vec![],
-        associated_types: vec![(member, TypeRef::Tuple(vec![projection.clone(), projection]))],
+        associated_types: vec![(member, TypeRef::Tuple(vec![projection.clone(), projection.clone()]))],
         protocol_args_text: vec![], type_param_fn_bounds: vec![],
     });
     let bytes = verum_vbc::serialize::serialize_module(&module).unwrap();
     let restored = verum_vbc::deserialize::deserialize_module(&bytes).unwrap();
+    use verum_vbc::{copy_plan, drop_plan, types::{CbgrTier, Mutability}};
+    let owned = TypeRef::Tuple(vec![projection.clone()]);
+    assert!(copy_plan::build(&restored, &owned).is_err());
+    assert!(drop_plan::build(&restored, &owned).is_err());
+    let reference = TypeRef::reference(projection, Mutability::Immutable, CbgrTier::Tier0);
+    let signature = TypeRef::Function {
+        params: vec![reference.clone()], return_type: Box::new(TypeRef::Concrete(TypeId::UNIT)),
+        is_async: false, contexts: Default::default(),
+    };
+    assert!(copy_plan::build(&restored, &signature).is_err());
+    assert!(drop_plan::build(&restored, &signature).is_err());
+    let borrowed = TypeRef::Tuple(vec![reference]);
+    assert_eq!(restored.resource_discipline(&borrowed), verum_common::ResourceDiscipline::Unrestricted);
+    let plan = copy_plan::build(&restored, &borrowed).unwrap();
+    assert!(matches!(plan.nodes.as_slice(), [copy_plan::CopyNode::Record { .. }, copy_plan::CopyNode::Identity]));
+    let drop_plan::DropPlan::Record { fields, .. } = drop_plan::build(&restored, &borrowed).unwrap()
+        else { panic!("tuple cleanup"); };
+    assert!(matches!(fields.as_slice(), [drop_plan::DropPlan::Ignore]));
     let error = Interpreter::new(restored.into()).execute_function(FunctionId(0)).unwrap_err();
     assert!(matches!(&error, InterpreterError::InvalidBytecode { message, .. }
         if message.contains("associated-type expansion") && message.contains("limit")), "{error}");

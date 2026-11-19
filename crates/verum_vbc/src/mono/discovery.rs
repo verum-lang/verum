@@ -10,9 +10,13 @@ use crate::types::TypeRef;
 // An associated projection is still a deferred type, even when its base is
 // concrete. Rank-2 binders need their own substitution scope (T1521).
 pub(crate) fn concrete(ty: &TypeRef) -> bool {
-    let mut pending = verum_common::List::from_iter([(ty, 0u32, 0usize)]);
+    concrete_for(ty, crate::associated_types::WitnessUse::Signature)
+}
+
+pub(crate) fn concrete_for(ty: &TypeRef, scope: crate::associated_types::WitnessUse) -> bool {
+    let mut pending = verum_common::List::from_iter([(ty, 0u32, 0usize, scope)]);
     let mut remaining = crate::types::MAX_TYPE_REF_NODES - 1;
-    while let Some((ty, binders, depth)) = pending.pop() {
+    while let Some((ty, binders, depth, scope)) = pending.pop() {
         if depth >= crate::types::MAX_TYPE_REF_DEPTH { return false; }
         match ty {
             TypeRef::Generic(id) if u32::from(id.0) >= binders => return false,
@@ -21,6 +25,7 @@ pub(crate) fn concrete(ty: &TypeRef) -> bool {
             | TypeRef::Rank2Function { .. } => return false,
             _ => {},
         }
+        let Some(child_scope) = scope.child_scope(ty) else { continue; };
         // A closed existential is an exact semantic argument. Its hidden
         // subject is local; free caller slots in every bound and equality
         // still require evidence. Layout is checked independently.
@@ -30,7 +35,7 @@ pub(crate) fn concrete(ty: &TypeRef) -> bool {
             if remaining == 0 { exhausted = true; }
             else {
                 remaining -= 1;
-                pending.push((child, child_binders, depth + 1));
+                pending.push((child, child_binders, depth + 1, child_scope));
             }
         });
         if exhausted { return false; }

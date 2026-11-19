@@ -18,6 +18,21 @@ impl DeclarationLookup for VbcModule {
     fn spelling(&self, id: StringId) -> Option<&str> { self.get_string(id) }
 }
 
+/// A reference has its own complete storage representation. Operations that
+/// inspect a semantic signature, including calls to user code, need its target.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WitnessUse { Signature, Storage }
+
+impl WitnessUse {
+    pub(crate) fn child_scope(self, ty: &TypeRef) -> Option<Self> {
+        match ty {
+            TypeRef::Reference { .. } if self == Self::Storage => None,
+            TypeRef::Function { .. } | TypeRef::Rank2Function { .. } | TypeRef::Dynamic(_) => Some(Self::Signature),
+            _ => Some(self),
+        }
+    }
+}
+
 /// Resolve a plain associated assignment from the receiver's exact descriptor.
 /// Missing or ambiguous evidence remains unresolved. Invalid carriers fail.
 pub fn resolve_projection(
@@ -94,13 +109,28 @@ pub(crate) fn instantiate_witness(
     Ok(result)
 }
 
+pub(crate) fn instantiate_storage(
+    declarations: &impl DeclarationLookup,
+    substitution: &TypeSubstitution,
+    ty: &TypeRef,
+) -> VbcResult<TypeRef> {
+    let mut result = substitution.apply(ty)?;
+    normalize_for(declarations, &mut result, WitnessUse::Storage)?;
+    Ok(result)
+}
+
 /// Normalize declaration-backed associated assignments throughout a witness.
 /// An unresolved member stays explicit for the consumer that requires it.
 /// Bound both depth and expansion work, including branching recursive families.
 pub(crate) fn normalize_projections(declarations: &impl DeclarationLookup, ty: &mut TypeRef) -> VbcResult<()> {
+    normalize_for(declarations, ty, WitnessUse::Signature)
+}
+
+pub(crate) fn normalize_for(declarations: &impl DeclarationLookup, ty: &mut TypeRef, scope: WitnessUse) -> VbcResult<()> {
     fn normalize(
         declarations: &impl DeclarationLookup,
         ty: &mut TypeRef,
+        scope: WitnessUse,
         depth: usize,
         remaining: &mut usize,
     ) -> VbcResult<()> {
@@ -108,7 +138,8 @@ pub(crate) fn normalize_projections(declarations: &impl DeclarationLookup, ty: &
             return Err(VbcError::AssociatedType("associated-type expansion exceeds the type nesting or work limit".into()));
         }
         *remaining -= 1;
-        let mut child = |ty: &mut TypeRef| normalize(declarations, ty, depth + 1, remaining);
+        let Some(child_scope) = scope.child_scope(ty) else { return Ok(()); };
+        let mut child = |ty: &mut TypeRef| normalize(declarations, ty, child_scope, depth + 1, remaining);
         match ty {
             TypeRef::AssociatedProjection { base, qualifier, assoc, args } => {
                 child(base)?;
@@ -140,5 +171,5 @@ pub(crate) fn normalize_projections(declarations: &impl DeclarationLookup, ty: &
     }
     const MAX_EXPANSION_NODES: usize = 16_384;
     let mut remaining = MAX_EXPANSION_NODES;
-    normalize(declarations, ty, 0, &mut remaining)
+    normalize(declarations, ty, scope, 0, &mut remaining)
 }
