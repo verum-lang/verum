@@ -37,6 +37,11 @@ fn retained_handle_runs_in_native_image() {
 }
 
 #[test]
+fn retained_field_preserves_the_allocation_write_grant_in_native_image() {
+    native(include_str!("../../verum_vbc/tests/fixtures/retained_allocation.vr"));
+}
+
+#[test]
 fn caught_zero_and_overflow_preserve_the_counter_in_native_image() {
     for count in [0, u32::MAX] {
         let prefix = SOURCE.split("    fn main()").next().unwrap();

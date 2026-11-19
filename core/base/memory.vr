@@ -619,7 +619,7 @@ implement<T: Display> Display for Heap<T> {
 /// The reference counts use atomic operations for thread safety.
 @opaque
 public type Shared<T> is {
-    ptr: &unsafe SharedInner<T>,
+    ptr: &unsafe mut SharedInner<T>,
     generation: UInt32,
     epoch: UInt16,
 };
@@ -649,7 +649,7 @@ implement<T> Shared<T> {
             Result.Err(e) => panic(f"Out of memory: {e.message()}"),
         };
 
-        let typed_ptr = ptr as &unsafe SharedInner<T>;
+        let typed_ptr = ptr as &unsafe mut SharedInner<T>;
 
         unsafe {
             ptr_write(typed_ptr, inner);
@@ -674,7 +674,7 @@ implement<T> Shared<T> {
         let align = SharedInner<T>.alignment;
 
         let (ptr, gen, epoch) = cbgr_alloc(size, align)?;
-        let typed_ptr = ptr as &unsafe SharedInner<T>;
+        let typed_ptr = ptr as &unsafe mut SharedInner<T>;
 
         unsafe {
             ptr_write(typed_ptr, inner);
@@ -836,9 +836,12 @@ implement<T> Shared<T> {
 
 implement<T> Clone for Shared<T> {
     fn clone(&self) -> Shared<T> {
-        // SAFETY: this live Shared owns the strong counter of its allocation.
-        // The primitive allocates the wrapper before its checked atomic retain.
-        unsafe { @intrinsic("retain_copy", self, &mut (*self.ptr).strong_count) }
+        // SAFETY: strong_count is an aligned UInt32 used only by atomic
+        // operations while the allocation is shared. This live handle keeps
+        // its allocation alive throughout the checked retain. Project from the
+        // allocation pointer so the counter retains its original write grant.
+        let allocation = self.ptr;
+        unsafe { @intrinsic("retain_copy", self, &mut (*allocation).strong_count) }
     }
 }
 
@@ -952,7 +955,7 @@ implement<T: Display> Display for Shared<T> {
 /// Can be upgraded to Shared<T> if the value is still alive.
 @opaque
 public type Weak<T> is {
-    ptr: &unsafe SharedInner<T>,
+    ptr: &unsafe mut SharedInner<T>,
     generation: UInt32,
     epoch: UInt16,
 };

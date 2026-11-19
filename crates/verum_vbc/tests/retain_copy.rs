@@ -44,6 +44,32 @@ fn retained_handle_preserves_borrowed_payload_and_increments_its_explicit_counte
         Some(73)
     );
 }
+
+#[test]
+fn retaining_shared_storage_updates_only_the_explicitly_writable_atomic_field() {
+    let source = include_str!("fixtures/retained_allocation.vr");
+    let module = wire(source);
+    let entry = module.find_function_by_name("main").unwrap();
+    let mut vm = Interpreter::new(module.into());
+    assert_eq!(vm.execute_function(entry).unwrap().try_as_i64(), Some(73));
+
+    let readonly_source = source.replace("&mut allocation as", "&allocation as");
+    let readonly = wire(&readonly_source);
+    let entry = readonly.find_function_by_name("main").unwrap();
+    let failure = Interpreter::new(readonly.into()).execute_function(entry).unwrap_err();
+    assert!(matches!(failure, verum_vbc::interpreter::InterpreterError::CapabilityDenied { .. }), "{failure:?}");
+
+    let ordinary = readonly_source.replace(
+        "@intrinsic(\"retain_copy\", handle, &mut (*allocation).strong)",
+        "(*allocation).strong = 8; *handle",
+    );
+    assert_ne!(ordinary, readonly_source);
+    let module = wire(&ordinary);
+    let entry = module.find_function_by_name("main").unwrap();
+    let failure = Interpreter::new(module.into()).execute_function(entry).unwrap_err();
+    assert!(matches!(failure, verum_vbc::interpreter::InterpreterError::CapabilityDenied { .. }), "{failure:?}");
+}
+
 #[test]
 fn zero_and_overflow_refuse_and_release_the_unpublished_wrapper() {
     for count in [0, u32::MAX] {

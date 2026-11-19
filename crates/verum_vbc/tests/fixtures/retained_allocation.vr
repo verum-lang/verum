@@ -1,0 +1,17 @@
+type Allocation is { strong: UInt32, neighbor: UInt32 };
+type Ticket is { ptr: &unsafe mut Allocation, value: &Int };
+fn retain(handle: &Ticket) -> Ticket {
+    let allocation = handle.ptr;
+    unsafe {
+        @intrinsic("retain_copy", handle, &mut (*allocation).strong)
+    }
+}
+fn main() -> Int {
+    let value = 73;
+    let mut allocation = Allocation { strong: 1, neighbor: 11 };
+    let ticket = Ticket { ptr: &mut allocation as &unsafe mut Allocation, value: &value };
+    let alias = &ticket;
+    let retained = retain(&ticket);
+    if allocation.strong != 2 || allocation.neighbor != 11 || *alias.value != 73 { return 0; }
+    *retained.value
+}
