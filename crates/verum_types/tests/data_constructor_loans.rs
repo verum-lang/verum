@@ -111,7 +111,7 @@ fn same_shaped_function_calls_still_invalidate_unknown_captures() {
         "fn invoke(callback:fn()->Int)->Choice<fn()->Int>;",
         "fn invoke(callback:fn()->Int)->Choice<fn()->Int> {callback();Choice.Hold(callback)}",
     ] {
-        let source = format!("{CHOICE} {declaration} fn wrap(callback:fn()->Int)->Choice<fn()->Int> {{let value=invoke(callback);value}}");
+        let source = format!("{CHOICE} {CELL} {declaration} fn read(cell:&mut Cell, callback:fn()->Int)->&Int {{let value=invoke(callback);cell.pointer}}");
         let found = errors(&source, &[]);
         assert!(found.iter().any(|e| e.contains("cannot establish the lifetime")), "{source}: {found:?}");
     }
@@ -119,9 +119,29 @@ fn same_shaped_function_calls_still_invalidate_unknown_captures() {
 
 #[test]
 fn a_shadowed_constructor_name_does_not_grant_data_construction_authority() {
-    let source = format!("{CHOICE} fn invoke(callback:fn()->Int)->Choice<fn()->Int>; fn wrap(callback:fn()->Int)->Choice<fn()->Int> {{let Hold=invoke;let value=Hold(callback);value}}");
-    let found = errors(&source, &[]);
-    assert!(found.iter().any(|e| e.contains("cannot establish the lifetime")), "{found:?}");
+    for (binding, expression, opaque) in [("", "Choice.Hold(callback)", false), ("let Hold=invoke;", "Hold(callback)", true)] {
+        let source = format!("{CHOICE} {CELL} fn invoke(callback:fn()->Int)->Choice<fn()->Int>; fn read(cell:&mut Cell,callback:fn()->Int)->&Int {{{binding}let value={expression};cell.pointer}}");
+        let found = errors(&source, &[]);
+        if opaque {
+            assert!(found.iter().any(|e| e.contains("cannot establish the lifetime")), "{source}: {found:?}");
+        } else {
+            assert!(found.is_empty(), "{source}: {found:?}");
+        }
+    }
+}
+
+#[test]
+fn wrapping_a_callable_preserves_its_actual_captured_loan_across_a_call() {
+    for callee in ["invoke", "Hold"] {
+        let shadow = if callee == "Hold" { "let Hold=invoke;" } else { "" };
+        let prefix = format!("{CHOICE} fn invoke(callback:fn()->Int)->Choice<fn()->Int>; fn wrap(callback:fn()->Int)->Choice<fn()->Int> {{{shadow}{callee}(callback)}}");
+        // The incoming callback has no local origin to escape from this frame.
+        let valid = errors(&prefix, &[]);
+        assert!(valid.is_empty(), "{prefix}: {valid:?}");
+        let invalid = format!("{prefix} fn escape()->Choice<fn()->Int> {{let local=3;let loan=&local;let read:fn()->Int=|| *loan;wrap(read)}}");
+        let found = errors(&invalid, &[]);
+        assert!(found.iter().any(|error| error.contains("local") && error.contains("does not live long enough")), "{invalid}: {found:?}");
+    }
 }
 
 #[test]

@@ -34,6 +34,28 @@ fn closures(module: &VbcModule) -> verum_common::List<&FunctionDescriptor> {
 }
 
 #[test]
+fn a_callback_carried_through_a_sum_keeps_its_original_producer() {
+    let module = compile(r#"
+        type Choice<T> is Empty | Hold(T);
+        fn seven() -> Int { 7 }
+        fn invoke(callback: fn() -> Int) -> Choice<fn() -> Int> {
+            callback();
+            Choice.Hold(callback)
+        }
+        fn wrap(callback: fn() -> Int) -> Choice<fn() -> Int> { invoke(callback) }
+        fn probe() -> Int {
+            match wrap(seven) { Choice.Hold(read) => read(), Choice.Empty => 0 }
+        }
+    "#);
+    let wire = verum_vbc::deserialize::deserialize_module(&verum_vbc::serialize::serialize_module(&module).unwrap()).unwrap();
+    for module in [module, wire] {
+        let entry = module.find_function_by_name("callable.probe").unwrap();
+        let result = verum_vbc::interpreter::Interpreter::new(module.into()).execute_function(entry).unwrap();
+        assert_eq!(result.try_as_i64(), Some(7));
+    }
+}
+
+#[test]
 fn annotated_nominal_parameter_reaches_closure_descriptor() {
     let module = compile(
         "type Payload is { value: Int }; fn probe() -> Int { let f = |x: Payload| -> Payload { x }; 0 }",
