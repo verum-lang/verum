@@ -770,6 +770,35 @@ fn nominal_constructors_do_not_borrow_a_function_family_from_shared_synthetic_id
 }
 
 #[test]
+fn mounted_variants_keep_the_selected_sum_declaration_in_value_position() {
+    let provider = parse("module provider; public type Direction is West | East | Offset(Int);");
+    let consumer = parse(r#"
+        module consumer;
+        mount provider.{Direction, East, West, Offset};
+        fn choose(value: Int) -> Direction {
+            if value < 0 { West } else if value > 0 { Offset(value) } else { East }
+        }
+        fn run() -> Int {
+            let west = match choose(-1) { Direction.West => 30, _ => 0 };
+            let east = match choose(0) { Direction.East => 40, _ => 0 };
+            let offset = match choose(3) { Direction.Offset(n) => n, _ => 0 };
+            west + east + offset
+        }
+    "#);
+    execute_source_and_wire(compile(&[&provider, &consumer]).unwrap(), 73);
+
+    let other = parse("module other; public type Status is East | Closed;");
+    let ambiguous = parse(r#"
+        module consumer;
+        mount provider.{Direction, East};
+        mount other.East;
+        fn selected() -> Direction { East }
+    "#);
+    let error = compile(&[&provider, &other, &ambiguous]).expect_err("two constructor declarations");
+    assert!(error.to_string().contains("conflict") || error.to_string().contains("ambig"), "{error}");
+}
+
+#[test]
 fn a_static_member_called_through_a_value_keeps_only_its_declared_parameters() {
     let module = parse(r#"
         module consumer;

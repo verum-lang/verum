@@ -1007,7 +1007,10 @@ impl VbcCodegen {
             {
                 return Ok(Some(SourceValueSelection {
                     key: key.clone(), function: info,
-                    kind: if kinds.contains(&DeclarationCategory::Callable) { SourceValueKind::Callable }
+                    // Sum arms have callable table entries for construction;
+                    // their selected producer is never a first-class function family.
+                    kind: if info.variant_tag.is_some() { SourceValueKind::Constructor }
+                        else if kinds.contains(&DeclarationCategory::Callable) { SourceValueKind::Callable }
                         else { SourceValueKind::Value },
                 }));
             }
