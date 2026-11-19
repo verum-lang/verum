@@ -6,7 +6,7 @@
 // extension (RFC 5280 §4.2.1.12).
 // =============================================================================
 
-mount core.security.x509.ext.ext_key_usage.ExtKeyUsagePurpose;
+mount core.security.x509.ext.ext_key_usage.{ExtKeyUsagePurpose, parse};
 mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 
@@ -91,3 +91,16 @@ fn test_eku_purpose_any_purpose_disjoint_from_specifics() {
 }
 
 fn main() {}
+
+@test
+fn test_decoded_eku_distinguishes_server_and_client_oids() {
+    let mut bytes: List<Byte> = [0x30_u8, 0x0a_u8, 0x06_u8, 0x08_u8, 0x2b_u8, 0x06_u8,
+        0x01_u8, 0x05_u8, 0x05_u8, 0x07_u8, 0x03_u8, 0x01_u8];
+    let server = parse(bytes.as_slice()).unwrap();
+    assert(server.allows_server_auth(), "serverAuth missing from decoded usage");
+    assert(!server.allows_client_auth(), "serverAuth incorrectly grants clientAuth");
+    bytes[11] = 0x02_u8;
+    let client = parse(bytes.as_slice()).unwrap();
+    assert(client.allows_client_auth(), "clientAuth missing from decoded usage");
+    assert(!client.allows_server_auth(), "clientAuth incorrectly grants serverAuth");
+}

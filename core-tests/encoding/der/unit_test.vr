@@ -307,3 +307,20 @@ fn test_canonical_der_key_components() {
     assert_eq(seq[1], 129_u8);
     assert_eq(seq[2], 132_u8);
 }
+
+@test
+fn test_skip_one_element_and_unpack_the_bit_string_at_the_cursor() {
+    let bytes: List<Byte> = [0x81_u8, 0x02_u8, 0x12_u8, 0x34_u8, 0x03_u8, 0x02_u8, 0x03_u8, 0xa0_u8];
+    let mut reader = DerReader.new(bytes.as_slice());
+    reader.skip_element().unwrap();
+    assert_eq(reader.position(), 4);
+    let bits = reader.read_bit_string().unwrap();
+    let (octets, unused) = bits.into_parts();
+    assert_eq(unused, 3_u8);
+    assert_eq(octets.len(), 1);
+    assert_eq(octets[0], 0xa0_u8);
+    assert(reader.expect_end().is_ok());
+    let truncated: List<Byte> = [0x81_u8, 0x02_u8, 0x12_u8];
+    let mut short = DerReader.new(truncated.as_slice());
+    assert(short.skip_element().is_err());
+}

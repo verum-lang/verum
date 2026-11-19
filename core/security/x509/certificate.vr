@@ -66,7 +66,7 @@ mount core.collections.list.{List};
 mount core.encoding.der.{DerReader, DerError, DerErrorKind, DerTime as Time, TagClass};
 mount core.encoding.der as der;
 mount core.security.x509.algorithm.{
-    SignatureAlg, RsaPssParams, RsaPssHash, parse_signature_alg,
+    SignatureAlg, parse_signature_alg, signature_alg_matches,
 };
 mount core.security.x509.name.{DistinguishedName, parse_name};
 mount core.security.x509.spki.{Spki, parse_spki};
@@ -100,6 +100,11 @@ public type X509Certificate is {
     tbs_der: List<Byte>,                // feed to hash+verify with parent SPKI
 };
 
+implement X509Certificate {
+    /// Return the inclusive notBefore and notAfter dates as Unix seconds.
+    public fn validity_unix_bounds(&self) -> (Int64, Int64) { self.tbs.validity.unix_bounds() }
+}
+
 // =============================================================================
 // Parser
 // =============================================================================
@@ -116,7 +121,8 @@ public fn parse_certificate(bytes: &[Byte]) -> Result<X509Certificate, DerError>
     let (tbs, tbs_der) = parse_tbs(&mut cert_seq)?;
     let sig_alg = parse_signature_alg(&mut cert_seq)?;
     let sig_bs = cert_seq.read_bit_string()?;
-    if sig_bs.unused_bits != 0_u8 {
+    let (signature, unused) = sig_bs.into_parts();
+    if unused != 0_u8 {
         return Result.Err(DerError {
             kind: DerErrorKind.InvalidBitString,
             position: 0,
@@ -127,9 +133,7 @@ public fn parse_certificate(bytes: &[Byte]) -> Result<X509Certificate, DerError>
     r.expect_end()?;
 
     // RFC 5280 §4.1.1.2: outer signatureAlgorithm MUST equal inner
-    // TBSCertificate.signature. We defer equality to the verify path
-    // by comparing the two parsed forms; here we only check they are
-    // structurally comparable (same variant).
+    // TBSCertificate.signature, including the supported RSA-PSS parameters.
     if !signature_alg_matches(&sig_alg, &tbs.signature_alg) {
         return Result.Err(DerError {
             kind: DerErrorKind.MalformedDer,
@@ -141,7 +145,7 @@ public fn parse_certificate(bytes: &[Byte]) -> Result<X509Certificate, DerError>
     Result.Ok(X509Certificate {
         tbs:             tbs,
         signature_alg:   sig_alg,
-        signature_value: sig_bs.bytes,
+        signature_value: signature,
         raw_der:         raw_der,
         tbs_der:         tbs_der,
     })
@@ -184,14 +188,10 @@ fn parse_tbs(r: &mut DerReader) -> Result<(TbsCertificate, List<Byte>), DerError
     // Skip issuerUniqueID [1] / subjectUniqueID [2] (pre-v3 leftovers).
     if s.peek_is_context(1_u32) {
         // [1] IMPLICIT UniqueIdentifier. We don't need the bits; skip.
-        let (_, len, _, _) = s.peek_element_span()?;
-        let _ = s.read_tag_length()?;
-        let _ = s.take_bytes(len)?;
+        s.skip_element()?;
     }
     if s.peek_is_context(2_u32) {
-        let (_, len, _, _) = s.peek_element_span()?;
-        let _ = s.read_tag_length()?;
-        let _ = s.take_bytes(len)?;
+        s.skip_element()?;
     }
 
     // [3] EXPLICIT Extensions OPTIONAL
@@ -223,7 +223,7 @@ fn parse_validity(r: &mut DerReader) -> Result<CertValidity, DerError> {
     let not_before = parse_time_choice(&mut s)?;
     let not_after  = parse_time_choice(&mut s)?;
     s.expect_end()?;
-    Result.Ok(CertValidity { not_before: not_before, not_after: not_after })
+    Result.Ok(CertValidity.new(not_before, not_after))
 }
 
 fn parse_time_choice(r: &mut DerReader) -> Result<Time, DerError> {
@@ -250,41 +250,6 @@ fn parse_time_choice(r: &mut DerReader) -> Result<Time, DerError> {
 }
 
 // =============================================================================
-// Algorithm equality (RFC 5280 §4.1.1.2 outer vs inner)
-// =============================================================================
-
-fn rsa_pss_hash_eq(a: &RsaPssHash, b: &RsaPssHash) -> Bool {
-    match (a, b) {
-        (RsaPssHash.Sha256Hash, RsaPssHash.Sha256Hash) => true,
-        (RsaPssHash.Sha384Hash, RsaPssHash.Sha384Hash) => true,
-        (RsaPssHash.Sha512Hash, RsaPssHash.Sha512Hash) => true,
-        _ => false,
-    }
-}
-
-fn rsa_pss_params_eq(a: &RsaPssParams, b: &RsaPssParams) -> Bool {
-    rsa_pss_hash_eq(&a.hash, &b.hash) && a.salt_length == b.salt_length
-}
-
-fn signature_alg_matches(a: &SignatureAlg, b: &SignatureAlg) -> Bool {
-    match (a, b) {
-        (SignatureAlg.Sha256WithRsa,   SignatureAlg.Sha256WithRsa)   => true,
-        (SignatureAlg.Sha384WithRsa,   SignatureAlg.Sha384WithRsa)   => true,
-        (SignatureAlg.Sha512WithRsa,   SignatureAlg.Sha512WithRsa)   => true,
-        (SignatureAlg.Sha1WithRsa,     SignatureAlg.Sha1WithRsa)     => true,
-        (SignatureAlg.RsaPss(pa),      SignatureAlg.RsaPss(pb))      => rsa_pss_params_eq(pa, pb),
-        (SignatureAlg.EcdsaWithSha256, SignatureAlg.EcdsaWithSha256) => true,
-        (SignatureAlg.EcdsaWithSha384, SignatureAlg.EcdsaWithSha384) => true,
-        (SignatureAlg.EcdsaWithSha512, SignatureAlg.EcdsaWithSha512) => true,
-        (SignatureAlg.EcdsaWithSha1,   SignatureAlg.EcdsaWithSha1)   => true,
-        (SignatureAlg.Ed25519Sig,      SignatureAlg.Ed25519Sig)      => true,
-        (SignatureAlg.Ed448Sig,        SignatureAlg.Ed448Sig)        => true,
-        (SignatureAlg.Unknown(oa),     SignatureAlg.Unknown(ob))     => oa.eq(ob),
-        _ => false,
-    }
-}
-
-// =============================================================================
 // High-level accessors
 // =============================================================================
 
@@ -293,40 +258,24 @@ implement X509Certificate {
     /// basicConstraints extension must be present with cA = TRUE for a
     /// cert to legitimately issue other certs.
     public fn is_ca(&self) -> Bool {
-        match &self.tbs.extensions.basic_constraints {
-            Maybe.Some((_, bc)) => bc.is_ca,
-            Maybe.None => false,
-        }
+        self.tbs.extensions.ca_limits().0
     }
 
     /// pathLenConstraint (or Maybe.None for unlimited) — only meaningful on CAs.
     public fn path_len_constraint(&self) -> Maybe<Int> {
-        match &self.tbs.extensions.basic_constraints {
-            Maybe.Some((_, bc)) => bc.path_len_constraint.clone(),
-            Maybe.None => Maybe.None,
-        }
+        self.tbs.extensions.ca_limits().1
     }
 
     /// Does the cert cover the given hostname (SAN + name constraints
     /// permitting)?
     public fn matches_hostname(&self, hostname: &Text) -> Bool {
-        match &self.tbs.extensions.subject_alt_name {
-            Maybe.Some((_, san)) => san.matches_dns(hostname),
-            Maybe.None => {
-                // No SAN present. Per RFC 6125 §6.4.4, a cert without
-                // SAN is not an HTTPS identity; CN is ignored.
-                false
-            },
-        }
+        self.tbs.extensions.covers_hostname(hostname)
     }
 
     /// Accept a serverAuth connection? Requires the extendedKeyUsage
     /// extension to either be absent (permissive) or include
     /// serverAuth / anyExtendedKeyUsage.
     public fn allows_server_auth(&self) -> Bool {
-        match &self.tbs.extensions.ext_key_usage {
-            Maybe.Some((_, eku)) => eku.allows_server_auth(),
-            Maybe.None => true,
-        }
+        self.tbs.extensions.permits_server_auth()
     }
 }

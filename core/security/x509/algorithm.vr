@@ -85,6 +85,37 @@ public type RsaPssParams is {
 
 public type RsaPssHash is Sha256Hash | Sha384Hash | Sha512Hash;
 
+fn rsa_pss_hash_eq(a: &RsaPssHash, b: &RsaPssHash) -> Bool {
+    match (a, b) {
+        (RsaPssHash.Sha256Hash, RsaPssHash.Sha256Hash) => true,
+        (RsaPssHash.Sha384Hash, RsaPssHash.Sha384Hash) => true,
+        (RsaPssHash.Sha512Hash, RsaPssHash.Sha512Hash) => true,
+        _ => false,
+    }
+}
+
+fn rsa_pss_params_eq(a: &RsaPssParams, b: &RsaPssParams) -> Bool {
+    rsa_pss_hash_eq(&a.hash, &b.hash) && a.salt_length == b.salt_length
+}
+
+public(in core.security.x509) fn signature_alg_matches(a: &SignatureAlg, b: &SignatureAlg) -> Bool {
+    match (a, b) {
+        (SignatureAlg.Sha256WithRsa,   SignatureAlg.Sha256WithRsa)   => true,
+        (SignatureAlg.Sha384WithRsa,   SignatureAlg.Sha384WithRsa)   => true,
+        (SignatureAlg.Sha512WithRsa,   SignatureAlg.Sha512WithRsa)   => true,
+        (SignatureAlg.Sha1WithRsa,     SignatureAlg.Sha1WithRsa)     => true,
+        (SignatureAlg.RsaPss(pa),      SignatureAlg.RsaPss(pb))      => rsa_pss_params_eq(pa, pb),
+        (SignatureAlg.EcdsaWithSha256, SignatureAlg.EcdsaWithSha256) => true,
+        (SignatureAlg.EcdsaWithSha384, SignatureAlg.EcdsaWithSha384) => true,
+        (SignatureAlg.EcdsaWithSha512, SignatureAlg.EcdsaWithSha512) => true,
+        (SignatureAlg.EcdsaWithSha1,   SignatureAlg.EcdsaWithSha1)   => true,
+        (SignatureAlg.Ed25519Sig,      SignatureAlg.Ed25519Sig)      => true,
+        (SignatureAlg.Ed448Sig,        SignatureAlg.Ed448Sig)        => true,
+        (SignatureAlg.Unknown(oa),     SignatureAlg.Unknown(ob))     => oa == ob,
+        _ => false,
+    }
+}
+
 /// Public-key algorithm (SPKI.algorithm). `params` for EC is the named
 /// curve OID; for RSA it's NULL; for Ed25519/Ed448 absent.
 public type PublicKeyAlg is

@@ -203,6 +203,11 @@ public type BitString is {
     unused_bits: UInt8,   // 0..=7, per X.690 §8.6
 };
 
+implement BitString {
+    /// Consume the bit string and return its octets and unused trailing bit count.
+    public fn into_parts(self) -> (List<Byte>, UInt8) { (self.bytes, self.unused_bits) }
+}
+
 // =============================================================================
 // DerTime — UTCTime + GeneralizedTime both lowered to this shape
 // =============================================================================
@@ -431,11 +436,18 @@ implement DerReader {
             v
         };
 
-        if length < 0 || self.pos + length > self.end {
+        if length < 0 || length > self.end - self.pos {
             return Result.Err(err(UnexpectedEndOfInput, self.pos, "length runs past region"));
         }
 
         Result.Ok((Tag { class_: class_, constructed: constructed, number: number }, length))
+    }
+
+    /// Skip one definite-length DER element, checking its full payload bounds.
+    public fn skip_element(&mut self) -> Result<(), DerError> {
+        let (_, length) = self.read_tag_length()?;
+        self.pos = self.pos + length;
+        Result.Ok(())
     }
 
     /// Read a tag + length and immediately verify the tag matches

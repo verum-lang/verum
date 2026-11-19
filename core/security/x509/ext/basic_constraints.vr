@@ -36,6 +36,12 @@ public type BasicConstraints is {
     path_len_constraint: Maybe<Int>,
 };
 
+implement BasicConstraints {
+    public(in core.security.x509) fn ca_and_path_length(&self) -> (Bool, Maybe<Int>) {
+        (self.is_ca, self.path_len_constraint)
+    }
+}
+
 public fn parse(value: &[Byte]) -> Result<BasicConstraints, DerError> {
     let mut r = DerReader.new(value);
     let mut seq = r.read_sequence()?;

@@ -5,7 +5,8 @@
 // `core/security/x509/certificate.vr` — X.509 version tag.
 // =============================================================================
 
-mount core.security.x509.certificate.X509Version;
+mount core.security.x509.certificate.{X509Version, parse_certificate};
+mount core.encoding.base64;
 mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 
@@ -54,6 +55,40 @@ fn test_x509_version_v3_disjoint() {
     let v: X509Version = X509Version.V3;
     assert(!(v is X509Version.V1));
     assert(!(v is X509Version.V2));
+}
+
+@test
+fn test_certificate_validity_is_read_from_its_der() {
+    // Ed25519 test certificate for verum.invalid. OpenSSL independently decoded both times.
+    let encoded = "MIIBLzCB4qADAgECAgECMAUGAytlcDAaMRgwFgYDVQQDDA9WZXJ1bSBUZXN0IFJvb3QwHhcNMjYxMTAzMjEyNzI4WhcNMjYxMTA1MjEyNzI4WjAYMRYwFAYDVQQDDA12ZXJ1bS5pbnZhbGlkMCowBQYDK2VwAyEAg3q+9yNJk1bHxZIdfw5veheTVuBUZp4WYXADw7ecBKajTzBNMAwGA1UdEwEB/wQCMAAwDgYDVR0PAQH/BAQDAgeAMBMGA1UdJQQMMAoGCCsGAQUFBwMBMBgGA1UdEQQRMA+CDXZlcnVtLmludmFsaWQwBQYDK2VwA0EA/zcVlie8boXjnNJhD19wmG0jZoxIkxDryNn/UmgDtp88aZefy0nZWZASyNGu7oz9u4Y2aiIjVf2x62yBX/yGAA==";
+    let mut der = base64.decode(&encoded).unwrap();
+    let certificate = parse_certificate(der.as_slice()).unwrap();
+    assert(!certificate.is_ca(), "the leaf must have cA false");
+    assert(certificate.matches_hostname(&"verum.invalid"), "the DNS SAN must match verum.invalid");
+    assert(!certificate.matches_hostname(&"different.invalid"), "the DNS SAN must reject different.invalid");
+    assert(certificate.allows_server_auth(), "the leaf EKU must allow serverAuth");
+    let (first, last) = certificate.validity_unix_bounds();
+    assert_eq(first, 1793741248_i64);
+    assert_eq(last, 1793914048_i64);
+    // In this certificate the outer signature AlgorithmIdentifier starts
+    // immediately before the 64-byte, byte-aligned signature BIT STRING.
+    let outer_oid_end = der.len() - 68;
+    assert_eq(der[outer_oid_end], 0x70_u8);
+    let mut different_algorithm = der.clone();
+    different_algorithm[outer_oid_end] = 0x71_u8;
+    assert(parse_certificate(different_algorithm.as_slice()).is_err(), "the outer Ed448 OID must disagree with the inner Ed25519 OID");
+    der.push(0_u8);
+    assert(parse_certificate(der.as_slice()).is_err(), "the certificate reader must reject trailing bytes");
+}
+
+@test
+fn test_ca_constraints_come_from_the_decoded_certificate() {
+    let encoded = "MIIBJDCB16ADAgECAgEBMAUGAytlcDAaMRgwFgYDVQQDDA9WZXJ1bSBUZXN0IFJvb3QwHhcNMjYxMTAzMjEyNzI4WhcNMjYxMjAzMjEyNzI4WjAaMRgwFgYDVQQDDA9WZXJ1bSBUZXN0IFJvb3QwKjAFBgMrZXADIQC9kwkM7NS1fNIHT7+Z3n5V5VyrWl3H0UAu251nNEHvHqNCMEAwHQYDVR0OBBYEFArq9FRwwRJb/uwpUFaiYLTOmNjgMA8GA1UdEwEB/wQFMAMBAf8wDgYDVR0PAQH/BAQDAgEGMAUGAytlcANBACprbqytBojE+/kZwlR32pCO7QmTcXXIh5fvGB5RJfgcqsZAWJfCyoBv0/cFlKwz2uGHoTScQnZX1GXcMxwkEQk=";
+    let der = base64.decode(&encoded).unwrap();
+    let certificate = parse_certificate(der.as_slice()).unwrap();
+    assert(certificate.is_ca());
+    assert(certificate.path_len_constraint().is_none());
+    assert(!certificate.matches_hostname(&"verum.invalid"));
 }
 
 fn main() {}

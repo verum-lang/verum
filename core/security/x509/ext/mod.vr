@@ -105,6 +105,31 @@ public type ExtensionSet is {
 };
 
 implement ExtensionSet {
+    public(in core.security.x509) fn ca_limits(&self) -> (Bool, Maybe<Int>) {
+        match &self.basic_constraints {
+            Maybe.Some((_, constraints)) => constraints.ca_and_path_length(),
+            Maybe.None => (false, Maybe.None),
+        }
+    }
+
+    public(in core.security.x509) fn covers_hostname(&self, hostname: &Text) -> Bool {
+        match &self.subject_alt_name {
+            Maybe.Some((_, san)) => san.matches_dns(hostname),
+            Maybe.None => {
+                // No SAN present. Per RFC 6125 §6.4.4, a cert without
+                // SAN is not an HTTPS identity; CN is ignored.
+                false
+            },
+        }
+    }
+
+    public(in core.security.x509) fn permits_server_auth(&self) -> Bool {
+        match &self.ext_key_usage {
+            Maybe.Some((_, eku)) => eku.allows_server_auth(),
+            Maybe.None => true,
+        }
+    }
+
     public fn empty() -> ExtensionSet {
         ExtensionSet {
             basic_constraints: Maybe.None,
@@ -161,19 +186,19 @@ fn parse_one_extension(r: &mut DerReader) -> Result<RawExtension, DerError> {
 
 fn dispatch(ext: RawExtension, out: &mut ExtensionSet) -> Result<(), DerError> {
     if ext.oid.eq(&pkix_oid.ext_basic_constraints()) {
-        let parsed = basic_constraints.parse(ext.value_der.as_slice())?;
+        let parsed = core.security.x509.ext.basic_constraints.parse(ext.value_der.as_slice())?;
         out.basic_constraints = Maybe.Some((ext.critical, parsed));
     } else if ext.oid.eq(&pkix_oid.ext_key_usage()) {
-        let parsed = key_usage.parse(ext.value_der.as_slice())?;
+        let parsed = core.security.x509.ext.key_usage.parse(ext.value_der.as_slice())?;
         out.key_usage = Maybe.Some((ext.critical, parsed));
     } else if ext.oid.eq(&pkix_oid.ext_ext_key_usage()) {
-        let parsed = ext_key_usage.parse(ext.value_der.as_slice())?;
+        let parsed = core.security.x509.ext.ext_key_usage.parse(ext.value_der.as_slice())?;
         out.ext_key_usage = Maybe.Some((ext.critical, parsed));
     } else if ext.oid.eq(&pkix_oid.ext_subject_alt_name()) {
-        let parsed = subject_alt_name.parse(ext.value_der.as_slice())?;
+        let parsed = core.security.x509.ext.subject_alt_name.parse(ext.value_der.as_slice())?;
         out.subject_alt_name = Maybe.Some((ext.critical, parsed));
     } else if ext.oid.eq(&pkix_oid.ext_name_constraints()) {
-        let parsed = name_constraints.parse(ext.value_der.as_slice())?;
+        let parsed = core.security.x509.ext.name_constraints.parse(ext.value_der.as_slice())?;
         out.name_constraints = Maybe.Some((ext.critical, parsed));
     } else if ext.oid.eq(&pkix_oid.ext_authority_key_identifier()) {
         let kid = parse_aki_key_id(ext.value_der.as_slice())?;
@@ -211,9 +236,8 @@ fn parse_aki_key_id(value: &[Byte]) -> Result<List<Byte>, DerError> {
     if !is_kid {
         return Result.Ok([]);
     }
-    let (_, len, _, _) = seq.peek_element_span()?;
-    let _ = seq.read_tag_length()?;   // consume tag + length, cursor at value
-    let kid = seq.take_bytes(len)?;
+    let (_, _, start, end) = seq.peek_element_span()?;
+    let kid = seq.buffer_copy_region(start, end)?;
     // Skip rest of AKI.
     seq.skip_to_end();
     r.expect_end()?;
