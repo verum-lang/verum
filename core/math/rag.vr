@@ -41,13 +41,13 @@ mount core.encoding.value.Value;
 // Documents are the unit of retrieval in vector stores.
 public type Document is {
     // Unique identifier
-    id: Text,
+    public id: Text,
     // Text content
-    content: Text,
+    public content: Text,
     // Arbitrary metadata (source, page, etc.)
-    metadata: Map<Text, Value>,
+    public metadata: Map<Text, Value>,
     // Optional pre-computed embedding vector
-    embedding: Maybe<DynTensor<Float>>,
+    public embedding: Maybe<DynTensor<Float>>,
 };
 
 implement Document {
@@ -596,19 +596,31 @@ implement TextChunker {
         base_metadata: &Map<Text, Value>,
     ) -> List<Document> {
         let chunks = self.chunk(text);
+        // Only text metadata supplies an ID prefix; retain every metadata
+        // value, including non-text source values, in each resulting document.
+        let source = match base_metadata.get("source".to_text()) {
+            Maybe.Some(Value.VText(name)) => name,
+            _ => "doc".to_text(),
+        };
 
-        chunks.iter().enumerate().map(|(i, chunk)| {
-            let mut metadata = base_metadata.clone();
-            metadata.insert("chunk_index".to_text(), Value.Int(i as Int));
-            metadata.insert("total_chunks".to_text(), Value.Int(chunks.len() as Int));
+        let total = chunks.len();
+        let mut documents: List<Document> = List.with_capacity(total);
+        for (i, chunk) in chunks.into_iter().enumerate() {
+            let mut metadata: Map<Text, Value> = Map.new();
+            for (key, value) in base_metadata.iter() {
+                metadata.insert(key, value);
+            }
+            metadata.insert("chunk_index".to_text(), Value.int_(i as Int));
+            metadata.insert("total_chunks".to_text(), Value.int_(total as Int));
 
-            Document {
-                id: f"{base_metadata.get(&\"source\".to_text()).map(|v| v.as_text()).unwrap_or(\"doc\".to_text())}_{i}",
-                content: chunk.clone(),
+            documents.push(Document {
+                id: f"{source}_{i}",
+                content: chunk,
                 metadata,
                 embedding: Maybe.None,
-            }
-        }).collect()
+            });
+        }
+        documents
     }
 }
 
@@ -1057,7 +1069,7 @@ fn random_float() -> Float {
 // // Add documents
 // rag.add_document(
 //  &"Verum is a programming language designed for verified computing...".to_text(),
-//  Map.from([("source".to_text(), Value.Text("docs/intro.md".to_text()))]),
+//  Map.from([("source".to_text(), Value.text("docs/intro.md".to_text()))]),
 // );
 //
 

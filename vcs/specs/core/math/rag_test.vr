@@ -36,6 +36,7 @@
 
 module test.stdlib.math.rag_test;
 
+mount core.encoding.value.{Value, value_equals};
 mount core.math.rag.{
     Document, VectorStore, HNSWConfig, HNSWIndex, HNSWVectorStore,
     ChunkStrategy, TextChunker, RAGPipeline,
@@ -88,6 +89,38 @@ fn test_document_with_metadata_empty_map() {
     assert(doc.id == "doc3");
 
     print("document_with_metadata_empty_map test passed");
+}
+
+@test
+fn test_chunk_metadata_preserves_dynamic_values() {
+    let mut metadata: Map<Text, Value> = Map.new();
+    metadata.insert("source".to_text(), Value.text("manual".to_text()));
+    metadata.insert("revision".to_text(), Value.int_(7));
+    let chunker = TextChunker.with_separator(5, 0, "|".to_text());
+    let docs = chunker.chunk_with_metadata(&"hello|world".to_text(), &metadata);
+    assert(docs.len() == 2);
+    assert(docs[0].id == "manual_0");
+    assert(docs[1].id == "manual_1");
+    assert(docs[0].content == "hello");
+    assert(docs[1].content == "world");
+    assert(value_equals(&docs[0].metadata.get("revision".to_text()).unwrap(), &Value.int_(7)));
+    assert(value_equals(&docs[1].metadata.get("revision".to_text()).unwrap(), &Value.int_(7)));
+    assert(value_equals(&docs[0].metadata.get("chunk_index".to_text()).unwrap(), &Value.int_(0)));
+    assert(value_equals(&docs[1].metadata.get("chunk_index".to_text()).unwrap(), &Value.int_(1)));
+    assert(value_equals(&docs[0].metadata.get("total_chunks".to_text()).unwrap(), &Value.int_(2)));
+    assert(metadata.get("chunk_index".to_text()).is_none());
+    assert(metadata.get("total_chunks".to_text()).is_none());
+}
+
+@test
+fn test_chunk_metadata_does_not_coerce_non_text_source() {
+    let mut metadata: Map<Text, Value> = Map.new();
+    metadata.insert("source".to_text(), Value.int_(23));
+    let chunker = TextChunker.new(32, 0);
+    let docs = chunker.chunk_with_metadata(&"hello".to_text(), &metadata);
+    assert(docs.len() == 1);
+    assert(docs[0].id == "doc_0");
+    assert(value_equals(&docs[0].metadata.get("source".to_text()).unwrap(), &Value.int_(23)));
 }
 
 @test
