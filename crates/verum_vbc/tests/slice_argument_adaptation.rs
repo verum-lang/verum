@@ -259,3 +259,82 @@ fn incompatible_elements_mutability_and_lookalike_storage_are_rejected() {
         }
     }
 }
+
+#[test]
+fn selected_list_parameter_supplies_a_fresh_locals_element_type() {
+    for binding in [
+        "let mut bytes = List.new();",
+        "let mut bytes: List<Byte> = List.new();",
+        "let bytes: List<Bool> = [true]; let mut bytes = List.new();",
+    ] {
+        run(
+            &format!(
+                r#"
+                type Bytes is List<Byte>;
+                type Reader is protocol {{
+                    fn fill(&mut self, bytes: &mut Bytes) -> Int;
+                    fn collect(&mut self) -> Int {{
+                        {binding}
+                        let count = self.fill(&mut bytes);
+                        count + inspect(&bytes)
+                    }}
+                }};
+                type Source is {{ value: Byte }};
+                implement Reader for Source {{
+                    fn fill(&mut self, bytes: &mut Bytes) -> Int {{
+                        bytes.push(self.value);
+                        1
+                    }}
+                }}
+                fn inspect(bytes: &[Byte]) -> Int {{ (bytes[0] as Int) + bytes.len() }}
+                fn probe() -> Int {{
+                    let mut source = Source {{ value: 213_u8 }};
+                    source.collect()
+                }}
+            "#
+            ),
+            215,
+        );
+    }
+}
+
+#[test]
+fn list_borrow_does_not_replace_an_existing_element_or_guess_one_from_a_slice() {
+    let declarations = r#"
+        fn fill(bytes: &mut List<Byte>) { bytes.push(213_u8); }
+        fn booleans(values: &mut List<Bool>) { values.push(true); }
+        fn inspect(bytes: &[Byte]) -> Int { bytes.len() }
+    "#;
+    for (body, reason) in [
+        (
+            "let mut bytes: List<Bool> = [true]; fill(&mut bytes);",
+            "List borrow differs",
+        ),
+        (
+            "let mut bytes = List.new(); fill(&mut bytes); booleans(&mut bytes);",
+            "List borrow differs",
+        ),
+        (
+            "let mut bytes = List.new(); fill(&bytes);",
+            "mutable List parameter",
+        ),
+        ("let bytes = List.new(); fill(&mut bytes);", "mutable local"),
+        (
+            "let bytes = List.new(); inspect(&bytes);",
+            "source element declaration",
+        ),
+        (
+            "let mut bytes = List.new(); bytes.push(true); fill(&mut bytes); inspect(&bytes);",
+            "source element declaration",
+        ),
+    ] {
+        let source = format!("{declarations} fn probe<A>(value: A) {{ {body} }}");
+        for unit in [false, true] {
+            let error = compile(&source, unit).expect_err("accepted unsupported List borrow");
+            assert!(
+                error.to_string().contains(reason),
+                "unit={unit}, body={body}: {error}"
+            );
+        }
+    }
+}

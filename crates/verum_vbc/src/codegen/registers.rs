@@ -103,6 +103,9 @@ pub struct RegisterInfo {
     /// exclusive paths are sound.
     pub declared_uninit: bool,
 
+    /// An unannotated empty List has a nominal owner but no element yet.
+    pub(super) pending_list_element: Option<crate::types::TypeId>,
+
     /// Scope level where this was defined.
     pub scope_level: usize,
 
@@ -215,6 +218,7 @@ impl RegisterAllocator {
                     is_mutable: *is_mutable,
                     is_initialized: true,
                     declared_uninit: false,
+                    pending_list_element: None,
                     scope_level: 0,
                     kind: RegisterKind::Parameter,
                     is_cell: false,
@@ -270,6 +274,7 @@ impl RegisterAllocator {
                 is_mutable,
                 is_initialized: true,
                 declared_uninit: false,
+                pending_list_element: None,
                 scope_level,
                 kind: RegisterKind::Local,
                 is_cell: false,

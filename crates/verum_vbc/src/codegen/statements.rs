@@ -1372,6 +1372,11 @@ impl VbcCodegen {
                 let name = Self::literal_default_type_name(value?)?;
                 self.semantic_type_in_current_scope(&name)
             });
+        let open_list = if ty.is_none() && inferred_copy_type.is_none() {
+            value.zip(init_reg).and_then(|(expr, reg)| self.unbound_list_allocation(expr, reg, copy_start))
+        } else {
+            None
+        };
         // Block locals and callable bodies establish result types during
         // compilation. Consume those facts after the initializer, rather
         // than retaining a pre-compilation guess or generic placeholder.
@@ -1546,7 +1551,16 @@ impl VbcCodegen {
         }
 
         if let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind {
-            if let Some(inferred) = inferred_copy_type.filter(|_| ty.is_none()) {
+            if let Some(owner) = open_list {
+                // The allocation proves its owner. A generic name rendered from
+                // the constructor cannot supply a caller-owned element type.
+                if let Some(nominal) = self.declaration_type_name(&crate::types::TypeRef::Concrete(owner), 0) {
+                    self.ctx.variable_type_names.insert(name.name.to_string(), nominal);
+                }
+                if let Some(binding) = self.ctx.lookup_var_mut(name.as_str()) {
+                    binding.pending_list_element = Some(owner);
+                }
+            } else if let Some(inferred) = inferred_copy_type.filter(|_| ty.is_none()) {
                 if let Some(reg) = self.ctx.lookup_var(name.name.as_str()).map(|v| v.reg) {
                     // The initializer's exact declaration is also authoritative
                     // for an inferred binding. Requiring a written annotation

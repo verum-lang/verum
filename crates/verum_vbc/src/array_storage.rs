@@ -3,7 +3,7 @@
 use crate::encoding::decode_reg;
 use crate::instruction::{ArithSubOpcode, Instruction, MemSubOpcode, Reg};
 use crate::types::TypeRef;
-use verum_common::{Map, Maybe};
+use verum_common::{Map, Maybe, Set};
 
 /// Physical scalar encoding allowed by a fixed array's declared element type.
 /// A compatible allocation or producer must still establish the actual layout.
@@ -51,6 +51,9 @@ pub enum ArrayResultFact {
 #[derive(Clone, Debug, Default)]
 pub struct ArrayResultFacts {
     values: Map<Reg, ArrayResultFact>,
+    // The allocation is still empty across register moves. Writes and escapes
+    // invalidate all aliases without changing their physical List layout.
+    fresh_lists: Set<Reg>,
 }
 
 impl ArrayResultFacts {
@@ -59,14 +62,22 @@ impl ArrayResultFacts {
         self.values.get(&register).copied()
     }
 
+    /// The value still comes from an empty List allocation and has not escaped.
+    #[cfg(feature = "codegen")]
+    pub(crate) fn is_fresh_list(&self, register: Reg) -> bool {
+        self.fresh_lists.contains(&register)
+    }
+
     /// Discard proof across an unknown execution boundary.
     pub fn clear(&mut self) {
         self.values.clear();
+        self.fresh_lists.clear();
     }
 
     /// Discard the fact when this register is overwritten.
     pub fn forget(&mut self, register: Reg) {
         self.values.remove(&register);
+        self.fresh_lists.remove(&register);
     }
 
     /// Advance proof using the actual emitted instruction. Returns whether the
@@ -78,9 +89,13 @@ impl ArrayResultFacts {
         match instruction {
             I::Mov { dst, src } => {
                 let fact = self.get(*src);
+                let fresh = self.fresh_lists.contains(src);
                 self.forget(*dst);
                 if let Some(fact) = fact {
                     self.values.insert(*dst, fact);
+                    if fresh {
+                        self.fresh_lists.insert(*dst);
+                    }
                 }
             }
             I::CloneTyped { dst, src, type_ref: TypeRef::Array { element, length } } => {
@@ -104,7 +119,7 @@ impl ArrayResultFacts {
                         return false;
                     }
                 };
-                self.values.insert(*dst, copied);
+                self.record_selected_result(*dst, copied);
             }
             I::CloneTyped { dst, src, type_ref: TypeRef::Concrete(owner) }
                 if matches!(crate::copy_plan::builtin_copy_node(*owner), Some(crate::copy_plan::CopyNode::Identity)) =>
@@ -123,14 +138,14 @@ impl ArrayResultFacts {
                 self.forget(*src);
             }
             I::LoadI { dst, value } => {
-                self.values.insert(*dst, ArrayResultFact::Integer(*value));
+                self.record_selected_result(*dst, ArrayResultFact::Integer(*value));
             }
             I::LoadSmallI { dst, value } => {
-                self.values
-                    .insert(*dst, ArrayResultFact::Integer(i64::from(*value)));
+                self.record_selected_result(*dst, ArrayResultFact::Integer(i64::from(*value)));
             }
             I::NewList { dst, .. } => {
                 self.values.insert(*dst, ArrayResultFact::List);
+                self.fresh_lists.insert(*dst);
             }
             I::MemExtended { sub_op, operands } => {
                 let Some(op) = MemSubOpcode::from_byte(*sub_op) else {
@@ -141,6 +156,7 @@ impl ArrayResultFacts {
                     op,
                     MemSubOpcode::ByteArrayStore | MemSubOpcode::TypedArrayStore
                 ) {
+                    self.fresh_lists.clear();
                     return true; // Element stores do not replace or resize the array.
                 }
                 let mut cursor = 0;
@@ -246,7 +262,8 @@ impl ArrayResultFacts {
                 self.clear();
                 return false;
             }
-            I::Nop | I::ListPush { .. } | I::SetE { .. } | I::Assert { .. } => {}
+            I::ListPush { .. } | I::SetE { .. } => self.fresh_lists.clear(),
+            I::Nop | I::Assert { .. } => {}
             // Clones, reference accesses and calls need their selected producer
             // contract. Branch/loop joins need a meet, not last-emitted-wins.
             _ => {
@@ -260,6 +277,7 @@ impl ArrayResultFacts {
     /// Record a result only after its actual selected producer has been proved.
     /// Type declarations and method spelling are not sufficient evidence.
     pub fn record_selected_result(&mut self, register: Reg, fact: ArrayResultFact) {
+        self.fresh_lists.remove(&register);
         self.values.insert(register, fact);
     }
 }

@@ -8755,6 +8755,7 @@ impl VbcCodegen {
     pub(super) fn compile_call_operand(
         &mut self, argument: &Expr, expected: Option<&crate::types::TypeRef>,
     ) -> CodegenResult<Option<Reg>> {
+        self.constrain_list_borrow(argument, expected)?;
         if let Some(slice) = self.compile_borrowed_slice_argument(argument, expected)? {
             return Ok(Some(slice));
         }
