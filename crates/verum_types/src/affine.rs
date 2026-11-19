@@ -175,6 +175,7 @@ struct AffineBinding {
 }
 
 /// Outer bindings temporarily hidden by a match arm's own pattern names.
+#[derive(Clone)]
 pub(crate) struct PatternScope {
     hidden: Map<Text, Maybe<AffineBinding>>,
     pre_loop_bindings: Set<Text>,

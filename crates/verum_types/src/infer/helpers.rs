@@ -1,7 +1,7 @@
 //! Standalone helper functions and trait implementations for the type-checker.
 //!
 //! Contains: ConditionExt, mount_tree_exports_name, resolve_builtin_meta_type,
-//! check_condition, levenshtein_distance, span_to_line_col, expr_kind_description,
+//! levenshtein_distance, span_to_line_col, expr_kind_description,
 //! type_kind_description, HKT kind-checking TypeChecker methods, QTT helpers,
 //! type-size calculation,
 //! meta_value_to_literal, collect_named_types_from_*, parse_descriptor_type_string.
@@ -130,60 +130,6 @@ pub(crate) fn resolve_builtin_meta_type(name: &str) -> Option<Type> {
             args: List::new(),
         }),
     }
-}
-
-/// This handles both expression conditions and let conditions:
-/// - `if x > 0` - Expression condition (must evaluate to Bool)
-/// - `if let Some(v) = opt` - Let condition (pattern must match value)
-///
-/// Returns the type of bindings introduced (empty for expression conditions)
-pub(crate) fn check_condition(
-    checker: &mut TypeChecker,
-    condition: &verum_ast::expr::ConditionKind,
-) -> Result<List<(Text, Type)>> {
-    match condition {
-        verum_ast::expr::ConditionKind::Expr(expr) => {
-            // Expression condition - must be Bool
-            checker.check_expr(expr, &Type::bool())?;
-            Ok(List::new())
-        }
-        verum_ast::expr::ConditionKind::Let { pattern, value } => {
-            // Let condition - bind pattern to value
-            // If-let expressions: "if let Pattern = expr { ... }" for refutable pattern matching with type narrowing
-            //
-
-            // The pattern is checked against the type of the value,
-            // and any bound variables become available in the then-branch.
-            let value_result = checker.synth_expr(value)?;
-            let value_ty = value_result.ty;
-
-            // Bind pattern to value type
-            checker.bind_pattern(pattern, &value_ty)?;
-
-            // Collect bindings introduced by the pattern
-            let bindings = checker.collect_pattern_bindings(pattern, &value_ty)?;
-
-            Ok(bindings)
-        }
-    }
-}
-
-/// Check all conditions in an if-condition chain
-///
-/// Handles both simple conditions and let-chains like:
-/// `if let Some(x) = opt && x > 0`
-pub(crate) fn check_all_conditions(
-    checker: &mut TypeChecker,
-    conditions: &verum_ast::expr::IfCondition,
-) -> Result<List<(Text, Type)>> {
-    let mut all_bindings = List::new();
-
-    for cond in &conditions.conditions {
-        let mut bindings = check_condition(checker, cond)?;
-        all_bindings.append(&mut bindings);
-    }
-
-    Ok(all_bindings)
 }
 
 pub(crate) use verum_diagnostics::name_distance::levenshtein_distance;

@@ -183,3 +183,43 @@ fn a_ref_pattern_may_return_the_incoming_owners_payload() {
     let found = errors(&source);
     assert!(found.is_empty(), "{source}: {found:?}");
 }
+
+#[test]
+fn conditional_ref_bindings_borrow_the_subject_in_both_typing_modes() {
+    for body in [
+        "fn inspect(value:&Choice)->Int {if let Choice.Owned(ref token)=*value {token.value} else {0}}",
+        "fn inspect(value:&Choice)->Int {let n=if let Choice.Owned(ref token)=*value {token.value} else {0};n}",
+        "fn inspect(value:&Holder, other:&Holder)->Int {if let Choice.Owned(ref token)=value.choice && let Choice.Scalar(n)=other.choice && n>0 {token.value+n} else {0}}",
+        "fn inspect(value:&Holder)->Int {if value.choice is Choice.Owned(ref token) && token.value>0 {token.value} else {0}}",
+        "fn inspect(value:Choice)->Int {if let Choice.Owned(token)=value {return token.value;} if let Choice.Scalar(n)=value {n} else {0}}",
+        "fn select(value:&Holder)->&Token {if let Choice.Owned(ref token)=value.choice {token} else {panic(\"missing\")}}",
+        "fn inspect(value:&mut Holder)->Int {if let Choice.Owned(ref mut token)=value.choice {token.value=73;token.value} else {value.choice=Choice.Scalar(0);0}}",
+    ] {
+        let found = errors(&format!("{TYPES} {body}"));
+        assert!(found.is_empty(), "{body}: {found:?}");
+    }
+}
+
+#[test]
+fn conditional_payload_access_preserves_ownership_permissions_and_storage_lifetime() {
+    for (body, reasons) in [
+        ("fn invalid(value:&Choice)->Token {if let Choice.Owned(token)=*value {token} else {Token{value:0}}}", &["out of borrowed storage"][..]),
+        ("fn invalid(value:&Holder)->Int {if let Choice.Owned(ref mut token)=value.choice {token.value=0;token.value} else {0}}", &["immutable", "shared"]),
+        ("fn invalid(value:&mut Holder)->Int {if let Choice.Owned(ref token)=value.choice {value.choice=Choice.Scalar(0);token.value} else {0}}", &["borrow"]),
+        ("fn invalid(value:&mut Holder,fallback:&Token)->Int {let selected=if let Choice.Owned(ref token)=value.choice {token} else {fallback};value.choice=Choice.Scalar(0);selected.value}", &["borrow"]),
+        ("fn make()->Choice {Choice.Owned(Token{value:73})} fn invalid()->&Token {if let Choice.Owned(ref token)=make() {token} else {panic(\"missing\")}}", &["does not live long enough", "outlives", "escapes"]),
+        ("fn inspect(t:Token)->Int {t.value} fn invalid(value:Choice)->Int {if let Choice.Owned(token)=value {inspect(token);} if let Choice.Owned(next)=value {next.value} else {0}}", &["moved", "consum"]),
+    ] {
+        let found = errors(&format!("{TYPES} {body}"));
+        assert!(found.iter().any(|error| reasons.iter().any(|reason| error.contains(reason))), "{body}: {found:?}");
+    }
+}
+
+#[test]
+fn a_failed_later_guard_preserves_consumption_from_earlier_guards() {
+    let source = format!(
+        "{TYPES} fn positive(t:Token)->Bool {{t.value>0}} fn invalid(value:Choice, t:Token)->Int {{if let Choice.Scalar(n)=value && positive(t) {{n}} else {{t.value}}}}"
+    );
+    let found = errors(&source);
+    assert!(found.iter().any(|error| error.contains("moved") || error.contains("consum")), "{found:?}");
+}

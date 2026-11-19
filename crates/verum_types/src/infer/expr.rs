@@ -118,6 +118,18 @@ enum CallPreparation {
     Apply(PreparedCall),
 }
 
+struct BranchPatternScope {
+    ownership: crate::affine::PatternScope,
+    borrowed: bool,
+    tracks_origins: bool,
+}
+
+#[derive(Default)]
+struct ConditionFailures {
+    ownership: List<crate::affine::AffineAlternatives>,
+    loans: Option<crate::aliasing::BorrowTracker>,
+}
+
 impl TypeChecker {
     pub(super) fn synth_place_use(&mut self, expr: &Expr, usage: PlaceUse) -> Result<InferResult> {
         self.with_place_types(expr, |checker| {
@@ -691,7 +703,7 @@ impl TypeChecker {
             // If expression with expected type
             // If expressions: both branches must unify to same type; if-let patterns narrow types in the then-branch
             // Refinement types enhancement: flow-sensitive refinement propagation, evidence tracking for verified predicates — Refinement Evidence Propagation
-            If { .. } => self.check_if_expr(expr, expected),
+            If { .. } => self.infer_if_expr(expr, Some(expected)),
 
             // Block with expected type
             Block(block) => self.with_block_scope(block, false, true,
@@ -1642,188 +1654,6 @@ impl TypeChecker {
         })
     }
 
-    /// Bidirectional type-check an `if` expression.
-    /// Propagates refinement evidence from conditions into the then-branch,
-    /// checks both branches against the expected type, and unifies the results.
-    fn check_if_expr(&mut self, expr: &Expr, expected: &Type) -> Result<InferResult> {
-        use ExprKind::*;
-        let ExprKind::If { condition, then_branch, else_branch } = &expr.kind
-            else { unreachable!() };
-                use crate::refinement_evidence::EvidencePropagator;
-
-                // Handle all conditions (expression and/or let conditions)
-                // Bindings from let conditions are available in the then branch
-                self.ctx.env.push_scope();
-                self.refinement_evidence.push_scope();
-
-                // Collect condition expressions for evidence propagation
-                let mut condition_exprs: Vec<&Expr> = Vec::new();
-
-                for cond in &condition.conditions {
-                    match cond {
-                        verum_ast::expr::ConditionKind::Expr(cond_expr) => {
-                            // Check if this is an `is` pattern test (e.g., `v is IntVal(n)`)
-                            // If so, bind pattern variables for the then-branch.
-                            if let ExprKind::Is {
-                                expr: test_expr,
-                                pattern,
-                                negated,
-                            } = &cond_expr.kind
-                            {
-                                let test_result = self.synth_expr(test_expr)?;
-                                if !*negated {
-                                    self.bind_pattern(pattern, &test_result.ty)?;
-                                }
-                            } else if let ExprKind::Binary {
-                                op: verum_ast::expr::BinOp::And,
-                                left,
-                                right,
-                            } = &cond_expr.kind
-                            {
-                                // Handle `v is Pattern && guard` by extracting Is from left of &&
-                                if let ExprKind::Is {
-                                    expr: test_expr,
-                                    pattern,
-                                    negated,
-                                } = &left.kind
-                                {
-                                    let test_result = self.synth_expr(test_expr)?;
-                                    if !negated {
-                                        self.bind_pattern(pattern, &test_result.ty)?;
-                                    }
-                                    // Check the guard condition with bindings in scope
-                                    self.check_expr(right, &Type::bool())?;
-                                } else {
-                                    // Regular && expression
-                                    self.check_expr(cond_expr, &Type::bool())?;
-                                }
-                            } else {
-                                // Expression condition - must be Bool
-                                self.check_expr(cond_expr, &Type::bool())?;
-                            }
-                            condition_exprs.push(cond_expr);
-
-                            // Add positive evidence for the then-branch
-                            // e.g., after `if x.is_empty()`, we know x.is_empty() == true in then
-                            self.refinement_evidence
-                                .add_evidence_from_condition(cond_expr, cond_expr.span);
-
-                            // Flow-sensitive type narrowing: narrow variable types based on condition
-                            self.narrow_variable_types_from_condition(cond_expr, false);
-
-                            // Track method-based conditions for better evidence
-                            if let Maybe::Some((var_name, method_name, negated)) =
-                                EvidencePropagator::analyze_method_condition(cond_expr)
-                            {
-                                // Note: The evidence is already added above, but we can
-                                // also track it by variable for faster lookup
-                                self.refinement_evidence.add_method_evidence(
-                                    var_name,
-                                    method_name.as_str(),
-                                    negated,
-                                    cond_expr.span,
-                                );
-                            }
-                        }
-                        verum_ast::expr::ConditionKind::Let { pattern, value } => {
-                            // Let condition - bind pattern to value type in scope
-                            let value_result = self.synth_expr(value)?;
-                            self.bind_pattern(pattern, &value_result.ty)?;
-                            // Pattern matching also provides evidence about the matched value
-                        }
-                    }
-                }
-
-                // The two branches are ALTERNATIVES — see the match arms in
-                // `infer_match_expr` for the same rule. The condition itself
-                // runs on every path, so the snapshot is taken after it.
-                let affine_at_if = self.affine_tracker.snapshot_alternatives();
-
-                // Check then branch with evidence in scope
-                self.check_block(then_branch, expected)?;
-
-                // Check if then branch unconditionally exits
-                let then_exits = EvidencePropagator::block_unconditionally_exits(then_branch);
-
-                // A branch that unconditionally exits never reaches the code
-                // after the `if`, so what it consumed cannot reach it either.
-                let affine_then = (!then_exits)
-                    .then(|| self.affine_tracker.snapshot_alternatives());
-                self.affine_tracker.restore_alternatives(&affine_at_if);
-
-                self.ctx.env.pop_scope();
-                self.refinement_evidence.pop_scope();
-
-                // If then branch exits and there's no else, propagate negated evidence
-                // to the continuation (the code after the if)
-                // e.g., `if data.is_empty() { return 0; }` means !data.is_empty() after
-                if then_exits && else_branch.is_none() {
-                    for cond_expr in &condition_exprs {
-                        self.refinement_evidence
-                            .add_negated_evidence(cond_expr, cond_expr.span);
-                        // Narrow variable types with negated condition in continuation
-                        self.narrow_variable_types_from_condition(cond_expr, true);
-
-                        // Track negated method conditions
-                        if let Maybe::Some((var_name, method_name, was_negated)) =
-                            EvidencePropagator::analyze_method_condition(cond_expr)
-                        {
-                            // Flip the negation: if condition was `x.is_empty()`,
-                            // we now know `!x.is_empty()` (negated=true)
-                            self.refinement_evidence.add_method_evidence(
-                                var_name,
-                                method_name.as_str(),
-                                !was_negated,
-                                cond_expr.span,
-                            );
-                        }
-                    }
-                }
-
-                if let Some(else_expr) = else_branch {
-                    // In else branch, we have the negation of the condition
-                    self.ctx.env.push_scope();
-                    self.refinement_evidence.push_scope();
-                    for cond_expr in &condition_exprs {
-                        self.refinement_evidence
-                            .add_negated_evidence(cond_expr, cond_expr.span);
-                        self.narrow_variable_types_from_condition(cond_expr, true);
-                    }
-                    self.check_expr(else_expr, expected)?;
-                    self.ctx.env.pop_scope();
-                    self.refinement_evidence.pop_scope();
-                    let affine_else = self.affine_tracker.snapshot_alternatives();
-                    self.merge_if_alternatives(affine_then, Some(affine_else), &affine_at_if);
-                } else {
-                    // No `else`: falling through IS the second alternative,
-                    // and it consumed nothing beyond the condition.
-                    self.merge_if_alternatives(affine_then, None, &affine_at_if);
-                    self.unifier.unify(&Type::Unit, expected, expr.span)?;
-                }
-
-                Ok(InferResult::new(expected.clone()))
-    }
-
-    /// Fold the two alternatives of an `if` back together.
-    ///
-    /// `then_state` is `None` when the then-branch unconditionally exits, and
-    /// `else_state` is `None` when there is no `else` — in which case the
-    /// fall-through path is the second alternative and is exactly the state
-    /// at the construct.
-    fn merge_if_alternatives(
-        &mut self,
-        then_state: Option<crate::affine::AffineAlternatives>,
-        else_state: Option<crate::affine::AffineAlternatives>,
-        at_if: &crate::affine::AffineAlternatives,
-    ) {
-        let mut branches: Vec<crate::affine::AffineAlternatives> = Vec::new();
-        if let Some(s) = then_state {
-            branches.push(s);
-        }
-        branches.push(else_state.unwrap_or_else(|| at_if.clone()));
-        self.affine_tracker.merge_alternatives(&branches);
-    }
-
     /// Bidirectional type-check a record literal expression against an expected type.
     /// Checks each field against its declared type, handles optional base spread,
     /// and propagates narrowed type information for refinement fields.
@@ -2398,7 +2228,9 @@ impl TypeChecker {
         // Type lattice: Never is the bottom type, subtype of all types (Never <: T for all T)
         let resolved_result_ty = self.unifier.apply(&result.ty);
         if self.is_never_type(&resolved_result_ty) {
-            return Ok(InferResult::new(expected.clone()));
+            // Subsumption accepts bottom at every expected type. Its control
+            // flow still diverges when combining the paths of a conditional.
+            return Ok(result);
         }
 
         // CRITICAL FIX: Unify with the original (non-normalized) types first.
@@ -4664,7 +4496,7 @@ impl TypeChecker {
 
                 // If expressions - with flow-sensitive refinement narrowing
                 // If expressions: both branches must unify to same type; if-let patterns narrow types in the then-branch
-                If { .. } => self.infer_if_expr(current_expr),
+                If { .. } => self.infer_if_expr(current_expr, None),
 
                 // Lambda synthesis: create fresh type variables for parameters
                 // Pi types (dependent functions): (x: A) -> B(x) where return type depends on input value, non-dependent functions are special case — Pi types (dependent functions)
@@ -5212,99 +5044,192 @@ impl TypeChecker {
         Ok(InferResult::new(token_stream_ty))
     }
 
-    /// Type-infer a closure (lambda) expression.
-    /// Performs capture analysis, borrow tracking, parameter binding,
-    /// return-type synthesis, Pi-type formation, and Send/Sync safety checks.
-    /// Type-infer a match expression.
-    /// Auto-derefs reference scrutinees, dispatches to dependent-type match
-    /// when applicable, checks each arm's pattern + body, unifies arm types,
-    /// and propagates refinement evidence.
-    /// Type-check an `if` expression with flow-sensitive refinement narrowing.
-    /// Binds let-conditions in the then-branch; propagates evidence.
-    fn infer_if_expr(&mut self, expr: &Expr) -> Result<InferResult> {
-        use ExprKind::*;
-        let ExprKind::If { condition, then_branch, else_branch } = &expr.kind
-            else { unreachable!() };
-                    self.ctx.env.push_scope();
-                    self.refinement_evidence.push_scope();
+    fn record_condition_failure(
+        &self,
+        scopes: &[BranchPatternScope],
+        end: Span,
+        failures: &mut ConditionFailures,
+    ) -> Result<()> {
+        // A failed guard keeps the effects of earlier guards, but its else
+        // branch cannot see their pattern names or borrow their local storage.
+        let mut loans = self.borrow_tracker.clone_for_branch();
+        let ownership = if scopes.is_empty() {
+            self.affine_tracker.snapshot_alternatives()
+        } else {
+            let mut affine = self.affine_tracker.clone();
+            for scope in scopes.iter().rev() {
+                if let Some(error) = affine.exit_pattern_scope(scope.ownership.clone(), end).into_iter().next() {
+                    return Err(error);
+                }
+                loans.exit_scope();
+            }
+            affine.snapshot_alternatives()
+        };
+        failures.ownership.push(ownership);
+        if let Some(existing) = &mut failures.loans {
+            existing.merge_live_loans(&loans);
+        } else {
+            failures.loans = Some(loans);
+        }
+        Ok(())
+    }
 
-                    let mut condition_exprs: Vec<Expr> = Vec::new();
+    fn apply_condition_evidence(&mut self, condition: &Expr, negated: bool) {
+        if negated {
+            self.refinement_evidence.add_negated_evidence(condition, condition.span);
+        } else {
+            self.refinement_evidence.add_evidence_from_condition(condition, condition.span);
+        }
+        self.narrow_variable_types_from_condition(condition, negated);
+        if let Some((var, method, was_negated)) =
+            crate::refinement_evidence::EvidencePropagator::analyze_method_condition(condition)
+        {
+            self.refinement_evidence.add_method_evidence(var, &method, was_negated ^ negated, condition.span);
+        }
+    }
 
-                    for cond in &condition.conditions {
-                        match cond {
-                            verum_ast::expr::ConditionKind::Expr(cond_expr) => {
-                                if let ExprKind::Is {
-                                    expr: test_expr,
-                                    pattern,
-                                    negated,
-                                } = &cond_expr.kind
-                                {
-                                    let test_result = self.synth_expr(test_expr)?;
-                                    if !negated {
-                                        self.bind_pattern(pattern, &test_result.ty)?;
-                                    }
-                                } else {
-                                    self.check_expr(cond_expr, &Type::bool())?;
-                                    self.refinement_evidence
-                                        .add_evidence_from_condition(cond_expr, cond_expr.span);
-                                    self.narrow_variable_types_from_condition(cond_expr, false);
-                                    condition_exprs.push(cond_expr.clone());
-                                }
-                            }
-                            verum_ast::expr::ConditionKind::Let { pattern, value } => {
-                                let value_result = self.synth_expr(value)?;
-                                self.bind_pattern(pattern, &value_result.ty)?;
-                            }
+    fn infer_conditional_branches(
+        &mut self,
+        condition: &verum_ast::expr::IfCondition,
+        then_branch: &Block,
+        else_branch: Option<&Expr>,
+        expected: Option<&Type>,
+        span: Span,
+    ) -> Result<InferResult> {
+        use verum_ast::expr::ConditionKind;
+
+        let mut scopes = List::new();
+        let mut failures = ConditionFailures::default();
+        self.ctx.enter_scope();
+        self.refinement_evidence.push_scope();
+        let then_result = (|| -> Result<InferResult> {
+            enum Guard<'a> { Pattern(&'a Pattern, &'a Expr), Predicate(&'a Expr) }
+            let mut guards: List<_> = condition.conditions.iter().rev().map(|guard| match guard {
+                ConditionKind::Let { pattern, value } => Guard::Pattern(pattern, value),
+                ConditionKind::Expr(expr) => Guard::Predicate(expr),
+            }).collect();
+            while let Some(guard) = guards.pop() {
+                let (pattern, subject, predicate) = match guard {
+                    Guard::Pattern(pattern, subject) => (pattern, subject, None),
+                    Guard::Predicate(guard) => {
+                        if let ExprKind::Paren(inner) = &guard.kind {
+                            guards.push(Guard::Predicate(inner));
+                            continue;
+                        }
+                        if let ExprKind::Binary { op: BinOp::And, left, right } = &guard.kind {
+                            guards.push(Guard::Predicate(right));
+                            guards.push(Guard::Predicate(left));
+                            continue;
+                        }
+                        if let ExprKind::Is { expr, pattern, negated: false } = &guard.kind {
+                            (pattern, expr.as_ref(), Some(guard))
+                        } else {
+                            self.check_expr(guard, &Type::bool())?;
+                            self.record_condition_failure(&scopes, guard.span, &mut failures)?;
+                            self.apply_condition_evidence(guard, false);
+                            continue;
                         }
                     }
+                };
+                let inferred = self.synth_borrowed_operand(subject)?;
+                let applied = self.unifier.try_apply(&inferred.ty, subject.span)?;
+                let binding_ty = self.resolve_assoc_projections_deep(&applied);
+                let origins = self.aggregate_origins(subject, &binding_ty);
+                let name = self.extract_simple_var_name(subject);
+                self.record_condition_failure(&scopes, subject.span, &mut failures)?;
+                scopes.push(self.open_branch_pattern(pattern, subject, &binding_ty, name.as_ref(), &origins)?);
+                if let Some(predicate) = predicate { self.apply_condition_evidence(predicate, false); }
+            }
+            let result = match expected {
+                Some(ty) => self.check_block(then_branch, ty)?,
+                None => self.infer_block(then_branch)?,
+            };
+            if !scopes.is_empty() && let Some(tail) = then_branch.expr.as_deref() {
+                let carries_loans = self.carries_stored_loan(&self.unifier.apply(&result.ty));
+                self.observe_match_arm_origins(tail, carries_loans && scopes.iter().any(|scope| scope.tracks_origins));
+                if carries_loans && scopes.iter().any(|scope| scope.borrowed) {
+                    self.check_aggregate_escape(tail, &result.ty, false)?;
+                }
+            }
+            Ok(result)
+        })();
+        let keep_loans = then_result.as_ref()
+            .is_ok_and(|result| self.carries_stored_loan(&self.unifier.apply(&result.ty)));
+        let mut linear_error = None;
+        while let Some(scope) = scopes.pop() {
+            let errors = self.close_branch_pattern(scope, then_branch.span, keep_loans);
+            if linear_error.is_none() { linear_error = errors.into_iter().next(); }
+        }
+        self.refinement_evidence.pop_scope();
+        self.ctx.exit_scope();
+        let then_result = then_result?;
+        if let Some(error) = linear_error { return Err(error); }
+        let then_reaches_join = !self.is_never_type(&then_result.ty);
+        let taken_affine = self.affine_tracker.snapshot_alternatives();
+        let failed_loans = failures.loans.ok_or_else(|| TypeError::OtherWithCodeSpanned {
+            code: "E400".into(), msg: "if requires a condition".into(), span: condition.span,
+        })?;
+        match failures.ownership.as_slice() {
+            [state] => self.affine_tracker.restore_alternatives(state),
+            alternatives => self.affine_tracker.merge_alternatives(alternatives),
+        }
+        let taken_loans = std::mem::replace(&mut self.borrow_tracker, failed_loans);
+        // Only the negation of the whole condition follows from a failed
+        // conjunction. A later guard might never have been evaluated.
+        let negative = match condition.conditions.as_slice() {
+            [ConditionKind::Expr(expr)] => Some(expr),
+            _ => None,
+        };
+        if else_branch.is_some() {
+            self.ctx.enter_scope();
+            self.refinement_evidence.push_scope();
+        }
+        if (else_branch.is_some() || !then_reaches_join) && let Some(expr) = negative {
+            self.apply_condition_evidence(expr, true);
+        }
+        let else_result = match (else_branch, expected) {
+            (Some(branch), Some(ty)) => self.check_expr(branch, ty),
+            (Some(branch), None) => self.synth_expr(branch),
+            (None, _) => {
+                if let Some(ty) = expected { self.unifier.unify(&Type::Unit, ty, span)?; }
+                Ok(InferResult::new(Type::unit()))
+            }
+        };
+        if else_branch.is_some() {
+            self.refinement_evidence.pop_scope();
+            self.ctx.exit_scope();
+        }
+        let else_result = else_result?;
+        let else_reaches_join = !self.is_never_type(&else_result.ty);
+        if then_reaches_join {
+            if else_reaches_join {
+                self.affine_tracker.merge_alternatives(&[
+                    self.affine_tracker.snapshot_alternatives(), taken_affine,
+                ]);
+                self.borrow_tracker.merge_live_loans(&taken_loans);
+            } else {
+                self.affine_tracker.restore_alternatives(&taken_affine);
+                self.borrow_tracker = taken_loans;
+            }
+        }
+        let ty = match (expected, then_reaches_join, else_reaches_join) {
+            (_, false, false) => Type::Never,
+            (Some(ty), _, _) => ty.clone(),
+            (None, false, true) => else_result.ty,
+            (None, true, false) => then_result.ty,
+            (None, true, true) => {
+                self.unifier.unify(&then_result.ty, &else_result.ty, span)?;
+                self.unifier.try_apply(&then_result.ty, span)?
+            }
+        };
+        Ok(InferResult::new(ty))
+    }
 
-                    // Alternatives, exactly as in `check_if_expr`.
-                    let affine_at_if = self.affine_tracker.snapshot_alternatives();
-
-                    let then_result = self.infer_block(then_branch)?;
-
-                    self.ctx.env.pop_scope();
-                    self.refinement_evidence.pop_scope();
-
-                    let affine_then = (!self.is_never_type(&then_result.ty))
-                        .then(|| self.affine_tracker.snapshot_alternatives());
-                    self.affine_tracker.restore_alternatives(&affine_at_if);
-
-                    let else_result = if let Some(else_expr) = else_branch {
-                        self.ctx.env.push_scope();
-                        self.refinement_evidence.push_scope();
-                        for cond_expr in &condition_exprs {
-                            self.refinement_evidence
-                                .add_negated_evidence(cond_expr, cond_expr.span);
-                            self.narrow_variable_types_from_condition(cond_expr, true);
-                        }
-                        let result = self.synth_expr(else_expr)?;
-                        self.ctx.env.pop_scope();
-                        self.refinement_evidence.pop_scope();
-                        result
-                    } else {
-                        InferResult::new(Type::unit())
-                    };
-
-                    {
-                        let affine_else = else_branch
-                            .is_some()
-                            .then(|| self.affine_tracker.snapshot_alternatives());
-                        self.merge_if_alternatives(affine_then, affine_else, &affine_at_if);
-                    }
-
-                    // Only reachable branches contribute a value to the join.
-                    // In particular a diverging first branch cannot conceal an
-                    // incompatible value produced by the other branch.
-                    let result_ty = if self.is_never_type(&then_result.ty) {
-                        else_result.ty
-                    } else if self.is_never_type(&else_result.ty) {
-                        then_result.ty
-                    } else {
-                        self.unifier.unify(&then_result.ty, &else_result.ty, expr.span)?;
-                        self.unifier.apply(&then_result.ty)
-                    };
-                    Ok(InferResult::new(result_ty))
+    fn infer_if_expr(&mut self, expr: &Expr, expected: Option<&Type>) -> Result<InferResult> {
+        let ExprKind::If { condition, then_branch, else_branch } = &expr.kind else { unreachable!() };
+        self.with_result_borrow_scope(|checker| {
+            checker.infer_conditional_branches(condition, then_branch, else_branch.as_deref(), expected, expr.span)
+        })
     }
 
     /// Type-check a `while` loop.
@@ -5603,20 +5528,16 @@ impl TypeChecker {
                     }
     }
 
-    fn infer_scoped_match_arm(
-        &mut self,
-        arm: &verum_ast::pattern::MatchArm,
-        scrutinee: &Expr,
-        scrutinee_ty: &Type,
-        scrutinee_name: Option<&Text>,
-        expected: Option<&Type>,
-        sources: &[crate::ty::RecordReceiver],
-    ) -> Result<InferResult> {
-        let bindings = self.collect_pattern_bindings(&arm.pattern, scrutinee_ty)?;
-        let (consumes, ref_bindings) = self.match_pattern_use(&arm.pattern, &bindings);
+    fn open_branch_pattern(
+        &mut self, pattern: &verum_ast::Pattern, scrutinee: &Expr,
+        scrutinee_ty: &Type, scrutinee_name: Option<&Text>, sources: &[crate::ty::RecordReceiver],
+    ) -> Result<BranchPatternScope> {
+        let bindings = self.collect_pattern_bindings(pattern, scrutinee_ty)?;
+        let (consumes, ref_bindings) = self.match_pattern_use(pattern, &bindings);
         if consumes {
+            self.check_owned_place_read(scrutinee, scrutinee_ty, None)?;
             if scrutinee_ty.reference_parts().is_some() {
-                for (_, ty) in &bindings { self.check_resource_copy(ty, arm.pattern.span)?; }
+                for (_, ty) in &bindings { self.check_resource_copy(ty, pattern.span)?; }
             }
             self.consume_affine_call_args(std::slice::from_ref(scrutinee), std::slice::from_ref(scrutinee_ty))?;
         }
@@ -5629,9 +5550,9 @@ impl TypeChecker {
         self.borrow_tracker.enter_scope();
         self.ctx.enter_scope();
         self.refinement_evidence.push_scope();
-        let result = (|| {
+        let installed = (|| -> Result<()> {
             if let Some(name) = scrutinee_name {
-                self.add_pattern_evidence(&arm.pattern, name.clone(), arm.pattern.span);
+                self.add_pattern_evidence(pattern, name.clone(), pattern.span);
             }
             if !ref_bindings.is_empty() && borrowed_sources.is_empty() {
                 // A computed subject owns storage only for this match arm.
@@ -5654,13 +5575,13 @@ impl TypeChecker {
                         .collect::<List<_>>().join(".");
                     let field = (!path.is_empty()).then_some(path);
                     if let Some(error) = self.borrow_tracker.check_place_borrow(
-                        &root, field.as_deref(), binding.mutable, arm.pattern.span,
+                        &root, field.as_deref(), binding.mutable, pattern.span,
                     ) { return Err(error); }
                     match (field, binding.mutable) {
-                        (Some(field), true) => self.borrow_tracker.borrow_field_mut(root.clone(), field, arm.pattern.span)?,
-                        (Some(field), false) => self.borrow_tracker.borrow_field_immut(root.clone(), field, arm.pattern.span)?,
-                        (None, true) => self.borrow_tracker.borrow_mut(root.clone(), arm.pattern.span)?,
-                        (None, false) => self.borrow_tracker.borrow_immut(root.clone(), arm.pattern.span)?,
+                        (Some(field), true) => self.borrow_tracker.borrow_field_mut(root.clone(), field, pattern.span)?,
+                        (Some(field), false) => self.borrow_tracker.borrow_field_immut(root.clone(), field, pattern.span)?,
+                        (None, true) => self.borrow_tracker.borrow_mut(root.clone(), pattern.span)?,
+                        (None, false) => self.borrow_tracker.borrow_immut(root.clone(), pattern.span)?,
                     };
                     self.borrow_tracker.clear_last_borrow();
                 }
@@ -5673,7 +5594,7 @@ impl TypeChecker {
                     if !origins.contains(&source) { origins.push(source); }
                 }
             }
-            self.bind_pattern(&arm.pattern, scrutinee_ty)?;
+            self.bind_pattern(pattern, scrutinee_ty)?;
             for (name, origins) in binding_sources {
                 self.ctx.env.set_reference_origin(&name,
                     crate::context::ReferenceOrigin::Candidates(origins.into_boxed_slice()));
@@ -5684,13 +5605,46 @@ impl TypeChecker {
                         // Borrowed patterns project the scrutinee's existing
                         // loan. Only owned aggregates need new retained loans.
                         if scrutinee_ty.reference_parts().is_none() {
-                            for source in sources { self.retain_origin(source, None, arm.pattern.span)?; }
+                            for source in sources { self.retain_origin(source, None, pattern.span)?; }
                         }
                         self.ctx.env.set_reference_origin(name,
                             crate::context::ReferenceOrigin::Candidates(sources.into()));
                     }
                 }
             }
+            Ok(())
+        })();
+        let scope = BranchPatternScope {
+            ownership, borrowed: !ref_bindings.is_empty(),
+            tracks_origins: !sources.is_empty() || !borrowed_sources.is_empty(),
+        };
+        if let Err(error) = installed {
+            self.close_branch_pattern(scope, pattern.span, false);
+            return Err(error);
+        }
+        Ok(scope)
+    }
+
+    fn close_branch_pattern(&mut self, scope: BranchPatternScope, end: Span, keep_loans: bool) -> List<TypeError> {
+        let errors = self.affine_tracker.exit_pattern_scope(scope.ownership, end);
+        self.refinement_evidence.pop_scope();
+        if keep_loans { self.borrow_tracker.exit_scope_retaining_loans(); }
+        else { self.borrow_tracker.exit_scope(); }
+        self.ctx.exit_scope();
+        errors
+    }
+
+    fn infer_scoped_match_arm(
+        &mut self,
+        arm: &verum_ast::pattern::MatchArm,
+        scrutinee: &Expr,
+        scrutinee_ty: &Type,
+        scrutinee_name: Option<&Text>,
+        expected: Option<&Type>,
+        sources: &[crate::ty::RecordReceiver],
+    ) -> Result<InferResult> {
+        let scope = self.open_branch_pattern(&arm.pattern, scrutinee, scrutinee_ty, scrutinee_name, sources)?;
+        let result = (|| {
             if let Some(guard) = &arm.guard {
                 self.check_expr(guard, &Type::bool())?;
                 self.refinement_evidence.add_evidence_from_condition(guard, guard.span);
@@ -5702,18 +5656,11 @@ impl TypeChecker {
         })();
         let carries_loans = result.as_ref()
             .is_ok_and(|inferred| self.carries_stored_loan(&self.unifier.apply(&inferred.ty)));
-        self.observe_match_arm_origins(&arm.body, carries_loans && (!sources.is_empty() || !borrowed_sources.is_empty()));
-        let escapes = if carries_loans && !ref_bindings.is_empty() {
+        self.observe_match_arm_origins(&arm.body, carries_loans && scope.tracks_origins);
+        let escapes = if carries_loans && scope.borrowed {
             self.check_aggregate_escape(&arm.body, &result.as_ref().expect("inferred result").ty, false)
         } else { Ok(()) };
-        let linear_errors = self.affine_tracker.exit_pattern_scope(ownership, arm.body.span);
-        self.refinement_evidence.pop_scope();
-        if carries_loans {
-            self.borrow_tracker.exit_scope_retaining_loans();
-        } else {
-            self.borrow_tracker.exit_scope();
-        }
-        self.ctx.exit_scope();
+        let linear_errors = self.close_branch_pattern(scope, arm.body.span, carries_loans);
         // Restore lexical state even when the arm failed. Outer consumption
         // remains in the tracker; only arm-owned pattern names leave scope.
         let inferred = result?;
@@ -13616,13 +13563,10 @@ impl TypeChecker {
             }
             None
         };
-        let result = if let Some(r) = tail {
-            r
-        } else if has_diverging_stmt {
-            // Block has a diverging statement, so it has type Never
+        let result = if has_diverging_stmt {
             InferResult::new(Type::never())
         } else {
-            InferResult::new(Type::unit())
+            tail.unwrap_or_else(|| InferResult::new(Type::unit()))
         };
 
         let validation = block.expr.as_ref().map(|tail| self.check_aggregate_escape(tail, &result.ty, false));
@@ -13746,12 +13690,11 @@ impl TypeChecker {
         }
 
         let result = if let Some(tail) = &block.expr {
-            self.check_expr(tail, expected).and_then(|result| {
-                self.check_aggregate_escape(tail, &result.ty, false)?;
-                Ok(result)
-            })
+            let result = self.check_expr(tail, expected)?;
+            self.check_aggregate_escape(tail, &result.ty, false)?;
+            Ok(if has_diverging_stmt { InferResult::new(Type::Never) } else { result })
         } else if has_diverging_stmt {
-            Ok(InferResult::new(expected.clone()))
+            Ok(InferResult::new(Type::Never))
         } else {
             // Reaching the end contributes Unit, including to an inferred callable result.
             self.unifier.unify(&Type::Unit, expected, block.span)
