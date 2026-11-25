@@ -80,6 +80,20 @@ fn quotient_descent_requires_generator_agreement_and_checked_local_evidence() {
 }
 
 #[test]
+fn an_identity_section_conflicts_with_the_strict_stage_bound() {
+    let source = include_str!("fixtures/bounded_stage.vr");
+    let name = "bounded_stage_has_no_section";
+    assert_eq!(check(source, name).status, "verified");
+    for changed in [
+        source.replacen("below(include_at(n,x),n)", "below(n,include_at(n,x))", 1),
+        source.replacen("include_at(cutoff,section_at(x)) == x", "x == x", 1),
+        source.replace("exact(irreflexive(cutoff,r,impossible))", "exact(impossible)"),
+    ] {
+        assert_eq!(check(&changed, name).status, "rejected");
+    }
+}
+
+#[test]
 fn constructive_implication_checks_both_propositions_and_their_direction() {
     let source = "theorem t(a:Type, b:Type, x:a): a implies b implies a proof { intro(first, second); exact(first); }";
     assert_eq!(check(source, "t").status, "verified");

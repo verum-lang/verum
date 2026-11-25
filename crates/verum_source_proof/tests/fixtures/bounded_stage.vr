@@ -1,0 +1,24 @@
+// A family whose image lies strictly below its index cannot supply a section
+// of the identity. With fibre(n) = Fin n this obstructs finite presentability.
+public theorem bounded_stage_has_no_section(
+    carrier: Type, fibre: fn(carrier) -> Type, below: fn(carrier, carrier) -> Type,
+    include_at: fn<n: meta carrier>(fibre(n)) -> carrier,
+    cutoff: carrier, section_at: fn(carrier) -> fibre(cutoff)
+)
+    requires forall n: carrier. forall x: fibre(n). below(include_at(n,x),n)
+    requires forall n: carrier. forall r: Type. below(n,n) implies r
+    requires forall x: carrier. include_at(cutoff,section_at(x)) == x
+    : forall r: Type. r
+proof {
+    have bounded: forall n: carrier. forall x: fibre(n). below(include_at(n,x),n) by assumption;
+    have irreflexive: forall n: carrier. forall r: Type. below(n,n) implies r by assumption;
+    have factors: forall x: carrier. include_at(cutoff,section_at(x)) == x by assumption;
+    have transport_bound: forall a: carrier. forall b: carrier. forall n: carrier.
+        (a == b) implies (below(a,n) implies below(b,n))
+        by intro(a,b,n,p,h), rewrite < p, exact(h);
+    have impossible: below(cutoff,cutoff)
+        by exact(transport_bound(include_at(cutoff,section_at(cutoff)), cutoff, cutoff,
+            factors(cutoff), bounded(cutoff,section_at(cutoff))));
+    intro(r);
+    exact(irreflexive(cutoff,r,impossible));
+}
