@@ -1,0 +1,16 @@
+// A local obstruction between successive stages excludes a return from any
+// common cocone vertex. A universal colimit is unnecessary for this conclusion.
+public theorem cocone_forbids_stage_return(
+    index: Type, obj: Type, hom: fn(obj, obj) -> Type,
+    compose: fn<a: meta obj, b: meta obj, c: meta obj>(hom(a,b), hom(b,c)) -> hom(a,c),
+    object_at: fn(index) -> obj, next: fn(index) -> index, apex: obj
+)
+    requires forall i: index. hom(object_at(i),apex)
+    requires forall i: index. forall r: Type. hom(object_at(next(i)),object_at(i)) implies r
+    : forall i: index. forall back: hom(apex,object_at(i)). forall r: Type. r
+proof {
+    have leg: forall i: index. hom(object_at(i),apex) by assumption;
+    have no_backstep: forall i: index. forall r: Type. hom(object_at(next(i)),object_at(i)) implies r by assumption;
+    intro(i,back,r);
+    exact(no_backstep(i,r,compose(object_at(next(i)),apex,object_at(i),leg(next(i)),back)));
+}

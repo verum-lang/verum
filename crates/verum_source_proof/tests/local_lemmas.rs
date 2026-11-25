@@ -183,3 +183,20 @@ fn lawvere_fixed_point_uses_the_representation_at_its_own_point() {
         assert_eq!(check(&changed, name).status, "rejected");
     }
 }
+
+#[test]
+fn a_return_from_the_cocone_vertex_must_cross_the_actual_successor_obstruction() {
+    let source = include_str!("fixtures/stage_obstruction.vr");
+    let name = "cocone_forbids_stage_return";
+    let actual = check(source, name);
+    assert_eq!(actual.status, "verified", "{:?}", actual.diagnostic);
+    for changed in [
+        source.replace("leg(next(i)),back", "leg(i),back"),
+        source.replace("leg(next(i)),back", "back,leg(next(i))"),
+        source.replacen("hom(object_at(next(i)),object_at(i)) implies r", "hom(object_at(i),object_at(next(i))) implies r", 1),
+    ] {
+        let report = check(&changed, name);
+        assert_eq!(report.status, "rejected", "{:?}", report.diagnostic);
+        assert!(report.judgment.is_none());
+    }
+}

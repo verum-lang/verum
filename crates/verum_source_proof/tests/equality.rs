@@ -393,6 +393,7 @@ fn independently_replay_source_transports_and_corrupted_certificates() {
         (include_str!("fixtures/collapsing_chain.vr"), "collapsing_chain_factor_unique"),
         (include_str!("fixtures/colimit_comparison.vr"), "colimit_comparison_roundtrip"),
         (include_str!("fixtures/quotient_descent.vr"), "quotient_descent"),
+        (include_str!("fixtures/stage_obstruction.vr"), "cocone_forbids_stage_return"),
         (include_str!("fixtures/bounded_stage.vr"), "bounded_stage_has_no_section"),
     ] {
         let certificate = accepts(source, name);
