@@ -183,17 +183,49 @@ fn ordinal_render_produces_distinct_outputs() {
 fn ordinal_finite_zero_not_regular_per_convention() {
     // Convention: 0 is not regular. Documented invariant.
     assert!(!Ordinal::Finite(0).is_regular());
-    // But Finite(1), Finite(2), ... are regular.
+    // Every positive successor has cofinality one.
     assert!(Ordinal::Finite(1).is_regular());
-    assert!(Ordinal::Finite(99).is_regular());
+    assert!(!Ordinal::Finite(99).is_regular());
 }
 
 #[test]
-fn ordinal_sup_not_regular_conservative() {
-    // Sup is conservatively NOT regular (unless it happens to equal
-    // a regular ordinal, but that requires deeper analysis).
+fn ordinal_finite_supremum_has_the_cofinality_of_its_maximum() {
     let sup = Ordinal::Sup(vec![Ordinal::Finite(2), Ordinal::Finite(5)]);
     assert!(!sup.is_regular());
+    assert!(Ordinal::Sup(vec![Ordinal::Omega, sup]).is_regular());
+}
+
+#[test]
+fn finite_suprema_are_least_upper_bounds_including_at_notation_boundaries() {
+    use Ordinal::*;
+    let ordinals = [
+        Finite(0), OmegaTimes(0), Finite(1), Finite(u32::MAX), Finite(u32::MAX).succ(),
+        Omega, OmegaPow(1), OmegaPlus(u32::MAX).succ(), OmegaTimes(2),
+        OmegaSquared, OmegaSquaredPlus(Box::new(OmegaSquared)),
+        OmegaPow(3), OmegaSquaredPlus(Box::new(OmegaPow(3))), OmegaPow(3).succ(),
+        Kappa(0), Kappa(u32::MAX), Kappa(u32::MAX).succ(),
+        Kappa(u32::MAX).next_inaccessible(),
+    ];
+    for a in &ordinals {
+        let normal = a.normalize();
+        assert!(a.le(&normal) && normal.le(a));
+        assert_eq!(normal.normalize(), normal);
+        assert!(a.lt(&a.succ()) && !a.succ().is_limit());
+        assert!(a.lt(&a.next_inaccessible()));
+        for b in &ordinals {
+            let sup = Sup(vec![b.clone(), a.clone(), b.clone()]);
+            assert!(!sup.lt(&sup));
+            assert!(a.le(&sup) && b.le(&sup));
+            assert_eq!(a.lt(b), !b.le(a));
+            assert_eq!(sup.normalize(), if a.lt(b) { b.normalize() } else { normal.clone() });
+            for bound in &ordinals {
+                assert_eq!(sup.le(bound), a.le(bound) && b.le(bound));
+                assert_eq!(a.succ().le(bound), a.lt(bound));
+            }
+        }
+    }
+    assert!(Finite(u32::MAX).succ().lt(&Omega));
+    assert_eq!(OmegaSquaredPlus(Box::new(Kappa(2))).normalize(), Kappa(2));
 }
 
 #[test]
