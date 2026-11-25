@@ -344,3 +344,106 @@ fn integer_induction_requires_negative_and_positive_obligations() {
     let result = verify(source);
     assert!(matches!(result, ProofVerificationResult::Verified(_)), "{result:?}");
 }
+
+#[test]
+fn shared_helper_graphs_preserve_symbolic_arguments_and_dead_branches() {
+    let mut definitions =
+        String::from("pure fn p0(n:Int)->Bool { if false { n / 0 == 4 } else { n == 0 } }\n");
+    for level in 1..=18 {
+        let parent = level - 1;
+        definitions.push_str(&format!(
+            "pure fn p{level}(n:Int)->Bool {{ p{parent}(n) && p{parent}(n) }}\n"
+        ));
+    }
+    let chain = vec!["p18(n)"; 80].join(" && ");
+    for (other, expected_witness) in [("!p18(n + 1)", false), ("p18(n + 1)", true)] {
+        let source = format!(
+            "{definitions} theorem t(n:Int) requires n == 0 : {chain} && {other} proof by smt;"
+        );
+        let module = FastParser::new()
+            .parse_module_str(&source, FileId::new(0))
+            .unwrap();
+        let ItemKind::Theorem(theorem) = &module.items.last().unwrap().kind else {
+            unreachable!()
+        };
+        let result = verum_smt::source_words::refute(
+            &Context::new(),
+            theorem,
+            &theorem.proposition,
+            Some(&module),
+        );
+        if expected_witness {
+            assert!(
+                result.as_deref().is_some_and(|m| m.contains("n = 0")),
+                "{result:?}"
+            );
+        } else {
+            assert_eq!(result, None);
+        }
+    }
+}
+
+#[test]
+fn signed_division_and_remainder_use_executable_truncation() {
+    for (goal, failure) in [
+        ("n / 2 == -2 && n % 2 == -1", None),
+        ("n / 2 == -3 || n % 2 == 1", Some("n = -5")),
+        ("n / 0 == n", Some("inconclusive")),
+    ] {
+        let source = format!("theorem t(n:Int) requires n == -5 : {goal} proof by smt;");
+        let module = FastParser::new()
+            .parse_module_str(&source, FileId::new(0))
+            .unwrap();
+        let ItemKind::Theorem(theorem) = &module.items[0].kind else {
+            panic!("missing theorem")
+        };
+        let verdict = verum_smt::source_words::refute(
+            &Context::new(),
+            theorem,
+            &theorem.proposition,
+            Some(&module),
+        );
+        match failure {
+            Some(evidence) => assert!(
+                verdict.as_ref().is_some_and(|m| m.contains(evidence)),
+                "{verdict:?}"
+            ),
+            None => assert_eq!(verdict, None),
+        }
+    }
+}
+
+#[test]
+fn only_unconditionally_asserted_word_equalities_specialize_helper_calls() {
+    for (premise, failure) in [
+        ("p.x == 3 && 2 == p.y", None),
+        ("p.x == 3 || p.y == 2", Some("counterexample")),
+        ("p.x != 3 => p.y == 2", Some("counterexample")),
+    ] {
+        let source = format!(
+            "type Pair is {{ x:Int, y:Int }}; pure fn total(p:Pair)->Int {{ p.x + p.y }}
+            theorem t(p:Pair) requires {premise} : total(p) == 5 proof by auto;"
+        );
+        let module = FastParser::new()
+            .parse_module_str(&source, FileId::new(0))
+            .unwrap();
+        let ItemKind::Theorem(theorem) = &module.items[2].kind else {
+            panic!("missing theorem")
+        };
+        let result = verum_smt::source_words::refute(
+            &Context::new(),
+            theorem,
+            &theorem.proposition,
+            Some(&module),
+        );
+        match failure {
+            None => assert_eq!(result, None),
+            Some(expected) => assert!(
+                result
+                    .as_deref()
+                    .is_some_and(|text| text.contains(expected)),
+                "{result:?}"
+            ),
+        }
+    }
+}

@@ -2,7 +2,7 @@
 //! A model of the negated source judgment can disqualify a proposed proof.
 //! This check never supplies a proof body or grants kernel authority.
 use crate::Context;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::rc::Rc;
 use verum_ast::decl::{FunctionBody, FunctionParam, FunctionParamKind, TheoremDecl, TypeDeclBody};
 use verum_ast::expr::{BinOpCategory, Block, ConditionKind};
@@ -18,7 +18,7 @@ const MAX_NODES: usize = 8192;
 
 type Bindings = BTreeMap<String, Value>;
 
-#[derive(Clone)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 enum Value {
     Word(BV),
     Truth(Bool),
@@ -52,11 +52,85 @@ impl Value {
     }
 }
 
+/// Specialize the conclusion using ground word equalities that must hold in
+/// every model of the checked hypotheses. Keep the original solver assertions
+/// and model inputs so a reported counterexample still belongs to the source.
+fn specialize(scope: &Bindings, hypotheses: &[Bool]) -> Bindings {
+    let mut known = HashMap::new();
+    let mut pending = hypotheses.to_vec();
+    let mut visited = std::collections::HashSet::new();
+    while let Some(h) = pending.pop() {
+        if visited.len() >= MAX_NODES {
+            break;
+        }
+        if !visited.insert(h.clone()) {
+            continue;
+        }
+        let Ok(decl) = h.safe_decl() else { continue };
+        match decl.kind() {
+            z3::DeclKind::And => {
+                pending.extend(h.children().into_iter().filter_map(|c| c.as_bool()))
+            }
+            z3::DeclKind::Eq => {
+                if let (Some(a), Some(b)) = (
+                    h.nth_child(0).and_then(|c| c.as_bv()),
+                    h.nth_child(1).and_then(|c| c.as_bv()),
+                ) {
+                    match (a.as_u64(), b.as_u64()) {
+                        (None, Some(_)) => {
+                            known.insert(a, b);
+                        }
+                        (Some(_), None) => {
+                            known.insert(b, a);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn narrowed(scope: &Bindings, known: &HashMap<BV, BV>) -> Bindings {
+        scope
+            .iter()
+            .map(|(name, value)| {
+                let value = match value {
+                    Value::Word(w) => Value::Word(known.get(w).unwrap_or(w).clone()),
+                    Value::Record(ty, fields) => {
+                        Value::Record(ty.clone(), Rc::new(narrowed(fields, known)))
+                    }
+                    Value::Truth(_) => value.clone(),
+                };
+                (name.clone(), value)
+            })
+            .collect()
+    }
+    if known.is_empty() {
+        scope.clone()
+    } else {
+        narrowed(scope, &known)
+    }
+}
+
 pub(crate) fn word_arithmetic(op: BinOp, lhs: &BV, rhs: &BV) -> Option<BV> {
     Some(match op {
         BinOp::Add => lhs.bvadd(rhs),
         BinOp::Sub => lhs.bvsub(rhs),
         BinOp::Mul => lhs.bvmul(rhs),
+        BinOp::Div | BinOp::Rem => {
+            // Both executable operations truncate towards zero. Use only
+            // divisors whose totality is independent of the dividend.
+            let divisor = rhs.simplify();
+            if divisor.as_u64()? == 0 || divisor == BV::from_i64(-1, rhs.get_size()) {
+                return None;
+            }
+            if op == BinOp::Div {
+                lhs.bvsdiv(&divisor)
+            } else {
+                lhs.bvsrem(&divisor)
+            }
+        }
         _ => return None,
     })
 }
@@ -172,13 +246,17 @@ fn needs_word_check(theorem: &TheoremDecl, conclusion: &Expr, module: Option<&Mo
 struct Encoding<'a> {
     module: Option<&'a Module>,
     inputs: Bindings,
+    calls: HashMap<(String, Bindings), Value>,
     has_words: bool,
     remaining: usize,
+    stopped_at: Option<verum_ast::Span>,
+    depth_exhausted: bool,
 }
 
 impl Encoding<'_> {
     fn input(&mut self, name: &str, ty: &Type, depth: usize) -> Option<Value> {
         if depth >= MAX_DEPTH {
+            self.depth_exhausted = true;
             return None;
         }
         self.remaining = self.remaining.checked_sub(1)?;
@@ -249,8 +327,6 @@ impl Encoding<'_> {
                 }
             }
             (Value::Truth(a), Value::Truth(b)) => match op {
-                BinOp::And => Bool::and(&[&a, &b]),
-                BinOp::Or => Bool::or(&[&a, &b]),
                 BinOp::Imply => a.implies(&b),
                 BinOp::Iff | BinOp::Eq => a.iff(&b),
                 BinOp::Ne => a.iff(&b).not(),
@@ -259,6 +335,40 @@ impl Encoding<'_> {
             _ => return None,
         };
         Some(Value::Truth(result))
+    }
+
+    // Binary source chains form one ordered Boolean obligation. Visit their
+    // leaves iteratively and preserve left-to-right short-circuit evaluation.
+    fn logical(&mut self, op: BinOp, root: &Expr, scope: &Bindings, depth: usize) -> Option<Bool> {
+        let mut pending = vec![root];
+        let mut values = Vec::new();
+        let neutral = op == BinOp::And;
+        while let Some(expr) = pending.pop() {
+            if let ExprKind::Binary {
+                op: nested,
+                left,
+                right,
+            } = &expr.kind
+                && *nested == op
+            {
+                self.remaining = self.remaining.checked_sub(1)?;
+                pending.push(right);
+                pending.push(left);
+                continue;
+            }
+            let value = self.value(expr, scope, depth)?.truth()?;
+            match value.as_bool() {
+                Some(b) if b != neutral => return Some(value),
+                Some(_) => {}
+                None => values.push(value),
+            }
+        }
+        let terms = values.iter().collect::<Vec<_>>();
+        Some(if neutral {
+            Bool::and(&terms)
+        } else {
+            Bool::or(&terms)
+        })
     }
 
     fn block(&mut self, block: &Block, scope: &Bindings, depth: usize) -> Option<Value> {
@@ -286,7 +396,16 @@ impl Encoding<'_> {
     }
 
     fn value(&mut self, expr: &Expr, scope: &Bindings, depth: usize) -> Option<Value> {
+        let value = self.translate(expr, scope, depth);
+        if value.is_none() && self.stopped_at.is_none() {
+            self.stopped_at = Some(expr.span);
+        }
+        value
+    }
+
+    fn translate(&mut self, expr: &Expr, scope: &Bindings, depth: usize) -> Option<Value> {
         if depth >= MAX_DEPTH {
+            self.depth_exhausted = true;
             return None;
         }
         self.remaining = self.remaining.checked_sub(1)?;
@@ -312,6 +431,10 @@ impl Encoding<'_> {
             }
             ExprKind::Paren(x) => self.value(x, scope, next),
             ExprKind::Block(block) => self.block(block, scope, next),
+            ExprKind::Binary {
+                op: op @ (BinOp::And | BinOp::Or),
+                ..
+            } => self.logical(*op, expr, scope, next).map(Value::Truth),
             ExprKind::Binary { op, left, right } => {
                 let lhs = self.value(left, scope, next)?;
                 let rhs = self.value(right, scope, next)?;
@@ -363,6 +486,11 @@ impl Encoding<'_> {
                     return None;
                 };
                 let guard = self.value(test, scope, next)?.truth()?;
+                match guard.simplify().as_bool() {
+                    Some(true) => return self.block(then_branch, scope, next),
+                    Some(false) => return self.value(else_branch.as_deref()?, scope, next),
+                    None => {}
+                }
                 let yes = self.block(then_branch, scope, next)?;
                 let no = self.value(else_branch.as_deref()?, scope, next)?;
                 match (yes, no) {
@@ -420,12 +548,22 @@ impl Encoding<'_> {
                         return None;
                     }
                 }
+                // The admitted helper fragment is deterministic and has no effects
+                // on caller storage. Symbolic arguments include record field values.
+                let key = (name.to_owned(), locals);
+                if let Some(result) = self.calls.get(&key) {
+                    return Some(result.clone());
+                }
                 let result = match f.body.as_ref()? {
-                    FunctionBody::Expr(e) => self.value(e, &locals, next)?,
-                    FunctionBody::Block(b) => self.block(b, &locals, next)?,
+                    FunctionBody::Expr(e) => self.value(e, &key.1, next)?,
+                    FunctionBody::Block(b) => self.block(b, &key.1, next)?,
                     _ => return None,
                 };
-                result.has_type(f.return_type.as_ref()?).then_some(result)
+                if !result.has_type(f.return_type.as_ref()?) {
+                    return None;
+                }
+                self.calls.insert(key, result.clone());
+                Some(result)
             }
             _ => None,
         }
@@ -441,33 +579,46 @@ pub fn refute(
     conclusion: &Expr,
     module: Option<&Module>,
 ) -> Option<String> {
-    let incomplete = || {
-        needs_word_check(theorem, conclusion, module).then(||
-            "signed-word verification inconclusive: the source judgment exceeds the exact translation fragment or its resource budget".to_owned()
-        )
+    let incomplete = |enc: &Encoding<'_>| {
+        needs_word_check(theorem, conclusion, module).then(|| {
+            let reason = if enc.remaining == 0 {
+                "expression budget exhausted"
+            } else if enc.depth_exhausted {
+                "expression depth exhausted"
+            } else {
+                "source operation or type has no exact total-word translation"
+            };
+            match enc.stopped_at {
+                Some(span) => format!("signed-word verification inconclusive: {reason} at {span}"),
+                None => format!("signed-word verification inconclusive: {reason}"),
+            }
+        })
+    };
+    let mut enc = Encoding {
+        module,
+        inputs: Bindings::new(),
+        calls: HashMap::new(),
+        has_words: false,
+        remaining: MAX_NODES,
+        stopped_at: None,
+        depth_exhausted: false,
     };
     if !theorem.generics.is_empty()
         || theorem.generic_where_clause.is_some()
         || theorem.meta_where_clause.is_some()
     {
-        return incomplete();
+        return incomplete(&enc);
     }
-    let mut enc = Encoding {
-        module,
-        inputs: Bindings::new(),
-        has_words: false,
-        remaining: MAX_NODES,
-    };
     let mut scope = Bindings::new();
     for param in &theorem.params {
         let Some((name, ty)) = parameter(param) else {
-            return incomplete();
+            return incomplete(&enc);
         };
         let Some(value) = enc.input(name, ty, 0) else {
-            return incomplete();
+            return incomplete(&enc);
         };
         if scope.insert(name.to_owned(), value).is_some() {
-            return incomplete();
+            return incomplete(&enc);
         }
     }
     let judgment = (|| {
@@ -476,10 +627,27 @@ pub fn refute(
             .iter()
             .map(|req| enc.value(req, &scope, 0)?.truth())
             .collect::<Option<Vec<_>>>()?;
-        Some((hypotheses, enc.value(conclusion, &scope, 0)?.truth()?))
+        let mut goal = conclusion;
+        while let ExprKind::Binary {
+            op: BinOp::Imply,
+            left,
+            right,
+        } = &goal.kind
+        {
+            if !theorem
+                .requires
+                .iter()
+                .any(|req| req.span == left.span && req == left.as_ref())
+            {
+                break;
+            }
+            goal = right;
+        }
+        let local = specialize(&scope, &hypotheses);
+        Some((hypotheses, enc.value(goal, &local, 0)?.truth()?))
     })();
     let Some((hypotheses, goal)) = judgment else {
-        return incomplete();
+        return incomplete(&enc);
     };
     if !enc.has_words {
         return None;
