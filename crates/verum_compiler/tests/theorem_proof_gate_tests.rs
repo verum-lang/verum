@@ -47,6 +47,12 @@ fn opts_for(temp: &NamedTempFile) -> CompilerOptions {
 
 /// Outcome of a check-only run: (pipeline_ok, error codes, warning codes).
 fn check(source: &str) -> (bool, Vec<String>, Vec<String>) {
+    check_module(&format!(
+        "@no_implicit_prelude module test.proof_gate;\n{source}"
+    ))
+}
+
+fn check_module(source: &str) -> (bool, Vec<String>, Vec<String>) {
     let temp = create_temp_source(source);
     let opts = opts_for(&temp);
     let mut session = Session::new(opts);
@@ -332,7 +338,7 @@ fn external_closed_theorem_module() {
         count += 1;
     }
     assert!(count > 0, "module contains no checked theorems");
-    let (ok, errors, warnings) = check(&source);
+    let (ok, errors, warnings) = check_module(&source);
     assert!(
         ok && errors.is_empty() && warnings.is_empty(),
         "{errors:?} {warnings:?}"
@@ -344,5 +350,45 @@ fn external_closed_theorem_module() {
     );
     eprintln!(
         "Verified {count} closed theorem bodies from {path:?}; tactic metadata is not a kernel certificate."
+    );
+}
+
+#[test]
+fn cached_theorem_is_rechecked_when_a_helper_changes_at_the_same_span() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("cache_boundary.vr");
+    let cache = dir.path().join("closures");
+    let check = |increment: u8| {
+        let source = format!(
+            "@no_implicit_prelude module test.cache_boundary;
+             pure fn step(n:Int)->Int {{ n + {increment} }}
+             theorem monotone(n:Int): step(n) >= n proof by omega;"
+        );
+        std::fs::write(&input, source).unwrap();
+        let mut session = Session::new(CompilerOptions {
+            input: input.clone(),
+            verify_mode: VerifyMode::Proof,
+            closure_cache_enabled: true,
+            closure_cache_root: Some(cache.clone()),
+            ..Default::default()
+        });
+        let result = CompilationPipeline::new(&mut session).run_check_only();
+        let messages: Vec<_> = session
+            .diagnostics()
+            .iter()
+            .map(|d| d.message().to_string())
+            .collect();
+        (result.is_ok() && !session.has_errors(), messages)
+    };
+    let first = check(0);
+    assert!(first.0, "{first:?}");
+    assert!(cache.read_dir().unwrap().next().is_some());
+    let same = check(0);
+    assert!(same.0, "{same:?}");
+    let changed = check(1);
+    assert!(!changed.0, "{changed:?}");
+    assert!(
+        changed.1.join(" ").contains("counterexample"),
+        "{changed:?}"
     );
 }

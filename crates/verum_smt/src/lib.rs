@@ -236,6 +236,7 @@ pub mod pattern_quantifiers;
 // Contract literal support (P0-3)
 pub mod contract;
 mod scalar_transition;
+pub mod source_words;
 pub mod postcondition;
 pub mod precondition;
 pub mod rsl_parser;

@@ -62,7 +62,9 @@ use verum_common::Text;
 /// express — rev 2: `Ok::admitted` (an admitted proof must keep
 /// emitting its unverified-proposition warning on cache hits; a stale
 /// `admitted: false` serde default would silence it forever).
-const VERDICT_SCHEMA_REV: u32 = 2;
+/// Revision 3 binds theorem verification to the module's executable helper
+/// bodies and checks total signed-word counterexamples.
+const VERDICT_SCHEMA_REV: u32 = 3;
 
 /// The version string stamped into every cache fingerprint: the
 /// kernel's `VVA_VERSION` (any kernel-rule edit changes the trust

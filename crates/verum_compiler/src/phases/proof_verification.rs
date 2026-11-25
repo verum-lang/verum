@@ -68,6 +68,16 @@ pub enum ProofEvidence {
     Admitted,
 }
 
+impl ProofEvidence {
+    pub fn status(self) -> &'static str {
+        match self {
+            Self::Assumed => "assumed",
+            Self::Admitted => "admitted",
+            Self::TacticDischarge => "tactic_checked",
+        }
+    }
+}
+
 /// Verification metadata, not a replayable kernel certificate.
 #[derive(Debug, Clone)]
 pub struct ProofSummary {
@@ -1601,7 +1611,7 @@ pub fn verify_proof_body_with_aliases_and_graph(
 
     let primary_goal = ProofGoal::with_hypotheses(proposition.clone(), hypotheses.clone());
 
-    match proof_body {
+    let result = match proof_body {
         // ----------------------------------------------------------------
         // Term proof (Curry-Howard)
         // ----------------------------------------------------------------
@@ -1768,7 +1778,27 @@ pub fn verify_proof_body_with_aliases_and_graph(
                 }
             }
         }
+    };
+    // An explicit admission stays an admission even if the proposition is
+    // false. Only a potential discharge needs a source-semantics check.
+    if matches!(&result, ProofVerificationResult::Verified(summary) if summary.evidence != ProofEvidence::TacticDischarge)
+    {
+        return result;
     }
+    if let Some(reason) = verum_smt::source_words::refute(smt_ctx, theorem, &proposition, module) {
+        return ProofVerificationResult::Failed {
+            verified_steps: List::new(),
+            unproved: [UnprovedSubgoal {
+                goal: reason.into(),
+                hypotheses: hypotheses.iter().map(format_expr).collect(),
+                suggestions: List::new(),
+            }]
+            .into_iter()
+            .collect(),
+        };
+    }
+
+    result
 }
 
 /// Verify a structured proof with its sequence of steps and optional

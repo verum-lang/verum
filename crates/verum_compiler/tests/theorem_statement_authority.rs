@@ -125,6 +125,63 @@ fn renamed_predicate_has_the_same_truth_value() {
 }
 
 #[test]
+fn machine_successor_requires_a_representable_next_grade() {
+    let definitions = "
+        type Budget is { amount:Int };
+        pure fn fits(n:Int, e:Budget)->Bool { n >= 0 && e.amount >= 0 && e.amount <= n }
+    ";
+    for (premise, conclusion, accepted) in [
+        ("n >= 0", "n + 1 > n", false),
+        ("n < 9223372036854775807", "n + 1 > n", true),
+        ("fits(n,e)", "fits(n + 1,e)", false),
+        (
+            "fits(n,e) && n < 9223372036854775807",
+            "fits(n + 1,e)",
+            true,
+        ),
+    ] {
+        let source = format!(
+            "{definitions} theorem t(n:Int,e:Budget) requires {premise}
+            ensures {conclusion} proof by omega;"
+        );
+        let result = verify(&source);
+        assert_eq!(
+            matches!(result, ProofVerificationResult::Verified(_)),
+            accepted,
+            "{source}\n{result:?}"
+        );
+        if !accepted {
+            assert!(
+                format!("{result:?}").contains("n = 9223372036854775807"),
+                "{result:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn exact_word_check_covers_quantifiers_scopes_and_untranslated_operands() {
+    for source in [
+        "theorem t(n:Int) requires n >= 0 : n * 2 >= 0 proof by omega;",
+        "theorem t(): forall n:Int. n + 1 > n proof by smt;",
+        "theorem t<T>(n:Int): n + 1 > n proof by omega;",
+        "theorem t(n:Int,unused:Unknown): n + 1 > n proof by omega;",
+        "theorem t(): forall n:Int. exists m:Int. m > n proof by smt;",
+        "pure fn bump(x:Int)->Int { let x = x + 1; x } theorem t(x:Int): bump(x) > x proof by omega;",
+        "pure fn bump(x:Int)->Int { let y = x + 1; y } theorem t(x:Int): bump(x) > x / 1 proof by omega;",
+    ] {
+        let result = verify(source);
+        let ProofVerificationResult::Failed { unproved, .. } = result else {
+            panic!("{source}: {result:?}")
+        };
+        assert!(
+            format!("{unproved:?}").contains("signed"),
+            "{source}: {unproved:?}"
+        );
+    }
+}
+
+#[test]
 fn unsupported_source_calls_cannot_discharge_false_propositions() {
     let result = verify(
         r#"
@@ -235,9 +292,9 @@ fn guarded_elimination_retains_valid_boolean_and_arithmetic_proofs() {
         "theorem t(): true proof { show true by trivial; trivial; }",
         "theorem t(): true proof by exact(true);",
         "theorem t(): true proof by contradiction { show false by auto; };",
-        "theorem nonnegative_double(n:Int) requires n >= 0 : n * 2 >= 0 { proof { have lower_bound: n >= 0 by assumption; show n * 2 >= 0 by omega; } }",
-        "theorem nonnegative_double(n:Int) requires n >= 0 : n * 2 >= 0 proof by induction on n { case _ => auto, case _ => auto, case _ => auto };",
-        "theorem nonnegative_double(n:Int) requires n >= 0 : n * 2 >= 0 proof by { induction n; all_goals { auto } };",
+        "theorem nonnegative_double(n:Int) requires n >= 0 requires n <= 4611686018427387903 : n * 2 >= 0 { proof { have lower_bound: n >= 0 by assumption; show n * 2 >= 0 by omega; } }",
+        "theorem nonnegative_double(n:Int) requires n >= 0 requires n <= 4611686018427387903 : n * 2 >= 0 proof by induction on n { case _ => auto, case _ => auto, case _ => auto };",
+        "theorem nonnegative_double(n:Int) requires n >= 0 requires n <= 4611686018427387903 : n * 2 >= 0 proof by { induction n; all_goals { auto } };",
     ] {
         let result = verify(source);
         let ProofVerificationResult::Verified(summary) = result else { panic!("{source}: {result:?}") };
@@ -283,7 +340,7 @@ fn integer_induction_requires_negative_and_positive_obligations() {
         let result = verify(source);
         assert!(matches!(result, ProofVerificationResult::Failed { .. }), "{source}: {result:?}");
     }
-    let source = "theorem t(n:Int) requires n >= 0 : n * 2 >= 0 proof by induction on n { case _ => {} case _ => { have ih: n >= 0 => n * 2 >= 0 by assumption; } case _ => {} };";
+    let source = "theorem t(n:Int) requires n >= 0 requires n <= 4611686018427387903 : n * 2 >= 0 proof by induction on n { case _ => {} case _ => { have ih: n >= 0 && n <= 4611686018427387903 => n * 2 >= 0 by assumption; } case _ => {} };";
     let result = verify(source);
     assert!(matches!(result, ProofVerificationResult::Verified(_)), "{result:?}");
 }

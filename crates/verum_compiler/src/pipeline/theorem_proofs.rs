@@ -185,6 +185,15 @@ impl<'s> CompilationPipeline<'s> {
         // a 50-theorem corpus, and only the failure path consumes it.
         let apply_graph = build_apply_graph_for_session(self, module);
 
+        // Helper implementations and record declarations participate in the
+        // source judgment. Hash the actual elaboration input once per module.
+        let closure_cache = closure_cache
+            .map(|store| {
+                let mut hash = blake3::Hasher::new();
+                serde_json::to_writer(&mut hash, module).map(|()| (store, hash.finalize()))
+            })
+            .transpose()?;
+
         for item in &module.items {
             let (thm, kind_name) = match &item.kind {
                 verum_ast::ItemKind::Theorem(t) => (t, "theorem"),
@@ -216,15 +225,15 @@ impl<'s> CompilationPipeline<'s> {
             // hit we serve the cached verdict; on miss we run the
             // engine and persist the new verdict. No-op when
             // closure_cache is None.
-            let cache_outcome = closure_cache.as_ref().map(|store| {
+            let cache_outcome = closure_cache.as_ref().map(|(store, module_digest)| {
                 use verum_verification::closure_cache::{
                     CachedVerdict, ClosureFingerprint, cached_check,
                 };
-                // Signature payload: name + requires + ensures +
-                // proposition rendering. Stable across runs so long
-                // as the AST `Debug` projection is stable.
+                // The module digest also binds the theorem to the source definitions
+                // visible during local reflection and word verification.
                 let signature_payload = format!(
-                    "{}|requires={:?}|ensures={:?}|prop={:?}",
+                    "module={}|{}|requires={:?}|ensures={:?}|prop={:?}",
+                    module_digest,
                     thm.name.name.as_str(),
                     thm.requires,
                     thm.ensures,

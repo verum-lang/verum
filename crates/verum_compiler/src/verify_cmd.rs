@@ -38,7 +38,7 @@ use verum_smt::{
 
 use verum_common::{List, Map, Text, ToText};
 
-use crate::phases::proof_verification::ProofVerificationResult;
+use crate::phases::proof_verification::{ProofEvidence, ProofVerificationResult};
 use crate::pipeline::CompilationPipeline;
 use crate::session::Session;
 use crate::verification_profiler::{FileLocation, VerificationProfiler};
@@ -405,6 +405,14 @@ impl<'s> VerifyCommand<'s> {
         if report.has_failures() {
             anyhow::bail!("Verification failed");
         }
+        if report.num_timeout() > 0 {
+            anyhow::bail!("Verification timed out");
+        }
+        if report.num_with_evidence(ProofEvidence::Assumed) > 0
+            || report.num_with_evidence(ProofEvidence::Admitted) > 0
+        {
+            anyhow::bail!("Verification contains theorem obligations without a completed proof");
+        }
 
         Ok(())
     }
@@ -681,6 +689,10 @@ impl<'s> VerifyCommand<'s> {
                     &variant_registry,
                     &mut module_properties,
                 );
+                let Some(result) = result.transpose() else {
+                    report.add_result(func.name.name.clone(), VerificationResult::NoObligations);
+                    continue;
+                };
                 let elapsed = start_time.elapsed();
 
                 // Drain per-obligation timings accumulated during
@@ -760,6 +772,14 @@ impl<'s> VerifyCommand<'s> {
 
             // Verify theorems, lemmas, and corollaries
             let (thm, kind_name) = match &item.kind {
+                ItemKind::Axiom(axiom) => {
+                    if filter.is_none_or(|name| name == axiom.name.as_str()) {
+                        report.add_result(format!("axiom {}", axiom.name).into(), VerificationResult::Theorem {
+                            evidence: ProofEvidence::Assumed, elapsed: Duration::ZERO,
+                        });
+                    }
+                    continue;
+                }
                 ItemKind::Theorem(t) => (t, "theorem"),
                 ItemKind::Lemma(t) => (t, "lemma"),
                 ItemKind::Corollary(t) => (t, "corollary"),
@@ -792,6 +812,7 @@ impl<'s> VerifyCommand<'s> {
 
             let result = self.verify_theorem(
                 thm,
+                module,
                 kind_name,
                 timeout,
                 &alias_map,
@@ -808,7 +829,8 @@ impl<'s> VerifyCommand<'s> {
 
             // Track time spent
             match &result {
-                VerificationResult::Proved { elapsed }
+                VerificationResult::Theorem { elapsed, .. }
+                | VerificationResult::Proved { elapsed }
                 | VerificationResult::Failed { elapsed, .. } => {
                     self.budget_tracker
                         .add_time(*elapsed, thm.name.as_str().to_text());
@@ -835,6 +857,7 @@ impl<'s> VerifyCommand<'s> {
     fn verify_theorem(
         &self,
         theorem: &TheoremDecl,
+        module: &Module,
         kind_name: &str,
         timeout: Duration,
         alias_map: &std::collections::HashMap<Text, Vec<Expr>>,
@@ -851,13 +874,14 @@ impl<'s> VerifyCommand<'s> {
     ) -> VerificationResult {
         let start = Instant::now();
 
-        // Theorems without proof bodies are axioms - accept them
+        // A missing body contributes an assumption to the report.
         if theorem.proof.is_none() {
             info!(
                 "{} '{}' accepted as axiom (no proof body)",
                 kind_name, theorem.name
             );
-            return VerificationResult::Proved {
+            return VerificationResult::Theorem {
+                evidence: ProofEvidence::Assumed,
                 elapsed: start.elapsed(),
             };
         }
@@ -972,11 +996,13 @@ impl<'s> VerifyCommand<'s> {
         }
 
         // Run the full proof verification pipeline
-        match crate::phases::proof_verification::verify_proof_body_with_aliases(
+        match crate::phases::proof_verification::verify_proof_body_with_aliases_and_graph(
             &mut proof_engine,
             &smt_ctx,
             theorem,
             alias_map,
+            None,
+            Some(module),
         ) {
             ProofVerificationResult::Verified(cert) => {
                 let has_incomplete = cert.has_incomplete_steps();
@@ -992,7 +1018,8 @@ impl<'s> VerifyCommand<'s> {
                         ""
                     }
                 );
-                VerificationResult::Proved {
+                VerificationResult::Theorem {
+                    evidence: cert.evidence,
                     elapsed: start.elapsed(),
                 }
             }
@@ -1048,7 +1075,7 @@ impl<'s> VerifyCommand<'s> {
         contract_table: &verum_verification::SymbolTable,
         variant_registry: &[(Text, Vec<Text>)],
         module_properties: &mut verum_types::computational_properties::PropertyInferrer,
-    ) -> Result<verum_smt::ProofResult, VerificationError> {
+    ) -> Result<Option<verum_smt::ProofResult>, VerificationError> {
         let start = Instant::now();
 
         // Check if function has any verifiable content.
@@ -1127,10 +1154,7 @@ impl<'s> VerifyCommand<'s> {
             && !has_implicit_requires
             && !has_body_obligations
         {
-            // Return a proof result with zero cost
-            return Ok(verum_smt::ProofResult::new(
-                verum_smt::VerificationCost::new("no_verification".into(), Duration::ZERO, true),
-            ));
+            return Ok(None);
         }
 
         // Inline refinement predicates on parameters flow in here too:
@@ -1478,7 +1502,7 @@ impl<'s> VerifyCommand<'s> {
             true, // succeeded
         );
 
-        Ok(verum_smt::ProofResult::new(cost))
+        Ok(Some(verum_smt::ProofResult::new(cost)))
     }
 
     /// Step 3 worker: discharge wp-generated body-obligation VCs
@@ -1785,7 +1809,6 @@ impl<'s> VerifyCommand<'s> {
     ) -> Vec<Expr> {
         synthesize_return_refinement_ensures_impl(return_type, alias_map)
     }
-
 }
 
 /// Pure core of [`VerifyCommand::synthesize_return_refinement_ensures`]
@@ -2480,6 +2503,12 @@ impl<'s> VerifyCommand<'s> {
 
         for (name, result) in &report.results {
             match result {
+                VerificationResult::NoObligations => {
+                    println!("  {}: no obligations", name.as_str().dimmed());
+                }
+                VerificationResult::Theorem { evidence, elapsed } => {
+                    println!("  {}: {} ({:.2}s)", name.as_str().bold(), evidence.status(), elapsed.as_secs_f64());
+                }
                 VerificationResult::Proved { elapsed } => {
                     println!(
                         "  {} {}: Proved in {:.2}s",
@@ -2534,11 +2563,15 @@ impl<'s> VerifyCommand<'s> {
 
         println!();
         println!(
-            "Summary: {} proved, {} failed, {} timeout, {} skipped",
+            "Summary: {} proved, {} tactic-checked, {} assumed, {} admitted, {} failed, {} timeout, {} skipped, {} without obligations",
             report.num_proved().to_string().green(),
+            report.num_with_evidence(ProofEvidence::TacticDischarge),
+            report.num_with_evidence(ProofEvidence::Assumed),
+            report.num_with_evidence(ProofEvidence::Admitted),
             report.num_failed().to_string().red(),
             report.num_timeout().to_string().yellow(),
-            report.num_skipped().to_string().dimmed()
+            report.num_skipped().to_string().dimmed(),
+            report.num_without_obligations()
         );
     }
 
@@ -2680,10 +2713,10 @@ impl<'s> VerifyCommand<'s> {
         let mut rows = Vec::new();
         for (name, result) in &report.results {
             let elapsed = match result {
-                VerificationResult::Proved { elapsed } => Some(*elapsed),
+                VerificationResult::Proved { elapsed } | VerificationResult::Theorem { elapsed, .. } => Some(*elapsed),
                 VerificationResult::Failed { elapsed, .. } => Some(*elapsed),
                 VerificationResult::Timeout { elapsed, .. } => Some(*elapsed),
-                VerificationResult::Skipped => None,
+                VerificationResult::Skipped | VerificationResult::NoObligations => None,
             };
             if let Some(e) = elapsed {
                 rows.push((name.clone(), e));
@@ -2720,6 +2753,11 @@ impl<'s> VerifyCommand<'s> {
                 f64,
                 Option<String>,
             ) = match result {
+                VerificationResult::NoObligations => ("info", "no_obligations".into(), 0.0, None),
+                VerificationResult::Theorem { evidence, elapsed } => (
+                    if *evidence == ProofEvidence::TacticDischarge { "info" } else { "warning" },
+                    evidence.status().to_owned(), elapsed.as_secs_f64() * 1000.0, None,
+                ),
                 VerificationResult::Proved { elapsed } => (
                     "info",
                     "proved".to_string(),
@@ -2837,7 +2875,13 @@ impl<'s> VerifyCommand<'s> {
 
 /// Verification result for a single function
 #[derive(Debug, Clone)]
-pub enum VerificationResult {
+pub enum VerificationResult {    /// No contract, refinement or body obligation was generated for this function.
+    NoObligations,
+    /// Evidence produced by the tactic frontend for a source theorem.
+    Theorem {
+        evidence: ProofEvidence,
+        elapsed: Duration,
+    },
     /// Successfully proved all refinements
     Proved { elapsed: Duration },
 
@@ -2896,7 +2940,7 @@ impl VerificationReport {
     pub fn failed_names(&self) -> Vec<&str> {
         self.results
             .iter()
-            .filter(|(_, r)| !matches!(r, VerificationResult::Proved { .. }))
+            .filter(|(_, r)| !matches!(r, VerificationResult::NoObligations | VerificationResult::Proved { .. } | VerificationResult::Theorem { evidence: ProofEvidence::TacticDischarge, .. }))
             .map(|(n, _)| n.as_str())
             .collect()
     }
@@ -2957,6 +3001,17 @@ impl VerificationReport {
             .count()
     }
 
+    pub fn num_without_obligations(&self) -> usize {
+        self.results
+            .iter()
+            .filter(|(_, r)| matches!(r, VerificationResult::NoObligations))
+            .count()
+    }
+
+    pub fn num_with_evidence(&self, kind: ProofEvidence) -> usize {
+        self.results.iter().filter(|(_, r)| matches!(r, VerificationResult::Theorem { evidence, .. } if *evidence == kind)).count()
+    }
+
     /// Count of failed verifications
     pub fn num_failed(&self) -> usize {
         self.results
@@ -2998,6 +3053,8 @@ impl VerificationReport {
             .iter()
             .map(|(name, result)| {
                 let (status, elapsed, counterexample) = match result {
+                    VerificationResult::Theorem { evidence, elapsed } =>
+                        (evidence.status().to_owned(), Some(elapsed.as_secs_f64()), None),
                     VerificationResult::Proved { elapsed } => {
                         ("proved".to_string(), Some(elapsed.as_secs_f64()), None)
                     }
@@ -3013,6 +3070,7 @@ impl VerificationReport {
                         ("timeout".to_string(), Some(elapsed.as_secs_f64()), None)
                     }
                     VerificationResult::Skipped => ("skipped".to_string(), None, None),
+                    VerificationResult::NoObligations => ("no_obligations".to_string(), None, None),
                 };
 
                 FunctionResultJson {
@@ -3027,6 +3085,10 @@ impl VerificationReport {
         VerificationReportJson {
             total_functions: self.results.len(),
             proved: self.num_proved(),
+            no_obligations: self.num_without_obligations(),
+            tactic_checked: self.num_with_evidence(ProofEvidence::TacticDischarge),
+            assumed: self.num_with_evidence(ProofEvidence::Assumed),
+            admitted: self.num_with_evidence(ProofEvidence::Admitted),
             failed: self.num_failed(),
             timeout: self.num_timeout(),
             skipped: self.num_skipped(),
@@ -3121,6 +3183,14 @@ fn build_counterexample_from_model(model: &z3::Model) -> verum_smt::CounterExamp
 pub struct VerificationReportJson {
     pub total_functions: usize,
     pub proved: usize,
+    #[serde(default)]
+    pub no_obligations: usize,
+    #[serde(default)]
+    pub tactic_checked: usize,
+    #[serde(default)]
+    pub assumed: usize,
+    #[serde(default)]
+    pub admitted: usize,
     pub failed: usize,
     pub timeout: usize,
     pub skipped: usize,

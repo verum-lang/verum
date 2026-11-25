@@ -248,12 +248,8 @@ impl SepLogicEncoder {
             ExprKind::Binary { op, left, right } => {
                 let left = self.encode_word(left)?;
                 let right = self.encode_word(right)?;
-                match op {
-                    BinOp::Add => left.bvadd(&right),
-                    BinOp::Sub => left.bvsub(&right),
-                    BinOp::Mul => left.bvmul(&right),
-                    _ => return Err(Self::unsupported_scalar()),
-                }
+                crate::source_words::word_arithmetic(*op, &left, &right)
+                    .ok_or_else(Self::unsupported_scalar)?
             }
             _ => return Err(Self::unsupported_scalar()),
         })
