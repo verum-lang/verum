@@ -151,3 +151,34 @@ fn rewrite_rejects_dangling_hypothesis_name() {
     );
     let _ = Maybe::<()>::None; // silence unused-import lint
 }
+
+#[test]
+fn targeted_rewriting_preserves_the_goal_and_all_other_local_propositions() {
+    let a = ident_expr("a");
+    let b = ident_expr("b");
+    let equation = eq(a.clone(), b.clone());
+    let pred = |v| binary(BinOp::Gt, v, int_lit(0));
+    let goal = ProofGoal::with_hypotheses(
+        pred(a.clone()),
+        List::from_iter([equation.clone(), pred(a.clone()), pred(b.clone())]),
+    );
+    let mut engine = ProofSearchEngine::new();
+    let at = |target: &str, reverse| ProofTactic::RewriteAt {
+        hypothesis: "h0".into(),
+        target: target.into(),
+        reverse,
+    };
+    let changed = engine.execute_tactic(&at("h1", false), &goal).unwrap();
+    assert_eq!(changed[0].goal, goal.goal);
+    assert_eq!(
+        changed[0].hypotheses,
+        List::from_iter([equation.clone(), pred(b.clone()), pred(b.clone())])
+    );
+    let reversed = engine.execute_tactic(&at("h2", true), &goal).unwrap();
+    assert_eq!(
+        reversed[0].hypotheses,
+        List::from_iter([equation, pred(a.clone()), pred(a)])
+    );
+    assert!(engine.execute_tactic(&at("h2", false), &goal).is_err());
+    assert!(engine.execute_tactic(&at("h3", false), &goal).is_err());
+}

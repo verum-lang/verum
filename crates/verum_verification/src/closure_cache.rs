@@ -66,7 +66,8 @@ use verum_common::Text;
 /// bodies and checks total signed-word counterexamples.
 /// Revision 4 publishes only discharged local theorem hints.
 /// Revision 5 checks conditional simplification premises and resolves named rules.
-const VERDICT_SCHEMA_REV: u32 = 5;
+/// Revision 6 resolves both the equality and the written rewrite location.
+const VERDICT_SCHEMA_REV: u32 = 6;
 
 /// The version string stamped into every cache fingerprint: the
 /// kernel's `VVA_VERSION` (any kernel-rule edit changes the trust

@@ -447,3 +447,21 @@ fn only_unconditionally_asserted_word_equalities_specialize_helper_calls() {
         }
     }
 }
+
+#[test]
+fn a_named_rewrite_location_must_exist_in_the_source_context() {
+    let good = verify(
+        "theorem t(a:Bool,b:Bool) requires a == b requires a : b proof by { rewrite h0 at h1; assumption };",
+    );
+    assert!(
+        matches!(good, ProofVerificationResult::Verified(_)),
+        "{good:?}"
+    );
+    let bad = verify(
+        "theorem t(a:Bool,b:Bool) requires a == b : a == b proof by { rewrite h0 at h9; reflexivity };",
+    );
+    assert!(
+        matches!(bad, ProofVerificationResult::Failed { .. }),
+        "{bad:?}"
+    );
+}

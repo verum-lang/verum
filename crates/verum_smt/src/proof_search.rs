@@ -2305,12 +2305,12 @@ impl ProofSearchEngine {
             ProofTactic::Rewrite {
                 hypothesis,
                 reverse,
-            } => self.try_rewrite(hypothesis, *reverse, goal),
+            } => self.try_rewrite(hypothesis, None, *reverse, goal),
             ProofTactic::RewriteAt {
                 hypothesis,
                 target,
                 reverse,
-            } => self.try_rewrite_at(hypothesis, target, *reverse, goal),
+            } => self.try_rewrite(hypothesis, Some(target), *reverse, goal),
             ProofTactic::Unfold { name } => self.try_unfold(name, goal),
             ProofTactic::Compute => self.try_compute(goal),
             ProofTactic::Left => self.try_left(goal),
@@ -4741,84 +4741,44 @@ impl ProofSearchEngine {
         }
     }
 
-    /// Rewrite the goal using a specific equality hypothesis.
-    ///
-    /// `hypothesis` is the user-named hypothesis (e.g. `h0`, `h1`, or a
-    /// pattern-bound name). It is resolved to an index via
-    /// [`find_hypothesis_index`]; the hypothesis at that index must be
-    /// an equality `a = b`, otherwise we error out naming both the
-    /// hypothesis and its actual shape.
-    ///
-    /// Pre-fix this scanned for the first equality hypothesis in the
-    /// goal regardless of the user's chosen name, silently rewriting
-    /// with the wrong hypothesis when the user asked for `rewrite h2`
-    /// but `h0` was also an equality.
+    /// Transport either the goal or the selected local proposition along the
+    /// named equality. Resolve both names in the original proof context.
     fn try_rewrite(
-        &mut self,
+        &self,
         hypothesis: &Text,
+        target: Option<&Text>,
         reverse: bool,
         goal: &ProofGoal,
     ) -> Result<List<ProofGoal>, ProofError> {
-        let idx = self.find_hypothesis_index(hypothesis, goal)?;
-        let hyp = &goal.hypotheses[idx];
+        let evidence = &goal.hypotheses[self.find_hypothesis_index(hypothesis, goal)?];
         let ExprKind::Binary {
             op: BinOp::Eq,
             left,
             right,
-        } = &hyp.kind
+        } = &evidence.kind
         else {
             return Err(ProofError::TacticFailed(
-                format!(
-                    "rewrite: hypothesis '{}' is not an equality (got {:?})",
-                    hypothesis,
-                    std::mem::discriminant(&hyp.kind)
-                )
-                .into(),
+                format!("rewrite: hypothesis '{hypothesis}' is not an equality").into(),
             ));
         };
-
         let (from, to) = if reverse {
             (right, left)
         } else {
             (left, right)
         };
-
-        let new_goal_expr = match Self::try_rewrite_once(&goal.goal, from, to) {
-            Maybe::Some(expr) => expr,
-            Maybe::None => {
-                return Err(ProofError::TacticFailed(
-                    format!(
-                        "rewrite: equality '{}' did not match any subterm of the goal",
-                        hypothesis
-                    )
-                    .into(),
-                ));
-            }
+        let mut rewritten = goal.clone();
+        let selected = match target {
+            Some(name) => &mut rewritten.hypotheses[self.find_hypothesis_index(name, goal)?],
+            None => &mut rewritten.goal,
         };
-        let mut new_goal = goal.clone();
-        new_goal.goal = new_goal_expr;
-        let mut result = List::new();
-        result.push(new_goal);
-        Ok(result)
-    }
-
-    /// Rewrite at a specific named target inside the goal using the
-    /// given equality hypothesis.
-    ///
-    /// Same hypothesis resolution as [`try_rewrite`]: the named
-    /// hypothesis is looked up by index, not via first-equality scan.
-    /// Target-localised rewriting (limit substitution to the named
-    /// subterm of the goal) is a future refinement; for now this
-    /// uses whole-goal rewriting after resolving the correct
-    /// hypothesis.
-    fn try_rewrite_at(
-        &mut self,
-        hypothesis: &Text,
-        _target: &Text,
-        reverse: bool,
-        goal: &ProofGoal,
-    ) -> Result<List<ProofGoal>, ProofError> {
-        self.try_rewrite(hypothesis, reverse, goal)
+        *selected = Self::try_rewrite_once(selected, from, to).ok_or_else(|| {
+            let location = target.map(Text::as_str).unwrap_or("the goal");
+            ProofError::TacticFailed(
+                format!("rewrite: equality '{hypothesis}' did not match any subterm of {location}")
+                    .into(),
+            )
+        })?;
+        Ok(List::from_iter([rewritten]))
     }
 
     /// Unfold definition
