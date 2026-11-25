@@ -570,7 +570,7 @@ pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<Intrins
         }
 
  // -- Gödel coding ------------------------------------------------
-        "kernel_godel_coding" => cited(true, "verum_kernel::godel_coding (Cantor pairing / PrimRec / MuRec decidability)", "godel_coding: Cantor pairing + PrimRec + MuRec + GodelEncoding all decidable"),
+        "kernel_godel_coding" => cited(true, "verum_kernel::godel_coding", "Reference to checked word coding, primitive recursion and bounded minimization; this marker supplies no object-theory derivation"),
 
  // -- Industrial tactics ------------------------------------------
         "kernel_tactics_industrial" => cited(true, "verum_kernel::tactics (lia/decide/induction/congruence/eauto dispatchers)", "tactics_industrial: lia/decide/induction/congruence/eauto deterministic dispatchers"),

@@ -161,6 +161,144 @@ theorem list_injective {xs ys : List Nat} {z : Nat}
   rw [sameLength, list_roundtrip ys hy] at h
   exact (Option.some.inj h).symm
 
+inductive SyntaxTree where
+  | node (symbol : Nat) (args : List SyntaxTree)
+
+def encodeTree : Nat → SyntaxTree → Option Nat
+  | 0, _ => none
+  | depth+1, .node symbol args => do
+    let tag ← pairWord symbol args.length
+    let codes ← args.mapM (encodeTree depth)
+    let payload ← encodeList codes
+    pairWord tag payload
+
+def decodeTree : Nat → Nat → Option SyntaxTree
+  | 0, _ => none
+  | depth+1, z => do
+    let (tag, payload) := unpair z
+    let (symbol, arity) := unpair tag
+    let codes ← decodeList arity payload
+    return .node symbol (← codes.mapM (decodeTree depth))
+
+private theorem unpair_of_word {a b z : Nat} (h : pairWord a b = some z) : unpair z = (a,b) := by
+  rw [pairWord_exact] at h
+  split at h
+  · cases h; exact unpair_pair a b
+  · contradiction
+
+private theorem map_roundtrip {X Y : Type} (enc : X → Option Y) (dec : Y → Option X)
+    (xs : List X) (ys : List Y) (inverse : ∀ x ∈ xs, ∀ y, enc x = some y → dec y = some x)
+    (h : xs.mapM enc = some ys) :
+    ys.length = xs.length ∧ ys.mapM dec = some xs := by
+  induction xs generalizing ys with
+  | nil =>
+    have eq : [] = ys := Option.some.inj h
+    cases eq; exact ⟨rfl,rfl⟩
+  | cons x xs ih =>
+    rw [List.mapM_cons] at h
+    obtain ⟨y, hy, rest⟩ := Option.bind_eq_some_iff.mp h
+    obtain ⟨tail, ht, out⟩ := Option.bind_eq_some_iff.mp rest
+    have eq : y :: tail = ys := Option.some.inj out
+    cases eq
+    obtain ⟨hlen, hd⟩ := ih tail (fun v hv => inverse v (List.mem_cons_of_mem _ hv)) ht
+    exact ⟨congrArg Nat.succ hlen, by simp [List.mapM_cons, inverse x (by simp) y hy, hd]⟩
+
+/-- The word codec returns the original symbol, arity and every ordered subtree
+    for every successful encoding at every finite depth. -/
+theorem tree_roundtrip (depth : Nat) (t : SyntaxTree) (z : Nat)
+    (h : encodeTree depth t = some z) : decodeTree depth z = some t := by
+  induction depth generalizing t z with
+  | zero => simp [encodeTree] at h
+  | succ depth ih =>
+    cases t with
+    | node symbol args =>
+      obtain ⟨tag, htag, rest⟩ := Option.bind_eq_some_iff.mp h
+      obtain ⟨codes, hc, rest⟩ := Option.bind_eq_some_iff.mp rest
+      obtain ⟨payload, hp, hcode⟩ := Option.bind_eq_some_iff.mp rest
+      obtain ⟨hlen, hchildren⟩ := map_roundtrip _ _ args codes (fun x _ => ih x) hc
+      have hlist := list_roundtrip codes hp
+      rw [hlen] at hlist
+      simp [decodeTree, unpair_of_word hcode, unpair_of_word htag, hlist, hchildren]
+
+private theorem decoded_list {n z : Nat} {xs : List Nat} (hz : z ≤ wordMax)
+    (h : decodeList n z = some xs) :
+    xs.length = n ∧ (∀ x ∈ xs, x ≤ wordMax) ∧ encodeList xs = some z := by
+  induction n generalizing z xs with
+  | zero =>
+    simp only [decodeList] at h
+    split at h
+    · rename_i hzero
+      subst z
+      cases h
+      simp [encodeList]
+    · contradiction
+  | succ n ih =>
+    obtain ⟨ys, ht, hout⟩ := Option.bind_eq_some_iff.mp h
+    have eq : (unpair z).1 :: ys = xs := Option.some.inj hout
+    cases eq
+    obtain ⟨ha,hb⟩ := decoded_components_fit hz
+    obtain ⟨hlen, hsmall, henc⟩ := ih hb ht
+    refine ⟨congrArg Nat.succ hlen, ?_, ?_⟩
+    · intro x hx
+      rcases List.mem_cons.mp hx with rfl | inTail
+      · exact ha
+      · exact hsmall x inTail
+    · simp [encodeList, henc, word_roundtrip hz]
+
+/-- Every accepted syntax code is canonical, including all nested arity tags
+    and the residual payload after the last child. -/
+theorem decoded_tree_reencodes (depth z : Nat) (t : SyntaxTree) (hz : z ≤ wordMax)
+    (h : decodeTree depth z = some t) : encodeTree depth t = some z := by
+  induction depth generalizing z t with
+  | zero => simp [decodeTree] at h
+  | succ depth ih =>
+    obtain ⟨codes, hc, rest⟩ := Option.bind_eq_some_iff.mp h
+    obtain ⟨args, ha, hout⟩ := Option.bind_eq_some_iff.mp rest
+    have eq : .node (unpair (unpair z).1).1 args = t := Option.some.inj hout
+    cases eq
+    obtain ⟨hTagSmall, hPayloadSmall⟩ := decoded_components_fit hz
+    obtain ⟨hcodeLen, hsmall, hp⟩ := decoded_list hPayloadSmall hc
+    change codes.length = (unpair (unpair z).1).2 at hcodeLen
+    obtain ⟨hargLen, hchildren⟩ := map_roundtrip _ _ codes args (fun x hx t ht => ih x t (hsmall x hx) ht) ha
+    simp [encodeTree, hargLen, hcodeLen, word_roundtrip hTagSmall, hchildren, hp, word_roundtrip hz]
+
+private theorem map_preserves_results {X Y : Type} (f g : X → Option Y)
+    (preserves : ∀ x y, f x = some y → g x = some y) (xs : List X) (ys : List Y)
+    (h : xs.mapM f = some ys) : xs.mapM g = some ys := by
+  induction xs generalizing ys with
+  | nil => exact h
+  | cons x xs ih =>
+    rw [List.mapM_cons] at h
+    obtain ⟨y, hy, rest⟩ := Option.bind_eq_some_iff.mp h
+    obtain ⟨tail, ht, out⟩ := Option.bind_eq_some_iff.mp rest
+    have eq : y :: tail = ys := Option.some.inj out
+    cases eq
+    simp [List.mapM_cons, preserves x y hy, ih tail ht]
+
+theorem encodeTree_extends {small large : Nat} (hle : small ≤ large) (t : SyntaxTree) (z : Nat)
+    (h : encodeTree small t = some z) : encodeTree large t = some z := by
+  induction small generalizing large t z with
+  | zero => simp [encodeTree] at h
+  | succ small ih =>
+    cases large with
+    | zero => cases hle
+    | succ large =>
+      cases t with
+      | node s args =>
+        obtain ⟨tag, htag, rest⟩ := Option.bind_eq_some_iff.mp h
+        obtain ⟨codes, hc, rest⟩ := Option.bind_eq_some_iff.mp rest
+        have lifted := map_preserves_results _ _ (ih (Nat.le_of_succ_le_succ hle)) args codes hc
+        simpa [encodeTree, htag, lifted] using rest
+
+theorem tree_injective {d e : Nat} (x y : SyntaxTree) (z : Nat)
+    (hx : encodeTree d x = some z) (hy : encodeTree e y = some z) : x = y := by
+  have common := tree_roundtrip (max d e) x z (encodeTree_extends (Nat.le_max_left d e) x z hx)
+  have other := tree_roundtrip (max d e) y z (encodeTree_extends (Nat.le_max_right d e) y z hy)
+  exact Option.some.inj (common.symm.trans other)
+
+#print axioms tree_roundtrip
+#print axioms decoded_tree_reencodes
+#print axioms tree_injective
 #print axioms unpair_pair
 #print axioms pair_unpair
 #print axioms pairWord_exact

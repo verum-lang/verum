@@ -614,7 +614,7 @@ pub use zfc_self_recognition::{
 /// Recursive-function syntax and exact, word-bounded Gödel encodings.
 pub mod godel_coding;
 pub use godel_coding::{
-    GodelEncoding, MuRecursive, PrimitiveRecursive, RecursiveEvalError, cantor_pair, cantor_unpair,
+    GodelDecodeError, GodelEncoding, MuRecursive, PrimitiveRecursive, RecursiveEvalError, cantor_pair, cantor_unpair,
     decode_list, encode_list, is_mu_recursive, is_primitive_recursive,
 };
 

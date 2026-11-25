@@ -332,6 +332,18 @@ pub struct GodelEncoding {
     pub args: Vec<GodelEncoding>,
 }
 
+/// A finite input can encode many zero-valued children. Resource refusal is
+/// distinct from an invalid arity tag or a noncanonical nonzero tail.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum GodelDecodeError {
+    #[error("nonzero payload remains after the declared children")]
+    TrailingPayload,
+    #[error("decoded tree would exceed the node limit")]
+    NodeLimit,
+    #[error("allocation failed while decoding a syntax tree")]
+    Allocation,
+}
+
 impl GodelEncoding {
     /// Encode on an explicit work stack. Walking siblings backwards builds the
     /// arity-tagged argument payload directly, with one frame per ancestor.
@@ -354,6 +366,59 @@ impl GodelEncoding {
             }
         }
         None
+    }
+
+    /// Recover the unique syntax tree at this code, within a caller-supplied
+    /// total node budget. Charge each declared child before allocating its slot.
+    pub fn decode(code: u64, node_limit: usize) -> Result<Self, GodelDecodeError> {
+        struct Frame {
+            node: GodelEncoding,
+            arity: usize,
+            payload: u64,
+        }
+        fn open(code: u64, available: &mut usize) -> Result<Frame, GodelDecodeError> {
+            let (tag, payload) = cantor_unpair(code);
+            let (symbol, arity) = cantor_unpair(tag);
+            let arity = usize::try_from(arity).map_err(|_| GodelDecodeError::NodeLimit)?;
+            *available = available
+                .checked_sub(arity)
+                .ok_or(GodelDecodeError::NodeLimit)?;
+            let mut node = GodelEncoding::atom(symbol);
+            node.args
+                .try_reserve_exact(arity)
+                .map_err(|_| GodelDecodeError::Allocation)?;
+            Ok(Frame {
+                node,
+                arity,
+                payload,
+            })
+        }
+
+        let mut available = node_limit
+            .checked_sub(1)
+            .ok_or(GodelDecodeError::NodeLimit)?;
+        let mut current = open(code, &mut available)?;
+        let mut parents = Vec::new();
+        loop {
+            if current.node.args.len() < current.arity {
+                let (child, tail) = cantor_unpair(current.payload);
+                current.payload = tail;
+                parents
+                    .try_reserve(1)
+                    .map_err(|_| GodelDecodeError::Allocation)?;
+                parents.push(current);
+                current = open(child, &mut available)?;
+            } else {
+                if current.payload != 0 {
+                    return Err(GodelDecodeError::TrailingPayload);
+                }
+                let Some(mut parent) = parents.pop() else {
+                    return Ok(current.node);
+                };
+                parent.node.args.push(current.node);
+                current = parent;
+            }
+        }
     }
 
     /// Encode an atom `(symbol)` with zero arguments.
@@ -729,6 +794,55 @@ mod tests {
         for n in 0..10 {
             let result = add.eval(&[n, n], &mut 1024).unwrap();
             assert_eq!(result, 2 * n);
+        }
+    }
+    #[test]
+    fn tree_codes_are_canonical_and_charge_all_nodes_before_expansion() {
+        let tree = GodelEncoding {
+            symbol: 0,
+            args: vec![
+                GodelEncoding {
+                    symbol: 1,
+                    args: vec![GodelEncoding::atom(0)],
+                },
+                GodelEncoding::atom(1),
+            ],
+        };
+        let code = tree.encode().unwrap();
+        assert_eq!(GodelEncoding::decode(code, 4), Ok(tree));
+        assert_eq!(
+            GodelEncoding::decode(code, 3),
+            Err(GodelDecodeError::NodeLimit)
+        );
+        assert_eq!(
+            GodelEncoding::decode(0, 0),
+            Err(GodelDecodeError::NodeLimit)
+        );
+        let tag = cantor_pair(0, 100_000).unwrap();
+        let wide = cantor_pair(tag, 0).unwrap();
+        assert_eq!(
+            GodelEncoding::decode(wide, 100_000),
+            Err(GodelDecodeError::NodeLimit)
+        );
+        let expanded = GodelEncoding::decode(wide, 100_001).unwrap();
+        assert_eq!(expanded.args.len(), 100_000);
+        assert_eq!(expanded.encode(), Some(wide));
+        let invalid_leaf = cantor_pair(cantor_pair(0, 0).unwrap(), 1).unwrap();
+        let invalid_child = cantor_pair(
+            cantor_pair(0, 1).unwrap(),
+            cantor_pair(invalid_leaf, 0).unwrap(),
+        )
+        .unwrap();
+        for malformed in [invalid_leaf, invalid_child] {
+            assert_eq!(
+                GodelEncoding::decode(malformed, 2),
+                Err(GodelDecodeError::TrailingPayload)
+            );
+        }
+        for wire in 0..4096 {
+            if let Ok(decoded) = GodelEncoding::decode(wire, 256) {
+                assert_eq!(decoded.encode(), Some(wire));
+            }
         }
     }
 }
