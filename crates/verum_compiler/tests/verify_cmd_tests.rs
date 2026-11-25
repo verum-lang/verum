@@ -294,3 +294,23 @@ fn applying_a_sibling_requires_its_checked_body_and_its_premises() {
     );
     assert!(cmd.run_to_report(Some("absent")).is_err());
 }
+
+#[test]
+fn conditional_simplification_retains_every_used_premise() {
+    use verum_compiler::verify_cmd::VerifyCommand;
+    use verum_compiler::{CompilerOptions, Session};
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("conditional.vr");
+    std::fs::write(&input, "@no_implicit_prelude module test.conditional;
+        theorem valid(b:Bool) requires b : b proof by simp[guarded_eq];
+        theorem invalid(b:Bool): b proof by simp[guarded_eq];
+        theorem missing():true proof by simp[unknown_rule];
+        theorem guarded_eq(b:Bool) requires b : b == true proof by auto;").unwrap();
+    let mut session = Session::new(CompilerOptions { input, ..Default::default() });
+    let mut cmd = VerifyCommand::new(&mut session);
+    let valid = cmd.run_to_report(Some("valid")).unwrap().to_json();
+    assert_eq!((valid.tactic_checked, valid.failed), (2, 0));
+    let invalid = cmd.run_to_report(Some("invalid")).unwrap().to_json();
+    assert_eq!((invalid.tactic_checked, invalid.failed), (1, 1));
+    assert_eq!(cmd.run_to_report(Some("missing")).unwrap().to_json().failed, 1);
+}

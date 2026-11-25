@@ -10,7 +10,8 @@
 use std::collections::{BTreeMap, HashSet};
 
 use serde::{Deserialize, Serialize};
-use verum_ast::decl::{ProofBody, ProofStep, ProofStepKind, TacticExpr};
+use verum_ast::decl::{ProofBody, TacticExpr};
+use verum_ast::visitor::{Visitor, walk_tactic_expr};
 use verum_ast::expr::{Expr, ExprKind};
 
 /// Classification of a single apply-graph leaf.
@@ -636,90 +637,44 @@ pub fn build_apply_graph_from_modules(modules: &[&verum_ast::Module]) -> ApplyGr
 /// every theorem in the workspace populates each `SymbolEntry::Theorem`'s
 /// `apply_targets` list. Pure AST walk — no semantic resolution.
 pub fn extract_apply_targets(body: &ProofBody) -> Vec<String> {
-    let mut names = source_apply_names(body);
+    let mut names = tactic_dependencies(body, false);
     names.retain(|name| !is_builtin_tactic_name(name));
     names
 }
 
-/// Explicit names as written, before resolving them against a declaration scope.
-/// A module can declare a lemma whose name is also a primitive tactic spelling.
-pub fn source_apply_names(body: &ProofBody) -> Vec<String> {
-    let mut targets = Vec::new();
-    walk_proof_body(body, &mut targets);
-    targets
+/// Source dependencies to resolve against the module's actual declarations.
+pub fn source_lemma_names(body: &ProofBody) -> Vec<String> {
+    tactic_dependencies(body, true)
 }
 
-fn walk_proof_body(body: &ProofBody, targets: &mut Vec<String>) {
-    match body {
-        ProofBody::Structured(s) => {
-            for step in s.steps.iter() {
-                walk_proof_step(step, targets);
-            }
-        }
-        ProofBody::Tactic(t) => walk_tactic(t, targets),
-        ProofBody::Term(_) | ProofBody::ByMethod(_) => {}
+fn tactic_dependencies(body: &ProofBody, include_simp: bool) -> Vec<String> {
+    struct References {
+        names: Vec<String>,
+        include_simp: bool,
     }
-}
+    impl Visitor for References {
+        fn visit_expr(&mut self, _: &Expr) {}
 
-fn walk_proof_step(step: &ProofStep, targets: &mut Vec<String>) {
-    match &step.kind {
-        ProofStepKind::Tactic(t) => walk_tactic(t, targets),
-        ProofStepKind::Have { justification, .. }
-        | ProofStepKind::Show { justification, .. }
-        | ProofStepKind::Suffices { justification, .. } => {
-            walk_tactic(justification, targets);
-        }
-        ProofStepKind::Cases { cases, .. } => {
-            for case in cases.iter() {
-                for sub in case.proof.iter() {
-                    walk_proof_step(sub, targets);
+        fn visit_tactic_expr(&mut self, tactic: &TacticExpr) {
+            match tactic {
+                TacticExpr::Apply { lemma, args } => {
+                    let callee = match &lemma.kind {
+                        ExprKind::Call { func, .. } if args.is_empty() => func.as_ref(),
+                        _ => lemma.as_ref(),
+                    };
+                    self.names.extend(expr_as_path_name(callee));
                 }
+                TacticExpr::Simp { lemmas, .. } if self.include_simp => {
+                    self.names.extend(lemmas.iter().filter_map(expr_as_path_name));
+                }
+                _ => {}
             }
+            walk_tactic_expr(self, tactic);
         }
-        ProofStepKind::Focus { steps, .. } => {
-            for sub in steps.iter() {
-                walk_proof_step(sub, targets);
-            }
-        }
-        ProofStepKind::Calc(chain) => {
-            for cstep in chain.steps.iter() {
-                walk_tactic(&cstep.justification, targets);
-            }
-        }
-        ProofStepKind::Let { .. } | ProofStepKind::Obtain { .. } => {}
     }
-}
-
-fn walk_tactic(tactic: &TacticExpr, targets: &mut Vec<String>) {
-    match tactic {
-        TacticExpr::Apply { lemma, args } => {
-            // Two parser shapes (matches bridge_discharge_check):
-            //  * Apply{lemma:Call{func, args:[..]}, args:[]}
-            //  * Apply{lemma:Path, args:[..]}
-            let effective_lemma: &Expr = match &lemma.kind {
-                ExprKind::Call { func, .. } if args.is_empty() => func.as_ref(),
-                _ => lemma,
-            };
-            if let Some(name) = expr_as_path_name(effective_lemma) {
-                targets.push(name);
-            }
-        }
-        TacticExpr::Try(inner)
-        | TacticExpr::Repeat(inner)
-        | TacticExpr::AllGoals(inner)
-        | TacticExpr::Focus(inner) => walk_tactic(inner, targets),
-        TacticExpr::TryElse { body, fallback } => {
-            walk_tactic(body, targets);
-            walk_tactic(fallback, targets);
-        }
-        TacticExpr::Seq(tacs) | TacticExpr::Alt(tacs) => {
-            for t in tacs.iter() {
-                walk_tactic(t, targets);
-            }
-        }
-        // Other tactic forms don't carry an `apply lemma` payload.
-        _ => {}
-    }
+    let mut refs = References { names: Vec::new(), include_simp };
+    refs.visit_proof_body(body);
+    refs.names
 }
 
 /// Built-in tactic name set. Source like `apply trivial;` parses

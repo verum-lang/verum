@@ -4219,72 +4219,27 @@ impl ProofSearchEngine {
         lemmas: &List<Text>,
         goal: &ProofGoal,
     ) -> Result<List<ProofGoal>, ProofError> {
-        // Apply simplification using specific lemmas
-        let mut simplified_goal = goal.clone();
-
-        for lemma_name in lemmas {
-            // Try to apply each lemma for simplification
-            if let Maybe::Some(lemma_hint) = self.hints.lookup_lemma_by_name(lemma_name) {
-                // Try to simplify using this lemma
-                let simplified =
-                    Self::try_simplify_with_lemma(&simplified_goal.goal, &lemma_hint.lemma);
-                if let Maybe::Some(new_goal) = simplified {
-                    simplified_goal.goal = new_goal;
+        let mut result = List::new();
+        let mut simplified = goal.clone();
+        for name in lemmas {
+            let hint = self.lookup_lemma(name)?;
+            let (premises, conclusion) = Self::extract_lemma_structure(&hint.lemma);
+            let ExprKind::Binary { op: BinOp::Eq, left, right } = &conclusion.kind else {
+                continue;
+            };
+            if let Maybe::Some(rewritten) = Self::try_rewrite_once(&simplified.goal, left, right) {
+                // The current rewriter matches the stated expressions rigidly.
+                // Every used equality must hold in the original proof context.
+                for premise in premises {
+                    result.push(ProofGoal::with_hypotheses(premise, goal.hypotheses.clone()));
                 }
+                simplified.goal = rewritten;
             }
         }
-
-        // Check if we made progress or goal is trivial
-        if Self::is_trivial(&simplified_goal.goal) {
-            Ok(List::new())
-        } else {
-            let mut result = List::new();
-            result.push(simplified_goal);
-            Ok(result)
+        if !Self::is_trivial(&simplified.goal) {
+            result.push(simplified);
         }
-    }
-
-    /// Try to simplify using a specific lemma
-    fn try_simplify_with_lemma(goal: &Expr, lemma: &Expr) -> Maybe<Expr> {
-        // Extract conclusion from lemma (handle premises => conclusion)
-        let (_, conclusion) = Self::extract_lemma_structure_expr(lemma);
-
-        // Check if lemma conclusion is an equality we can use for rewriting
-        if let ExprKind::Binary {
-            op: BinOp::Eq,
-            left,
-            right,
-        } = &conclusion.kind
-        {
-            // Try rewriting left -> right
-            if let Maybe::Some(result) = Self::try_rewrite_once(goal, left, right) {
-                return Maybe::Some(result);
-            }
-        }
-
-        Maybe::None
-    }
-
-    /// Extract lemma structure (static version for library use)
-    fn extract_lemma_structure_expr(lemma: &Expr) -> (List<Expr>, Expr) {
-        let mut premises = List::new();
-        let mut current = lemma;
-
-        loop {
-            match &current.kind {
-                ExprKind::Binary {
-                    op: BinOp::Imply,
-                    left,
-                    right,
-                } => {
-                    premises.push((**left).clone());
-                    current = right;
-                }
-                _ => break,
-            }
-        }
-
-        (premises, current.clone())
+        Ok(result)
     }
 
     /// Try to rewrite once (single step)

@@ -65,7 +65,8 @@ use verum_common::Text;
 /// Revision 3 binds theorem verification to the module's executable helper
 /// bodies and checks total signed-word counterexamples.
 /// Revision 4 publishes only discharged local theorem hints.
-const VERDICT_SCHEMA_REV: u32 = 4;
+/// Revision 5 checks conditional simplification premises and resolves named rules.
+const VERDICT_SCHEMA_REV: u32 = 5;
 
 /// The version string stamped into every cache fingerprint: the
 /// kernel's `VVA_VERSION` (any kernel-rule edit changes the trust

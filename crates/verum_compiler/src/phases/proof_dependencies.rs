@@ -22,7 +22,7 @@ pub(crate) fn ordered<'a>(module: &'a Module, target: Option<&str>) -> Vec<&'a I
     let mut users = vec![Vec::new(); items.len()];
     for (i, item) in items.iter().enumerate() {
         if let Some(body) = item.kind.as_theorem_decl().and_then(|t| t.proof.as_ref()) {
-            for name in verum_kernel::soundness::apply_graph::source_apply_names(body) {
+            for name in verum_kernel::soundness::apply_graph::source_lemma_names(body) {
                 if let Some(&j) = names.get(name.as_str())
                     && dependencies[i].insert(j)
                 {
