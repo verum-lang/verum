@@ -1,0 +1,41 @@
+// Maps compose in path order. Points have source t. Only the diagonal
+// evaluation law and representation of arrows A -> Y are needed.
+public theorem lawvere_point_surjection(
+    obj: Type, hom: fn(obj,obj) -> Type,
+    comp: fn<i: meta obj, j: meta obj, k: meta obj>(hom(i,j),hom(j,k)) -> hom(i,k),
+    t: obj, a: obj, p: obj, y: obj, diag: hom(a,p), eval: hom(p,y), step: hom(y,y),
+    pair: fn(hom(t,a),hom(t,a)) -> hom(t,p)
+)
+    requires forall i: obj. forall j: obj. forall k: obj. forall l: obj.
+        forall f: hom(i,j). forall g: hom(j,k). forall h: hom(k,l).
+        comp(i,k,l,comp(i,j,k,f,g),h) == comp(i,j,l,f,comp(j,k,l,g,h))
+    requires forall x: hom(t,a). comp(t,a,p,x,diag) == pair(x,x)
+    requires forall g: hom(a,y). forall r: Type.
+        (forall point: hom(t,a). (forall x: hom(t,a).
+            comp(t,p,y,pair(point,x),eval) == comp(t,a,y,x,g)) implies r) implies r
+    : forall r: Type. forall use_witness: fn<b: meta hom(t,y)>(
+        Path<hom(t,y)>(comp(t,y,y,b,step),b)) -> r. r
+proof {
+    have assoc: forall i: obj. forall j: obj. forall k: obj. forall l: obj.
+        forall f: hom(i,j). forall g: hom(j,k). forall h: hom(k,l).
+        comp(i,k,l,comp(i,j,k,f,g),h) == comp(i,j,l,f,comp(j,k,l,g,h)) by assumption;
+    have diagonal: forall x: hom(t,a). comp(t,a,p,x,diag) == pair(x,x) by assumption;
+    have cover: forall g: hom(a,y). forall r: Type.
+        (forall point: hom(t,a). (forall x: hom(t,a).
+            comp(t,p,y,pair(point,x),eval) == comp(t,a,y,x,g)) implies r) implies r by assumption;
+    have diagonal_at: forall x: hom(t,a).
+        comp(t,y,y,comp(t,p,y,pair(x,x),eval),step)
+        == comp(t,a,y,x,comp(a,p,y,diag,comp(p,y,y,eval,step)))
+        by intro(x), rewrite assoc(t,p,y,y,pair(x,x),eval,step), rewrite < diagonal(x),
+           exact(assoc(t,a,p,y,x,diag,comp(p,y,y,eval,step)));
+    have meet: forall v: hom(t,y). forall w: hom(t,y). forall z: hom(t,y).
+        (v == z) implies ((w == z) implies (v == w))
+        by intro(v,w,z,hv,hw), rewrite hv, rewrite hw, reflexivity;
+    intro(r,use_witness);
+    have choose: forall point: hom(t,a). (forall x: hom(t,a).
+        comp(t,p,y,pair(point,x),eval) == comp(t,a,y,x,comp(a,p,y,diag,comp(p,y,y,eval,step)))) implies r
+        by intro(point,agrees), exact(use_witness(comp(t,p,y,pair(point,point),eval),
+            meet(comp(t,y,y,comp(t,p,y,pair(point,point),eval),step),comp(t,p,y,pair(point,point),eval),
+                comp(t,a,y,point,comp(a,p,y,diag,comp(p,y,y,eval,step))),diagonal_at(point),agrees(point))));
+    exact(cover(comp(a,p,y,diag,comp(p,y,y,eval,step)),r,choose));
+}

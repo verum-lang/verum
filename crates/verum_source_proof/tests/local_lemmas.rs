@@ -168,3 +168,18 @@ fn grouped_local_justifications_preserve_their_own_sequence() {
         assert_eq!(result.status, "verified", "{:?}", result.diagnostic);
     }
 }
+
+#[test]
+fn lawvere_fixed_point_uses_the_representation_at_its_own_point() {
+    let source = include_str!("fixtures/lawvere_point_surjection.vr");
+    let name = "lawvere_point_surjection";
+    let report = check(source, name);
+    assert_eq!(report.status, "verified", "{:?}", report.diagnostic);
+    for changed in [
+        source.replace("diagonal_at(point),agrees(point)", "agrees(point),diagonal_at(point)"),
+        source.replace("rewrite < diagonal(x)", "rewrite diagonal(x)"),
+        source.replace("exact(cover(comp(a,p,y,diag,comp(p,y,y,eval,step))", "exact(cover(comp(a,p,y,diag,eval)"),
+    ] {
+        assert_eq!(check(&changed, name).status, "rejected");
+    }
+}
