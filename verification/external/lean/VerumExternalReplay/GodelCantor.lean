@@ -11,7 +11,13 @@ def triangle : Nat → Nat
 theorem twice_triangle (n : Nat) : 2 * triangle n = n * (n + 1) := by
   induction n with
   | zero => rfl
-  | succ n ih => simp only [triangle]; grind
+  | succ n ih =>
+    calc
+      2 * triangle (n+1) = 2 * triangle n + (2*n + 2) := by
+        simp [triangle, Nat.mul_add, Nat.add_assoc]
+      _ = (n+1)*(n+1+1) := by
+        rw [ih, Nat.succ_mul n (n+1+1), Nat.mul_succ n (n+1)]
+        omega
 
 theorem triangle_formula (n : Nat) : triangle n = n * (n + 1) / 2 := by
   rw [← twice_triangle]; omega
