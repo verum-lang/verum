@@ -50,6 +50,20 @@ fn reject(source: &str) {
     assert!(!errors.is_empty(), "unproved contract accepted: {source}");
 }
 
+#[test]
+fn inherited_bounds_belong_to_the_declared_sum_even_with_identical_shapes() {
+    let base = "type Root is protocol { fn read(&self) -> Int; };
+        type Child is protocol extends Root {};
+        type One<T> is Missing | Value(T);
+        type Other<T> is Missing | Value(T);
+        implement<T> Root for Other<T> { fn read(&self) -> Int { 2 } }";
+    let own = "implement<T> Root for One<T> { fn read(&self) -> Int { 1 } }";
+    let child = "implement<T> Child for One<T> {}";
+    accept(&format!("{base} {own} {child}"));
+    let missing = errors(&format!("{base} {child}"));
+    assert!(missing.iter().any(|error| error.contains("Root")), "{missing:?}");
+}
+
 fn heads(extra: &str, first: &str, second: Option<(&str, &str)>, query: &str) -> Text {
     let second = second
         .map(|(head, item)| format!("implement Stream for Cell<{head}>{{type Item={item};}}"))

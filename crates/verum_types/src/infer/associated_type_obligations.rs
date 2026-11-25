@@ -157,7 +157,9 @@ impl TypeChecker {
         let previous_self = self.current_self_type.clone();
         let result = (|| {
             let (assumptions, callables) = self.enter_source_impl_conditions(declaration, &frame)?;
-            let self_type = self.ast_to_type(for_type)?;
+            // Superprotocol and associated obligations belong to the implementation
+            // receiver. A sum's payload layout cannot identify that declaration.
+            let self_type = self.declared_type(for_type)?;
             self.set_current_self_type(Some(self_type.clone()));
             let arguments = match source_parameters.as_deref() {
                 Some(parameters) => {
