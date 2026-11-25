@@ -589,8 +589,9 @@ pub fn register_kernel_bridge_dispatchers(ctx: &mut ElabContext) {
 pub fn close_over_axioms(ctx: &ElabContext, body: Term, body_type: Term) -> (Term, Term) {
     let mut term = body;
     let mut ty = body_type;
-    // Wrap from innermost (last axiom) outwards.
-    for entry in ctx.global_axioms.values().rev() {
+    // Lookup assigns slot zero to the first entry. Install that binder
+    // innermost; each subsequent wrapper encloses the preceding ones.
+    for entry in ctx.global_axioms.values() {
         // Λ over the axiom-witness binder.
         term = Term::Lam(Box::new(entry.claimed_type.clone()), Box::new(term));
         // Π over the axiom-type in the claimed_type.

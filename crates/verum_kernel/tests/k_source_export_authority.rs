@@ -89,6 +89,69 @@ fn native_identity_source_is_checked_and_unequal_endpoints_are_rejected() {
     }
 }
 
+fn closed_reference_judgments() -> Vec<(verum_proof::admission::Judgment, bool)> {
+    use verum_proof::admission::{Judgment, PROFILE};
+    use verum_kernel::proof_checker::Certificate;
+    use verum_kernel::tactic_elaborator::{close_over_axioms, resolve_apply_target};
+    let mut ctx = ElabContext::new();
+    let base = Term::universe(0);
+    let identity = Term::pi(base.clone(), base.clone());
+    ctx.register_axiom("z_function", identity.clone());
+    ctx.register_axiom("a_type", base.clone());
+    let mut cases = Vec::new();
+    for (name, domain, other) in [
+        ("z_function", &identity, &base),
+        ("a_type", &base, &identity),
+    ] {
+        let reference = resolve_apply_target(&ctx, name).unwrap();
+        assert_eq!(ctx.synthesize_type(&reference).as_ref(), Some(domain));
+        for (ty, accepted) in [(domain, true), (other, false)] {
+            let (term, claimed_type) = close_over_axioms(&ctx, reference.clone(), ty.clone());
+            let statement = Term::pi(identity.clone(), Term::pi(base.clone(), ty.clone()));
+            assert_eq!(claimed_type, statement, "{name} : {ty:?}");
+            cases.push((Judgment {
+                profile: PROFILE.to_owned(),
+                statement,
+                certificate: Certificate { term, claimed_type, metadata: Default::default() },
+            }, accepted));
+        }
+    }
+    cases
+}
+
+#[test]
+fn closing_the_context_preserves_the_type_of_each_named_reference() {
+    for (judgment, accepted) in closed_reference_judgments() {
+        let cert = &judgment.certificate;
+        assert_eq!(cert.verify().is_ok(), accepted, "{judgment:?}");
+        assert_eq!(verum_kernel::proof_checker_nbe::verify_certificate(cert).is_ok(), accepted);
+    }
+}
+
+#[test]
+#[ignore = "requires an installed Lean kernel"]
+fn lean_checks_closed_named_references_against_independent_statements() {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    let lean = std::env::var_os("VERUM_LEAN").unwrap_or_else(|| "lean".into());
+    for (judgment, accepted) in closed_reference_judgments() {
+        let bytes = serde_json::to_vec(&judgment).unwrap();
+        let source = verum_proof::lean_export::source(&bytes).unwrap();
+        let mut child = Command::new(&lean).arg("--stdin")
+            .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped())
+            .spawn().expect("start independent Lean kernel");
+        child.stdin.take().unwrap().write_all(source.as_bytes()).unwrap();
+        let output = child.wait_with_output().unwrap();
+        let log = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(output.status.success(), accepted, "{log}\n{}", String::from_utf8_lossy(&output.stderr));
+        if accepted {
+            assert!(log.contains("does not depend on any axioms"), "{log}");
+        } else {
+            assert!(log.contains("Type mismatch") || log.contains("type mismatch"), "{log}");
+        }
+    }
+}
+
 #[test]
 fn generic_and_value_parameter_types_cannot_be_replaced_by_a_universe() {
     use verum_ast::decl::{FunctionParam, FunctionParamKind};
