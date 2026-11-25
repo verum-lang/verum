@@ -443,12 +443,6 @@ impl<'s> VerifyCommand<'s> {
         let record_fields =
             crate::phases::proof_verification::build_record_field_alias_map(module);
 
-        // Pre-populate a hints database with every sibling theorem / lemma /
-        // corollary / axiom in this module so `apply <name>` can find them.
-        // Cloned per theorem below — cheap because `LemmaHint` is small.
-        let mut module_hints = verum_smt::proof_search::HintsDatabase::new();
-        crate::phases::proof_verification::register_module_lemmas(module, &mut module_hints);
-
         // Pre-build a refinement-reflection registry so `proof by auto`
         // / `by smt` can unfold calls to user-defined pure functions.
         // Without this, a theorem like
@@ -657,15 +651,16 @@ impl<'s> VerifyCommand<'s> {
         // `divide requires b != 0` reported Proved (T0657).
         let contract_table = verum_verification::VCGenerator::build_module_contract_table(module);
 
-        for item in &module.items {
+        use crate::phases::proof_dependencies;
+        let ordered = proof_dependencies::ordered(module, filter);
+        let variants = variant_registry.iter().cloned().collect();
+        let mut module_hints = verum_smt::proof_search::HintsDatabase::new();
+        proof_dependencies::seed_assumptions(&mut module_hints, &ordered, &alias_map, &variants);
+        let functions = module.items.iter().filter(|item|
+            matches!(&item.kind, ItemKind::Function(f) if filter.is_none_or(|name| name == f.name.as_str()))
+        );
+        for item in functions.chain(ordered) {
             if let ItemKind::Function(func) = &item.kind {
-                // Skip if filter doesn't match
-                if let Some(name) = filter {
-                    if func.name.as_str() != name {
-                        continue;
-                    }
-                }
-
                 debug!("Verifying function: {}", func.name);
 
                 // Check budget before starting
@@ -773,11 +768,9 @@ impl<'s> VerifyCommand<'s> {
             // Verify theorems, lemmas, and corollaries
             let (thm, kind_name) = match &item.kind {
                 ItemKind::Axiom(axiom) => {
-                    if filter.is_none_or(|name| name == axiom.name.as_str()) {
-                        report.add_result(format!("axiom {}", axiom.name).into(), VerificationResult::Theorem {
-                            evidence: ProofEvidence::Assumed, elapsed: Duration::ZERO,
-                        });
-                    }
+                    report.add_result(format!("axiom {}", axiom.name).into(), VerificationResult::Theorem {
+                        evidence: ProofEvidence::Assumed, elapsed: Duration::ZERO,
+                    });
                     continue;
                 }
                 ItemKind::Theorem(t) => (t, "theorem"),
@@ -785,13 +778,6 @@ impl<'s> VerifyCommand<'s> {
                 ItemKind::Corollary(t) => (t, "corollary"),
                 _ => continue,
             };
-
-            // Skip if filter doesn't match
-            if let Some(name) = filter {
-                if thm.name.as_str() != name {
-                    continue;
-                }
-            }
 
             debug!(
                 "Verifying {} '{}' ({} requires, {} ensures)",
@@ -825,6 +811,16 @@ impl<'s> VerifyCommand<'s> {
                 &reflection_env.positional,
             );
 
+            if matches!(
+                &result,
+                VerificationResult::Theorem {
+                    evidence: ProofEvidence::TacticDischarge,
+                    ..
+                }
+            ) {
+                proof_dependencies::insert_theorem(&mut module_hints, thm, &alias_map, &variants);
+            }
+
             // Note: Profiler is not used for theorem verification (different result type)
 
             // Track time spent
@@ -845,6 +841,11 @@ impl<'s> VerifyCommand<'s> {
             report.add_result(format!("{} {}", kind_name, thm.name).to_text(), result);
         }
 
+        if let Some(name) = filter
+            && report.results.is_empty()
+        {
+            anyhow::bail!("Unknown verification target `{name}`");
+        }
         Ok(report)
     }
 

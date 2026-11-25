@@ -229,3 +229,68 @@ fn command_reports_the_evidence_of_each_real_source_declaration() {
             .contains("without a completed proof")
     );
 }
+
+#[test]
+fn applying_a_sibling_requires_its_checked_body_and_its_premises() {
+    use verum_compiler::verify_cmd::VerifyCommand;
+    use verum_compiler::{CompilerOptions, Session};
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("siblings.vr");
+    std::fs::write(
+        &input,
+        "@no_implicit_prelude module test.siblings;
+        theorem circle(): false proof by apply circle;
+        theorem left(): false proof by apply right;
+        theorem right(): false proof by apply left;
+        theorem use_admitted(): false proof by apply unfinished;
+        theorem unfinished(): false proof by admit;
+        theorem use_failed(): false proof by apply failed;
+        theorem failed(): false proof by trivial;
+        theorem use_front(b:Bool) requires b : b proof by apply grounded(b);
+        theorem leak(b:Bool): b proof by apply grounded(b);
+        theorem grounded(b:Bool) requires b : b proof by assumption;
+        fn ordinary(n:Int)->Int { n }",
+    )
+    .unwrap();
+    let mut session = Session::new(CompilerOptions {
+        input,
+        ..Default::default()
+    });
+    let mut cmd = VerifyCommand::new(&mut session);
+    let all = cmd.run_to_report(None).unwrap().to_json();
+    let status = |name: &str| {
+        all.results
+            .iter()
+            .find(|s| s.function == name)
+            .unwrap()
+            .status
+            .as_str()
+    };
+    for symbol in [
+        "circle",
+        "left",
+        "right",
+        "use_admitted",
+        "use_failed",
+        "failed",
+        "leak",
+    ] {
+        assert_eq!(status(&format!("theorem {symbol}")), "failed", "{symbol}");
+    }
+    assert_eq!(status("theorem unfinished"), "admitted");
+    assert_eq!(status("theorem grounded"), "tactic_checked");
+    assert_eq!(status("theorem use_front"), "tactic_checked");
+    assert_eq!(status("ordinary"), "no_obligations");
+    let filtered = cmd.run_to_report(Some("use_front")).unwrap().to_json();
+    assert_eq!(filtered.tactic_checked, 2);
+    assert_eq!(filtered.total_functions, 2);
+    assert_eq!(cmd.run_to_report(Some("left")).unwrap().to_json().failed, 2);
+    assert_eq!(
+        cmd.run_to_report(Some("ordinary"))
+            .unwrap()
+            .to_json()
+            .no_obligations,
+        1
+    );
+    assert!(cmd.run_to_report(Some("absent")).is_err());
+}

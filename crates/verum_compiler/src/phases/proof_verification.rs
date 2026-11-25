@@ -1512,6 +1512,205 @@ pub fn verify_proof_body_with_aliases_and_graph(
     // Explicit SepAssertion entailment belongs to the SMT API; this entry
     // verifies the actual proposition using the supplied proof body.
 
+    let primary_goal = source_theorem_goal(theorem, alias_map, engine.variant_map());
+    let proposition = &primary_goal.goal;
+    let hypotheses = &primary_goal.hypotheses;
+
+    let result = match proof_body {
+        // ----------------------------------------------------------------
+        // Term proof (Curry-Howard)
+        // ----------------------------------------------------------------
+        ProofBody::Term(proof_term) => {
+            let step_start = Instant::now();
+
+            // The supplied term must justify this exact goal. A different
+            // automatically found proof cannot stand in for invalid evidence.
+            let result = engine.execute_tactic(&ProofTactic::Exact {
+                term: format_expr(proof_term),
+            }, &primary_goal).map_err(ProofVerificationError::from).and_then(|sub_goals| {
+                discharge_subgoals(engine, smt_ctx, &sub_goals, "proof term")
+            });
+
+            match result {
+                Ok(()) => {
+                    let mut steps = List::new();
+                    steps.push(VerifiedStep {
+                        description: Text::from(format!("proof term: {}", format_expr(proof_term))),
+                        tactic_used: Text::from("exact"),
+                        duration: step_start.elapsed(),
+                    });
+                    ProofVerificationResult::Verified(ProofSummary {
+                        theorem_name,
+                        steps,
+                        total_duration: proof_start.elapsed(),
+                        goal: primary_goal.clone(),
+                        evidence: ProofEvidence::TacticDischarge,
+                    })
+                }
+                Err(e) => {
+                    let mut unproved = List::new();
+                    let mut suggestions =
+                        heuristic_suggestions(proposition, hypotheses, Maybe::None);
+                    suggestions.extend(build_suggestions_from_pv_error(&e));
+                    unproved.push(UnprovedSubgoal {
+                        goal: format_expr(proposition),
+                        hypotheses: hypotheses.iter().map(|h| format_expr(h)).collect(),
+                        suggestions,
+                    });
+                    ProofVerificationResult::Failed {
+                        verified_steps: List::new(),
+                        unproved,
+                    }
+                }
+            }
+        }
+
+        // ----------------------------------------------------------------
+        // Single tactic proof
+        // ----------------------------------------------------------------
+        ProofBody::Tactic(tactic_expr) => {
+            let step_start = Instant::now();
+            let tactic = convert_tactic(tactic_expr);
+
+            let result = engine
+                .execute_tactic(&tactic, &primary_goal)
+                .map_err(ProofVerificationError::from)
+                .and_then(|sub_goals| {
+                    discharge_subgoals(engine, smt_ctx, &sub_goals, "tactic proof")?;
+                    Ok(())
+                });
+
+            match result {
+                Ok(()) => {
+                    // Recursive: `try admit` / `first [admit, …]` are
+                    // admitted proofs too, not just a bare top-level
+                    // `admit`/`sorry`.
+                    let has_incomplete = tactic_expr.contains_unsafe();
+                    let mut steps = List::new();
+                    steps.push(VerifiedStep {
+                        description: Text::from(format!("tactic: {:?}", tactic_expr)),
+                        tactic_used: format!("{:?}", tactic_expr).into(),
+                        duration: step_start.elapsed(),
+                    });
+                    ProofVerificationResult::Verified(ProofSummary {
+                        theorem_name,
+                        steps,
+                        total_duration: proof_start.elapsed(),
+                        goal: primary_goal.clone(),
+                evidence: if has_incomplete {
+                    ProofEvidence::Admitted
+                } else {
+                    ProofEvidence::TacticDischarge
+                },
+                    })
+                }
+                Err(e) => {
+                    let mut unproved = List::new();
+                    // What happened first, guesses after — the report
+                    // shows the leading suggestion.
+                    let mut suggestions = build_suggestions_from_pv_error(&e);
+                    suggestions.extend(heuristic_suggestions(
+                        proposition,
+                        hypotheses,
+                        pv_error_tactic_name(&e),
+                    ));
+                    unproved.push(UnprovedSubgoal {
+                        goal: format_expr(proposition),
+                        hypotheses: hypotheses.iter().map(|h| format_expr(h)).collect(),
+                        suggestions,
+                    });
+                    ProofVerificationResult::Failed {
+                        verified_steps: List::new(),
+                        unproved,
+                    }
+                }
+            }
+        }
+
+        // ----------------------------------------------------------------
+        // Structured proof
+        // ----------------------------------------------------------------
+        ProofBody::Structured(structure) => verify_structured_proof(
+            engine,
+            smt_ctx,
+            structure,
+            &primary_goal,
+            &theorem_name,
+            proof_start,
+        ),
+
+        // ----------------------------------------------------------------
+        // Proof by method (induction / cases / contradiction)
+        // ----------------------------------------------------------------
+        ProofBody::ByMethod(method) => {
+            match verify_proof_method(engine, smt_ctx, method, &primary_goal) {
+                Ok(steps) => {
+                    // AST-level authority: the previous detector
+                    // string-matched lowercase "admit" against a Debug
+                    // render that produces "Admit" and never fired.
+                    let has_incomplete = method.contains_unsafe();
+                    ProofVerificationResult::Verified(ProofSummary {
+                        theorem_name,
+                        steps,
+                        total_duration: proof_start.elapsed(),
+                        goal: primary_goal.clone(),
+                evidence: if has_incomplete {
+                    ProofEvidence::Admitted
+                } else {
+                    ProofEvidence::TacticDischarge
+                },
+                    })
+                }
+                Err(e) => {
+                    let mut unproved = List::new();
+                    // What happened first, guesses after — the report
+                    // shows the leading suggestion.
+                    let mut suggestions = build_suggestions_from_pv_error(&e);
+                    suggestions.extend(heuristic_suggestions(
+                        proposition,
+                        hypotheses,
+                        pv_error_tactic_name(&e),
+                    ));
+                    unproved.push(UnprovedSubgoal {
+                        goal: format_expr(proposition),
+                        hypotheses: hypotheses.iter().map(|h| format_expr(h)).collect(),
+                        suggestions,
+                    });
+                    ProofVerificationResult::Failed {
+                        verified_steps: List::new(),
+                        unproved,
+                    }
+                }
+            }
+        }
+    };
+    // An explicit admission stays an admission even if the proposition is
+    // false. Only a potential discharge needs a source-semantics check.
+    if matches!(&result, ProofVerificationResult::Verified(summary) if summary.evidence != ProofEvidence::TacticDischarge)
+    {
+        return result;
+    }
+    if let Some(reason) = verum_smt::source_words::refute(smt_ctx, theorem, proposition, module) {
+        return ProofVerificationResult::Failed {
+            verified_steps: List::new(),
+            unproved: [UnprovedSubgoal {
+                goal: reason.into(),
+                hypotheses: hypotheses.iter().map(format_expr).collect(),
+                suggestions: List::new(),
+            }]
+            .into_iter()
+            .collect(),
+        };
+    }
+
+    result
+}
+
+/// The proposition available to a proof and the hypotheses required to use it.
+pub(crate) fn source_theorem_goal(
+    theorem: &TheoremDecl, alias_map: &std::collections::HashMap<Text, Vec<Expr>>,
+    variants: &std::collections::HashMap<Text, Vec<Text>>,
+) -> ProofGoal {
     // Build the primary goal from the theorem's proposition and requires clauses.
     //
 
@@ -1605,200 +1804,12 @@ pub fn verify_proof_body_with_aliases_and_graph(
     // complete ADT semantics Z3 needs for variant-indexed
     // reasoning. The registry lives on the engine — populated by
     // `verify_cmd::verify_module` from the module's `TypeDecl`s.
-    for hyp in variant_exhaustiveness_hypotheses(theorem, engine.variant_map()) {
+    for hyp in variant_exhaustiveness_hypotheses(theorem, variants) {
         hypotheses.push(hyp);
     }
 
-    let primary_goal = ProofGoal::with_hypotheses(proposition.clone(), hypotheses.clone());
+    ProofGoal::with_hypotheses(proposition, hypotheses)
 
-    let result = match proof_body {
-        // ----------------------------------------------------------------
-        // Term proof (Curry-Howard)
-        // ----------------------------------------------------------------
-        ProofBody::Term(proof_term) => {
-            let step_start = Instant::now();
-
-            // The supplied term must justify this exact goal. A different
-            // automatically found proof cannot stand in for invalid evidence.
-            let result = engine.execute_tactic(&ProofTactic::Exact {
-                term: format_expr(proof_term),
-            }, &primary_goal).map_err(ProofVerificationError::from).and_then(|sub_goals| {
-                discharge_subgoals(engine, smt_ctx, &sub_goals, "proof term")
-            });
-
-            match result {
-                Ok(()) => {
-                    let mut steps = List::new();
-                    steps.push(VerifiedStep {
-                        description: Text::from(format!("proof term: {}", format_expr(proof_term))),
-                        tactic_used: Text::from("exact"),
-                        duration: step_start.elapsed(),
-                    });
-                    ProofVerificationResult::Verified(ProofSummary {
-                        theorem_name,
-                        steps,
-                        total_duration: proof_start.elapsed(),
-                        goal: primary_goal.clone(),
-                        evidence: ProofEvidence::TacticDischarge,
-                    })
-                }
-                Err(e) => {
-                    let mut unproved = List::new();
-                    let mut suggestions =
-                        heuristic_suggestions(&proposition, &hypotheses, Maybe::None);
-                    suggestions.extend(build_suggestions_from_pv_error(&e));
-                    unproved.push(UnprovedSubgoal {
-                        goal: format_expr(&proposition),
-                        hypotheses: hypotheses.iter().map(|h| format_expr(h)).collect(),
-                        suggestions,
-                    });
-                    ProofVerificationResult::Failed {
-                        verified_steps: List::new(),
-                        unproved,
-                    }
-                }
-            }
-        }
-
-        // ----------------------------------------------------------------
-        // Single tactic proof
-        // ----------------------------------------------------------------
-        ProofBody::Tactic(tactic_expr) => {
-            let step_start = Instant::now();
-            let tactic = convert_tactic(tactic_expr);
-
-            let result = engine
-                .execute_tactic(&tactic, &primary_goal)
-                .map_err(ProofVerificationError::from)
-                .and_then(|sub_goals| {
-                    discharge_subgoals(engine, smt_ctx, &sub_goals, "tactic proof")?;
-                    Ok(())
-                });
-
-            match result {
-                Ok(()) => {
-                    // Recursive: `try admit` / `first [admit, …]` are
-                    // admitted proofs too, not just a bare top-level
-                    // `admit`/`sorry`.
-                    let has_incomplete = tactic_expr.contains_unsafe();
-                    let mut steps = List::new();
-                    steps.push(VerifiedStep {
-                        description: Text::from(format!("tactic: {:?}", tactic_expr)),
-                        tactic_used: format!("{:?}", tactic_expr).into(),
-                        duration: step_start.elapsed(),
-                    });
-                    ProofVerificationResult::Verified(ProofSummary {
-                        theorem_name,
-                        steps,
-                        total_duration: proof_start.elapsed(),
-                        goal: primary_goal.clone(),
-                evidence: if has_incomplete {
-                    ProofEvidence::Admitted
-                } else {
-                    ProofEvidence::TacticDischarge
-                },
-                    })
-                }
-                Err(e) => {
-                    let mut unproved = List::new();
-                    // What happened first, guesses after — the report
-                    // shows the leading suggestion.
-                    let mut suggestions = build_suggestions_from_pv_error(&e);
-                    suggestions.extend(heuristic_suggestions(
-                        &proposition,
-                        &hypotheses,
-                        pv_error_tactic_name(&e),
-                    ));
-                    unproved.push(UnprovedSubgoal {
-                        goal: format_expr(&proposition),
-                        hypotheses: hypotheses.iter().map(|h| format_expr(h)).collect(),
-                        suggestions,
-                    });
-                    ProofVerificationResult::Failed {
-                        verified_steps: List::new(),
-                        unproved,
-                    }
-                }
-            }
-        }
-
-        // ----------------------------------------------------------------
-        // Structured proof
-        // ----------------------------------------------------------------
-        ProofBody::Structured(structure) => verify_structured_proof(
-            engine,
-            smt_ctx,
-            structure,
-            &primary_goal,
-            &theorem_name,
-            proof_start,
-        ),
-
-        // ----------------------------------------------------------------
-        // Proof by method (induction / cases / contradiction)
-        // ----------------------------------------------------------------
-        ProofBody::ByMethod(method) => {
-            match verify_proof_method(engine, smt_ctx, method, &primary_goal) {
-                Ok(steps) => {
-                    // AST-level authority: the previous detector
-                    // string-matched lowercase "admit" against a Debug
-                    // render that produces "Admit" and never fired.
-                    let has_incomplete = method.contains_unsafe();
-                    ProofVerificationResult::Verified(ProofSummary {
-                        theorem_name,
-                        steps,
-                        total_duration: proof_start.elapsed(),
-                        goal: primary_goal.clone(),
-                evidence: if has_incomplete {
-                    ProofEvidence::Admitted
-                } else {
-                    ProofEvidence::TacticDischarge
-                },
-                    })
-                }
-                Err(e) => {
-                    let mut unproved = List::new();
-                    // What happened first, guesses after — the report
-                    // shows the leading suggestion.
-                    let mut suggestions = build_suggestions_from_pv_error(&e);
-                    suggestions.extend(heuristic_suggestions(
-                        &proposition,
-                        &hypotheses,
-                        pv_error_tactic_name(&e),
-                    ));
-                    unproved.push(UnprovedSubgoal {
-                        goal: format_expr(&proposition),
-                        hypotheses: hypotheses.iter().map(|h| format_expr(h)).collect(),
-                        suggestions,
-                    });
-                    ProofVerificationResult::Failed {
-                        verified_steps: List::new(),
-                        unproved,
-                    }
-                }
-            }
-        }
-    };
-    // An explicit admission stays an admission even if the proposition is
-    // false. Only a potential discharge needs a source-semantics check.
-    if matches!(&result, ProofVerificationResult::Verified(summary) if summary.evidence != ProofEvidence::TacticDischarge)
-    {
-        return result;
-    }
-    if let Some(reason) = verum_smt::source_words::refute(smt_ctx, theorem, &proposition, module) {
-        return ProofVerificationResult::Failed {
-            verified_steps: List::new(),
-            unproved: [UnprovedSubgoal {
-                goal: reason.into(),
-                hypotheses: hypotheses.iter().map(format_expr).collect(),
-                suggestions: List::new(),
-            }]
-            .into_iter()
-            .collect(),
-        };
-    }
-
-    result
 }
 
 /// Verify a structured proof with its sequence of steps and optional
@@ -2583,71 +2594,6 @@ pub fn variant_disjointness_axioms(module: &verum_ast::Module) -> Vec<Expr> {
 // ---------------------------------------------------------------------------
 // Module-scoped lemma / axiom registration
 // ---------------------------------------------------------------------------
-
-/// Walk all `theorem`, `lemma`, `corollary`, and `axiom` declarations in the
-/// module and register each as a `LemmaHint` in the `HintsDatabase` keyed by
-/// its unqualified name. This is what gives `apply <name>` in one theorem's
-/// proof body access to every sibling declaration in the same file.
-///
-/// The lemma expression is the theorem's `proposition`, which the parser
-/// already synthesises from the requires/ensures clauses as
-/// `(req_conj) ⇒ (ens_conj)`. `try_apply` then peels the implication chain
-/// into premises + conclusion and unifies the conclusion with the current
-/// goal, exactly the usual natural-deduction `apply` semantics.
-///
-/// Priority is fixed at a neutral mid-value so user declarations sit between
-/// core stdlib hints (highest) and speculative auto-hints (lowest). No
-/// heuristic ranking: the caller supplies the lemma name explicitly, so
-/// priority only matters when pattern-matching auto chooses among multiple
-/// candidates, not for direct-lookup apply.
-pub fn register_module_lemmas(
-    module: &verum_ast::Module,
-    hints: &mut verum_smt::proof_search::HintsDatabase,
-) {
-    use verum_ast::ItemKind;
-    use verum_smt::proof_search::LemmaHint;
-
-    let param_names = |params: &List<verum_ast::decl::FunctionParam>| -> List<Text> {
-        params
-            .iter()
-            .filter_map(|p| match &p.kind {
-                FunctionParamKind::Regular { pattern, .. } => match &pattern.kind {
-                    verum_ast::pattern::PatternKind::Ident { name, .. } => {
-                        Some(name.name.clone())
-                    }
-                    _ => None,
-                },
-                _ => None,
-            })
-            .collect()
-    };
-
-    for item in &module.items {
-        let (name, proposition, params) = match &item.kind {
-            ItemKind::Theorem(t) | ItemKind::Lemma(t) | ItemKind::Corollary(t) => (
-                t.name.name.clone(),
-                t.proposition.as_ref().clone(),
-                param_names(&t.params),
-            ),
-            ItemKind::Axiom(a) => (
-                a.name.name.clone(),
-                a.proposition.as_ref().clone(),
-                param_names(&a.params),
-            ),
-            _ => continue,
-        };
-
-        let hint = LemmaHint {
-            // Declaration-order parameter names: the authority for
-            // positional instantiation of `apply lemma(args…)`.
-            params,
-            name: name.clone(),
-            priority: 500,
-            lemma: Heap::new(proposition),
-        };
-        hints.register_lemma(name, hint);
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Alias-map construction (nominal refinement chain flattener)

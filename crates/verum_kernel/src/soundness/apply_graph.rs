@@ -636,6 +636,14 @@ pub fn build_apply_graph_from_modules(modules: &[&verum_ast::Module]) -> ApplyGr
 /// every theorem in the workspace populates each `SymbolEntry::Theorem`'s
 /// `apply_targets` list. Pure AST walk — no semantic resolution.
 pub fn extract_apply_targets(body: &ProofBody) -> Vec<String> {
+    let mut names = source_apply_names(body);
+    names.retain(|name| !is_builtin_tactic_name(name));
+    names
+}
+
+/// Explicit names as written, before resolving them against a declaration scope.
+/// A module can declare a lemma whose name is also a primitive tactic spelling.
+pub fn source_apply_names(body: &ProofBody) -> Vec<String> {
     let mut targets = Vec::new();
     walk_proof_body(body, &mut targets);
     targets
@@ -693,17 +701,7 @@ fn walk_tactic(tactic: &TacticExpr, targets: &mut Vec<String>) {
                 _ => lemma,
             };
             if let Some(name) = expr_as_path_name(effective_lemma) {
-                // Filter built-in tactic names: source like
-                // `apply trivial;` parses as
-                // `Apply { lemma: Path(trivial) }` — the walker
-                // would otherwise treat "trivial" as a theorem
-                // reference and the apply-graph would leak an
-                // unresolved leaf for what is in fact a primitive
-                // tactic invocation. These names are not theorems
-                // and never resolve in the symbol table.
-                if !is_builtin_tactic_name(&name) {
-                    targets.push(name);
-                }
+                targets.push(name);
             }
         }
         TacticExpr::Try(inner)

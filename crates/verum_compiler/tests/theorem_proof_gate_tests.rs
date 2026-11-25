@@ -392,3 +392,56 @@ fn cached_theorem_is_rechecked_when_a_helper_changes_at_the_same_span() {
         "{changed:?}"
     );
 }
+
+#[test]
+fn compilation_checks_sibling_proof_dependencies_on_cold_and_cached_runs() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("siblings.vr");
+    let cache = dir.path().join("closures");
+    let run = |decls: &str| {
+        std::fs::write(
+            &input,
+            format!("@no_implicit_prelude module test.siblings;\n{decls}"),
+        )
+        .unwrap();
+        let mut session = Session::new(CompilerOptions {
+            input: input.clone(),
+            verify_mode: VerifyMode::Proof,
+            closure_cache_enabled: true,
+            closure_cache_root: Some(cache.clone()),
+            ..Default::default()
+        });
+        let compiled = CompilationPipeline::new(&mut session)
+            .run_check_only()
+            .is_ok();
+        let failures = session
+            .diagnostics()
+            .iter()
+            .filter(|d| d.code() == Some("E0319"))
+            .count();
+        (compiled && !session.has_errors(), failures)
+    };
+    for (source, failures) in [
+        ("theorem circle(): false proof by apply circle;", 1),
+        (
+            "theorem left(): false proof by apply right; theorem right(): false proof by apply left;",
+            2,
+        ),
+        (
+            "theorem use_admitted(): false proof by apply unfinished; theorem unfinished(): false proof by admit;",
+            1,
+        ),
+        (
+            "theorem consumer(b:Bool): b proof by apply guarded(b); theorem guarded(b:Bool) requires b : b proof by assumption;",
+            1,
+        ),
+        (
+            "theorem consumer(b:Bool) requires b : b proof by apply guarded(b); theorem guarded(b:Bool) requires b : b proof by assumption;",
+            0,
+        ),
+    ] {
+        for _ in 0..2 {
+            assert_eq!(run(source), (failures == 0, failures), "{source}");
+        }
+    }
+}

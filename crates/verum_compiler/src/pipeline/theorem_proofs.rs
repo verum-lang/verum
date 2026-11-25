@@ -30,7 +30,7 @@ impl<'s> CompilationPipeline<'s> {
     /// the module.
     pub(super) fn verify_theorem_proofs(&self, module: &Module) -> Result<()> {
         use crate::phases::proof_verification::{
-            ProofVerificationResult, build_refinement_alias_map, register_module_lemmas,
+            ProofVerificationResult, build_refinement_alias_map,
             verify_proof_body_with_aliases_and_graph,
         };
         use verum_smt::proof_search::{HintsDatabase, ProofSearchEngine};
@@ -97,13 +97,12 @@ impl<'s> CompilationPipeline<'s> {
         let timeout_ms = self.session.options().smt_timeout_secs * 1000;
         let timeout = Duration::from_millis(timeout_ms);
 
-        // Seed the hints DB with stdlib core lemmas *and* every
-        // sibling theorem / axiom / lemma in this module, so
-        // `apply <name>` can dispatch to local declarations in the
-        // same file — the idiom used by the UHM bridge / corollary
-        // structure.
+        use crate::phases::proof_dependencies;
+        let ordered = proof_dependencies::ordered(module, None);
+        let variants = Default::default();
         let mut hints_db = HintsDatabase::with_core();
-        register_module_lemmas(module, &mut hints_db);
+        proof_dependencies::seed_assumptions(&mut hints_db, &ordered, &alias_map, &variants);
+        let mut hint_digest = blake3::Hasher::new();
         let mut proof_engine = ProofSearchEngine::with_hints(hints_db);
 
         // Refinement reflection: scan the module for pure,
@@ -194,7 +193,7 @@ impl<'s> CompilationPipeline<'s> {
             })
             .transpose()?;
 
-        for item in &module.items {
+        for item in ordered {
             let (thm, kind_name) = match &item.kind {
                 verum_ast::ItemKind::Theorem(t) => (t, "theorem"),
                 verum_ast::ItemKind::Lemma(t) => (t, "lemma"),
@@ -232,8 +231,9 @@ impl<'s> CompilationPipeline<'s> {
                 // The module digest also binds the theorem to the source definitions
                 // visible during local reflection and word verification.
                 let signature_payload = format!(
-                    "module={}|{}|requires={:?}|ensures={:?}|prop={:?}",
+                    "module={}|hints={}|{}|requires={:?}|ensures={:?}|prop={:?}",
                     module_digest,
+                    hint_digest.finalize(),
                     thm.name.name.as_str(),
                     thm.requires,
                     thm.ensures,
@@ -313,9 +313,11 @@ impl<'s> CompilationPipeline<'s> {
                 })
             });
 
+            let mut publish = false;
             match cache_outcome {
                 Some(outcome) => {
-                    use verum_verification::closure_cache::CachedCheckOutcome;
+                    use verum_verification::closure_cache::{CachedCheckOutcome, CachedVerdict};
+                    publish = matches!(outcome.verdict(), CachedVerdict::Ok { admitted: false, .. });
                     if let CachedCheckOutcome::Hit { cached, .. } = &outcome {
                         cache_hits += 1;
                         verified_count += 1; // Cached Ok counts as verified.
@@ -348,6 +350,7 @@ impl<'s> CompilationPipeline<'s> {
                         Some(module),
                     ) {
                         ProofVerificationResult::Verified(cert) => {
+                            publish = !cert.has_incomplete_steps();
                             verified_count += 1;
                             info!(
                                 "✓ {} '{}' verified ({} steps, {:.1}ms)",
@@ -378,6 +381,17 @@ impl<'s> CompilationPipeline<'s> {
                         }
                     }
                 }
+            }
+            if publish {
+                proof_dependencies::insert_theorem(
+                    proof_engine.hints_mut(),
+                    thm,
+                    &alias_map,
+                    &variants,
+                );
+                let name = thm.name.as_str().as_bytes();
+                hint_digest.update(&(name.len() as u64).to_le_bytes());
+                hint_digest.update(name);
             }
         }
 

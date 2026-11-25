@@ -60,6 +60,7 @@ pub mod mir_lowering;
 pub mod optimization;
 pub mod phase0_stdlib;
 pub mod proof_erasure;
+pub(crate) mod proof_dependencies;
 pub mod proof_verification;
 pub mod safety_gate;
 pub mod semantic_analysis;
