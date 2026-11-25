@@ -54,6 +54,28 @@ fn declared_callback_and_closure_are_accepted() {
 }
 
 #[test]
+fn typed_closures_preserve_the_declared_sum_across_callable_boundaries() {
+    let declarations = "type One<T> is Empty | Item(T);
+        type Other<T> is Empty | Item(T);
+        context Jobs {
+            fn run<F:fn(&One<Int>)->Int>(callback:F)->Int;
+            fn map<F:fn(One<Int>)->One<Int>>(callback:F)->Int;
+        }";
+    for (name, accepted) in [("One", true), ("Other", false)] {
+        let closure = format!("|x:&{name}<Int>| 1");
+        for body in [format!("Jobs.run({closure})"), format!("let f = {closure}; Jobs.run(f)")] {
+            let errors = check(&format!("{declarations} fn probe()->Int using[Jobs] {{ {body} }}"));
+            assert_eq!(errors.is_empty(), accepted, "{body}: {errors:#?}");
+        }
+        let closure = format!("|x:One<Int>| -> {name}<Int> {{ x }}");
+        for body in [format!("Jobs.map({closure})"), format!("let f = {closure}; Jobs.map(f)")] {
+            let errors = check(&format!("{declarations} fn probe()->Int using[Jobs] {{ {body} }}"));
+            assert_eq!(errors.is_empty(), accepted, "{body}: {errors:#?}");
+        }
+    }
+}
+
+#[test]
 fn context_call_output_keeps_its_declared_protocol_owner() {
     let declarations = r#"
         type Measure is protocol { type Value; fn measure(self) -> Self.Value; };

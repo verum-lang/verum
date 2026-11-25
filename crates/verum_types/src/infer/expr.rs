@@ -1602,7 +1602,7 @@ impl TypeChecker {
             });
         }
         let result = if let Some(annotation) = return_type {
-            let annotated = self.ast_to_type(annotation)?;
+            let annotated = self.declared_type(annotation)?;
             let required = self.normalize_type(&self.unifier.try_apply(output, annotation.span)?);
             if !matches!(required, Type::Unit) {
                 self.check_call_type_bound(&annotated, &required, annotation.span, 0)?;
@@ -1616,7 +1616,7 @@ impl TypeChecker {
             for (param, input) in params.iter().zip(inputs) {
                 let input = checker.normalize_type(input);
                 let actual = if let Some(annotation) = &param.ty {
-                    let annotated = checker.ast_to_type(annotation)?;
+                    let annotated = checker.declared_type(annotation)?;
                     // The obligation flows from caller to parameter. At the
                     // annotation's location the source supplied the parameter.
                     if let Err(error) = checker.check_call_type_bound(&input, &annotated, annotation.span, 0) {
@@ -6251,14 +6251,14 @@ impl TypeChecker {
                     _ => None,
                 });
                 let param_ty = match &param.ty {
-                    Some(annotation) => checker.ast_to_type(annotation)?,
+                    Some(annotation) => checker.declared_type(annotation)?,
                     None => Type::Var(TypeVar::fresh()),
                 };
                 checker.bind_parameter_pattern(&param.pattern, &param_ty)?;
                 param_types.push(param_ty);
             }
             let ret_ty = if let Some(annotation) = return_type {
-                let expected = checker.ast_to_type(annotation)?;
+                let expected = checker.declared_type(annotation)?;
                 checker.current_function_return_type = verum_common::Maybe::Some(expected.clone());
                 checker.infer_closure_result(body, Some(&expected))?;
                 expected
