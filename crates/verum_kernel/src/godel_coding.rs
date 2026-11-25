@@ -1,49 +1,9 @@
-//! Recursive functions + Gödel coding — algorithmic kernel rule.
+//! Numeric syntax for recursive functions and Cantor coding of finite trees.
 //!
-//! ## What this delivers
-//!
-//! Self-reference and Gödel-style incompleteness arguments require a
-//! decidable encoding of formulae and proofs as natural numbers
-//! (Gödel numbers). Pre-this-module Verum's kernel had no algorithmic
-//! Gödel-coding surface — proofs about provability/representability
-//! had to admit via framework axioms.
-//!
-//! ships:
-//!
-//!  1. [`PrimitiveRecursive`] — the canonical Gödel-style enum of
-//!  *primitive recursive functions*: `Zero`, `Succ`, `Proj(i, k)`,
-//!  `Comp(g, hs)`, `PrimRec(g, h)`. Decidable evaluation on
-//!  every input vector.
-//!  2. [`MuRecursive`] — adds bounded `MuMin(f, bound)` for full
-//!  μ-recursion (Kleene's normal form). Total only when `f`
-//!  witnesses a zero within the supplied `bound`.
-//!  3. [`GodelEncoding`] — pairing-function encode/decode for
-//!  `(symbol, arg_list)` AST cells; uses the standard Cantor
-//!  pairing `⟨a, b⟩ = (a + b)(a + b + 1)/2 + b`.
-//!  4. `encode_term` / `decode_term` — round-trip identification
-//!  between [`crate::CoreTerm`]-shaped AST trees and `u64` Gödel
-//!  numbers (current surface: handles a small symbol alphabet; V1
-//!  promotion to full kernel-CoreTerm round-trip).
-//!  5. [`is_primitive_recursive`] / [`is_mu_recursive`] — decidable
-//!  class-membership tests.
-//!  6. [`representable_in_pa`] — witness flag that the encoded
-//!  function is *representable* in Peano arithmetic (every
-//!  primitive recursive function is; not every μ-recursive one).
-//!
-//! ## What this UNBLOCKS
-//!
-//!  - **Gödel's first incompleteness theorem** — the meta-theorem
-//!  that any consistent recursively-axiomatised system extending
-//!  PA admits a true-but-unprovable sentence. Pre-this-module
-//!  was admitted via host-stdlib `godel_first_incompleteness` axiom.
-//!  Promotion: invoke [`GodelEncoding::encode`] on the diagonal
-//!  formula directly.
-//!  - **MSFS Theorem 5.1 §5** — the diagonalisation argument for
-//!  `id_X violates Π_4` requires Gödel-coding for the
-//!  representability step; promotion via this module.
-//!  - **Diakrisis Yanofsky 2003** — every diagonal-paradox claim
-//!  reduces to a primitive-recursive fixed-point construction;
-//!  `MuRecursive` enables the in-kernel discharge.
+//! Cell encodings carry the symbol and arity. All pairing operations produce
+//! the exact natural-number code when it fits in a `u64`. The implementation
+//! returns `None` on encoding overflow. A code identifies syntax; proof
+//! admission checks a separate judgment.
 
 use serde::{Deserialize, Serialize};
 
@@ -231,65 +191,39 @@ pub fn representable_in_pa(_pr: &PrimitiveRecursive) -> bool {
 // Gödel encoding
 // =============================================================================
 
-/// Cantor pairing function: bijection `ℕ × ℕ → ℕ`. Defined as
-/// `⟨a, b⟩ = (a + b)(a + b + 1)/2 + b`.
-///
-/// Saturates at `u64::MAX` on overflow.
-pub fn cantor_pair(a: u64, b: u64) -> u64 {
-    let sum = a.saturating_add(b);
-    let half = sum.saturating_mul(sum.saturating_add(1)) / 2;
-    half.saturating_add(b)
+/// Cantor pairing restricted to pairs whose natural-number code fits in a word.
+pub fn cantor_pair(a: u64, b: u64) -> Option<u64> {
+    let diagonal = u128::from(a.checked_add(b)?);
+    u64::try_from(diagonal * (diagonal + 1) / 2 + u128::from(b)).ok()
 }
 
-/// Inverse of [`cantor_pair`]: returns `(a, b)` such that
-/// `cantor_pair(a, b) = z` whenever `z` is a valid pair encoding.
-pub fn cantor_unpair(z: u64) -> (u64, u64) {
-    // Solve w(w+1)/2 ≤ z for the largest w.
-    // Use integer square root: w = ⌊(√(8z + 1) - 1) / 2⌋.
-    let eight_z_plus_one = z.saturating_mul(8).saturating_add(1);
-    let w = isqrt_floor(eight_z_plus_one);
-    let w = (w.saturating_sub(1)) / 2;
-    let t = w.saturating_mul(w.saturating_add(1)) / 2;
-    let b = z.saturating_sub(t);
-    let a = w.saturating_sub(b);
-    (a, b)
+/// Exact inverse on the entire code space, including `u64::MAX`.
+pub fn cantor_unpair(code: u64) -> (u64, u64) {
+    let code = u128::from(code);
+    let diagonal = ((8 * code + 1).isqrt() - 1) / 2;
+    let b = code - diagonal * (diagonal + 1) / 2;
+    ((diagonal - b) as u64, b as u64)
 }
 
-/// Integer floor of the square root of `n`. Newton's method for `u64`.
-fn isqrt_floor(n: u64) -> u64 {
-    if n == 0 {
-        return 0;
-    }
-    let mut x = n;
-    let mut y = x.div_ceil(2);
-    while y < x {
-        x = y;
-        y = (x + n / x) / 2;
-    }
-    x
+/// Payload of an arity-tagged list. Its length is part of the enclosing code.
+pub fn encode_list(symbols: &[u64]) -> Option<u64> {
+    symbols
+        .iter()
+        .rev()
+        .try_fold(0, |tail, &head| cantor_pair(head, tail))
 }
 
-/// Encode a list of `u64` symbols into a single Gödel number using
-/// iterated Cantor pairing. Empty list maps to `0`.
-pub fn encode_list(symbols: &[u64]) -> u64 {
-    let mut acc: u64 = 0;
-    for &s in symbols.iter().rev() {
-        acc = cantor_pair(s, acc);
-    }
-    acc
-}
-
-/// Decode a Gödel number into a list of `n` symbols (the requested
-/// length). Inverse of [`encode_list`] modulo length.
-pub fn decode_list(z: u64, len: usize) -> Vec<u64> {
-    let mut out = Vec::with_capacity(len);
-    let mut cur = z;
+/// Recover the payload at the given arity. A nonzero remainder belongs to a
+/// different encoding. Allocation failure also refuses the decode.
+pub fn decode_list(mut code: u64, len: usize) -> Option<Vec<u64>> {
+    let mut symbols = Vec::new();
+    symbols.try_reserve_exact(len).ok()?;
     for _ in 0..len {
-        let (head, tail) = cantor_unpair(cur);
-        out.push(head);
-        cur = tail;
+        let (head, tail) = cantor_unpair(code);
+        symbols.push(head);
+        code = tail;
     }
-    out
+    (code == 0).then_some(symbols)
 }
 
 /// A simple AST-cell encoding: every cell is `(symbol, arity, args)`
@@ -303,11 +237,27 @@ pub struct GodelEncoding {
 }
 
 impl GodelEncoding {
-    /// Encode this cell into a Gödel number.
-    pub fn encode(&self) -> u64 {
-        let head = cantor_pair(self.symbol, self.args.len() as u64);
-        let tail = encode_list(&self.args.iter().map(|a| a.encode()).collect::<Vec<u64>>());
-        cantor_pair(head, tail)
+    /// Encode on an explicit work stack. Walking siblings backwards builds the
+    /// arity-tagged argument payload directly, with one frame per ancestor.
+    pub fn encode(&self) -> Option<u64> {
+        fn frame(cell: &GodelEncoding) -> Option<(u64, std::slice::Iter<'_, GodelEncoding>, u64)> {
+            let arity = u64::try_from(cell.args.len()).ok()?;
+            Some((cantor_pair(cell.symbol, arity)?, cell.args.iter(), 0))
+        }
+        let mut stack = vec![frame(self)?];
+        while let Some((head, children, tail)) = stack.last_mut() {
+            if let Some(child) = children.next_back() {
+                stack.push(frame(child)?);
+            } else {
+                let code = cantor_pair(*head, *tail)?;
+                stack.pop();
+                let Some((_, _, parent_tail)) = stack.last_mut() else {
+                    return Some(code);
+                };
+                *parent_tail = cantor_pair(code, *parent_tail)?;
+            }
+        }
+        None
     }
 
     /// Encode an atom `(symbol)` with zero arguments.
@@ -444,19 +394,19 @@ mod tests {
 
     #[test]
     fn cantor_pair_basic_values() {
-        assert_eq!(cantor_pair(0, 0), 0);
-        assert_eq!(cantor_pair(1, 0), 1);
-        assert_eq!(cantor_pair(0, 1), 2);
-        assert_eq!(cantor_pair(2, 0), 3);
-        assert_eq!(cantor_pair(1, 1), 4);
-        assert_eq!(cantor_pair(0, 2), 5);
+        assert_eq!(cantor_pair(0, 0), Some(0));
+        assert_eq!(cantor_pair(1, 0), Some(1));
+        assert_eq!(cantor_pair(0, 1), Some(2));
+        assert_eq!(cantor_pair(2, 0), Some(3));
+        assert_eq!(cantor_pair(1, 1), Some(4));
+        assert_eq!(cantor_pair(0, 2), Some(5));
     }
 
     #[test]
     fn cantor_pair_unpair_roundtrip() {
         for a in 0..20 {
             for b in 0..20 {
-                let z = cantor_pair(a, b);
+                let z = cantor_pair(a, b).unwrap();
                 let (a2, b2) = cantor_unpair(z);
                 assert_eq!(
                     (a, b),
@@ -477,7 +427,7 @@ mod tests {
         let mut seen = std::collections::HashSet::new();
         for a in 0..30 {
             for b in 0..30 {
-                let z = cantor_pair(a, b);
+                let z = cantor_pair(a, b).unwrap();
                 assert!(
                     seen.insert(z),
                     "Cantor pair collision: ({}, {}) → {} already seen",
@@ -489,13 +439,43 @@ mod tests {
         }
     }
 
+    #[test]
+    fn word_boundaries_keep_exact_codes_and_refuse_overflow() {
+        let (a, b) = cantor_unpair(u64::MAX);
+        assert_eq!(cantor_pair(a, b), Some(u64::MAX));
+        assert_eq!(cantor_pair(a + 1, b), None);
+        assert_eq!(cantor_pair(u64::MAX, u64::MAX), None);
+        // The old saturating product mapped both distinct inputs to 2^63 - 1.
+        assert_eq!(cantor_pair(1 << 32, 0), Some((1 << 63) + (1 << 31)));
+        assert_eq!(
+            cantor_pair((1 << 32) + 1, 0),
+            Some((1 << 63) + 3 * (1 << 31) + 1)
+        );
+        assert_eq!(encode_list(&[0, u64::MAX]), None);
+        assert_eq!(decode_list(2, 1), None);
+        assert_eq!(decode_list(1, 0), None);
+        let nested = GodelEncoding {
+            symbol: 0,
+            args: vec![GodelEncoding::atom(u64::MAX)],
+        };
+        assert_eq!(nested.encode(), None);
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn every_word_decodes_on_its_exact_diagonal(code: u64) {
+            let (a, b) = cantor_unpair(code);
+            proptest::prop_assert_eq!(cantor_pair(a, b), Some(code));
+        }
+    }
+
     // ----- List encoding -----
 
     #[test]
     fn encode_decode_list_roundtrip() {
         for input in [vec![1u64], vec![1, 2, 3], vec![5, 0, 7, 0], vec![]] {
-            let z = encode_list(&input);
-            let out = decode_list(z, input.len());
+            let z = encode_list(&input).unwrap();
+            let out = decode_list(z, input.len()).unwrap();
             assert_eq!(
                 out, input,
                 "List round-trip failure: {:?} → {} → {:?}",
@@ -512,8 +492,8 @@ mod tests {
             symbol: 7,
             args: vec![GodelEncoding::atom(3), GodelEncoding::atom(5)],
         };
-        let z1 = cell.encode();
-        let z2 = cell.encode();
+        let z1 = cell.encode().unwrap();
+        let z2 = cell.encode().unwrap();
         assert_eq!(z1, z2);
     }
 
@@ -527,7 +507,7 @@ mod tests {
             symbol: 2,
             args: vec![GodelEncoding::atom(1)],
         };
-        assert_ne!(a.encode(), b.encode());
+        assert_ne!(a.encode().unwrap(), b.encode().unwrap());
     }
 
     #[test]
@@ -535,7 +515,7 @@ mod tests {
         let atom = GodelEncoding::atom(7);
         // atom(7) encodes as ⟨⟨7, 0⟩, encode_list([])⟩ = ⟨⟨7, 0⟩, 0⟩
         // = ⟨cantor_pair(7, 0), 0⟩
-        let expected = cantor_pair(cantor_pair(7, 0), 0);
+        let expected = cantor_pair(cantor_pair(7, 0).unwrap(), 0);
         assert_eq!(atom.encode(), expected);
     }
 

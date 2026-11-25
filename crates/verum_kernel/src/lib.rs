@@ -617,24 +617,7 @@ pub use zfc_self_recognition::{
     is_zfc_plus_2_inacc_provable, required_meta_theory,
 };
 
-/// Recursive functions + Gödel coding — algorithmic kernel rule.
-/// Provides the decidable encoding-of-formulae machinery required for
-/// Gödel-style incompleteness arguments and Yanofsky 2003 diagonal
-/// paradox claims.
-///
-/// Ships:
-///  * `PrimitiveRecursive` — Kleene normal form (Zero / Succ / Proj
-///  / Comp / PrimRec) with totally-evaluating `eval`.
-///  * `MuRecursive` — extends primitive recursion with bounded
-///  `MuMin` minimisation.
-///  * `cantor_pair` / `cantor_unpair` — bijection ℕ × ℕ → ℕ.
-///  * `encode_list` / `decode_list` — list-of-symbols ↔ Gödel number.
-///  * `GodelEncoding` — recursive AST cell with `encode` to u64.
-///  * `is_primitive_recursive` / `is_mu_recursive` /
-///  `representable_in_pa` — class-membership predicates.
-///
-/// Future work: full kernel-CoreTerm round-trip via `encode_term` /
-/// `decode_term` (ships symbol-level cells).
+/// Recursive-function syntax and exact, word-bounded Gödel encodings.
 pub mod godel_coding;
 pub use godel_coding::{
     GodelEncoding, MuRecursive, PrimitiveRecursive, cantor_pair, cantor_unpair, decode_list,
