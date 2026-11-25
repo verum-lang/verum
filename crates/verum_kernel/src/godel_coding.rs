@@ -56,135 +56,231 @@ pub enum PrimitiveRecursive {
 }
 
 impl PrimitiveRecursive {
-    /// Saturate-add helper to avoid overflow on pathological evals.
-    fn add(a: u64, b: u64) -> u64 {
-        a.saturating_add(b)
-    }
+    /// Infer the unique input arity from the formation rules. In an empty
+    /// composition the outer function is nullary and the result is nullary.
+    pub fn arity(&self) -> Option<usize> {
+        enum Frame<'a> {
+            Visit(&'a PrimitiveRecursive),
+            Compose(usize),
+            Recur,
+        }
 
-    /// Evaluate this primitive recursive function on the given
-    /// argument vector. Returns the function's natural-number value.
-    ///
-    /// Total on every input — primitive recursion is *always*
-    /// terminating. Saturates at `u64::MAX` defensively for
-    /// pathological recursion depths.
-    pub fn eval(&self, args: &[u64]) -> u64 {
-        match self {
-            PrimitiveRecursive::Zero => 0,
-            PrimitiveRecursive::Succ => {
-                if args.is_empty() {
-                    0
-                } else {
-                    Self::add(args[0], 1)
+        let mut work = vec![Frame::Visit(self)];
+        let mut arities = Vec::new();
+        while let Some(frame) = work.pop() {
+            match frame {
+                Frame::Visit(Self::Zero) => arities.push(0),
+                Frame::Visit(Self::Succ) => arities.push(1),
+                Frame::Visit(Self::Proj { i, k }) if *i > 0 && i <= k => arities.push(*k as usize),
+                Frame::Visit(Self::Proj { .. }) => return None,
+                Frame::Visit(Self::Comp { g, hs }) => {
+                    work.push(Frame::Compose(hs.len()));
+                    work.extend(hs.iter().rev().map(Frame::Visit));
+                    work.push(Frame::Visit(g));
                 }
-            }
-            PrimitiveRecursive::Proj { i, k } => {
-                let idx = *i as usize;
-                let kk = *k as usize;
-                if idx == 0 || idx > kk || args.len() < kk {
-                    0
-                } else {
-                    args[idx - 1]
+                Frame::Visit(Self::PrimRec { g, h }) => {
+                    work.push(Frame::Recur);
+                    work.push(Frame::Visit(h));
+                    work.push(Frame::Visit(g));
                 }
-            }
-            PrimitiveRecursive::Comp { g, hs } => {
-                let inner: Vec<u64> = hs.iter().map(|h| h.eval(args)).collect();
-                g.eval(&inner)
-            }
-            PrimitiveRecursive::PrimRec { g, h } => {
-                if args.is_empty() {
-                    return g.eval(&[]);
+                Frame::Compose(count) => {
+                    let start = arities.len() - count - 1;
+                    let (outer, inner) = arities[start..].split_first()?;
+                    let input = inner.first().copied().unwrap_or(0);
+                    if *outer != count || inner.iter().any(|&arity| arity != input) {
+                        return None;
+                    }
+                    arities.truncate(start);
+                    arities.push(input);
                 }
-                let n = args[0];
-                let xs = &args[1..];
-                // Base case.
-                let mut acc = g.eval(xs);
-                // Step case for k = 0, 1, ..., n - 1.
-                for k in 0..n {
-                    let mut step_args = Vec::with_capacity(xs.len() + 2);
-                    step_args.push(k);
-                    step_args.push(acc);
-                    step_args.extend_from_slice(xs);
-                    acc = h.eval(&step_args);
+                Frame::Recur => {
+                    let step = arities.pop()?;
+                    let base = arities.pop()?;
+                    if step != base.checked_add(2)? {
+                        return None;
+                    }
+                    arities.push(base + 1);
                 }
-                acc
             }
         }
+        arities.pop()
     }
 
-    /// True iff this term is well-formed: arities check out and
-    /// projections are 1-based and within their declared `k`.
+    /// Evaluate a well-formed term at precisely its declared arity. Each
+    /// primitive application and recursion step consumes the caller's budget.
+    pub fn eval(&self, args: &[u64], fuel: &mut u64) -> Result<u64, RecursiveEvalError> {
+        check_arguments(self.arity(), args.len())?;
+        self.eval_formed(args, fuel)
+    }
+
+    fn eval_formed(&self, args: &[u64], fuel: &mut u64) -> Result<u64, RecursiveEvalError> {
+        use std::rc::Rc;
+        enum Frame<'a> {
+            Apply(&'a PrimitiveRecursive, Rc<[u64]>),
+            Compose(&'a PrimitiveRecursive, usize),
+            Step {
+                h: &'a PrimitiveRecursive,
+                args: Rc<[u64]>,
+                index: u64,
+            },
+        }
+
+        let mut work = vec![Frame::Apply(self, Rc::from(args))];
+        let mut values = Vec::new();
+        while let Some(frame) = work.pop() {
+            *fuel = fuel.checked_sub(1).ok_or(RecursiveEvalError::WorkLimit)?;
+            match frame {
+                Frame::Apply(Self::Zero, _) => values.push(0),
+                Frame::Apply(Self::Succ, args) => {
+                    values.push(
+                        args[0]
+                            .checked_add(1)
+                            .ok_or(RecursiveEvalError::WordOverflow)?,
+                    );
+                }
+                Frame::Apply(Self::Proj { i, .. }, args) => values.push(args[*i as usize - 1]),
+                Frame::Apply(Self::Comp { g, hs }, args) => {
+                    work.push(Frame::Compose(g, hs.len()));
+                    work.extend(hs.iter().rev().map(|h| Frame::Apply(h, Rc::clone(&args))));
+                }
+                Frame::Compose(g, count) => {
+                    let args = values.split_off(values.len() - count);
+                    work.push(Frame::Apply(g, Rc::from(args)));
+                }
+                Frame::Apply(Self::PrimRec { g, h }, args) => {
+                    let params = Rc::from(&args[1..]);
+                    if args[0] != 0 {
+                        work.push(Frame::Step { h, args, index: 0 });
+                    }
+                    work.push(Frame::Apply(g, params));
+                }
+                Frame::Step { h, args, index } => {
+                    let mut step = Vec::with_capacity(args.len() + 1);
+                    step.push(index);
+                    step.push(values.pop().expect("base or previous step value"));
+                    step.extend_from_slice(&args[1..]);
+                    if index + 1 < args[0] {
+                        work.push(Frame::Step {
+                            h,
+                            args,
+                            index: index + 1,
+                        });
+                    }
+                    work.push(Frame::Apply(h, Rc::from(step)));
+                }
+            }
+        }
+        Ok(values.pop().expect("a formed term produces one value"))
+    }
+
+    /// Decide syntactic formation. Arithmetic representability requires a
+    /// formula and a separate proof in a specified presentation.
     pub fn is_well_formed(&self) -> bool {
-        match self {
-            PrimitiveRecursive::Zero | PrimitiveRecursive::Succ => true,
-            PrimitiveRecursive::Proj { i, k } => *i >= 1 && *i <= *k,
-            PrimitiveRecursive::Comp { g, hs } => {
-                g.is_well_formed() && hs.iter().all(|h| h.is_well_formed())
-            }
-            PrimitiveRecursive::PrimRec { g, h } => g.is_well_formed() && h.is_well_formed(),
-        }
+        self.arity().is_some()
     }
 }
 
-/// Decidable predicate: every term of this type IS primitive recursive
-/// by construction; the predicate exists for symmetry with [`is_mu_recursive`].
-pub fn is_primitive_recursive(_pr: &PrimitiveRecursive) -> bool {
-    true
+/// Reasons a word-sized evaluator cannot return a mathematical value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecursiveEvalError {
+    /// A constructor does not satisfy its formation rule.
+    InvalidTerm,
+    /// The input vector has the wrong dimension.
+    WrongArity {
+        /// Number of inputs inferred from the term.
+        expected: usize,
+        /// Number of inputs supplied by the caller.
+        actual: usize,
+    },
+    /// A natural-number intermediate exceeds the word domain.
+    WordOverflow,
+    /// The caller's evaluation budget was exhausted.
+    WorkLimit,
 }
 
-// =============================================================================
-// μ-recursive functions
-// =============================================================================
+fn check_arguments(arity: Option<usize>, actual: usize) -> Result<(), RecursiveEvalError> {
+    let expected = arity.ok_or(RecursiveEvalError::InvalidTerm)?;
+    if expected != actual {
+        return Err(RecursiveEvalError::WrongArity { expected, actual });
+    }
+    Ok(())
+}
 
-/// μ-recursive functions extend primitive recursive ones by adding
-/// the *bounded minimisation* operator `MuMin(f, bound)`. Total iff
-/// the existential clause is witnessed within the bound; partial
-/// otherwise.
+/// Decide membership in the primitive-recursive syntax with checked arities.
+pub fn is_primitive_recursive(pr: &PrimitiveRecursive) -> bool {
+    pr.is_well_formed()
+}
+
+/// A primitive-recursive function extended by zero or more bounded searches.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum MuRecursive {
     /// Lift a primitive recursive function.
     Prim(PrimitiveRecursive),
-    /// `μ y < bound. f(y, x⃗) = 0` — minimal `y` below the bound such
-    /// that `f` returns 0. When no such `y` exists in the bound,
-    /// returns `None`.
+    /// Search the inclusive interval from zero to `bound` for the first zero
+    /// of `f(y, args...)`. Every earlier application must be defined.
     MuMin {
-        /// The predicate we're minimising over.
+        /// The function being minimised.
         f: Box<MuRecursive>,
-        /// Search bound (inclusive upper limit).
+        /// Inclusive upper search bound.
         bound: u64,
     },
 }
 
 impl MuRecursive {
-    /// Evaluate the μ-recursive function. Returns `None` when an
-    /// unbounded search fails to terminate within the supplied bound.
-    pub fn eval(&self, args: &[u64]) -> Option<u64> {
-        match self {
-            MuRecursive::Prim(p) => Some(p.eval(args)),
-            MuRecursive::MuMin { f, bound } => {
-                for y in 0..=*bound {
-                    let mut probe = Vec::with_capacity(args.len() + 1);
-                    probe.push(y);
-                    probe.extend_from_slice(args);
-                    if let Some(0) = f.eval(&probe) {
-                        return Some(y);
-                    }
+    fn decompose(&self) -> (&PrimitiveRecursive, Vec<u64>) {
+        let mut current = self;
+        let mut bounds = Vec::new();
+        loop {
+            match current {
+                Self::MuMin { f, bound } => {
+                    bounds.push(*bound);
+                    current = f;
                 }
-                None
+                Self::Prim(pr) => {
+                    bounds.reverse();
+                    return (pr, bounds);
+                }
             }
+        }
+    }
+
+    /// Each minimisation binds one input of its body.
+    pub fn arity(&self) -> Option<usize> {
+        let (pr, bounds) = self.decompose();
+        pr.arity()?.checked_sub(bounds.len())
+    }
+
+    /// Return the least witness or `Ok(None)` for an undefined bounded
+    /// minimisation. Invalid input, overflow and budget exhaustion are errors.
+    pub fn eval(&self, args: &[u64], fuel: &mut u64) -> Result<Option<u64>, RecursiveEvalError> {
+        let (pr, bounds) = self.decompose();
+        check_arguments(
+            pr.arity().and_then(|n| n.checked_sub(bounds.len())),
+            args.len(),
+        )?;
+        let mut probe = vec![0; bounds.len()];
+        probe.extend_from_slice(args);
+        'search: loop {
+            let mut value = pr.eval_formed(&probe, fuel)?;
+            for (candidate, &bound) in probe.iter_mut().zip(&bounds) {
+                if value == 0 {
+                    value = *candidate;
+                    *candidate = 0;
+                } else if *candidate < bound {
+                    *candidate += 1;
+                    continue 'search;
+                } else {
+                    return Ok(None);
+                }
+            }
+            return Ok(Some(value));
         }
     }
 }
 
-/// Decidable predicate: every term of this type IS μ-recursive.
-pub fn is_mu_recursive(_mu: &MuRecursive) -> bool {
-    true
-}
-
-/// Witness flag: every primitive recursive function is *representable*
-/// in Peano arithmetic (Gödel 1931 / Kleene 1952). Returns true for
-/// every primitive recursive input.
-pub fn representable_in_pa(_pr: &PrimitiveRecursive) -> bool {
-    true
+/// Decide membership in the arity-checked bounded-minimisation syntax.
+pub fn is_mu_recursive(mu: &MuRecursive) -> bool {
+    mu.arity().is_some()
 }
 
 // =============================================================================
@@ -277,14 +373,20 @@ mod tests {
 
     #[test]
     fn zero_is_zero() {
-        assert_eq!(PrimitiveRecursive::Zero.eval(&[]), 0);
-        assert_eq!(PrimitiveRecursive::Zero.eval(&[5, 7]), 0);
+        assert_eq!(PrimitiveRecursive::Zero.eval(&[], &mut 1024).unwrap(), 0);
+        assert_eq!(
+            PrimitiveRecursive::Zero.eval(&[5, 7], &mut 10),
+            Err(RecursiveEvalError::WrongArity {
+                expected: 0,
+                actual: 2
+            })
+        );
     }
 
     #[test]
     fn successor_increments() {
-        assert_eq!(PrimitiveRecursive::Succ.eval(&[3]), 4);
-        assert_eq!(PrimitiveRecursive::Succ.eval(&[0]), 1);
+        assert_eq!(PrimitiveRecursive::Succ.eval(&[3], &mut 1024).unwrap(), 4);
+        assert_eq!(PrimitiveRecursive::Succ.eval(&[0], &mut 1024).unwrap(), 1);
     }
 
     #[test]
@@ -292,9 +394,9 @@ mod tests {
         let p13 = PrimitiveRecursive::Proj { i: 1, k: 3 };
         let p23 = PrimitiveRecursive::Proj { i: 2, k: 3 };
         let p33 = PrimitiveRecursive::Proj { i: 3, k: 3 };
-        assert_eq!(p13.eval(&[10, 20, 30]), 10);
-        assert_eq!(p23.eval(&[10, 20, 30]), 20);
-        assert_eq!(p33.eval(&[10, 20, 30]), 30);
+        assert_eq!(p13.eval(&[10, 20, 30], &mut 1024).unwrap(), 10);
+        assert_eq!(p23.eval(&[10, 20, 30], &mut 1024).unwrap(), 20);
+        assert_eq!(p33.eval(&[10, 20, 30], &mut 1024).unwrap(), 30);
     }
 
     #[test]
@@ -324,9 +426,9 @@ mod tests {
             g: Box::new(g),
             h: Box::new(h),
         };
-        assert_eq!(add.eval(&[3, 5]), 8);
-        assert_eq!(add.eval(&[0, 7]), 7);
-        assert_eq!(add.eval(&[10, 0]), 10);
+        assert_eq!(add.eval(&[3, 5], &mut 1024).unwrap(), 8);
+        assert_eq!(add.eval(&[0, 7], &mut 1024).unwrap(), 7);
+        assert_eq!(add.eval(&[10, 0], &mut 1024).unwrap(), 10);
     }
 
     #[test]
@@ -339,26 +441,19 @@ mod tests {
                 hs: vec![f],
             };
         }
-        assert_eq!(f.eval(&[]), 5);
+        assert_eq!(f.eval(&[], &mut 1024).unwrap(), 5);
     }
 
     // ----- MuRecursive -----
 
     #[test]
     fn mu_min_finds_zero_within_bound() {
-        // f(y, x) = subtract(y, x) — primitive recursion is hairy here,
-        // so use Proj + composition: f(y, x) = if y == x then 0 else 1.
-        // For simplicity test against fixed value: f(y) = y - 5 (saturating)
-        // with bound 100; expect μy.[f(y)=0] = 5.
-        // We model this via Comp on Proj { i:1, k:1 } and a sub-by-5 trick:
-        // primitive recursion subtraction is too verbose for a unit test —
-        // instead use Zero (always zero) → first y = 0 wins.
-        let always_zero = PrimitiveRecursive::Zero;
+        let always_zero = zero_at(1);
         let mu = MuRecursive::MuMin {
             f: Box::new(MuRecursive::Prim(always_zero)),
             bound: 100,
         };
-        assert_eq!(mu.eval(&[]), Some(0));
+        assert_eq!(mu.eval(&[], &mut 1024).unwrap(), Some(0));
     }
 
     #[test]
@@ -372,7 +467,7 @@ mod tests {
             f: Box::new(always_succ),
             bound: 50,
         };
-        assert_eq!(mu.eval(&[]), None);
+        assert_eq!(mu.eval(&[], &mut 1024).unwrap(), None);
     }
 
     // ----- Class membership -----
@@ -381,13 +476,110 @@ mod tests {
     fn primitive_recursive_class_membership() {
         let f = PrimitiveRecursive::Succ;
         assert!(is_primitive_recursive(&f));
-        assert!(representable_in_pa(&f));
+        assert_eq!(f.arity(), Some(1));
     }
 
     #[test]
     fn mu_recursive_class_membership() {
         let f = MuRecursive::Prim(PrimitiveRecursive::Succ);
         assert!(is_mu_recursive(&f));
+    }
+
+    fn zero_at(arity: u32) -> PrimitiveRecursive {
+        (0..arity).fold(PrimitiveRecursive::Zero, |base, params| {
+            PrimitiveRecursive::PrimRec {
+                g: Box::new(base),
+                h: Box::new(PrimitiveRecursive::Proj {
+                    i: 2,
+                    k: params + 2,
+                }),
+            }
+        })
+    }
+
+    fn is_zero() -> PrimitiveRecursive {
+        PrimitiveRecursive::PrimRec {
+            g: Box::new(PrimitiveRecursive::Comp {
+                g: Box::new(PrimitiveRecursive::Succ),
+                hs: vec![PrimitiveRecursive::Zero],
+            }),
+            h: Box::new(zero_at(2)),
+        }
+    }
+
+    #[test]
+    fn formation_checks_every_constructor_even_in_unused_positions() {
+        use PrimitiveRecursive::*;
+        for invalid in [
+            Proj { i: 0, k: 1 },
+            Comp {
+                g: Box::new(Succ),
+                hs: vec![],
+            },
+            Comp {
+                g: Box::new(Proj { i: 1, k: 2 }),
+                hs: vec![Zero, Succ],
+            },
+            PrimRec {
+                g: Box::new(Zero),
+                h: Box::new(Succ),
+            },
+        ] {
+            assert!(!is_primitive_recursive(&invalid));
+            assert_eq!(
+                invalid.eval(&[], &mut 50),
+                Err(RecursiveEvalError::InvalidTerm)
+            );
+        }
+        let closed = MuRecursive::MuMin {
+            f: Box::new(MuRecursive::Prim(Zero)),
+            bound: 3,
+        };
+        assert!(!is_mu_recursive(&closed));
+        assert_eq!(
+            closed.eval(&[], &mut 50),
+            Err(RecursiveEvalError::InvalidTerm)
+        );
+        assert_eq!(
+            Succ.eval(&[], &mut 50),
+            Err(RecursiveEvalError::WrongArity {
+                expected: 1,
+                actual: 0
+            })
+        );
+        assert_eq!(
+            Succ.eval(&[u64::MAX], &mut 1),
+            Err(RecursiveEvalError::WordOverflow)
+        );
+        assert_eq!(
+            zero_at(1).eval(&[u64::MAX], &mut 10),
+            Err(RecursiveEvalError::WorkLimit)
+        );
+    }
+
+    #[test]
+    fn bounded_minimization_preserves_first_witness_and_prefix_definedness() {
+        use PrimitiveRecursive::*;
+        let search = |inner| MuRecursive::MuMin {
+            f: Box::new(inner),
+            bound: 3,
+        };
+        assert_eq!(
+            search(MuRecursive::Prim(is_zero())).eval(&[], &mut 100),
+            Ok(Some(1))
+        );
+        // f(z, y) = [y = 0]. For y=0 the inner search has no zero.
+        // A zero at y=1 cannot repair that earlier undefined application.
+        let inner = search(MuRecursive::Prim(Comp {
+            g: Box::new(is_zero()),
+            hs: vec![Proj { i: 2, k: 2 }],
+        }));
+        assert_eq!(inner.eval(&[0], &mut 1000), Ok(None));
+        assert_eq!(inner.eval(&[1], &mut 1000), Ok(Some(0)));
+        assert_eq!(search(inner).eval(&[], &mut 1000), Ok(None));
+        // If the inner search always returns zero, the outer first witness is zero.
+        let all = search(search(MuRecursive::Prim(zero_at(2))));
+        assert_eq!(all.eval(&[], &mut 100), Ok(Some(0)));
     }
 
     // ----- Cantor pairing -----
@@ -535,7 +727,7 @@ mod tests {
         };
         // For every target n, the diagonal x + x = 2n eventually hits 2n.
         for n in 0..10 {
-            let result = add.eval(&[n, n]);
+            let result = add.eval(&[n, n], &mut 1024).unwrap();
             assert_eq!(result, 2 * n);
         }
     }
