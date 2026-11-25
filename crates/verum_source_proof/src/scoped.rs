@@ -419,6 +419,17 @@ impl Elab {
                 self.infer(&x)?;
                 Ok(x)
             }
+            ExprKind::Binary { op: BinOp::Imply, left, right } => {
+                let domain = self.expr(left)?;
+                let body = self.expr(right)?;
+                self.require_type(&domain)?;
+                self.require_type(&body)?;
+                Ok(Ir::Pi {
+                    id: self.fresh(),
+                    domain: Box::new(domain),
+                    body: Box::new(body),
+                })
+            }
             ExprKind::Binary {
                 op: BinOp::Eq,
                 left,

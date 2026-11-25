@@ -391,6 +391,7 @@ fn independently_replay_source_transports_and_corrupted_certificates() {
         (include_str!("fixtures/collapsing_chain.vr"), "collapsing_chain_factorization"),
         (include_str!("fixtures/collapsing_chain.vr"), "collapsing_chain_factor_unique"),
         (include_str!("fixtures/colimit_comparison.vr"), "colimit_comparison_roundtrip"),
+        (include_str!("fixtures/quotient_descent.vr"), "quotient_descent"),
     ] {
         let certificate = accepts(source, name);
         cases.push((certificate.clone(), true));

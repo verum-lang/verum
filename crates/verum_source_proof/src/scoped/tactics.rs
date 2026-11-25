@@ -1,9 +1,19 @@
 //! Single-goal proof construction. Tactics produce ordinary kernel terms;
 //! neither goal mutation nor a successful tactic is proof authority.
 use super::*;
+use verum_ast::decl::{ProofStep, ProofStepKind};
 use verum_common::List;
 
+pub(super) enum Action<'a> {
+    Tactic(&'a TacticExpr),
+    Step(&'a ProofStep),
+}
+
 enum Frame {
+    Let {
+        id: BinderId,
+        value: Ir,
+    },
     Intro {
         id: BinderId,
         domain: Box<Ir>,
@@ -22,8 +32,12 @@ enum Frame {
 
 impl Elab {
     pub(super) fn tactics(&mut self, tactic: &TacticExpr, goal: &Ir) -> Result<Ir> {
+        self.prove_with_actions(List::from_iter([Action::Tactic(tactic)]), goal)
+    }
+
+    pub(super) fn prove_with_actions(&mut self, pending: List<Action<'_>>, goal: &Ir) -> Result<Ir> {
         let saved = self.stack.clone();
-        let result = self.tactics_inner(tactic, goal.clone());
+        let result = self.tactics_inner(pending, goal.clone());
         self.stack = saved;
         result
     }
@@ -37,14 +51,28 @@ impl Elab {
         .map_err(Error::from)
     }
 
-    fn tactics_inner(&mut self, tactic: &TacticExpr, mut goal: Ir) -> Result<Ir> {
-        let mut pending = List::new();
-        pending.push(tactic);
+    fn tactics_inner(&mut self, mut pending: List<Action<'_>>, mut goal: Ir) -> Result<Ir> {
         let mut frames = List::new();
-        while let Some(tactic) = pending.pop() {
+        while let Some(action) = pending.pop() {
+            let tactic = match action {
+                Action::Tactic(tactic) => tactic,
+                Action::Step(step) => match &step.kind {
+                    ProofStepKind::Tactic(tactic) => tactic,
+                    ProofStepKind::Have { name, proposition, justification } => {
+                        let domain = self.expr(proposition)?;
+                        self.require_type(&domain).map_err(|e| self.locate(e, proposition.span))?;
+                        let value = self.tactics(justification, &domain)
+                            .map_err(|e| self.locate(e, step.span))?;
+                        let binding = self.bind(Some(name.as_str().into()), domain, false)?;
+                        frames.push(Frame::Let { id: binding.id, value });
+                        continue;
+                    }
+                    _ => return Err(self.locate(unsupported("unsupported structured proof step"), step.span)),
+                },
+            };
             let proof = match tactic {
                 TacticExpr::Seq(steps) => {
-                    pending.extend(steps.iter().rev());
+                    pending.extend(steps.iter().rev().map(Action::Tactic));
                     continue;
                 }
                 TacticExpr::Intro(names) => {
@@ -147,6 +175,11 @@ impl Elab {
                 .into_iter()
                 .rev()
                 .fold(proof, |proof, frame| match frame {
+                    Frame::Let { id, value } => Ir::Let {
+                        id,
+                        value: Box::new(value),
+                        body: Box::new(proof),
+                    },
                     Frame::Intro { id, domain } => Ir::Lam {
                         id,
                         domain,

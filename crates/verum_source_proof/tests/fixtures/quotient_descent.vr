@@ -1,0 +1,31 @@
+// In a presentation by generators, a compatible family of legs descends
+// along the quotient recursor. Agreement on generators determines the map.
+public theorem quotient_descent(
+    generator_ty: Type, relation_ty: fn(generator_ty, generator_ty) -> Type, apex_ty: Type, codomain: Type,
+    inject_point: fn(generator_ty) -> apex_ty, leg: fn(generator_ty) -> codomain,
+    respects: fn<x: meta generator_ty, y: meta generator_ty>(relation_ty(x,y)) -> Path<codomain>(leg(x),leg(y)),
+    descend: fn<f: meta fn(generator_ty) -> codomain>(
+        fn<x: meta generator_ty, y: meta generator_ty>(relation_ty(x,y)) -> Path<codomain>(f(x),f(y))
+    ) -> fn(apex_ty) -> codomain
+)
+    requires forall f: fn(generator_ty) -> codomain.
+        forall h: fn<x: meta generator_ty, y: meta generator_ty>(relation_ty(x,y)) -> Path<codomain>(f(x),f(y)).
+        forall x: generator_ty. descend(f,h)(inject_point(x)) == f(x)
+    requires forall f: fn(apex_ty) -> codomain. forall g: fn(apex_ty) -> codomain.
+        (forall x: generator_ty. f(inject_point(x)) == g(inject_point(x))) implies
+        (forall q: apex_ty. f(q) == g(q))
+    : forall mediator: fn(apex_ty) -> codomain.
+        (forall x: generator_ty. mediator(inject_point(x)) == leg(x)) implies
+        (forall q: apex_ty. mediator(q) == descend(leg,respects)(q))
+proof {
+    have compute: forall f: fn(generator_ty) -> codomain.
+        forall h: fn<x: meta generator_ty, y: meta generator_ty>(relation_ty(x,y)) -> Path<codomain>(f(x),f(y)).
+        forall x: generator_ty. descend(f,h)(inject_point(x)) == f(x) by assumption;
+    have cover: forall f: fn(apex_ty) -> codomain. forall g: fn(apex_ty) -> codomain.
+        (forall x: generator_ty. f(inject_point(x)) == g(inject_point(x))) implies
+        (forall q: apex_ty. f(q) == g(q)) by assumption;
+    intro(mediator, factors, q);
+    have on_points: forall x: generator_ty. mediator(inject_point(x)) == descend(leg,respects)(inject_point(x))
+        by intro(x), rewrite(compute(leg,respects,x)), exact(factors(x));
+    exact(cover(mediator, descend(leg,respects), on_points, q));
+}

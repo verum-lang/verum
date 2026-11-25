@@ -63,6 +63,36 @@ fn colimit_comparison_uses_factorization_and_uniqueness() {
 }
 
 #[test]
+fn quotient_descent_requires_generator_agreement_and_checked_local_evidence() {
+    let source = include_str!("fixtures/quotient_descent.vr");
+    let name = "quotient_descent";
+    assert_eq!(check(source, name).status, "verified");
+    for changed in [
+        source.replace("exact(factors(x))", "reflexivity"),
+        source.replace("on_points, q));", "factors, q));"),
+        source.replace("exact(factors(x))", "exact(on_points(x))"),
+        source.replace("intro(mediator, factors, q);", "intro(mediator, factors);"),
+    ] {
+        let report = check(&changed, name);
+        assert_ne!(report.status, "verified");
+        assert!(report.judgment.is_none(), "{:?}", report.diagnostic);
+    }
+}
+
+#[test]
+fn constructive_implication_checks_both_propositions_and_their_direction() {
+    let source = "theorem t(a:Type, b:Type, x:a): a implies b implies a proof { intro(first, second); exact(first); }";
+    assert_eq!(check(source, "t").status, "verified");
+    for changed in [
+        source.replace("exact(first)", "exact(second)"),
+        source.replace(": a implies", ": x implies"),
+        source.replace("b implies a proof", "b implies x proof"),
+    ] {
+        assert_eq!(check(&changed, "t").status, "rejected");
+    }
+}
+
+#[test]
 fn local_facts_are_checked_even_when_unused() {
     let source = "theorem t(a:Type,b:Type,x:a):a proof { have h:a by exact(x); exact(x); }";
     assert_eq!(check(source, "t").status, "verified");
