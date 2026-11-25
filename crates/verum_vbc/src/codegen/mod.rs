@@ -1855,6 +1855,10 @@ impl VbcCodegen {
             .unwrap_or_else(|| self.source_module_root())
     }
 
+    fn diagnostic_declaration_scope<'a>(&'a self, scope: &'a str) -> &'a str {
+        if scope.is_empty() { &self.config.module_name } else { scope }
+    }
+
     /// Select a mount from the current source's retained declaration scope.
     /// A known source with no such mount must not consult another file's flat
     /// context table. The fallback supports callers that seed a context without
@@ -17599,7 +17603,7 @@ impl VbcCodegen {
         }).map_err(|mut error| {
             if error.context.is_none() {
                 error.context = Some(format!("in declaration scope '{}'",
-                    declaration_scope.unwrap_or_else(|| self.lexical_type_scope())));
+                    self.diagnostic_declaration_scope(declaration_scope.unwrap_or_else(|| self.lexical_type_scope()))));
             }
             error
         })
@@ -18047,7 +18051,7 @@ impl VbcCodegen {
             let id = self.nominal_type_id_in_scope(&name, scope)
                 .filter(|_| self.nominal_path_is_declared_in_scope(ty, scope))
                 .ok_or_else(|| CodegenError::with_span(CodegenErrorKind::InvalidSourceSignature(
-                    format!("unresolved nominal type '{name}' in declaration scope '{scope}'"),
+                    format!("unresolved nominal type '{name}' in declaration scope '{}'", self.diagnostic_declaration_scope(scope)),
                 ), ty.span))?;
             return Ok(TypeRef::Concrete(if preserve_refs && path.is_single() {
                 id.declared_scalar_identity(&name)
@@ -18158,7 +18162,7 @@ impl VbcCodegen {
                     .filter(|_| self.semantic_formal_path_is_declared(ty, &Default::default())) {
                     Some(type_id) => TypeRef::Concrete(type_id),
                     None => return Err(CodegenError::with_span(CodegenErrorKind::InvalidSourceSignature(
-                        format!("unresolved nominal type '{type_name}' in declaration scope '{}'", self.lexical_type_scope()),
+                        format!("unresolved nominal type '{type_name}' in declaration scope '{}'", self.diagnostic_declaration_scope(self.lexical_type_scope())),
                     ), ty.span)),
                 }
             }
@@ -19185,7 +19189,9 @@ impl VbcCodegen {
                     verum_ast::FunctionParamKind::Regular { ty, .. } => Some(ty),
                     _ => None,
                 };
-                if self.parameter_ownership(ty.as_ref(), written)? == value_uses::ParameterOwnership::RawAddress {
+                let ownership = self.parameter_ownership(ty.as_ref(), written)
+                    .map_err(|error| error.at_source(param.span))?;
+                if ownership == value_uses::ParameterOwnership::RawAddress {
                     self.ctx.mark_raw_pointer(reg);
                     continue;
                 }
@@ -19196,7 +19202,7 @@ impl VbcCodegen {
                 if owns_parameters { self.establish_parameter_owner(reg, &ty)?; }
             } else if owns_parameters {
                 return Err(CodegenError::unsupported_expr(
-                    "owned parameter requires a complete declaration and binding inventory"));
+                    "owned parameter requires a complete declaration and binding inventory").at_source(param.span));
             }
         }
 

@@ -18,10 +18,12 @@ fn declaration_interface(source: &str) -> VbcModule {
     let ast = Parser::new(source).parse_module().unwrap();
     VbcCodegen::new().collect_declaration_interface(&[&ast]).unwrap()
 }
-fn assert_incomplete_owned_body_refuses(source: &str) {
+fn assert_incomplete_owned_body_refuses(source: &str, formal: &str) {
     let ast = Parser::new(source).parse_module().unwrap();
-    let error = VbcCodegen::new().compile_module(&ast).unwrap_err().to_string();
-    assert!(error.contains("owned parameter requires a complete declaration and binding inventory"), "{error}");
+    let error = VbcCodegen::new().compile_module(&ast).unwrap_err();
+    assert!(error.to_string().contains("owned parameter requires a complete declaration and binding inventory"), "{error}");
+    let span = error.span.expect("source span of the incomplete formal");
+    assert_eq!(&source[span.start as usize..span.end as usize], formal);
 }
 fn roundtrip(m: &VbcModule) -> VbcModule {
     deserialize_module(&serialize_module(m).unwrap()).unwrap()
@@ -96,7 +98,7 @@ fn fixed_array_formals_keep_closed_extents_and_distinguish_zero_from_unknown() {
         assert_eq!(unknown.semantic_parameter_types().unwrap(), &[None]);
         assert!(unknown.semantic_return.is_none());
     }
-    assert_incomplete_owned_body_refuses(source);
+    assert_incomplete_owned_body_refuses(source, "a: [Int; N]");
 }
 
 #[test]
@@ -125,7 +127,7 @@ fn unsupported_positions_remain_unknown_without_shifting_following_formals() {
             Some([].as_slice())
         );
     }
-    assert_incomplete_owned_body_refuses(source);
+    assert_incomplete_owned_body_refuses(source, "b: [Int; N]");
     let complete = compile("fn raw(c: *const Int, d: &Int) -> Int { 7 }");
     for m in [&complete, &roundtrip(&complete)] {
         assert_eq!(function(m, "raw").semantic_parameter_types(), Some(expected[2..].as_ref()));

@@ -107,6 +107,8 @@ fn an_inline_interpolation_supplies_its_text_type_to_a_generic_method() {
     let error = VbcCodegen::with_config(CodegenConfig::new("format_lifetime"))
         .compile_module(&ast).expect_err("formatted Text cannot satisfy the receiver's Int slot");
     assert!(error.to_string().contains("conflicting source argument evidence"), "{error}");
+    let span = error.span.expect("the selected method call has a source span");
+    assert_eq!(&source[span.start as usize..span.end as usize], r#"holder.accept(f"answer {73}")"#);
 }
 
 #[test]

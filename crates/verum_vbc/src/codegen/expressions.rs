@@ -1364,7 +1364,7 @@ impl VbcCodegen {
             self.ctx.declared_result_types.insert(expr.span, declaration);
         }
         self.ctx.selected_call_result_span = outer;
-        result
+        result.map_err(|error| error.at_source(expr.span))
     }
 
     fn compile_expr_in_result_scope(

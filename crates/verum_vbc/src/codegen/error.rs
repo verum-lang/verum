@@ -246,6 +246,14 @@ impl CodegenError {
         }
     }
 
+    /// Keep the innermost real source location when propagating a lowering error.
+    pub(super) fn at_source(mut self, span: Span) -> Self {
+        if self.span.is_none() && span.start < span.end {
+            self.span = Some(span);
+        }
+        self
+    }
+
     /// Adds context to the error.
     pub fn with_context(mut self, ctx: impl Into<String>) -> Self {
         self.context = Some(ctx.into());
