@@ -16,16 +16,29 @@ mod numeric_capability_contract;
 #[path = "recovery_callable_contracts.rs"]
 mod recovery_callable_contracts;
 
-#[test]
-fn http2_frame_settings_and_stream_diagnostics_use_the_release_source_contracts() {
+fn check_release_owners(owners: &[&str]) {
     let session = crate::Session::new(crate::CompilerOptions::default());
     let (registry, phase) = release_stdlib_graph(&session);
-    for owner in ["core.net.http2.frame", "core.net.http2.settings", "core.net.http2.stream"] {
+    for &owner in owners {
         let module = registry.read().get_by_path(owner).unwrap().ast.clone();
         check_source_types(&mut phase.configured_checker(), owner, &module, &registry, |error| {
             error.to_diagnostic_with_span(Some(|span| session.convert_span(span)))
         }).unwrap_or_else(|errors| panic!("{owner}: {errors:#?}"));
     }
+}
+
+#[test]
+fn http2_frame_settings_and_stream_diagnostics_use_the_release_source_contracts() {
+    check_release_owners(&["core.net.http2.frame", "core.net.http2.settings", "core.net.http2.stream"]);
+}
+
+#[test]
+fn borrowed_format_pieces_and_byte_subslices_use_the_release_source_contracts() {
+    check_release_owners(&[
+        "core.base.panic",
+        "core.hash.crypto.sha256",
+        "core.security.x509.ext.subject_alt_name",
+    ]);
 }
 
 #[path = "sqlite_scanner_boundary.rs"]

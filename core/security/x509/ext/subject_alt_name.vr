@@ -180,8 +180,8 @@ fn match_dns_pattern(pattern: &Text, hostname: &Text) -> Bool {
         let mut i: Int = 0;
         while i < hb.len() && hb[i] != ('.' as Byte) { i = i + 1; }
         if i == 0 || i >= hb.len() { return false; }         // empty or no dot
-        let host_tail = &hb[(i + 1)..];
-        let pat_tail  = &pb[2..];
+        let host_tail = hb[(i + 1)..];
+        let pat_tail = pb[2..];
         return ascii_eq_ci(host_tail, pat_tail);
     }
 

@@ -180,7 +180,7 @@ implement Sha256 {
         // GetE pointer-mismatch when the fixed-array stack allocation
         // is read in a tight loop (task #17).
         while offset + BLOCK_SIZE <= n {
-            let block_slice = &data[offset..offset + BLOCK_SIZE];
+            let block_slice = data[offset..offset + BLOCK_SIZE];
             compress_block(&mut self.h, block_slice);
             offset = offset + BLOCK_SIZE;
         }

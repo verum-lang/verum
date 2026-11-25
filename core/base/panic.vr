@@ -558,7 +558,7 @@ public type FormatArgs is {
 fn format_args(args: FormatArgs) -> Text {
     let mut res = Text.new();
     for piece in args.pieces {
-        res.push_str(piece);
+        res.push_str(**piece);
     }
     res
 }
