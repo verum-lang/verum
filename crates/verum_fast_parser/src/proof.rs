@@ -1288,7 +1288,7 @@ impl<'a> RecursiveParser<'a> {
                 self.stream.expect(TokenKind::Colon)?;
                 let proposition = self.parse_expr()?;
                 let justification = if self.stream.consume(&TokenKind::By).is_some() {
-                    self.parse_tactic_expr_with_commas()?
+                    self.with_proof_semicolon(true, Self::parse_tactic_expr_with_commas)?
                 } else {
                     TacticExpr::Trivial
                 };
@@ -1305,7 +1305,7 @@ impl<'a> RecursiveParser<'a> {
                 self.stream.advance();
                 let proposition = self.parse_expr()?;
                 let justification = if self.stream.consume(&TokenKind::By).is_some() {
-                    self.parse_tactic_expr_with_commas()?
+                    self.with_proof_semicolon(true, Self::parse_tactic_expr_with_commas)?
                 } else {
                     TacticExpr::Trivial
                 };
@@ -1328,7 +1328,7 @@ impl<'a> RecursiveParser<'a> {
                 }
                 let proposition = self.parse_expr()?;
                 let justification = if self.stream.consume(&TokenKind::By).is_some() {
-                    self.parse_tactic_expr_with_commas()?
+                    self.with_proof_semicolon(true, Self::parse_tactic_expr_with_commas)?
                 } else {
                     TacticExpr::Trivial
                 };
@@ -2136,18 +2136,7 @@ impl<'a> RecursiveParser<'a> {
         // This allows `a + b` to be parsed as the start, with `==` being the calc relation
         let start = self.parse_expr_bp(7)?;
 
-        // Parse steps.
-        //
-        // Within a chain a `;` TERMINATES a step; it is not a tactic-sequence
-        // separator. The flag is scoped to the step loop and restored on EVERY
-        // exit — the loop below leaves through several `?`, and a leaked flag
-        // would silently change how tactic sequences parse in whatever the
-        // caller does next. See A75 and `semicolon_ends_construct`.
-        let prev_semi_scope = self.semicolon_ends_construct;
-        self.semicolon_ends_construct = true;
-        let steps_result = self.parse_calc_steps();
-        self.semicolon_ends_construct = prev_semi_scope;
-        let steps = steps_result?;
+        let steps = self.with_proof_semicolon(true, Self::parse_calc_steps)?;
 
         self.stream.expect(TokenKind::RBrace)?;
 
@@ -2322,6 +2311,19 @@ impl<'a> RecursiveParser<'a> {
         }
 
         Ok(tactic)
+    }
+
+    /// A structured step owns its terminating semicolon. Delimited tactics
+    /// open their own sequence scope, including on parse-error paths.
+    fn with_proof_semicolon<T>(
+        &mut self,
+        ends_step: bool,
+        parse: impl FnOnce(&mut Self) -> ParseResult<T>,
+    ) -> ParseResult<T> {
+        let saved = std::mem::replace(&mut self.semicolon_ends_construct, ends_step);
+        let result = parse(self);
+        self.semicolon_ends_construct = saved;
+        result
     }
 
     /// Whether the current semicolon joins tactics, rather than ending an
@@ -3021,7 +3023,7 @@ impl<'a> RecursiveParser<'a> {
                 self.stream.advance();
                 let mut tactics = Vec::new();
                 while !self.stream.check(&TokenKind::RBrace) && !self.stream.at_end() {
-                    tactics.push(self.parse_tactic_expr()?);
+                    tactics.push(self.with_proof_semicolon(false, Self::parse_tactic_expr)?);
                     self.stream.consume(&TokenKind::Semicolon);
                 }
                 self.stream.expect(TokenKind::RBrace)?;
@@ -3031,7 +3033,7 @@ impl<'a> RecursiveParser<'a> {
             // Parenthesized tactic: ( t1; t2 )
             Some(TokenKind::LParen) => {
                 self.stream.advance();
-                let tactic = self.parse_tactic_expr()?;
+                let tactic = self.with_proof_semicolon(false, Self::parse_tactic_expr)?;
                 self.stream.expect(TokenKind::RParen)?;
                 Ok(tactic)
             }

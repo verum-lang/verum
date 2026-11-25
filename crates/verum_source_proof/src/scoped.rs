@@ -7,6 +7,7 @@ use verum_ast::{BinOp, Expr, ExprKind, Path, PathSegment};
 use verum_common::{Maybe, span::Span};
 use verum_proof::proof_checker::{self as k, Certificate, Context, Level, Term};
 
+mod structured;
 mod tactics;
 
 pub const PROFILE: &str = "verum-source-pi-id/1";
@@ -47,6 +48,11 @@ pub enum Ir {
         body: Box<Ir>,
     },
     App(Box<Ir>, Box<Ir>),
+    Let {
+        id: BinderId,
+        value: Box<Ir>,
+        body: Box<Ir>,
+    },
     Id {
         carrier: Box<Ir>,
         left: Box<Ir>,
@@ -570,8 +576,9 @@ impl Elab {
         match p {
             ProofBody::Term(e) => self.expr(e),
             ProofBody::Tactic(tactic) => self.tactics(tactic, goal),
+            ProofBody::Structured(block) => self.structured(block, goal),
             _ => Err(unsupported(
-                "structured proof steps require explicit elaboration; use a term or supported tactics",
+                "proof method outside the selected logical profile",
             )),
         }
     }
@@ -600,6 +607,19 @@ pub fn lower(t: &Ir, frame: &mut Vec<BinderId>) -> Result<Term> {
                 Term::pi(d, b)
             } else {
                 Term::lam(d, b)
+            }
+        }
+        Ir::Let { id, value, body } => {
+            if frame.contains(id) {
+                return Err(Error::Scope("local proof identity reused".into()));
+            }
+            let value = lower(value, frame)?;
+            frame.push(*id);
+            let body = lower(body, frame);
+            frame.pop();
+            Term::Let {
+                value: Box::new(value),
+                body: Box::new(body?),
             }
         }
         Ir::App(a, b) => Term::app(lower(a, frame)?, lower(b, frame)?),

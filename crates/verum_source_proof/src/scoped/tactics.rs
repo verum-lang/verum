@@ -415,6 +415,11 @@ fn free_binders(term: &Ir, free: &mut BTreeSet<BinderId>) {
             free.remove(id);
             free_binders(domain, free);
         }
+        Ir::Let { id, value, body } => {
+            free_binders(body, free);
+            free.remove(id);
+            free_binders(value, free);
+        }
         Ir::App(a, b) => {
             free_binders(a, free);
             free_binders(b, free);
@@ -466,6 +471,11 @@ fn rewrite_ir(term: &Ir, substitute: &impl Fn(&Ir) -> Option<Ir>) -> (Ir, bool) 
         Ir::Lam { id, domain, body } => Ir::Lam {
             id: *id,
             domain: child(domain),
+            body: child(body),
+        },
+        Ir::Let { id, value, body } => Ir::Let {
+            id: *id,
+            value: child(value),
             body: child(body),
         },
         Ir::App(a, b) => Ir::App(child(a), child(b)),

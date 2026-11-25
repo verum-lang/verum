@@ -1,0 +1,49 @@
+// A chain of inhabited sets with constant successor maps has a singleton
+// colimit. Every cocone factors pointwise through the value at the seed.
+public theorem collapsing_chain_factorization(
+    index_ty: Type, zero: index_ty, succ: fn(index_ty) -> index_ty,
+    fibre: fn(index_ty) -> Type, seed: fibre(zero), target: Type,
+    advance: fn<n: meta index_ty>(fibre(n)) -> fibre(succ(n)),
+    leg: fn<n: meta index_ty>(fibre(n)) -> target,
+    induct: fn<p: meta fn(index_ty) -> Type, n: meta index_ty>(
+        p(zero), fn<k: meta index_ty>(p(k)) -> p(succ(k))
+    ) -> p(n)
+)
+    requires forall n: index_ty. forall x: fibre(n). forall y: fibre(n).
+        advance(n, x) == advance(n, y)
+    requires forall n: index_ty. forall x: fibre(n).
+        leg(n, x) == leg(succ(n), advance(n, x))
+    : forall n: index_ty. forall x: fibre(n). leg(n, x) == leg(zero, seed)
+proof {
+    have constant_step: forall n: index_ty. forall x: fibre(n). forall y: fibre(n).
+        advance(n, x) == advance(n, y) by assumption;
+    have commutes: forall n: index_ty. forall x: fibre(n).
+        leg(n, x) == leg(succ(n), advance(n, x)) by assumption;
+    have same_stage: forall n: index_ty. forall x: fibre(n). forall y: fibre(n).
+        leg(n, x) == leg(n, y)
+        by intro(n, x, y), rewrite(commutes(n, x)), rewrite(commutes(n, y)),
+           rewrite(constant_step(n, x, y)), reflexivity;
+    have next_stage: forall n: index_ty.
+        forall ih: Path<target>(leg(n, induct(fibre, n, seed, advance)), leg(zero, seed)).
+        leg(succ(n), induct(fibre, succ(n), seed, advance)) == leg(zero, seed)
+        by intro(n, ih), rewrite(same_stage(succ(n), induct(fibre, succ(n), seed, advance),
+                                          advance(n, induct(fibre, n, seed, advance)))),
+           rewrite < commutes(n, induct(fibre, n, seed, advance)), exact(ih);
+    have at_point: forall n: index_ty. leg(n, induct(fibre, n, seed, advance)) == leg(zero, seed)
+        by intro(n), exact(induct(
+            |k: index_ty| leg(k, induct(fibre, k, seed, advance)) == leg(zero, seed),
+            n, same_stage(zero, induct(fibre, zero, seed, advance), seed), next_stage));
+    intro(n, x); rewrite(same_stage(n, x, induct(fibre, n, seed, advance))); exact(at_point(n));
+}
+
+// Any mediator out of the singleton is determined at the initial point.
+public theorem collapsing_chain_factor_unique(
+    index_ty: Type, zero: index_ty, fibre: fn(index_ty) -> Type, seed: fibre(zero),
+    target: Type, leg: fn<n: meta index_ty>(fibre(n)) -> target, candidate: target
+)
+    requires forall n: index_ty. forall x: fibre(n). leg(n, x) == candidate
+    : leg(zero, seed) == candidate
+proof {
+    have factors: forall n: index_ty. forall x: fibre(n). leg(n, x) == candidate by assumption;
+    exact(factors(zero, seed));
+}

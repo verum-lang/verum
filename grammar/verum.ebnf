@@ -2861,7 +2861,9 @@ show_step = 'show' , expression , proof_justification ;
 obtain_step = 'obtain' , pattern , 'from' , expression ;
 tactic_application = tactic_expr , ';' ;
 
-proof_justification = 'by' , ( tactic_expr | identifier ) ;
+(* In a structured step an ungrouped semicolon ends the justification.
+   Use commas or a parenthesized/braced tactic sequence for its intermediate steps. *)
+proof_justification = 'by' , tactic_expr , { ',' , tactic_expr } ;
 
 (* 2.19.7 Tactic Expressions *)
 (*

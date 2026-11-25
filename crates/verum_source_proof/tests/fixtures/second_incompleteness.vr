@@ -1,0 +1,44 @@
+// The internal derivability argument of Gödel II. A presentation supplies
+// its derivation rules and both directions of a diagonal sentence. A proof
+// of its own consistency then yields an actual derivation of its bottom.
+public theorem second_incompleteness(
+    sent: Type, ded: fn(sent) -> Type,
+    imp: fn(sent, sent) -> sent, prov: fn(sent) -> sent,
+    falsum: sent, fixed: sent,
+    mp: fn<a: meta sent, b: meta sent>(ded(imp(a, b)), ded(a)) -> ded(b),
+    weaken: fn<a: meta sent, b: meta sent>(ded(b)) -> ded(imp(a, b)),
+    combine: fn<a: meta sent, b: meta sent, c: meta sent>(
+        ded(imp(a, imp(b, c))), ded(imp(a, b))
+    ) -> ded(imp(a, c)),
+    necessitate: fn<a: meta sent>(ded(a)) -> ded(prov(a)),
+    diagonal_out: ded(imp(fixed, imp(prov(fixed), falsum))),
+    diagonal_in: ded(imp(imp(prov(fixed), falsum), fixed)),
+    internal_consistency: ded(imp(prov(falsum), falsum))
+)
+    requires forall a: sent. forall b: sent.
+        ded(imp(prov(imp(a, b)), imp(prov(a), prov(b))))
+    requires forall a: sent. ded(imp(prov(a), prov(prov(a))))
+    : ded(falsum)
+proof {
+    have distribution: forall a: sent. forall b: sent.
+        ded(imp(prov(imp(a, b)), imp(prov(a), prov(b)))) by assumption;
+    have introspection: forall a: sent. ded(imp(prov(a), prov(prov(a)))) by assumption;
+    have chain: forall a: sent. forall b: sent. forall c: sent.
+        forall first: ded(imp(a, b)). forall second: ded(imp(b, c)). ded(imp(a, c))
+        by intro(a, b, c, first, second), exact(combine(a, b, c, weaken(a, imp(b, c), second), first));
+    have lifted: ded(imp(prov(fixed), prov(imp(prov(fixed), falsum))))
+        by exact(mp(prov(imp(fixed, imp(prov(fixed), falsum))),
+                    imp(prov(fixed), prov(imp(prov(fixed), falsum))),
+                    distribution(fixed, imp(prov(fixed), falsum)),
+                    necessitate(imp(fixed, imp(prov(fixed), falsum)), diagonal_out)));
+    have conditional: ded(imp(prov(fixed), imp(prov(prov(fixed)), prov(falsum))))
+        by exact(chain(prov(fixed), prov(imp(prov(fixed), falsum)),
+                       imp(prov(prov(fixed)), prov(falsum)), lifted, distribution(prov(fixed), falsum)));
+    have prov_bottom: ded(imp(prov(fixed), prov(falsum)))
+        by exact(combine(prov(fixed), prov(prov(fixed)), prov(falsum), conditional, introspection(fixed)));
+    have neg_prov: ded(imp(prov(fixed), falsum))
+        by exact(chain(prov(fixed), prov(falsum), falsum, prov_bottom, internal_consistency));
+    have sentence: ded(fixed)
+        by exact(mp(imp(prov(fixed), falsum), fixed, diagonal_in, neg_prov));
+    exact(mp(prov(fixed), falsum, neg_prov, necessitate(fixed, sentence)));
+}
