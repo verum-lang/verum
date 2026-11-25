@@ -22,6 +22,29 @@ fn accepts(source: &str, declaration: &str) -> Certificate {
     judgment.certificate
 }
 
+#[test]
+fn explicit_path_in_a_proposition_uses_the_declared_fibre() {
+    let source = "theorem t(a:Type,p:fn(a)->Type,x:a,y:a,u:p(x),v:p(x),h:Path<p(x)>(u,v)):Path<p(x)>(u,v) proof=h;";
+    let proof = accepts(source, "t");
+    let inferred = accepts(
+        &source.replace("):Path<p(x)>(u,v) proof", "):u==v proof"),
+        "t",
+    );
+    assert_eq!(proof.claimed_type, inferred.claimed_type);
+    assert_eq!(proof.term, inferred.term);
+    for changed in [
+        source.replace("):Path<p(x)>(u,v) proof", "):Path<p(y)>(u,v) proof"),
+        source.replace("):Path<p(x)>(u,v) proof", "):Path<p(x)>(v,u) proof"),
+        source.replace("):Path<p(x)>(u,v) proof", "):Path<p(x)>(u) proof"),
+    ] {
+        let result = check(&changed, "t");
+        assert_eq!(result.status, "rejected", "{result:?}");
+        assert!(result.judgment.is_none());
+    }
+    let shadowed = "theorem t(a:Type,x:a,Path:fn(a,a)->Type):Path<a>(x,x) proof by reflexivity;";
+    assert_eq!(check(shadowed, "t").status, "unsupported");
+}
+
 const TRANSPORT: &str = include_str!("fixtures/transport.vr");
 const QUANTIFIED: &str = include_str!("fixtures/quantified_symmetry.vr");
 const IDENTITY_INDUCTION: &str = include_str!("fixtures/identity_induction.vr");

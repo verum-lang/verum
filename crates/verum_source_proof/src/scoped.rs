@@ -2,7 +2,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use verum_ast::decl::{FunctionParamKind, ProofBody, TacticExpr, TheoremDecl};
 use verum_ast::pattern::{Pattern, PatternKind};
-use verum_ast::ty::{GenericParamKind, Type, TypeKind, UniverseLevelExpr};
+use verum_ast::ty::{GenericArg, GenericParamKind, Type, TypeKind, UniverseLevelExpr};
 use verum_ast::{BinOp, Expr, ExprKind, Path, PathSegment};
 use verum_common::{Maybe, span::Span};
 use verum_proof::proof_checker::{self as k, Certificate, Context, Level, Term};
@@ -267,7 +267,8 @@ impl Elab {
                 contexts,
                 where_clause,
             } => {
-                if *is_async || calling_convention.is_some()
+                if *is_async
+                    || calling_convention.is_some()
                     || !contexts.is_empty()
                     || where_clause.is_some()
                     || params.is_empty()
@@ -324,11 +325,10 @@ impl Elab {
                 self.stack.truncate(saved);
                 result?
             }
-            TypeKind::PathType { carrier, lhs, rhs } => Ir::Id {
-                carrier: Box::new(self.ty(carrier)?),
-                left: Box::new(self.expr(lhs)?),
-                right: Box::new(self.expr(rhs)?),
-            },
+            TypeKind::PathType { carrier, lhs, rhs } => {
+                let carrier = self.ty(carrier)?;
+                self.path_type(carrier, lhs, rhs)?
+            }
             _ => {
                 return Err(unsupported(format!(
                     "type form outside pure Pi/Id profile: {:?}",
@@ -338,6 +338,13 @@ impl Elab {
         };
         self.require_type(&ir)?;
         Ok(ir)
+    }
+    fn path_type(&mut self, carrier: Ir, left: &Expr, right: &Expr) -> Result<Ir> {
+        Ok(Ir::Id {
+            carrier: Box::new(carrier),
+            left: Box::new(self.expr(left)?),
+            right: Box::new(self.expr(right)?),
+        })
     }
     fn expr(&mut self, e: &Expr) -> Result<Ir> {
         self.expr_inner(e)
@@ -369,6 +376,28 @@ impl Elab {
                 type_args,
                 args,
             } => {
+                // The proposition grammar is expression-valued. Its explicit Path<A>(x, y)
+                // arrives as a call, while a parameter annotation already carries PathType.
+                // Lexical bindings still take precedence in expression position.
+                if !type_args.is_empty()
+                    && matches!(&func.kind, ExprKind::Path(p) if p.as_ident().is_some_and(|n| n.as_str() == "Path"))
+                    && !self.stack.iter().any(|b| b.name.as_deref() == Some("Path"))
+                {
+                    let ([parameter], [left, right]) = (type_args.as_slice(), args.as_slice())
+                    else {
+                        return Err(Error::Rejected(
+                            "Path expects one carrier and two endpoints".into(),
+                        ));
+                    };
+                    let carrier = match parameter {
+                        GenericArg::Type(ty) => self.ty(ty)?,
+                        GenericArg::Const(expr) => self.expr(expr)?,
+                        _ => return Err(Error::Rejected("Path carrier must be a type".into())),
+                    };
+                    let path = self.path_type(carrier, left, right)?;
+                    self.require_type(&path)?;
+                    return Ok(path);
+                }
                 if !type_args.is_empty() {
                     return Err(unsupported(
                         "implicit type argument insertion is not implemented",
