@@ -308,16 +308,10 @@ pub use infinity_category::{
 pub mod grothendieck;
 pub use grothendieck::{GrothendieckConstruction, SIndexedDiagram, build_grothendieck};
 
-/// Adámek-Rosický 1.26 — λ-filtered colimit closure of κ-accessible
-/// categories. algorithmic kernel rule. Discharges the
-/// "κ_1-accessibility preserved under transfinite-tower colimit"
-/// invariant that gates MSFS §6 β-part Step 4. Pre-this-module
-/// admitted via msfs_lemma_A_8_adamek_rosicky framework axiom;
-/// ships the constructive closure operation itself.
+/// Check the declared ranks of a filtered diagram and its target category.
 pub mod accessibility;
 pub use accessibility::{
-    FilteredColimit, KappaAccessibleCategory, LambdaFilteredDiagram, build_filtered_colimit,
-    cofinality_bound_holds,
+    FilteredDiagramError, KappaAccessibleCategory, LambdaFilteredDiagram, check_filtered_diagram_scope,
 };
 
 /// Yoneda embedding (HTT 1.2.1) + ∞-Kan extensions (HTT 4.3.3.7) —

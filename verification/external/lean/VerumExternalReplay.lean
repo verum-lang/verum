@@ -10,6 +10,7 @@ import VerumExternalReplay.KernelSoundness
 import VerumExternalReplay.TypeAlgebra
 import VerumExternalReplay.TerminalCategory
 import VerumExternalReplay.SetDiagramColimit
+import VerumExternalReplay.FiniteStagePresentability
 import VerumExternalReplay.PropertyRequirement
 import VerumExternalReplay.IntegerBoundEntailment
 import VerumExternalReplay.ValueIndexUnification

@@ -247,17 +247,18 @@ pub fn htt_roadmap() -> Vec<RoadmapEntry> {
 /// with the chapter/page citation.
 pub fn adamek_rosicky_roadmap() -> Vec<RoadmapEntry> {
     vec![
-        RoadmapEntry::mechanised(
-            "AR 1.26",
-            "λ-filtered colimit closure of κ-accessible categories",
-            "accessibility::build_filtered_colimit",
-        ),
+        RoadmapEntry {
+            section: "AR 1.26".into(),
+            title: "Rank hypotheses for filtered colimits in accessible categories".into(),
+            status: MechanisationStatus::Partial,
+            kernel_modules: "accessibility::check_filtered_diagram_scope (rank diagnostics)".into(),
+        },
         RoadmapEntry {
             section: Text::from("AR 2.6"),
             title: Text::from("Reflexion of accessible category to a presentable one"),
             status: MechanisationStatus::Partial,
             kernel_modules: Text::from(
-                "reflective_subcategory::build_reflective_subcategory + accessibility::build_filtered_colimit",
+                "reflective_subcategory::build_reflective_subcategory + accessibility::check_filtered_diagram_scope",
             ),
         },
         RoadmapEntry {
@@ -291,7 +292,7 @@ pub fn adamek_rosicky_roadmap() -> Vec<RoadmapEntry> {
             ),
             status: MechanisationStatus::Partial,
             kernel_modules: Text::from(
-                "accessibility::build_filtered_colimit + adjoint_functor::build_adjunction",
+                "accessibility::check_filtered_diagram_scope + adjoint_functor::build_adjunction",
             ),
         },
         RoadmapEntry {
@@ -549,7 +550,7 @@ mod tests {
             .iter()
             .find(|e| e.section.as_str() == "AR 1.26")
             .expect("AR 1.26 must be in the roadmap");
-        assert_eq!(ar126.status, MechanisationStatus::Mechanised);
+        assert_eq!(ar126.status, MechanisationStatus::Partial);
     }
 
     // ----- CoverageReport -----
