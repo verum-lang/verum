@@ -55,6 +55,34 @@ fn check_source(source: &str) -> List<Text> {
 }
 
 #[test]
+fn explicit_field_borrows_respect_the_projected_place() {
+    let prelude = "module match_result; type Cell<T> is Occupied(T) | Empty; type Slot<T> is { field: T };";
+    let mut failures = Vec::new();
+    for (body, admits) in [
+        ("fn read<T>(s:&Cell<T>)->&T {match s {Occupied(ref x)=>x,Empty=>panic(\"empty\")}}", true),
+        ("fn write<T>(s:&mut Cell<T>)->&mut T {match s {Occupied(ref mut x)=>x,Empty=>panic(\"empty\")}}", true),
+        ("fn shared<T>(s:&mut Cell<T>)->&T {match s {Occupied(ref x)=>x,Empty=>panic(\"empty\")}}", true),
+        ("fn double<T>(s:&Cell<&T>)->&&T {match s {Occupied(ref x)=>x,Empty=>panic(\"empty\")}}", true),
+        ("fn pair<T>(s:&(T,Int))->&T {match s {(ref value,_)=>value}}", true),
+        ("fn record<T>(s:&Slot<T>)->&T {let Slot {field: ref x} = s; x}", true),
+        ("fn stored<T>(s:&Slot<&T>)->&&T {let Slot {field} = s; field}", true),
+        ("fn forge_record<T>(s:&Slot<T>)->&mut T {let Slot {field: ref mut x} = s; x}", false),
+        ("fn forge<T>(s:&Cell<T>)->&mut T {match s {Occupied(ref mut x)=>x,Empty=>panic(\"empty\")}}", false),
+        ("fn escape<T>(s:Cell<T>)->&T {match s {Occupied(ref x)=>x,Empty=>panic(\"empty\")}}", false),
+        ("fn wrong<T>(s:&Cell<T>)->&&T {match s {Occupied(ref x)=>x,Empty=>panic(\"empty\")}}", false),
+        ("fn wrong(s:&Cell<Int>)->&&Int {match s {Occupied(ref x)=>x,Empty=>panic(\"empty\")}}", false),
+        ("fn wrong(s:&Int)->&&Int {s}", false),
+        ("fn wrong<T>(s:&T)->&&T {s}", false),
+    ] {
+        let errors = check_source(&format!("{prelude} {body}"));
+        if errors.is_empty() != admits {
+            failures.push((body, errors));
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+#[test]
 fn mutable_variant_payload_outlives_its_pattern_scope() {
     let errors = check(
         r#"

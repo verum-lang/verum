@@ -64,6 +64,43 @@ fn pattern_field_type(scrutinee: &Type, field: &Type) -> Type {
     }
 }
 
+fn pattern_referent(mut ty: &Type) -> &Type {
+    while let Some((inner, _, _)) = ty.reference_parts() {
+        ty = inner;
+    }
+    ty
+}
+
+/// A projection already carries a borrow of the field. An explicit ref binding
+/// selects its grant while preserving any reference stored inside the field.
+fn pattern_binding_type(
+    ty: &Type,
+    by_ref: bool,
+    mutable: bool,
+    projected: bool,
+    span: Span,
+) -> Result<Type> {
+    use verum_ast::expr::ReferenceKind;
+    if !by_ref {
+        return Ok(ty.clone());
+    }
+    if projected && let Some((inner, writable, kind)) = ty.reference_parts() {
+        if mutable && !writable {
+            return Err(TypeError::OtherWithCodeSpanned {
+                code: "E310".into(),
+                msg: "cannot borrow a field through a shared reference as mutable".into(),
+                span,
+            });
+        }
+        return Ok(match kind {
+            ReferenceKind::Managed => Type::reference(mutable, inner.clone()),
+            ReferenceKind::Checked => Type::checked_reference(mutable, inner.clone()),
+            ReferenceKind::Unsafe => Type::unsafe_reference(mutable, inner.clone()),
+        });
+    }
+    Ok(Type::reference(mutable, ty.clone()))
+}
+
 /// A single pattern may bind a tuple payload as a whole. Positional patterns
 /// destructure its fields. Both binding passes must use the same shape.
 fn variant_tuple_fields<'a>(
@@ -415,6 +452,20 @@ impl TypeChecker {
         pattern: &Pattern,
         scheme: TypeScheme,
     ) -> Result<()> {
+        self.bind_place_pattern(pattern, scheme, false)
+    }
+
+    fn bind_projected_field(
+        &mut self, pattern: &Pattern, scrutinee: &Type, field: &Type,
+    ) -> Result<()> {
+        self.bind_place_pattern(
+            pattern,
+            TypeScheme::mono(pattern_field_type(scrutinee, field)),
+            scrutinee.reference_parts().is_some(),
+        )
+    }
+
+    fn bind_place_pattern(&mut self, pattern: &Pattern, scheme: TypeScheme, projected: bool) -> Result<()> {
         let _global_guard = GlobalDepthGuard::enter()?;
         use verum_ast::pattern::PatternKind;
 
@@ -447,18 +498,9 @@ impl TypeChecker {
                 by_ref,
                 mutable,
             } => {
-                // If the pattern uses 'ref' or 'ref mut', wrap the type in a reference
-                // e.g., `Some(ref x)` binds x to &T, `Some(ref mut x)` binds x to &mut T
-                let binding_scheme = if *by_ref {
-                    TypeScheme {
-                        ty: Type::Reference {
-                            inner: Box::new(scheme.ty.clone()),
-                            mutable: *mutable,
-                        },
-                        ..scheme.clone()
-                    }
-                } else {
-                    scheme.clone()
+                let binding_scheme = TypeScheme {
+                    ty: pattern_binding_type(&scheme.ty, *by_ref, *mutable, projected, pattern.span)?,
+                    ..scheme.clone()
                 };
                 self.ctx
                     .env
@@ -488,7 +530,7 @@ impl TypeChecker {
                     }
                 }
                 if let Some(sub) = subpattern {
-                    self.bind_pattern_scheme(sub, scheme)?;
+                    self.bind_place_pattern(sub, scheme, projected)?;
                 }
                 Ok(())
             }
@@ -509,41 +551,8 @@ impl TypeChecker {
                 // When destructuring through a reference, each element gets the
                 // reference wrapper applied. So &(T, U) -> pattern (a, b) gives
                 // a: &T and b: &U (not T and U directly).
-                let (tuple_ty, ref_wrapper): (Type, Option<Box<dyn Fn(Type) -> Type>>) =
-                    match &scheme.ty {
-                        Type::Tuple(_) => (scheme.ty.clone(), None),
-                        Type::Reference { inner, mutable } => {
-                            let m = *mutable;
-                            (
-                                *inner.clone(),
-                                Some(Box::new(move |t| Type::Reference {
-                                    inner: Box::new(t),
-                                    mutable: m,
-                                })),
-                            )
-                        }
-                        Type::CheckedReference { inner, mutable } => {
-                            let m = *mutable;
-                            (
-                                *inner.clone(),
-                                Some(Box::new(move |t| Type::CheckedReference {
-                                    inner: Box::new(t),
-                                    mutable: m,
-                                })),
-                            )
-                        }
-                        Type::UnsafeReference { inner, mutable } => {
-                            let m = *mutable;
-                            (
-                                *inner.clone(),
-                                Some(Box::new(move |t| Type::UnsafeReference {
-                                    inner: Box::new(t),
-                                    mutable: m,
-                                })),
-                            )
-                        }
-                        other => (other.clone(), None),
-                    };
+                let referent = pattern_referent(&scheme.ty);
+                let tuple_ty = referent.clone();
 
                 // Resolve type variables and named type aliases to find underlying tuple type
                 let tuple_ty = {
@@ -705,11 +714,7 @@ impl TypeChecker {
 
                         // Bind front patterns
                         for (pat, ty) in before.iter().zip(types.iter()) {
-                            let elem_ty = match &ref_wrapper {
-                                Some(wrap) => wrap(ty.clone()),
-                                None => ty.clone(),
-                            };
-                            self.bind_pattern(pat, &elem_ty)?;
+                            self.bind_projected_field(pat, &scheme.ty, ty)?;
                         }
 
                         // Bind back patterns from the end of the tuple
@@ -717,11 +722,7 @@ impl TypeChecker {
                             .iter()
                             .zip(types.iter().skip(types.len() - after.len()))
                         {
-                            let elem_ty = match &ref_wrapper {
-                                Some(wrap) => wrap(ty.clone()),
-                                None => ty.clone(),
-                            };
-                            self.bind_pattern(pat, &elem_ty)?;
+                            self.bind_projected_field(pat, &scheme.ty, ty)?;
                         }
                     } else {
                         if patterns.len() != types.len() {
@@ -733,11 +734,7 @@ impl TypeChecker {
                         }
                         for (pat, ty) in patterns.iter().zip(types.iter()) {
                             // Apply reference wrapper if we auto-deref'd through a reference
-                            let elem_ty = match &ref_wrapper {
-                                Some(wrap) => wrap(ty.clone()),
-                                None => ty.clone(),
-                            };
-                            self.bind_pattern(pat, &elem_ty)?;
+                            self.bind_projected_field(pat, &scheme.ty, ty)?;
                         }
                     }
                     Ok(())
@@ -759,7 +756,7 @@ impl TypeChecker {
                     return Err(TypeError::Other("dependent record patterns require a stable receiver; use named projections".into()));
                 }
                 // First, try to resolve as a record type (the original behavior)
-                if let Some(field_types) = self.resolve_to_record_type(&scheme.ty) {
+                if let Some(field_types) = self.resolve_to_record_type(pattern_referent(&scheme.ty)) {
                     // A named case payload is not a field of the enclosing sum.
                     // Authorize record fields only after resolving an actual record.
                     for field in field_patterns {
@@ -770,12 +767,12 @@ impl TypeChecker {
                             Some(field_ty) => {
                                 // If pattern is provided, bind it; otherwise bind the field name directly
                                 if let Some(ref pat) = field_pat.pattern {
-                                    self.bind_pattern(pat, field_ty)?;
+                                    self.bind_projected_field(pat, &scheme.ty, field_ty)?;
                                 } else {
                                     // Shorthand: { x } means { x: x }
                                     self.ctx.env.insert(
                                         field_pat.name.name.clone(),
-                                        TypeScheme::mono(field_ty.clone()),
+                                        TypeScheme::mono(pattern_field_type(&scheme.ty, field_ty)),
                                     );
                                 }
                             }
@@ -2300,11 +2297,11 @@ impl TypeChecker {
                 }
 
                 // Collect bindings from first pattern
-                let first_bindings = self.collect_pattern_bindings(&patterns[0], &scheme.ty)?;
+                let first_bindings = self.collect_place_bindings(&patterns[0], &scheme.ty, projected)?;
 
                 // Check all other patterns have same bindings
                 for (i, pat) in patterns.iter().enumerate().skip(1) {
-                    let bindings = self.collect_pattern_bindings(pat, &scheme.ty)?;
+                    let bindings = self.collect_place_bindings(pat, &scheme.ty, projected)?;
 
                     // Check that binding sets are identical
                     if first_bindings.len() != bindings.len() {
@@ -2356,7 +2353,7 @@ impl TypeChecker {
                 // ordinary binder, preserving reference and ownership state.
                 // The first alternative supplies the final common bindings.
                 for pattern in patterns.iter().rev() {
-                    self.bind_pattern_scheme(pattern, scheme.clone())?;
+                    self.bind_place_pattern(pattern, scheme.clone(), projected)?;
                 }
 
                 Ok(())
@@ -2605,13 +2602,13 @@ impl TypeChecker {
 
             PatternKind::Paren(inner) => {
                 // Parenthesized pattern - just unwrap and process inner
-                self.bind_pattern_scheme(inner, scheme)
+                self.bind_place_pattern(inner, scheme, projected)
             }
 
             #[allow(deprecated)]
             PatternKind::View { pattern, .. } => {
                 // View patterns: bind the inner pattern
-                self.bind_pattern_scheme(pattern, scheme)
+                self.bind_place_pattern(pattern, scheme, projected)
             }
 
             PatternKind::Active {
@@ -2818,7 +2815,7 @@ impl TypeChecker {
                 // The guard is an expression that must evaluate to bool at runtime.
                 // For type binding purposes, we only need to bind the inner pattern.
                 // The guard expression is type-checked separately in match arm processing.
-                self.bind_pattern_scheme(pattern, scheme)
+                self.bind_place_pattern(pattern, scheme, projected)
             }
 
             PatternKind::Cons { head, tail } => {
@@ -2846,6 +2843,20 @@ impl TypeChecker {
         pattern: &Pattern,
         ty: &Type,
     ) -> Result<List<(Text, Type)>> {
+        self.collect_place_bindings(pattern, ty, false)
+    }
+
+    fn collect_field_bindings(
+        &mut self, pattern: &Pattern, scrutinee: &Type, field: &Type,
+    ) -> Result<List<(Text, Type)>> {
+        self.collect_place_bindings(
+            pattern,
+            &pattern_field_type(scrutinee, field),
+            scrutinee.reference_parts().is_some(),
+        )
+    }
+
+    fn collect_place_bindings(&mut self, pattern: &Pattern, ty: &Type, projected: bool) -> Result<List<(Text, Type)>> {
         use verum_ast::pattern::PatternKind;
 
         match &pattern.kind {
@@ -2867,12 +2878,10 @@ impl TypeChecker {
                 }
 
                 // Normal variable binding
-                let binding_ty = if *by_ref {
-                    Type::Reference { inner: Box::new(ty.clone()), mutable: *mutable }
-                } else { ty.clone() };
+                let binding_ty = pattern_binding_type(ty, *by_ref, *mutable, projected, pattern.span)?;
                 let mut bindings = List::from_iter([(name.name.clone(), binding_ty)]);
                 if let Some(sub) = subpattern {
-                    let sub_bindings = self.collect_pattern_bindings(sub, ty)?;
+                    let sub_bindings = self.collect_place_bindings(sub, ty, projected)?;
                     bindings.extend(sub_bindings);
                 }
                 Ok(bindings)
@@ -2884,8 +2893,7 @@ impl TypeChecker {
             }
 
             PatternKind::Tuple(patterns) => {
-                let mut referent = ty;
-                while let Some((inner, _, _)) = referent.reference_parts() { referent = inner; }
+                let referent = pattern_referent(ty);
                 if patterns.is_empty() && matches!(referent, Type::Unit) {
                     return Ok(List::new());
                 }
@@ -2900,7 +2908,7 @@ impl TypeChecker {
 
                     let mut all_bindings = List::new();
                     for (pat, field) in patterns.iter().zip(types.iter()) {
-                        let mut bindings = self.collect_pattern_bindings(pat, &pattern_field_type(ty, field))?;
+                        let mut bindings = self.collect_field_bindings(pat, ty, field)?;
                         all_bindings.append(&mut bindings);
                     }
                     Ok(all_bindings)
@@ -2958,7 +2966,7 @@ impl TypeChecker {
                                     let fields = variant_tuple_fields(&tag, patterns, payload_ty, pattern.span)?;
                                     let mut all_bindings = List::new();
                                     for (pat, field) in patterns.iter().zip(fields) {
-                                        all_bindings.extend(self.collect_pattern_bindings(pat, &pattern_field_type(ty, field))?);
+                                        all_bindings.extend(self.collect_field_bindings(pat, ty, field)?);
                                     }
                                     Ok(all_bindings)
                                 }
@@ -2975,7 +2983,7 @@ impl TypeChecker {
                                                 // If pattern is provided, collect from it; otherwise bind field name
                                                 if let Some(ref pat) = field_pat.pattern {
                                                     let mut bindings = self
-                                                        .collect_pattern_bindings(pat, &pattern_field_type(ty, field_ty))?;
+                                                        .collect_field_bindings(pat, ty, field_ty)?;
                                                     all_bindings.append(&mut bindings);
                                                 } else {
                                                     // Shorthand: { code, message } means { code: code, message: message }
@@ -3015,7 +3023,7 @@ impl TypeChecker {
                 // For nested OR patterns, just use the first alternative's bindings
                 // (they should all be the same, which will be checked recursively)
                 if let Some(first) = patterns.first() {
-                    self.collect_pattern_bindings(first, ty)
+                    self.collect_place_bindings(first, ty, projected)
                 } else {
                     Ok(List::new())
                 }
@@ -3092,7 +3100,7 @@ impl TypeChecker {
 
             PatternKind::Paren(inner) => {
                 // Parenthesized pattern: just collect from inner
-                self.collect_pattern_bindings(inner, ty)
+                self.collect_place_bindings(inner, ty, projected)
             }
 
             PatternKind::Record { fields, .. } => {
@@ -3100,7 +3108,7 @@ impl TypeChecker {
                     return Err(TypeError::Other("dependent record patterns require a stable receiver; use named projections".into()));
                 }
                 // Record pattern: collect bindings from each field pattern
-                if let Type::Record(field_types) = ty {
+                if let Some(field_types) = self.resolve_to_record_type(pattern_referent(ty)) {
                     let mut all_bindings = List::new();
 
                     for field_pat in fields {
@@ -3109,12 +3117,12 @@ impl TypeChecker {
                         if let Some(field_ty) = field_types.get(field_name) {
                             // If pattern is provided, collect from it; otherwise bind field name
                             if let Some(ref pat) = field_pat.pattern {
-                                let mut bindings = self.collect_pattern_bindings(pat, field_ty)?;
+                                let mut bindings = self.collect_field_bindings(pat, ty, field_ty)?;
                                 all_bindings.append(&mut bindings);
                             } else {
                                 // Shorthand: { x, y } means { x: x, y: y }
                                 all_bindings
-                                    .push((verum_common::Text::from(field_name), field_ty.clone()));
+                                    .push((verum_common::Text::from(field_name), pattern_field_type(ty, field_ty)));
                             }
                         }
                     }
@@ -3214,7 +3222,7 @@ impl TypeChecker {
 
                 // Collect bindings from the inner pattern only.
                 // The guard expression doesn't introduce new bindings.
-                self.collect_pattern_bindings(pattern, ty)
+                self.collect_place_bindings(pattern, ty, projected)
             }
 
             PatternKind::Cons { head, tail } => {
@@ -3350,7 +3358,7 @@ impl TypeChecker {
         self.check_variant_construction_visibility(scrutinee, tag, span)?;
         let fields = variant_tuple_fields(tag, patterns, payload_ty, span)?;
         for (pattern, field) in patterns.iter().zip(fields) {
-            self.bind_pattern(pattern, &pattern_field_type(scrutinee, field))?;
+            self.bind_projected_field(pattern, scrutinee, field)?;
         }
         Ok(())
     }
@@ -3472,17 +3480,16 @@ impl TypeChecker {
                         // When matching through a reference, bind field as reference
                         // e.g., match &tree { Tree.Node { value, ... } => ... }
                         // value should be &Int, not Int
-                        let effective_field_ty = pattern_field_type(scrutinee, field_ty);
 
                         // Bind the pattern (or use shorthand)
                         if let Some(ref pat) = field_pat.pattern {
                             // Explicit pattern: { code: c, message: msg }
-                            self.bind_pattern(pat, &effective_field_ty)?;
+                            self.bind_projected_field(pat, scrutinee, field_ty)?;
                         } else {
                             // Shorthand: { code, message } means { code: code, message: message }
                             self.ctx
                                 .env
-                                .insert(field_name.to_text(), TypeScheme::mono(effective_field_ty));
+                                .insert(field_name.to_text(), TypeScheme::mono(pattern_field_type(scrutinee, field_ty)));
                         }
                     }
                     None => {

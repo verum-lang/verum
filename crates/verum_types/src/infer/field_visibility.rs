@@ -452,6 +452,26 @@ impl TypeChecker {
                     | Type::Pointer { inner: to, mutable }
                     | Type::VolatilePointer { inner: to, mutable },
                 ) => {
+                    // A reborrow still addresses the same storage. Value-level
+                    // auto-borrow/deref cannot add or remove a pointer inside it.
+                    let from_slot = self.value_conversion_head(from, false);
+                    let to_slot = self.value_conversion_head(to, false);
+                    let differing_layer = match (from_slot.reference_parts(), to_slot.reference_parts()) {
+                        (Some(_), None) => Some((&to_slot, &from_slot)),
+                        (None, Some(_)) => Some((&from_slot, &to_slot)),
+                        _ => None,
+                    };
+                    if let Some((slot, reference)) = differing_layer {
+                        let may_infer_reference = matches!(slot, Type::Var(v)
+                            if !self.unifier.is_rigid(*v) && !reference.free_vars().contains(v));
+                        if !may_infer_reference {
+                            return Err(TypeError::Mismatch {
+                                expected: expected.diagnostic_text(),
+                                actual: actual.diagnostic_text(),
+                                span,
+                            });
+                        }
+                    }
                     self.check_value_conversion_inner(from, to, span, visited)?;
                     if *mutable {
                         // Writes through the converted reference travel in the
