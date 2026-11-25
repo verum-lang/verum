@@ -224,7 +224,7 @@ implement Http2Frame {
     /// `payload.len() == header.length`.
     public fn decode_payload(header: &FrameHeader, payload: &[Byte]) -> Result<Http2Frame, Http2Error> {
         if payload.len() != header.length {
-            return Result.Err(Http2Error.MalformedFrame("payload length mismatch".into()));
+            return Result.Err(Http2Error.MalformedFrame("payload length mismatch"));
         }
         match header.frame_type {
             FrameType.Data         => decode_data(header, payload),
@@ -253,21 +253,21 @@ implement Http2Frame {
 
 fn decode_data(header: &FrameHeader, payload: &[Byte]) -> Result<Http2Frame, Http2Error> {
     if header.stream_id == 0 {
-        return Result.Err(connection_error(ErrorCode.PROTOCOL_ERROR, &"DATA on stream 0".into()));
+        return Result.Err(connection_error(ErrorCode.PROTOCOL_ERROR, &"DATA on stream 0"));
     }
     let padded = header.flags.has(FrameFlags.PADDED);
     let mut pos = 0;
     let mut pad_length: UInt8 = 0;
     if padded {
         if payload.len() < 1 {
-            return Result.Err(connection_error(ErrorCode.FRAME_SIZE_ERROR, &"DATA truncated pad-length".into()));
+            return Result.Err(connection_error(ErrorCode.FRAME_SIZE_ERROR, &"DATA truncated pad-length"));
         }
         pad_length = payload[0] as UInt8;
         pos = 1;
     }
     let data_end = payload.len() - (pad_length as Int);
     if data_end < pos {
-        return Result.Err(connection_error(ErrorCode.PROTOCOL_ERROR, &"DATA pad-length too large".into()));
+        return Result.Err(connection_error(ErrorCode.PROTOCOL_ERROR, &"DATA pad-length too large"));
     }
     Result.Ok(Http2Frame.DataFrame {
         stream_id: header.stream_id,
@@ -279,26 +279,26 @@ fn decode_data(header: &FrameHeader, payload: &[Byte]) -> Result<Http2Frame, Htt
 
 fn decode_headers(header: &FrameHeader, payload: &[Byte]) -> Result<Http2Frame, Http2Error> {
     if header.stream_id == 0 {
-        return Result.Err(connection_error(ErrorCode.PROTOCOL_ERROR, &"HEADERS on stream 0".into()));
+        return Result.Err(connection_error(ErrorCode.PROTOCOL_ERROR, &"HEADERS on stream 0"));
     }
     let padded = header.flags.has(FrameFlags.PADDED);
     let has_prio = header.flags.has(FrameFlags.PRIORITY);
     let mut pos = 0;
     let mut pad_length: UInt8 = 0;
     if padded {
-        if payload.len() < 1 { return Result.Err(connection_error(ErrorCode.FRAME_SIZE_ERROR, &"HEADERS truncated".into())); }
+        if payload.len() < 1 { return Result.Err(connection_error(ErrorCode.FRAME_SIZE_ERROR, &"HEADERS truncated")); }
         pad_length = payload[0] as UInt8;
         pos = 1;
     }
     let mut priority: Maybe<PriorityData> = Maybe.None;
     if has_prio {
-        if payload.len() < pos + 5 { return Result.Err(connection_error(ErrorCode.FRAME_SIZE_ERROR, &"HEADERS truncated pri".into())); }
+        if payload.len() < pos + 5 { return Result.Err(connection_error(ErrorCode.FRAME_SIZE_ERROR, &"HEADERS truncated pri")); }
         priority = Maybe.Some(parse_priority(&payload[pos..pos + 5]));
         pos = pos + 5;
     }
     let block_end = payload.len() - (pad_length as Int);
     if block_end < pos {
-        return Result.Err(connection_error(ErrorCode.PROTOCOL_ERROR, &"HEADERS pad-length too large".into()));
+        return Result.Err(connection_error(ErrorCode.PROTOCOL_ERROR, &"HEADERS pad-length too large"));
     }
     Result.Ok(Http2Frame.HeadersFrame {
         stream_id: header.stream_id,
@@ -312,10 +312,10 @@ fn decode_headers(header: &FrameHeader, payload: &[Byte]) -> Result<Http2Frame, 
 
 fn decode_priority(header: &FrameHeader, payload: &[Byte]) -> Result<Http2Frame, Http2Error> {
     if header.stream_id == 0 {
-        return Result.Err(connection_error(ErrorCode.PROTOCOL_ERROR, &"PRIORITY on stream 0".into()));
+        return Result.Err(connection_error(ErrorCode.PROTOCOL_ERROR, &"PRIORITY on stream 0"));
     }
     if payload.len() != 5 {
-        return Result.Err(connection_error(ErrorCode.FRAME_SIZE_ERROR, &"PRIORITY not 5 bytes".into()));
+        return Result.Err(connection_error(ErrorCode.FRAME_SIZE_ERROR, &"PRIORITY not 5 bytes"));
     }
     Result.Ok(Http2Frame.PriorityFrame {
         stream_id: header.stream_id,
@@ -325,10 +325,10 @@ fn decode_priority(header: &FrameHeader, payload: &[Byte]) -> Result<Http2Frame,
 
 fn decode_rst_stream(header: &FrameHeader, payload: &[Byte]) -> Result<Http2Frame, Http2Error> {
     if header.stream_id == 0 {
-        return Result.Err(connection_error(ErrorCode.PROTOCOL_ERROR, &"RST_STREAM on stream 0".into()));
+        return Result.Err(connection_error(ErrorCode.PROTOCOL_ERROR, &"RST_STREAM on stream 0"));
     }
     if payload.len() != 4 {
-        return Result.Err(connection_error(ErrorCode.FRAME_SIZE_ERROR, &"RST_STREAM not 4 bytes".into()));
+        return Result.Err(connection_error(ErrorCode.FRAME_SIZE_ERROR, &"RST_STREAM not 4 bytes"));
     }
     Result.Ok(Http2Frame.RstStreamFrame {
         stream_id: header.stream_id,
@@ -338,14 +338,14 @@ fn decode_rst_stream(header: &FrameHeader, payload: &[Byte]) -> Result<Http2Fram
 
 fn decode_settings(header: &FrameHeader, payload: &[Byte]) -> Result<Http2Frame, Http2Error> {
     if header.stream_id != 0 {
-        return Result.Err(connection_error(ErrorCode.PROTOCOL_ERROR, &"SETTINGS not on stream 0".into()));
+        return Result.Err(connection_error(ErrorCode.PROTOCOL_ERROR, &"SETTINGS not on stream 0"));
     }
     let ack = header.flags.has(FrameFlags.ACK);
     if ack && payload.len() != 0 {
-        return Result.Err(connection_error(ErrorCode.FRAME_SIZE_ERROR, &"SETTINGS ACK with payload".into()));
+        return Result.Err(connection_error(ErrorCode.FRAME_SIZE_ERROR, &"SETTINGS ACK with payload"));
     }
     if payload.len() % 6 != 0 {
-        return Result.Err(connection_error(ErrorCode.FRAME_SIZE_ERROR, &"SETTINGS payload not 6-aligned".into()));
+        return Result.Err(connection_error(ErrorCode.FRAME_SIZE_ERROR, &"SETTINGS payload not 6-aligned"));
     }
     let mut params: List<(UInt16, UInt32)> = List.new();
     let mut i = 0;
@@ -360,24 +360,24 @@ fn decode_settings(header: &FrameHeader, payload: &[Byte]) -> Result<Http2Frame,
 
 fn decode_push_promise(header: &FrameHeader, payload: &[Byte]) -> Result<Http2Frame, Http2Error> {
     if header.stream_id == 0 {
-        return Result.Err(connection_error(ErrorCode.PROTOCOL_ERROR, &"PUSH_PROMISE on stream 0".into()));
+        return Result.Err(connection_error(ErrorCode.PROTOCOL_ERROR, &"PUSH_PROMISE on stream 0"));
     }
     let padded = header.flags.has(FrameFlags.PADDED);
     let mut pos = 0;
     let mut pad_length: UInt8 = 0;
     if padded {
-        if payload.len() < 1 { return Result.Err(connection_error(ErrorCode.FRAME_SIZE_ERROR, &"PP truncated".into())); }
+        if payload.len() < 1 { return Result.Err(connection_error(ErrorCode.FRAME_SIZE_ERROR, &"PP truncated")); }
         pad_length = payload[0] as UInt8;
         pos = 1;
     }
     if payload.len() < pos + 4 {
-        return Result.Err(connection_error(ErrorCode.FRAME_SIZE_ERROR, &"PP truncated promised".into()));
+        return Result.Err(connection_error(ErrorCode.FRAME_SIZE_ERROR, &"PP truncated promised"));
     }
     let promised = read_u32_be(payload, pos) & 0x7FFFFFFF;
     pos = pos + 4;
     let block_end = payload.len() - (pad_length as Int);
     if block_end < pos {
-        return Result.Err(connection_error(ErrorCode.PROTOCOL_ERROR, &"PP pad too large".into()));
+        return Result.Err(connection_error(ErrorCode.PROTOCOL_ERROR, &"PP pad too large"));
     }
     Result.Ok(Http2Frame.PushPromiseFrame {
         stream_id: header.stream_id,
@@ -390,10 +390,10 @@ fn decode_push_promise(header: &FrameHeader, payload: &[Byte]) -> Result<Http2Fr
 
 fn decode_ping(header: &FrameHeader, payload: &[Byte]) -> Result<Http2Frame, Http2Error> {
     if header.stream_id != 0 {
-        return Result.Err(connection_error(ErrorCode.PROTOCOL_ERROR, &"PING not on stream 0".into()));
+        return Result.Err(connection_error(ErrorCode.PROTOCOL_ERROR, &"PING not on stream 0"));
     }
     if payload.len() != 8 {
-        return Result.Err(connection_error(ErrorCode.FRAME_SIZE_ERROR, &"PING not 8 bytes".into()));
+        return Result.Err(connection_error(ErrorCode.FRAME_SIZE_ERROR, &"PING not 8 bytes"));
     }
     let mut opaque: [UInt8; 8] = [0; 8];
     let mut i = 0;
@@ -406,10 +406,10 @@ fn decode_ping(header: &FrameHeader, payload: &[Byte]) -> Result<Http2Frame, Htt
 
 fn decode_go_away(header: &FrameHeader, payload: &[Byte]) -> Result<Http2Frame, Http2Error> {
     if header.stream_id != 0 {
-        return Result.Err(connection_error(ErrorCode.PROTOCOL_ERROR, &"GOAWAY not on stream 0".into()));
+        return Result.Err(connection_error(ErrorCode.PROTOCOL_ERROR, &"GOAWAY not on stream 0"));
     }
     if payload.len() < 8 {
-        return Result.Err(connection_error(ErrorCode.FRAME_SIZE_ERROR, &"GOAWAY too short".into()));
+        return Result.Err(connection_error(ErrorCode.FRAME_SIZE_ERROR, &"GOAWAY too short"));
     }
     let last_stream_id = read_u32_be(payload, 0) & 0x7FFFFFFF;
     let error_code = ErrorCode.new(read_u32_be(payload, 4));
@@ -422,11 +422,11 @@ fn decode_go_away(header: &FrameHeader, payload: &[Byte]) -> Result<Http2Frame, 
 
 fn decode_window_update(header: &FrameHeader, payload: &[Byte]) -> Result<Http2Frame, Http2Error> {
     if payload.len() != 4 {
-        return Result.Err(connection_error(ErrorCode.FRAME_SIZE_ERROR, &"WINDOW_UPDATE not 4".into()));
+        return Result.Err(connection_error(ErrorCode.FRAME_SIZE_ERROR, &"WINDOW_UPDATE not 4"));
     }
     let increment = read_u32_be(payload, 0) & 0x7FFFFFFF;
     if increment == 0 {
-        return Result.Err(connection_error(ErrorCode.PROTOCOL_ERROR, &"WINDOW_UPDATE zero inc".into()));
+        return Result.Err(connection_error(ErrorCode.PROTOCOL_ERROR, &"WINDOW_UPDATE zero inc"));
     }
     Result.Ok(Http2Frame.WindowUpdateFrame {
         stream_id: header.stream_id,
@@ -436,7 +436,7 @@ fn decode_window_update(header: &FrameHeader, payload: &[Byte]) -> Result<Http2F
 
 fn decode_continuation(header: &FrameHeader, payload: &[Byte]) -> Result<Http2Frame, Http2Error> {
     if header.stream_id == 0 {
-        return Result.Err(connection_error(ErrorCode.PROTOCOL_ERROR, &"CONTINUATION on stream 0".into()));
+        return Result.Err(connection_error(ErrorCode.PROTOCOL_ERROR, &"CONTINUATION on stream 0"));
     }
     Result.Ok(Http2Frame.ContinuationFrame {
         stream_id: header.stream_id,

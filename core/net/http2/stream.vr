@@ -244,14 +244,14 @@ implement StreamFsm {
             // Closed — any data is a PROTOCOL_ERROR (§5.1)
             (StreamState.Closed, _) => {
                 return Result.Err(StreamTransitionError.InvalidTransition {
-                    state: self.state, event: "closed".into(),
+                    state: self.state, event: "closed",
                 });
             }
 
             // Anything else is invalid.
             (s, _) => {
                 return Result.Err(StreamTransitionError.InvalidTransition {
-                    state: s, event: "invalid".into(),
+                    state: s, event: "invalid",
                 });
             }
         };
