@@ -386,6 +386,11 @@ fn independently_replay_source_transports_and_corrupted_certificates() {
         (CONGRUENCE, "t"),
         (INTRO, "t"),
         (FAMILY, "t"),
+        (include_str!("fixtures/diagonal_substitution.vr"), "diagonal_substitution"),
+        (include_str!("fixtures/second_incompleteness.vr"), "second_incompleteness"),
+        (include_str!("fixtures/collapsing_chain.vr"), "collapsing_chain_factorization"),
+        (include_str!("fixtures/collapsing_chain.vr"), "collapsing_chain_factor_unique"),
+        (include_str!("fixtures/colimit_comparison.vr"), "colimit_comparison_roundtrip"),
     ] {
         let certificate = accepts(source, name);
         cases.push((certificate.clone(), true));

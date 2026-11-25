@@ -1,0 +1,36 @@
+// Cocones of a fixed diagram vary covariantly with their apex. A universal
+// cocone represents that functor. The induced comparison maps between two
+// representing apices compose to the identity (swap x and y for the converse).
+public theorem colimit_comparison_roundtrip(
+    obj: Type, hom: fn(obj, obj) -> Type, cocone: fn(obj) -> Type,
+    compose: fn<a: meta obj, b: meta obj, c: meta obj>(hom(a,b), hom(b,c)) -> hom(a,c),
+    post: fn<a: meta obj, b: meta obj>(cocone(a), hom(a,b)) -> cocone(b),
+    x: obj, y: obj, cx: cocone(x), cy: cocone(y), identity_x: hom(x,x),
+    med_x: fn<z: meta obj>(cocone(z)) -> hom(x,z),
+    med_y: fn<z: meta obj>(cocone(z)) -> hom(y,z)
+)
+    requires forall a: obj. forall b: obj. forall c: obj.
+        forall q: cocone(a). forall f: hom(a,b). forall g: hom(b,c).
+        post(a,c,q,compose(a,b,c,f,g)) == post(b,c,post(a,b,q,f),g)
+    requires post(x,x,cx,identity_x) == cx
+    requires forall z: obj. forall q: cocone(z). post(x,z,cx,med_x(z,q)) == q
+    requires forall z: obj. forall h: hom(x,z). med_x(z,post(x,z,cx,h)) == h
+    requires forall z: obj. forall q: cocone(z). post(y,z,cy,med_y(z,q)) == q
+    : compose(x,y,x,med_x(y,cy),med_y(x,cx)) == identity_x
+proof {
+    have composition_law: forall a: obj. forall b: obj. forall c: obj.
+        forall q: cocone(a). forall f: hom(a,b). forall g: hom(b,c).
+        post(a,c,q,compose(a,b,c,f,g)) == post(b,c,post(a,b,q,f),g) by assumption;
+    have unit_law: post(x,x,cx,identity_x) == cx by assumption;
+    have factor_x: forall z: obj. forall q: cocone(z).
+        post(x,z,cx,med_x(z,q)) == q by assumption;
+    have unique_x: forall z: obj. forall h: hom(x,z).
+        med_x(z,post(x,z,cx,h)) == h by assumption;
+    have factor_y: forall z: obj. forall q: cocone(z).
+        post(y,z,cy,med_y(z,q)) == q by assumption;
+    have legs: post(x,x,cx,compose(x,y,x,med_x(y,cy),med_y(x,cx))) == cx
+        by rewrite(composition_law(x,y,x,cx,med_x(y,cy),med_y(x,cx))),
+           rewrite(factor_x(y,cy)), exact(factor_y(x,cx));
+    rewrite < unique_x(x,compose(x,y,x,med_x(y,cy),med_y(x,cx)));
+    rewrite(legs); rewrite < unit_law; exact(unique_x(x,identity_x));
+}

@@ -1,10 +1,21 @@
 # Machine Verification of MSFS and Diakrisis in Verum
 
-*Полный пошаговый процесс машинной верификации препринта MSFS (41 страница, Sereda 2026, [Zenodo](https://zenodo.org/records/19755781)) и всего Diakrisis-корпуса (142 теоремы, 13 аксиом) в Verum proof assistant.*
+Ниже приведены область проверенных утверждений и инженерная спецификация дальнейшей формализации. Сертификат относится к конкретному суждению, его параметрам и исходному тексту. [Архитектура верификации Verum](./verum-verification-architecture.md)
 
-*Опирается на спецификацию [`verum-verification-architecture.md`](./verum-verification-architecture.md) (VVA) — единую объединённую архитектуру Verum (Part A core + Part A.Z foundational synthesis + Part B Diakrisis-extensions).*
+## Что воспроизводится
 
-*Документ — operational, не aspirational: каждый шаг изложен как конкретная инженерная процедура с входными артефактами, kernel-правилами, certificate-output, и acceptance-критериями.*
+| Источник | Проверенная область |
+|---|---|
+| MSFS `a72ed6e`, `verum-corpus/proofs` | Пять исходных теорем из `afnt-alpha-id` и `ss-membership` проходят оба нативных алгоритма. Lean принимает каждый экспортированный терм без глобальных аксиом. Для двух теорем о принадлежности манифест сверки текста ссылается на прежнюю редакцию статьи. Из трёх цитат дословно сохранилась одна. |
+| MSFS, четыре модуля `wave1_*.vr` | 17 объявлений теорем, ноль объявлений аксиом. Обе программы допуска Verum возвращают `unsupported_source_construct` для всех 17. Профиль Pi/Id требует семантики аннотаций, ограничений и атрибутов. Конечный профиль требует разрешённых идентичностей для полного модуля. В 15 прежних модулях остаются 43 схематические аксиомы, распределённые по девяти файлам. |
+| Math Foundations `4636563`, `StrongAFNT.lean` | Lean воспроизводит `godel_second_incompleteness`, `strong_afnt_alpha` и `colimit_dichotomy_O2` без глобальных аксиом. Параметры структуры `ArithGodelFramework` входят в тип этих теорем. Мост `realPA_instantiates_arithGodelFramework` требует `RealArithGodelCoding Sys` и использует `propext` и `Quot.sound`. В `PADerives` есть полная индукция PA. Перенос на произвольные слабые расширения Q требует отдельной конструкции. |
+| HOLON `eca671e`, `ReadoutDescent.lean` | Самостоятельный запуск штатной проверки Lean воспроизводит 16 аудитов теорем и пять отрицательных контролей. Для действия на наблюдениях нужна совместимость действия с равенством наблюдений, включая доступность частичного действия. Сечение само по себе этой совместимости не даёт. |
+
+**Диагональная часть α.** В Verum построено предложение `g = subst_num(d, quote_open(d))`, где `d = compose_diag(phi)`. Обе импликации следуют из корректности кода подстановки и представимости композиции. Из двух направлений фиксированной точки, правил вывода и трёх условий Гильберта — Бернайса — Лёба вторую теорему Гёделя можно воспроизвести отдельно. Для применения к статье нужны каноническая Σ₁-нумерация конкретного S, арифметическая реализация этих операций и формализуемый в PA примитивно-рекурсивный перевод доказательства противоречия вдоль интерпретации. В статье используется `T_S = PA + Con_σ(S)`. Точные машинные коды синтаксиса позволяют проверять вычисления на представимом диапазоне. Представимость функции в PA требует формулы и доказательства. [Диагональная подстановка](../../crates/verum_source_proof/tests/fixtures/diagonal_substitution.vr) · [Вывод второй теоремы](../../crates/verum_source_proof/tests/fixtures/second_incompleteness.vr) · [Пудлак об интерпретациях и непротиворечивости](https://www.cambridge.org/core/journals/journal-of-symbolic-logic/article/abs/cuts-consistency-statements-and-interpretations/43AA282E6574B73C2C6BC99CD3EF2183)
+
+**Трансфинитная часть β.** Нативно проверены поточечная факторизация и единственность для цепи с постоянными переходами, а также закон композиции канонических отображений сравнения из универсального свойства коконуса. Существование конкретного колимита остаётся самостоятельным обязательством. Для β(a) нужны малая в U₂ кофинальная диаграмма, единая конечная стадия k для её объектов, определимые в S согласованные переходы и колимит в U₂. Для вывода κ₁-доступности нужны также гипотезы о доступности диаграммы и переходов. В β(b) дихотомия относится к определимости самой вершины в области действия α. Лемма Lean `colimit_dichotomy_O2` использует цепь с индексом Nat и условие на её стрелки в вершину. [Цепь с постоянными переходами](../../crates/verum_source_proof/tests/fixtures/collapsing_chain.vr) · [Сравнение колимитов](../../crates/verum_source_proof/tests/fixtures/colimit_comparison.vr) · [Универсальное свойство колимита](https://stacks.math.columbia.edu/tag/002D)
+
+Нативный прогон использует `verum-source-replay` с явно выбранным профилем, затем `verum-proof` на полученном суждении. Команда `verum-proof export-lean` выдаёт терм для отдельного запуска Lean. Тест `independently_replay_source_transports_and_corrupted_certificates` передаёт независимому чекеру Lean исходные и испорченные сертификаты. Аудит глобальных аксиом и параметры самой теоремы проверяются по отдельности. [Независимая проверка](../../crates/verum_source_proof/tests/equality.rs) · [Проверка доказательств в Lean](https://lean-lang.org/doc/reference/latest/ValidatingProofs/)
 
 ---
 
@@ -12,10 +23,7 @@
 
 ### 0.1 Что у нас есть на входе
 
-**Верификационные артефакты**:
-- MSFS preprint (not in this repo): 1692 LOC LaTeX, 41-page PDF, 27 theorem-environments.
-- Diakrisis corpus (not in this repo): 142 теоремы, 13 аксиом, ~120 markdown files.
-- VVA specification: 4336 LOC, описывает kernel + ladder + dual stdlib + VVA extensions.
+Входами служат английский текст статьи MSFS с метками утверждений, теоретический корпус Diakrisis, соответствующие исходники Verum и проекты Lean. Число аксиом теории и число объявлений в коде измеряются отдельно. В проверенных исходниках `verum-mf-corpus` найдено девять объявлений `public axiom`, в `verum-diakrisis-corpus/src` — 65.
 
 **Verum capabilities** (по VVA):
 - `verum_kernel` (~5000 LOC, ≤6500 после VVA) с CoreTerm calculus.
@@ -51,7 +59,7 @@
 ### 0.3 Принципы процесса
 
 1. **Dependency-driven order**: каждая теорема верифицируется только когда все её зависимости уже verified.
-2. **Axiom-first, theorem-later**: сначала все теоремы регистрируются как `@axiom`-placeholders, затем последовательно превращаются в `@theorem` через formal proof.
+2. Открытое утверждение хранится как обязательство вне множества допущенных теорем. Включение в сертификат требует проверенного тела или явно указанной фундаментальной аксиомы с транзитивным учётом зависимостей.
 3. **LCF discipline**: kernel re-checks каждый proof; we never trust SMT verdict без certificate recheck.
 4. **Single-source policy**: MSFS — first-source для теорем, в нём формализованных. Diakrisis — расширения. Verum-формализация цитирует MSFS-labels для core, Diakrisis-paths для extensions.
 5. **Cross-format validation**: каждая `@verify(certified)` теорема экспортируется в Lean / Coq / Agda; если хоть один формат rejects — это red flag.

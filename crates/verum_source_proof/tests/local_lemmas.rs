@@ -33,6 +33,36 @@ fn derived_local_lemmas_replay_the_derivability_argument() {
 }
 
 #[test]
+fn diagonal_witness_uses_its_own_code_in_both_directions() {
+    let source = include_str!("fixtures/diagonal_substitution.vr");
+    let name = "diagonal_substitution";
+    assert_eq!(check(source, name).status, "verified");
+    for changed in [
+        source.replace("coding(compose_diag(phi))", "coding(phi)"),
+        source.replace("exact(backward(phi,", "exact(forward(phi,"),
+        source.replace("out_proof, in_proof", "out_proof, out_proof"),
+    ] {
+        assert_eq!(check(&changed, name).status, "rejected");
+    }
+}
+
+#[test]
+fn colimit_comparison_uses_factorization_and_uniqueness() {
+    let source = include_str!("fixtures/colimit_comparison.vr");
+    let name = "colimit_comparison_roundtrip";
+    for syntax in ["rewrite <", "rw <"] {
+        let checked = check(&source.replace("rewrite <", syntax), name);
+        assert_eq!(checked.status, "verified", "{:?}", checked.diagnostic);
+    }
+    for changed in [
+        source.replace("exact(factor_y(x,cx))", "exact(factor_x(y,cy))"),
+        source.replace("exact(unique_x(x,identity_x))", "reflexivity"),
+    ] {
+        assert_eq!(check(&changed, name).status, "rejected");
+    }
+}
+
+#[test]
 fn local_facts_are_checked_even_when_unused() {
     let source = "theorem t(a:Type,b:Type,x:a):a proof { have h:a by exact(x); exact(x); }";
     assert_eq!(check(source, "t").status, "verified");

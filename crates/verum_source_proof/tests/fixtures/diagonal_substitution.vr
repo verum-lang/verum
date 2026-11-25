@@ -1,0 +1,37 @@
+// A formula expressing composition with diagonal substitution gives a
+// fixed point for each unary formula. The code of a formula and the code
+// of the resulting closed sentence are distinct operations.
+public theorem diagonal_substitution(
+    unary: Type, sent: Type, num: Type,
+    quote_open: fn(unary) -> num, quote_closed: fn(sent) -> num,
+    subst_num: fn(unary, num) -> sent, diagonal: fn(num) -> num,
+    compose_diag: fn(unary) -> unary, imp: fn(sent, sent) -> sent,
+    derives: fn(sent) -> Type, phi: unary
+)
+    requires forall a: unary.
+        diagonal(quote_open(a)) == quote_closed(subst_num(a, quote_open(a)))
+    requires forall a: unary. forall n: num.
+        derives(imp(subst_num(compose_diag(a), n), subst_num(a, diagonal(n))))
+    requires forall a: unary. forall n: num.
+        derives(imp(subst_num(a, diagonal(n)), subst_num(compose_diag(a), n)))
+    : forall r: Type. forall use_witness: fn<g: meta sent>(
+        derives(imp(g, subst_num(phi, quote_closed(g)))),
+        derives(imp(subst_num(phi, quote_closed(g)), g))
+    ) -> r. r
+proof {
+    have coding: forall a: unary.
+        diagonal(quote_open(a)) == quote_closed(subst_num(a, quote_open(a))) by assumption;
+    have forward: forall a: unary. forall n: num.
+        derives(imp(subst_num(compose_diag(a), n), subst_num(a, diagonal(n)))) by assumption;
+    have backward: forall a: unary. forall n: num.
+        derives(imp(subst_num(a, diagonal(n)), subst_num(compose_diag(a), n))) by assumption;
+    have out_proof: derives(imp(subst_num(compose_diag(phi), quote_open(compose_diag(phi))),
+        subst_num(phi, quote_closed(subst_num(compose_diag(phi), quote_open(compose_diag(phi)))))))
+        by rewrite < coding(compose_diag(phi)), exact(forward(phi, quote_open(compose_diag(phi))));
+    have in_proof: derives(imp(subst_num(phi,
+        quote_closed(subst_num(compose_diag(phi), quote_open(compose_diag(phi))))),
+        subst_num(compose_diag(phi), quote_open(compose_diag(phi)))))
+        by rewrite < coding(compose_diag(phi)), exact(backward(phi, quote_open(compose_diag(phi))));
+    intro(r, use_witness);
+    exact(use_witness(subst_num(compose_diag(phi), quote_open(compose_diag(phi))), out_proof, in_proof));
+}

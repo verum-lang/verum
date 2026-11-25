@@ -26,6 +26,10 @@ use verum_lexer::TokenKind;
 use crate::error::{ErrorCode, ParseError, ParseErrorKind};
 use crate::parser::{ParseResult, RecursiveParser};
 
+fn is_rewrite_keyword(name: &str) -> bool {
+    matches!(name, "rewrite" | "rw")
+}
+
 impl<'a> RecursiveParser<'a> {
     // ============================================================================
     // Ghost Attribute Helper
@@ -1613,6 +1617,13 @@ impl<'a> RecursiveParser<'a> {
                 }
             }
 
+            // In a structured step, '<' after the contextual rewrite keyword
+            // selects the reverse direction before expression disambiguation.
+            Some(TokenKind::Ident(name)) if is_rewrite_keyword(name.as_str())
+                && matches!(self.stream.peek_nth_kind(1), Some(TokenKind::Lt)) => {
+                ProofStepKind::Tactic(self.parse_tactic_expr()?)
+            }
+
             // Tactic application: tactic_expr ';'
             // Grammar: tactic_application = tactic_expr , ';' ;
             // This handles bare tactics like: trivial; simp; ring; auto; cases h;
@@ -2714,7 +2725,7 @@ impl<'a> RecursiveParser<'a> {
             }
 
             // Rewrite tactic
-            Some(TokenKind::Ident(name)) if name.as_str() == "rewrite" || name.as_str() == "rw" => {
+            Some(TokenKind::Ident(name)) if is_rewrite_keyword(name.as_str()) => {
                 self.stream.advance();
                 // Optional reverse
                 let rev = self.stream.peek_kind() == Some(&TokenKind::Ident(Text::from("←")))
