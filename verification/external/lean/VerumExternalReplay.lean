@@ -12,6 +12,7 @@ import VerumExternalReplay.TerminalCategory
 import VerumExternalReplay.SetDiagramColimit
 import VerumExternalReplay.FiniteStagePresentability
 import VerumExternalReplay.WordGrade
+import VerumExternalReplay.GodelCantor
 import VerumExternalReplay.PropertyRequirement
 import VerumExternalReplay.IntegerBoundEntailment
 import VerumExternalReplay.ValueIndexUnification
