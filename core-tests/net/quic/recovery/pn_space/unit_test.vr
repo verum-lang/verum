@@ -8,7 +8,9 @@
 //     (RFC 9000 §12.3: three separate packet-number spaces).
 // =============================================================================
 
-mount core.net.quic.recovery.pn_space.{PnSpaceKind};
+mount core.net.quic.recovery.pn_space.{PnSpace, PnSpaceKind};
+mount core.net.quic.ack_ranges.{AckRanges};
+mount core.net.quic.frame.{encode_frame};
 
 // =============================================================================
 // Section 1: as_index (RFC 9000 §12.3)
@@ -37,3 +39,39 @@ fn test_qpns_indices_within_3_spaces() {
 }
 
 fn main() {}
+
+@test
+fn recovered_ranges_preserve_ack_wire_order() {
+    let mut space = PnSpace.new(PnSpaceKind.Initial);
+    space.on_packet_received(9_u64);
+    space.on_packet_received(5_u64);
+    space.on_packet_received(6_u64);
+    space.on_packet_received(4_u64);
+    space.on_packet_received(5_u64);
+    let frame = match space.build_ack_frame(0_u64) {
+        Maybe.Some(f) => f, Maybe.None => panic("missing ACK"),
+    };
+    let mut encoded: List<Byte> = [];
+    let n = encode_frame(&frame, &mut encoded);
+    // ACK largest 9, delay 0, one extra range, [9..9], gap 1, [4..6].
+    let expected: [Byte; 7] = [2_u8, 9_u8, 0_u8, 1_u8, 0_u8, 1_u8, 2_u8];
+    assert(n == expected.len());
+    let mut i = 0;
+    while i < expected.len() { assert(encoded[i] == expected[i]); i = i + 1; }
+    space.discard();
+    assert(space.build_ack_frame(0_u64).is_none());
+}
+
+@test
+fn merge_at_integer_boundaries() {
+    let top: UInt64 = UInt64.MAX;
+    let merged = AckRanges.empty().insert_pn(top).insert_pn(top - 2_u64)
+        .insert_pn(0_u64).insert_pn(top - 1_u64).insert_pn(0_u64);
+    assert(merged.is_valid());
+    assert(merged.len() == 2);
+    assert(merged.contains(top));
+    assert(merged.contains(top - 1_u64));
+    assert(merged.contains(top - 2_u64));
+    assert(merged.contains(0_u64));
+    assert(!merged.contains(1_u64));
+}

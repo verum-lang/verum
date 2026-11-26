@@ -1,0 +1,14 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L2
+// @tags: net, quic, visibility
+// @expected-error: E202 "'sent_packets' is Private"
+// @expected-error-count: 1
+
+mount core.net.quic.recovery.pn_space.{PnSpace};
+
+fn clear_sent_inventory(space: &mut PnSpace) {
+    space.sent_packets.clear();
+}
+
+fn main() {}

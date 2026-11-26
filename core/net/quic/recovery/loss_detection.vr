@@ -109,12 +109,12 @@ implement LossDetection {
         info: SentPacketInfo,
         cc: &mut dyn CongestionCtrl,
     ) {
-        if info.ack_eliciting {
-            self.time_of_last_ack_eliciting_packet[kind.as_index()] = Maybe.Some(info.time_sent);
+        match info.ack_eliciting_sent_at() {
+            Maybe.Some(t) => self.time_of_last_ack_eliciting_packet[kind.as_index()] = Maybe.Some(t),
+            Maybe.None => {},
         }
-        if info.in_flight {
-            cc.on_packet_sent(info.size_bytes);
-        }
+        let bytes = info.flight_bytes();
+        if bytes > 0_u32 { cc.on_packet_sent(bytes); }
         self.space_mut(kind).record_sent(info);
         self.set_loss_detection_timer();
     }
@@ -137,17 +137,14 @@ implement LossDetection {
         // in this call's `largest_acked`, sample its RTT.
         let mut maybe_latest_rtt_us: Maybe<UInt64> = Maybe.None;
         let mut acked_bytes: UInt32 = 0_u32;
-        let mut j: Int = 0;
-        while j < acked.len() {
-            let info = &acked[j];
-            if info.in_flight { acked_bytes = acked_bytes + info.size_bytes; }
-            if info.packet_number == largest_acked {
-                let rtt_us = now.duration_since(info.time_sent)
-                    .unwrap_or_else(|| Duration.from_micros(0))
-                    .as_micros() as UInt64;
-                maybe_latest_rtt_us = Maybe.Some(rtt_us);
+        let mut ack_eliciting = false;
+        for info in &acked {
+            acked_bytes = acked_bytes.saturating_add(info.flight_bytes());
+            if info.ack_eliciting_sent_at().is_some() { ack_eliciting = true; }
+            match info.rtt_sample(largest_acked, now) {
+                Maybe.Some(us) => maybe_latest_rtt_us = Maybe.Some(us),
+                Maybe.None => {},
             }
-            j = j + 1;
         }
         match maybe_latest_rtt_us {
             Maybe.Some(us) => self.rtt.on_rtt_sample(us, ack_delay_us),
@@ -155,19 +152,13 @@ implement LossDetection {
         }
 
         // Threshold-based loss detection on remaining in-flight packets.
-        let lost = self.detect_lost_packets(kind, largest_acked, now);
+        let delay = self.compute_loss_delay_us();
+        let lost = self.space_mut(kind).take_lost(largest_acked, now, K_PACKET_THRESHOLD, delay);
         let mut lost_bytes: UInt32 = 0_u32;
         let mut to_retransmit: List<QuicFrame> = [];
-        let mut i: Int = 0;
-        while i < lost.len() {
-            let li = &lost[i];
-            if li.in_flight { lost_bytes = lost_bytes + li.size_bytes; }
-            let mut f: Int = 0;
-            while f < li.frames.len() {
-                to_retransmit.push(li.frames[f].clone());
-                f = f + 1;
-            }
-            i = i + 1;
+        for packet in lost {
+            lost_bytes = lost_bytes.saturating_add(packet.flight_bytes());
+            for frame in packet.into_frames() { to_retransmit.push(frame); }
         }
 
         if acked_bytes > 0_u32 {
@@ -179,53 +170,12 @@ implement LossDetection {
 
         // Reset PTO back-off on any ACK that newly-acknowledges
         // ack-eliciting packets.
-        let mut any_ack_eliciting = false;
-        let mut k: Int = 0;
-        while k < acked.len() {
-            if acked[k].ack_eliciting { any_ack_eliciting = true; break; }
-            k = k + 1;
-        }
-        if any_ack_eliciting { self.pto_count = 0_u32; }
-
+        if ack_eliciting { self.pto_count = 0_u32; }
         self.set_loss_detection_timer();
         to_retransmit
     }
 
-    /// RFC 9002 §6.1 — Find sent packets that are now lost based on
-    /// the threshold rule. Remove them from sent_packets.
-    fn detect_lost_packets(
-        &mut self,
-        kind: PnSpaceKind,
-        largest_acked: UInt64,
-        now: Instant,
-    ) -> List<SentPacketInfo> {
-        let loss_delay_us = self.compute_loss_delay_us();
-
-        // Partition sent_packets into retained vs lost.
-        let sp = self.space_mut(kind);
-        let mut retained: List<SentPacketInfo> = [];
-        let mut lost:     List<SentPacketInfo> = [];
-        let mut i: Int = 0;
-        while i < sp.sent_packets.len() {
-            let info = &sp.sent_packets[i];
-            let is_pn_thresh_lost =
-                largest_acked >= info.packet_number + K_PACKET_THRESHOLD;
-            let elapsed_us = now.duration_since(info.time_sent)
-                .unwrap_or_else(|| Duration.from_micros(0))
-                .as_micros() as UInt64;
-            let is_time_thresh_lost = elapsed_us > loss_delay_us;
-
-            if is_pn_thresh_lost || is_time_thresh_lost {
-                lost.push(sp.sent_packets[i].clone());
-            } else {
-                retained.push(sp.sent_packets[i].clone());
-            }
-            i = i + 1;
-        }
-        sp.sent_packets = retained;
-        lost
-    }
-
+    /// Compute the RFC 9002 time threshold from the largest recent RTT estimate.
     fn compute_loss_delay_us(&self) -> UInt64 {
         let srtt_us = self.rtt.smoothed().as_micros() as UInt64;
         let latest_us = self.rtt.latest().as_micros() as UInt64;
@@ -244,18 +194,7 @@ implement LossDetection {
         let mut idx: Int = 0;
         while idx < 3 {
             let t_opt = self.time_of_last_ack_eliciting_packet[idx];
-            let has_inflight = {
-                let mut any_flight = false;
-                let mut k: Int = 0;
-                let sp = &self.spaces[idx];
-                if sp.discarded { any_flight = false; } else {
-                    while k < sp.sent_packets.len() {
-                        if sp.sent_packets[k].in_flight { any_flight = true; break; }
-                        k = k + 1;
-                    }
-                }
-                any_flight
-            };
+            let has_inflight = self.spaces[idx].has_packets_in_flight();
             if has_inflight {
                 match t_opt {
                     Maybe.Some(t) => {

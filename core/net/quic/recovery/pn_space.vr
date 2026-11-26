@@ -51,6 +51,26 @@ public type SentPacketInfo is {
     frames:             List<QuicFrame>,   // frames to retransmit on loss
 };
 
+implement SentPacketInfo {
+    pub(in core.net.quic) fn flight_bytes(&self) -> UInt32 {
+        if self.in_flight { self.size_bytes } else { 0_u32 }
+    }
+
+    pub(in core.net.quic) fn ack_eliciting_sent_at(&self) -> Maybe<Instant> {
+        if self.ack_eliciting { Maybe.Some(self.time_sent) } else { Maybe.None }
+    }
+
+    pub(in core.net.quic) fn rtt_sample(&self, largest: UInt64, now: Instant) -> Maybe<UInt64> {
+        if self.packet_number != largest { return Maybe.None; }
+        match now.duration_since(self.time_sent) {
+            Maybe.Some(d) => Maybe.Some(d.as_micros() as UInt64),
+            Maybe.None => Maybe.None,
+        }
+    }
+
+    pub(in core.net.quic) fn into_frames(self) -> List<QuicFrame> { self.frames }
+}
+
 // =============================================================================
 // PnSpaceKind
 // =============================================================================
@@ -154,7 +174,7 @@ implement PnSpace {
     /// keys dropped). After this, no further sends or acks are accepted.
     public fn discard(&mut self) {
         self.discarded = true;
-        self.sent_packets = [];
+        self.sent_packets.clear();
         self.ack_ranges = AckRanges.empty();
     }
 
@@ -170,8 +190,7 @@ implement PnSpace {
         if should_update { self.largest_acked_received = Maybe.Some(pn); }
 
         // Invariant-preserving insert via AckRanges wrapper .
-        let taken = self.ack_ranges.clone();
-        self.ack_ranges = taken.insert_pn(pn);
+        self.ack_ranges.record(pn);
     }
 
     /// Incorporate an ACK received from the peer. Returns freshly-acked
@@ -187,57 +206,48 @@ implement PnSpace {
             self.largest_acked_sent = Maybe.Some(largest_acked);
         }
 
-        // Linear scan: retain not-acked, collect acked.
-        let mut retained: List<SentPacketInfo> = [];
-        let mut acked:    List<SentPacketInfo> = [];
-        let mut i: Int = 0;
-        while i < self.sent_packets.len() {
-            let p = &self.sent_packets[i];
-            let is_acked = ranges_contain(ranges, p.packet_number);
-            if is_acked {
-                acked.push(self.sent_packets[i].clone());
-            } else {
-                retained.push(self.sent_packets[i].clone());
-            }
-            i = i + 1;
+        let mut retained: List<SentPacketInfo> = List.with_capacity(self.sent_packets.len());
+        let mut acked: List<SentPacketInfo> = [];
+        for info in core.base.memory.replace(&mut self.sent_packets, List<SentPacketInfo>.new()) {
+            if ranges_contain(ranges, info.packet_number) { acked.push(info); }
+            else { retained.push(info); }
         }
         self.sent_packets = retained;
         acked
     }
 
+    pub(in core.net.quic) fn has_packets_in_flight(&self) -> Bool {
+        if self.discarded { return false; }
+        for packet in &self.sent_packets {
+            if packet.in_flight { return true; }
+        }
+        false
+    }
+
+    pub(in core.net.quic) fn take_lost(&mut self, largest: UInt64, now: Instant,
+                                      threshold: UInt64, delay_us: UInt64) -> List<SentPacketInfo> {
+        let mut retained: List<SentPacketInfo> = List.with_capacity(self.sent_packets.len());
+        let mut lost: List<SentPacketInfo> = [];
+        for packet in core.base.memory.replace(&mut self.sent_packets, List<SentPacketInfo>.new()) {
+            let elapsed = match now.duration_since(packet.time_sent) {
+                Maybe.Some(duration) => duration.as_micros() as UInt64,
+                Maybe.None => 0_u64,
+            };
+            if packet.packet_number <= largest &&
+               (largest - packet.packet_number >= threshold || elapsed >= delay_us) {
+                lost.push(packet);
+            } else { retained.push(packet); }
+        }
+        self.sent_packets = retained;
+        lost
+    }
+
     /// Build an ACK frame ready to ship, or Maybe.None if we have no
     /// outstanding received packets to acknowledge.
     public fn build_ack_frame(&self, ack_delay_us: UInt64) -> Maybe<QuicFrame> {
-        let largest = match self.largest_acked_received { Maybe.Some(v) => v, Maybe.None => return Maybe.None };
-        // Emit ECN counts only if any counter is non-zero. Some peers
-        // require explicit ECN counts to be absent when none are seen.
-        let ecn = if self.ecn_ect0 == 0_u64 && self.ecn_ect1 == 0_u64 && self.ecn_ce == 0_u64 {
-            Maybe.None
-        } else {
-            Maybe.Some(crate_ecn_snapshot(self))
-        };
-        // The AckFrame wire variant still carries a plain List<AckRange>
-        // (codec-friendly); we convert from the invariant-carrying
-        // wrapper at the emission boundary. The V3 invariant therefore
-        // witnesses the wire list is well-formed on exit.
-        Maybe.Some(QuicFrame.AckFrame {
-            largest_acked: largest,
-            ack_delay:     ack_delay_us,
-            ranges:        self.ack_ranges.as_list().clone(),
-            ecn:           ecn,
-        })
+        QuicFrame.acknowledgment(&self.ack_ranges, ack_delay_us, self.ecn_ect0, self.ecn_ect1, self.ecn_ce)
     }
 }
-
-fn crate_ecn_snapshot(s: &PnSpace) -> core.net.quic.frame.EcnCounts {
-    core.net.quic.frame.EcnCounts {
-        ect0: s.ecn_ect0, ect1: s.ecn_ect1, ce: s.ecn_ce,
-    }
-}
-
-// =============================================================================
-// Helpers
-// =============================================================================
 
 /// Membership test over a wire-ranges list (kept public for back-compat
 /// with consumers outside this module that parse ACK frames coming from
@@ -247,7 +257,7 @@ public fn ranges_contain(ranges: &List<AckRange>, pn: UInt64) -> Bool {
     let mut i: Int = 0;
     while i < ranges.len() {
         let r = &ranges[i];
-        if pn >= r.smallest && pn <= r.largest { return true; }
+        if r.contains(pn) { return true; }
         i = i + 1;
     }
     false

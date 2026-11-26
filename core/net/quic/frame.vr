@@ -74,6 +74,7 @@
 module core.net.quic.frame;
 
 mount core.collections.list.{List};
+mount core.net.quic.ack_ranges.{AckRanges};
 mount core.encoding.varint.{quic_encode_into, quic_decode, VarintError, VarintErrorKind};
 
 // =============================================================================
@@ -145,6 +146,27 @@ public type AckRange is {
     largest:  UInt64,
 };
 
+implement AckRange {
+    pub(in core.net.quic) fn single(pn: UInt64) -> AckRange {
+        AckRange { smallest: pn, largest: pn }
+    }
+
+    pub(in core.net.quic) fn first(&self) -> UInt64 { self.smallest }
+    pub(in core.net.quic) fn last(&self) -> UInt64 { self.largest }
+    pub(in core.net.quic) fn contains(&self, pn: UInt64) -> Bool {
+        self.smallest <= pn && pn <= self.largest
+    }
+
+    /// Join overlapping or adjacent closed intervals.
+    pub(in core.net.quic) fn join_if_touching(&self, other: &AckRange) -> Maybe<AckRange> {
+        if self.smallest > other.largest && self.smallest - other.largest > 1_u64 { return Maybe.None; }
+        if other.smallest > self.largest && other.smallest - self.largest > 1_u64 { return Maybe.None; }
+        let low = if self.smallest < other.smallest { self.smallest } else { other.smallest };
+        let high = if self.largest > other.largest { self.largest } else { other.largest };
+        Maybe.Some(AckRange { smallest: low, largest: high })
+    }
+}
+
 public type EcnCounts is {
     ect0:   UInt64,
     ect1:   UInt64,
@@ -204,6 +226,22 @@ public type QuicFrame is
 implement QuicFrame {
     /// Ack-eliciting frames trigger ACK generation by the peer.
     /// Frames that do not are PADDING, ACK, CONNECTION_CLOSE.
+    pub(in core.net.quic) fn acknowledgment(acked: &AckRanges, delay: UInt64,
+                                           ect0: UInt64, ect1: UInt64, ce: UInt64) -> Maybe<QuicFrame> {
+        let ranges = acked.as_list();
+        if ranges.is_empty() { return Maybe.None; }
+        let counts = if ect0 == 0_u64 && ect1 == 0_u64 && ce == 0_u64 {
+            Maybe.None
+        } else {
+            Maybe.Some(EcnCounts { ect0: ect0, ect1: ect1, ce: ce })
+        };
+        let mut snapshot: List<AckRange> = List.with_capacity(ranges.len());
+        for range in ranges { snapshot.push(AckRange { smallest: range.smallest, largest: range.largest }); }
+        Maybe.Some(QuicFrame.AckFrame {
+            largest_acked: ranges[0].largest, ack_delay: delay, ranges: snapshot, ecn: counts,
+        })
+    }
+
     public fn is_ack_eliciting(&self) -> Bool {
         match self {
             QuicFrame.PaddingRun(_)                  => false,
