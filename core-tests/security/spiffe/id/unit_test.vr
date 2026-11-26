@@ -8,8 +8,7 @@
 // =============================================================================
 
 mount core.security.spiffe.id.{SpiffeId, SpiffeIdError};
-mount core.base.maybe.{Maybe, Some, None};
-mount core.base.result.{Result, Ok, Err};
+mount core.base.result.Result;
 
 // =============================================================================
 // Section 1: SpiffeId record construction
@@ -17,36 +16,31 @@ mount core.base.result.{Result, Ok, Err};
 
 @test
 fn test_spiffe_id_trust_domain_only_record() {
-    let s: SpiffeId = SpiffeId {
-        trust_domain: "example.org".to_text(),
-        path: "".to_text(),
-    };
-    assert_eq(s.trust_domain, "example.org");
-    assert_eq(s.path, "");
+    let s = SpiffeId.parse(&"SPIFFE://example.org").unwrap();
+    assert_eq(*s.trust_domain(), "example.org");
+    assert_eq(*s.path(), "");
 }
 
 @test
 fn test_spiffe_id_with_path_record() {
-    let s: SpiffeId = SpiffeId {
-        trust_domain: "example.org".to_text(),
-        path: "/workload/api".to_text(),
-    };
-    assert_eq(s.trust_domain, "example.org");
-    assert_eq(s.path, "/workload/api");
+    let s = SpiffeId.parse(&"spiffe://example.org/workload/api").unwrap();
+    assert_eq(*s.trust_domain(), "example.org");
+    assert_eq(*s.path(), "/workload/api");
 }
 
 @test
 fn test_spiffe_id_record_field_independence() {
-    let a: SpiffeId = SpiffeId {
-        trust_domain: "a.example".to_text(),
-        path: "/svc".to_text(),
-    };
-    let b: SpiffeId = SpiffeId {
-        trust_domain: "b.example".to_text(),
-        path: "/svc".to_text(),
-    };
-    assert_eq(a.trust_domain, "a.example");
-    assert_eq(b.trust_domain, "b.example");
+    let a = SpiffeId.new("a.example", "/svc").unwrap();
+    let b = SpiffeId.new("b.example", "/svc").unwrap();
+    assert_eq(*a.trust_domain(), "a.example");
+    assert_eq(*b.trust_domain(), "b.example");
+}
+
+fn parse_error(input: &Text) -> SpiffeIdError {
+    match SpiffeId.parse(input) {
+        Result.Err(error) => error,
+        Result.Ok(_) => panic("expected an invalid SPIFFE ID"),
+    }
 }
 
 // =============================================================================
@@ -79,24 +73,21 @@ fn test_spiffe_id_error_empty_trust_domain_variant() {
 
 @test
 fn test_spiffe_id_error_invalid_trust_domain_variant() {
-    let e: SpiffeIdError = SpiffeIdError.InvalidTrustDomain {
-        reason: "upper-case".to_text(),
-    };
+    let domain = "a".repeat(256);
+    let e = parse_error(&f"spiffe://{domain}");
     assert(e is SpiffeIdError.InvalidTrustDomain);
 }
 
 @test
 fn test_spiffe_id_error_path_too_long_variant() {
-    let e: SpiffeIdError = SpiffeIdError.PathTooLong { len: 2_048 };
+    let path = "a".repeat(2048);
+    let e = parse_error(&f"spiffe://example.org/{path}");
     assert(e is SpiffeIdError.PathTooLong);
 }
 
 @test
 fn test_spiffe_id_error_invalid_characters_variant() {
-    let e: SpiffeIdError = SpiffeIdError.InvalidCharacters {
-        at: 7,
-        character: 0x20_u8,
-    };
+    let e = parse_error(&"spiffe://example.org/bad path");
     assert(e is SpiffeIdError.InvalidCharacters);
 }
 
@@ -125,9 +116,8 @@ fn test_spiffe_id_error_invalid_scheme_disjoint_from_empty() {
 
 @test
 fn test_spiffe_id_error_invalid_trust_domain_disjoint() {
-    let e: SpiffeIdError = SpiffeIdError.InvalidTrustDomain {
-        reason: "x".to_text(),
-    };
+    let domain = "a".repeat(256);
+    let e = parse_error(&f"spiffe://{domain}");
     assert(!(e is SpiffeIdError.Empty));
     assert(!(e is SpiffeIdError.EmptyTrustDomain));
     assert(!(e is SpiffeIdError.PathTooLong));

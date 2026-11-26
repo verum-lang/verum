@@ -20,7 +20,6 @@
 )
 module core.security.spiffe.id;
 
-
 public type SpiffeId is {
     trust_domain: Text,
     path: Text,
@@ -94,7 +93,7 @@ implement SpiffeId {
     /// Trust-domain-only SPIFFE ID (e.g. "spiffe://example.org").
     public fn from_trust_domain(trust_domain: Text) -> Result<SpiffeId, SpiffeIdError> {
         validate_trust_domain(&trust_domain)?;
-        Result.Ok(SpiffeId { trust_domain: trust_domain, path: "".into() })
+        Result.Ok(SpiffeId { trust_domain: trust_domain, path: "" })
     }
 
     /// Parse from canonical URI form.
@@ -103,32 +102,17 @@ implement SpiffeId {
         if input.len() > MAX_SPIFFE_ID_LENGTH {
             return Result.Err(SpiffeIdError.PathTooLong { len: input.len() });
         }
-        let bytes = input.as_bytes();
-        // Require "spiffe://" prefix.
-        if !starts_with_ci(bytes, SPIFFE_SCHEME.as_bytes()) {
+        if !starts_with_ci(input, SPIFFE_SCHEME) {
             return Result.Err(SpiffeIdError.MissingScheme);
         }
-        let rest = &bytes[9..];  // "spiffe://".len()
-        // Split at first '/'.
-        let mut slash: Int = -1;
-        let mut i = 0;
-        while i < rest.len() {
-            if rest[i] == 0x2F { slash = i; break; }
-            i = i + 1;
+        let bytes = input.as_bytes();
+        let domain_start = SPIFFE_SCHEME.len();
+        let mut path_start = domain_start;
+        while path_start < input.len() && bytes[path_start] != b'/' {
+            path_start += 1;
         }
-        let (td_bytes, path_bytes) = if slash < 0 {
-            (rest, &rest[rest.len()..])   // no path
-        } else {
-            (&rest[..slash], &rest[slash..])
-        };
-        if td_bytes.len() == 0 { return Result.Err(SpiffeIdError.EmptyTrustDomain); }
-        let trust_domain = Text.from_utf8(td_bytes).map_err(|_| SpiffeIdError.InvalidTrustDomain {
-            reason: "non-utf8".into(),
-        })?;
-        let path = Text.from_utf8(path_bytes).map_err(|_| SpiffeIdError.InvalidTrustDomain {
-            reason: "non-utf8".into(),
-        })?;
-        SpiffeId.new(trust_domain, path)
+        // The ASCII scheme and slash delimit byte boundaries in the input Text.
+        SpiffeId.new(input.slice(domain_start, path_start), input.slice(path_start, input.len()))
     }
 
     public fn trust_domain(&self) -> &Text { &self.trust_domain }
@@ -159,11 +143,11 @@ implement SpiffeId {
 fn validate_trust_domain(td: &Text) -> Result<(), SpiffeIdError> {
     if td.is_empty() { return Result.Err(SpiffeIdError.EmptyTrustDomain); }
     if td.len() > 255 {
-        return Result.Err(SpiffeIdError.InvalidTrustDomain { reason: "exceeds 255 chars".into() });
+        return Result.Err(SpiffeIdError.InvalidTrustDomain { reason: "exceeds 255 chars" });
     }
     let bytes = td.as_bytes();
     let mut i = 0;
-    while i < bytes.len() {
+    while i < td.len() {
         let b = bytes[i];
         // Allowed: a-z, 0-9, '-', '.', '_'
         let ok = (b >= 0x61 && b <= 0x7A)   // a-z
@@ -188,7 +172,7 @@ fn validate_path(path: &Text) -> Result<(), SpiffeIdError> {
     }
     // Permitted: alpha, digits, `-`, `.`, `_`, `~`, sub-delims, `:`, `@`.
     let mut i = 1;
-    while i < bytes.len() {
+    while i < path.len() {
         let b = bytes[i];
         let ok = (b >= 0x61 && b <= 0x7A)
             || (b >= 0x41 && b <= 0x5A)
@@ -205,15 +189,18 @@ fn validate_path(path: &Text) -> Result<(), SpiffeIdError> {
     Result.Ok(())
 }
 
-fn starts_with_ci(haystack: &[Byte], needle: &[Byte]) -> Bool {
+fn starts_with_ci(input: &Text, prefix: &Text) -> Bool {
     // Fold only A-Z to a-z. Naive `b | 0x20` folds non-letters too
     // (`\r` | 0x20 = `-`, `@` | 0x20 = `` ` ``, etc.) producing
     // false-positive equality across bit-5 pair-shifts. SPIFFE IDs
     // can carry path segments with `-`, `.`, `_` — folding those
     // bytes would make `spiffe:\r/...` match the spiffe:// prefix.
-    if haystack.len() < needle.len() { return false; }
+    let length = prefix.len();
+    if input.len() < length { return false; }
+    let haystack = input.as_bytes();
+    let needle = prefix.as_bytes();
     let mut i = 0;
-    while i < needle.len() {
+    while i < length {
         let rh = haystack[i];
         let rn = needle[i];
         let h = if rh >= 0x41_u8 && rh <= 0x5A_u8 { rh | 0x20_u8 } else { rh };
