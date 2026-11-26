@@ -37,6 +37,26 @@ fn copied_payload_return_does_not_borrow_the_local_container_or_lookup_key() {
 }
 
 #[test]
+fn branch_results_keep_only_the_loans_in_the_returned_payload() {
+    for (source, escapes) in [("input", false), ("&local", true)] {
+        let caller = format!("fn receive(input:&Int,choose:Bool)->Payload {{
+            let local=3;
+            if choose {{
+                let temporary=Payload{{ptr:&local,marker:1}};
+                Payload{{ptr:{source},marker:temporary.marker}}
+            }} else {{Payload{{ptr:input,marker:2}}}}
+        }}");
+        let errors = diagnostics("", &caller);
+        if escapes {
+            assert!(errors.iter().any(|error| error.contains("local")
+                && error.contains("does not live long enough")), "{errors:?}");
+        } else {
+            assert!(errors.is_empty(), "{errors:?}");
+        }
+    }
+}
+
+#[test]
 fn a_returned_reference_to_the_lookup_key_keeps_its_real_loan() {
     let errors = diagnostics(
         "fn selected(source:&Payload, key:&Int)->Payload { Payload {ptr:key,marker:source.marker} }",

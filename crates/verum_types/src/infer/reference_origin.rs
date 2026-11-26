@@ -603,6 +603,15 @@ impl TypeChecker {
         Some(origins)
     }
 
+    fn evaluated_result_origins(&self, value: &Expr) -> Option<&List<RecordReceiver>> {
+        match &unparen(value).kind {
+            ExprKind::Call { .. } | ExprKind::MethodCall { .. } | ExprKind::Closure { .. }
+            | ExprKind::Tuple(_) | ExprKind::Array(_) | ExprKind::Record { .. } =>
+                self.evaluated_value_origins.get(&value.span)?.as_ref(),
+            _ => None,
+        }
+    }
+
     pub(super) fn collect_reference_candidates(&mut self, value: &Expr, found: &mut List<RecordReceiver>) {
         fn add(found: &mut List<RecordReceiver>, source: RecordReceiver) {
             if !found.contains(&source) {
@@ -618,11 +627,7 @@ impl TypeChecker {
         {
             return;
         }
-        if matches!(unparen(value).kind,
-            ExprKind::Call { .. } | ExprKind::MethodCall { .. } | ExprKind::Closure { .. }
-            | ExprKind::Tuple(_) | ExprKind::Array(_) | ExprKind::Record { .. })
-            && let Some(origins) = self.evaluated_value_origins.get(&value.span).and_then(Option::as_ref)
-        {
+        if let Some(origins) = self.evaluated_result_origins(value) {
             for origin in origins { add(found, origin.clone()); }
             return;
         }
@@ -830,6 +835,14 @@ impl TypeChecker {
         block: &verum_ast::Block,
         found: &mut List<RecordReceiver>,
     ) {
+        // Only the tail reaches the join. Its evaluated origins already
+        // include loans carried through local bindings and nested calls.
+        if let Some(origins) = block.expr.as_deref().and_then(|tail| self.evaluated_result_origins(tail)) {
+            for origin in origins {
+                if !found.contains(origin) { found.push(origin.clone()); }
+            }
+            return;
+        }
         // The block's local names have gone out of scope. Include inputs of
         // local initializers rather than treating a local tail name as evidence.
         for stmt in &block.stmts {

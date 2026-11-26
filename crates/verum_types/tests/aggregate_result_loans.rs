@@ -227,13 +227,18 @@ fn distinct_nested_parameter_scopes_keep_the_selected_payload() {
 
 #[test]
 fn unbounded_instantiation_cannot_establish_reference_free_storage() {
-    let diagnostics = errors(
-        "type Expanding<T> is End | Next(Expanding<(T, T)>);
-        fn make(x: &Int) -> Expanding<Int> { Expanding.End }
-        fn probe() -> Expanding<Int> { let x = 7; make(&x) }",
-    );
-    // The shape analysis has a finite work budget. An unresolved recursive
-    // instance keeps its input origins; exhaustion cannot prove them absent.
+    let declaration = "type Expanding<T> is End | Next(Expanding<(T, T)>);";
+    // The closed constructor proves its result contains no loans regardless
+    // of the cost of inspecting every possible instance of Expanding.
+    let closed = errors(&format!("{declaration}
+        fn make(x: &Int) -> Expanding<Int> {{ Expanding.End }}
+        fn probe() -> Expanding<Int> {{ let x = 7; make(&x) }}"));
+    assert!(closed.is_empty(), "{closed:?}");
+    // With no selected body, exhaustion must retain the actual input loan.
+    let diagnostics = errors(&format!("{declaration}
+        fn probe(make:fn(&Int)->Expanding<Int>) -> Expanding<Int> {{
+            let x = 7; make(&x)
+        }}"));
     assert!(
         diagnostics
             .iter()
