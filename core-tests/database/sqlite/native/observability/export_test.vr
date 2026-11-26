@@ -1,0 +1,35 @@
+module core.database.sqlite.native.observability.tests.export;
+mount core.database.sqlite.native.observability.registry.registry_new;
+mount core.database.sqlite.native.observability.exporter.{MetricExporter, prometheus, json_lines, otlp, otlp_export};
+
+@test
+fn test_registry_values_and_exported_buckets() {
+    let mut reg = registry_new();
+    assert(reg.counter_value(&"reads") is Maybe.None);
+    assert_eq(otlp_export(&otlp(), &reg).len(), 0);
+
+    reg.add_counter("reads", 4_i64);
+    reg.inc_counter("reads");
+    reg.set_gauge("depth", 2_i64);
+    reg.set_gauge("depth", -3_i64);
+    reg.observe("latency_ns", 10000_i64);
+    reg.observe("latency_ns", 10001_i64);
+    reg.observe("latency_ns", 10000000001_i64);
+
+    assert_eq(reg.counter_count(), 1);
+    assert_eq(reg.gauge_count(), 1);
+    assert_eq(reg.histogram_count(), 1);
+    assert_eq(reg.counter_value(&"reads").unwrap(), 5_i64);
+    assert_eq(reg.gauge_value(&"depth").unwrap(), -3_i64);
+    assert_eq(reg.histogram_observations(&"latency_ns").unwrap(), 3_i64);
+
+    let scrape = prometheus().render(&reg);
+    assert(scrape.starts_with(&"# TYPE reads counter\nreads 5\n# TYPE depth gauge\ndepth -3\n"));
+    assert(scrape.contains(&"latency_ns_bucket{le=\"10000\"} 1\nlatency_ns_bucket{le=\"100000\"} 2\n"));
+    assert(scrape.ends_with(&"latency_ns_bucket{le=\"+Inf\"} 3\nlatency_ns_sum 10000020002\nlatency_ns_count 3\n"));
+    let json = json_lines().render(&reg);
+    assert_eq(json, "{\"type\":\"counter\",\"name\":\"reads\",\"value\":5}\n{\"type\":\"gauge\",\"name\":\"depth\",\"value\":-3}\n{\"type\":\"histogram\",\"name\":\"latency_ns\",\"count\":3,\"sum_ns\":10000020002}\n");
+    assert_eq(otlp_export(&otlp(), &reg).len(), 3);
+}
+
+fn main() {}

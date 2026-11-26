@@ -39,6 +39,8 @@ public fn counter_new(name: Text) -> MetricObsCounter {
 }
 
 implement MetricObsCounter {
+    public(in core.database.sqlite.native.observability) fn name(&self) -> &Text { &self.name }
+
     public fn inc(&mut self) { self.value = self.value + 1_i64; }
     public fn add(&mut self, n: Int64) { self.value = self.value + n; }
     public fn get(&self) -> Int64 { self.value }
@@ -55,6 +57,8 @@ public fn gauge_new(name: Text) -> MetricObsGauge {
 }
 
 implement MetricObsGauge {
+    public(in core.database.sqlite.native.observability) fn name(&self) -> &Text { &self.name }
+
     public fn set(&mut self, value: Int64) { self.value = value; }
     public fn inc(&mut self) { self.value = self.value + 1_i64; }
     public fn dec(&mut self) { self.value = self.value - 1_i64; }
@@ -112,6 +116,8 @@ public fn histogram_default(name: Text) -> MetricObsHistogram {
 }
 
 implement MetricObsHistogram {
+    public(in core.database.sqlite.native.observability) fn name(&self) -> &Text { &self.name }
+
     public fn observe(&mut self, value_ns: Int64) {
         self.sum_ns = self.sum_ns + value_ns;
         self.count_total = self.count_total + 1_i64;
@@ -174,6 +180,11 @@ implement MetricObsHistogram {
             return self.bounds_ns[self.bounds_ns.len() - 1];
         }
         0 as Int64
+    }
+
+    public(in core.database.sqlite.native.observability) fn finite_bound_count(&self) -> Int { self.bounds_ns.len() }
+    public(in core.database.sqlite.native.observability) fn upper_bound_ns(&self, index: Int) -> Int64 {
+        self.bounds_ns[index]
     }
 
     public fn bucket_count(&self) -> Int { self.counts.len() }
