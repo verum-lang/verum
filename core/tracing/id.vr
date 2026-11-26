@@ -260,7 +260,7 @@ public type IdGenerator is protocol {
 public type DefaultIdGenerator is ();
 
 implement DefaultIdGenerator {
-    public fn new() -> DefaultIdGenerator { () }
+    public fn new() -> DefaultIdGenerator { DefaultIdGenerator() }
 }
 
 implement IdGenerator for DefaultIdGenerator {

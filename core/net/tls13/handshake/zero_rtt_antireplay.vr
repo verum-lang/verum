@@ -398,7 +398,7 @@ implement ReplayGuard for ReplayCache {
 public type NoReplayGuard is ();
 
 implement NoReplayGuard {
-    public fn new() -> NoReplayGuard { () }
+    public fn new() -> NoReplayGuard { NoReplayGuard() }
 }
 
 implement ReplayGuard for NoReplayGuard {

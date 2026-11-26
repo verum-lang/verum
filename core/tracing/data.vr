@@ -407,7 +407,7 @@ public type SpanExporter is protocol {
 public type NoopExporter is ();
 
 implement NoopExporter {
-    public fn new() -> NoopExporter { () }
+    public fn new() -> NoopExporter { NoopExporter() }
 }
 
 implement SpanExporter for NoopExporter {

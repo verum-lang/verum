@@ -67,7 +67,7 @@ const MAX_TRACESTATE_HEADER_BYTES: Int = 4096;
 
 
 implement W3CTraceContext {
-    public fn new() -> W3CTraceContext { () }
+    public fn new() -> W3CTraceContext { W3CTraceContext() }
 }
 
 implement TextMapPropagator for W3CTraceContext {

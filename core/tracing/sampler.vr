@@ -83,7 +83,7 @@ public type Sampler is protocol {
 public type AlwaysOn is ();
 
 implement AlwaysOn {
-    public fn new() -> AlwaysOn { () }
+    public fn new() -> AlwaysOn { AlwaysOn() }
 }
 
 implement Sampler for AlwaysOn {
@@ -104,7 +104,7 @@ implement Sampler for AlwaysOn {
 public type AlwaysOff is ();
 
 implement AlwaysOff {
-    public fn new() -> AlwaysOff { () }
+    public fn new() -> AlwaysOff { AlwaysOff() }
 }
 
 implement Sampler for AlwaysOff {
