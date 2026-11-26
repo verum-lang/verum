@@ -1,0 +1,15 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L2
+// @tags: database, postgres, capability
+// @expected-error: E405 "CanWrite"
+// @expected-error-count: 1
+
+mount core.database.common.capability.{DbRead};
+mount core.database.common.db_handle.{Database};
+mount core.database.common.error.{DbError};
+mount core.database.postgres.pool.{PgPool};
+mount core.database.postgres.typed_database.*;
+fn try_write(handle: &Database<PgPool, DbRead>, statement: &Text) -> Result<Text, DbError> {
+    handle.execute_simple(statement)
+}

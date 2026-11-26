@@ -5,55 +5,30 @@
 // Spec: database spec §5.4 (capability types), §15.1 (handler use)
 // =============================================================================
 //
-// `Database<P, C>` is the capability-typed front door every handler
-// goes through to talk to a pool. `P` is the underlying pool type
-// (`PostgresPool`, `MysqlPool`, `SqlitePool`); `C` is the phantom
+// `Database<P, C>` gives a handler a capability-bounded interface to a pool.
+// `P` is the underlying pool type (`PgPool`, `MysqlPool`, `SqlitePool`,
+// or an asynchronous pool). `C` is the phantom
 // capability marker (`DbRead` / `DbReadWriteTx` / `DbAdmin` /
 // `DbReplication` / `DbNotify` / `DbCopy` / `DbUnsafe`).
 //
-// Compile-time enforcement:
-//
-//   `query`          → `where C: CanRead`
-//   `query_one`      → `where C: CanRead`
-//   `query_stream`   → `where C: CanRead`
-//   `execute`        → `where C: CanWrite`
-//   `begin`          → `where C: CanTx`
-//   `run_with_retry` → `where C: CanTx`
-//   `execute_ddl`    → `where C: CanDdl`
-//   `listen_channel` → `where C: CanNotify`
-//   `start_repl`     → `where C: CanRepl`
-//   `copy_from`      → `where C: CanCopy`
-//   `copy_to`        → `where C: CanCopy`
-//   `execute_raw`    → `where C: CanUnsafe`
-//
-// A handler annotated `using [Database<P, DbRead>]` that calls
-// `db.execute(...)` produces a "method not in scope" compile error,
-// not a runtime SQLSTATE 42501 / SQLITE_READONLY. The runtime never
-// gets the chance to ship the offending statement.
+// Each adapter declares a capability bound on its operations. For example,
+// PostgreSQL's `query_simple` requires CanRead, `execute_simple` requires
+// CanWrite, and `begin` requires CanTx. A read-only handle calling
+// `execute_simple` fails the CanWrite bound. The configured server role
+// enforces SQL privileges for the statement passed to a method.
 //
 // Capability narrowing is one-way:
 //
 //   `Database<P, DbAdmin>.into_readwrite() -> Database<P, DbReadWriteTx>`
 //   `Database<P, DbAdmin>.into_readonly()  -> Database<P, DbRead>`
 //   `Database<P, DbReadWriteTx>.into_readonly() -> Database<P, DbRead>`
-//   `Database<P, DbCopy>.into_readwrite()      -> Database<P, DbReadWriteTx>`
 //   `Database<P, DbCopy>.into_readonly()       -> Database<P, DbRead>`
 //
-// Widening is intentionally not exposed. Authority must be acquired
-// at pool construction (`PgPool.connect_with_role(...)`).
+// Admin handles may explicitly delegate COPY. Other grants originate at pool
+// construction.
 //
-// The wrapper itself is a plain value containing a `Shared<P>` and
-// the phantom marker — cloning is cheap (one atomic increment), and
-// narrowing produces a fresh `Database` that shares the same pool
-// reference. Every method delegates to the underlying pool's
-// `acquire` + `Connection.{query,execute,begin}` surface; the
-// per-query arena (carried by `PooledConnection.arena_mut`) is
-// already wired in `pool_impl.vr`.
-//
-// This module is intentionally adapter-agnostic — the same
-// `Database<P, C>` shape works for `PostgresPool`, `MysqlPool`,
-// `SqlitePool` once each implements the `Pool` protocol from
-// `core.database.common.pool`.
+// The handle owns a `Shared<P>`. Narrowing consumes the handle and keeps
+// the same pool. Adapter operations borrow that pool through `adapter_pool`.
 // =============================================================================
 
 @arch_module(
@@ -65,35 +40,20 @@
 )
 module core.database.common.db_handle;
 
-mount base.{Result, Ok, Err, Text, Maybe, None, Some};
-mount core.time.duration.{Duration};
+mount base.Text;
 mount base.memory.Shared;
-mount core.database.common.error.{DbError};
 mount core.database.common.capability.{
-    Capability, CanRead, CanWrite, CanTx, CanDdl, CanRepl, CanNotify,
-    CanCopy, CanUnsafe,
-    DbRead, DbReadWriteTx, DbAdmin, DbReplication, DbNotify, DbCopy, DbUnsafe,
-    CapabilitySet,
+    Capability, CapabilitySet, DbRead, DbReadWriteTx, DbAdmin,
+    DbReplication, DbNotify, DbCopy,
 };
 
 // -----------------------------------------------------------------------------
 // Database<P, C> — capability-typed front door.
 // -----------------------------------------------------------------------------
 
-/// Phantom-typed handle to a pool. `P` is the concrete pool type
-/// (e.g. `PostgresPool<SessionMode>`); `C` is the capability marker.
-///
-/// Construct via `Database.from_pool(pool)` — yields the broadest
-/// capability set available on the connection's role
-/// (`DbReadWriteTx` for application accounts, `DbAdmin` for the
-/// migration runner, etc.). Narrow via `into_readonly` /
-/// `into_readwrite` before handing the value into a more constrained
-/// scope.
-///
-/// `Shared<P>` so cloning + narrowing stay cheap (one atomic
-/// increment per `into_*` call). The pool itself is heavyweight —
-/// supervision tree, connection arena, statement cache — and lives
-/// behind the shared reference.
+/// Handle to a shared pool of type `P` with the method bounds of marker `C`.
+/// `from_pool` creates a `DbReadWriteTx` handle. Use the constructor for
+/// the grant being delegated when binding an existing pool to a handler.
 public type Database<P, C> is {
     pool: Shared<P>,
     /// Capability mask materialised at the runtime level — useful
@@ -136,6 +96,17 @@ implement<P> Database<P, DbAdmin> {
     }
 }
 
+implement<P> Database<P, DbNotify> {
+    /// Construct the notification handle at the pool initialization boundary.
+    public fn from_notify_pool(pool: Shared<P>) -> Database<P, DbNotify> {
+        Database {
+            pool: pool,
+            caps: CapabilitySet.for_marker<DbNotify>(),
+            _phantom: (),
+        }
+    }
+}
+
 implement<P> Database<P, DbReplication> {
     /// Construct a replication-consumer handle. The pool's role on
     /// the server must hold REPLICATION privilege.
@@ -164,15 +135,14 @@ implement<P> Database<P, DbRead> {
 // Universal accessors — `C: Capability` is satisfied by every marker.
 // -----------------------------------------------------------------------------
 
-implement<P, C: Capability> Database<P, C> {
-    /// Borrow the underlying pool. ESCAPE HATCH — typed callers
-    /// should rarely need this; provided so adapter-specific code
-    /// (e.g. `PgPool.listen_channel`) can reach into vendor APIs
-    /// not yet wrapped by the generic surface.
-    public fn pool_shared(&self) -> &Shared<P> {
-        &self.pool
+implement<P, C> Database<P, C> {
+    // Adapter operations borrow the pool only after their capability bound is selected.
+    public(in core.database) fn adapter_pool(&self) -> &P {
+        self.pool.get()
     }
+}
 
+implement<P, C: Capability> Database<P, C> {
     /// Capability set as runtime data — for metric labels / audit
     /// logs. Always agrees with the phantom `C` by construction.
     public fn capabilities(&self) -> &CapabilitySet {
@@ -187,7 +157,7 @@ implement<P, C: Capability> Database<P, C> {
 }
 
 // -----------------------------------------------------------------------------
-// Capability narrowing — admin → write → read; copy → write/read.
+// Capability narrowing — admin to read/write or read, copy to read.
 // -----------------------------------------------------------------------------
 //
 // Narrowing is implemented as a phantom-marker swap on the same
@@ -224,13 +194,6 @@ implement<P> Database<P, DbReadWriteTx> {
 }
 
 implement<P> Database<P, DbCopy> {
-    public fn into_readwrite(self) -> Database<P, DbReadWriteTx> {
-        Database {
-            pool: self.pool,
-            caps: CapabilitySet.read_write_tx(),
-            _phantom: (),
-        }
-    }
     public fn into_readonly(self) -> Database<P, DbRead> {
         Database {
             pool: self.pool,
@@ -253,45 +216,14 @@ implement<P> Database<P, DbAdmin> {
     public fn into_copy(self) -> Database<P, DbCopy> {
         Database {
             pool: self.pool,
-            caps: CapabilitySet.empty()
-                .add(CapabilitySet.read_only().mask)
-                .add(CapabilitySet.read_write_tx().mask),
+            caps: CapabilitySet.for_marker<DbCopy>(),
             _phantom: (),
         }
     }
 }
 
 // -----------------------------------------------------------------------------
-// Entry points to the *typed* method surface.
-//
-// The capability-bounded `implement<P, C: Can*>` blocks live in
-// per-adapter modules (`core.database.postgres.typed_methods`, etc.)
-// because the actual delegation requires concrete async types from
-// the underlying `Pool` implementation. The protocol bound here is
-// the load-bearing piece: any adapter-side method that calls
-// `pool.acquire()` MUST declare the matching `Can*` bound on `C`,
-// so misuse compiles into a "method not in scope" error.
-//
-// The pattern adapters follow:
-//
-//   implement<C: CanRead> Database<PgPool, C> {
-//       public async fn query<R: Row, P2: Params>(
-//           &self,
-//           q: &PreparedQuery<R, P2>,
-//           params: P2,
-//       ) -> Result<List<R>, DbError> {
-//           let mut handle = self.pool.acquire(...).await?;
-//           let res = handle.conn().query(q, params).await;
-//           handle.release_healthy();
-//           res
-//       }
-//   }
-//
-//   implement<C: CanWrite> Database<PgPool, C> {
-//       public async fn execute<P2: Params>(...) -> ... { ... }
-//   }
-//
-// This module reserves no method names so adapters can shape
-// capability-bounded surfaces without conflicting with common
-// scaffolding.
+// PostgreSQL, MySQL and SQLite declare their capability-bounded operations
+// in their typed_database modules. PostgreSQL and MySQL also provide
+// async_typed_database for their asynchronous pools.
 // -----------------------------------------------------------------------------

@@ -95,7 +95,7 @@ implement<C: CanRead> Database<MysqlPool, C> {
     /// see column metadata + text-encoded rows + affected_rows /
     /// last_insert_id in one shape.
     public fn query_simple(&self, sql: &Text) -> Result<MySimpleQueryResult, DbError> {
-        let mut handle = match self.pool.acquire() {
+        let mut handle = match self.adapter_pool().acquire() {
             Result.Ok(h)  => h,
             Result.Err(e) => return Result.Err(e),
         };
@@ -122,7 +122,7 @@ implement<C: CanRead> Database<MysqlPool, C> {
         sql: &Text,
         params: &List<StmtParam>,
     ) -> Result<MysqlPreparedResult, DbError> {
-        let mut handle = match self.pool.acquire() {
+        let mut handle = match self.adapter_pool().acquire() {
             Result.Ok(h)  => h,
             Result.Err(e) => return Result.Err(e),
         };
@@ -144,7 +144,7 @@ implement<C: CanWrite> Database<MysqlPool, C> {
     /// raw `MySimpleQueryResult` so callers read `affected_rows`
     /// and `last_insert_id`.
     public fn execute_simple(&self, sql: &Text) -> Result<MySimpleQueryResult, DbError> {
-        let mut handle = match self.pool.acquire() {
+        let mut handle = match self.adapter_pool().acquire() {
             Result.Ok(h)  => h,
             Result.Err(e) => return Result.Err(e),
         };
@@ -169,7 +169,7 @@ implement<C: CanWrite> Database<MysqlPool, C> {
         sql: &Text,
         params: &List<StmtParam>,
     ) -> Result<MysqlPreparedResult, DbError> {
-        let mut handle = match self.pool.acquire() {
+        let mut handle = match self.adapter_pool().acquire() {
             Result.Ok(h)  => h,
             Result.Err(e) => return Result.Err(e),
         };
@@ -192,7 +192,7 @@ implement<C: CanTx> Database<MysqlPool, C> {
     /// `MysqlTxScope<MysqlPool>` that holds the pool checkout for
     /// the duration of the tx; consumed by `commit` / `rollback`.
     public fn begin(&self) -> Result<MysqlTxScope<MysqlPool>, DbError> {
-        let mut handle = match self.pool.acquire() {
+        let mut handle = match self.adapter_pool().acquire() {
             Result.Ok(h)  => h,
             Result.Err(e) => return Result.Err(e),
         };
@@ -209,7 +209,7 @@ implement<C: CanTx> Database<MysqlPool, C> {
     /// mode. Used by handlers that need SERIALIZABLE for cross-
     /// row invariants or READ ONLY for replica-bound analytics.
     public fn begin_with_opts(&self, opts: &MyTxOpts) -> Result<MysqlTxScope<MysqlPool>, DbError> {
-        let mut handle = match self.pool.acquire() {
+        let mut handle = match self.adapter_pool().acquire() {
             Result.Ok(h)  => h,
             Result.Err(e) => return Result.Err(e),
         };
@@ -302,7 +302,7 @@ implement<C: CanDdl> Database<MysqlPool, C> {
     /// accidentally drop a table because `CanDdl` is not in scope
     /// on it. The bound is the load-bearing piece.
     public fn execute_ddl(&self, sql: &Text) -> Result<MySimpleQueryResult, DbError> {
-        let mut handle = match self.pool.acquire() {
+        let mut handle = match self.adapter_pool().acquire() {
             Result.Ok(h)  => h,
             Result.Err(e) => return Result.Err(e),
         };
@@ -326,7 +326,7 @@ implement<C: CanUnsafe> Database<MysqlPool, C> {
     /// `@unsafe` + `@audit(reason)` annotations the spec §8.9
     /// requires at the call site, every invocation is auditable.
     public fn execute_raw_unsafe(&self, sql: &Text) -> Result<MySimpleQueryResult, DbError> {
-        let mut handle = match self.pool.acquire() {
+        let mut handle = match self.adapter_pool().acquire() {
             Result.Ok(h)  => h,
             Result.Err(e) => return Result.Err(e),
         };
@@ -348,7 +348,7 @@ implement<C: Capability> Database<MysqlPool, C> {
     /// capability — even `Database<MysqlPool, DbRead>` can emit
     /// `db.pool.*` series.
     public fn pool_stats(&self) -> PoolStatsSnapshot {
-        self.pool.stats()
+        self.adapter_pool().stats()
     }
 }
 

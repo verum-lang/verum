@@ -47,22 +47,27 @@ public const CAP_UNSAFE:  Int = 0x0080;
 public type CapabilitySet is { mask: Int };
 
 implement CapabilitySet {
+    // Database handle constructors derive runtime rights from the selected marker.
+    public(in core.database) fn for_marker<C: Capability>() -> CapabilitySet {
+        CapabilitySet { mask: C.cap_mask() }
+    }
+
     public fn empty() -> CapabilitySet { CapabilitySet { mask: 0 } }
 
     public fn read_only() -> CapabilitySet {
-        CapabilitySet { mask: CAP_READ }
+        CapabilitySet.for_marker<DbRead>()
     }
 
     public fn read_write_tx() -> CapabilitySet {
-        CapabilitySet { mask: CAP_READ | CAP_WRITE | CAP_TX }
+        CapabilitySet.for_marker<DbReadWriteTx>()
     }
 
     public fn admin() -> CapabilitySet {
-        CapabilitySet { mask: CAP_READ | CAP_WRITE | CAP_TX | CAP_ADMIN }
+        CapabilitySet.for_marker<DbAdmin>()
     }
 
     public fn replication() -> CapabilitySet {
-        CapabilitySet { mask: CAP_READ | CAP_REPL }
+        CapabilitySet.for_marker<DbReplication>()
     }
 
     public fn has(&self, bit: Int) -> Bool {

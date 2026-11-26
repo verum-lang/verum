@@ -1,0 +1,47 @@
+// @test: run
+// @tier: all
+// @level: L2
+// @tags: database, postgres, capability
+// @expected-exit: 0
+
+mount core.database.common.capability.{DbRead, CapabilitySet, CAP_READ, CAP_WRITE, CAP_TX, CAP_ADMIN, CAP_NOTIFY, CAP_COPY};
+mount core.database.common.db_handle.{Database};
+mount core.database.common.error.{AdPostgres, DbError};
+mount core.database.common.pool_impl.{PoolConfig};
+mount core.database.postgres.config.{PgConfig};
+mount core.database.postgres.connection.{PgSimpleQueryResult};
+mount core.database.postgres.pool.{PgPool};
+mount core.database.postgres.typed_database.{admin_database_from_pool, notify_database_from_pool};
+
+fn read_with_handle(handle: &Database<PgPool, DbRead>, sql: &Text) -> Result<PgSimpleQueryResult, DbError> {
+    handle.query_simple(sql)
+}
+
+fn unopened_pool() -> PgPool {
+    let config = PoolConfig.default(AdPostgres).with_min(0);
+    match PgPool.launch(PgConfig.local_dev(), config) {
+        Result.Ok(pool) => pool,
+        Result.Err(_) => panic("a pool with no initial connections must initialize"),
+    }
+}
+
+fn main() -> Int {
+    let admin = admin_database_from_pool(unopened_pool());
+    assert(admin.capabilities().has(CAP_ADMIN));
+    let copy = admin.into_copy();
+    assert_eq(copy.capability_name(), "copy");
+    assert(copy.capabilities().has(CAP_READ));
+    assert(copy.capabilities().has(CAP_WRITE));
+    assert(copy.capabilities().has(CAP_COPY));
+    assert(!copy.capabilities().has(CAP_TX));
+    assert(!copy.capabilities().has(CAP_ADMIN));
+    let readonly = copy.into_readonly();
+    assert(readonly.capabilities().has(CAP_READ));
+    assert(readonly.capabilities().is_subset_of(&CapabilitySet.read_only()));
+
+    let notify = notify_database_from_pool(unopened_pool());
+    assert(notify.capabilities().has(CAP_READ));
+    assert(notify.capabilities().has(CAP_NOTIFY));
+    assert(!notify.capabilities().has(CAP_WRITE));
+    0
+}

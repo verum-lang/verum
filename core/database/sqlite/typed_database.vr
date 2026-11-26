@@ -98,14 +98,17 @@ implement<C: CanRead> Database<SqlitePool, C> {
     /// in-memory database is sub-microsecond; per-call pool
     /// acquire dominates.
     public fn query_rows(&self, sql: &Text) -> Result<List<List<SqliteValue>>, DbError> {
-        let mut handle: PooledConnection<SqliteConnection> = match self.pool.acquire() {
+        let mut handle: PooledConnection<SqliteConnection> = match self.adapter_pool().acquire() {
             Result.Ok(h)  => h,
             Result.Err(e) => return Result.Err(e),
         };
         let result = handle.conn_mut().query_all(sql);
         match &result {
             Result.Ok(_)  => handle.release_healthy(),
-            Result.Err(e) => handle.release_discard(e.message()),
+            Result.Err(cause) => {
+                let error: &DbError = cause;
+                handle.release_discard(error.message());
+            }
         }
         result
     }
@@ -113,24 +116,25 @@ implement<C: CanRead> Database<SqlitePool, C> {
     /// First-row-only convenience. Returns `Result.Ok(Maybe.None)` when the
     /// query produced no rows.
     public fn query_first(&self, sql: &Text) -> Result<Maybe<List<SqliteValue>>, DbError> {
-        let mut handle: PooledConnection<SqliteConnection> = match self.pool.acquire() {
+        let mut handle: PooledConnection<SqliteConnection> = match self.adapter_pool().acquire() {
             Result.Ok(h)  => h,
             Result.Err(e) => return Result.Err(e),
         };
-        let result = handle.conn_mut().query_first(sql);
-        match &result {
-            Result.Ok(row) => {
+        let result: Result<List<SqliteValue>, DbError> = handle.conn_mut().query_first(sql);
+        match result {
+            Result.Ok(value) => {
+                let row: List<SqliteValue> = value;
                 handle.release_healthy();
-                if (row.len() as Int) == 0 {
+                if row.is_empty() {
                     Result.Ok(Maybe.None)
                 } else {
-                    Result.Ok(Maybe.Some(row.clone()))
+                    Result.Ok(Maybe.Some(row))
                 }
             }
-            Result.Err(e) => {
-                let msg = e.message();
-                handle.release_discard(msg);
-                Result.Err(e.clone())
+            Result.Err(cause) => {
+                let error: DbError = cause;
+                handle.release_discard(error.message());
+                Result.Err(error)
             }
         }
     }
@@ -147,14 +151,17 @@ implement<C: CanWrite> Database<SqlitePool, C> {
     /// need them use the loom `Database.changes()` accessor via
     /// `SqliteConnection.inner_mut`).
     public fn execute_simple(&self, sql: &Text) -> Result<(), DbError> {
-        let mut handle: PooledConnection<SqliteConnection> = match self.pool.acquire() {
+        let mut handle: PooledConnection<SqliteConnection> = match self.adapter_pool().acquire() {
             Result.Ok(h)  => h,
             Result.Err(e) => return Result.Err(e),
         };
         let result = handle.conn_mut().execute(sql);
         match &result {
             Result.Ok(_)  => handle.release_healthy(),
-            Result.Err(e) => handle.release_discard(e.message()),
+            Result.Err(cause) => {
+                let error: &DbError = cause;
+                handle.release_discard(error.message());
+            }
         }
         result
     }
@@ -181,7 +188,7 @@ implement<C: CanTx> Database<SqlitePool, C> {
     /// The default for query-heavy paths that may or may not
     /// write.
     public fn begin(&self) -> Result<SqliteTxScope<SqlitePool>, DbError> {
-        let mut handle: PooledConnection<SqliteConnection> = match self.pool.acquire() {
+        let mut handle: PooledConnection<SqliteConnection> = match self.adapter_pool().acquire() {
             Result.Ok(h)  => h,
             Result.Err(e) => return Result.Err(e),
         };
@@ -198,7 +205,7 @@ implement<C: CanTx> Database<SqlitePool, C> {
     /// contention. Recommended for mutating paths so a busy-
     /// timeout kicks in at BEGIN, not mid-statement.
     public fn begin_immediate(&self) -> Result<SqliteTxScope<SqlitePool>, DbError> {
-        let mut handle: PooledConnection<SqliteConnection> = match self.pool.acquire() {
+        let mut handle: PooledConnection<SqliteConnection> = match self.adapter_pool().acquire() {
             Result.Ok(h)  => h,
             Result.Err(e) => return Result.Err(e),
         };
@@ -215,7 +222,7 @@ implement<C: CanTx> Database<SqlitePool, C> {
     /// duration. Use sparingly; intended for batch-write paths
     /// that absolutely cannot tolerate concurrent writers.
     public fn begin_exclusive(&self) -> Result<SqliteTxScope<SqlitePool>, DbError> {
-        let mut handle: PooledConnection<SqliteConnection> = match self.pool.acquire() {
+        let mut handle: PooledConnection<SqliteConnection> = match self.adapter_pool().acquire() {
             Result.Ok(h)  => h,
             Result.Err(e) => return Result.Err(e),
         };
@@ -315,7 +322,7 @@ implement<C: CanDdl> Database<SqlitePool, C> {
     /// cannot accidentally drop a table because `CanDdl` is not in
     /// scope on it.
     public fn execute_ddl(&self, sql: &Text) -> Result<(), DbError> {
-        let mut handle: PooledConnection<SqliteConnection> = match self.pool.acquire() {
+        let mut handle: PooledConnection<SqliteConnection> = match self.adapter_pool().acquire() {
             Result.Ok(h)  => h,
             Result.Err(e) => return Result.Err(e),
         };
@@ -338,7 +345,7 @@ implement<C: CanUnsafe> Database<SqlitePool, C> {
     /// `@unsafe` + `@audit(reason)` annotations the spec §8.9
     /// requires at the call site, every invocation is auditable.
     public fn execute_raw_unsafe(&self, sql: &Text) -> Result<(), DbError> {
-        let mut handle: PooledConnection<SqliteConnection> = match self.pool.acquire() {
+        let mut handle: PooledConnection<SqliteConnection> = match self.adapter_pool().acquire() {
             Result.Ok(h)  => h,
             Result.Err(e) => return Result.Err(e),
         };
@@ -359,7 +366,7 @@ implement<C: Capability> Database<SqlitePool, C> {
     /// Snapshot the underlying pool's metrics — for emission to
     /// the observability layer.
     public fn pool_stats(&self) -> PoolStatsSnapshot {
-        self.pool.stats()
+        self.adapter_pool().stats()
     }
 }
 

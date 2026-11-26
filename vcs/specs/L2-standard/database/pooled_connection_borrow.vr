@@ -1,0 +1,17 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: database, pool, borrow, returned-reference
+
+mount core.database.common.error.{DbError};
+mount core.database.common.pool_impl.{PooledConnection};
+mount core.database.postgres.connection.{PgConnection, PgSimpleQueryResult};
+
+fn query_checked_out(mut handle: PooledConnection<PgConnection>, sql: &Text) -> Result<PgSimpleQueryResult, DbError> {
+    let result = handle.conn_mut().simple_query(sql);
+    match &result {
+        Result.Ok(_) => handle.release_healthy(),
+        Result.Err(error) => handle.release_discard(error.message()),
+    };
+    result
+}

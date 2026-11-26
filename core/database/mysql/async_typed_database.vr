@@ -23,14 +23,14 @@ module core.database.mysql.async_typed_database;
 
 mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
 mount collections.List;
-mount core.database.common.error.{DbError, AdapterId, AdMysql};
+mount core.database.common.error.{DbError};
 mount core.database.common.db_handle.Database;
 mount core.database.common.capability.{
     Capability, CanRead, CanWrite, CanTx, CanDdl,
     DbRead, DbReadWriteTx, DbAdmin,
 };
 
-mount core.database.mysql.async_pool.AsyncMysqlPool;
+mount core.database.mysql.async_pool.{AsyncMysqlPool, AsyncMysqlPoolGuard};
 mount core.database.mysql.async_connection.AsyncMysqlConnection;
 mount core.database.mysql.connection.MySimpleQueryResult;
 mount core.database.mysql.async_transaction.{
@@ -43,7 +43,7 @@ implement<C: CanRead> Database<AsyncMysqlPool, C> {
     public async fn query_simple(&self, sql: &Text)
         -> Result<MySimpleQueryResult, DbError>
     {
-        let guard: AsyncMysqlPoolGuard = self.pool.acquire().await?;
+        let guard: AsyncMysqlPoolGuard = self.adapter_pool().acquire().await?;
         guard.conn_ref().simple_query(sql).await
     }
 }
@@ -53,7 +53,7 @@ implement<C: CanWrite> Database<AsyncMysqlPool, C> {
     public async fn execute_simple(&self, sql: &Text)
         -> Result<Int, DbError>
     {
-        let guard: AsyncMysqlPoolGuard = self.pool.acquire().await?;
+        let guard: AsyncMysqlPoolGuard = self.adapter_pool().acquire().await?;
         guard.conn_ref().execute(sql).await
     }
 }
@@ -68,57 +68,33 @@ implement<C: CanTx> Database<AsyncMysqlPool, C> {
     public async fn begin_with_opts(&self, opts: &MyTxOpts)
         -> Result<AsyncMysqlTxScope, DbError>
     {
-        let guard: AsyncMysqlPoolGuard = self.pool.acquire().await?;
-        let conn = guard.conn();
-        let tx = begin_tx_with_async(&conn, opts.clone()).await?;
-        Result.Ok(AsyncMysqlTxScope {
-            guard: Maybe.Some(guard),
-            conn: Maybe.Some(conn),
-            tx: Maybe.Some(tx),
-        })
+        let guard: AsyncMysqlPoolGuard = self.adapter_pool().acquire().await?;
+        let tx = begin_tx_with_async(guard.conn_ref(), opts.clone()).await?;
+        Result.Ok(AsyncMysqlTxScope { guard: guard, tx: tx })
     }
 }
 
 public type affine AsyncMysqlTxScope is {
-    guard: Maybe<core.database.mysql.async_pool.AsyncMysqlPoolGuard>,
-    conn: Maybe<AsyncMysqlConnection>,
-    tx: Maybe<AsyncMysqlTransaction>,
+    guard: AsyncMysqlPoolGuard,
+    tx: AsyncMysqlTransaction,
 };
 
 implement AsyncMysqlTxScope {
+    /// Borrow the checked-out actor for work in this transaction.
     public fn conn_ref(&self) -> &AsyncMysqlConnection {
-        match &self.conn {
-            Maybe.Some(c) => c,
-            Maybe.None    => panic("AsyncMysqlTxScope: connection already taken"),
-        }
+        self.guard.conn_ref()
     }
 
-    public async fn commit(mut self) -> Result<(), DbError> {
-        let conn = match self.conn.take() {
-            Maybe.Some(c) => c,
-            Maybe.None    => { return Result.Err(scope_used("commit")); }
-        };
-        let tx = match self.tx.take() {
-            Maybe.Some(t) => t,
-            Maybe.None    => { return Result.Err(scope_used("commit-no-tx")); }
-        };
-        let r = commit_tx_async(&conn, tx).await;
-        let _ = self.guard.take();
-        r
+    public async fn commit(self) -> Result<(), DbError> {
+        let result = commit_tx_async(self.guard.conn_ref(), self.tx).await;
+        drop(self.guard);
+        result
     }
 
-    public async fn rollback(mut self) -> Result<(), DbError> {
-        let conn = match self.conn.take() {
-            Maybe.Some(c) => c,
-            Maybe.None    => { return Result.Err(scope_used("rollback")); }
-        };
-        let tx = match self.tx.take() {
-            Maybe.Some(t) => t,
-            Maybe.None    => { return Result.Err(scope_used("rollback-no-tx")); }
-        };
-        let r = rollback_tx_async(&conn, tx).await;
-        let _ = self.guard.take();
-        r
+    public async fn rollback(self) -> Result<(), DbError> {
+        let result = rollback_tx_async(self.guard.conn_ref(), self.tx).await;
+        drop(self.guard);
+        result
     }
 }
 
@@ -138,13 +114,4 @@ public fn async_mysql_readonly_database_from_pool(pool: AsyncMysqlPool)
     -> Database<AsyncMysqlPool, DbRead>
 {
     Database.from_readonly_pool(Shared.new(pool))
-}
-
-fn scope_used(what: &Text) -> DbError {
-    DbError.Adapter(core.database.common.error.AdapterSpecific.new(
-        AdMysql,
-        "TX_SCOPE_USED".clone(),
-        f"AsyncMysqlTxScope already consumed at {what}",
-        false,
-    ))
 }

@@ -1,0 +1,14 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L2
+// @tags: database, capability, visibility
+// @expected-error: E400 "no method named `adapter_pool`"
+// @expected-error-count: 1
+
+mount core.database.common.capability.{DbRead};
+mount core.database.common.db_handle.{Database};
+mount core.database.postgres.pool.{PgPool};
+
+fn take_pool(handle: &Database<PgPool, DbRead>) -> &PgPool {
+    handle.adapter_pool()
+}

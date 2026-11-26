@@ -32,8 +32,7 @@
 //   implement<C: CanUnsafe>Database<PgPool, C> { fn execute_raw_unsafe(...) }
 //
 // `implement<P, C: Capability> Database<P, C>` from `db_handle.vr`
-// already gives the universal accessors (`pool_shared`,
-// `capabilities`, `capability_name`); this module fills the
+// provides `capabilities` and `capability_name`; this module fills the
 // adapter-specific behavioural surface.
 //
 // # Naming convention
@@ -78,7 +77,6 @@ mount core.database.common.db_handle.Database;
 mount core.database.common.capability.{
     Capability, CanRead, CanWrite, CanTx, CanDdl, CanNotify, CanCopy, CanUnsafe,
     DbRead, DbReadWriteTx, DbAdmin, DbReplication, DbNotify, DbCopy, DbUnsafe,
-    CapabilitySet,
 };
 mount core.database.common.pool_impl.{PooledConnection, ReleaseKind, Healthy, Discard};
 
@@ -106,7 +104,7 @@ implement<C: CanRead> Database<PgPool, C> {
     /// connection is RELEASE_DISCARDed so the pool reopens a fresh
     /// one (matches the spec's drop-on-fault discipline).
     public fn query_simple(&self, sql: &Text) -> Result<PgSimpleQueryResult, DbError> {
-        let mut handle = match self.pool.acquire() {
+        let mut handle = match self.adapter_pool().acquire() {
             Result.Ok(h)  => h,
             Result.Err(e) => return Result.Err(e),
         };
@@ -129,15 +127,11 @@ implement<C: CanRead> Database<PgPool, C> {
 
     /// Convenience — first row or Maybe.None.
     public fn query_first(&self, sql: &Text) -> Result<Maybe<List<WireValue>>, DbError> {
-        match self.query_simple(sql) {
-            Result.Ok(r) => {
-                if (r.rows.len() as Int) == 0 {
-                    Result.Ok(Maybe.None)
-                } else {
-                    Result.Ok(Maybe.Some(r.rows[0].clone()))
-                }
-            }
-            Result.Err(e) => Result.Err(e),
+        let mut rows = self.query_rows(sql)?;
+        if rows.is_empty() {
+            Result.Ok(Maybe.None)
+        } else {
+            Result.Ok(Maybe.Some(rows.swap_remove(0)))
         }
     }
 }
@@ -156,7 +150,7 @@ implement<C: CanWrite> Database<PgPool, C> {
     /// `query_simple` + look at `rows.len()` for RETURNING-clause
     /// shapes.
     public fn execute_simple(&self, sql: &Text) -> Result<Text, DbError> {
-        let mut handle = match self.pool.acquire() {
+        let mut handle = match self.adapter_pool().acquire() {
             Result.Ok(h)  => h,
             Result.Err(e) => return Result.Err(e),
         };
@@ -182,7 +176,7 @@ implement<C: CanTx> Database<PgPool, C> {
     /// finish the transaction and release the checkout. Affine alone does
     /// not reject a forgotten terminal call or establish implicit cleanup.
     public fn begin(&self) -> Result<TxScope<PgPool>, DbError> {
-        let mut handle = match self.pool.acquire() {
+        let mut handle = match self.adapter_pool().acquire() {
             Result.Ok(h)  => h,
             Result.Err(e) => return Result.Err(e),
         };
@@ -232,7 +226,7 @@ implement TxScope<PgPool> {
     /// underlying connection returns to the pool's idle queue
     /// (healthy state — commit succeeded).
     public fn commit(mut self) -> Result<(), DbError> {
-        let result = core.database.postgres.transaction.commit_tx(self.tx);
+        let result = core.database.postgres.transaction.commit_tx(self.handle.conn_mut(), self.tx);
         // Release after the wire COMMIT so the connection's state
         // is observed Ready again before the next acquire reuses
         // it. On commit failure the connection is in an ambiguous
@@ -246,7 +240,7 @@ implement TxScope<PgPool> {
 
     /// ROLLBACK the transaction and release the pool checkout.
     public fn rollback(mut self) -> Result<(), DbError> {
-        let result = core.database.postgres.transaction.rollback_tx(self.tx);
+        let result = core.database.postgres.transaction.rollback_tx(self.handle.conn_mut(), self.tx);
         match &result {
             Result.Ok(_)  => self.handle.release_healthy(),
             Result.Err(e) => self.handle.release_discard(format_err_reason(e)),
@@ -269,7 +263,7 @@ implement<C: CanDdl> Database<PgPool, C> {
     /// The body identical to `execute_simple` — DDL goes through
     /// the simple-query path. The bound is the load-bearing piece.
     public fn execute_ddl(&self, sql: &Text) -> Result<Text, DbError> {
-        let mut handle = match self.pool.acquire() {
+        let mut handle = match self.adapter_pool().acquire() {
             Result.Ok(h)  => h,
             Result.Err(e) => return Result.Err(e),
         };
@@ -294,7 +288,7 @@ implement<C: CanNotify> Database<PgPool, C> {
     /// (Postgres NOTIFY is transactional). When called outside a
     /// tx, fires immediately on the connection's auto-commit.
     public fn notify(&self, channel: &Text, payload: &Text) -> Result<(), DbError> {
-        let mut handle = match self.pool.acquire() {
+        let mut handle = match self.adapter_pool().acquire() {
             Result.Ok(h)  => h,
             Result.Err(e) => return Result.Err(e),
         };
@@ -317,7 +311,7 @@ implement<C: CanNotify> Database<PgPool, C> {
     /// a long-lived dedicated connection for the listen loop and
     /// uses the dispatcher's fan-out to broadcast to subscribers.
     public fn listen(&self, channel: &Text) -> Result<(), DbError> {
-        let mut handle = match self.pool.acquire() {
+        let mut handle = match self.adapter_pool().acquire() {
             Result.Ok(h)  => h,
             Result.Err(e) => return Result.Err(e),
         };
@@ -331,7 +325,7 @@ implement<C: CanNotify> Database<PgPool, C> {
 
     /// Send UNLISTEN on `channel` (or "*" to drop all subscriptions).
     public fn unlisten(&self, channel: &Text) -> Result<(), DbError> {
-        let mut handle = match self.pool.acquire() {
+        let mut handle = match self.adapter_pool().acquire() {
             Result.Ok(h)  => h,
             Result.Err(e) => return Result.Err(e),
         };
@@ -384,7 +378,7 @@ implement<C: CanCopy> Database<PgPool, C> {
         sql: &Text,
         rows: &List<List<Byte>>,
     ) -> Result<Int, DbError> {
-        let mut handle = match self.pool.acquire() {
+        let mut handle = match self.adapter_pool().acquire() {
             Result.Ok(h)  => h,
             Result.Err(e) => return Result.Err(e),
         };
@@ -417,7 +411,7 @@ implement<C: CanUnsafe> Database<PgPool, C> {
     /// `execute_simple` with a parameterised `sql#"..."` literal
     /// instead.
     public fn execute_raw_unsafe(&self, sql: &Text) -> Result<PgSimpleQueryResult, DbError> {
-        let mut handle = match self.pool.acquire() {
+        let mut handle = match self.adapter_pool().acquire() {
             Result.Ok(h)  => h,
             Result.Err(e) => return Result.Err(e),
         };
@@ -438,7 +432,7 @@ implement<C: Capability> Database<PgPool, C> {
     /// Snapshot the underlying pool's metrics for emission to the
     /// observability layer.
     public fn pool_stats(&self) -> core.database.common.pool_impl.PoolStatsSnapshot {
-        self.pool.stats()
+        self.adapter_pool().stats()
     }
 }
 
@@ -463,12 +457,7 @@ public fn admin_database_from_pool(pool: PgPool) -> Database<PgPool, DbAdmin> {
 /// long-lived listener connection + `NotifyDispatcher` for the
 /// fan-out pattern.
 public fn notify_database_from_pool(pool: PgPool) -> Database<PgPool, DbNotify> {
-    let shared = Shared.new(pool);
-    Database {
-        pool: shared,
-        caps: CapabilitySet.empty().add(0x0001).add(0x0020),    // READ + NOTIFY
-        _phantom: (),
-    }
+    Database.from_notify_pool(Shared.new(pool))
 }
 
 /// Replication handle — for logical-replication consumers. Surfaces

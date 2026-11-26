@@ -42,14 +42,14 @@ module core.database.postgres.async_typed_database;
 
 mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
 mount collections.List;
-mount core.database.common.error.{DbError, AdapterId, AdPostgres};
+mount core.database.common.error.{DbError};
 mount core.database.common.db_handle.Database;
 mount core.database.common.capability.{
     Capability, CanRead, CanWrite, CanTx, CanDdl,
     DbRead, DbReadWriteTx, DbAdmin,
 };
 
-mount core.database.postgres.async_pool.AsyncPgPool;
+mount core.database.postgres.async_pool.{AsyncPgPool, AsyncPgPoolGuard};
 mount core.database.postgres.async_connection.AsyncPgConnection;
 mount core.database.postgres.connection.PgSimpleQueryResult;
 mount core.database.postgres.async_transaction.{
@@ -69,7 +69,7 @@ implement<C: CanRead> Database<AsyncPgPool, C> {
     public async fn query_simple(&self, sql: &Text)
         -> Result<PgSimpleQueryResult, DbError>
     {
-        let guard: AsyncPgPoolGuard = self.pool.acquire().await?;
+        let guard: AsyncPgPoolGuard = self.adapter_pool().acquire().await?;
         guard.conn_ref().simple_query(sql).await
     }
 }
@@ -84,13 +84,13 @@ implement<C: CanWrite> Database<AsyncPgPool, C> {
     public async fn execute_simple(&self, sql: &Text)
         -> Result<Text, DbError>
     {
-        let guard: AsyncPgPoolGuard = self.pool.acquire().await?;
+        let guard: AsyncPgPoolGuard = self.adapter_pool().acquire().await?;
         guard.conn_ref().execute(sql).await
     }
 }
 
 // -----------------------------------------------------------------------------
-// Tx-bound surface — DbReadWriteTx / DbAdmin / DbCopy.
+// Tx-bound surface — DbReadWriteTx / DbAdmin / DbUnsafe.
 // -----------------------------------------------------------------------------
 
 implement<C: CanTx> Database<AsyncPgPool, C> {
@@ -108,14 +108,9 @@ implement<C: CanTx> Database<AsyncPgPool, C> {
     public async fn begin_with_opts(&self, opts: &PgTxOpts)
         -> Result<AsyncPgTxScope, DbError>
     {
-        let guard: AsyncPgPoolGuard = self.pool.acquire().await?;
-        let conn = guard.conn();
-        let tx = begin_tx_with_async(&conn, opts.clone()).await?;
-        Result.Ok(AsyncPgTxScope {
-            guard: Maybe.Some(guard),
-            conn: Maybe.Some(conn),
-            tx: Maybe.Some(tx),
-        })
+        let guard: AsyncPgPoolGuard = self.adapter_pool().acquire().await?;
+        let tx = begin_tx_with_async(guard.conn_ref(), opts.clone()).await?;
+        Result.Ok(AsyncPgTxScope { guard: guard, tx: tx })
     }
 }
 
@@ -124,53 +119,28 @@ implement<C: CanTx> Database<AsyncPgPool, C> {
 // -----------------------------------------------------------------------------
 
 /// Affine — exactly one consumer; `commit` / `rollback` consume.
-/// Drops without explicit decision call `rollback` best-effort
-/// in Drop.
+/// The caller chooses commit or rollback before releasing the guard.
 public type affine AsyncPgTxScope is {
-    guard: Maybe<core.database.postgres.async_pool.AsyncPgPoolGuard>,
-    conn: Maybe<AsyncPgConnection>,
-    tx: Maybe<AsyncPgTransaction>,
+    guard: AsyncPgPoolGuard,
+    tx: AsyncPgTransaction,
 };
 
 implement AsyncPgTxScope {
-    /// Borrow the underlying connection so the caller can issue
-    /// statements inside the transaction. Each call gives the same
-    /// actor handle.
+    /// Borrow the checked-out actor for work in this transaction.
     public fn conn_ref(&self) -> &AsyncPgConnection {
-        match &self.conn {
-            Maybe.Some(c) => c,
-            Maybe.None    => panic("AsyncPgTxScope: connection already taken"),
-        }
+        self.guard.conn_ref()
     }
 
-    public async fn commit(mut self) -> Result<(), DbError> {
-        let conn = match self.conn.take() {
-            Maybe.Some(c) => c,
-            Maybe.None    => { return Result.Err(scope_used("commit")); }
-        };
-        let tx = match self.tx.take() {
-            Maybe.Some(t) => t,
-            Maybe.None    => { return Result.Err(scope_used("commit-no-tx")); }
-        };
-        let r = commit_tx_async(&conn, tx).await;
-        // Relinquish the guard; its declared Drop body attempts pool return.
-        // This does not acknowledge delivery or prove destructor dispatch.
-        let _ = self.guard.take();
-        r
+    public async fn commit(self) -> Result<(), DbError> {
+        let result = commit_tx_async(self.guard.conn_ref(), self.tx).await;
+        drop(self.guard);
+        result
     }
 
-    public async fn rollback(mut self) -> Result<(), DbError> {
-        let conn = match self.conn.take() {
-            Maybe.Some(c) => c,
-            Maybe.None    => { return Result.Err(scope_used("rollback")); }
-        };
-        let tx = match self.tx.take() {
-            Maybe.Some(t) => t,
-            Maybe.None    => { return Result.Err(scope_used("rollback-no-tx")); }
-        };
-        let r = rollback_tx_async(&conn, tx).await;
-        let _ = self.guard.take();
-        r
+    public async fn rollback(self) -> Result<(), DbError> {
+        let result = rollback_tx_async(self.guard.conn_ref(), self.tx).await;
+        drop(self.guard);
+        result
     }
 }
 
@@ -198,17 +168,4 @@ public fn async_readonly_database_from_pool(pool: AsyncPgPool)
     -> Database<AsyncPgPool, DbRead>
 {
     Database.from_readonly_pool(Shared.new(pool))
-}
-
-// =============================================================================
-// Helpers
-// =============================================================================
-
-fn scope_used(what: &Text) -> DbError {
-    DbError.Adapter(core.database.common.error.AdapterSpecific.new(
-        AdPostgres,
-        "TX_SCOPE_USED".clone(),
-        f"AsyncPgTxScope already consumed at {what}",
-        false,
-    ))
 }
