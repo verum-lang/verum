@@ -2104,6 +2104,7 @@ impl VbcCodegen {
             qualified_name,
             resolver_pinned: true,
             type_prefix_receiver: false,
+            ..
         }) = expr.resolved_call_target.as_ref() else {
             return Ok(None);
         };
@@ -11496,6 +11497,7 @@ impl VbcCodegen {
             }
             ResolvedCallTarget::StaticCall {
                 qualified_name,
+                source_method,
                 type_prefix_receiver,
                 resolver_pinned,
             } => {
@@ -11626,7 +11628,7 @@ impl VbcCodegen {
                 let receiver_declaration = receiver.filter(|_| !type_prefix_receiver)
                     .and_then(|expr| self.declared_expression_result(expr, None, 0, 0));
                 let specialized = self.receiver_specialization(qualified_name.as_str(),
-                    receiver_declaration.as_ref(), args.len() + 1)?.cloned();
+                    receiver_declaration.as_ref(), args.len() + 1, source_method.as_ref())?.cloned();
                 let info_opt = specialized.or_else(|| self
                     .resolve_receiver_qualified_method(qualified_name.as_str(), receiver.is_some())
                     .or_else(|| self.ctx.lookup_function(qualified_name.as_str()).cloned()));
@@ -16626,7 +16628,7 @@ impl VbcCodegen {
         // CallG when witnesses derive, the CallM path stages them via
         // SetCallWitness.
         let specialized = self.receiver_specialization(&effective_method_name,
-            receiver_result_declaration.as_ref(), args.len() + 1)?.cloned();
+            receiver_result_declaration.as_ref(), args.len() + 1, None)?.cloned();
         let exact_receiver_target = specialized.as_ref().filter(|info| info.has_source_body)
             .map(|info| info.id.0);
         let instance_method = specialized.or_else(|| self

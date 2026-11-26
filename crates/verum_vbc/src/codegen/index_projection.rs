@@ -83,7 +83,7 @@ impl VbcCodegen {
                 ))));
             }
             if let Some(key) = self.structural_receiver_method_key(&owner, method, arity)? {
-                let function = self.receiver_specialization(&key, Some(&owner), arity)?
+                let function = self.receiver_specialization(&key, Some(&owner), arity, None)?
                     .or_else(|| self.ctx.lookup_qualified_function(&key));
                 return Ok(function.map(|function| DeclaredReceiverMethod::Function(function, owner)));
             }
@@ -92,7 +92,7 @@ impl VbcCodegen {
             };
             let Some(name) = self.type_declaration_identity(descriptor) else { return Ok(None); };
             if let Some(key) = self.registered_receiver_method(&name, method) {
-                let selected = self.receiver_specialization(&key, Some(&owner), arity)?;
+                let selected = self.receiver_specialization(&key, Some(&owner), arity, None)?;
                 let Some(function) = selected.or_else(|| self.ctx.lookup_qualified_function(&key)) else { return Ok(None); };
                 return Ok((function.param_count == arity
                     && function.param_names.first().is_some_and(|name| name == "self"))

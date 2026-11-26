@@ -48,7 +48,7 @@ impl VbcCodegen {
                 self.registered_receiver_method(name, method)
             });
             let Some(key) = key else { continue };
-            let specialized = self.receiver_specialization(&key, Some(actual), arity)?;
+            let specialized = self.receiver_specialization(&key, Some(actual), arity, None)?;
             let Some(function) = specialized.or_else(|| self.ctx.lookup_qualified_function(&key))
             else {
                 continue;
@@ -99,26 +99,28 @@ impl VbcCodegen {
         family: &str,
         receiver: Option<&TypeRef>,
         arity: usize,
+        source: Option<&(verum_common::Text, verum_ast::Span)>,
     ) -> CodegenResult<Option<&FunctionInfo>> {
-        self.receiver_role_specialization(family, receiver, arity, true)
+        self.receiver_role_specialization(family, receiver, arity, true, source)
     }
 
     pub(super) fn static_receiver_specialization(
         &self, family: &str, receiver: &TypeRef, arity: usize,
     ) -> CodegenResult<Option<&FunctionInfo>> {
-        self.receiver_role_specialization(family, Some(receiver), arity, false)
+        self.receiver_role_specialization(family, Some(receiver), arity, false, None)
     }
 
     fn receiver_role_specialization(
         &self, family: &str, receiver: Option<&TypeRef>, arity: usize, takes_receiver: bool,
+        source: Option<&(verum_common::Text, verum_ast::Span)>,
     ) -> CodegenResult<Option<&FunctionInfo>> {
-        let Some(
-            actual @ (TypeRef::Concrete(_) | TypeRef::Instantiated { .. } | TypeRef::Array { .. } | TypeRef::Slice(_)),
-        ) = receiver.map(pointee)
-        else {
-            return Ok(None);
+        let actual = receiver.map(pointee);
+        let has_receiver_family = match actual {
+            Some(TypeRef::Concrete(_)) => !takes_receiver,
+            Some(TypeRef::Instantiated { .. } | TypeRef::Array { .. } | TypeRef::Slice(_)) => true,
+            _ => false,
         };
-        if takes_receiver && matches!(actual, TypeRef::Concrete(_)) { return Ok(None); }
+        if source.is_none() && !has_receiver_family { return Ok(None); }
         let functions = &self.ctx.functions;
         let Some(second) = functions.get(&format!("{family}#impl2")) else {
             return Ok(None);
@@ -129,6 +131,28 @@ impl VbcCodegen {
             .into_iter()
             .chain([second])
             .chain(rest);
+        if let Some((owner, site)) = source {
+            // The same receiver can implement several same-named methods.
+            // The checked source location distinguishes their linkage slots.
+            let member = family.rsplit('.').next().unwrap_or(family);
+            let mut matches = siblings.filter(|candidate| {
+                let Some(descriptor) = self.declared_callable_descriptors.get(&candidate.id) else {
+                    return false;
+                };
+                let origin = descriptor.origin_module.and_then(|id| self.ctx.strings.get(id.0 as usize));
+                candidate.param_count == arity && origin.is_some_and(|name| name.as_str() == owner.as_str())
+                    && descriptor.source_signature.as_ref().is_some_and(|signature|
+                        signature.is_method() && signature.name.as_str() == member
+                        && signature.span.start == site.start && signature.span.end == site.end)
+            });
+            return match (matches.next(), matches.next()) {
+                (Some(selected), None) => Ok(Some(selected)),
+                _ => Err(CodegenError::with_span(CodegenErrorKind::InvalidSourceSignature(
+                    format!("no unique implementation of {family} at the checked declaration in {owner}"),
+                ), *site)),
+            };
+        }
+        let Some(actual) = actual else { return Ok(None); };
         let mut candidates = verum_common::List::new();
         for candidate in siblings.filter(|candidate| candidate.param_count == arity) {
             if self.has_declared_method_receiver(candidate)? != takes_receiver {

@@ -195,11 +195,16 @@ impl TypeChecker {
         &mut self,
         span: verum_ast::span::Span,
         qualified_name: impl Into<verum_common::Text>,
+        scheme: &TypeScheme,
     ) {
         self.resolved_call_targets.insert(
             span,
             verum_ast::expr::ResolvedCallTarget::StaticCall {
                 qualified_name: qualified_name.into(),
+                source_method: scheme.callable_source.as_ref()
+                    .filter(|(_, declaration)| scheme.declared_inherent && declaration.is_method()
+                        && !declaration.span.is_empty())
+                    .map(|(owner, declaration)| (owner.clone(), declaration.span)),
                 type_prefix_receiver: false,
                 resolver_pinned: false,
             },

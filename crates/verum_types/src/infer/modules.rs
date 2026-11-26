@@ -11498,6 +11498,7 @@ impl TypeChecker {
                 self.resolved_call_targets.insert(
                     call_span,
                     verum_ast::expr::ResolvedCallTarget::StaticCall {
+                        source_method: None,
                         qualified_name: Text::from(format!("{}.{}", head, method_name)),
                         // The syntactic receiver is the PROTOCOL name —
                         // a type-level prefix, not a runtime value.
@@ -11565,6 +11566,7 @@ impl TypeChecker {
                     self.resolved_call_targets.insert(
                         call_span,
                         verum_ast::expr::ResolvedCallTarget::StaticCall {
+                            source_method: None,
                             qualified_name: Text::from(qualified),
                             type_prefix_receiver: false,
                             resolver_pinned: true,
@@ -15225,6 +15227,7 @@ impl TypeChecker {
         self.resolved_call_targets.insert(
             span,
             verum_ast::expr::ResolvedCallTarget::StaticCall {
+                source_method: None,
                 qualified_name,
                 type_prefix_receiver: false,
                 resolver_pinned: true,
@@ -18424,24 +18427,8 @@ impl TypeChecker {
                     early_method_info
                 {
                     self.type_registry.register_declared_method_target(span, method_ty.clone(), recv_ty.clone(), &source_scheme);
-                    // #91/#95 — STATIC-DISPATCH ONLY.  Stamp the
-                    // resolved-call-target side-table only when the
-                    // receiver is a type-name path
-                    // (`Type.method(args)`), not when it's a value
-                    // expression (`obj.method(args)`).
-                    //
-                    // Static calls compile to `Call(fn_id, args)` —
-                    // arguments map 1:1 to the function's parameters
-                    // and the codegen's `compile_static_method_call`
-                    // assumes no implicit `self`.  Instance calls
-                    // need to compile the receiver and pass it as
-                    // implicit arg 0; that lowering is handled by
-                    // the legacy CallM-based instance-dispatch path,
-                    // which stays in charge for non-stamped
-                    // method-calls.  Stamping instance calls would
-                    // miscount arity and surface
-                    // `WrongArgumentCount` at the fast path's
-                    // function-info gate.
+                    // Source-selected instance methods also retain their exact declaration
+                    // on computed receivers. Codegen supplies the receiver as argument zero.
                     let is_static_path = matches!(
                         &receiver.kind,
                         verum_ast::expr::ExprKind::Path(p)
@@ -18451,13 +18438,9 @@ impl TypeChecker {
                                     verum_ast::ty::PathSegment::Name(_)
                                 )
                     );
-                    if is_static_path {
-                        let qualified = format!(
-                            "{}.{}",
-                            type_name_text.as_str(),
-                            method_name_text.as_str()
-                        );
-                        self.record_resolved_static_call(span, qualified);
+                    if source_scheme.declared_inherent || is_static_path {
+                        let qualified = format!("{type_name_text}.{method_name_text}");
+                        self.record_resolved_static_call(span, qualified, &source_scheme);
                     }
                     // Register type bounds for fresh type variables
                     for (fresh_var, bounds) in &type_bounds {
@@ -22270,6 +22253,9 @@ impl TypeChecker {
         self.type_registry.register_declared_method_target(
             span, self.unifier.apply(&method_ty), self.unifier.apply(recv_ty), scheme,
         );
+        if scheme.declared_inherent && let Some(owner) = self.get_type_name(recv_ty) {
+            self.record_resolved_static_call(span, format!("{owner}.{}", method.name), scheme);
+        }
         Ok(Some(InferResult::method(self.unifier.apply(&output), receiver_kind)))
     }
 

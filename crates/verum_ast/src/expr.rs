@@ -2861,6 +2861,9 @@ pub enum ResolvedCallTarget {
     /// `"Type.method"` form codegen looks up via `lookup_function`.
     StaticCall {
         qualified_name: Text,
+        /// The declaration selected in the accepted source, when the receiver
+        /// has a concrete inherent implementation. The owner scopes its byte range.
+        source_method: Option<(Text, Span)>,
         /// True when the call-site's syntactic receiver is a TYPE-LEVEL
         /// prefix (protocol or type name) rather than a runtime value —
         /// `Default.default()` stamped as `Int.default`.  Codegen must

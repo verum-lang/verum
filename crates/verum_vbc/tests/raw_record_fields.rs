@@ -28,6 +28,7 @@ fn interpreter(body: &str, resolved_calls: bool) -> Interpreter {
                 && let ExprKind::MethodCall { method, .. } = &tail.kind
             {
                 tail.set_resolved_call_target(ResolvedCallTarget::StaticCall {
+                    source_method: None,
                     qualified_name: format!("&unsafe Record.{}", method.name).into(),
                     type_prefix_receiver: false,
                     resolver_pinned: false,

@@ -33,6 +33,27 @@ fn produce(source: &str) -> Result<VbcModule, Text> {
         }
     }
 }
+#[test]
+fn concrete_receiver_executes_its_inherent_body_in_both_declaration_orders() {
+    let inherent = "implement Gauge { fn reading(&self)->Int { self.value } }";
+    let protocol = "implement Sample for Gauge { fn reading(&self)->Int { 17 } }";
+    for definitions in [format!("{inherent} {protocol}"), format!("{protocol} {inherent}")] {
+        let source = format!("module core;
+            type Gauge is {{ value: Int }};
+            type Sample is protocol {{ fn reading(&self)->Int; }};
+            {definitions}
+            public fn probe()->Int {{ let g = Gauge {{ value: 73 }}; g.reading() }}
+            public fn temporary()->Int {{ (Gauge {{ value: 11 }}).reading() }}");
+        let module = produce(&source).expect("checked receiver");
+        let entry = module.find_function_by_name("core.probe").unwrap();
+        let temporary = module.find_function_by_name("core.temporary").unwrap();
+        let mut vm = Interpreter::try_new_validated(module.into()).unwrap();
+        vm.run_global_ctors().unwrap();
+        assert_eq!(vm.execute_function(entry).unwrap().try_as_i64(), Some(73), "{definitions}");
+        assert_eq!(vm.execute_function(temporary).unwrap().try_as_i64(), Some(11), "{definitions}");
+    }
+}
+
 fn source(actual: &str) -> Text {
     format!(
         "module core;
