@@ -1,0 +1,17 @@
+// @test: run-interpreter-panic
+// @tier: 0
+// @level: L2
+// @tags: sqlite, vdbe, ssa, dominance
+// @timeout: 15000
+// @expected-panic: invalid SQLite SSA successor
+
+mount core.database.sqlite.native.l4_vdbe.ssa.block.block_id;
+mount core.database.sqlite.native.l4_vdbe.ssa.inst.SsaInst;
+mount core.database.sqlite.native.l4_vdbe.ssa.cfg.cfg_new;
+mount core.database.sqlite.native.l4_vdbe.ssa.dominator.build_dom_tree;
+
+fn main() {
+    let mut cfg = cfg_new();
+    cfg.get_mut(&block_id(0)).set_terminator(SsaInst.IJump(block_id(1)));
+    let _ = build_dom_tree(&cfg);
+}

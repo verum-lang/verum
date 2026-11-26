@@ -53,7 +53,7 @@ fn kind_equality_holds() {
 fn empty_ssa_program() {
     let p = ssa_program_new("SELECT 1".clone());
     assert_eq(p.block_count(), 1);
-    assert_eq(p.value_count, 1);
+    assert_eq(p.value_count(), 1);
     // Total instructions = phi(0) + insts(0) + 1 terminator (placeholder)
     assert_eq(p.total_instr_count(), 1);
 }
@@ -120,14 +120,13 @@ fn lift_round_trip_smoke() {
 // -----------------------------------------------------------------------------
 
 fn dominator_single_block() {
-    let mut prog = ssa_program_new("".clone());
-    prog.cfg.compute_preds();
-    let dom = build_dom_tree(&prog.cfg);
+    let prog = ssa_program_new("".clone());
+    let dom = build_dom_tree(prog.graph());
     // Entry block (id 0) has no dominator.
     let imm = dom.immediate_dominator(&block_id(0));
     match imm {
-        None => {},
-        Some(_) => panic("entry block must have no idom"),
+        Maybe.None => {},
+        Maybe.Some(_) => panic("entry block must have no idom"),
     }
 }
 
