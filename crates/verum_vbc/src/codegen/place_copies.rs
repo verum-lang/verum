@@ -142,6 +142,9 @@ impl VbcCodegen {
                 CbgrTier::Tier0,
             )),
             ExprKind::Array(verum_ast::ArrayExpr::List(elements)) => {
+                if let Some(result) = self.ctx.declared_result_types.get(&expr.span) {
+                    return result.clone();
+                }
                 let element = nested(elements.first()?, None)?;
                 if !elements.iter().skip(1).all(|value| nested(value, None).as_ref() == Some(&element)) {
                     return None;

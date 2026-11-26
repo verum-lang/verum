@@ -7,13 +7,17 @@ use crate::types::TypeRef;
 pub(super) use crate::array_storage::ArrayResultFacts;
 
 impl VbcCodegen {
+    pub(super) fn nominal_array_element<'a>(&self, destination: &'a TypeRef) -> Option<&'a TypeRef> {
+        let TypeRef::Instantiated { base, args } = destination else { return None };
+        let index = self.declared_runtime_carrier(*base)?.array_construction_element_parameter()?;
+        args.get(index)
+    }
+
     /// Only the callable's structural contract selects conversion. Expression
     /// hints belong to initializers/arguments/fields and are not return targets.
     pub(super) fn materialize_list_return(&mut self, source: Reg) -> CodegenResult<Reg> {
         let (returns_list, signed_bits) = match self.ctx.return_type.as_ref() {
-            Some(TypeRef::Instantiated { base, args }) => self.declared_runtime_carrier(*base)
-                .and_then(|carrier| carrier.array_construction_element_parameter())
-                .and_then(|position| args.get(position))
+            Some(target @ TypeRef::Instantiated { .. }) => self.nominal_array_element(target)
                 .map(|element| (true, self.array_element_signed_bits(element)))
                 .unwrap_or((false, None)),
             Some(TypeRef::Concrete(base)) => (

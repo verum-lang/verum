@@ -1513,7 +1513,7 @@ impl VbcCodegen {
 
             // === Tuples and Arrays ===
             ExprKind::Tuple(elements) => self.compile_tuple(elements, expr.span),
-            ExprKind::Array(array_expr) => self.compile_array(array_expr),
+            ExprKind::Array(array_expr) => self.compile_array(array_expr, expr.span),
 
             // === Field Access ===
             ExprKind::Field { expr: base, field } => {
@@ -8790,6 +8790,14 @@ impl VbcCodegen {
             return Ok(Some(slice));
         }
         let value = Self::normalized_place(argument);
+        if matches!(value.kind, ExprKind::Array(verum_ast::ArrayExpr::List(_)))
+            && let Some(target) = expected.and_then(|ty| self.expand_declared_alias(ty.clone()))
+            && matches!(target, crate::types::TypeRef::Instantiated { .. } | crate::types::TypeRef::Concrete(_))
+            && self.nominal_array_element(&target).is_none()
+        {
+            return Err(CodegenError::with_span(CodegenErrorKind::InvalidSourceSignature(
+                "selected parameter has no declared array construction".into()), argument.span));
+        }
         if !Self::admits_constructor_context(value) {
             return self.compile_expr(argument);
         }
@@ -23318,7 +23326,7 @@ impl VbcCodegen {
     }
 
     /// Compiles an array expression.
-    fn compile_array(&mut self, array: &verum_ast::ArrayExpr) -> CodegenResult<Option<Reg>> {
+    fn compile_array(&mut self, array: &verum_ast::ArrayExpr, span: verum_ast::Span) -> CodegenResult<Option<Reg>> {
         match array {
             verum_ast::ArrayExpr::List(elements) => {
                 let result = self.ctx.alloc_temp();
@@ -23335,16 +23343,30 @@ impl VbcCodegen {
                 let cap_hint = elements.len().min(u16::MAX as usize) as u16;
                 self.ctx.emit(Instruction::NewList { dst: result , capacity_hint: cap_hint });
 
-                // Push all elements
+                let target = self.ctx.expected_value_type.clone().and_then(|ty| self.expand_declared_alias(ty));
+                let element = target.as_ref().and_then(|ty| self.nominal_array_element(ty));
                 for elem in elements.iter() {
+                    let start = self.ctx.instructions.len();
                     let elem_reg = self
-                        .compile_expr(elem)?
+                        .compile_call_operand(elem, element)?
                         .or_internal("array element has no value")?;
-                    self.ctx.emit(Instruction::ListPush {
+                    let actual = self.copy_source_type(elem, elem_reg, start, self.ctx.instructions.len());
+                    let declared = match element {
+                        Some(expected) if actual.as_ref() == Some(expected) => Some(expected.clone()),
+                        Some(expected) => Some(self.source_expression_declaration(elem, Some(expected), 0)
+                            .filter(|ty| ty == expected)
+                            .ok_or_else(|| CodegenError::with_span(
+                                CodegenErrorKind::InvalidSourceSignature("array element does not establish the declared container element type".into()), elem.span))?),
+                        None => actual,
+                    };
+                    self.emit_declared_value_store(elem, elem_reg, declared.as_ref(), |val| Instruction::ListPush {
                         list: result,
-                        val: elem_reg,
-                    });
+                        val,
+                    })?;
                     self.ctx.free_temp(elem_reg);
+                }
+                if element.is_some() {
+                    self.ctx.declared_result_types.insert(span, self.ctx.expected_value_type.clone());
                 }
 
                 Ok(Some(result))

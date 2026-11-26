@@ -31,6 +31,10 @@ fn compile(body: &str, bootstrap: bool) -> VbcModule {
 }
 
 fn compile_in(owner: &str, body: &str, bootstrap: bool) -> VbcModule {
+    try_compile_in(owner, body, bootstrap).unwrap_or_else(|error| panic!("{owner}: {error:?}"))
+}
+
+fn try_compile_in(owner: &str, body: &str, bootstrap: bool) -> Result<VbcModule, verum_vbc::codegen::CodegenError> {
     let source = format!("module {owner};\n{DECLARATIONS}\n{body}");
     let ast = Parser::new(&source).parse_module().expect("source grammar");
     let mut compiler = VbcCodegen::with_config(CodegenConfig::new(owner));
@@ -39,31 +43,28 @@ fn compile_in(owner: &str, body: &str, bootstrap: bool) -> VbcModule {
         compiler
             .collect_unit_declarations(&[&ast])
             .expect("declarations");
-        compiler
-            .compile_unit_items(&[&ast], ItemFailurePolicy::Strict)
-            .expect("items");
+        compiler.compile_unit_items(&[&ast], ItemFailurePolicy::Strict)?;
         compiler.finalize_module_from_state().expect("finalize")
     } else {
-        compiler.compile_additional_module(&ast).expect("source codegen")
+        compiler.compile_additional_module(&ast)?
     };
     let dispose = module
         .find_function_by_name(&format!("{owner}.dispose"))
         .expect("dispose declaration");
-    let function = module.get_function(dispose).unwrap();
-    let declared = function
-        .semantic_parameter_types()
-        .expect("source parameter evidence")[0]
-        .clone()
-        .expect("source generic declaration");
-    assert!(
-        declared.is_generic(),
-        "disposal must exercise frame witness resolution"
-    );
+    assert!(emit_parameter_drop(&mut module, dispose).is_generic(),
+        "disposal must exercise frame witness resolution");
+    // The declaration and typed operand must survive a real archive boundary.
+    Ok(deserialize_module(&serialize_module(&module).expect("serialize")).expect("deserialize"))
+}
+
+fn emit_parameter_drop(module: &mut VbcModule, entry: verum_vbc::module::FunctionId) -> verum_vbc::types::TypeRef {
+    let declared = module.get_function(entry).unwrap().semantic_parameter_types()
+        .expect("source parameter evidence")[0].clone().expect("declared disposal operand");
     let start = module.bytecode.len() as u32;
     encode_instruction(
         &Instruction::DropTyped {
             src: Reg(0),
-            type_ref: declared,
+            type_ref: declared.clone(),
         },
         &mut module.bytecode,
     );
@@ -72,13 +73,12 @@ fn compile_in(owner: &str, body: &str, bootstrap: bool) -> VbcModule {
     let function = module
         .functions
         .iter_mut()
-        .find(|function| function.id == dispose)
+        .find(|function| function.id == entry)
         .unwrap();
     function.bytecode_offset = start;
     function.bytecode_length = end - start;
     function.instructions = None;
-    // The declaration and typed operand must survive a real archive boundary.
-    deserialize_module(&serialize_module(&module).expect("serialize")).expect("deserialize")
+    declared
 }
 
 fn run(body: &str, expected: i64) {
@@ -191,7 +191,7 @@ fn generic_explicit_drop_receives_its_exact_frame_witness() {
     run(
         r#"
 type Envelope<T> is { value: T };
-implement<T> Drop for Envelope<T> { fn drop(&mut self) { self.value.drop(); } }
+implement<T: Drop> Drop for Envelope<T> { fn drop(&mut self) { self.value.drop(); } }
 fn probe() -> Int {
     let mut drops = 0;
     dispose<Maybe<Envelope<Guard>>>(Maybe.Some(Envelope { value: Guard { drops: &mut drops, marker: 41 } }));
@@ -334,29 +334,34 @@ fn nominal_primitive_metadata_cannot_silently_authorize_discarding_owned_fields(
 #[test]
 fn foreign_map_declaration_cannot_claim_the_vm_table() {
     for bootstrap in [false, true] {
-        let module = compile(
+        let mut module = compile(
             r#"
             type Map<K, V> is { len: Int, cap: Int, entries: &unsafe V, tombstones: Int };
             fn corruptible(value: Map<Int, Int>) { dispose<Map<Int, Int>>(value); }
+            fn direct(value: Map<Int, Int>) {}
         "#,
             bootstrap,
         );
         let entry = module
             .find_function_by_name("drop_runtime.corruptible")
             .unwrap();
+        let direct = module.find_function_by_name("drop_runtime.direct").unwrap();
+        emit_parameter_drop(&mut module, direct);
         let mut interpreter = Interpreter::new(Arc::new(module));
         let foreign = interpreter
             .state
             .heap
             .alloc(verum_vbc::types::TypeId::MAP, 32)
             .unwrap();
-        let error = interpreter
-            .execute_function_with_args(entry, &[verum_vbc::Value::from_ptr(foreign.as_ptr())])
-            .unwrap_err();
-        assert!(
-            error.to_string().contains("nominal owner mismatch"),
-            "bootstrap={bootstrap}: {error}"
-        );
+        for (entry, reason) in [
+            (entry, "typed copy nominal owner differs from its declaration"),
+            (direct, "nominal owner mismatch"),
+        ] {
+            let error = interpreter.execute_function_with_args(
+                entry, &[verum_vbc::Value::from_ptr(foreign.as_ptr())],
+            ).unwrap_err();
+            assert!(error.to_string().contains(reason), "bootstrap={bootstrap}: {error}");
+        }
     }
 }
 
@@ -376,45 +381,52 @@ fn native_list_destruction_uses_the_declared_element_and_owner() {
             ]);
             digits
         }
-        fn drop_numbers(xs: List<Int>) { dispose<List<Int>>(xs); }
+        fn drop_numbers(xs: List<Int>) {}
     "#;
     for bootstrap in [false, true] {
-        for owner in ["core.collections.list", "example.foreign"] {
-            let module = compile_in(owner, SOURCE, bootstrap);
-            let entry = module
-                .find_function_by_name(&format!("{owner}.ordered"))
-                .unwrap();
-            let numbers = module
-                .find_function_by_name(&format!("{owner}.drop_numbers"))
-                .unwrap();
-            let mut interpreter = Interpreter::new(Arc::new(module));
-            let result = interpreter.execute_function(entry);
-            if owner == "example.foreign" {
-                assert!(
-                    result
-                        .unwrap_err()
-                        .to_string()
-                        .contains("nominal owner mismatch")
-                );
-                continue;
-            }
-            assert_eq!(
-                result.expect("all three owned elements dropped").as_i64(),
-                321
-            );
-            let packed = interpreter
-                .state
-                .heap
-                .alloc(verum_vbc::types::TypeId::BYTE_LIST, 24)
-                .unwrap();
-            let error = interpreter
-                .execute_function_with_args(numbers, &[verum_vbc::Value::from_ptr(packed.as_ptr())])
-                .unwrap_err();
-            assert!(
-                error.to_string().contains("Byte element witness"),
-                "{error}"
-            );
-        }
+        let owner = "core.collections.list";
+        let mut module = compile_in(owner, SOURCE, bootstrap);
+        let entry = module
+            .find_function_by_name(&format!("{owner}.ordered"))
+            .unwrap();
+        let numbers = module
+            .find_function_by_name(&format!("{owner}.drop_numbers"))
+            .unwrap();
+        emit_parameter_drop(&mut module, numbers);
+        let mut interpreter = Interpreter::new(Arc::new(module));
+        let result = interpreter.execute_function(entry);
+        assert_eq!(
+            result.expect("all three owned elements dropped").as_i64(),
+            321
+        );
+        let packed = interpreter
+            .state
+            .heap
+            .alloc(verum_vbc::types::TypeId::BYTE_LIST, 24)
+            .unwrap();
+        let error = interpreter
+            .execute_function_with_args(numbers, &[verum_vbc::Value::from_ptr(packed.as_ptr())])
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("Byte element witness"),
+            "{error}"
+        );
+        let foreign = "example.foreign";
+        let invalid_element = "type List<T> is { len: Int, cap: Int, ptr: &unsafe T };
+            fn invalid() { dispose<List<List<Int>>>([[1], [true]]); }";
+        assert!(try_compile_in(owner, invalid_element, bootstrap).is_err(),
+            "a matching outer container cannot validate an incompatible inner element");
+        let rejected = try_compile_in(foreign, SOURCE, bootstrap).err()
+            .expect("a foreign same-leaf declaration cannot construct a native list literal");
+        assert!(rejected.to_string().contains("no declared array construction"), "{rejected}");
+        let mut module = compile_in(foreign,
+            "type List<T> is { len: Int, cap: Int, ptr: &unsafe T }; fn direct(xs: List<Int>) {}", bootstrap);
+        let entry = module.find_function_by_name("example.foreign.direct").unwrap();
+        emit_parameter_drop(&mut module, entry);
+        let mut interpreter = Interpreter::new(Arc::new(module));
+        let actual_list = interpreter.alloc_list(&[verum_vbc::Value::from_i64(1)]).unwrap();
+        let rejected = interpreter.execute_function_with_args(entry, &[actual_list]).unwrap_err();
+        assert!(rejected.to_string().contains("nominal owner mismatch"), "{rejected}");
     }
 }
 

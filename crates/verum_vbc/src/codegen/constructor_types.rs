@@ -444,6 +444,16 @@ impl VbcCodegen {
             && let Some(literal) = self.contextual_numeric_literal(expr, expected) {
             return literal;
         }
+        if let ExprKind::Array(verum_ast::ArrayExpr::List(items)) = &expr.kind
+            && let Some(owner) = expected
+            && let Some(target) = self.expand_declared_alias(owner.clone())
+            && matches!(target, TypeRef::Instantiated { .. } | TypeRef::Concrete(_))
+        {
+            let element = self.nominal_array_element(&target)?;
+            return items.iter().all(|item|
+                self.source_expression_declaration(item, Some(element), depth + 1).as_ref() == Some(element)
+            ).then(|| owner.clone());
+        }
         if let Some(result) = self.lexical_call_result(expr) {
             return result;
         }
@@ -488,6 +498,7 @@ impl VbcCodegen {
     pub(super) fn admits_constructor_context(expr: &Expr) -> bool {
         matches!(Self::normalized_place(expr).kind,
             ExprKind::Call { .. } | ExprKind::MethodCall { .. } | ExprKind::Record { .. }
+                | ExprKind::Array(verum_ast::ArrayExpr::List(_))
                 | ExprKind::Path(_) | ExprKind::Field { .. } | ExprKind::Block(_)
                 | ExprKind::Unsafe(_) | ExprKind::If { .. } | ExprKind::Match { .. })
     }
@@ -604,6 +615,7 @@ impl VbcCodegen {
                 Some(actual.clone())
             } else if matches!(
                 Self::normalized_place(arg).kind, ExprKind::Call { .. } | ExprKind::MethodCall { .. }
+                    | ExprKind::Array(verum_ast::ArrayExpr::List(_))
             ) {
                 self.source_expression_declaration(arg, expected.as_ref(), 0)
             } else {
