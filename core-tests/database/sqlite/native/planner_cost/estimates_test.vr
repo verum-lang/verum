@@ -1,0 +1,42 @@
+module core.database.sqlite.native.planner_cost.tests.estimates;
+mount core.database.sqlite.native.planner_cost.stats.table_stats_default;
+mount core.database.sqlite.native.planner_cost.cost.{AmFullScan, estimate_access, cost_total};
+mount core.database.sqlite.native.planner_cost.selectivity.{
+    estimate, PkColEqLiteral, PkColEqCol, PkColIn, PkColIsNull, PkColIsNotNull,
+};
+
+@test
+fn test_column_estimates_use_recorded_counts() {
+    let mut stats = table_stats_default("orders", 100_i64);
+    assert(estimate(&PkColEqLiteral("k"), &stats) == 0.1);
+    assert(stats.record_column_distribution("k", 4_i64, 25_i64));
+    assert(estimate(&PkColEqLiteral("k"), &stats) == 0.25);
+    assert(estimate(&PkColEqCol("k"), &stats) == 0.25);
+    assert(estimate(&PkColIsNull("k"), &stats) == 0.25);
+    assert(estimate(&PkColIsNotNull("k"), &stats) == 0.75);
+    assert(estimate(&PkColIn("k", 2), &stats) == 0.5);
+    assert(estimate(&PkColIn("k", 7), &stats) == 1.0);
+    assert(estimate(&PkColIn("k", 0), &stats) == 0.0);
+    assert(estimate(&PkColIn("k", -1), &stats) == 0.0);
+    let scan = estimate_access(&AmFullScan, &stats, 0.2);
+    assert(cost_total(&scan) == 5.0);
+    assert(stats.record_column_distribution("other", 1_i64, 0_i64));
+    assert(stats.record_column_distribution("k", 2_i64, 50_i64));
+    assert(!stats.record_column_distribution("k", 51_i64, 50_i64));
+    assert(!stats.record_column_distribution("k", -1_i64, 0_i64));
+    assert(!stats.record_column_distribution("k", 1_i64, -1_i64));
+    assert(!stats.record_column_distribution("k", 0_i64, 101_i64));
+    assert(estimate(&PkColIsNull("k"), &stats) == 0.5);
+    assert(estimate(&PkColEqLiteral("k"), &stats) == 0.5);
+    assert(estimate(&PkColEqLiteral("other"), &stats) == 1.0);
+}
+
+@test
+fn test_empty_table_has_no_nulls_and_unknown_cardinality() {
+    let mut empty = table_stats_default("empty", 0_i64);
+    assert(empty.record_column_distribution("k", 0_i64, 0_i64));
+    assert(estimate(&PkColIsNull("k"), &empty) == 0.0);
+    assert(estimate(&PkColEqLiteral("k"), &empty) == 0.1);
+}
+
+fn main() {}

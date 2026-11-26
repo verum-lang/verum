@@ -125,6 +125,63 @@ public fn table_stats_default(name: Text, n_rows: Int64) -> TableStats {
     }
 }
 
+implement TableStats {
+    public(in core.database.sqlite.native) fn table_key(&self) -> Text {
+        self.table_name.clone()
+    }
+
+    public(in core.database.sqlite.native.planner_cost) fn scan_estimates(
+        &self, selectivity: Float64,
+    ) -> (Float64, Float64) {
+        ((self.n_rows as Float64) * selectivity, self.n_pages as Float64)
+    }
+
+    /// Record distinct non-NULL values and NULL rows for this table's row count.
+    /// Updating the counts preserves histogram samples collected separately.
+    public fn record_column_distribution(
+        &mut self, name: Text, distinct: Int64, null_rows: Int64,
+    ) -> Bool {
+        if null_rows < 0_i64 || null_rows > self.n_rows { return false; }
+        if distinct < 0_i64 || distinct > self.n_rows - null_rows { return false; }
+        let fraction = if self.n_rows == 0_i64 {
+            0.0
+        } else {
+            (null_rows as Float64) / (self.n_rows as Float64)
+        };
+        let mut i: Int = 0;
+        while i < self.columns.len() {
+            let column = &mut self.columns[i];
+            if column.name == name {
+                column.distinct_estimate = distinct;
+                column.null_fraction = fraction;
+                return true;
+            }
+            i = i + 1;
+        }
+        self.columns.push(ColumnStats {
+            name: name,
+            distinct_estimate: distinct,
+            null_fraction: fraction,
+            histogram: List.new(),
+        });
+        true
+    }
+
+    public(in core.database.sqlite.native.planner_cost) fn column_distribution(
+        &self, name: &Text,
+    ) -> Maybe<(Int64, Float64)> {
+        let mut i: Int = 0;
+        while i < self.columns.len() {
+            let column = &self.columns[i];
+            if column.name == *name {
+                return Maybe.Some((column.distinct_estimate, column.null_fraction));
+            }
+            i = i + 1;
+        }
+        Maybe.None
+    }
+}
+
 // -----------------------------------------------------------------------------
 // StatsRegistry — per-SqliteNativeConnection / per-Database stats container
 // -----------------------------------------------------------------------------

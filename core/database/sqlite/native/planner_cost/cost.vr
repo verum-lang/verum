@@ -95,9 +95,7 @@ public fn estimate_access(
     stats: &TableStats,
     predicate_selectivity: Float64,
 ) -> Cost {
-    let total_rows = stats.n_rows as Float64;
-    let pages = stats.n_pages as Float64;
-    let estimated_rows = total_rows * predicate_selectivity;
+    let (estimated_rows, pages) = stats.scan_estimates(predicate_selectivity);
     match method {
         AmFullScan => Cost {
             rows: estimated_rows,
@@ -110,7 +108,7 @@ public fn estimate_access(
             per_row_cost: COST_ROW_DECODE,
         },
         AmIndexSeek(n_keys) => {
-            let k_cost = COST_INDEX_SEEK + (n_keys as Float64) * COST_PER_BTREE_LEVEL;
+            let k_cost: Float64 = COST_INDEX_SEEK + (n_keys as Float64) * COST_PER_BTREE_LEVEL;
             Cost {
                 rows: estimated_rows,
                 setup_cost: k_cost,
@@ -118,7 +116,7 @@ public fn estimate_access(
             }
         }
         AmIndexRangeScan(n_keys) => {
-            let k_cost = COST_INDEX_SEEK + (n_keys as Float64) * COST_PER_BTREE_LEVEL;
+            let k_cost: Float64 = COST_INDEX_SEEK + (n_keys as Float64) * COST_PER_BTREE_LEVEL;
             Cost {
                 rows: estimated_rows,
                 setup_cost: k_cost,

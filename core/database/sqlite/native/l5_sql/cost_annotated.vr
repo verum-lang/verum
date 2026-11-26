@@ -53,7 +53,7 @@ mount core.database.sqlite.native.planner_cost.cost.{
     access_name,
 };
 mount core.database.sqlite.native.planner_cost.stats.{
-    TableStats, IndexStats, ColumnStats, table_stats_default,
+    TableStats, IndexStats, table_stats_default,
 };
 mount core.database.sqlite.native.l5_sql.access_planning.{
     AccessPlan, plan_access, full_scan_plan,
@@ -108,10 +108,8 @@ public type CostAnnotatedPlan is {
 // Statistics catalogue
 // -----------------------------------------------------------------------------
 
-/// In-memory stats catalogue keyed by table name.  Populated by the
-/// planner facade from ANALYZE output (or from default heuristics
-/// when ANALYZE has not run).  Pure data — no mutation across
-/// planner invocations.
+/// In-memory statistics supplied to the annotator by table name.
+/// The SQL compiler constructs an empty catalogue for each compilation.
 public type StatsCatalogue is {
     tables: Map<Text, TableStats>,
     indices: Map<Text, IndexStats>,
@@ -125,8 +123,8 @@ implement StatsCatalogue {
     /// Lookup table statistics, returning a default empty record if
     /// missing (cheap — `table_stats_default(name, 0)` is zero-row).
     public fn table_stats_for(&self, name: &Text) -> TableStats {
-        match self.tables.get(name) {
-            Maybe.Some(s) => clone_table_stats(s),
+        match self.tables.get(name.clone()) {
+            Maybe.Some(s) => s,
             Maybe.None => table_stats_default(name.clone(), 0_i64),
         }
     }
@@ -134,7 +132,7 @@ implement StatsCatalogue {
     /// Register a fresh table-stats record.  Replaces any existing
     /// entry under the same name.
     public fn record_table(&mut self, stats: TableStats) {
-        self.tables.insert(stats.table_name.clone(), stats);
+        self.tables.insert(stats.table_key(), stats);
     }
 
     /// `true` iff every cost computation will use real (not default)
@@ -142,32 +140,6 @@ implement StatsCatalogue {
     public fn fully_populated(&self) -> Bool {
         self.tables.len() > 0
     }
-}
-
-fn clone_table_stats(src: &TableStats) -> TableStats {
-    TableStats {
-        table_name: src.table_name.clone(),
-        n_rows: src.n_rows,
-        n_pages: src.n_pages,
-        avg_row_size_bytes: src.avg_row_size_bytes,
-        columns: clone_column_stats_list(&src.columns),
-    }
-}
-
-fn clone_column_stats_list(src: &List<ColumnStats>) -> List<ColumnStats> {
-    let mut out: List<ColumnStats> = List.new();
-    let mut i: Int = 0;
-    while i < src.len() {
-        let c = &src[i];
-        out.push(ColumnStats {
-            name: c.name.clone(),
-            distinct_estimate: c.distinct_estimate,
-            null_fraction: c.null_fraction,
-            histogram: List.new(),
-        });
-        i = i + 1;
-    }
-    out
 }
 
 // -----------------------------------------------------------------------------
