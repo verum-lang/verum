@@ -375,3 +375,27 @@ fn typed_atomic_store_can_run_in_a_synchronous_callback() {
     let found = errors(&suspending);
     assert!(found.iter().any(|error| error.contains("Async") || error.contains("async")), "{found:?}");
 }
+
+#[test]
+fn a_source_factory_alias_preserves_the_selected_declarations_contract() {
+    let consumer = "mount platform.inspect; static mut HANDLER: fn() = handler;
+                    fn handler() { inspect(); }";
+    let provider = "public type Outcome is { code: Int };
+        type First is Outcome; type Alias is First;
+        implement Outcome { public fn create() -> Outcome { Outcome { code: 7 } } }
+        public fn inspect() -> Outcome { Alias.create() }";
+    let accepted = errors_with_provider(consumer, Some(provider));
+    assert!(accepted.is_empty(), "synchronous alias factory: {accepted:?}");
+    for rejected in [
+        provider.replace("public fn create", "public async fn create"),
+        provider.replace("public fn inspect", "implement Alias { public async fn create() -> Outcome { loop {} } }
+            public fn inspect"),
+        provider.replace("public fn create() -> Outcome { Outcome { code: 7 } }",
+                         "public fn create() -> Outcome;"),
+        provider.replace("type First is Outcome", "type First is Alias"),
+        provider.replace("type First is Outcome", "type First is UnknownOwner"),
+    ] {
+        assert!(!errors_with_provider(consumer, Some(&rejected)).is_empty(),
+            "unproved source contract accepted: {rejected}");
+    }
+}

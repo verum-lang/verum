@@ -677,18 +677,37 @@ impl TypeChecker {
         let Some(name) = receiver.as_ident() else { return SourceCall::Known(false); };
         let selected = self.with_source_signature_scope(owner, |checker|
             checker.declaring_source_type_declaration(name.name.as_str()));
-        let Some((declaration, target)) = selected else { return SourceCall::Known(false); };
+        let Some((mut declaration, mut target)) = selected else { return SourceCall::Known(false); };
+        let mut visited = Set::new();
+        while let TypeDeclBody::Alias(alias) = &declaration.body {
+            // A transparent name introduces no runtime call. Walk its declaring
+            // scope; substitutions and competing impls need typed selection.
+            if !declaration.generics.is_empty() || !declaration.value_params.is_empty()
+                || declaration.generic_where_clause.is_some() || declaration.meta_where_clause.is_some()
+                || declaration.resource_modifier.is_some() || visited.len() == MAX_SOURCE_CALL_STEPS
+                || !visited.insert((target.clone(), declaration.span))
+                || !matches!(self.source_static_function_for_properties(
+                    &target, &declaration.name.name, &member.name), Ok(None))
+            {
+                return SourceCall::Known(false);
+            }
+            let verum_ast::TypeKind::Path(path) = &alias.kind else { return SourceCall::Known(false); };
+            let Some(name) = path.as_ident() else { return SourceCall::Known(false); };
+            let next = self.with_source_signature_scope(&target, |checker|
+                checker.declaring_source_type_declaration(&name.name));
+            let Some(next) = next else { return SourceCall::Known(false); };
+            (declaration, target) = next;
+        }
         match self.source_static_function_for_properties(&target, &declaration.name.name, &member.name) {
             Ok(Some(function)) => {
                 if target != *owner && function.declaration().visibility != verum_ast::Visibility::Public { return SourceCall::Known(false); }
-                return SourceCall::Declaration(target, function);
+                SourceCall::Declaration(target, function)
             }
-            Err(()) => return SourceCall::Known(false),
-            Ok(None) => {},
+            Err(()) => SourceCall::Known(false),
+            Ok(None) => SourceCall::Known(matches!(&declaration.body, TypeDeclBody::Variant(variants) | TypeDeclBody::Inductive(variants)
+                if variants.iter().any(|variant| variant.name.name == member.name
+                    && self.cfg_evaluator.should_include(&variant.attributes)))),
         }
-        SourceCall::Known(matches!(&declaration.body, TypeDeclBody::Variant(variants) | TypeDeclBody::Inductive(variants)
-            if variants.iter().any(|variant| variant.name.name == member.name
-                && self.cfg_evaluator.should_include(&variant.attributes))))
     }
 
     // A local binding owns its spelling. In particular an imported namespace,
