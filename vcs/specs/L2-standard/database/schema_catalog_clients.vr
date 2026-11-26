@@ -1,0 +1,45 @@
+// @test: run
+// @level: L2
+// @tier: 0
+// @tags: database, schema, introspection, unicode
+// @expected-exit: 0
+
+mount core.database.common.error.{AdPostgres, DbError};
+mount core.database.common.schema.{SchemaSnapshot, TableSnap};
+mount core.database.common.schema_diff.{diff, delta_kind_name};
+mount core.database.common.check_codegen.{RefinementPredicate, or_null, to_check_sql_for_column};
+mount core.database.postgres.connection.PgConnection;
+mount core.database.mysql.connection.MysqlConnection;
+mount core.database.sqlite.connection.SqliteConnection;
+mount core.database.postgres.introspect.introspect_schema as postgres_schema;
+mount core.database.mysql.introspect.introspect_schema as mysql_schema;
+mount core.database.sqlite.introspect.introspect as sqlite_schema;
+
+fn read_postgres(conn: &mut PgConnection, schema: &Text) -> Result<SchemaSnapshot, DbError> {
+    postgres_schema(conn, schema)
+}
+
+fn read_mysql(conn: &mut MysqlConnection, schema: &Text) -> Result<SchemaSnapshot, DbError> {
+    mysql_schema(conn, schema)
+}
+
+fn read_sqlite(conn: &mut SqliteConnection) -> Result<SchemaSnapshot, DbError> {
+    sqlite_schema(conn)
+}
+
+fn main() {
+    let before = SchemaSnapshot.empty(AdPostgres);
+    let mut after = SchemaSnapshot.empty(AdPostgres);
+    after.add_table(TableSnap.empty("public".clone(), "orders".clone()));
+    assert_eq(after.table_count(), 1);
+    assert(after.table("", "orders").is_some());
+    let changes = diff(&before, &after);
+    assert_eq(changes.len(), 1);
+    assert_eq(delta_kind_name(&changes[0]), "table_added");
+
+    let predicate = or_null(RefinementPredicate.RpTextEq("café's".clone()));
+    let copy = predicate.clone();
+    let sql = to_check_sql_for_column(&copy, "na\"mé", false, AdPostgres).unwrap();
+    assert_eq(sql, "\"na\"\"mé\" = 'café''s'");
+    assert(to_check_sql_for_column(&predicate, "n", true, AdPostgres).unwrap().contains("IS NULL"));
+}

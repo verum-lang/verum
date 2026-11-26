@@ -129,6 +129,36 @@ public type RefinementPredicate is
     | RpOr(List<RefinementPredicate>)
     | RpNot(Heap<RefinementPredicate>);
 
+/// Clone each owned payload using its declared operation. Heap nodes receive
+/// independent storage and list elements keep their original order.
+implement Clone for RefinementPredicate {
+    fn clone(&self) -> RefinementPredicate {
+        match self {
+            RpTrue => RpTrue,
+            RpFalse => RpFalse,
+            RpIntRange { lo, hi } => RefinementPredicate.RpIntRange { lo: *lo, hi: *hi },
+            RpLenRange { lo, hi } => RefinementPredicate.RpLenRange { lo: *lo, hi: *hi },
+            RpIntGe(n) => RpIntGe(*n),
+            RpIntLe(n) => RpIntLe(*n),
+            RpIntGt(n) => RpIntGt(*n),
+            RpIntLt(n) => RpIntLt(*n),
+            RpIntEq(n) => RpIntEq(*n),
+            RpIntNe(n) => RpIntNe(*n),
+            RpLenLe(n) => RpLenLe(*n),
+            RpLenGe(n) => RpLenGe(*n),
+            RpRegexMatch(value) => RpRegexMatch(value.clone()),
+            RpTextEq(value) => RpTextEq(value.clone()),
+            RpTextNe(value) => RpTextNe(value.clone()),
+            RpOneOfInt(value) => RpOneOfInt(value.clone()),
+            RpOneOfText(value) => RpOneOfText(value.clone()),
+            RpAnd(value) => RpAnd(value.clone()),
+            RpOr(value) => RpOr(value.clone()),
+            RpOrNull(inner) => RpOrNull(Heap.new((**inner).clone())),
+            RpNot(inner) => RpNot(Heap.new((**inner).clone())),
+        }
+    }
+}
+
 // -----------------------------------------------------------------------------
 // Builder helpers — terse construction at the derive call site.
 // -----------------------------------------------------------------------------
@@ -147,7 +177,7 @@ public type RefinementPredicate is
 /// first-wins across modules, so the resolved body can belong to a
 /// different type of the same name.
 public fn int_range(lo: Int, hi: Int) -> RefinementPredicate {
-    RpIntRange { lo: lo, hi: hi }
+    RefinementPredicate.RpIntRange { lo: lo, hi: hi }
 }
 
 /// Inclusive lower bound `col >= n`. Renamed from `min` 2026-05-20
@@ -174,7 +204,7 @@ public fn len_min(n: Int) -> RefinementPredicate { RpLenGe(n) }
 
 /// Closed length interval.
 public fn len_range(lo: Int, hi: Int) -> RefinementPredicate {
-    RpLenRange { lo: lo, hi: hi }
+    RefinementPredicate.RpLenRange { lo: lo, hi: hi }
 }
 
 /// Non-empty text (`length(col) >= 1`).
@@ -253,15 +283,13 @@ public fn to_check_sql_for_column(
     nullable: Bool,
     adapter: AdapterId,
 ) -> Maybe<Text> {
-    let stripped = if !nullable {
+    if !nullable {
         match pred {
-            RpOrNull(inner) => (*inner).clone(),
-            _               => pred.clone(),
+            RpOrNull(inner) => { return to_check_sql(inner.as_ref(), col, adapter); }
+            _ => {}
         }
-    } else {
-        pred.clone()
-    };
-    to_check_sql(&stripped, col, adapter)
+    }
+    to_check_sql(pred, col, adapter)
 }
 
 // -----------------------------------------------------------------------------
@@ -481,20 +509,10 @@ fn quote_ident(col: &Text, adapter: AdapterId) -> Text {
 }
 
 fn double_char(s: &Text, c: Char) -> Text {
-    let mut out: Text = "".clone();
-    let bytes = s.as_bytes();
-    let target = c as Int;
-    let mut i: Int = 0;
-    let n = bytes.len() as Int;
-    while i < n {
-        let b = bytes[i] as Int;
-        if b == target {
-            out.push_char(c);
-            out.push_char(c);
-        } else {
-            out.push_char(b as Char);
-        }
-        i = i + 1;
+    let mut out = Text.new();
+    for ch in s.chars() {
+        out.push(ch);
+        if ch == c { out.push(ch); }
     }
     out
 }

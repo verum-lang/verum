@@ -50,6 +50,7 @@ module core.database.common.schema_diff;
 
 mount base.{Text, Bool, Maybe, Some, None};
 mount collections.List;
+mount core.database.common.check_codegen.RefinementPredicate;
 mount core.database.common.schema.{
     SchemaSnapshot, TableSnap, ColumnSnap, IndexSnap, ForeignKeySnap,
 };
@@ -159,7 +160,7 @@ public fn diff(before: &SchemaSnapshot, after: &SchemaSnapshot) -> List<SchemaDe
     while i < after.tables.len() {
         let t = &after.tables[i];
         if find_table(&before.tables, &t.schema, &t.name).is_none() {
-            deltas.push(TableAdded {
+            deltas.push(SchemaDelta.TableAdded {
                 schema: t.schema.clone(),
                 name: t.name.clone(),
                 table: clone_table(t),
@@ -173,7 +174,7 @@ public fn diff(before: &SchemaSnapshot, after: &SchemaSnapshot) -> List<SchemaDe
     while i < before.tables.len() {
         let t = &before.tables[i];
         if find_table(&after.tables, &t.schema, &t.name).is_none() {
-            deltas.push(TableDropped {
+            deltas.push(SchemaDelta.TableDropped {
                 schema: t.schema.clone(),
                 name: t.name.clone(),
             });
@@ -205,7 +206,7 @@ fn diff_columns(before: &TableSnap, after: &TableSnap, deltas: &mut List<SchemaD
     while i < after.columns.len() {
         let c = &after.columns[i];
         if find_column(&before.columns, &c.name).is_none() {
-            deltas.push(ColumnAdded {
+            deltas.push(SchemaDelta.ColumnAdded {
                 schema: after.schema.clone(),
                 table: after.name.clone(),
                 column: clone_column(c),
@@ -218,7 +219,7 @@ fn diff_columns(before: &TableSnap, after: &TableSnap, deltas: &mut List<SchemaD
     while i < before.columns.len() {
         let c = &before.columns[i];
         if find_column(&after.columns, &c.name).is_none() {
-            deltas.push(ColumnDropped {
+            deltas.push(SchemaDelta.ColumnDropped {
                 schema: after.schema.clone(),
                 table: after.name.clone(),
                 name: c.name.clone(),
@@ -233,7 +234,7 @@ fn diff_columns(before: &TableSnap, after: &TableSnap, deltas: &mut List<SchemaD
         match find_column(&after.columns, &bc.name) {
             Maybe.Some(ac) => {
                 if bc.declared_type != ac.declared_type {
-                    deltas.push(ColumnTypeChanged {
+                    deltas.push(SchemaDelta.ColumnTypeChanged {
                         schema: after.schema.clone(),
                         table: after.name.clone(),
                         name: bc.name.clone(),
@@ -242,7 +243,7 @@ fn diff_columns(before: &TableSnap, after: &TableSnap, deltas: &mut List<SchemaD
                     });
                 }
                 if bc.nullable != ac.nullable {
-                    deltas.push(ColumnNullableChanged {
+                    deltas.push(SchemaDelta.ColumnNullableChanged {
                         schema: after.schema.clone(),
                         table: after.name.clone(),
                         name: bc.name.clone(),
@@ -251,7 +252,7 @@ fn diff_columns(before: &TableSnap, after: &TableSnap, deltas: &mut List<SchemaD
                     });
                 }
                 if !maybe_text_eq(&bc.default_expr, &ac.default_expr) {
-                    deltas.push(ColumnDefaultChanged {
+                    deltas.push(SchemaDelta.ColumnDefaultChanged {
                         schema: after.schema.clone(),
                         table: after.name.clone(),
                         name: bc.name.clone(),
@@ -260,7 +261,7 @@ fn diff_columns(before: &TableSnap, after: &TableSnap, deltas: &mut List<SchemaD
                     });
                 }
                 if !maybe_text_eq(&bc.refinement, &ac.refinement) {
-                    deltas.push(ColumnRefinementChanged {
+                    deltas.push(SchemaDelta.ColumnRefinementChanged {
                         schema: after.schema.clone(),
                         table: after.name.clone(),
                         name: bc.name.clone(),
@@ -282,7 +283,7 @@ fn diff_indexes(before: &TableSnap, after: &TableSnap, deltas: &mut List<SchemaD
         match find_index(&before.indexes, &a.name) {
             Maybe.Some(b) => {
                 if !index_eq(b, a) {
-                    deltas.push(IndexChanged {
+                    deltas.push(SchemaDelta.IndexChanged {
                         schema: after.schema.clone(),
                         table: after.name.clone(),
                         name: a.name.clone(),
@@ -292,7 +293,7 @@ fn diff_indexes(before: &TableSnap, after: &TableSnap, deltas: &mut List<SchemaD
                 }
             }
             Maybe.None => {
-                deltas.push(IndexAdded {
+                deltas.push(SchemaDelta.IndexAdded {
                     schema: after.schema.clone(),
                     table: after.name.clone(),
                     index: clone_index(a),
@@ -305,7 +306,7 @@ fn diff_indexes(before: &TableSnap, after: &TableSnap, deltas: &mut List<SchemaD
     while i < before.indexes.len() {
         let b = &before.indexes[i];
         if find_index(&after.indexes, &b.name).is_none() {
-            deltas.push(IndexDropped {
+            deltas.push(SchemaDelta.IndexDropped {
                 schema: after.schema.clone(),
                 table: after.name.clone(),
                 name: b.name.clone(),
@@ -322,7 +323,7 @@ fn diff_foreign_keys(before: &TableSnap, after: &TableSnap, deltas: &mut List<Sc
         match find_fk(&before.foreign_keys, a) {
             Maybe.Some(b) => {
                 if !fk_eq(b, a) {
-                    deltas.push(ForeignKeyChanged {
+                    deltas.push(SchemaDelta.ForeignKeyChanged {
                         schema: after.schema.clone(),
                         table: after.name.clone(),
                         from: clone_fk(b),
@@ -331,7 +332,7 @@ fn diff_foreign_keys(before: &TableSnap, after: &TableSnap, deltas: &mut List<Sc
                 }
             }
             Maybe.None => {
-                deltas.push(ForeignKeyAdded {
+                deltas.push(SchemaDelta.ForeignKeyAdded {
                     schema: after.schema.clone(),
                     table: after.name.clone(),
                     fk: clone_fk(a),
@@ -344,7 +345,7 @@ fn diff_foreign_keys(before: &TableSnap, after: &TableSnap, deltas: &mut List<Sc
     while i < before.foreign_keys.len() {
         let b = &before.foreign_keys[i];
         if find_fk(&after.foreign_keys, b).is_none() {
-            deltas.push(ForeignKeyDropped {
+            deltas.push(SchemaDelta.ForeignKeyDropped {
                 schema: after.schema.clone(),
                 table: after.name.clone(),
                 columns: clone_text_list(&b.columns),
@@ -479,7 +480,10 @@ fn clone_column(c: &ColumnSnap) -> ColumnSnap {
         autoincrement: c.autoincrement,
         default_expr: clone_maybe_text(&c.default_expr),
         refinement: clone_maybe_text(&c.refinement),
-        refinement_pred: c.refinement_pred.clone(),
+        refinement_pred: match &c.refinement_pred {
+            Maybe.Some(pred) => Maybe.Some(pred.clone()),
+            Maybe.None => Maybe.None,
+        },
         check_constraint: clone_maybe_text(&c.check_constraint),
     }
 }

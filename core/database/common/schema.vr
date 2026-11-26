@@ -58,34 +58,49 @@ mount core.database.common.check_codegen.{RefinementPredicate};
 // -----------------------------------------------------------------------------
 
 public type ColumnSnap is {
-    name: Text,
+    public(in core.database.common) name: Text,
     /// Vendor type name (`int8`, `text`, `bigint`, `varchar(254)` …)
-    declared_type: Text,
+    public(in core.database.common) declared_type: Text,
     /// Whether SQL NULL is allowed for this column.
-    nullable: Bool,
+    public(in core.database.common) nullable: Bool,
     /// True if the column is a PK or part of one.
-    pk: Bool,
+    public(in core.database.common) pk: Bool,
     /// True if the column has a UNIQUE constraint.
-    unique: Bool,
+    public(in core.database.common) unique: Bool,
     /// True if the column auto-increments / has a default sequence.
-    autoincrement: Bool,
+    public(in core.database.common) autoincrement: Bool,
     /// SQL DEFAULT expression text, or Maybe.None.
-    default_expr: Maybe<Text>,
+    public(in core.database.common) default_expr: Maybe<Text>,
     /// Verum refinement-predicate text (carried verbatim from the
     /// originating column type if the introspector recognised one).
     /// Documentation form — use `refinement_pred` for structured
     /// access from migration-codegen / `@table` derive.
-    refinement: Maybe<Text>,
+    public(in core.database.common) refinement: Maybe<Text>,
     /// Structured refinement predicate. When present, `verum
     /// db:plan` runs `check_codegen.to_check_sql_for_column` over
     /// it to emit a per-dialect CHECK constraint that mirrors the
     /// SMT-discharged client-side guarantee. `Maybe.None` here means the
     /// originating refinement is outside the CHECK-codegen-able
     /// fragment (Z3-only enforcement, no server-side periscope).
-    refinement_pred: Maybe<RefinementPredicate>,
+    public(in core.database.common) refinement_pred: Maybe<RefinementPredicate>,
     /// CHECK-constraint text — multiple constraints concatenated by
     /// " AND " in declaration order.
-    check_constraint: Maybe<Text>,
+    public(in core.database.common) check_constraint: Maybe<Text>,
+}
+
+implement ColumnSnap {
+    /// Live catalogs supply the SQL properties. Refinements and CHECK text may
+    /// be attached separately when their definitions are available.
+    public(in core.database) fn from_catalog(
+        name: Text, declared_type: Text, nullable: Bool, pk: Bool, unique: Bool,
+        autoincrement: Bool, default_expr: Maybe<Text>,
+    ) -> ColumnSnap {
+        ColumnSnap {
+            name: name, declared_type: declared_type, nullable: nullable,
+            pk: pk, unique: unique, autoincrement: autoincrement, default_expr: default_expr,
+            refinement: Maybe.None, refinement_pred: Maybe.None, check_constraint: Maybe.None,
+        }
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -93,12 +108,24 @@ public type ColumnSnap is {
 // -----------------------------------------------------------------------------
 
 public type IndexSnap is {
-    name: Text,
+    public(in core.database.common) name: Text,
     /// Columns indexed in order.
-    columns: List<Text>,
+    public(in core.database.common) columns: List<Text>,
     /// Partial-index predicate (Postgres / SQLite) — carried verbatim.
-    predicate: Maybe<Text>,
-    unique: Bool,
+    public(in core.database.common) predicate: Maybe<Text>,
+    public(in core.database.common) unique: Bool,
+}
+
+implement IndexSnap {
+    public(in core.database) fn from_catalog(
+        name: Text, columns: List<Text>, unique: Bool, predicate: Maybe<Text>,
+    ) -> IndexSnap {
+        IndexSnap { name: name, columns: columns, unique: unique, predicate: predicate }
+    }
+
+    public(in core.database) fn add_column(&mut self, column: Text) {
+        self.columns.push(column);
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -106,12 +133,30 @@ public type IndexSnap is {
 // -----------------------------------------------------------------------------
 
 public type ForeignKeySnap is {
-    columns: List<Text>,
-    referenced_table: Text,
-    referenced_columns: List<Text>,
+    public(in core.database.common) columns: List<Text>,
+    public(in core.database.common) referenced_table: Text,
+    public(in core.database.common) referenced_columns: List<Text>,
     /// ON DELETE action — "cascade", "restrict", "set null", "no action".
-    on_delete: Text,
-    on_update: Text,
+    public(in core.database.common) on_delete: Text,
+    public(in core.database.common) on_update: Text,
+}
+
+implement ForeignKeySnap {
+    public(in core.database) fn from_catalog(
+        referenced_table: Text, column: Text, referenced_column: Text,
+        on_delete: Text, on_update: Text,
+    ) -> ForeignKeySnap {
+        ForeignKeySnap {
+            columns: [column], referenced_table: referenced_table,
+            referenced_columns: [referenced_column], on_delete: on_delete, on_update: on_update,
+        }
+    }
+
+    /// One catalog row relates one local column to one referenced column.
+    public(in core.database) fn add_column_pair(&mut self, column: Text, referenced_column: Text) {
+        self.columns.push(column);
+        self.referenced_columns.push(referenced_column);
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -119,24 +164,31 @@ public type ForeignKeySnap is {
 // -----------------------------------------------------------------------------
 
 public type TableSnap is {
-    schema: Text,            // pg = "public", mysql = db_name, sqlite = "main"
-    name: Text,
-    columns: List<ColumnSnap>,
-    indexes: List<IndexSnap>,
-    foreign_keys: List<ForeignKeySnap>,
+    public(in core.database.common) schema: Text,            // pg = "public", mysql = db_name, sqlite = "main"
+    public(in core.database.common) name: Text,
+    public(in core.database.common) columns: List<ColumnSnap>,
+    public(in core.database.common) indexes: List<IndexSnap>,
+    public(in core.database.common) foreign_keys: List<ForeignKeySnap>,
     /// Postgres tablespace / SQLite WITHOUT ROWID flag — vendor-specific
     /// hints carried as opaque key=value pairs.
-    options: List<(Text, Text)>,
+    public(in core.database.common) options: List<(Text, Text)>,
 }
 
 implement TableSnap {
     public fn empty(schema: Text, name: Text) -> TableSnap {
+        TableSnap.from_catalog(schema, name, [], [], [])
+    }
+
+    public(in core.database) fn from_catalog(
+        schema: Text, name: Text, columns: List<ColumnSnap>, indexes: List<IndexSnap>,
+        foreign_keys: List<ForeignKeySnap>,
+    ) -> TableSnap {
         TableSnap {
             schema: schema,
             name: name,
-            columns: List.new(),
-            indexes: List.new(),
-            foreign_keys: List.new(),
+            columns: columns,
+            indexes: indexes,
+            foreign_keys: foreign_keys,
             options: List.new(),
         }
     }
@@ -184,7 +236,7 @@ public type SchemaSnapshot is {
     default_schema: Text,
     /// All known tables. Order is insertion-order (the introspector
     /// emits them sorted by (schema, name) for stable diffs).
-    tables: List<TableSnap>,
+    public(in core.database.common) tables: List<TableSnap>,
     /// Free-form metadata — captured-at timestamp, host, user, etc.
     /// Diff-stable across re-introspections of the same DB state.
     metadata: List<(Text, Text)>,
@@ -192,10 +244,17 @@ public type SchemaSnapshot is {
 
 implement SchemaSnapshot {
     public fn empty(adapter: AdapterId) -> SchemaSnapshot {
+        let schema = default_schema_for(&adapter);
+        SchemaSnapshot.from_catalog(adapter, schema, "".clone())
+    }
+
+    public(in core.database) fn from_catalog(
+        adapter: AdapterId, default_schema: Text, server_version: Text,
+    ) -> SchemaSnapshot {
         SchemaSnapshot {
             adapter: adapter,
-            server_version: "".clone(),
-            default_schema: default_schema_for(&adapter),
+            server_version: server_version,
+            default_schema: default_schema,
             tables: List.new(),
             metadata: List.new(),
         }

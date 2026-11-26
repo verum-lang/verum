@@ -1,0 +1,12 @@
+// @test: typecheck-fail
+// @level: L2
+// @tier: 0
+// @tags: database, schema, visibility
+// @expected-error: E202
+// @expected-error-count: 1
+
+mount core.database.common.schema.SchemaSnapshot;
+
+fn replace_catalog(snapshot: &mut SchemaSnapshot) {
+    snapshot.tables = [];
+}

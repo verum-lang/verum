@@ -50,18 +50,17 @@ mount core.database.sqlite.connection.{SqliteConnection, SqliteValue, SvText, Sv
 /// Build a SchemaSnapshot off a live SQLite connection. The
 /// connection's mode must be at least `read` (no DDL is issued).
 public fn introspect(conn: &mut SqliteConnection) -> Result<SchemaSnapshot, DbError> {
-    let mut snap = SchemaSnapshot.empty(AdSqlite);
-    snap.server_version = match probe_version(conn) {
+    let version = match probe_version(conn) {
         Result.Ok(v)  => v,
         Result.Err(_) => "unknown".clone(),
     };
+    let mut snap = SchemaSnapshot.from_catalog(AdSqlite, "main".clone(), version);
 
     // Pull the user-table list.
     let table_names = list_user_tables(conn)?;
     let mut i: Int = 0;
     while i < table_names.len() as Int {
-        let name = &table_names[i];
-        let table = build_table_snap(conn, name)?;
+        let table = build_table_snap(conn, &table_names[i])?;
         snap.add_table(table);
         i = i + 1;
     }
@@ -73,8 +72,7 @@ public fn introspect(conn: &mut SqliteConnection) -> Result<SchemaSnapshot, DbEr
 // -----------------------------------------------------------------------------
 
 fn probe_version(conn: &mut SqliteConnection) -> Result<Text, DbError> {
-    let sql = "SELECT sqlite_version()".clone();
-    match conn.query_first(&sql) {
+    match conn.query_first("SELECT sqlite_version()") {
         Result.Ok(row) => {
             if (row.len() as Int) >= 1 {
                 Result.Ok(value_to_text(&row[0]))
@@ -89,8 +87,7 @@ fn probe_version(conn: &mut SqliteConnection) -> Result<Text, DbError> {
 fn list_user_tables(conn: &mut SqliteConnection) -> Result<List<Text>, DbError> {
     // Filter out internal sqlite_* tables — they all start with
     // "sqlite_".
-    let sql = "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name".clone();
-    match conn.query_all(&sql) {
+    match conn.query_all("SELECT name FROM sqlite_master WHERE type='table' AND name NOT GLOB 'sqlite_*' ORDER BY name") {
         Result.Ok(rows) => {
             let mut out: List<Text> = List.new();
             let mut i: Int = 0;
@@ -108,11 +105,10 @@ fn list_user_tables(conn: &mut SqliteConnection) -> Result<List<Text>, DbError> 
 }
 
 fn build_table_snap(conn: &mut SqliteConnection, name: &Text) -> Result<TableSnap, DbError> {
-    let mut t = TableSnap.empty("main".clone(), name.clone());
-    t.columns      = read_columns(conn, name)?;
-    t.indexes      = read_indexes(conn, name)?;
-    t.foreign_keys = read_foreign_keys(conn, name)?;
-    Result.Ok(t)
+    let columns = read_columns(conn, name)?;
+    let indexes = read_indexes(conn, name)?;
+    let foreign_keys = read_foreign_keys(conn, name)?;
+    Result.Ok(TableSnap.from_catalog("main".clone(), name.clone(), columns, indexes, foreign_keys))
 }
 
 fn read_columns(conn: &mut SqliteConnection, table: &Text) -> Result<List<ColumnSnap>, DbError> {
@@ -133,18 +129,9 @@ fn read_columns(conn: &mut SqliteConnection, table: &Text) -> Result<List<Column
                         _      => Maybe.Some(value_to_text(&r[4])),
                     };
                     let pk = value_to_int(&r[5]) > 0;
-                    out.push(ColumnSnap {
-                        name: col_name,
-                        declared_type: col_type,
-                        nullable: !notnull,
-                        pk: pk,
-                        unique: false,    // populated in read_indexes
-                        autoincrement: false,
-                        default_expr: default_expr,
-                        refinement: Maybe.None,
-                        refinement_pred: Maybe.None,
-                        check_constraint: Maybe.None,
-                    });
+                    out.push(ColumnSnap.from_catalog(
+                        col_name, col_type, !notnull, pk, false, false, default_expr,
+                    ));
                 }
                 i = i + 1;
             }
@@ -167,15 +154,8 @@ fn read_indexes(conn: &mut SqliteConnection, table: &Text) -> Result<List<IndexS
                     let idx_name = value_to_text(&r[1]);
                     let unique   = value_to_int(&r[2]) != 0;
                     let cols = read_index_columns(conn, &idx_name)?;
-                    out.push(IndexSnap {
-                        name: idx_name,
-                        columns: cols,
-                        predicate: Maybe.None,    // sqlite_master.sql carries the
-                                            // WHERE clause; parsing it back
-                                            // is a follow-up to keep this
-                                            // module dependency-free.
-                        unique: unique,
-                    });
+                    // index_list does not expose the partial-index predicate.
+                    out.push(IndexSnap.from_catalog(idx_name, cols, unique, Maybe.None));
                 }
                 i = i + 1;
             }
@@ -223,19 +203,15 @@ fn read_foreign_keys(conn: &mut SqliteConnection, table: &Text) -> Result<List<F
                     let to_c    = value_to_text(&r[4]);
                     let on_upd  = value_to_text(&r[5]);
                     let on_del  = value_to_text(&r[6]);
-                    if id != current_id {
-                        grouped.push(ForeignKeySnap {
-                            columns: List.new(),
-                            referenced_table: ref_tab.clone(),
-                            referenced_columns: List.new(),
-                            on_delete: on_del.clone(),
-                            on_update: on_upd.clone(),
-                        });
+                    if grouped.is_empty() || id != current_id {
+                        grouped.push(ForeignKeySnap.from_catalog(
+                            ref_tab, from_c, to_c, on_del, on_upd,
+                        ));
                         current_id = id;
+                    } else {
+                        let last = (grouped.len() as Int) - 1;
+                        grouped[last].add_column_pair(from_c, to_c);
                     }
-                    let last = (grouped.len() as Int) - 1;
-                    grouped[last].columns.push(from_c);
-                    grouped[last].referenced_columns.push(to_c);
                 }
                 i = i + 1;
             }
@@ -316,7 +292,7 @@ fn render_pragma(name: &Text, arg: &Text) -> Text {
     let mut out: Text = "PRAGMA ".clone();
     out.push_str(name);
     out.push_str(&"(\"".clone());
-    out.push_str(arg);
+    out.push_str(&arg.replace("\"", "\"\""));
     out.push_str(&"\")".clone());
     out
 }
