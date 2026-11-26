@@ -2078,6 +2078,7 @@ pub(in super::super) fn handle_drop_ref(
         let header_addr =
             data_ptr.wrapping_sub(verum_common::layout::ALLOCATION_HEADER_SIZE as usize);
         if state.cbgr_allocations.contains(&header_addr) {
+            state.heap.revoke_projections(data_ptr);
             // Retire the allocation identity and set FREED in its header.
             // Field offsets and the FREED bit value live in
             // `verum_common::{layout, cbgr::flags}`.

@@ -141,3 +141,69 @@ fn only_the_declared_heap_transfers_its_cell() {
         );
     }
 }
+
+#[test]
+fn cell_borrows_read_and_write_the_same_value_and_expire_with_the_owner() {
+    use verum_vbc::{Value, interpreter::InterpreterError};
+    let mut module = VbcModule::new("cell-borrows".into());
+    let allocate = method(&mut module, "Heap.new", 1);
+    let borrow = method(&mut module, "core.base.memory.Heap.as_ref", 0);
+    let borrow_mut = method(&mut module, "core.base.memory.Heap.as_mut", 0);
+    let read = function(
+        &mut module,
+        "read",
+        1,
+        &[
+            I::Deref {
+                dst: Reg(1),
+                ref_reg: Reg(0),
+            },
+            I::Ret { value: Reg(1) },
+        ],
+    );
+    let write = function(
+        &mut module,
+        "write",
+        2,
+        &[
+            I::DerefMut {
+                ref_reg: Reg(0),
+                value: Reg(1),
+            },
+            I::Ret { value: Reg(1) },
+        ],
+    );
+    let destroy = function(
+        &mut module,
+        "drop_cell",
+        1,
+        &[I::DropRef { src: Reg(0) }, I::Ret { value: Reg(0) }],
+    );
+    module.header.function_table_count = module.functions.len() as u32;
+    let bytes = verum_vbc::serialize::serialize_module(&module).unwrap();
+    for m in [
+        module,
+        verum_vbc::deserialize::deserialize_module_validated(&bytes).unwrap(),
+    ] {
+        let mut vm = Interpreter::try_new_validated(m.into()).unwrap();
+        let cell = vm
+            .call(
+                allocate,
+                &[
+                    Value::from_small_string("Heap").unwrap(),
+                    Value::from_i64(17),
+                ],
+            )
+            .unwrap();
+        let slot = vm.call(borrow_mut, &[cell]).unwrap();
+        vm.call(write, &[slot, Value::from_i64(73)]).unwrap();
+        let shared = vm.call(borrow, &[cell]).unwrap();
+        assert_eq!(vm.call(read, &[shared]).unwrap().try_as_i64(), Some(73));
+        assert!(matches!(
+            vm.call(write, &[shared, Value::from_i64(0)]),
+            Err(InterpreterError::CapabilityDenied { .. })
+        ));
+        vm.call(destroy, &[cell]).unwrap();
+        assert!(vm.call(read, &[slot]).is_err());
+    }
+}

@@ -1023,6 +1023,13 @@ fn execute_method_call(
     // Only that pair gets the second hop: broader fixed-point peeling
     // changes observable &mut write-back semantics (the monad
     // left-identity regressions the first two drafts introduced).
+    if args.count == 0
+        && let Some(super::wrapper_runtime::HeapCellMethod::Borrow { mutable }) = super::wrapper_runtime::heap_cell_method(&method_name)
+        && let Some(reference) = super::wrapper_runtime::borrow_heap_cell(state, receiver, mutable)?
+    {
+        state.set_reg(dst, reference);
+        return Ok(DispatchResult::Continue);
+    }
     let mut dispatch_receiver = if receiver.is_projected_slot() {
         // Checked sequences retain their owner ticket; only element projections
         // denote one value. The shared reader validates lifetime and READ rights
@@ -1091,7 +1098,7 @@ fn execute_method_call(
     // constructor carries the address in its argument, an instance method or
     // a pre-resolved zero-argument call carries it in the receiver.
     if matches!(bare_method_name.as_str(), "into_raw" | "from_raw") {
-        let declared = super::wrapper_runtime::heap_raw_method(&method_name);
+        let declared = super::wrapper_runtime::heap_cell_method(&method_name);
         let type_receiver = receiver.is_small_string()
             && WKT::Heap.matches(receiver.as_small_string().as_str());
         let cell = match (bare_method_name.as_str(), args.count) {

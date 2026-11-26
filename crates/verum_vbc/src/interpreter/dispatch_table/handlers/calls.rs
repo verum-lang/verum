@@ -282,7 +282,7 @@ pub(in super::super) fn handle_call(
             .unwrap_or_default();
         if let Some(result) = super::wrapper_runtime::try_intercept_wrapper_call(
             state,
-            &func_name,
+            super::wrapper_runtime::heap_cell_method(&func_name),
             args.start.0,
             args.count,
             caller_base,
@@ -341,7 +341,7 @@ pub(in super::super) fn handle_call(
             // A Heap cell carries its allocation header across a raw transfer.
             if let Some(result) = super::wrapper_runtime::try_intercept_wrapper_call(
                 state,
-                &func_name,
+                super::wrapper_runtime::heap_cell_method(&func_name),
                 args.start.0,
                 args.count,
                 caller_base,
@@ -820,8 +820,9 @@ pub(in super::super) fn handle_call_generic(
         );
     }
 
+    let wrapper = state.module.strings.get(func_name_id).and_then(super::wrapper_runtime::heap_cell_method);
     if let Some(result) = super::wrapper_runtime::try_intercept_wrapper_call(
-        state, state.module.strings.get(func_name_id).unwrap_or_default(),
+        state, wrapper,
         args.start.0, args.count, state.reg_base(),
     )? {
         state.set_reg(dst, result);
