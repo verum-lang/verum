@@ -462,6 +462,34 @@ fn an_inherited_associated_equality_can_determine_the_result_parameter() {
     assert!(missing.iter().any(|e| e.contains("E405") || e.contains("E427")), "{missing:?}");
 }
 #[test]
+fn forwarding_a_generic_callback_retains_the_receivers_associated_type() {
+    let source = r#"module core.owned;
+type Sequence is protocol {
+    type Entry;
+    fn fold<B, F: fn(B, Self.Entry) -> B>(self, initial: B, combine: F) -> B;
+};
+type Backward is protocol extends Sequence {
+    fn rfold<B, F: fn(B, Self.Entry) -> B>(self, initial: B, combine: F) -> B;
+};
+type Leaf is { value: Int };
+implement Sequence for Leaf {
+    type Entry = Int;
+    fn fold<B, F: fn(B, Int) -> B>(self, initial: B, combine: F) -> B { combine(initial, self.value) }
+}
+type Reverse<I> is { iter: I };
+implement<I: Backward> Sequence for Reverse<I> {
+    type Entry = I.Entry;
+    fn fold<B, F: fn(B, I.Entry) -> B>(self, initial: B, combine: F) -> B {
+        self.iter.rfold(initial, combine)
+    }
+}
+"#;
+    accepts(source);
+    let mismatched = source.replace("F: fn(B, I.Entry) -> B", "F: fn(B, Bool) -> B");
+    rejects(&mismatched);
+}
+
+#[test]
 fn inherited_projection_does_not_use_child_shadow() {
     rejects(
         "module core.owned; type Base is protocol {type C;fn get()->Self.C;};type F is protocol extends Base {type C;};type Model is {x:()};implement Base for Model {type C=Bool;fn get()->Bool{true}} implement F for Model {type C=Int;fn get()->Self.C{1}}",

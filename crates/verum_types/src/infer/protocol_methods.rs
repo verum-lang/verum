@@ -14,6 +14,28 @@ use verum_ast::{
 };
 use verum_common::{List, Map, Text};
 
+/// A declaration's Self stays abstract during signature comparison. The
+/// implementation receiver instantiates the arguments of its ancestors.
+#[derive(Clone, Copy)]
+pub(super) enum ProtocolMethodReceiver<'a> {
+    Call(&'a Type),
+    Conformance { declared: &'a Type, implementing: &'a Type },
+}
+
+impl<'a> ProtocolMethodReceiver<'a> {
+    fn declared(self) -> &'a Type {
+        match self {
+            Self::Call(ty) | Self::Conformance { declared: ty, .. } => ty,
+        }
+    }
+
+    fn implementing(self) -> &'a Type {
+        match self {
+            Self::Call(ty) | Self::Conformance { implementing: ty, .. } => ty,
+        }
+    }
+}
+
 pub(super) struct AppliedProtocolMethod {
     pub owner: Text,
     pub arguments: List<Type>,
@@ -47,7 +69,7 @@ impl TypeChecker {
             for bound in premise.bounds.iter().filter(|bound| !bound.is_negative) {
                 let owner = self.path_to_string(&bound.protocol);
                 for candidate in self.applied_protocol_methods_in_hierarchy(
-                    &owner, &bound.args, &ty, &ty, &method.name, span,
+                    &owner, &bound.args, ProtocolMethodReceiver::Call(&ty), &method.name, span,
                 )? {
                     if candidate.method.receiver_kind() == Some(crate::core_metadata::ReceiverKind::None)
                         && !candidates.iter().any(|other: &AppliedProtocolMethod|
@@ -407,8 +429,7 @@ impl TypeChecker {
         &self,
         protocol_name: &Text,
         arguments: &[Type],
-        receiver: &Type,
-        owner_receiver: &Type,
+        receiver: ProtocolMethodReceiver<'_>,
         method_name: &Text,
         span: Span,
     ) -> Result<List<AppliedProtocolMethod>> {
@@ -416,8 +437,7 @@ impl TypeChecker {
             checker: &TypeChecker,
             name: &Text,
             arguments: &[Type],
-            receiver: &Type,
-            owner_receiver: &Type,
+            receiver: ProtocolMethodReceiver<'_>,
             method: &Text,
             span: Span,
             active: &mut List<Text>,
@@ -453,7 +473,7 @@ impl TypeChecker {
                 return Ok(List::new());
             }
             let substitution = match &protocol.constraints {
-                ProtocolConstraints::Declared { .. } => protocol.constraints.application(owner_receiver, arguments)
+                ProtocolConstraints::Declared { .. } => protocol.constraints.application(receiver.implementing(), arguments)
                     .map_err(|message| invalid(span, message))?,
                 _ if protocol.type_params.is_empty() => crate::ty::Substitution::new(),
                 _ => return Err(invalid(span, "super-protocol application lacks its declaration-owned telescope")),
@@ -473,7 +493,6 @@ impl TypeChecker {
                     &owner,
                     &bound.args,
                     receiver,
-                    owner_receiver,
                     method,
                     span,
                     active,
@@ -506,7 +525,6 @@ impl TypeChecker {
             protocol_name,
             arguments,
             receiver,
-            owner_receiver,
             method_name,
             span,
             &mut List::new(),
@@ -524,8 +542,7 @@ impl TypeChecker {
         let methods = self.applied_protocol_methods_in_hierarchy(
             protocol_name,
             arguments,
-            receiver,
-            receiver,
+            ProtocolMethodReceiver::Call(receiver),
             method_name,
             span,
         )?;
@@ -555,12 +572,12 @@ impl TypeChecker {
         method: &ProtocolMethod,
         constraints: &ProtocolConstraints,
         owner: &Text,
-        receiver: &Type,
+        receiver: ProtocolMethodReceiver<'_>,
         arguments: &[Type],
         span: Span,
     ) -> Result<ProtocolMethod> {
         let mut applied = method
-            .apply_owner(arguments, receiver)
+            .apply_owner(arguments, receiver.declared())
             .map_err(|message| invalid(span, message))?;
         if !method.type_param_bounds.values().flatten()
             .any(|bound| self.has_callback_projection(bound))
@@ -594,12 +611,25 @@ impl TypeChecker {
             ));
         }
         let substitution = constraints
-            .application(receiver, arguments)
+            .application(receiver.declared(), arguments)
             .map_err(|message| invalid(span, message))?;
+        let caller = match receiver {
+            ProtocolMethodReceiver::Call(_) => None,
+            ProtocolMethodReceiver::Conformance { declared, .. } => {
+                let mut premises = self.caller_protocol_premises();
+                premises.push(crate::protocol::WhereClause {
+                    ty: declared.clone(),
+                    bounds: List::from_single(crate::protocol::ProtocolBound::positive(
+                        Self::text_to_path(owner), arguments.iter().cloned().collect(),
+                    )),
+                });
+                Some(premises)
+            }
+        };
         let scope = super::call_obligations::CallProjectionScope {
             declaration: &premises,
             arguments: &substitution,
-            caller: None,
+            caller: caller.as_ref().map(|premises| premises.as_slice()),
             span,
         };
         for (parameter, bounds) in &declared.type_param_bounds {

@@ -1,6 +1,6 @@
 //! Method conformance is checked in the implementation's declaration frame,
 //! before that implementation can provide protocol evidence.
-use super::{TypeChecker, protocol_methods::AppliedProtocolMethod};
+use super::{TypeChecker, protocol_methods::{AppliedProtocolMethod, ProtocolMethodReceiver}};
 use crate::{
     Result, Type, TypeError,
     protocol::{ProtocolBound, ProtocolConstraints, ProtocolImpl, ProtocolMethod, WhereClause},
@@ -174,8 +174,9 @@ impl TypeChecker {
                 let obligations = self.applied_protocol_methods_in_hierarchy(
                     &name,
                     &implementation.protocol_args,
-                    &self_type,
-                    &implementation.for_type,
+                    ProtocolMethodReceiver::Conformance {
+                        declared: &self_type, implementing: &implementation.for_type,
+                    },
                     &function.name.name,
                     function.span,
                 )?;
