@@ -4707,8 +4707,16 @@ impl TypeChecker {
         self.ctx.define_builtin_type(name, ty);
     }
 
-    fn define_builtin_value(&mut self, name: impl Into<Text>, scheme: TypeScheme) {
+    fn define_builtin_value(&mut self, name: impl Into<Text>, mut scheme: TypeScheme) {
         let name = name.into();
+        if matches!(name.as_str(), "panic" | "unreachable")
+            && let Some(operation) = verum_vbc::intrinsics::lookup_intrinsic(&name)
+            && matches!(operation.intrinsic.strategy,
+                verum_vbc::intrinsics::registry::CodegenStrategy::DirectOpcode(
+                    verum_vbc::instruction::Opcode::Panic | verum_vbc::instruction::Opcode::Unreachable))
+        {
+            scheme.builtin_trap_arity = Some(usize::from(operation.intrinsic.param_count));
+        }
         self.builtin_ambient_names.insert(name.clone());
         self.ctx.env.insert(name, scheme);
     }

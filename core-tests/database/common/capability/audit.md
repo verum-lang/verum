@@ -35,7 +35,7 @@ and the PostgreSQL adapter.
 The [checkout fixture](../../../../vcs/specs/L2-standard/database/pooled_connection_borrow.vr)
 accepts a real `PooledConnection<PgConnection>`. It queries the checked-out
 connection and consumes the handle on either the healthy or discard path.
-Ordinary source checking reports E312 twice on the same call:
+Source checking reports E312 twice on the query path.
 
 ```text
 let result = handle.conn_mut().simple_query(sql);
@@ -43,9 +43,19 @@ let result = handle.conn_mut().simple_query(sql);
 E312: cannot establish the lifetime of references stored in `handle` after this mutable call
 ```
 
-`PooledConnection.conn_mut()` matches the optional connection inside the
-checkout. Its success arm borrows the contained connection. Its empty arm
-panics. The checkout separately borrows its parent pool. All three complete
-synchronous adapter modules remain rejected while checking checkout
-lifetimes. The common capability module, handle owner and both asynchronous
-adapter modules pass whole-source checking.
+The companion function borrows the connection, ends that borrow and
+releases the handle. It reports one E312 on `handle.conn_mut()` with no
+query present. The checkout retains a separate reference to its parent pool.
+
+The checker traces references returned by a borrowed sum pattern to the
+record field and payload position selected by each arm. A direct language
+trap with literal arguments can close a terminal arm. The pool's defining
+module imports the source `panic` through the prelude. That function calls
+`panic_impl`, which writes to stderr and exits the process. Its writes
+require a separate proof. [Panic implementation](../../../../core/base/panic.vr)
+
+Whole-source checking reports 19 lifetime diagnostics in the PostgreSQL
+adapter, 15 in MySQL and 10 in SQLite. The common pool implementation has
+two further diagnostics on `idle` in `launch`. The common capability
+module, handle owner and both asynchronous adapters pass whole-source
+checking.

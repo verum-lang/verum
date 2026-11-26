@@ -717,13 +717,31 @@ impl TypeChecker {
     // module with the same name. Ordinary typed calls still resolve these
     // bindings; preliminary declaration analysis remains conservative.
     fn source_receiver_shadowing(&self, owner: &Text, name: &Text) -> (bool, bool) {
+        self.source_receiver_bindings(owner, name, false)
+    }
+
+    /// A raw registered source can omit the synthetic prelude mount present
+    /// during body checking. Resolve it in this declaration's scope before
+    /// assigning a bare call the authority of a language operation.
+    pub(super) fn source_allows_builtin_trap(&self, name: &Text) -> bool {
+        !self.source_receiver_bindings(&self.current_module_path, name, true).1
+    }
+
+    fn source_receiver_bindings(&self, owner: &Text, name: &Text, include_prelude: bool) -> (bool, bool) {
         use super::source_declarations::{source_mount_targets, MountTargetKind};
         let registry = self.module_registry.read();
         let registered = registry.get_by_path_aliased(owner);
         let module = self.source_type_registration.local_declarations.iter().rev()
             .find(|(path, _)| path == owner).map(|(_, module)| module.as_ref())
             .or_else(|| registered.as_ref().map(|module| &module.ast));
-        let Some(module) = module else { return (false, false); };
+        let Some(module) = module else { return (false, include_prelude); };
+        if include_prelude
+            && let Some(prelude) = verum_ast::prelude::implicit_prelude_path(module)
+            && let Some(module) = self.get_module_with_path_aliases(prelude, &registry)
+            && module.exports.get(name).is_some()
+        {
+            return (false, true);
+        }
         let mut bound = false;
         let mut value = false;
         let header = module.file_header_index();

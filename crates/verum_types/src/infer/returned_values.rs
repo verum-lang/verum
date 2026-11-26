@@ -1,6 +1,6 @@
 //! Source-owned result derivations for direct values and structural projections.
 use super::TypeChecker;
-use crate::context::{CounterAccess, CounterAddress, InputFieldWrite, ReturnedValue, ReturnedValueNode};
+use crate::context::{BorrowedVariantCase, CounterAccess, CounterAddress, InputFieldWrite, ReturnedValue, ReturnedValueNode};
 use crate::ty::{RecordReceiver, Type};
 use verum_ast::{
     BinOp, Expr, ExprKind, FunctionBody, FunctionDecl, FunctionParamKind, LiteralKind, PatternKind,
@@ -320,7 +320,11 @@ fn variant_constructor(
     for segment in suffix.iter().rev() {
         path = format!("{path}.{segment}").into();
     }
-    let (declaration, owner) = checker.declaring_source_type_declaration(&path)?;
+    declared_tuple_variant_owner(checker, &path, name, count)
+}
+
+fn declared_tuple_variant_owner(checker: &TypeChecker, path: &str, name: &Text, count: usize) -> Option<Text> {
+    let (declaration, owner) = checker.declaring_source_type_declaration(path)?;
     let TypeDeclBody::Variant(variants) = &declaration.body else { return None; };
     let variant = variants.iter().find(|variant| variant.name.name == *name)?;
     if !variant.generic_params.is_empty() || variant.where_clause.is_some()
@@ -334,6 +338,108 @@ fn variant_constructor(
         _ => return None,
     }
     Some(TypeChecker::source_type_declaration_key(&owner, &declaration.name.name))
+}
+
+/// A borrowed sum lends its payload in place. Recognize all returning arms
+/// and inspect the complete body of every terminal arm. Computed patterns,
+/// guards, local cleanup and unproved calls keep the unknown-write rule.
+fn borrowed_variant_match(
+    checker: &TypeChecker,
+    scrutinee: &Expr,
+    arms: &[verum_ast::pattern::MatchArm],
+    bindings: &Map<Text, usize>,
+    nodes: &[ReturnedValueNode],
+) -> Option<ReturnedValueNode> {
+    use verum_ast::{UnOp, VariantPatternData};
+    let ExprKind::Unary { op, expr } = &unparen(scrutinee).kind else { return None; };
+    let mutable = match op { UnOp::Ref => false, UnOp::RefMut => true, _ => return None };
+    let mut place = unparen(expr);
+    let mut fields = List::new();
+    while let ExprKind::Field { expr, field } = &place.kind {
+        if fields.len() >= MAX_RETURNED_VALUE_STEPS { return None; }
+        fields.push(field.name.clone());
+        place = unparen(expr);
+    }
+    fields.reverse();
+    let ExprKind::Path(path) = &place.kind else { return None; };
+    let input = match path.segments.as_slice() {
+        [verum_ast::PathSegment::SelfValue] => *bindings.get(&Text::from("self"))?,
+        [verum_ast::PathSegment::Name(name)] => *bindings.get(&name.name)?,
+        _ => return None,
+    };
+    if !matches!(nodes.get(input)?, ReturnedValueNode::Parameter(_) | ReturnedValueNode::Receiver) {
+        return None;
+    }
+    let mut remaining = MAX_RETURNED_VALUE_STEPS.checked_sub(arms.len())?;
+    let mut owner = None;
+    let mut cases = List::new();
+    let mut traps = Set::new();
+    let mut terminal_wildcard = false;
+    for arm in arms {
+        if terminal_wildcard || arm.guard.is_some() || arm.with_clause.is_some() || !arm.attributes.is_empty() {
+            return None;
+        }
+        let mut body = unparen(&arm.body);
+        while let ExprKind::Block(block) = &body.kind {
+            remaining = remaining.checked_sub(1)?;
+            if !block.stmts.is_empty() { return None; }
+            body = unparen(block.expr.as_deref()?);
+        }
+        let (name, parts) = match &arm.pattern.kind {
+            PatternKind::Wildcard => (None, &[][..]),
+            PatternKind::Variant { path, data } => {
+                let (variant, prefix) = path.segments.split_last()?;
+                let verum_ast::PathSegment::Name(variant) = variant else { return None; };
+                if prefix.is_empty() { return None; }
+                let mut sum = path.clone();
+                sum.segments.pop();
+                let parts = match data {
+                    None => &[][..],
+                    Some(VariantPatternData::Tuple(parts)) => parts.as_slice(),
+                    _ => return None,
+                };
+                let key = declared_tuple_variant_owner(checker, &checker.path_to_string(&sum), &variant.name, parts.len())?;
+                if owner.as_ref().is_some_and(|previous| previous != &key) { return None; }
+                owner = Some(key);
+                (Some(variant.name.clone()), parts)
+            }
+            _ => return None,
+        };
+        remaining = remaining.checked_sub(parts.len())?;
+        let mut bound = Map::new();
+        for (index, part) in parts.iter().enumerate() {
+            match &part.kind {
+                PatternKind::Wildcard => (),
+                PatternKind::Ident { name, by_ref: false, mutable: false, subpattern: None } => {
+                    if bound.insert(name.name.clone(), index).is_some() { return None; }
+                }
+                _ => return None,
+            }
+        }
+        let returned_field = match &body.kind {
+            ExprKind::Path(path) => Some(*bound.get(&path.as_ident()?.name)?),
+            ExprKind::Call { func, args, type_args } if type_args.is_empty() => {
+                let ExprKind::Path(path) = &unparen(func).kind else { return None; };
+                let callee = &path.as_ident()?.name;
+                if bound.contains_key(callee) || bindings.contains_key(callee)
+                    || checker.ctx.env.lookup(callee)?.builtin_trap_arity != Some(args.len())
+                    || (traps.insert(callee.clone()) && !checker.source_allows_builtin_trap(callee))
+                    || args.iter().any(|arg| !matches!(&unparen(arg).kind,
+                        ExprKind::Literal(literal) if matches!(literal.kind, LiteralKind::Text(_)))) {
+                    return None;
+                }
+                None
+            }
+            _ => return None,
+        };
+        if let Some(name) = name {
+            cases.push(BorrowedVariantCase { name, arity: parts.len(), returned_field });
+        } else {
+            terminal_wildcard = true;
+        }
+    }
+    cases.iter().any(|case| case.returned_field.is_some()).then_some(())?;
+    Some(ReturnedValueNode::BorrowedVariant { input, fields, mutable, owner: owner?, cases, terminal_wildcard })
 }
 
 fn append_expression(
@@ -363,6 +469,7 @@ fn append_expression(
         if pending.len() > remaining || nodes.len() >= MAX_RETURNED_VALUE_STEPS { return None; }
         let node = match step {
             Step::Enter(expression) => match &unparen(expression).kind {
+                ExprKind::Match { expr, arms } => borrowed_variant_match(checker, expr, arms, bindings, nodes)?,
                 ExprKind::Path(path) => {
                     let slot = match path.segments.as_slice() {
                         [verum_ast::ty::PathSegment::Name(name)] => bindings.get(&name.name),
@@ -744,6 +851,7 @@ impl TypeChecker {
                 ReturnedValueNode::Field { source, .. }
                 | ReturnedValueNode::TupleIndex { source, .. } => mark(*source)?,
                 ReturnedValueNode::RetainedCopy { handle, .. } => mark(*handle)?,
+                ReturnedValueNode::BorrowedVariant { input, .. } => mark(*input)?,
                 ReturnedValueNode::Choice { arms, .. } => {
                     for arm in arms { mark(*arm)?; }
                 }
@@ -777,6 +885,19 @@ impl TypeChecker {
                     self.read_value_origins(
                         facts.nodes.get(*handle)?.clone(), values.get(*handle)?.clone(), span, true,
                     )?.1
+                }
+                ReturnedValueNode::BorrowedVariant { input, fields, cases, .. } => {
+                    // The reference addresses storage inside the input. Following the
+                    // references stored in the record would substitute their lifetimes.
+                    for base in values.get(*input)? {
+                        for position in cases.iter().filter_map(|case| case.returned_field) {
+                            let mut place = base.clone();
+                            place.fields.extend(fields.iter().cloned());
+                            place.fields.push(position.to_string().into());
+                            if !origins.contains(&place) { origins.push(place); }
+                        }
+                    }
+                    origins
                 }
                 ReturnedValueNode::Literal(_) | ReturnedValueNode::Compound { .. }
                 | ReturnedValueNode::ScalarBinary { .. } | ReturnedValueNode::Condition(_)
@@ -959,6 +1080,36 @@ impl TypeChecker {
                 }
                 ReturnedValueNode::Receiver => self.unifier.apply(receiver?),
                 ReturnedValueNode::Literal(ty) => ty.clone(),
+                ReturnedValueNode::BorrowedVariant { input, fields, mutable, owner, cases, terminal_wildcard } => {
+                    let root = self.place_reference_head(nodes.get(*input)?, span).ok()?;
+                    let Type::Reference { mutable: writable, inner } = root else { return None; };
+                    if *mutable && !writable { return None; }
+                    let mut sum = *inner;
+                    for field in fields {
+                        if self.reference_mode(&sum, span).ok()?.is_some() { return None; }
+                        sum = self.unifier.apply(&self.lookup_field_type(&sum, field)?);
+                    }
+                    if &self.conversion_nominal_head(&sum)?.0 != owner { return None; }
+                    let Type::Variant(variants) = self.expand_generic_to_variant(&sum).ok()? else { return None; };
+                    let mut covered = Set::new();
+                    let mut result = None;
+                    for case in cases {
+                        if !covered.insert(&case.name) { return None; }
+                        let payload = variants.get(&case.name)?;
+                        if let Some(position) = case.returned_field {
+                            let field = match (case.arity, position, payload) {
+                                (1, 0, payload) => payload,
+                                (arity, index, Type::Tuple(parts)) if arity == parts.len() => parts.get(index)?,
+                                _ => return None,
+                            };
+                            let borrow = Type::reference(*mutable, field.clone());
+                            if result.as_ref().is_some_and(|other| other != &borrow) { return None; }
+                            result = Some(borrow);
+                        }
+                    }
+                    if !terminal_wildcard && covered.len() != variants.len() { return None; }
+                    result?
+                }
                 ReturnedValueNode::RetainedCopy { handle, counter, access, address } => {
                     // The registered operation copies the borrowed handle and writes only
                     // its scalar counter. Resolve each place component in the selected

@@ -185,6 +185,15 @@ pub(crate) struct InputFieldWrite {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub(crate) struct BorrowedVariantCase {
+    pub name: Text,
+    pub arity: usize,
+    /// Position of the borrowed binder returned by this arm. A terminal arm
+    /// has no result and has separately proved its operation and operands.
+    pub returned_field: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) enum ReturnedValueNode {
     Parameter(usize),
     Receiver,
@@ -194,6 +203,14 @@ pub(crate) enum ReturnedValueNode {
     Tuple(List<usize>),
     Record { owner: Text, fields: List<(Text, usize)> },
     Variant { owner: Text, name: Text, fields: List<usize> },
+    BorrowedVariant {
+        input: usize,
+        fields: List<Text>,
+        mutable: bool,
+        owner: Text,
+        cases: List<BorrowedVariantCase>,
+        terminal_wildcard: bool,
+    },
     Compound { op: verum_ast::BinOp, left: usize, right: usize },
     ScalarBinary { op: verum_ast::BinOp, left: usize, right: usize },
     Condition(usize),
@@ -277,6 +294,9 @@ pub struct TypeScheme {
     pub(crate) receiver_kind: Option<crate::core_metadata::ReceiverKind>,
     /// Structural body derivation owned by this callable's exact source.
     pub(crate) returned_value: Option<Shared<ReturnedValue>>,
+    /// Installed only by the language registrar for a direct terminating
+    /// operation. A source function returning Never has its own write footprint.
+    pub(crate) builtin_trap_arity: Option<usize>,
     /// Declared implementation receiver using this scheme's type variables.
     /// This preserves reordered, nested and fixed receiver arguments without
     /// inferring the implementation relationship from a method's return type.
@@ -478,6 +498,7 @@ impl TypeScheme {
             impl_self_type: None,
             receiver_kind: None,
             returned_value: None,
+            builtin_trap_arity: None,
             explicit_method_vars: None,
             value_parameters: List::new(),
             universe_params: List::new(),

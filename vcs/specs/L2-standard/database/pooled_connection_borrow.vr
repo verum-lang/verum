@@ -7,6 +7,11 @@ mount core.database.common.error.{DbError};
 mount core.database.common.pool_impl.{PooledConnection};
 mount core.database.postgres.connection.{PgConnection, PgSimpleQueryResult};
 
+fn release_after_borrow(mut handle: PooledConnection<PgConnection>) {
+    { let connection = handle.conn_mut(); }
+    handle.release_healthy();
+}
+
 fn query_checked_out(mut handle: PooledConnection<PgConnection>, sql: &Text) -> Result<PgSimpleQueryResult, DbError> {
     let result = handle.conn_mut().simple_query(sql);
     match &result {
