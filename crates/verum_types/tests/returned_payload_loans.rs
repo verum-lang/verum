@@ -536,4 +536,38 @@ fn computed_write_receivers_do_not_gain_an_unproved_storage_identity() {
          {let local=3;selected(&mut a,&mut b,first).item.replace(&local);} a}");
     assert!(errors.iter().any(|error| error.contains("does not live long enough")
         || error.contains("cannot establish the lifetime")), "{errors:?}");
+    // A reference-valued intermediate can point outside both holder slots.
+    let indirect = "type Holder is {item:&mut Payload};
+        implement Payload {fn replace(&mut self,source:&Int) {self.ptr=source;}}
+        fn selected(a:&mut Holder,b:&mut Holder,first:Bool)->&mut Holder {if first {a} else {b}}";
+    let errors = diagnostics(indirect,
+        "fn receive(a:&mut Holder,b:&mut Holder,first:Bool) {
+         let local=3; selected(a,b,first).item.replace(&local); }");
+    assert!(errors.iter().any(|error| error.contains("does not live long enough")
+        || error.contains("cannot establish the lifetime")), "{errors:?}");
+}
+
+#[test]
+fn a_selected_helper_retains_the_loans_of_either_conditional_result() {
+    let caller = "fn receive(input:&Int, flag:Bool)->Payload {
+        let local=3; let container=Payload{ptr:input,marker:1};
+        selected(&container, &local, flag)
+    }";
+    for (left, right, escapes) in [
+        ("source.ptr", "source.ptr", false),
+        ("key", "source.ptr", true),
+        ("source.ptr", "key", true),
+    ] {
+        let helper = format!("fn selected(source:&Payload, key:&Int, flag:Bool)->Payload {{
+            if flag {{ Payload{{ptr:{left},marker:1}} }}
+            else {{ Payload{{ptr:{right},marker:2}} }}
+        }}");
+        let errors = diagnostics(&helper, caller);
+        if escapes {
+            assert!(errors.iter().any(|error| error.contains("local")
+                && error.contains("does not live long enough")), "{errors:?}");
+        } else {
+            assert!(errors.is_empty(), "{errors:?}");
+        }
+    }
 }

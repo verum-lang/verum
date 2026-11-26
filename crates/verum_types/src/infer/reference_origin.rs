@@ -15,6 +15,16 @@ fn unparen(mut expr: &Expr) -> &Expr {
     expr
 }
 
+fn field_root(expr: &Expr) -> (&Expr, List<&verum_ast::Ident>) {
+    let mut fields = List::new();
+    let mut root = unparen(expr);
+    while let ExprKind::Field { expr, field } = &root.kind {
+        fields.push(field);
+        root = unparen(expr);
+    }
+    (root, fields)
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum AutoBorrowRoot {
     SharedOnly,
@@ -1111,6 +1121,8 @@ impl TypeChecker {
             if mode.is_some() && self.reference_mode(actual, argument.span)?.is_none() {
                 if let Some((source, _)) = self.record_place_for_auto_borrow(argument, AutoBorrowRoot::IncludeExclusive) {
                     origins.push(source);
+                } else if let Some(candidates) = self.computed_field_borrow_origins(argument) {
+                    origins = candidates;
                 }
             } else {
                 self.collect_evaluated_operand_origins(argument, &mut origins);
@@ -1231,6 +1243,25 @@ impl TypeChecker {
         self.record_place_for_auto_borrow(expr, AutoBorrowRoot::IncludeExclusive)
     }
 
+    /// A computed reference can designate several callers' places. A write
+    /// through an inline field can reach any of them. Keep each candidate
+    /// without promoting the set to a unique storage identity.
+    fn computed_field_borrow_origins(&mut self, place: &Expr) -> Option<List<RecordReceiver>> {
+        let (root, fields) = field_root(place);
+        if fields.is_empty() { return None; }
+        let actual = self.observed_operand_type(root)
+            .or_else(|| self.type_registry.lookup_expr(root.span).cloned())?;
+        let ty = match self.place_reference_head(&actual, root.span).ok()? {
+            Type::Reference { inner, .. } | Type::CheckedReference { inner, .. }
+            | Type::UnsafeReference { inner, .. } => *inner,
+            _ => return None,
+        };
+        if self.reference_mode(&ty, root.span).ok()?.is_some() { return None; }
+        let mut origins = self.evaluated_result_origins(root)?.clone();
+        self.project_inline_fields(ty, fields, &mut origins)?;
+        Some(origins)
+    }
+
     /// An implicit borrow of an inline field names its original storage even
     /// when the root is an exclusive reference. This is location evidence,
     /// not write permission; the caller still checks the selected receiver.
@@ -1240,12 +1271,7 @@ impl TypeChecker {
         expr: &Expr,
         access: AutoBorrowRoot,
     ) -> Option<(RecordReceiver, Type)> {
-        let mut fields = List::new();
-        let mut root = unparen(expr);
-        while let ExprKind::Field { expr, field } = &root.kind {
-            fields.push(field);
-            root = unparen(expr);
-        }
+        let (root, fields) = field_root(expr);
         let ExprKind::Path(path) = &root.kind else { return None };
         let name = match path.segments.as_slice() {
             [verum_ast::ty::PathSegment::Name(name)] => name.name.as_str(),
@@ -1253,7 +1279,7 @@ impl TypeChecker {
                 if access == AutoBorrowRoot::IncludeExclusive => "self",
             _ => return None,
         };
-        let mut ty = self.ctx.env.lookup(name)?.ty.clone();
+        let ty = self.ctx.env.lookup(name)?.ty.clone();
         let head = self.place_reference_head(&ty, root.span).ok()?;
         let reference = match &head {
             Type::Reference { mutable: false, .. } => true,
@@ -1275,14 +1301,24 @@ impl TypeChecker {
             _ => false,
         };
         let mut owner = self.ctx.env.record_source(name, reference)?;
+        let ty = self.project_inline_fields(ty, fields, std::slice::from_mut(&mut owner))?;
+        Some((owner, ty))
+    }
+
+    fn project_inline_fields(
+        &self,
+        mut ty: Type,
+        fields: List<&verum_ast::Ident>,
+        origins: &mut [RecordReceiver],
+    ) -> Option<Type> {
         for field in fields.into_iter().rev() {
             ty = self.lookup_field_type(&self.record_conversion_head(&ty), &field.name)?;
             if self.reference_mode(&ty, field.span).ok()?.is_some() {
                 return None;
             }
-            owner.fields.push(field.name.clone());
+            for origin in &mut *origins { origin.fields.push(field.name.clone()); }
         }
-        Some((owner, ty))
+        Some(ty)
     }
 }
 

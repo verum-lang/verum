@@ -197,6 +197,7 @@ pub(crate) enum ReturnedValueNode {
     Compound { op: verum_ast::BinOp, left: usize, right: usize },
     ScalarBinary { op: verum_ast::BinOp, left: usize, right: usize },
     Condition(usize),
+    Choice { condition: usize, arms: [usize; 2] },
     Index { source: usize, index: usize },
     SelectedCall { span: Span, receiver: Option<usize>, arguments: List<usize> },
     RetainedCopy { handle: usize, counter: usize, access: List<CounterAccess>, address: CounterAddress },

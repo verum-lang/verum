@@ -126,10 +126,8 @@ pub(super) fn returned_value(
         },
     };
     let control = value.filter(|value| matches!(unparen(value).kind,
-        ExprKind::If { .. } | ExprKind::While { .. } | ExprKind::Block(_)));
-    if let Some(control) = control {
-        if !control_tail_is_unit(control) { return None; }
-    }
+        ExprKind::If { .. } | ExprKind::While { .. } | ExprKind::Block(_))
+        && control_tail_is_unit(value));
     append_statements(checker, statements, control, &mut bindings, &mut nodes, &mut locals, &mut writes)?;
     let value = value.filter(|_| control.is_none());
     let result = match value {
@@ -354,6 +352,7 @@ fn append_expression(
         Variant(Text, Text, usize),
         Call(verum_ast::Span, bool, usize),
         Binary(BinOp),
+        Choice,
         Index,
     }
     let mut pending = List::from_iter([Step::Enter(value)]);
@@ -373,6 +372,22 @@ fn append_expression(
                         _ => return None,
                     };
                     values.push(*slot?);
+                    continue;
+                }
+                ExprKind::Block(block) if block.stmts.is_empty() => {
+                    pending.push(Step::Enter(block.expr.as_deref()?));
+                    continue;
+                }
+                ExprKind::If { condition, then_branch, else_branch: Some(other) }
+                    if then_branch.stmts.is_empty() =>
+                {
+                    let [verum_ast::expr::ConditionKind::Expr(test)] = condition.conditions.as_slice() else {
+                        return None;
+                    };
+                    pending.push(Step::Choice);
+                    pending.push(Step::Enter(other));
+                    pending.push(Step::Enter(then_branch.expr.as_deref()?));
+                    pending.push(Step::Enter(test));
                     continue;
                 }
                 ExprKind::Literal(literal) => {
@@ -536,6 +551,11 @@ fn append_expression(
             Step::Tuple(count) => {
                 let start = values.len().checked_sub(count)?;
                 ReturnedValueNode::Tuple(values.split_off(start))
+            }
+            Step::Choice => {
+                let otherwise = values.pop()?;
+                let consequent = values.pop()?;
+                ReturnedValueNode::Choice { condition: values.pop()?, arms: [consequent, otherwise] }
             }
             Step::Binary(op) => {
                 let right = values.pop()?;
@@ -724,6 +744,9 @@ impl TypeChecker {
                 ReturnedValueNode::Field { source, .. }
                 | ReturnedValueNode::TupleIndex { source, .. } => mark(*source)?,
                 ReturnedValueNode::RetainedCopy { handle, .. } => mark(*handle)?,
+                ReturnedValueNode::Choice { arms, .. } => {
+                    for arm in arms { mark(*arm)?; }
+                }
                 ReturnedValueNode::Tuple(parts)
                 | ReturnedValueNode::Variant { fields: parts, .. } => {
                     for part in parts { mark(*part)?; }
@@ -737,6 +760,13 @@ impl TypeChecker {
         let mut values: List<List<RecordReceiver>> = List::new();
         for (index, node) in derivation.nodes.iter().enumerate() {
             let ty = facts.nodes.get(index)?;
+            let mut origins = List::new();
+            let mut include = |part: usize| -> Option<()> {
+                for origin in values.get(part)? {
+                    if !origins.contains(origin) { origins.push(origin.clone()); }
+                }
+                Some(())
+            };
             let origins = match node {
                 ReturnedValueNode::Parameter(parameter) => {
                     self.closed_call_input_origins(args.get(*parameter)?, ty,
@@ -770,25 +800,15 @@ impl TypeChecker {
                 }
                 ReturnedValueNode::Tuple(parts)
                 | ReturnedValueNode::Variant { fields: parts, .. } => {
-                    let mut origins = List::new();
-                    for part in parts {
-                        for origin in values.get(*part)? {
-                            if !origins.contains(origin) {
-                                origins.push(origin.clone());
-                            }
-                        }
-                    }
+                    for part in parts { include(*part)?; }
                     origins
                 }
                 ReturnedValueNode::Record { fields, .. } => {
-                    let mut origins = List::new();
-                    for (_, part) in fields {
-                        for origin in values.get(*part)? {
-                            if !origins.contains(origin) {
-                                origins.push(origin.clone());
-                            }
-                        }
-                    }
+                    for (_, part) in fields { include(*part)?; }
+                    origins
+                }
+                ReturnedValueNode::Choice { arms, .. } => {
+                    for arm in arms { include(*arm)?; }
                     origins
                 }
             };
@@ -889,6 +909,9 @@ impl TypeChecker {
                     };
                     parts.iter().copied().zip(types).collect()
                 }
+                ReturnedValueNode::Choice { condition, arms } => List::from_iter([
+                    (*condition, Type::Bool), (arms[0], ty.clone()), (arms[1], ty.clone()),
+                ]),
                 ReturnedValueNode::Compound { left, right, .. } => {
                     List::from_iter([(*left, ty.clone()), (*right, ty.clone())])
                 }
@@ -1010,6 +1033,13 @@ impl TypeChecker {
                         .collect::<Option<List<_>>>()?;
                     let receiver = match receiver { Some(index) => Some(nodes.get(*index)?), None => None };
                     self.scalar_call_result(calls.get(span)?, *span, &arguments, receiver)?
+                }
+                ReturnedValueNode::Choice { condition, arms } => {
+                    let first = nodes.get(arms[0])?;
+                    if nodes.get(*condition)? != &Type::Bool || first != nodes.get(arms[1])? {
+                        return None;
+                    }
+                    first.clone()
                 }
                 ReturnedValueNode::Condition(source) => {
                     if nodes.get(*source)? != &Type::Bool { return None; }
