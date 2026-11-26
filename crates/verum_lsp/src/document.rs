@@ -751,9 +751,11 @@ impl DocumentState {
                 verum_common::span::LineColSpan::new("<generated>", 0, 0, 0)
             }
         };
+        let diagnostic = |error: &verum_types::TypeError| {
+            error.source_diagnostic(module, |error| error.to_diagnostic_with_span(Some(convert)))
+        };
         for error in type_checker.prepare_module_declarations(module) {
-            self.diagnostics
-                .push(error.to_diagnostic_with_span(Some(convert)));
+            self.diagnostics.push(diagnostic(&error));
         }
         // Unsaved buffers retain their own imports while checking bodies.
         let header = module.file_header_index();
@@ -764,8 +766,7 @@ impl DocumentState {
                     return false;
                 }
                 if let Err(type_error) = type_checker.check_item(item) {
-                    self.diagnostics
-                        .push(type_error.to_diagnostic_with_span(Some(convert)));
+                    self.diagnostics.push(diagnostic(&type_error));
                 }
             }
             true
@@ -776,8 +777,7 @@ impl DocumentState {
         // the checker's diagnostic channel even when check_item returns Ok.
         // Render its source errors with this revision, as the compiler does.
         for error in type_checker.take_deferred_errors() {
-            self.diagnostics
-                .push(error.to_diagnostic_with_span(Some(convert)));
+            self.diagnostics.push(diagnostic(&error));
         }
         for (name, symbol) in &mut self.symbols {
             if matches!(symbol.kind, SymbolKind::Field) {
@@ -799,8 +799,7 @@ impl DocumentState {
         let errors = type_checker.diagnostic_sources();
         if errors.len() == type_checker.diagnostics().len() {
             for error in errors {
-                self.diagnostics
-                    .push(error.to_diagnostic_with_span(Some(convert)));
+                self.diagnostics.push(diagnostic(error));
             }
         } else {
             self.diagnostics

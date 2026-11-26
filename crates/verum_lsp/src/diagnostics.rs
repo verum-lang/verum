@@ -117,7 +117,15 @@ pub fn to_lsp_diagnostic(diagnostic: &VerumDiagnostic, text: &str, uri: &Url) ->
         related_information: None,
         tags: None,
         code_description: None,
-        data: None,
+        data: (!diagnostic.notes().is_empty() || !diagnostic.helps().is_empty()).then(|| {
+            let messages = |labels: &[verum_diagnostics::Label]| -> Vec<_> {
+                labels.iter().map(|label| label.message.to_string()).collect()
+            };
+            serde_json::json!({"verum": {
+                "notes": messages(diagnostic.notes()),
+                "help": messages(diagnostic.helps()),
+            }})
+        }),
     };
 
     // Add related information from secondary labels

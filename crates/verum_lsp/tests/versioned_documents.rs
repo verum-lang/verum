@@ -18,6 +18,22 @@ fn change(start: (u32, u32), end: (u32, u32), text: &str) -> TextDocumentContent
 }
 
 #[test]
+fn a_recovered_variant_error_links_the_owning_function_and_exact_utf16_range() {
+    let text = "type Choice is Found(Int) | Empty;\nfn inspect(value: Int) -> Int { /*😀*/ if let Found(n) = value { n } else { 0 } }";
+    let document = DocumentState::new(text.into(), 3, FileId::new(1));
+    let uri = Url::parse("file:///main.vr").unwrap();
+    let (local, foreign) = verum_lsp::diagnostics::project_diagnostics(
+        &document.diagnostics, text, &uri, &document.diagnostic_sources,
+    );
+    assert!(foreign.is_empty());
+    let finding = local.iter().find(|d| d.message.contains("variant pattern requires variant type")).unwrap();
+    let line = text.lines().nth(1).unwrap();
+    let column = line[..line.find("Found(n)").unwrap()].encode_utf16().count() as u32;
+    assert_eq!(finding.range, Range::new(Position::new(1, column), Position::new(1, column + 8)));
+    assert_eq!(finding.data.as_ref().unwrap()["verum"]["notes"], json!(["while checking function `inspect`"]));
+}
+
+#[test]
 fn utf16_edits_keep_non_bmp_neighbors_and_apply_in_order() {
     let mut doc = DocumentState::new(
         "// a😀я\nfn answer() -> Int { 42 }".into(),

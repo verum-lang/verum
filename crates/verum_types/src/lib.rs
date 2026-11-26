@@ -227,6 +227,7 @@ pub mod references; // Deref protocol implementations for reference types
 pub mod refinement;
 mod refinement_substitution;
 pub mod refinement_diagnostics;
+mod source_diagnostic;
 pub mod refinement_entailment;
 pub(crate) mod value_parameter_domain;
 pub mod refinement_evidence; // Refinement types enhancement: flow-sensitive refinement propagation, evidence tracking for verified predicates — Flow-sensitive refinement propagation

@@ -1214,6 +1214,23 @@ async fn test_diagnostic_severity_mapping() {
     assert_eq!(lsp_diag.severity, Some(DiagnosticSeverity::HINT));
 }
 
+#[test]
+fn diagnostic_wire_preserves_compiler_context_and_help() {
+    use verum_diagnostics::{Diagnostic, DiagnosticBuilder, Span};
+    use verum_lsp::diagnostics::to_lsp_diagnostic;
+    let uri = Url::parse("file:///main.vr").unwrap();
+    let span = Span::new("main.vr", 1, 1, 6);
+    let diagnostic = DiagnosticBuilder::error().message("borrow outlives referent")
+        .span(span.clone()).code("E312").add_note("while checking function collect")
+        .help("return an owned value").build();
+    let wire = serde_json::to_value(to_lsp_diagnostic(&diagnostic, "value", &uri)).unwrap();
+    assert_eq!(wire["data"]["verum"], serde_json::json!({
+        "notes": ["while checking function collect"], "help": ["return an owned value"]
+    }));
+    assert_eq!(wire["message"], "borrow outlives referent");
+    assert!(to_lsp_diagnostic(&Diagnostic::new_error("plain", span, "E312"), "value", &uri).data.is_none());
+}
+
 #[tokio::test]
 async fn test_diagnostic_code_description() {
     // Verify that error codes link to documentation
