@@ -1,0 +1,12 @@
+{
+  "producer": "9d6725c61d8ef056c5e76a8c81fc46a658bc44d6",
+  "producer_tree": "4185a6f5927f846352362f23f0cf0adbb983b005",
+  "producer_test": "cog::source_archive_finalization::actual_source_cog_preserves_short_long_and_binary_entries",
+  "producer_source_bindings": {
+    "Cargo.lock": "1383eaade9056881958fb1ef023cb8326fdccff1204ad1ad5bcdf9a341be3741",
+    "crates/verum_cli/src/cog.rs": "244666839eaa0e3bd5f631867e2ab160074608f1f13750bbc5dfb6c8b0e826ae",
+    "crates/verum_cli/tests/cog/source_archive_finalization.rs": "98aeae20a89b1dbd7a1092455b16b7ed9fbbe4c3a8587e91c52ada36d9e753d2"
+  },
+  "locked_tar_version": "0.4.46",
+  "expected_json_sha256": "110347c80d95c1e40e34eaea5a9a0daad38f62a6130a875776ff392344dac5a9"
+}
