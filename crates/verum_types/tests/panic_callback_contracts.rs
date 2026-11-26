@@ -1,37 +1,8 @@
 //! A selected panic intrinsic is synchronous; spelling alone grants no callable bound.
-use verum_common::{List, Text};
-use verum_fast_parser::Parser;
-use verum_types::TypeChecker;
-
-fn errors(source: &str) -> List<Text> {
-    let module = Parser::new(source).parse_module().unwrap();
-    let mut checker = TypeChecker::new();
-    checker.register_builtins();
-    let mut errors: List<Text> = checker
-        .prepare_module_declarations(&module)
-        .into_iter()
-        .map(|error| format!("{error:?}").into())
-        .collect();
-    for item in &module.items {
-        if let Err(error) = checker.check_item(item) {
-            errors.push(format!("{error:?}").into());
-        }
-    }
-    errors.extend(
-        checker
-            .take_deferred_errors()
-            .into_iter()
-            .map(|error| Text::from(format!("{error:?}"))),
-    );
-    errors.extend(
-        checker
-            .diagnostics()
-            .iter()
-            .filter(|d| d.is_error())
-            .map(|d| d.message().into()),
-    );
-    errors
-}
+#[path = "support/callable_diagnostics.rs"]
+mod callable_diagnostics;
+use callable_diagnostics::{assert_open_callback_rejected, errors};
+use verum_common::List;
 
 #[test]
 fn builtin_panic_can_terminate_a_synchronous_callback() {
@@ -68,15 +39,8 @@ fn an_async_source_homonym_keeps_its_declared_bound() {
 
 #[test]
 fn a_shadowing_callback_cannot_borrow_the_builtin_contract() {
-    let found = errors(
-        "fn invoke<F:fn()->Int>(f:F)->Int {f()} fn probe(panic:async fn()->Int)->Int {invoke(||panic())}",
-    );
-    assert!(
-        found
-            .iter()
-            .any(|e| e.contains("Mismatch") && e.contains("async")),
-        "{found:?}"
-    );
+    let source = "fn invoke<F:fn()->Int>(f:F)->Int {f()} fn probe(panic:async fn()->Int)->Int {invoke(||panic())}";
+    assert_open_callback_rejected(source, "||panic()", List::new());
 }
 
 #[test]

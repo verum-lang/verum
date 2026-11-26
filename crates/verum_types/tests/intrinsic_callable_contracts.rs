@@ -1,37 +1,10 @@
 //! Missing operation evidence must never manufacture a pure callable.
-use verum_common::{List, Text};
+#[path = "support/callable_diagnostics.rs"]
+mod callable_diagnostics;
+use callable_diagnostics::{assert_open_callback_rejected, errors};
+use verum_common::List;
 use verum_fast_parser::Parser;
-use verum_types::TypeChecker;
-
-fn errors(source: &str) -> List<Text> {
-    let module = Parser::new(source).parse_module().unwrap();
-    let mut checker = TypeChecker::new();
-    checker.register_builtins();
-    let mut errors: List<Text> = checker
-        .prepare_module_declarations(&module)
-        .into_iter()
-        .map(|error| format!("{error:?}").into())
-        .collect();
-    for item in &module.items {
-        if let Err(error) = checker.check_item(item) {
-            errors.push(format!("{error:?}").into());
-        }
-    }
-    errors.extend(
-        checker
-            .take_deferred_errors()
-            .into_iter()
-            .map(|error| Text::from(format!("{error:?}"))),
-    );
-    errors.extend(
-        checker
-            .diagnostics()
-            .iter()
-            .filter(|d| d.is_error())
-            .map(|d| d.message().into()),
-    );
-    errors
-}
+use verum_types::{Type, TypeChecker};
 
 #[test]
 fn a_checked_intrinsic_body_cannot_invent_purity() {
@@ -62,13 +35,7 @@ fn an_unrestricted_body_can_still_use_an_intrinsic() {
 fn unknown_intrinsic_properties_do_not_satisfy_a_callback_bound() {
     let source = "fn invoke(number: Int) -> Int { @intrinsic(\"syscall0\", number) }
         static mut CALLBACK: fn(Int) -> Int = invoke;";
-    let rejected = errors(source);
-    assert!(
-        rejected
-            .iter()
-            .any(|error| error.contains("Mismatch") && error.contains("async")),
-        "callback lost its missing-property obligation: {rejected:?}"
-    );
+    assert_open_callback_rejected(source, "invoke", List::from_single(Type::Int));
 }
 
 #[test]
