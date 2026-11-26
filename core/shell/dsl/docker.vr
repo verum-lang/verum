@@ -36,7 +36,7 @@ implement DockerImage {
             Result.Ok(DockerImage(s))
         } else {
             Result.Err(ShellError.SpawnFailed {
-                command: "<DockerImage.parse>".into(),
+                command: "<DockerImage.parse>",
                 reason:  f"invalid docker image: {s}",
             })
         }
@@ -55,7 +55,7 @@ implement DockerTag {
         let r = Regex.new("""^[a-zA-Z0-9._\\-]{1,128}$""").unwrap();
         if r.is_match(&s) { Result.Ok(DockerTag(s)) }
         else { Result.Err(ShellError.SpawnFailed {
-            command: "<DockerTag.parse>".into(),
+            command: "<DockerTag.parse>",
             reason:  f"invalid docker tag: {s}",
         }) }
     }
@@ -70,10 +70,10 @@ public type PortMapping is {
 
 implement PortMapping {
     public fn tcp(host: Int, container: Int) -> PortMapping {
-        PortMapping { host, container, protocol: "tcp".into() }
+        PortMapping { host, container, protocol: "tcp" }
     }
     public fn udp(host: Int, container: Int) -> PortMapping {
-        PortMapping { host, container, protocol: "udp".into() }
+        PortMapping { host, container, protocol: "udp" }
     }
     public fn render(&self) -> Text { f"{self.host}:{self.container}/{self.protocol}" }
 }
@@ -134,17 +134,17 @@ implement DockerCmd {
                 render_build(context, tag, file, target, *no_cache, build_args, flav),
             Run { image, cmd, env, volumes, ports, rm, detach, name } =>
                 render_run(image, cmd, env, volumes, ports, *rm, *detach, name, flav),
-            Push { image } => quote_join(&["docker".into(), "push".into(), image.as_text().clone()], flav),
-            Pull { image } => quote_join(&["docker".into(), "pull".into(), image.as_text().clone()], flav),
+            Push { image } => quote_join(&["docker", "push", image.as_text().clone()], flav),
+            Pull { image } => quote_join(&["docker", "pull", image.as_text().clone()], flav),
             Stop { name, timeout } => {
-                let mut args: List<Text> = ["docker".into(), "stop".into()];
-                if let Maybe.Some(t) = timeout { args.push("-t".into()); args.push(f"{t}"); }
+                let mut args: List<Text> = ["docker", "stop"];
+                if let Maybe.Some(t) = timeout { args.push("-t"); args.push(f"{t}"); }
                 args.push(name.clone());
                 quote_join(&args, flav)
             }
             Logs { name, follow, tail } => {
-                let mut args: List<Text> = ["docker".into(), "logs".into()];
-                if *follow { args.push("-f".into()); }
+                let mut args: List<Text> = ["docker", "logs"];
+                if *follow { args.push("-f"); }
                 if let Maybe.Some(t) = tail { args.push(f"--tail={t}"); }
                 args.push(name.clone());
                 quote_join(&args, flav)
@@ -162,13 +162,13 @@ fn render_build(
     build_args: &List<(Text, Text)>,
     flav: ShellFlavour,
 ) -> Text {
-    let mut args: List<Text> = ["docker".into(), "build".into()];
-    args.push("-t".into()); args.push(tag.as_text().clone());
-    if let Maybe.Some(f) = file   { args.push("-f".into()); args.push(f.to_text()); }
-    if let Maybe.Some(t) = target { args.push("--target".into()); args.push(t.clone()); }
-    if no_cache { args.push("--no-cache".into()); }
+    let mut args: List<Text> = ["docker", "build"];
+    args.push("-t"); args.push(tag.as_text().clone());
+    if let Maybe.Some(f) = file   { args.push("-f"); args.push(f.to_text()); }
+    if let Maybe.Some(t) = target { args.push("--target"); args.push(t.clone()); }
+    if no_cache { args.push("--no-cache"); }
     for (k, v) in build_args.iter() {
-        args.push("--build-arg".into());
+        args.push("--build-arg");
         args.push(f"{k}={v}");
     }
     args.push(context.to_text());
@@ -186,20 +186,20 @@ fn render_run(
     name: &Maybe<Text>,
     flav: ShellFlavour,
 ) -> Text {
-    let mut args: List<Text> = ["docker".into(), "run".into()];
-    if rm     { args.push("--rm".into()); }
-    if detach { args.push("-d".into()); }
-    if let Maybe.Some(n) = name { args.push("--name".into()); args.push(n.clone()); }
+    let mut args: List<Text> = ["docker", "run"];
+    if rm     { args.push("--rm"); }
+    if detach { args.push("-d"); }
+    if let Maybe.Some(n) = name { args.push("--name"); args.push(n.clone()); }
     for (k, v) in env.iter() {
-        args.push("-e".into());
+        args.push("-e");
         args.push(f"{k}={v}");
     }
     for v in volumes.iter() {
-        args.push("-v".into());
+        args.push("-v");
         args.push(v.render());
     }
     for p in ports.iter() {
-        args.push("-p".into());
+        args.push("-p");
         args.push(p.render());
     }
     args.push(image.as_text().clone());

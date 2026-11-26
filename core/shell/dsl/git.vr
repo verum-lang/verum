@@ -55,7 +55,7 @@ implement GitUrl {
             Result.Ok(GitUrl(s))
         } else {
             Result.Err(ShellError.SpawnFailed {
-                command: "<GitUrl.parse>".into(),
+                command: "<GitUrl.parse>",
                 reason:  f"invalid git URL: {s}",
             })
         }
@@ -79,7 +79,7 @@ implement GitRefspec {
             Result.Ok(GitRefspec(s))
         } else {
             Result.Err(ShellError.SpawnFailed {
-                command: "<GitRefspec.parse>".into(),
+                command: "<GitRefspec.parse>",
                 reason:  f"invalid git refspec: {s}",
             })
         }
@@ -103,7 +103,7 @@ implement GitBranch {
             Result.Ok(GitBranch(s))
         } else {
             Result.Err(ShellError.SpawnFailed {
-                command: "<GitBranch.parse>".into(),
+                command: "<GitBranch.parse>",
                 reason:  f"invalid git branch: {s}",
             })
         }
@@ -218,10 +218,10 @@ fn render_clone(
     recurse_submodules: Bool,
     flav: core.shell.escape.ShellFlavour,
 ) -> Text {
-    let mut args: List<Text> = ["git".into(), "clone".into()];
-    if let Maybe.Some(d) = depth { args.push("--depth".into()); args.push(f"{d}"); }
-    if let Maybe.Some(b) = branch { args.push("--branch".into()); args.push(b.as_text().clone()); }
-    if recurse_submodules { args.push("--recurse-submodules".into()); }
+    let mut args: List<Text> = ["git", "clone"];
+    if let Maybe.Some(d) = depth { args.push("--depth"); args.push(f"{d}"); }
+    if let Maybe.Some(b) = branch { args.push("--branch"); args.push(b.as_text().clone()); }
+    if recurse_submodules { args.push("--recurse-submodules"); }
     args.push(url.as_text().clone());
     if let Maybe.Some(d) = dest { args.push(d.to_text()); }
     quote_join(&args, flav)
@@ -235,11 +235,11 @@ fn render_commit(
     all: Bool,
     flav: core.shell.escape.ShellFlavour,
 ) -> Text {
-    let mut args: List<Text> = ["git".into(), "commit".into()];
-    if amend { args.push("--amend".into()); }
-    if sign  { args.push("-S".into()); }
-    if all   { args.push("--all".into()); }
-    args.push("-m".into());
+    let mut args: List<Text> = ["git", "commit"];
+    if amend { args.push("--amend"); }
+    if sign  { args.push("-S"); }
+    if all   { args.push("--all"); }
+    args.push("-m");
     args.push(message.clone());
     for p in files.iter() { args.push(p.to_text()); }
     quote_join(&args, flav)
@@ -254,12 +254,12 @@ fn render_log(
     path: &Maybe<PathBuf>,
     flav: core.shell.escape.ShellFlavour,
 ) -> Text {
-    let mut args: List<Text> = ["git".into(), "log".into()];
+    let mut args: List<Text> = ["git", "log"];
     let format_text = match format {
-        Oneline    => "--oneline".into(),
-        Short      => "--format=short".into(),
-        Medium     => "--format=medium".into(),
-        Full       => "--format=full".into(),
+        Oneline    => "--oneline",
+        Short      => "--format=short",
+        Medium     => "--format=medium",
+        Full       => "--format=full",
         Custom(p)  => f"--format={p}",
     };
     args.push(format_text);
@@ -267,7 +267,7 @@ fn render_log(
     if let Maybe.Some(a) = author { args.push(f"--author={a}"); }
     if let Maybe.Some(s) = since  { args.push(f"--since={s}"); }
     if let Maybe.Some(u) = until  { args.push(f"--until={u}"); }
-    if let Maybe.Some(p) = path   { args.push("--".into()); args.push(p.to_text()); }
+    if let Maybe.Some(p) = path   { args.push("--"); args.push(p.to_text()); }
     quote_join(&args, flav)
 }
 
@@ -278,13 +278,13 @@ fn render_push(
     dry_run: Bool,
     flav: core.shell.escape.ShellFlavour,
 ) -> Text {
-    let mut args: List<Text> = ["git".into(), "push".into()];
+    let mut args: List<Text> = ["git", "push"];
     match force {
         Maybe.None                          => {}
-        Maybe.Some(ForceMode.Force)         => args.push("--force".into()),
-        Maybe.Some(ForceMode.ForceWithLease)=> args.push("--force-with-lease".into()),
+        Maybe.Some(ForceMode.Force)         => args.push("--force"),
+        Maybe.Some(ForceMode.ForceWithLease)=> args.push("--force-with-lease"),
     }
-    if dry_run { args.push("--dry-run".into()); }
+    if dry_run { args.push("--dry-run"); }
     args.push(remote.clone());
     args.push(refspec.as_text().clone());
     quote_join(&args, flav)
@@ -296,30 +296,30 @@ fn render_pull(
     rebase: Bool,
     flav: core.shell.escape.ShellFlavour,
 ) -> Text {
-    let mut args: List<Text> = ["git".into(), "pull".into()];
-    if rebase { args.push("--rebase".into()); }
+    let mut args: List<Text> = ["git", "pull"];
+    if rebase { args.push("--rebase"); }
     args.push(remote.clone());
     if let Maybe.Some(b) = branch { args.push(b.as_text().clone()); }
     quote_join(&args, flav)
 }
 
 fn render_checkout(branch: &GitBranch, create: Bool, flav: core.shell.escape.ShellFlavour) -> Text {
-    let mut args: List<Text> = ["git".into(), "checkout".into()];
-    if create { args.push("-b".into()); }
+    let mut args: List<Text> = ["git", "checkout"];
+    if create { args.push("-b"); }
     args.push(branch.as_text().clone());
     quote_join(&args, flav)
 }
 
 fn render_status(short: Bool, porcelain: Bool) -> Text {
-    let mut s: Text = "git status".into();
+    let mut s: Text = "git status";
     if porcelain { s.push_str(" --porcelain"); }
     if short     { s.push_str(" -s"); }
     s
 }
 
 fn render_add(paths: &List<PathBuf>, all: Bool, flav: core.shell.escape.ShellFlavour) -> Text {
-    let mut args: List<Text> = ["git".into(), "add".into()];
-    if all { args.push("--all".into()); }
+    let mut args: List<Text> = ["git", "add"];
+    if all { args.push("--all"); }
     for p in paths.iter() { args.push(p.to_text()); }
     quote_join(&args, flav)
 }
@@ -330,9 +330,9 @@ fn render_diff(
     target: &Maybe<Text>,
     flav: core.shell.escape.ShellFlavour,
 ) -> Text {
-    let mut args: List<Text> = ["git".into(), "diff".into()];
-    if cached    { args.push("--cached".into()); }
-    if name_only { args.push("--name-only".into()); }
+    let mut args: List<Text> = ["git", "diff"];
+    if cached    { args.push("--cached"); }
+    if name_only { args.push("--name-only"); }
     if let Maybe.Some(t) = target { args.push(t.clone()); }
     quote_join(&args, flav)
 }
