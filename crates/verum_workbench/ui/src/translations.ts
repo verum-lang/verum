@@ -414,6 +414,7 @@ export const translations = {
   'Execution and proof results': 'Результаты выполнения и проверки доказательств',
   'Results': 'Результаты',
   'No operations yet': 'Операций пока нет',
+  'Diagnostics · {count}': 'Диагностика · {count}',
   'Operation history': 'История операций',
   'Make an idea executable': 'Превратите идею в программу',
   'Run, check or prove the current source.': 'Запустите код, проверьте модуль или доказательство.',

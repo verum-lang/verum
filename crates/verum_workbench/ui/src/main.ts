@@ -553,6 +553,7 @@ function resultView(diagnostics: boolean) {
   $('operations-panel').hidden = diagnostics; $('diagnostics-panel').hidden = !diagnostics;
   $('operations-tab').setAttribute('aria-selected', String(!diagnostics)); $('diagnostics-tab').setAttribute('aria-selected', String(diagnostics));
   $('operations-tab').tabIndex = diagnostics ? -1 : 0; $('diagnostics-tab').tabIndex = diagnostics ? 0 : -1;
+  renderResultSummary();
 }
 bind('operations-tab', () => resultView(false)); bind('diagnostics-tab', () => resultView(true));
 for (const id of ['operations-tab', 'diagnostics-tab']) $(id).addEventListener('keydown', event => {
@@ -567,6 +568,7 @@ let fileCount = '…', lintCount = '…';
 function updateFindingCount(count = fileCount) {
   fileCount = count;
   setText($('diagnostics-count'), lintScope.value === 'project' ? lintCount : fileCount);
+  if (!$('diagnostics-panel').hidden) renderResultSummary();
 }
 function showDiagnosticScope(project: boolean) {
   lintScope.value = project ? 'project' : 'file';
@@ -1025,8 +1027,20 @@ function appendProofLocation(parent: HTMLElement, receipt: Receipt, span: unknow
   reveal.disabled = !relativeVerumPath(receipt.path) || !['succeeded', 'failed', 'unsupported'].includes(receipt.status);
   parent.classList.add('proof-location'); parent.append(reveal);
 }
+function renderResultSummary(receipt = receipts.find(receipt => receipt.id === selectedReceipt)) {
+  const diagnostics = !$('diagnostics-panel').hidden;
+  const count = diagnostics ? (lintScope.value === 'project' ? lintCount : fileCount) : String(receipts.length);
+  const summary = $('result-summary');
+  summary.classList.toggle('collapsed-only', diagnostics || !receipt);
+  setText(summary, diagnostics ? m('Diagnostics · {count}', { count }) : receipt
+    ? m('{kind} · {status}', { kind: operationLabel(receipt.kind), status: m(receipt.status) })
+    : m('No operations yet'));
+  setText($('mobile-result-count'), Number(count) > 0 ? count : '');
+}
 function renderResults() {
-  setText($('result-count'), String(receipts.length)); setText($('mobile-result-count'), receipts.length ? String(receipts.length) : '');
+  const receipt = receipts.find(receipt => receipt.id === selectedReceipt);
+  setText($('result-count'), String(receipts.length));
+  renderResultSummary(receipt);
   const running = receipts.filter(receipt => receipt.status === 'running').length;
   setText($('running-count'), running ? m('{count} running', { count: running }) : '');
   const nextHistory = JSON.stringify(receipts.map(receipt => ({ id: receipt.id, kind: receipt.kind, path: receipt.path, status: receipt.status, seconds: Math.floor(elapsed(receipt) / 1000) }))) + selectedReceipt;
@@ -1044,8 +1058,6 @@ function renderResults() {
     }
     restoreFocus();
   }
-  const receipt = receipts.find(receipt => receipt.id === selectedReceipt);
-  setText($('result-summary'), receipt ? m('{kind} · {status}', { kind: operationLabel(receipt.kind), status: m(receipt.status) }) : m('No operations yet'));
   if (!receipt) return;
   const nextDetail = JSON.stringify(receipt) + currentPath + currentHash + sourceMode() + Math.floor(elapsed(receipt) / 1000);
   if (detailSignature === nextDetail) return;

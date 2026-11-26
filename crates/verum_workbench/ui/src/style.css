@@ -814,6 +814,7 @@ dialog:has(.change-review) h2 { font-size: 15px; overflow-wrap: anywhere; }
   font-size: 10px;
 }
 #results-pane[data-collapsed=true] .panel-toggle svg { transform: rotate(180deg); }
+#results-pane:not([data-collapsed=true]) .panel-summary.collapsed-only { visibility: hidden; }
 .result-layout {
   display: flex;
   min-height: 0;
