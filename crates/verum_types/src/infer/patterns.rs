@@ -3587,35 +3587,7 @@ impl TypeChecker {
             properties: None,
         };
 
-        // If the pattern has generic type parameters, create a polymorphic scheme
-        if type_param_vars.is_empty() {
-            self.ctx
-                .env
-                .insert(name.as_str(), TypeScheme::mono(func_ty));
-        } else {
-            self.ctx.env.insert(
-                name.as_str(),
-                TypeScheme {
-                    vars: type_param_vars,
-                    value_parameters: List::new(),
-                    nominal_applications: List::new(),
-                    ty: func_ty,
-                    implicit_vars: Set::new(),
-                    var_type_bounds: Map::new(),
-                    var_protocol_bounds: Map::new(),
-                    where_clauses: List::new(),
-            type_equalities: List::new(),
-                    impl_var_count: 0,
-                    impl_self_type: None,
-                    receiver_kind: None,
-                    returned_value: None,
-                    explicit_method_vars: None,
-                    universe_params: List::new(),
-                    callable_source: None,
-                    value_declaration: None,
-                },
-            );
-        }
+        self.ctx.env.insert(name.as_str(), TypeScheme::poly(type_param_vars, func_ty));
 
         Ok(())
     }

@@ -236,6 +236,8 @@ impl ReturnedValue {
 pub struct TypeScheme {
     /// Source identity is retained independently of fresh generic variables.
     pub(crate) callable_source: Option<(Text, Shared<verum_ast::FunctionDecl>)>,
+    /// A directly declared receiver method takes precedence over protocol entries in the dispatch cache.
+    pub(crate) declared_inherent: bool,
     pub(crate) value_declaration: Option<Shared<ValueDeclaration>>,
     /// Universally quantified type variables
     pub vars: List<TypeVar>,
@@ -480,55 +482,20 @@ impl TypeScheme {
             value_parameters: List::new(),
             universe_params: List::new(),
             callable_source: None,
+            declared_inherent: false,
             value_declaration: None,
         }
     }
 
     /// Create a polymorphic type scheme
     pub fn poly(vars: List<TypeVar>, ty: Type) -> Self {
-        Self {
-            vars,
-            ty,
-            implicit_vars: Set::new(),
-            var_type_bounds: Map::new(),
-            var_protocol_bounds: Map::new(),
-            where_clauses: List::new(),
-            type_equalities: List::new(),
-            nominal_applications: List::new(),
-            impl_var_count: 0,
-            impl_self_type: None,
-            receiver_kind: None,
-            returned_value: None,
-            explicit_method_vars: None,
-            value_parameters: List::new(),
-            universe_params: List::new(),
-            callable_source: None,
-            value_declaration: None,
-        }
+        Self { vars, ..Self::mono(ty) }
     }
 
     /// Create a polymorphic type scheme with some implicit parameters.
     /// Implicit arguments: compiler-inferred function arguments resolved by unification or type class search
     pub fn poly_with_implicit(vars: List<TypeVar>, ty: Type, implicit_vars: Set<TypeVar>) -> Self {
-        Self {
-            vars,
-            ty,
-            implicit_vars,
-            var_type_bounds: Map::new(),
-            var_protocol_bounds: Map::new(),
-            where_clauses: List::new(),
-            type_equalities: List::new(),
-            nominal_applications: List::new(),
-            impl_var_count: 0,
-            impl_self_type: None,
-            receiver_kind: None,
-            returned_value: None,
-            explicit_method_vars: None,
-            value_parameters: List::new(),
-            universe_params: List::new(),
-            callable_source: None,
-            value_declaration: None,
-        }
+        Self { vars, implicit_vars, ..Self::mono(ty) }
     }
 
     /// Create a polymorphic type scheme with type bounds.
@@ -539,25 +506,7 @@ impl TypeScheme {
         ty: Type,
         var_type_bounds: Map<TypeVar, List<Type>>,
     ) -> Self {
-        Self {
-            vars,
-            ty,
-            implicit_vars: Set::new(),
-            var_type_bounds,
-            var_protocol_bounds: Map::new(),
-            where_clauses: List::new(),
-            type_equalities: List::new(),
-            nominal_applications: List::new(),
-            impl_var_count: 0,
-            impl_self_type: None,
-            receiver_kind: None,
-            returned_value: None,
-            explicit_method_vars: None,
-            value_parameters: List::new(),
-            universe_params: List::new(),
-            callable_source: None,
-            value_declaration: None,
-        }
+        Self { vars, var_type_bounds, ..Self::mono(ty) }
     }
 
     /// Add type bounds to an existing scheme.

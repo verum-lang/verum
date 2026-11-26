@@ -18329,10 +18329,9 @@ impl TypeChecker {
                     drop(methods_guard);
                     scheme_opt.map(|scheme| -> Result<Option<_>> {
                         if !self.inherent_receiver_allows(&recv_ty, &scheme) {
-                            return Err(TypeError::MethodNotFound {
-                                ty: recv_ty.to_text(), method: method.name.clone(),
-                                span: method.span, did_you_mean: None, field_fn: None,
-                            });
+                            // This declaration only covers its own receiver
+                            // domain. A disjoint receiver can have a protocol impl.
+                            return Ok(None);
                         }
                         let impl_vc = scheme.impl_var_count;
                         let instance = scheme.try_instantiate().map_err(|message| TypeError::UniverseBinding { message, span })?;

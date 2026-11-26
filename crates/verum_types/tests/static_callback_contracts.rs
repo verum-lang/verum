@@ -17,6 +17,39 @@ fn mutually_recursive_functions_can_be_used_as_synchronous_callbacks() {
     assert!(found.is_empty(), "{found:?}");
 }
 
+#[test]
+fn receiver_selects_its_inherent_method_independently_of_protocol_registration_order() {
+    let inherent = "implement<T> Gauge<T> { fn reading(&self) -> Int { self.count } }";
+    let protocol = "implement<T> Sample for Gauge<T> { fn reading(&self) -> Bool { true } }";
+    for implementations in [format!("{inherent} {protocol}"), format!("{protocol} {inherent}")] {
+        let declarations = format!("type Gauge<T> is {{ count: Int, item: T }};
+            type Sample is protocol {{ fn reading(&self) -> Bool; }};
+            {implementations}
+            fn apply<F: fn()->Int>(f:F)->Int {{ f() }}");
+        let errors_found = errors(&format!("{declarations}
+            fn direct(g: &Gauge<Int>)->Int {{ apply(|| g.reading()) }}
+            fn abstract_read<T:Sample>(g: &T)->Bool {{ g.reading() }}"));
+        assert!(errors_found.is_empty(), "{implementations}: {errors_found:?}");
+        let wrong = errors(&format!("{declarations}
+            fn wrong(g: &Gauge<Int>)->Bool {{ g.reading() }}"));
+        assert!(!wrong.is_empty(), "selected a protocol method on the concrete receiver");
+    }
+}
+
+#[test]
+fn specialized_inherent_method_leaves_disjoint_protocol_dispatch_available() {
+    let source = "type Gauge<T> is { item: T };
+        type Sample is protocol { fn reading(&self) -> Bool; };
+        implement Gauge<Int> { fn reading(&self) -> Int { self.item } }
+        implement Sample for Gauge<Bool> { fn reading(&self) -> Bool { self.item } }
+        fn integer(g: &Gauge<Int>)->Int { g.reading() }
+        fn boolean(g: &Gauge<Bool>)->Bool { g.reading() }";
+    let found = errors(source);
+    assert!(found.is_empty(), "{found:?}");
+    let absent = errors(&format!("{source} fn absent(g: &Gauge<Char>)->Int {{ g.reading() }}"));
+    assert!(absent.iter().any(|error| error.contains("a type implementing `reading` for `cog.Gauge<Char>`")), "{absent:?}");
+}
+
 fn errors_with_provider(source: &str, provider: Option<&str>) -> List<Text> {
     let ast = Parser::new(source).parse_module().unwrap();
     let mut checker = TypeChecker::new();
