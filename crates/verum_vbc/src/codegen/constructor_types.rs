@@ -684,6 +684,11 @@ impl VbcCodegen {
                 let actual = match bindings.get(parameter.id) {
                     Some(signature @ TypeRef::Function { .. }) => Some(signature),
                     Some(TypeRef::Generic(id)) => self.ctx.registers.callable_bound_signatures.get(id),
+                    // A reference can be passed to a declared &F parameter, where
+                    // F binds to its pointee. A reference bound to F itself cannot
+                    // be dispatched as a closure, even if the result is known.
+                    Some(TypeRef::Reference { .. }) if parameter.type_bounds.iter()
+                        .any(|bound| matches!(bound, TypeRef::Function { .. })) => return None,
                     _ => None,
                 };
                 let Some(actual) = actual.cloned() else { continue; };

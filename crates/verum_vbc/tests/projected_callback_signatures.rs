@@ -127,3 +127,30 @@ fn a_callback_cannot_infer_an_owner_from_a_same_leaf_projection() {
             || error.contains("source declaration"), "{error}");
     }
 }
+
+#[test]
+fn forwarding_a_borrowed_callable_retains_its_result_and_capture() {
+    let module = compile(r#"
+        module consumer;
+        fn apply<A, B, F: fn(A) -> B>(value: A, callback: &F) -> B { (*callback)(value) }
+        fn through<O: fn(Int) -> Bool>(callback: O) -> Bool {
+            apply(47, &callback)
+        }
+        fn run() -> Int {
+            let limit = 42;
+            if through(|value| value > limit) { 73 } else { 0 }
+        }
+    "#).unwrap();
+    let entry = module.find_function_by_name("consumer.run").unwrap();
+    assert_eq!(Interpreter::new(module.into()).execute_function(entry).unwrap().try_as_i64(), Some(73));
+}
+
+#[test]
+fn a_known_result_does_not_make_a_reference_an_owned_callable() {
+    let error = compile(r#"
+        module consumer;
+        fn apply<F: fn(Int) -> Bool>(callback: F) -> Bool { callback(47) }
+        fn through<O: fn(Int) -> Bool>(callback: O) -> Bool { apply(&callback) }
+    "#).expect_err("the call would dispatch a reference as a closure");
+    assert!(error.to_string().contains("source argument evidence"), "{error}");
+}
