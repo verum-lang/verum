@@ -101,8 +101,8 @@ implement PartialEq for QpackDecodeError {
 implement Eq for QpackDecodeError {}
 
 public type QpackHeaderField is {
-    name:  Text,
-    value: Text,
+    public name: Text,
+    public value: Text,
 };
 
 // =============================================================================

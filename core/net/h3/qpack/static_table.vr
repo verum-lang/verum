@@ -27,8 +27,8 @@ module core.net.h3.qpack.static_table;
 mount core.collections.list.{List};
 
 public type QpackStaticEntry is {
-    name:  Text,
-    value: Text,
+    public name: Text,
+    public value: Text,
 };
 
 public const STATIC_TABLE_SIZE: Int = 99;
