@@ -1534,14 +1534,7 @@ impl VbcCodegen {
                 self.emit_generic_value_handoff(reg, ty, true)
             } else { match value {
                 Some(expr) if !transfer && self.binds_a_copy_of_a_place(expr, reg, inferred_copy_type.as_ref())? => {
-                    let owned = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::CloneTyped {
-                        dst: owned,
-                        src: reg,
-                        type_ref: inferred_copy_type.clone()
-                            .or_internal("value copy requires its source declaration")?,
-                    });
-                    owned
+                    self.copy_place_storage(reg, inferred_copy_type.as_ref(), Self::named_place_binding(expr), expr.span)?
                 }
                 _ => reg,
             }};

@@ -4218,9 +4218,7 @@ impl VbcCodegen {
         } else if let Some(ty) = generic {
             self.emit_generic_value_handoff(value_reg, ty, true)
         } else if needs_copy {
-            let owned = self.ctx.alloc_temp();
-            self.ctx.emit(Instruction::CloneTyped { dst: owned, src: value_reg,
-                type_ref: copy_type.clone().or_internal("assignment copy requires its source declaration")? });
+            let owned = self.copy_place_storage(value_reg, copy_type.as_ref(), Self::named_place_binding(value), value.span)?;
             self.ctx.free_temp(value_reg);
             owned
         } else { value_reg };
@@ -26398,10 +26396,8 @@ impl VbcCodegen {
                 let cloned_reg = if let Some(ty) = generic {
                     self.emit_generic_value_handoff(value_reg, ty, true)
                 } else if is_place {
-                    let owned = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::CloneTyped { dst: owned, src: value_reg,
-                        type_ref: copy_type.or_internal("variant field copy requires its source declaration")? });
-                    owned
+                    let name = field.value.as_ref().map_or(Some(field.name.name.as_str()), Self::named_place_binding);
+                    self.copy_place_storage(value_reg, copy_type.as_ref(), name, field.span)?
                 } else { value_reg };
 
                 let field_name_str: &str = field.name.name.as_str();
@@ -26776,13 +26772,8 @@ impl VbcCodegen {
                 let stored = if let Some(ty) = generic {
                     self.emit_generic_value_handoff(value_reg, ty, true)
                 } else if is_place {
-                    let owned = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::CloneTyped {
-                        dst: owned,
-                        src: value_reg,
-                        type_ref: copy_type.or_internal("field copy requires its source declaration")?,
-                    });
-                    owned
+                    let name = field.value.as_ref().map_or(Some(field.name.name.as_str()), Self::named_place_binding);
+                    self.copy_place_storage(value_reg, copy_type.as_ref(), name, field.span)?
                 } else {
                     value_reg
                 };

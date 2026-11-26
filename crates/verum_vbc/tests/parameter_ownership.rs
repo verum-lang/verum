@@ -99,6 +99,42 @@ fn refined_parameter_drops_its_declared_base_without_publishing_an_erased_domain
 }
 
 #[test]
+fn refined_place_copies_keep_the_entry_predicate_and_exact_payload() {
+    let source = r#"
+        type Report is Empty | Value { value: Int };
+        type Slot is { value: Int };
+        fn record(value: Int{it > 0}) -> Int {
+            let mut slot = Slot { value };
+            slot.value = value;
+            let saved = value;
+            let report = Report.Value { value: value };
+            match report {
+                Report.Value { value: measured } => slot.value + saved + measured,
+                Report.Empty => 0,
+            }
+        }
+    "#;
+    for unit in [false, true] {
+        let compiled = compile(source, unit).expect("refined value in record and variant");
+        let module = verum_vbc::deserialize::deserialize_module(
+            &verum_vbc::serialize::serialize_module(&compiled).unwrap(),
+        ).unwrap();
+        verum_vbc::validate::validate_module(&module).unwrap();
+        let entry = module.find_function_by_name("parameter_ownership.record").unwrap();
+        assert_eq!(module.get_function(entry).unwrap().semantic_parameter_types(), Some([None].as_slice()));
+        let mut vm = Interpreter::new(module.into());
+        for input in [7, 0, -1] {
+            let result = vm.execute_function_with_args(entry, &[verum_vbc::Value::from_i64(input)]);
+            if input > 0 {
+                assert_eq!(result.unwrap().try_as_i64(), Some(3 * input));
+            } else {
+                assert!(matches!(result, Err(verum_vbc::interpreter::InterpreterError::AssertionFailed { .. })), "{result:?}");
+            }
+        }
+    }
+}
+
+#[test]
 fn forwarding_a_refined_affine_parameter_transfers_its_single_owner() {
     run(r#"
         fn release(value: Ticket) {}

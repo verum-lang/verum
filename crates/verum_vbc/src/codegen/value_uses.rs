@@ -706,13 +706,24 @@ impl super::VbcCodegen {
         Ok(if let Some(ty) = self.generic_named_place(expr, value) {
             self.emit_generic_value_handoff(value, ty, true)
         } else if self.binds_a_copy_of_a_place(expr, value, declared)? {
-            let ty = declared.cloned().ok_or_else(|| super::CodegenError::with_span(
-                super::CodegenErrorKind::Internal(
-                    "value copy requires its retained source declaration".into(),
-                ), expr.span,
-            ))?;
-            self.copy_declared_value(value, ty)
+            self.copy_place_storage(value, declared, Self::named_place_binding(expr), expr.span)?
         } else { value })
+    }
+
+    /// A refinement keeps its predicate in the source signature. Only the
+    /// physical copy may use the carrier of that exact, live binding.
+    pub(super) fn copy_place_storage(
+        &mut self, value: Reg, declared: Option<&TypeRef>, name: Option<&str>, span: verum_ast::Span,
+    ) -> super::CodegenResult<Reg> {
+        let ty = declared.or_else(|| {
+            let (carrier, discipline) = self.named_ownership_carrier(name?, value)?;
+            (discipline == ResourceDiscipline::Unrestricted).then_some(carrier)
+        }).cloned().ok_or_else(|| super::CodegenError::with_span(
+            super::CodegenErrorKind::InvalidSourceSignature(
+                "value copy requires its retained source declaration".into(),
+            ), span,
+        ))?;
+        Ok(self.copy_declared_value(value, ty))
     }
 
     fn copy_declared_value(&mut self, value: Reg, ty: TypeRef) -> Reg {
