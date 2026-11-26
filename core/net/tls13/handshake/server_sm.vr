@@ -135,6 +135,13 @@ public type ServerConnected is {
     exporter_master:   SecretBytes,
 };
 
+implement ServerConnected {
+    pub(in core.net) fn negotiated_suite(&self) -> &CipherSuite { &self.suite }
+    pub(in core.net) fn application_traffic(&self) -> (&TrafficSecret, &TrafficSecret) {
+        (&self.client_ap_traffic, &self.server_ap_traffic)
+    }
+}
+
 public type ServerSm is
       WaitClientHelloSm(WaitClientHello)
     | WaitClientFinishedSm(WaitClientFinished)
@@ -153,6 +160,12 @@ public type ServerStepOutput is {
 // =============================================================================
 // Step — driven by inbound handshake message
 // =============================================================================
+
+implement ServerStepOutput {
+    pub(in core.net) fn into_output(self) -> (List<Byte>, Maybe<ServerConnected>) {
+        (self.outbound_handshake, self.connected)
+    }
+}
 
 implement ServerSm {
     public fn new(config: ServerConfig) -> ServerSm {

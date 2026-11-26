@@ -20,10 +20,10 @@ mount core.security.x509.{TrustStore};
 fn check_crypto_stream_reassembly() {
     let mut s = CryptoStream.new();
     // Out-of-order: feed chunk [0..5) after chunk [5..10).
-    s.insert(5_u64, &[0x66_u8, 0x6f_u8, 0x6f_u8, 0x62_u8, 0x61_u8]);
-    s.insert(0_u64, &[0x68_u8, 0x65_u8, 0x6c_u8, 0x6c_u8, 0x6f_u8]);
+    s.insert(5_u64, &[0x66_u8, 0x6f_u8, 0x6f_u8, 0x62_u8, 0x61_u8]).unwrap();
+    s.insert(0_u64, &[0x68_u8, 0x65_u8, 0x6c_u8, 0x6c_u8, 0x6f_u8]).unwrap();
     let _ = s.drain_readable();
-    let _ = s.reserve_outbound(4);
+    let _ = s.reserve_outbound(4).unwrap();
 }
 
 fn check_driver_construction() {

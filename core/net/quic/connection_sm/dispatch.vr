@@ -99,6 +99,11 @@ public type CryptoChunk is {
     data:   List<Byte>,
 };
 
+implement CryptoChunk {
+    pub(in core.net.quic) fn location(&self) -> (PnSpaceKind, UInt64) { (self.space, self.offset) }
+    pub(in core.net.quic) fn bytes(&self) -> &[Byte] { self.data.as_slice() }
+}
+
 public type NewCid is {
     sequence_number: UInt64,
     retire_prior_to: UInt64,
@@ -107,6 +112,14 @@ public type NewCid is {
 };
 
 implement DispatchOutcome {
+    pub(in core.net.quic) fn take_outbound(&mut self) -> List<QuicFrame> {
+        let mut frames = self.to_retransmit.split_off(0);
+        frames.append(&mut self.outbound_frames);
+        frames
+    }
+
+    pub(in core.net.quic) fn crypto_for_handshake(&self) -> &[CryptoChunk] { self.crypto_chunks.as_slice() }
+
     public fn empty() -> DispatchOutcome {
         DispatchOutcome {
             outbound_frames: [],

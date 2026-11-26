@@ -110,6 +110,12 @@ mount core.net.quic.recovery.{LossDetection, NewReno, CongestionCtrl};
 mount core.net.quic.stream_sm.{SendStream, RecvStream, ConnFlowControl};
 public mount .aead.{QuicSpaceKeys};
 mount core.net.quic.error.{QuicError};
+mount core.net.quic.frame.{QuicFrame};
+mount core.net.quic.packet.{LongPacketType};
+mount core.net.quic.recovery.pn_space.{PnSpaceKind, SentPacketInfo};
+mount .tx.{LongPacketInput, ShortPacketInput, TxError, build_long_packet, build_short_packet};
+mount .dispatch.{DispatchOutcome, dispatch_frames};
+mount .rx.{InboundPacket, RxError, parse_long_packet, parse_short_packet};
 
 // Re-exports
 public mount .state.{Initial, Handshake, OneRtt, Closing, Draining};
@@ -135,6 +141,14 @@ public type QuicKeys is {
 };
 
 implement QuicKeys {
+    fn pair(&self, space: &PnSpaceKind) -> &Maybe<(QuicSpaceKeys, QuicSpaceKeys)> {
+        match space {
+            PnSpaceKind.Initial => &self.initial,
+            PnSpaceKind.Handshake => &self.handshake,
+            PnSpaceKind.Application => &self.app,
+        }
+    }
+
     public fn empty() -> QuicKeys {
         QuicKeys { initial: Maybe.None, handshake: Maybe.None, app: Maybe.None }
     }
@@ -187,6 +201,96 @@ public type ConnState is {
 // =============================================================================
 
 implement ConnState {
+    pub(in core.net.quic) fn open_packet(&self, wire: &[Byte]) -> Result<Maybe<InboundPacket>, RxError> {
+        if wire.len() == 0 { return Result.Err(RxError.Truncated); }
+        let long = (wire[0] & 0x80_u8) != 0_u8;
+        let space = if long {
+            if wire.len() < 5 { return Result.Err(RxError.Truncated); }
+            if wire[1] == 0_u8 && wire[2] == 0_u8 && wire[3] == 0_u8 && wire[4] == 0_u8 {
+                PnSpaceKind.Initial
+            } else {
+                match LongPacketType.from_bits(wire[0] >> 4) {
+                    LongPacketType.Initial => PnSpaceKind.Initial,
+                    LongPacketType.Handshake => PnSpaceKind.Handshake,
+                    _ => return Result.Ok(Maybe.None),
+                }
+            }
+        } else { PnSpaceKind.Application };
+        let pair = match self.keys.pair(&space) {
+            Maybe.Some(p) => p, Maybe.None => return Result.Ok(Maybe.None),
+        };
+        let largest = self.loss.largest_received(space);
+        let packet = if long {
+            parse_long_packet(wire, &pair.1, largest)?
+        } else {
+            parse_short_packet(wire, self.scid_local.len(), &pair.1, largest)?
+        };
+        Result.Ok(Maybe.Some(packet))
+    }
+
+    pub(in core.net.quic) fn install_application_keys(&mut self, tx: QuicSpaceKeys, rx: QuicSpaceKeys) {
+        self.keys.app = Maybe.Some((tx, rx));
+    }
+
+    pub(in core.net.quic) fn start_draining(&mut self, expiry: Instant) {
+        self.drain_expiry = Maybe.Some(expiry);
+    }
+
+    pub(in core.net.quic) fn drain_complete(&self, now: Instant) -> Bool {
+        match self.drain_expiry { Maybe.Some(expiry) => now >= expiry, Maybe.None => true }
+    }
+
+    pub(in core.net.quic) fn process_received(&mut self, frames: &List<QuicFrame>, space: PnSpaceKind,
+                                               pn: UInt64, now: Instant) -> Result<DispatchOutcome, QuicError> {
+        let outcome = dispatch_frames(frames, space, now, &mut self.loss, &mut self.cc, &mut self.flow,
+                                      &mut self.send_streams, &mut self.recv_streams)?;
+        self.loss.note_received(space, pn);
+        Result.Ok(outcome)
+    }
+
+    pub(in core.net.quic) fn recovery_tick(&mut self, now: Instant) {
+        match self.loss.timer_fires_at() {
+            Maybe.Some(t) => if now >= t { let _ = self.loss.on_timer(now, &mut self.cc); },
+            Maybe.None => {},
+        }
+    }
+
+    pub(in core.net.quic) fn pacing_rate(&self) -> UInt64 { self.cc.pacing_rate() }
+
+    pub(in core.net.quic) fn pending_ack(&self, space: PnSpaceKind) -> Maybe<QuicFrame> {
+        self.loss.pending_ack(space, 0_u64)
+    }
+
+    pub(in core.net.quic) fn protect_outbound(&mut self, space: PnSpaceKind, frames: &List<QuicFrame>)
+        -> Result<Maybe<(UInt64, List<Byte>)>, TxError> {
+        let keys = match self.keys.pair(&space) {
+            Maybe.Some(pair) => &pair.0,
+            Maybe.None => return Result.Ok(Maybe.None),
+        };
+        let (pn, largest) = match self.loss.allocate_outbound(space) {
+            Maybe.Some(info) => info, Maybe.None => return Result.Err(TxError.InvalidPacketNumber),
+        };
+        let wire = match space {
+            PnSpaceKind.Application => build_short_packet(ShortPacketInput.new(
+                &self.dcid_peer, false, false, pn, largest, frames, keys)),
+            _ => {
+                let packet_type = match space {
+                    PnSpaceKind.Initial => LongPacketType.Initial,
+                    _ => LongPacketType.Handshake,
+                };
+                build_long_packet(LongPacketInput.new(packet_type, self.version, &self.dcid_peer,
+                    &self.scid_local, &[], pn, largest, frames, keys))
+            },
+        }?;
+        Result.Ok(Maybe.Some((pn, wire)))
+    }
+
+    pub(in core.net.quic) fn record_outbound(&mut self, space: PnSpaceKind, pn: UInt64, now: Instant,
+                                             size: UInt32, frames: List<QuicFrame>) {
+        let info = SentPacketInfo.from_sent_frames(pn, now, size, frames);
+        self.loss.on_packet_sent(space, info, &mut self.cc);
+    }
+
     pub(in core.net.quic) fn initial(
         role: QuicRole, peer_dcid: ConnectionId, scid_local: ConnectionId,
         params_local: TransportParams, initial_keys_tx: QuicSpaceKeys,

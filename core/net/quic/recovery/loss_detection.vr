@@ -102,6 +102,22 @@ implement LossDetection {
         &self.spaces[kind.as_index()]
     }
 
+    pub(in core.net.quic) fn largest_received(&self, kind: PnSpaceKind) -> Maybe<UInt64> {
+        self.space(kind).largest_received()
+    }
+
+    pub(in core.net.quic) fn note_received(&mut self, kind: PnSpaceKind, pn: UInt64) {
+        self.space_mut(kind).on_packet_received(pn);
+    }
+
+    pub(in core.net.quic) fn pending_ack(&self, kind: PnSpaceKind, delay: UInt64) -> Maybe<QuicFrame> {
+        self.space(kind).build_ack_frame(delay)
+    }
+
+    pub(in core.net.quic) fn allocate_outbound(&mut self, kind: PnSpaceKind) -> Maybe<(UInt64, Maybe<UInt64>)> {
+        self.space_mut(kind).allocate_outbound()
+    }
+
     /// Register a freshly-sent packet.
     public fn on_packet_sent(
         &mut self,

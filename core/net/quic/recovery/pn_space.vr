@@ -52,6 +52,18 @@ public type SentPacketInfo is {
 };
 
 implement SentPacketInfo {
+    pub(in core.net.quic) fn from_sent_frames(pn: UInt64, now: Instant, size: UInt32,
+                                               frames: List<QuicFrame>) -> SentPacketInfo {
+        let mut eliciting = false;
+        let mut padding = false;
+        for frame in &frames {
+            if frame.is_ack_eliciting() { eliciting = true; }
+            match frame { QuicFrame.PaddingRun(n) => if *n > 0 { padding = true; }, _ => {} }
+        }
+        SentPacketInfo { packet_number: pn, time_sent: now, size_bytes: size,
+                         in_flight: eliciting || padding, ack_eliciting: eliciting, frames: frames }
+    }
+
     pub(in core.net.quic) fn flight_bytes(&self) -> UInt32 {
         if self.in_flight { self.size_bytes } else { 0_u32 }
     }
@@ -128,6 +140,14 @@ implement PnSpace {
             sent_packets: [],
             discarded: false,
         }
+    }
+
+    pub(in core.net.quic) fn largest_received(&self) -> Maybe<UInt64> { self.largest_acked_received }
+
+    pub(in core.net.quic) fn allocate_outbound(&mut self) -> Maybe<(UInt64, Maybe<UInt64>)> {
+        if self.discarded || self.next_pn >= (1_u64 << 62_u64) { return Maybe.None; }
+        let pn = self.next_packet_number();
+        Maybe.Some((pn, self.largest_acked_sent))
     }
 
     /// Allocate the next packet number. Monotonically increasing per

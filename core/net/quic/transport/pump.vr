@@ -54,40 +54,19 @@ module core.net.quic.transport.pump;
 
 mount core.collections.list.{List};
 mount core.time.instant.{Instant};
-mount core.time.duration.{Duration};
 mount core.async.cancellation.{CancellationToken};
 mount core.net.addr.{SocketAddr};
 
-mount core.net.quic.connection_id.{ConnectionId};
 mount core.net.quic.frame.{QuicFrame, decode_all_frames};
 mount core.net.quic.packet.{LongPacketType};
-mount core.net.quic.recovery.{LossDetection, NewReno, PnSpaceKind, SentPacketInfo};
-mount core.net.quic.stream_sm.{SendStream, RecvStream, ConnFlowControl};
-mount core.net.quic.transport_params.{TransportParams};
-mount core.net.quic.error.{QuicError, TransportErrorCode};
+mount core.net.quic.recovery.{PnSpaceKind};
+mount core.net.quic.error.{QuicError};
 mount core.net.quic.path.{QuicPath, PathManager};
-
-mount core.net.quic.connection_sm.{
-    ConnState, QuicSpaceKeys,
-};
-mount core.net.quic.connection_sm.state.{Initial, Handshake, OneRtt, Closing, Draining};
-mount core.net.quic.connection_sm.tx.{
-    build_long_packet, build_short_packet,
-    LongPacketInput, ShortPacketInput, TxError,
-};
-mount core.net.quic.connection_sm.rx.{
-    parse_long_packet, parse_short_packet,
-    InboundPacket, InboundLongPacket, InboundShortPacket, RxError,
-};
-mount core.net.quic.connection_sm.dispatch.{
-    dispatch_frames, DispatchOutcome, CryptoChunk, NewCid,
-};
-mount core.net.quic.connection_sm.handshake_driver.{
-    HandshakeDriver, HandshakeOutput,
-};
-mount core.net.quic.connection_sm.keys.{
-    derive_space_keys, aead_key_len_for, is_chacha_aead,
-};
+mount core.net.quic.connection_sm.{ConnState};
+mount core.net.quic.connection_sm.rx.{InboundPacket};
+mount core.net.quic.connection_sm.dispatch.{DispatchOutcome};
+mount core.net.quic.connection_sm.handshake_driver.{HandshakeDriver, HandshakeOutput};
+mount core.net.quic.connection_sm.keys.{derive_space_keys};
 mount core.net.quic.connection_sm.path_control;
 mount core.net.quic.pacer.{Pacer, PacerDecision};
 mount core.net.quic.idle_timeout.{IdleTimeoutTracker, TickResult as IdleTickResult};
@@ -109,8 +88,6 @@ public type PumpError is
     | QuicFrame(Text)
     | Quic(QuicError)
     | Cancelled;
-
-fn txerr(e: TransportError) -> PumpError { PumpError.Transport(e) }
 
 implement Display for PumpError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
@@ -185,6 +162,8 @@ public type ConnectionPump is {
     /// records the earliest instant it's allowed to send again and
     /// skips emission until wall-clock catches up.
     pacing_next_ok:   Maybe<Instant>,
+    pending:          List<List<QuicFrame>>,
+    ack_due:          [Bool; 3],
     /// RFC 9000 §10.1 idle-timeout tracker. `Maybe.None` until the peer's
     /// `max_idle_timeout` transport parameter arrives; callers invoke
     /// `arm_idle_timer` once the local+peer values are known.
@@ -201,7 +180,8 @@ implement ConnectionPump {
         handshake: HandshakeDriver,
     ) -> ConnectionPump {
         let local = transport.local_addr();
-        let path  = QuicPath.new(local, peer_addr.clone(), /* initially_validated */ false);
+        // The three-times amplification budget applies to an unvalidated server address.
+        let path = QuicPath.new(local, peer_addr.clone(), true);
         ConnectionPump {
             transport:       transport,
             peer_addr:       peer_addr,
@@ -213,6 +193,8 @@ implement ConnectionPump {
             phase_tag:       PumpPhase.PumpInitial,
             pacer:           Pacer.with_mss(1200_u64),
             pacing_next_ok:  Maybe.None,
+            pending:         [List<QuicFrame>.new(), List<QuicFrame>.new(), List<QuicFrame>.new()],
+            ack_due:         [false; 3],
             idle:            Maybe.None,
         }
     }
@@ -238,6 +220,8 @@ implement ConnectionPump {
             phase_tag:       PumpPhase.PumpInitial,
             pacer:           Pacer.with_mss(1200_u64),
             pacing_next_ok:  Maybe.None,
+            pending:         [List<QuicFrame>.new(), List<QuicFrame>.new(), List<QuicFrame>.new()],
+            ack_due:         [false; 3],
             idle:            Maybe.None,
         }
     }
@@ -275,7 +259,7 @@ implement ConnectionPump {
                 Maybe.Some(tracker) => match tracker.tick(now.clone()) {
                     IdleTickResult.Expired => {
                         self.phase_tag = PumpPhase.PumpDraining;
-                        self.connection.drain_expiry = Maybe.Some(now.clone());
+                        self.connection.start_draining(now);
                     },
                     IdleTickResult.Active(_) => {},
                 },
@@ -286,16 +270,13 @@ implement ConnectionPump {
             self.drain_outbound(now).await?;
 
             // 4. Phase promotion bookkeeping.
-            self.check_handshake_progress();
+            self.check_handshake_progress()?;
 
             // Terminate when the connection reaches Closing/Draining
             // and the idle timer expired.
             match self.phase_tag {
                 PumpPhase.PumpDraining => {
-                    match self.connection.drain_expiry {
-                        Maybe.Some(d) => if Instant.now() >= d { return Result.Ok(()); },
-                        Maybe.None    => return Result.Ok(()),
-                    }
+                    if self.connection.drain_complete(Instant.now()) { return Result.Ok(()); }
                 },
                 _ => {},
             }
@@ -315,8 +296,8 @@ implement ConnectionPump {
         // responds to immediately.
         match self.try_recv().await {
             Maybe.Some(Result.Ok(dg)) => {
-                path_control.on_inbound_bytes(&mut self.paths, dg.data.len() as UInt64);
-                self.process_datagram(&dg).await?;
+                path_control.on_inbound_bytes(&mut self.paths, dg.bytes().len() as UInt64);
+                self.process_datagram(&dg)?;
             },
             Maybe.Some(Result.Err(e)) => return Result.Err(PumpError.Transport(e)),
             Maybe.None => {},   // nothing to do
@@ -335,67 +316,16 @@ implement ConnectionPump {
         }
     }
 
-    async fn process_datagram(&mut self, dg: &InboundDatagram) -> Result<(), PumpError> {
+    pub(in core.net.quic) fn process_datagram(&mut self, dg: &InboundDatagram) -> Result<(), PumpError> {
         let mut offset: Int = 0;
-        while offset < dg.data.len() {
-            let rem = &dg.data[offset..];
-            if rem.len() == 0 { break; }
-            let is_long = (rem[0] & 0x80_u8) != 0_u8;
-            if is_long {
-                // Select keys by long-packet type.
-                let type_bits = (rem[0] >> 4) & 0x03_u8;
-                let ptype = LongPacketType.from_bits(type_bits);
-                let keys_rx = match self.rx_keys_for_long(&ptype) {
-                    Maybe.Some(k) => k,
-                    Maybe.None    => {
-                        // Keys not yet installed for that space — skip
-                        // this packet; real impl buffers for later.
-                        break;
-                    },
-                };
-                let largest_acked = self.largest_acked_for(self.pn_space_for_long(&ptype));
-                match parse_long_packet(rem, &keys_rx, largest_acked) {
-                    Result.Ok(pkt) => {
-                        let consumed = self.handle_inbound_packet(pkt).await?;
-                        offset = offset + consumed;
-                    },
-                    Result.Err(_) => break,   // drop malformed tail
-                }
-            } else {
-                // Short header — 1-RTT app-data.
-                let keys_rx = match &self.connection.keys.app {
-                    Maybe.Some((_, rx)) => rx.clone(),
-                    Maybe.None          => break,
-                };
-                let largest_acked = self.largest_acked_for(PnSpaceKind.Application);
-                let dcid_len = self.connection.scid_local.len();
-                match parse_short_packet(rem, dcid_len, &keys_rx, largest_acked) {
-                    Result.Ok(pkt) => {
-                        let consumed = self.handle_inbound_packet(pkt).await?;
-                        offset = offset + consumed;
-                    },
-                    Result.Err(_) => break,
-                }
-            }
+        while offset < dg.bytes().len() {
+            let packet = match self.connection.open_packet(dg.bytes()[offset..]) {
+                Result.Ok(Maybe.Some(p)) => p,
+                _ => break,
+            };
+            offset = offset + self.handle_inbound_packet(packet)?;
         }
         Result.Ok(())
-    }
-
-    fn rx_keys_for_long(&self, ptype: &LongPacketType) -> Maybe<QuicSpaceKeys> {
-        match ptype {
-            LongPacketType.Initial => {
-                match &self.connection.keys.initial {
-                    Maybe.Some((_, rx)) => Maybe.Some(rx.clone()), Maybe.None => Maybe.None,
-                }
-            },
-            LongPacketType.Handshake => {
-                match &self.connection.keys.handshake {
-                    Maybe.Some((_, rx)) => Maybe.Some(rx.clone()), Maybe.None => Maybe.None,
-                }
-            },
-            LongPacketType.ZeroRtt   => Maybe.None,     // 0-RTT not supported v1
-            LongPacketType.Retry     => Maybe.None,     // retry goes through dedicated path
-        }
     }
 
     fn pn_space_for_long(&self, ptype: &LongPacketType) -> PnSpaceKind {
@@ -406,93 +336,53 @@ implement ConnectionPump {
         }
     }
 
-    fn largest_acked_for(&self, space: PnSpaceKind) -> Maybe<UInt64> {
-        let idx = space.as_index();
-        self.connection.loss.spaces[idx].largest_acked_received
-    }
-
-    async fn handle_inbound_packet(&mut self, pkt: InboundPacket) -> Result<Int, PumpError> {
-        match pkt {
-            InboundPacket.Long(lp) => self.handle_long_packet(lp).await,
-            InboundPacket.Short(sp) => self.handle_short_packet(sp).await,
-            InboundPacket.VersionNegotiation { consumed, .. } => {
-                // Client receives VN — downgrade / retry. v1 only; reject.
-                Result.Ok(consumed)
+    fn handle_inbound_packet(&mut self, packet: InboundPacket) -> Result<Int, PumpError> {
+        let consumed = packet.consumed();
+        match packet {
+            InboundPacket.Long(p) => {
+                let space = self.pn_space_for_long(p.packet_type());
+                self.accept_frames(space, p.packet_number(), p.payload(), p.consumed())
             },
+            InboundPacket.Short(p) => self.accept_frames(PnSpaceKind.Application, p.packet_number(),
+                                                        p.payload(), p.consumed()),
+            InboundPacket.VersionNegotiation { .. } => Result.Ok(consumed),
         }
     }
 
-    async fn handle_long_packet(&mut self, lp: InboundLongPacket) -> Result<Int, PumpError> {
-        let space = self.pn_space_for_long(&lp.ptype);
-        self.connection.loss.spaces[space.as_index()].on_packet_received(lp.packet_number);
-
-        // Parse frames + dispatch.
-        let frames = decode_all_frames(lp.payload.as_slice())
-            .map_err(|_| PumpError.QuicFrame(Text.from("decode frames (long)")))?;
-        // §10.1.1 — idle timer resets on *any* ack-eliciting packet
-        // successfully processed.
-        let rx_ack_eliciting = any_ack_eliciting(&frames);
-        let outcome = dispatch_frames(
-            &frames, space, Instant.now(),
-            &mut self.connection.loss, &mut self.connection.cc, &mut self.connection.flow,
-            &mut self.connection.send_streams, &mut self.connection.recv_streams,
-        ).map_err(|e| PumpError.Quic(e))?;
-        self.absorb_dispatch(outcome)?;
-        match &mut self.idle {
-            Maybe.Some(t) => t.on_packet_received(Instant.now(), rx_ack_eliciting),
-            Maybe.None => {},
-        }
-        Result.Ok(lp.consumed)
+    fn accept_frames(&mut self, space: PnSpaceKind, pn: UInt64, payload: &[Byte], consumed: Int) -> Result<Int, PumpError> {
+        let frames = match decode_all_frames(payload) {
+            Result.Ok(f) => f, Result.Err(_) => return Result.Err(PumpError.QuicFrame(Text.from("decode frames"))),
+        };
+        let ack_eliciting = any_ack_eliciting(&frames);
+        let now = Instant.now();
+        let outcome = match self.connection.process_received(&frames, space, pn, now) {
+            Result.Ok(v) => v, Result.Err(e) => return Result.Err(PumpError.Quic(e)),
+        };
+        if ack_eliciting { self.ack_due[space.as_index()] = true; }
+        self.absorb_dispatch(space, outcome)?;
+        match &mut self.idle { Maybe.Some(t) => t.on_packet_received(now, ack_eliciting), Maybe.None => {} }
+        Result.Ok(consumed)
     }
 
-    async fn handle_short_packet(&mut self, sp: InboundShortPacket) -> Result<Int, PumpError> {
-        self.connection.loss.spaces[PnSpaceKind.Application.as_index()]
-            .on_packet_received(sp.packet_number);
-        let frames = decode_all_frames(sp.payload.as_slice())
-            .map_err(|_| PumpError.QuicFrame(Text.from("decode frames (short)")))?;
-        let rx_ack_eliciting = any_ack_eliciting(&frames);
-        let outcome = dispatch_frames(
-            &frames, PnSpaceKind.Application, Instant.now(),
-            &mut self.connection.loss, &mut self.connection.cc, &mut self.connection.flow,
-            &mut self.connection.send_streams, &mut self.connection.recv_streams,
-        ).map_err(|e| PumpError.Quic(e))?;
-        self.absorb_dispatch(outcome)?;
-        match &mut self.idle {
-            Maybe.Some(t) => t.on_packet_received(Instant.now(), rx_ack_eliciting),
-            Maybe.None => {},
-        }
-        Result.Ok(sp.consumed)
-    }
-
-    fn absorb_dispatch(&mut self, outcome: DispatchOutcome) -> Result<(), PumpError> {
+    fn absorb_dispatch(&mut self, space: PnSpaceKind, mut outcome: DispatchOutcome) -> Result<(), PumpError> {
         // Forward CRYPTO chunks to the handshake driver.
         let mut i: Int = 0;
-        while i < outcome.crypto_chunks.len() {
-            let chunk = &outcome.crypto_chunks[i];
-            self.handshake.on_crypto_chunk(chunk)
-                .map_err(|_| PumpError.Handshake(Text.from("feed CRYPTO")))?;
+        while i < outcome.crypto_for_handshake().len() {
+            let chunk = &outcome.crypto_for_handshake()[i];
+            match self.handshake.on_crypto_chunk(chunk) {
+                Result.Ok(()) => {}, Result.Err(_) => return Result.Err(PumpError.Handshake(Text.from("feed CRYPTO"))),
+            }
             i = i + 1;
         }
-        // Queue retransmits + PATH_RESPONSE echoes + other frames.
-        // For now accumulate onto pending outbound per space.
-        let _ = outcome;
+        let mut outbound = outcome.take_outbound();
+        self.pending[space.as_index()].append(&mut outbound);
         Result.Ok(())
     }
 
     // ==================== step 2: timers ====================
 
     fn check_timers(&mut self, now: Instant) -> Result<(), PumpError> {
-        match self.connection.loss.timer_fires_at() {
-            Maybe.Some(t) => {
-                if now >= t {
-                    let _ = self.connection.loss.on_timer(now, &mut self.connection.cc);
-                    // on_timer may return a Some<PnSpaceKind> indicating
-                    // we should emit a PROBE — the outbound drain below
-                    // picks up the ack-eliciting marker.
-                }
-            },
-            Maybe.None => {},
-        }
+        self.connection.recovery_tick(now);
         Result.Ok(())
     }
 
@@ -502,85 +392,46 @@ implement ConnectionPump {
         // RFC 9002 §7.7 — pacer's target rate tracks the CC's current
         // pacing estimate. Refresh once per drain; the bucket refill
         // inside `Pacer.check/on_packet_sent` handles sub-tick accuracy.
-        self.pacer.set_rate(self.connection.cc.pacing_rate());
+        self.pacer.set_rate(self.connection.pacing_rate());
 
-        // Pull any CRYPTO frames the handshake driver produced.
-        let hs_out = self.handshake.take_outbound();
-
-        // Group by PN space + build at most one packet per space per
-        // tick. Real impl coalesces Initial+Handshake+1-RTT into one
-        // UDP datagram (RFC 9000 §12.2) — deferred to the optimisation
-        // commit.
-        let mut by_space: List<(PnSpaceKind, List<QuicFrame>)> = [
-            (PnSpaceKind.Initial,     []),
-            (PnSpaceKind.Handshake,   []),
-            (PnSpaceKind.Application, []),
-        ];
-        let mut i: Int = 0;
-        while i < hs_out.len() {
-            let (space, frame) = &hs_out[i];
-            let idx = space.as_index();
-            by_space[idx].1.push(frame.clone());
-            i = i + 1;
+        if let Maybe.Some(deadline) = self.pacing_next_ok {
+            if now < deadline { return Result.Ok(()); }
         }
 
-        // For Application space, also fold in any app-level STREAM
-        // writes that are ready.
-        self.collect_stream_frames(&mut by_space[PnSpaceKind.Application.as_index()].1);
+        let mut handshake_frames = self.handshake.take_outbound();
+        while let Maybe.Some((space, frame)) = handshake_frames.pop_front() {
+            self.pending[space.as_index()].push(frame);
+        }
 
-        // Also: emit pending ACK frames per space.
-        let mut s: Int = 0;
-        while s < 3 {
-            let kind = match s {
-                0 => PnSpaceKind.Initial,
-                1 => PnSpaceKind.Handshake,
-                _ => PnSpaceKind.Application,
+        let mut i = 0;
+        while i < 3 {
+            let space = match i {
+                0 => PnSpaceKind.Initial, 1 => PnSpaceKind.Handshake, _ => PnSpaceKind.Application,
             };
-            match self.connection.loss.spaces[s].build_ack_frame(/* ack_delay_us */ 0_u64) {
-                Maybe.Some(ack) => by_space[s].1.push(ack),
-                Maybe.None => {},
+            let mut frames = self.pending[i].split_off(0);
+            let mut included_ack = false;
+            if self.ack_due[i] {
+                if let Maybe.Some(ack) = self.connection.pending_ack(space) {
+                    frames.push(ack);
+                    included_ack = true;
+                }
             }
-            s = s + 1;
-        }
-
-        // If a prior tick hit `NotYet` and the deadline hasn't elapsed,
-        // skip emission entirely — RFC 9002 §7.7 mandates the sender
-        // respect the pacing delay before the next packet goes out.
-        match &self.pacing_next_ok {
-            Maybe.Some(deadline) => if now < deadline { return Result.Ok(()); },
-            Maybe.None => {},
-        }
-
-        // Build + send per space (skip spaces with discarded keys).
-        let mut j: Int = 0;
-        while j < 3 {
-            let (kind, frames) = &by_space[j];
-            if frames.len() == 0 { j = j + 1; continue; }
-            self.send_packet_in_space(kind.clone(), frames.clone(), now.clone()).await?;
-            // A pacer stall raised mid-drain blocks the remaining spaces
-            // this tick; the loop resumes next tick once the deadline
-            // elapses. Coalescing (§12.2) will collapse these back to
-            // one datagram in the optimisation commit.
-            match &self.pacing_next_ok {
-                Maybe.Some(deadline) => if now < deadline { break; },
-                Maybe.None => {},
+            if !frames.is_empty() {
+                match self.send_packet_in_space(space, frames, now).await? {
+                    Maybe.Some(mut deferred) => {
+                        if included_ack { let _ = deferred.pop(); }
+                        self.pending[i] = deferred;
+                    },
+                    Maybe.None => if included_ack { self.ack_due[i] = false; },
+                }
             }
-            j = j + 1;
+            i = i + 1;
         }
         Result.Ok(())
     }
 
-    fn collect_stream_frames(&mut self, out: &mut List<QuicFrame>) {
-        // Walk send_streams — for each stream with buffered bytes,
-        // emit a STREAM frame (with FIN if final_size reached). FC
-        // gating + CC window caps are enforced by the sender; the
-        // real assembler (Phase 7 optimisation) coalesces multiple
-        // streams into one packet. Stubbed here so the loop compiles;
-        // the app-write → packet-emit path is driven by external
-        // callers (QuicStream.write_all) inserting onto
-        // `connection.send_streams[sid].send_buf` until the real
-        // stream-stream assembler lands.
-        let _ = out;
+    fn within_amplification_limit(&self, size: UInt64) -> Bool {
+        path_control.gate_outbound(self.paths.active(), size) >= size
     }
 
     async fn send_packet_in_space(
@@ -588,75 +439,15 @@ implement ConnectionPump {
         space: PnSpaceKind,
         frames: List<QuicFrame>,
         now: Instant,
-    ) -> Result<(), PumpError> {
-        let keys_tx = match space {
-            PnSpaceKind.Initial => match &self.connection.keys.initial {
-                Maybe.Some((tx, _)) => tx.clone(),
-                Maybe.None          => return Result.Ok(()),     // keys discarded / not installed
-            },
-            PnSpaceKind.Handshake => match &self.connection.keys.handshake {
-                Maybe.Some((tx, _)) => tx.clone(),
-                Maybe.None          => return Result.Ok(()),
-            },
-            PnSpaceKind.Application => match &self.connection.keys.app {
-                Maybe.Some((tx, _)) => tx.clone(),
-                Maybe.None          => return Result.Ok(()),
-            },
-        };
-
-        let idx = space.as_index();
-        let pn = self.connection.loss.spaces[idx].next_packet_number();
-        let largest_acked = self.connection.loss.spaces[idx].largest_acked_sent.clone();
-
-        let wire = match space {
-            PnSpaceKind.Initial => {
-                let empty_tok: [Byte; 0] = [];
-                let input = LongPacketInput {
-                    ptype:         LongPacketType.Initial,
-                    version:       self.connection.version,
-                    dcid:          &self.connection.dcid_peer,
-                    scid:          &self.connection.scid_local,
-                    token:         &empty_tok,
-                    packet_number: pn,
-                    largest_acked: largest_acked.clone(),
-                    frames:        &frames,
-                    keys:          &keys_tx,
-                };
-                build_long_packet(input).map_err(|_| PumpError.Crypto(Text.from("build initial")))?
-            },
-            PnSpaceKind.Handshake => {
-                let empty_tok: [Byte; 0] = [];
-                let input = LongPacketInput {
-                    ptype:         LongPacketType.Handshake,
-                    version:       self.connection.version,
-                    dcid:          &self.connection.dcid_peer,
-                    scid:          &self.connection.scid_local,
-                    token:         &empty_tok,
-                    packet_number: pn,
-                    largest_acked: largest_acked.clone(),
-                    frames:        &frames,
-                    keys:          &keys_tx,
-                };
-                build_long_packet(input).map_err(|_| PumpError.Crypto(Text.from("build handshake")))?
-            },
-            PnSpaceKind.Application => {
-                let input = ShortPacketInput {
-                    dcid:          &self.connection.dcid_peer,
-                    spin_bit:      false,
-                    key_phase:     false,
-                    packet_number: pn,
-                    largest_acked: largest_acked.clone(),
-                    frames:        &frames,
-                    keys:          &keys_tx,
-                };
-                build_short_packet(input).map_err(|_| PumpError.Crypto(Text.from("build 1rtt")))?
-            },
+    ) -> Result<Maybe<List<QuicFrame>>, PumpError> {
+        let (pn, wire) = match self.connection.protect_outbound(space, &frames) {
+            Result.Ok(Maybe.Some(packet)) => packet,
+            Result.Ok(Maybe.None) => return Result.Ok(Maybe.Some(frames)),
+            Result.Err(_) => return Result.Err(PumpError.Crypto(Text.from("protect outgoing packet"))),
         };
 
         // Gate outbound against path anti-amplification.
-        let active_path = self.paths.active();
-        let gated = path_control.gate_outbound(active_path, wire.len() as UInt64);
-        if gated == 0_u64 { return Result.Ok(()); }
+        if !self.within_amplification_limit(wire.len() as UInt64) { return Result.Ok(Maybe.Some(frames)); }
 
         // RFC 9002 §7.7 pacing admission. The Initial PN space is
         // exempted so the first handshake packet isn't held up by an
@@ -673,20 +464,15 @@ implement ConnectionPump {
                 },
             },
         };
-        if !allow { return Result.Ok(()); }
+        if !allow { return Result.Ok(Maybe.Some(frames)); }
         self.pacing_next_ok = Maybe.None;
 
-        // Track as in-flight for the recovery loop.
-        let info = SentPacketInfo {
-            packet_number: pn,
-            time_sent:     now.clone(),
-            size_bytes:    wire.len() as UInt32,
-            in_flight:     true,
-            ack_eliciting: any_ack_eliciting(&frames),
-            frames:        frames.clone(),
-        };
+        // Charge recovery, pacing and amplification only after transport acceptance.
+        match self.transport.send(wire.as_slice(), &self.peer_addr, EcnCodepoint.NotEct).await {
+            Result.Ok(()) => {}, Result.Err(e) => return Result.Err(PumpError.Transport(e)),
+        }
         let tx_ack_eliciting = any_ack_eliciting(&frames);
-        self.connection.loss.on_packet_sent(space.clone(), info, &mut self.connection.cc);
+        self.connection.record_outbound(space, pn, now, wire.len() as UInt32, frames);
         path_control.on_outbound_bytes(&mut self.paths, wire.len() as UInt64);
         // Drain the token bucket by the actual datagram size.
         self.pacer.on_packet_sent(bytes_u64, now.clone());
@@ -698,52 +484,35 @@ implement ConnectionPump {
             Maybe.None => {},
         }
 
-        // Finally — ship it.
-        self.transport.send(wire.as_slice(), &self.peer_addr, EcnCodepoint.NotEct)
-            .await.map_err(txerr)?;
-        Result.Ok(())
+        Result.Ok(Maybe.None)
     }
 
     // ==================== step 4: phase promotion ====================
 
-    fn check_handshake_progress(&mut self) {
-        match self.handshake.completion() {
+    fn check_handshake_progress(&mut self) -> Result<(), PumpError> {
+        match self.phase_tag {
+            PumpPhase.PumpOneRtt | PumpPhase.PumpClosing | PumpPhase.PumpDraining => return Result.Ok(()),
+            _ => {},
+        }
+        let (suite, tx, rx) = match self.handshake.completion() {
             Maybe.Some(HandshakeOutput.ClientHandshakeOutput(c)) => {
-                let suite = c.negotiated_suite();
-                let (client_traffic, server_traffic) = c.application_traffic();
-                self.negotiated_hash = Maybe.Some(suite.hash_kind());
-                self.negotiated_aead = Maybe.Some(suite.aead_kind());
-                // Derive + install 1-RTT keys; mark Handshake keys for
-                // discard on first Application-space send.
-                let suite_aead = suite.aead_kind();
-                match derive_space_keys(client_traffic, &suite_aead) {
-                    Result.Ok(ktx) => match derive_space_keys(server_traffic, &suite_aead) {
-                        Result.Ok(krx) => {
-                            self.connection.keys.app = Maybe.Some((ktx, krx));
-                            self.phase_tag = PumpPhase.PumpOneRtt;
-                        },
-                        Result.Err(_) => {},
-                    },
-                    Result.Err(_) => {},
-                }
+                let (client, server) = c.application_traffic();
+                (c.negotiated_suite(), client, server)
             },
             Maybe.Some(HandshakeOutput.ServerHandshakeOutput(c)) => {
-                self.negotiated_hash = Maybe.Some(c.hash.clone());
-                self.negotiated_aead = Maybe.Some(c.suite.aead_kind());
-                let suite_aead = c.suite.aead_kind();
-                match derive_space_keys(&c.server_ap_traffic, &suite_aead) {
-                    Result.Ok(ktx) => match derive_space_keys(&c.client_ap_traffic, &suite_aead) {
-                        Result.Ok(krx) => {
-                            self.connection.keys.app = Maybe.Some((ktx, krx));
-                            self.phase_tag = PumpPhase.PumpOneRtt;
-                        },
-                        Result.Err(_) => {},
-                    },
-                    Result.Err(_) => {},
-                }
+                let (client, server) = c.application_traffic();
+                (c.negotiated_suite(), server, client)
             },
-            Maybe.None => {},
-        }
+            Maybe.None => return Result.Ok(()),
+        };
+        let aead = suite.aead_kind();
+        let tx_keys = match derive_space_keys(tx, &aead) { Result.Ok(k) => k, Result.Err(_) => return Result.Err(PumpError.Crypto(Text.from("derive application sending keys"))) };
+        let rx_keys = match derive_space_keys(rx, &aead) { Result.Ok(k) => k, Result.Err(_) => return Result.Err(PumpError.Crypto(Text.from("derive application receiving keys"))) };
+        self.connection.install_application_keys(tx_keys, rx_keys);
+        self.negotiated_hash = Maybe.Some(suite.hash_kind());
+        self.negotiated_aead = Maybe.Some(aead);
+        self.phase_tag = PumpPhase.PumpOneRtt;
+        Result.Ok(())
     }
 
     // ==================== accessors ====================

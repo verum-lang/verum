@@ -47,6 +47,7 @@
 module core.net.quic.connection_sm.handshake_driver;
 
 mount core.collections.list.{List};
+mount core.base.memory.{replace};
 mount core.net.quic.frame.{QuicFrame};
 mount core.net.quic.recovery.{PnSpaceKind};
 mount core.net.quic.connection_sm.dispatch.{CryptoChunk};
@@ -82,74 +83,83 @@ implement CryptoStream {
 
     /// Insert a CRYPTO frame chunk. Idempotent on retransmit — already-
     /// delivered bytes are silently dropped.
-    public fn insert(&mut self, offset: UInt64, data: &[Byte]) {
-        if data.len() == 0 { return; }
+    public fn insert(&mut self, offset: UInt64, data: &[Byte]) -> Result<(), TlsError> {
+        let limit = (1_u64 << 62_u64) - 1_u64;
+        if offset > limit || (data.len() as UInt64) > limit - offset { return Result.Err(TlsError.IllegalParameter); }
         let end = offset + (data.len() as UInt64);
-        // Early-drop everything below next_readable.
-        if end <= self.next_readable { return; }
-
-        let (eff_start, eff_data) = if offset < self.next_readable {
-            let skip = (self.next_readable - offset) as Int;
-            let mut d: List<Byte> = [];
-            let mut i: Int = skip;
-            while i < data.len() { d.push(data[i]); i = i + 1; }
-            (self.next_readable, d)
-        } else {
-            let mut d: List<Byte> = [];
-            let mut i: Int = 0;
-            while i < data.len() { d.push(data[i]); i = i + 1; }
-            (offset, d)
-        };
-
-        // Sorted insert + forward merge.
-        let mut i: Int = 0;
-        while i < self.runs.len() && self.runs[i].start < eff_start { i = i + 1; }
-        self.runs.insert(i, CryptoRun { start: eff_start, bytes: eff_data });
-        self.merge_forward(i);
-    }
-
-    fn merge_forward(&mut self, mut j: Int) {
-        while j + 1 < self.runs.len() {
-            let cur_end = self.runs[j].start + (self.runs[j].bytes.len() as UInt64);
-            let next = &self.runs[j + 1];
-            if cur_end >= next.start {
-                if next.start + (next.bytes.len() as UInt64) > cur_end {
-                    let gap = (cur_end - next.start) as Int;
-                    let mut k: Int = gap;
-                    while k < next.bytes.len() {
-                        self.runs[j].bytes.push(next.bytes[k]);
-                        k = k + 1;
-                    }
+        if data.len() == 0 || end <= self.next_readable { return Result.Ok(()); }
+        let start = if offset < self.next_readable { self.next_readable } else { offset };
+        let mut at = 0;
+        while at < self.runs.len() {
+            let existing = &self.runs[at];
+            if existing.start + (existing.bytes.len() as UInt64) >= start { break; }
+            at = at + 1;
+        }
+        let mut merged_start = start;
+        let mut merged_end = end;
+        let mut last = at;
+        while last < self.runs.len() {
+            let existing = &self.runs[last];
+            if existing.start > merged_end { break; }
+            let existing_end = existing.start + (existing.bytes.len() as UInt64);
+            let mut pos = if start > existing.start { start } else { existing.start };
+            while pos < end && pos < existing_end {
+                if data[(pos - offset) as Int] != existing.bytes[(pos - existing.start) as Int] {
+                    return Result.Err(TlsError.IllegalParameter);
                 }
-                let _ = self.runs.remove(j + 1);
-            } else {
-                break;
+                pos = pos + 1_u64;
             }
+            if existing.start < merged_start { merged_start = existing.start; }
+            if existing_end > merged_end { merged_end = existing_end; }
+            last = last + 1;
         }
+        let mut bytes: List<Byte> = List.with_capacity((merged_end - merged_start) as Int);
+        let mut pos = merged_start;
+        let mut run = at;
+        while pos < merged_end {
+            if pos >= start && pos < end { bytes.push(data[(pos - offset) as Int]); }
+            else {
+                while run < last && pos >= self.runs[run].start + (self.runs[run].bytes.len() as UInt64) { run = run + 1; }
+                let source = &self.runs[run];
+                bytes.push(source.bytes[(pos - source.start) as Int]);
+            }
+            pos = pos + 1_u64;
+        }
+        while last > at { last = last - 1; let _ = self.runs.remove(last); }
+        self.runs.insert(at, CryptoRun { start: merged_start, bytes: bytes });
+        Result.Ok(())
     }
 
-    /// Drain the contiguous readable prefix. Returns empty when
-    /// nothing new is available.
+    /// Drain the complete contiguous prefix.
     public fn drain_readable(&mut self) -> List<Byte> {
-        let mut out: List<Byte> = [];
-        while self.runs.len() > 0 && self.runs[0].start == self.next_readable {
-            let head = &self.runs[0];
-            let n = head.bytes.len();
-            let mut i: Int = 0;
-            while i < n {
-                out.push(head.bytes[i]);
-                i = i + 1;
-            }
-            self.next_readable = self.next_readable + (n as UInt64);
-            let _ = self.runs.remove(0);
-        }
-        out
+        if self.runs.is_empty() || self.runs[0].start != self.next_readable { return List<Byte>.new(); }
+        let head = self.runs.remove(0);
+        self.next_readable = self.next_readable + (head.bytes.len() as UInt64);
+        head.bytes
     }
 
-    public fn reserve_outbound(&mut self, n: Int) -> UInt64 {
+    /// TLS handshake records carry a one-byte type and a three-byte body length.
+    fn take_message(&mut self) -> Maybe<List<Byte>> {
+        if self.runs.is_empty() || self.runs[0].start != self.next_readable ||
+           self.runs[0].bytes.len() < 4 { return Maybe.None; }
+        let n = 4 + ((self.runs[0].bytes[1] as Int) << 16)
+                  + ((self.runs[0].bytes[2] as Int) << 8) + (self.runs[0].bytes[3] as Int);
+        if n > self.runs[0].bytes.len() { return Maybe.None; }
+        let mut head = self.runs.remove(0);
+        self.next_readable = self.next_readable + (n as UInt64);
+        if head.bytes.len() > n {
+            let tail = head.bytes.split_off(n);
+            self.runs.insert(0, CryptoRun { start: self.next_readable, bytes: tail });
+        }
+        Maybe.Some(head.bytes)
+    }
+
+    public fn reserve_outbound(&mut self, n: Int) -> Result<UInt64, TlsError> {
+        let max_offset: UInt64 = (1_u64 << 62) - 1_u64;
+        if n < 0 || (n as UInt64) > max_offset - self.tx_offset { return Result.Err(TlsError.IllegalParameter); }
         let off = self.tx_offset;
-        self.tx_offset = self.tx_offset + (n as UInt64);
-        off
+        self.tx_offset = off + (n as UInt64);
+        Result.Ok(off)
     }
 }
 
@@ -160,7 +170,7 @@ implement CryptoStream {
 public type HandshakeRole is AsClient(ClientSm) | AsServer(ServerSm);
 
 public type HandshakeDriver is {
-    role:       HandshakeRole,
+    role:       Maybe<HandshakeRole>,
     /// Per-space inbound CRYPTO reassembly + outbound offset tracking.
     initial:    CryptoStream,
     handshake:  CryptoStream,
@@ -179,7 +189,7 @@ public type HandshakeOutput is
 implement HandshakeDriver {
     public fn client(sm: ClientSm) -> HandshakeDriver {
         HandshakeDriver {
-            role:       HandshakeRole.AsClient(sm),
+            role:       Maybe.Some(HandshakeRole.AsClient(sm)),
             initial:    CryptoStream.new(),
             handshake:  CryptoStream.new(),
             application: CryptoStream.new(),
@@ -190,7 +200,7 @@ implement HandshakeDriver {
 
     public fn server(sm: ServerSm) -> HandshakeDriver {
         HandshakeDriver {
-            role:       HandshakeRole.AsServer(sm),
+            role:       Maybe.Some(HandshakeRole.AsServer(sm)),
             initial:    CryptoStream.new(),
             handshake:  CryptoStream.new(),
             application: CryptoStream.new(),
@@ -202,14 +212,16 @@ implement HandshakeDriver {
     /// Emit initial ClientHello (client only). After this, caller
     /// pumps `on_crypto_chunk` with peer responses.
     public fn start_client(&mut self) -> Result<(), TlsError> {
-        match self.role.clone() {
-            HandshakeRole.AsClient(sm) => {
-                let (sm2, wire) = sm.start()?;
-                self.role = HandshakeRole.AsClient(sm2);
-                self.enqueue_outbound(PnSpaceKind.Initial, wire);
-                Result.Ok(())
-            },
-            HandshakeRole.AsServer(_) => Result.Err(TlsError.UnexpectedMessage),
+        if !self.can_start_client() { return Result.Err(TlsError.UnexpectedMessage); }
+        let (sm, wire) = start_client_role(replace(&mut self.role, Maybe<HandshakeRole>.None))?;
+        self.role = Maybe.Some(HandshakeRole.AsClient(sm));
+        self.enqueue_flight(wire)
+    }
+
+    fn can_start_client(&self) -> Bool {
+        match &self.role {
+            Maybe.Some(HandshakeRole.AsClient(ClientSm.StartSm { .. })) => true,
+            _ => false,
         }
     }
 
@@ -217,22 +229,18 @@ implement HandshakeDriver {
     /// reassembly on that space and feeds the TLS SM if a full
     /// handshake message is now available.
     public fn on_crypto_chunk(&mut self, chunk: &CryptoChunk) -> Result<(), TlsError> {
-        let space = chunk.space.clone();
-        let stream = self.stream_for(&space);
-        stream.insert(chunk.offset, chunk.data.as_slice());
+        let (space, offset) = chunk.location();
+        self.stream_for(&space).insert(offset, chunk.bytes())?;
 
         // Drain any ready bytes and feed to the TLS SM one message at
         // a time. The SM's decode layer picks message boundaries off
         // the uint24 length field in the Handshake record header.
         loop {
-            let data = self.stream_for(&space).drain_readable();
-            if data.len() == 0 { break; }
-            let (consumed, produced_space, out_wire, connected) =
-                self.feed_tls(data.as_slice())?;
-            if consumed == 0 { break; }
-            if out_wire.len() > 0 {
-                self.enqueue_outbound(produced_space, out_wire);
-            }
+            let data = match self.stream_for(&space).take_message() {
+                Maybe.Some(message) => message, Maybe.None => break,
+            };
+            let (outbound, connected) = self.feed_tls(data.as_slice())?;
+            self.enqueue_flight(outbound)?;
             match connected {
                 Maybe.Some(ho) => { self.connected_secrets = Maybe.Some(ho); },
                 Maybe.None => {},
@@ -250,63 +258,34 @@ implement HandshakeDriver {
     }
 
     fn feed_tls(&mut self, wire: &[Byte]) ->
-        Result<(Int, PnSpaceKind, List<Byte>, Maybe<HandshakeOutput>), TlsError>
+        Result<(List<Byte>, Maybe<HandshakeOutput>), TlsError>
     {
-        match self.role.clone() {
-            HandshakeRole.AsClient(sm) => {
-                let (sm2, step) = sm.on_handshake(wire)?;
-                self.role = HandshakeRole.AsClient(sm2);
-                // Outbound flows into the next PN space by phase:
-                //  * Pre-ServerHello → we're in Initial (shouldn't emit
-                //  past CH; first on_handshake call receives SH).
-                //  * After ServerHello, client's next message is
-                //  client Finished in Handshake space.
-                let target_space = self.client_out_space();
-                let connected: Maybe<HandshakeOutput> = match step.connected {
-                    Maybe.Some(c) => Maybe.Some(HandshakeOutput.ClientHandshakeOutput(c)),
-                    Maybe.None    => Maybe.None,
-                };
-                Result.Ok((wire.len(), target_space, step.outbound_handshake, connected))
-            },
-            HandshakeRole.AsServer(sm) => {
-                let (sm2, step) = sm.on_handshake(wire)?;
-                self.role = HandshakeRole.AsServer(sm2);
-                let target_space = self.server_out_space();
-                let connected: Maybe<HandshakeOutput> = match step.connected {
-                    Maybe.Some(c) => Maybe.Some(HandshakeOutput.ServerHandshakeOutput(c)),
-                    Maybe.None    => Maybe.None,
-                };
-                Result.Ok((wire.len(), target_space, step.outbound_handshake, connected))
-            },
-        }
+        let (next, outbound, connected) = advance_role(
+            replace(&mut self.role, Maybe<HandshakeRole>.None), wire)?;
+        self.role = Maybe.Some(next);
+        Result.Ok((outbound, connected))
     }
 
-    fn client_out_space(&self) -> PnSpaceKind {
-        match &self.role {
-            HandshakeRole.AsClient(sm) => match sm {
-                ClientSm.StartSm {..} => PnSpaceKind.Initial,
-                ClientSm.WaitServerHelloSm(_) => PnSpaceKind.Initial,
+    /// A TLS flight may contain ServerHello and Handshake-protected messages in one buffer.
+    fn enqueue_flight(&mut self, wire: List<Byte>) -> Result<(), TlsError> {
+        let mut pos = 0;
+        while pos < wire.len() {
+            if wire.len() - pos < 4 { return Result.Err(TlsError.DecodeError); }
+            let body_len = ((wire[pos + 1] as Int) << 16) + ((wire[pos + 2] as Int) << 8)
+                           + (wire[pos + 3] as Int);
+            if body_len > wire.len() - pos - 4 { return Result.Err(TlsError.DecodeError); }
+            let end = pos + 4 + body_len;
+            let space = match wire[pos] {
+                1_u8 | 2_u8 => PnSpaceKind.Initial,
+                4_u8 => PnSpaceKind.Application,
                 _ => PnSpaceKind.Handshake,
-            },
-            _ => PnSpaceKind.Initial,
+            };
+            let bytes = List<Byte>.from_slice(wire.as_slice()[pos..end]);
+            let offset = self.stream_for(&space).reserve_outbound(end - pos)?;
+            self.outbound.push((space, QuicFrame.crypto_at(offset, bytes)));
+            pos = end;
         }
-    }
-
-    fn server_out_space(&self) -> PnSpaceKind {
-        match &self.role {
-            HandshakeRole.AsServer(sm) => match sm {
-                ServerSm.WaitClientHelloSm(_) => PnSpaceKind.Initial,
-                _ => PnSpaceKind.Handshake,
-            },
-            _ => PnSpaceKind.Initial,
-        }
-    }
-
-    fn enqueue_outbound(&mut self, space: PnSpaceKind, wire: List<Byte>) {
-        if wire.len() == 0 { return; }
-        let offset = self.stream_for(&space).reserve_outbound(wire.len());
-        let frame = QuicFrame.CryptoFrame { offset: offset, data: wire };
-        self.outbound.push((space, frame));
+        Result.Ok(())
     }
 
     /// Pull all queued outbound CRYPTO frames by PN space. Returns
@@ -325,7 +304,38 @@ implement HandshakeDriver {
         match &self.connected_secrets { Maybe.Some(_) => true, Maybe.None => false }
     }
 
-    public fn completion(&self) -> Maybe<HandshakeOutput> {
-        self.connected_secrets.clone()
+    public fn completion(&self) -> Maybe<&HandshakeOutput> {
+        match &self.connected_secrets { Maybe.Some(output) => Maybe.Some(output), Maybe.None => Maybe.None }
+    }
+}
+
+fn start_client_role(role: Maybe<HandshakeRole>) -> Result<(ClientSm, List<Byte>), TlsError> {
+    match role {
+        Maybe.Some(HandshakeRole.AsClient(sm)) => sm.start(),
+        _ => Result.Err(TlsError.UnexpectedMessage),
+    }
+}
+
+fn advance_role(role: Maybe<HandshakeRole>, wire: &[Byte])
+    -> Result<(HandshakeRole, List<Byte>, Maybe<HandshakeOutput>), TlsError> {
+    match role {
+        Maybe.Some(HandshakeRole.AsClient(sm)) => {
+            let (sm2, step) = sm.on_handshake(wire)?;
+            let connected: Maybe<HandshakeOutput> = match step.connected {
+                Maybe.Some(c) => Maybe.Some(HandshakeOutput.ClientHandshakeOutput(c)),
+                Maybe.None    => Maybe.None,
+            };
+            Result.Ok((HandshakeRole.AsClient(sm2), step.outbound_handshake, connected))
+        },
+        Maybe.Some(HandshakeRole.AsServer(sm)) => {
+            let (sm2, step) = sm.on_handshake(wire)?;
+            let (outbound, completion) = step.into_output();
+            let connected: Maybe<HandshakeOutput> = match completion {
+                Maybe.Some(c) => Maybe.Some(HandshakeOutput.ServerHandshakeOutput(c)),
+                Maybe.None    => Maybe.None,
+            };
+            Result.Ok((HandshakeRole.AsServer(sm2), outbound, connected))
+        },
+        Maybe.None => Result.Err(TlsError.UnexpectedMessage),
     }
 }

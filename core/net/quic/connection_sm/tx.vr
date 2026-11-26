@@ -54,6 +54,8 @@ public type TxError is
       FrameEncodeFailed
     | AeadFailed
     | BufferTooLarge
+    | InvalidPacketNumber
+    | InvalidLongPacketType
     | SampleUnavailable;
 
 implement Display for TxError {
@@ -61,6 +63,8 @@ implement Display for TxError {
         let s = match self {
             FrameEncodeFailed   => "QUIC tx: frame encode failed",
             AeadFailed          => "QUIC tx: AEAD seal failed",
+            InvalidPacketNumber => "QUIC tx: packet number exceeds the available space",
+            InvalidLongPacketType => "QUIC tx: Retry has no protected packet number",
             BufferTooLarge      => "QUIC tx: packet buffer too large",
             SampleUnavailable   => "QUIC tx: header-protection sample unavailable",
         };
@@ -74,6 +78,8 @@ implement Debug for TxError {
             FrameEncodeFailed   => "FrameEncodeFailed",
             AeadFailed          => "AeadFailed",
             BufferTooLarge      => "BufferTooLarge",
+            InvalidPacketNumber => "InvalidPacketNumber",
+            InvalidLongPacketType => "InvalidLongPacketType",
             SampleUnavailable   => "SampleUnavailable",
         };
         f.write_str(s)
@@ -86,6 +92,8 @@ implement PartialEq for TxError {
             (FrameEncodeFailed, FrameEncodeFailed) => true,
             (AeadFailed,        AeadFailed)        => true,
             (BufferTooLarge,    BufferTooLarge)    => true,
+            (InvalidPacketNumber, InvalidPacketNumber) => true,
+            (InvalidLongPacketType, InvalidLongPacketType) => true,
             (SampleUnavailable, SampleUnavailable) => true,
             _ => false,
         }
@@ -111,11 +119,20 @@ public type LongPacketInput<'a> is {
     keys:        &'a QuicSpaceKeys,
 };
 
-public fn build_long_packet(input: LongPacketInput) -> Result<List<Byte>, TxError> {
-    // Serialise frames into a scratch buffer.
-    let payload = encode_frames(input.frames)?;
+implement<'a> LongPacketInput<'a> {
+    public fn new(ptype: LongPacketType, version: UInt32, dcid: &'a ConnectionId,
+                  scid: &'a ConnectionId, token: &'a [Byte], pn: UInt64, largest: Maybe<UInt64>,
+                  frames: &'a List<QuicFrame>, keys: &'a QuicSpaceKeys) -> LongPacketInput<'a> {
+        LongPacketInput { ptype: ptype, version: version, dcid: dcid, scid: scid, token: token,
+                          packet_number: pn, largest_acked: largest, frames: frames, keys: keys }
+    }
+}
 
+public fn build_long_packet(input: LongPacketInput) -> Result<List<Byte>, TxError> {
+    if input.ptype is LongPacketType.Retry { return Result.Err(TxError.InvalidLongPacketType); }
+    if input.packet_number >= (1_u64 << 62) { return Result.Err(TxError.InvalidPacketNumber); }
     let (truncated_pn, pn_len) = encode_packet_number_len(input.packet_number, input.largest_acked);
+    let payload = encode_frames(input.frames, pn_len);
 
     // AEAD tag length — 16 for GCM / ChaCha20-Poly1305 (warp's supported suites).
     let tag_len: Int = 16;
@@ -184,9 +201,18 @@ public type ShortPacketInput<'a> is {
     keys:          &'a QuicSpaceKeys,
 };
 
+implement<'a> ShortPacketInput<'a> {
+    public fn new(dcid: &'a ConnectionId, spin_bit: Bool, key_phase: Bool, pn: UInt64,
+                  largest: Maybe<UInt64>, frames: &'a List<QuicFrame>, keys: &'a QuicSpaceKeys) -> ShortPacketInput<'a> {
+        ShortPacketInput { dcid: dcid, spin_bit: spin_bit, key_phase: key_phase, packet_number: pn,
+                           largest_acked: largest, frames: frames, keys: keys }
+    }
+}
+
 public fn build_short_packet(input: ShortPacketInput) -> Result<List<Byte>, TxError> {
-    let payload = encode_frames(input.frames)?;
+    if input.packet_number >= (1_u64 << 62) { return Result.Err(TxError.InvalidPacketNumber); }
     let (truncated_pn, pn_len) = encode_packet_number_len(input.packet_number, input.largest_acked);
+    let payload = encode_frames(input.frames, pn_len);
 
     // First byte: 0 (header form) | 1 (fixed) | S (spin) | 0 0 (reserved) | K (key phase) | PP (pn_len-1)
     let mut first: Byte = 0x40_u8
@@ -216,14 +242,16 @@ public fn build_short_packet(input: ShortPacketInput) -> Result<List<Byte>, TxEr
 // Helpers
 // =============================================================================
 
-fn encode_frames(frames: &List<QuicFrame>) -> Result<List<Byte>, TxError> {
+fn encode_frames(frames: &List<QuicFrame>, pn_len: UInt8) -> List<Byte> {
     let mut out: List<Byte> = [];
     let mut i: Int = 0;
     while i < frames.len() {
         let _ = encode_frame(&frames[i], &mut out);
         i = i + 1;
     }
-    Result.Ok(out)
+    // RFC 9001 §5.4.2 requires a full 16-byte sample starting four bytes after the PN offset.
+    while out.len() < 4 - (pn_len as Int) { out.push(0_u8); }
+    out
 }
 
 fn append_truncated_pn(out: &mut List<Byte>, pn: UInt32, pn_len: UInt8) {

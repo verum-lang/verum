@@ -154,6 +154,16 @@ public type InboundPacket is
     | Short(InboundShortPacket)
     | VersionNegotiation { dcid: ConnectionId, scid: ConnectionId, versions: List<UInt32>, consumed: Int };
 
+implement InboundPacket {
+    public fn consumed(&self) -> Int {
+        match self {
+            InboundPacket.Long(packet) => packet.consumed(),
+            InboundPacket.Short(packet) => packet.consumed(),
+            InboundPacket.VersionNegotiation { consumed, .. } => *consumed,
+        }
+    }
+}
+
 // =============================================================================
 // Entry points
 // =============================================================================

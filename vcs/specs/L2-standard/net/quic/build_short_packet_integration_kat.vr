@@ -1,9 +1,10 @@
-// @test: typecheck-pass
+// @test: run-interpreter
 // @tier: 0
 // @level: L2
 // @tags: quic, packet, build_short_packet, integration, rfc9000_17_3, rfc9001_5_4
 // @timeout: 15000
 // @expected-exit: 0
+// @expected-stdout: build_short_packet 1-RTT pipeline structural invariants verified
 
 // Integration KAT for `build_short_packet` — the 1-RTT outbound-packet
 // assembly pipeline:
@@ -20,51 +21,23 @@
 // fields. So the post-HP wire is very short: first byte + DCID + PN +
 // ciphertext(payload + 16 tag).
 
-mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 mount core.net.quic.connection_id.{ConnectionId};
-mount core.net.quic.frame.{QuicFrame
-};
+mount core.net.quic.frame.{QuicFrame};
 mount core.net.quic.connection_sm.tx.{ShortPacketInput, build_short_packet, TxError};
-mount core.net.quic.connection_sm.mod.{QuicSpaceKeys};
-mount core.net.quic.crypto.header_protection.{HpKey};
-mount core.net.quic.crypto.initial.{derive_initial_secrets, derive_initial_keys};
-
-fn synth_initial_keys_for_short(dcid: &[Byte]) -> Result<QuicSpaceKeys, ()> {
-    // Re-use the Initial-secret derivation to get a set of valid AEAD +
-    // HP keys. These aren't semantically correct 1-RTT keys, but are
-    // functionally valid for building+parsing a Short packet — the AAD
-    // + nonce plumbing is identical regardless of secret provenance.
-    let secrets = derive_initial_secrets(dcid).map_err(|_| ())?;
-    let keys = derive_initial_keys(secrets.client.as_slice()).map_err(|_| ())?;
-    let mut hp_arr: [Byte; 16] = [0_u8; 16];
-    let mut i: Int = 0;
-    while i < 16 { hp_arr[i] = keys.hp[i]; i = i + 1; }
-    Ok(QuicSpaceKeys {
-        aead_key: keys.key,
-        aead_iv:  keys.iv,
-        hp_key:   HpKey.AesEcb128(hp_arr),
-    })
-}
+mount core.net.quic.connection_sm.rx.{InboundPacket, parse_short_packet};
+mount core.net.quic.crypto.initial.{derive_initial_secrets};
 
 fn build_minimum_short_packet(spin: Bool, key_phase: Bool) -> List<Byte> {
     let dcid_bytes: List<Byte> = [
         0xAA_u8, 0xBB_u8, 0xCC_u8, 0xDD_u8,
     ];
     let dcid = ConnectionId.from_bytes(dcid_bytes.as_slice()).unwrap();
-    let keys = synth_initial_keys_for_short(dcid_bytes.as_slice()).unwrap();
+    let keys = derive_initial_secrets(dcid_bytes.as_slice()).unwrap().client_packet_keys().unwrap();
 
-    let frames: List<Frame> = [ QuicFrame.PingFrame ];
+    let frames: List<QuicFrame> = [ QuicFrame.PingFrame ];
 
-    let input = ShortPacketInput {
-        dcid:          &dcid,
-        spin_bit:      spin,
-        key_phase:     key_phase,
-        packet_number: 5_u64,
-        largest_acked: Some(0_u64),
-        frames:        &frames,
-        keys:          &keys,
-    };
+    let input = ShortPacketInput.new(&dcid, spin, key_phase, 5_u64, Maybe.Some(0_u64), &frames, &keys);
     build_short_packet(input).unwrap()
 }
 
@@ -101,12 +74,9 @@ fn dcid_bytes_preserved_post_hp() {
 }
 
 fn wire_size_matches_expectation() {
-    // Wire = 1 first_byte + 4 dcid + pn_len + 1 ping_plaintext + 16 tag.
-    // With largest_acked = 0 and pn = 5, encode_packet_number_len likely
-    // picks pn_len = 1. So total = 1 + 4 + 1 + 1 + 16 = 23.
+    // With a one-byte PN, PING needs two bytes of PADDING to supply the HP sample.
     let wire = build_minimum_short_packet(false, false);
-    assert(wire.len() >= 20);
-    assert(wire.len() <= 30);
+    assert(wire.len() == 25);
 }
 
 fn two_builds_with_different_pns_produce_different_wires() {
@@ -114,19 +84,11 @@ fn two_builds_with_different_pns_produce_different_wires() {
     // so the ciphertext+tag change, even for identical plaintext.
     let dcid_bytes: List<Byte> = [0xAA_u8, 0xBB_u8, 0xCC_u8, 0xDD_u8];
     let dcid = ConnectionId.from_bytes(dcid_bytes.as_slice()).unwrap();
-    let keys = synth_initial_keys_for_short(dcid_bytes.as_slice()).unwrap();
-    let frames: List<Frame> = [ QuicFrame.PingFrame ];
+    let keys = derive_initial_secrets(dcid_bytes.as_slice()).unwrap().client_packet_keys().unwrap();
+    let frames: List<QuicFrame> = [ QuicFrame.PingFrame ];
 
-    let input_a = ShortPacketInput {
-        dcid: &dcid, spin_bit: false, key_phase: false,
-        packet_number: 5_u64, largest_acked: Some(0_u64),
-        frames: &frames, keys: &keys,
-    };
-    let input_b = ShortPacketInput {
-        dcid: &dcid, spin_bit: false, key_phase: false,
-        packet_number: 6_u64, largest_acked: Some(0_u64),
-        frames: &frames, keys: &keys,
-    };
+    let input_a = ShortPacketInput.new(&dcid, false, false, 5_u64, Maybe.Some(0_u64), &frames, &keys);
+    let input_b = ShortPacketInput.new(&dcid, false, false, 6_u64, Maybe.Some(0_u64), &frames, &keys);
     let wire_a = build_short_packet(input_a).unwrap();
     let wire_b = build_short_packet(input_b).unwrap();
     // Some byte beyond the DCID must differ.
@@ -139,6 +101,44 @@ fn two_builds_with_different_pns_produce_different_wires() {
     assert(differ);
 }
 
+fn authenticated_ping_and_number_limit() {
+    let wire = build_minimum_short_packet(false, false);
+    let id: List<Byte> = [0xaa_u8, 0xbb_u8, 0xcc_u8, 0xdd_u8];
+    let dcid = ConnectionId.from_bytes(id.as_slice()).unwrap();
+    let keys = derive_initial_secrets(id.as_slice()).unwrap().client_packet_keys().unwrap();
+    // Independent AES-GCM and AES-ECB sealing with the v1 HKDF labels.
+    let expected: List<Byte> = [
+        0x56_u8, 0xaa_u8, 0xbb_u8, 0xcc_u8, 0xdd_u8, 0x43_u8, 0x12_u8, 0xa0_u8,
+        0xf4_u8, 0x30_u8, 0x92_u8, 0x04_u8, 0xf8_u8, 0xf0_u8, 0xf8_u8, 0x2e_u8,
+        0xe0_u8, 0xab_u8, 0x79_u8, 0x62_u8, 0x8e_u8, 0x24_u8, 0x94_u8, 0x5a_u8,
+        0xac_u8,
+    ];
+    assert(wire.len() == expected.len());
+    let mut cursor = 0;
+    while cursor < wire.len() {
+        assert(wire[cursor] + 0_u8 == expected[cursor] + 0_u8);
+        cursor = cursor + 1;
+    }
+    let packet = parse_short_packet(wire.as_slice(), 4, &keys, Maybe.None).unwrap();
+    assert(packet.consumed() == wire.len());
+    match packet {
+        InboundPacket.Short(p) => {
+            assert(p.packet_number() == 5_u64);
+            assert(p.payload().len() == 3);
+            assert(p.payload()[0] + 0_u8 == 1_u8);
+            assert(p.payload()[1] + 0_u8 == 0_u8);
+            assert(p.payload()[2] + 0_u8 == 0_u8);
+        },
+        _ => panic("expected protected Short header"),
+    }
+    let frames: List<QuicFrame> = [QuicFrame.PingFrame];
+    let input = ShortPacketInput.new(&dcid, false, false, 1_u64 << 62, Maybe.None, &frames, &keys);
+    match build_short_packet(input) {
+        Result.Err(TxError.InvalidPacketNumber) => {},
+        _ => panic("out-of-range packet number was accepted"),
+    }
+}
+
 @main
 public fn main() -> Int {
     short_header_form_bit_is_clear();
@@ -146,6 +146,7 @@ public fn main() -> Int {
     spin_bit_propagates_to_first_byte();
     dcid_bytes_preserved_post_hp();
     wire_size_matches_expectation();
+    authenticated_ping_and_number_limit();
     two_builds_with_different_pns_produce_different_wires();
     print("build_short_packet 1-RTT pipeline structural invariants verified");
     0

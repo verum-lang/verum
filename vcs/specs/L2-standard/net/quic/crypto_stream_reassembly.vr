@@ -1,16 +1,16 @@
-// @test: typecheck-pass
+// @test: run-interpreter
 // @tier: 0
 // @level: L2
 // @tags: quic, crypto, reassembly, handshake_driver, rfc9000_19_6
 // @timeout: 15000
 // @expected-exit: 0
+// @expected-stdout: RFC 9000 §19.6 CryptoStream reassembly verified
 
 // RFC 9000 §19.6 CRYPTO frame reassembly: handshake_driver.CryptoStream
 // accepts out-of-order offsets, deduplicates retransmits, and drains
 // the contiguous readable prefix in order.
 
-mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 mount core.net.quic.connection_sm.handshake_driver.{CryptoStream};
 
 fn empty_stream_drains_empty() {
@@ -22,7 +22,7 @@ fn empty_stream_drains_empty() {
 fn in_order_bytes_drain_immediately() {
     let mut s = CryptoStream.new();
     let a: List<Byte> = [0xAA_u8, 0xBB_u8, 0xCC_u8];
-    s.insert(0_u64, a.as_slice());
+    s.insert(0_u64, a.as_slice()).unwrap();
     let got = s.drain_readable();
     assert(got.len() == 3);
     assert(got[0] == 0xAA_u8);
@@ -35,12 +35,12 @@ fn in_order_bytes_drain_immediately() {
 fn out_of_order_hold_until_prefix_fills() {
     let mut s = CryptoStream.new();
     let later: List<Byte> = [0x10_u8, 0x11_u8];
-    s.insert(3_u64, later.as_slice());
+    s.insert(3_u64, later.as_slice()).unwrap();
     // Nothing drainable — prefix 0..3 still missing.
     assert(s.drain_readable().len() == 0);
     // Fill the gap.
     let head: List<Byte> = [0x00_u8, 0x01_u8, 0x02_u8];
-    s.insert(0_u64, head.as_slice());
+    s.insert(0_u64, head.as_slice()).unwrap();
     let got = s.drain_readable();
     // Contiguous [0..5) now deliverable.
     assert(got.len() == 5);
@@ -51,8 +51,8 @@ fn out_of_order_hold_until_prefix_fills() {
 fn duplicate_insert_is_idempotent() {
     let mut s = CryptoStream.new();
     let data: List<Byte> = [0x01_u8, 0x02_u8];
-    s.insert(0_u64, data.as_slice());
-    s.insert(0_u64, data.as_slice());          // full overlap — drop
+    s.insert(0_u64, data.as_slice()).unwrap();
+    s.insert(0_u64, data.as_slice()).unwrap();          // full overlap — drop
     let got = s.drain_readable();
     assert(got.len() == 2);
 }
@@ -60,11 +60,11 @@ fn duplicate_insert_is_idempotent() {
 fn partial_overlap_deduplicates_prefix() {
     let mut s = CryptoStream.new();
     let a: List<Byte> = [0xAA_u8, 0xBB_u8, 0xCC_u8];
-    s.insert(0_u64, a.as_slice());
+    s.insert(0_u64, a.as_slice()).unwrap();
     let _ = s.drain_readable();                 // cursor advances to 3
     // Retransmit overlapping the cursor: offset 1, bytes B C D E.
     let b: List<Byte> = [0xBB_u8, 0xCC_u8, 0xDD_u8, 0xEE_u8];
-    s.insert(1_u64, b.as_slice());
+    s.insert(1_u64, b.as_slice()).unwrap();
     let got = s.drain_readable();
     // Only the fresh tail D E is delivered.
     assert(got.len() == 2);
@@ -74,15 +74,30 @@ fn partial_overlap_deduplicates_prefix() {
 
 fn reserve_outbound_advances_tx_offset() {
     let mut s = CryptoStream.new();
-    let off0 = s.reserve_outbound(500);
-    let off1 = s.reserve_outbound(300);
+    let off0 = s.reserve_outbound(500).unwrap();
+    let off1 = s.reserve_outbound(300).unwrap();
     assert(off0 == 0_u64);
     assert(off1 == 500_u64);
+}
+
+fn conflicting_overlap_preserves_buffer() {
+    let mut stream = CryptoStream.new();
+    let initial: List<Byte> = [1_u8, 2_u8, 3_u8];
+    let conflict: List<Byte> = [9_u8, 4_u8];
+    stream.insert(0_u64, initial.as_slice()).unwrap();
+    assert(stream.insert(2_u64, conflict.as_slice()).is_err());
+    let got = stream.drain_readable();
+    assert(got.len() == 3);
+    assert(got[2] + 0_u8 == 3_u8);
+    assert(stream.reserve_outbound(-1).is_err());
+    assert(stream.reserve_outbound(1).unwrap() == 0_u64);
+    assert(stream.insert((1_u64 << 62) - 1_u64, initial.as_slice()).is_err());
 }
 
 @main
 public fn main() -> Int {
     empty_stream_drains_empty();
+    conflicting_overlap_preserves_buffer();
     in_order_bytes_drain_immediately();
     out_of_order_hold_until_prefix_fills();
     duplicate_insert_is_idempotent();

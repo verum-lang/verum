@@ -96,6 +96,10 @@ public type InboundDatagram is {
     ecn:       EcnCodepoint,
 };
 
+implement InboundDatagram {
+    pub(in core.net.quic) fn bytes(&self) -> &[Byte] { self.data.as_slice() }
+}
+
 public type EcnCodepoint is NotEct | Ect1 | Ect0 | Ce;
 
 implement EcnCodepoint {

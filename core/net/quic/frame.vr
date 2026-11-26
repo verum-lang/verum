@@ -226,6 +226,10 @@ public type QuicFrame is
 implement QuicFrame {
     /// Ack-eliciting frames trigger ACK generation by the peer.
     /// Frames that do not are PADDING, ACK, CONNECTION_CLOSE.
+    pub(in core.net.quic) fn crypto_at(offset: UInt64, bytes: List<Byte>) -> QuicFrame {
+        QuicFrame.CryptoFrame { offset: offset, data: bytes }
+    }
+
     pub(in core.net.quic) fn acknowledgment(acked: &AckRanges, delay: UInt64,
                                            ect0: UInt64, ect1: UInt64, ce: UInt64) -> Maybe<QuicFrame> {
         let ranges = acked.as_list();

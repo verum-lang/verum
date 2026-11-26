@@ -1,9 +1,10 @@
-// @test: typecheck-pass
+// @test: run-interpreter
 // @tier: 0
 // @level: L2
 // @tags: quic, packet, build_long_packet, integration, rfc9000_17_2_2, rfc9001_5_1, rfc9001_5_4
 // @timeout: 15000
 // @expected-exit: 0
+// @expected-stdout: build_long_packet Initial pipeline structural invariants verified
 
 // Integration KAT for `build_long_packet` — the full outbound-packet
 // assembly pipeline that composes:
@@ -32,30 +33,14 @@
 //   * sealed payload len = plaintext + 16 AEAD tag bytes
 //   * total wire bytes < QUIC MTU floor (1200 B for Initial)
 
-mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
 mount core.net.quic.connection_id.{ConnectionId};
-mount core.net.quic.frame.{QuicFrame
-};
+mount core.net.quic.frame.{QuicFrame, decode_frame};
 mount core.net.quic.packet.{LongPacketType};
 mount core.net.quic.version.{VERSION_1};
-mount core.net.quic.connection_sm.tx.{LongPacketInput, build_long_packet, TxError};
-mount core.net.quic.connection_sm.mod.{QuicSpaceKeys};
-mount core.net.quic.crypto.header_protection.{HpKey};
-mount core.net.quic.crypto.initial.{derive_initial_secrets, derive_initial_keys};
-
-fn synth_initial_keys(dcid: &[Byte]) -> Result<QuicSpaceKeys, ()> {
-    let secrets = derive_initial_secrets(dcid).map_err(|_| ())?;
-    let keys = derive_initial_keys(secrets.client.as_slice()).map_err(|_| ())?;
-    let mut hp_arr: [Byte; 16] = [0_u8; 16];
-    let mut i: Int = 0;
-    while i < 16 { hp_arr[i] = keys.hp[i]; i = i + 1; }
-    Ok(QuicSpaceKeys {
-        aead_key: keys.key,
-        aead_iv:  keys.iv,
-        hp_key:   HpKey.AesEcb128(hp_arr),
-    })
-}
+mount core.net.quic.connection_sm.tx.{LongPacketInput, build_long_packet};
+mount core.net.quic.connection_sm.rx.{InboundPacket, RxError, parse_long_packet};
+mount core.net.quic.crypto.initial.{derive_initial_secrets};
 
 fn build_minimum_initial_packet() -> List<Byte> {
     // RFC 9001 §A.1 client DCID (8 bytes).
@@ -65,28 +50,14 @@ fn build_minimum_initial_packet() -> List<Byte> {
     ];
     let dcid = ConnectionId.from_bytes(dcid_bytes.as_slice()).unwrap();
     let scid = ConnectionId.empty();
-    let keys = synth_initial_keys(dcid_bytes.as_slice()).unwrap();
-
-    // One small CRYPTO frame — offset 0 + 4 bytes of synthetic TLS data.
-    let frames: List<Frame> = [
-        QuicFrame.CryptoFrame {
-            offset: 0_u64,
-            data:   [0x01_u8, 0x00_u8, 0x00_u8, 0x10_u8],
-        },
-    ];
-
-    let empty_token: List<Byte> = [];
-    let input = LongPacketInput {
-        ptype:         LongPacketType.Initial,
-        version:       VERSION_1,
-        dcid:          &dcid,
-        scid:          &scid,
-        token:         empty_token.as_slice(),
-        packet_number: 0_u64,
-        largest_acked: None,
-        frames:        &frames,
-        keys:          &keys,
-    };
+    let keys = derive_initial_secrets(dcid_bytes.as_slice()).unwrap().client_packet_keys().unwrap();
+    let crypto_wire: List<Byte> = [6_u8, 0_u8, 4_u8, 1_u8, 0_u8, 0_u8, 16_u8];
+    let (frame, consumed) = decode_frame(crypto_wire.as_slice(), 0).unwrap();
+    assert(consumed == crypto_wire.len());
+    let frames: List<QuicFrame> = [frame];
+    let token: List<Byte> = [];
+    let input = LongPacketInput.new(LongPacketType.Initial, VERSION_1, &dcid, &scid,
+                                    token.as_slice(), 0_u64, Maybe.None, &frames, &keys);
     build_long_packet(input).unwrap()
 }
 
@@ -99,11 +70,7 @@ fn long_header_form_and_fixed_bit_set() {
 
 fn long_type_bits_are_initial() {
     let wire = build_minimum_initial_packet();
-    // Long type bits live at bit 4-5 (mask 0x30). Initial = 00.
-    // After HP, these bits MAY be flipped; the static bits 6-7 (long/fixed)
-    // are always preserved. So we can't directly assert type bits — but
-    // we can assert the first-byte high 2 bits (form/fixed) are stable.
-    assert((wire[0] & 0xC0_u8) == 0xC0_u8);
+    assert((wire[0] & 0x30_u8) == 0_u8);
 }
 
 fn version_field_is_v1_big_endian() {
@@ -151,19 +118,47 @@ fn packet_is_within_quic_mtu_floor() {
 }
 
 fn aead_expansion_is_16_bytes() {
-    // We fed 6 bytes of CRYPTO frame (type 1 + offset 1 + len 1 + 4 data
-    // overhead → but actual encoded frame is type(1) + offset(1) + len(1)
-    // + 4 data = 7 bytes). Length field = pn_len + payload_len + 16 tag
-    // = 1 + 7 + 16 = 24 bytes accounted for by AEAD.
-    //
-    // Post-build wire = header + length + PN + ciphertext(payload+tag).
-    // With empty SCID + empty token + 8-byte DCID, header pre-length
-    // section is 15 bytes. Length varint (24 fits in 1 byte → 0x18).
-    // + 1 PN byte + 7+16 = 23 bytes of ciphertext.  Total ≈ 40.
     let wire = build_minimum_initial_packet();
-    // Sanity bound — should be between 30 and 60 bytes.
-    assert(wire.len() >= 30);
-    assert(wire.len() <= 60);
+    // Header before the length is 16 bytes. Length encodes PN(1), CRYPTO(7) and tag(16).
+    assert(wire[16] + 0_u8 == 24_u8);
+    assert(wire.len() == 41);
+}
+
+fn authenticated_frame_roundtrip() {
+    let mut wire = build_minimum_initial_packet();
+    let dcid: List<Byte> = [0x83_u8, 0x94_u8, 0xc8_u8, 0xf0_u8, 0x3e_u8, 0x51_u8, 0x57_u8, 0x08_u8];
+    let keys = derive_initial_secrets(dcid.as_slice()).unwrap().client_packet_keys().unwrap();
+    // Independent AES-GCM and AES-ECB sealing with the v1 HKDF labels.
+    let expected: List<Byte> = [
+        0xc4_u8, 0x00_u8, 0x00_u8, 0x00_u8, 0x01_u8, 0x08_u8, 0x83_u8, 0x94_u8,
+        0xc8_u8, 0xf0_u8, 0x3e_u8, 0x51_u8, 0x57_u8, 0x08_u8, 0x00_u8, 0x00_u8,
+        0x18_u8, 0x1b_u8, 0x46_u8, 0xb4_u8, 0x15_u8, 0xdb_u8, 0x9a_u8, 0x7c_u8,
+        0xb3_u8, 0x98_u8, 0x0b_u8, 0x8c_u8, 0x19_u8, 0x2b_u8, 0x8f_u8, 0x57_u8,
+        0x4d_u8, 0x59_u8, 0x67_u8, 0x64_u8, 0x2a_u8, 0x28_u8, 0xb2_u8, 0x55_u8,
+        0xa4_u8,
+    ];
+    assert(wire.len() == expected.len());
+    let mut cursor = 0;
+    while cursor < wire.len() {
+        assert(wire[cursor] + 0_u8 == expected[cursor] + 0_u8);
+        cursor = cursor + 1;
+    }
+    let packet = parse_long_packet(wire.as_slice(), &keys, Maybe.None).unwrap();
+    assert(packet.consumed() == wire.len());
+    match packet {
+        InboundPacket.Long(p) => {
+            assert(p.packet_number() == 0_u64);
+            assert(p.payload().len() == 7);
+            assert(p.payload()[6] + 0_u8 == 16_u8);
+        },
+        _ => panic("expected protected Initial"),
+    }
+    let last = wire.len() - 1;
+    wire[last] = wire[last] ^ 1_u8;
+    match parse_long_packet(wire.as_slice(), &keys, Maybe.None) {
+        Result.Err(RxError.AeadFailure) => {},
+        _ => panic("corrupted Initial tag was accepted"),
+    }
 }
 
 @main
@@ -176,6 +171,7 @@ public fn main() -> Int {
     token_length_prefix_is_zero();
     packet_is_within_quic_mtu_floor();
     aead_expansion_is_16_bytes();
+    authenticated_frame_roundtrip();
     print("build_long_packet Initial pipeline structural invariants verified");
     0
 }

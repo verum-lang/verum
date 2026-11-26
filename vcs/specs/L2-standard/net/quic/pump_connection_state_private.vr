@@ -1,0 +1,14 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L2
+// @tags: net, quic, visibility
+// @expected-error: E202 "'connection' is Private"
+// @expected-error-count: 1
+
+mount core.net.quic.transport.pump.{ConnectionPump};
+
+fn replace_packet_state(pump: &mut ConnectionPump) {
+    let _ = &mut pump.connection;
+}
+
+fn main() {}
