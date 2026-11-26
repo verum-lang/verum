@@ -849,6 +849,13 @@ dialog:has(.change-review) h2 { font-size: 15px; overflow-wrap: anywhere; }
 .diagnostic-related { display: flex; justify-content: space-between; gap: 8px; width: 100%; padding: 4px 0 6px 18px; color: var(--accent-text); text-align: start; overflow-wrap: anywhere; }
 .diagnostic-message { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 12px; }
 .diagnostic-marker { color: var(--warning); }
+.diagnostic-finding { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; border-top: 1px solid var(--subtle-border); }
+.diagnostic-finding .diagnostic-item { border-top: 0; }
+.diagnostic-finding > [aria-expanded="true"] svg { transform: rotate(90deg); }
+.diagnostic-code { color: var(--muted); font-size: 0.9em; }
+.diagnostic-context { grid-column: 1 / -1; margin: 0; padding: 0 0 8px 12px; overflow-wrap: anywhere; }
+.diagnostic-context dt { margin-top: 4px; color: var(--muted); font-size: 0.9em; }
+.diagnostic-context dd { margin: 0; white-space: pre-wrap; }
 .severity-1 { color: var(--danger); }
 .history {
   width: 132px;

@@ -6,7 +6,7 @@ import { continueSourcePage, projectSourceIndex, workspaceFilePath, type SourceP
 import './style.css';
 import { runtimeSourceLine, runtimeSourceRange } from './runtime';
 import { lintPage, type LintFile, type LintFinding, type LintReport } from './lint';
-import { textEditChanges } from './language';
+import { diagnosticContext, textEditChanges } from './language';
 import { proofSourceRange } from './proof';
 import { ProofTargets, declarationProfile, type ProofProfile } from './proof-targets';
 import { sourceHash as sha256, sourceRevision } from './source';
@@ -540,7 +540,15 @@ async function inspectProject() {
   }
 }
 bind('project-refresh', async () => { scheduleAnalysis(); await inspectProject(); });
-window.addEventListener('focus', scheduleAnalysis);
+// The first keyboard interaction can focus a newly opened browser window.
+// Only returning from another window can invalidate an already displayed project.
+let leftWindow = false;
+window.addEventListener('blur', event => { if (event.target === window) leftWindow = true; });
+window.addEventListener('focus', event => {
+  if (event.target !== window || !leftWindow) return;
+  leftWindow = false;
+  if (isConnected() && currentPath.endsWith('.vr') && !analysisBusy && !analysisPending) void analyzeSource();
+});
 function resultView(diagnostics: boolean) {
   $('operations-panel').hidden = diagnostics; $('diagnostics-panel').hidden = !diagnostics;
   $('operations-tab').setAttribute('aria-selected', String(!diagnostics)); $('diagnostics-tab').setAttribute('aria-selected', String(diagnostics));
@@ -675,9 +683,18 @@ async function analyzeSource() {
   try {
     const reply = await languageRequest<Analysis>(revision);
     if (generation !== analysisGeneration || !sameRevision(revision, languageRevision())) return;
-    renderAnalysis(reply.result);
+    const next = reply.result;
+    // Revalidating an unchanged project must preserve keyboard focus, the
+    // editor selection and expanded findings. Source edits clear currentAnalysis.
+    if (!currentAnalysis || !next.project_revision ||
+        next.project_revision !== currentAnalysis.project_revision ||
+        next.source_hash !== currentAnalysis.source_hash || next.analysis_scope !== currentAnalysis.analysis_scope ||
+        next.library_metadata?.sha256 !== currentAnalysis.library_metadata?.sha256) renderAnalysis(next);
   } catch (error) {
     if (generation === analysisGeneration && sameRevision(revision, languageRevision())) {
+      currentAnalysis = null; editor.diagnostics(editor.source(), []);
+      proofTargets.begin(revision); renderProofTargets();
+      $('module-topology').replaceChildren(); $('analysis-scope').replaceChildren(); updateFindingCount('…');
       setText($('language-status'), m('Analysis unavailable'));
       const message = m('Analysis failed: {error}', { error: errorText(error) });
       $('diagnostics-list').replaceChildren(node('p', 'muted', message));
@@ -739,10 +756,25 @@ function renderAnalysis(snapshot: Analysis) {
     scope.replaceChildren(node('span', '', label));
   }
   const diagnostics = $('diagnostics-list'); diagnostics.replaceChildren();
+  let contextIndex = 0;
   const appendDiagnostic = (diagnostic: Analysis['diagnostics'][number], navigate: () => unknown, path = '') => {
     const entry = button('', navigate, 'diagnostic-item');
-    entry.append(node('span', `diagnostic-marker severity-${diagnostic.severity}`, diagnostic.severity === 1 ? '●' : '◇'), node('span', 'diagnostic-message', diagnostic.message), node('span', 'muted', `${path ? path + ':' : ''}${diagnostic.range.start.line + 1}:${diagnostic.range.start.character + 1}`));
-    diagnostics.append(entry);
+    const message = node('span', 'diagnostic-message');
+    if (diagnostic.code != null) message.append(node('code', 'diagnostic-code', String(diagnostic.code)), ' ');
+    message.append(diagnostic.message);
+    entry.append(node('span', `diagnostic-marker severity-${diagnostic.severity}`, diagnostic.severity === 1 ? '●' : '◇'), message, node('span', 'muted', `${path ? path + ':' : ''}${diagnostic.range.start.line + 1}:${diagnostic.range.start.character + 1}`));
+    const context = diagnosticContext(document, diagnostic);
+    if (context) {
+      const group = node('div', 'diagnostic-finding');
+      context.id = `diagnostic-context-${contextIndex++}`; context.hidden = true;
+      const toggle = iconButton('chevronRight', m('Compiler details'), () => {
+        context.hidden = !context.hidden;
+        toggle.setAttribute('aria-expanded', String(!context.hidden));
+      });
+      toggle.setAttribute('aria-controls', context.id); toggle.setAttribute('aria-expanded', 'false');
+      setAttribute(toggle, 'aria-label', m('Compiler details for {message}', { message: diagnostic.message }));
+      group.append(entry, toggle, context); diagnostics.append(group);
+    } else diagnostics.append(entry);
     for (const related of diagnostic.relatedInformation ?? []) {
       const link = button(related.message, () => navigateDefinition(related.location, snapshot.project_revision ?? undefined), 'diagnostic-related');
       const position = related.location.range.start;

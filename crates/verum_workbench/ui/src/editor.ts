@@ -8,7 +8,7 @@ import { StreamLanguage, syntaxHighlighting, HighlightStyle, bracketMatching, in
 import { tags } from '@lezer/highlight';
 import { translations } from './translations';
 import { currentLocale, m, t } from './i18n';
-import { languageRequest, sameRevision, positionAt, rangeOffsets, textEditChanges, type DocumentRevision, type Diagnostic, type Range } from './language';
+import { diagnosticContext, languageRequest, sameRevision, positionAt, rangeOffsets, textEditChanges, type DocumentRevision, type Diagnostic, type Range } from './language';
 import { editFileText } from './source';
 import { renderHoverContent } from './hover-content';
 
@@ -209,7 +209,16 @@ export function makeEditor(parent: HTMLElement, source: string, onChange: (sourc
       if (view.state.doc.toString() !== source) return;
       view.dispatch(setDiagnostics(view.state, diagnostics.flatMap(diagnostic => {
         const range = rangeOffsets(source, diagnostic.range);
-        return range ? [{ ...range, message: diagnostic.message, source: diagnostic.source, severity: diagnostic.severity === 1 ? 'error' as const : diagnostic.severity === 2 ? 'warning' as const : 'info' as const }] : [];
+        const label = [diagnostic.source, diagnostic.code].filter(value => value != null).join(' ');
+        return range ? [{ ...range, message: diagnostic.message, source: label,
+          renderMessage: (view: EditorView) => {
+            const doc = view.dom.ownerDocument;
+            const message = doc.createElement('div'); message.textContent = diagnostic.message;
+            const context = diagnosticContext(doc, diagnostic);
+            if (context) message.append(context);
+            return message;
+          },
+          severity: diagnostic.severity === 1 ? 'error' as const : diagnostic.severity === 2 ? 'warning' as const : 'info' as const }] : [];
       })));
     },
     select(range: Range) {

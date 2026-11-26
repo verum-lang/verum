@@ -5,7 +5,26 @@ export type Position = { line: number; character: number };
 export type Range = { start: Position; end: Position };
 export type FormattingOptions = { tabSize: number; insertSpaces: boolean };
 export type SourceLocation = { uri: string; range: Range };
-export type Diagnostic = { relatedInformation?: Array<{ location: SourceLocation; message: string }>; range: Range; severity?: number; message: string; source?: string; code?: string | number };
+export type Diagnostic = { relatedInformation?: Array<{ location: SourceLocation; message: string }>; range: Range; severity?: number; message: string; source?: string; code?: string | number;
+  data?: { verum?: { notes?: string[]; help?: string[] } };
+};
+
+export function diagnosticContext(doc: Document, diagnostic: Diagnostic): HTMLElement | null {
+  const evidence = diagnostic.data?.verum;
+  if (!evidence) return null;
+  const context = doc.createElement('dl');
+  context.className = 'diagnostic-context';
+  for (const [title, messages] of [[m('Context'), evidence.notes], [m('Suggested action'), evidence.help]] as const) {
+    if (!Array.isArray(messages)) continue;
+    const lines = messages.filter(message => typeof message === 'string' && message.trim());
+    if (!lines.length) continue;
+    const term = doc.createElement('dt'); term.textContent = t(title); context.append(term);
+    for (const message of lines) {
+      const detail = doc.createElement('dd'); detail.textContent = message; context.append(detail);
+    }
+  }
+  return context.childElementCount ? context : null;
+}
 export type RecordMember = { name: string; selection_range: Range; annotation: { source: string; range: Range }; depends_on: number[] | null };
 export type ArchitectureAnnotation = {
   attribute: { source: string; range: Range };
