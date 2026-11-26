@@ -141,7 +141,7 @@ implement AeadState {
 
     /// Compute the per-record nonce: iv XOR pad64(seq, 12).
     fn per_record_nonce(&self) -> [Byte; 12] {
-        let mut nonce: [Byte; 12] = self.iv.clone();
+        let mut nonce: [Byte; 12] = self.iv;
         // seq is right-aligned: XOR into the last 8 bytes.
         nonce[ 4] = nonce[ 4] ^ ((self.seq >> 56) & 0xFF_u64) as Byte;
         nonce[ 5] = nonce[ 5] ^ ((self.seq >> 48) & 0xFF_u64) as Byte;
@@ -238,8 +238,8 @@ implement AeadState {
             return Result.Err(Tls13RecordError.CiphertextTooShort);
         }
 
-        let aad = &record[..5];
-        let ciphertext = &record[5..];
+        let aad = record[..5];
+        let ciphertext = record[5..];
 
         let nonce = self.per_record_nonce();
         let inner = aead_open(

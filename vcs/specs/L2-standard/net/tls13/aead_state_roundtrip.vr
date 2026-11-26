@@ -15,8 +15,8 @@
 //     failure → Tls13RecordError.AeadFailure.
 //   * Non-ApplicationData outer type → BadContentType.
 
-mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
+mount core.encoding.hex.{encode};
 mount core.net.tls13.cipher_suite.{AeadKind};
 mount core.net.tls13.record.content_type.{ContentType};
 mount core.net.tls13.record.aead.{AeadState, Tls13RecordError};
@@ -41,6 +41,23 @@ fn make_iv() -> [Byte; 12] {
     let mut i: Int = 0;
     while i < 12 { iv[i] = (0xC0_u8 | (i as Byte)); i = i + 1; }
     iv
+}
+
+fn successive_record_nonces_preserve_the_static_iv() {
+    let mut tx = AeadState.new(AeadKind.Aes128Gcm, make_key_16(), make_iv());
+    let payload: [Byte; 3] = [0x48_u8, 0x49_u8, 0x50_u8];
+    let expected: List<Text> = [
+        "1703030014f206c9ba824dbf503e8583d504c8bdcccef52774",
+        "17030300146b0bac5c37c1ff933a7d105e51a7dc4bfc89c419",
+        "1703030014db83ea12c239bb4b949987f37461b65afda62ac9",
+    ];
+    let mut i: Int = 0;
+    while i < expected.len() {
+        let wire = tx.seal(&payload, ContentType.ApplicationData, 0).unwrap();
+        assert(encode(wire.as_slice()) == expected[i]);
+        i = i + 1;
+    }
+    assert(tx.seq() == 3_u64);
 }
 
 fn aes128_gcm_seal_open_roundtrip() {
@@ -116,6 +133,10 @@ fn tampered_tag_fails_open() {
         Err(Tls13RecordError.AeadFailure) => {},
         _ => panic("tampered tag must reject"),
     }
+    assert(rx.seq() == 0_u64);
+    wire[last] = wire[last] ^ 0x01_u8;
+    let _ = rx.open(wire.as_slice()).unwrap();
+    assert(rx.seq() == 1_u64);
 }
 
 fn wrong_key_fails_open() {
@@ -163,6 +184,7 @@ fn short_ciphertext_is_rejected() {
 
 @main
 public fn main() -> Int {
+    successive_record_nonces_preserve_the_static_iv();
     aes128_gcm_seal_open_roundtrip();
     chacha20_poly1305_roundtrip();
     seq_increments_monotonic_v8();

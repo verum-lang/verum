@@ -14,8 +14,8 @@
 //   * reseed_for_hrr replaces the cumulative hash with
 //     `message_hash(hash(CH1))` per the HRR transcript folding rule.
 
-mount core.*;
-mount core.collections.List;
+mount core.collections.list.{List};
+mount core.encoding.hex.{encode};
 mount core.net.tls13.cipher_suite.{HashKind};
 mount core.net.tls13.handshake.transcript.{Transcript};
 
@@ -27,6 +27,20 @@ fn bytes_eq(a: &[Byte], b: &[Byte]) -> Bool {
         i = i + 1;
     }
     true
+}
+
+fn snapshots_own_the_digest_bytes() {
+    let abc: [Byte; 3] = [0x61_u8, 0x62_u8, 0x63_u8];
+    let mut sha256 = Transcript.new(HashKind.Sha256);
+    sha256.append(&abc);
+    let mut first = sha256.snapshot();
+    assert(encode(first.as_slice()) == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+    first[0] = first[0] ^ 0xff_u8;
+    assert(encode(sha256.snapshot().as_slice()) == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+
+    let mut sha384 = Transcript.new(HashKind.Sha384);
+    sha384.append(&abc);
+    assert(encode(sha384.snapshot().as_slice()) == "cb00753f45a35e8bb5a03d699ac65007272c32ab0eded1631a8b605a43ff5bed8086072ba1e7cc2358baeca134c825a7");
 }
 
 fn empty_transcript_sha256_has_32_byte_snapshot() {
@@ -109,6 +123,7 @@ fn reseed_for_hrr_changes_hash() {
 
 @main
 public fn main() -> Int {
+    snapshots_own_the_digest_bytes();
     empty_transcript_sha256_has_32_byte_snapshot();
     empty_transcript_sha384_has_48_byte_snapshot();
     hash_kind_survives_append();

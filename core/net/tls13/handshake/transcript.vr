@@ -73,10 +73,18 @@ implement Transcript {
     /// consuming the hasher. Returned as a byte vector so both hash
     /// sizes (32 / 48) fit behind a uniform type.
     public fn snapshot(&self) -> List<Byte> {
+        let mut digest: List<Byte> = [];
         match self {
-            Transcript.Sha256Tr(h) => h.clone().finalize().to_list(),
-            Transcript.Sha384Tr(h) => h.clone().finalize().to_list(),
-        }
+            Transcript.Sha256Tr(h) => {
+                let bytes = h.clone().finalize();
+                digest.extend_from_slice(&bytes);
+            },
+            Transcript.Sha384Tr(h) => {
+                let bytes = h.clone().finalize();
+                digest.extend_from_slice(&bytes);
+            },
+        };
+        digest
     }
 
     /// Re-seed for post-HelloRetryRequest transcript (RFC 8446 §4.4.1):
