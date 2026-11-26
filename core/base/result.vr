@@ -13,7 +13,7 @@
     lifecycle: Lifecycle.Definition
 )
 module core.base.result;
-mount core.base.memory.replace;
+mount core.base.memory.{Heap, replace};
 
 // Import types from other core modules
 mount core.base.maybe.{Maybe, Some, None};
