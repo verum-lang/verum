@@ -40,6 +40,7 @@
 )
 module core.verify.kernel_v0.judgment;
 
+mount core.base.primitives.*;
 mount core.prelude.{Heap, List, Maybe, Text};
 mount super.core_term.{
     CoreTerm, abstraction, application, application_type, is_strictly_positive, lifted,

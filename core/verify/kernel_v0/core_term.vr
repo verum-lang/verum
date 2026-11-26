@@ -51,6 +51,7 @@
 )
 module core.verify.kernel_v0.core_term;
 
+mount core.base.primitives.*;
 mount core.prelude.{Clone, Heap, Maybe};
 
 /// **Minimal CoC term** — the bootstrap kernel's inductive type.
