@@ -12,7 +12,7 @@
 //  sqlite3_set_last_insert_rowid(…) → void
 //
 
-// The 32-bit variants truncate via the standard cast (`as Int`).
+// Use the 64-bit accessors for counts outside the signed C int range.
 // =============================================================================
 
 @arch_module(
@@ -22,29 +22,28 @@
 )
 module core.database.sqlite.native.changes.engine;
 
-mount base.{Bool};
 mount core.database.sqlite.native.changes.counter.{
     ChangeCounter,
 };
 
 public fn sqlite3_changes(c: &ChangeCounter) -> Int {
-    c.statement_changes as Int
+    (c.last_statement_rows() as Int32) as Int
 }
 
 public fn sqlite3_changes64(c: &ChangeCounter) -> Int64 {
-    c.statement_changes
+    c.last_statement_rows()
 }
 
 public fn sqlite3_total_changes(c: &ChangeCounter) -> Int {
-    c.total_changes as Int
+    (c.total_rows() as Int32) as Int
 }
 
 public fn sqlite3_total_changes64(c: &ChangeCounter) -> Int64 {
-    c.total_changes
+    c.total_rows()
 }
 
 public fn sqlite3_last_insert_rowid(c: &ChangeCounter) -> Int64 {
-    c.last_insert_rowid
+    c.last_rowid()
 }
 
 public fn sqlite3_set_last_insert_rowid(c: &mut ChangeCounter, rowid: Int64) {

@@ -25,11 +25,17 @@ public type ChangeSnapshot is {
 
 public fn snapshot_of(c: &ChangeCounter) -> ChangeSnapshot {
     ChangeSnapshot {
-        statement_changes: c.statement_changes,
-        total_changes: c.total_changes,
-        last_insert_rowid: c.last_insert_rowid,
-        version: c.version,
+        statement_changes: c.last_statement_rows(),
+        total_changes: c.total_rows(),
+        last_insert_rowid: c.last_rowid(),
+        version: c.revision(),
     }
+}
+
+implement ChangeSnapshot {
+    public fn last_statement_rows(&self) -> Int64 { self.statement_changes }
+    public fn total_rows(&self) -> Int64 { self.total_changes }
+    public fn last_rowid(&self) -> Int64 { self.last_insert_rowid }
 }
 
 /// True iff `after` records more mutations than `before`.

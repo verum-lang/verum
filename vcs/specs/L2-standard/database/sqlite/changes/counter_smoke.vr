@@ -1,4 +1,4 @@
-// @test: typecheck-pass
+// @test: run-interpreter
 // @tier: 0
 // @level: L2
 // @tags: sqlite, changes, counter, capi
@@ -57,12 +57,40 @@ fn test_changes64_matches_statement_field() {
     assert_eq(sqlite3_changes64(&c), 7 as Int64);
 }
 
-fn test_start_statement_zeroes_local() {
+fn test_completed_dml_and_auxiliary_writes() {
     let mut c = new_counter();
-    c.record_statement(4_i64);
-    c.start_statement();
+    c.record_insert(7_i64);
+    c.record_statement_with_auxiliary(1_i64, 2_i64);
+    let observed = snapshot_of(&c);
+    assert_eq(observed.last_statement_rows(), 1_i64);
+    assert_eq(observed.total_rows(), 3_i64);
+    assert_eq(observed.last_rowid(), 7_i64);
+    assert_eq(sqlite3_changes(&c), 1);
+    assert_eq(sqlite3_total_changes(&c), 3);
+    assert(!advanced(&observed, &snapshot_of(&c)));
+
+    c.record_statement(0_i64);
     assert(is_noop(&c));
-    assert_eq(sqlite3_total_changes(&c), 4);
+    assert_eq(sqlite3_total_changes64(&c), 3_i64);
+    assert_eq(observed.last_statement_rows(), 1_i64);
+    sqlite3_set_last_insert_rowid(&mut c, -9_i64);
+    assert_eq(observed.last_rowid(), 7_i64);
+    assert_eq(sqlite3_last_insert_rowid(&c), -9_i64);
+    let after = snapshot_of(&c);
+    assert(advanced(&observed, &after));
+    assert_eq(total_delta(&observed, &after), 0_i64);
+}
+
+fn test_wide_counts_and_connection_isolation() {
+    let mut c = new_counter();
+    let other = new_counter();
+    c.record_statement(2147483647_i64);
+    assert_eq(sqlite3_changes(&c), 2147483647);
+    assert_eq(sqlite3_total_changes(&c), 2147483647);
+    c.record_statement(2147483648_i64);
+    assert_eq(sqlite3_changes64(&c), 2147483648_i64);
+    assert_eq(sqlite3_total_changes64(&c), 4294967295_i64);
+    assert_eq(sqlite3_total_changes64(&other), 0_i64);
 }
 
 fn main() {
@@ -71,5 +99,6 @@ fn main() {
     test_last_insert_rowid_overrides();
     test_snapshot_diff_reports_delta();
     test_changes64_matches_statement_field();
-    test_start_statement_zeroes_local();
+    test_completed_dml_and_auxiliary_writes();
+    test_wide_counts_and_connection_isolation();
 }

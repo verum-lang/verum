@@ -6,7 +6,7 @@
 //
 
 // Counters are always stored as Int64 internally; the 32-bit accessors
-// in `engine` truncate.
+// in `engine` use the C int width.
 //
 
 //  * `statement_changes` — changes from the most recent INSERT/UPDATE/
@@ -44,29 +44,38 @@ public fn new_counter() -> ChangeCounter {
 }
 
 implement ChangeCounter {
-    /// Called by the VDBE at the end of a DML statement. Overwrites
-    /// statement_changes, folds into total_changes, bumps version.
+    public(in core.database.sqlite.native.changes) fn last_statement_rows(&self) -> Int64 { self.statement_changes }
+    public(in core.database.sqlite.native.changes) fn total_rows(&self) -> Int64 { self.total_changes }
+    public(in core.database.sqlite.native.changes) fn last_rowid(&self) -> Int64 { self.last_insert_rowid }
+    public(in core.database.sqlite.native.changes) fn revision(&self) -> Int64 { self.version }
+
+    /// Record a completed DML statement with no auxiliary changes.
     public fn record_statement(&mut self, changes: Int64) {
+        self.record_statement_with_auxiliary(changes, 0_i64);
+    }
+
+    /// Include trigger and foreign-key writes in the total. Exclude rows
+    /// deleted by REPLACE constraint resolution from both counts.
+    public fn record_statement_with_auxiliary(&mut self, changes: Int64, auxiliary_rows: Int64) {
+        assert(changes >= 0_i64 && auxiliary_rows >= 0_i64, "negative SQLite row count");
+        assert(changes <= Int64.MAX - self.total_changes, "SQLite total changes exceed Int64");
+        let new_total = self.total_changes + changes;
+        assert(auxiliary_rows <= Int64.MAX - new_total, "SQLite total changes exceed Int64");
         self.statement_changes = changes;
-        self.total_changes = self.total_changes + changes;
+        self.total_changes = new_total + auxiliary_rows;
         self.version = self.version + 1_i64;
     }
 
-    /// Called by the VDBE when an INSERT into a rowid table commits.
+    /// Record a successful insert into a rowid table, including one
+    /// in a transaction that is rolled back later.
     public fn record_insert(&mut self, rowid: Int64) {
-        self.last_insert_rowid = rowid;
-        self.version = self.version + 1_i64;
+        self.override_last_insert_rowid(rowid);
     }
 
     /// Explicit override — matches sqlite3_set_last_insert_rowid.
     public fn override_last_insert_rowid(&mut self, rowid: Int64) {
         self.last_insert_rowid = rowid;
         self.version = self.version + 1_i64;
-    }
-
-    /// Reset statement-local counter at the start of a new statement.
-    public fn start_statement(&mut self) {
-        self.statement_changes = 0 as Int64;
     }
 }
 
