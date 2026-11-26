@@ -52,7 +52,7 @@ implement TagRegistry {
     public fn contains(&self, name: &Text) -> Bool {
         let mut i: Int = 0;
         while i < self.tags.len() {
-            if self.tags.get(i).name == *name { return true; }
+            if self.tags[i].name == *name { return true; }
             i = i + 1;
         }
         false

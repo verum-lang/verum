@@ -98,6 +98,20 @@ fn test_engine_value_fetch_wrong_tag_yields_zero() {
     assert_eq(e.sqlite3_value_pointer(1, &want_wrong), 0 as Int64);
 }
 
+fn test_rebinding_replaces_the_tag_and_handle() {
+    let mut e = new_engine(2);
+    let original = new_tag("carray".clone());
+    let replacement = new_tag("json".clone());
+    assert(e.sqlite3_bind_pointer(2, new_pointer("carray".clone(), 41_i64, true)));
+    assert(e.sqlite3_bind_pointer(2, new_pointer("json".clone(), 73_i64, false)));
+    assert_eq(e.sqlite3_value_pointer(2, &original), 0_i64);
+    assert_eq(e.sqlite3_value_pointer(2, &replacement), 73_i64);
+    assert(!e.clear(3));
+    assert_eq(e.sqlite3_value_pointer(2, &replacement), 73_i64);
+    assert_eq(e.sqlite3_value_pointer(1, &replacement), 0_i64);
+    assert_eq(new_engine(-1).slot_count(), 0);
+}
+
 fn main() {
     test_tag_helpers();
     test_tags_match();
@@ -110,4 +124,5 @@ fn main() {
     test_engine_rejects_out_of_range_index();
     test_engine_clear_zeroes_slot();
     test_engine_value_fetch_wrong_tag_yields_zero();
+    test_rebinding_replaces_the_tag_and_handle();
 }
