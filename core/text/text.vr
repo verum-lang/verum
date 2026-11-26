@@ -1630,12 +1630,11 @@ implement Text {
         if current >= width {
             return self.clone();
         }
-        let fill_byte = fill as Byte;
         let mut res = Text.new();
         let pad_count = width - current;
         let mut i = 0;
         while i < pad_count {
-            res.push_byte(fill_byte);
+            res.push(fill);
             i = i + 1;
         }
         res.push_str(self);
@@ -1648,12 +1647,11 @@ implement Text {
         if current >= width {
             return self.clone();
         }
-        let fill_byte = fill as Byte;
         let mut res = self.clone();
         let pad_count = width - current;
         let mut i = 0;
         while i < pad_count {
-            res.push_byte(fill_byte);
+            res.push(fill);
             i = i + 1;
         }
         res
@@ -1667,20 +1665,19 @@ implement Text {
         if current >= width {
             return self.clone();
         }
-        let fill_byte = fill as Byte;
         let pad_count = width - current;
         let left = pad_count / 2;
         let right = pad_count - left;
         let mut res = Text.new();
         let mut i = 0;
         while i < left {
-            res.push_byte(fill_byte);
+            res.push(fill);
             i = i + 1;
         }
         res.push_str(self);
         i = 0;
         while i < right {
-            res.push_byte(fill_byte);
+            res.push(fill);
             i = i + 1;
         }
         res

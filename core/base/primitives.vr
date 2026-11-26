@@ -79,7 +79,7 @@ implement Int {
     /// the left-aligning twin — the default dispatches on the value's
     /// own type (T0606).
     public fn format_width(self, width: Int, fill: Char) -> Text {
-        self.to_string().pad_left(width, fill)
+        f"{self}".pad_left(width, fill)
     }
 
     /// Minimum value (-2^63).
@@ -847,7 +847,7 @@ implement Float {
     /// the left-aligning twin — the default dispatches on the value's
     /// own type (T0606).
     public fn format_width(self, width: Int, fill: Char) -> Text {
-        self.to_string().pad_left(width, fill)
+        f"{self}".pad_left(width, fill)
     }
 
     /// Minimum finite value.
@@ -1984,7 +1984,7 @@ implement UInt64 {
     /// the left-aligning twin — the default dispatches on the value's
     /// own type (T0606).
     public fn format_width(self, width: Int, fill: Char) -> Text {
-        self.to_string().pad_left(width, fill)
+        f"{self}".pad_left(width, fill)
     }
 
     /// Minimum value (0).
@@ -2196,7 +2196,7 @@ implement UInt32 {
     /// the left-aligning twin — the default dispatches on the value's
     /// own type (T0606).
     public fn format_width(self, width: Int, fill: Char) -> Text {
-        self.to_string().pad_left(width, fill)
+        f"{self}".pad_left(width, fill)
     }
 
     public const MIN: UInt32 = 0;
@@ -2382,7 +2382,7 @@ implement UInt16 {
     /// the left-aligning twin — the default dispatches on the value's
     /// own type (T0606).
     public fn format_width(self, width: Int, fill: Char) -> Text {
-        self.to_string().pad_left(width, fill)
+        f"{self}".pad_left(width, fill)
     }
 
     public const MIN: UInt16 = 0;
@@ -2546,7 +2546,7 @@ implement UInt8 {
     /// the left-aligning twin — the default dispatches on the value's
     /// own type (T0606).
     public fn format_width(self, width: Int, fill: Char) -> Text {
-        self.to_string().pad_left(width, fill)
+        f"{self}".pad_left(width, fill)
     }
 
     public const MIN: UInt8 = 0;
@@ -2708,7 +2708,7 @@ implement UInt128 {
     /// the left-aligning twin — the default dispatches on the value's
     /// own type (T0606).
     public fn format_width(self, width: Int, fill: Char) -> Text {
-        self.to_string().pad_left(width, fill)
+        f"{self}".pad_left(width, fill)
     }
 
     public const MIN: UInt128 = 0;
@@ -2873,7 +2873,7 @@ implement Int8 {
     /// the left-aligning twin — the default dispatches on the value's
     /// own type (T0606).
     public fn format_width(self, width: Int, fill: Char) -> Text {
-        self.to_string().pad_left(width, fill)
+        f"{self}".pad_left(width, fill)
     }
 
     public const MIN: Int8 = -128;
@@ -3047,7 +3047,7 @@ implement Int16 {
     /// the left-aligning twin — the default dispatches on the value's
     /// own type (T0606).
     public fn format_width(self, width: Int, fill: Char) -> Text {
-        self.to_string().pad_left(width, fill)
+        f"{self}".pad_left(width, fill)
     }
 
     public const MIN: Int16 = -32768;
@@ -3222,7 +3222,7 @@ implement Int32 {
     /// the left-aligning twin — the default dispatches on the value's
     /// own type (T0606).
     public fn format_width(self, width: Int, fill: Char) -> Text {
-        self.to_string().pad_left(width, fill)
+        f"{self}".pad_left(width, fill)
     }
 
     public const MIN: Int32 = -2147483648;
@@ -3398,7 +3398,7 @@ implement Int64 {
     /// the left-aligning twin — the default dispatches on the value's
     /// own type (T0606).
     public fn format_width(self, width: Int, fill: Char) -> Text {
-        self.to_string().pad_left(width, fill)
+        f"{self}".pad_left(width, fill)
     }
 
     public const MIN: Int64 = -9223372036854775808;
@@ -3573,7 +3573,7 @@ implement Int128 {
     /// the left-aligning twin — the default dispatches on the value's
     /// own type (T0606).
     public fn format_width(self, width: Int, fill: Char) -> Text {
-        self.to_string().pad_left(width, fill)
+        f"{self}".pad_left(width, fill)
     }
 
     // -2^127
@@ -3738,7 +3738,7 @@ implement ISize {
     /// the left-aligning twin — the default dispatches on the value's
     /// own type (T0606).
     public fn format_width(self, width: Int, fill: Char) -> Text {
-        self.to_string().pad_left(width, fill)
+        f"{self}".pad_left(width, fill)
     }
 
     // On 64-bit platforms (assumed)
@@ -3910,7 +3910,7 @@ implement USize {
     /// the left-aligning twin — the default dispatches on the value's
     /// own type (T0606).
     public fn format_width(self, width: Int, fill: Char) -> Text {
-        self.to_string().pad_left(width, fill)
+        f"{self}".pad_left(width, fill)
     }
 
     public const MIN: USize = 0;
@@ -4072,7 +4072,7 @@ implement Float32 {
     /// the left-aligning twin — the default dispatches on the value's
     /// own type (T0606).
     public fn format_width(self, width: Int, fill: Char) -> Text {
-        self.to_string().pad_left(width, fill)
+        f"{self}".pad_left(width, fill)
     }
 
     public const MIN: Float32 = -3.40282347e+38;
@@ -4282,7 +4282,7 @@ implement Float64 {
     /// the left-aligning twin — the default dispatches on the value's
     /// own type (T0606).
     public fn format_width(self, width: Int, fill: Char) -> Text {
-        self.to_string().pad_left(width, fill)
+        f"{self}".pad_left(width, fill)
     }
 
     public const MIN: Float64 = -1.7976931348623157e+308;

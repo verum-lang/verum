@@ -1,0 +1,49 @@
+mount core.base.primitives.*;
+
+@test
+fn signed_width_preserves_sign_and_magnitude() {
+    assert_eq((-7).format_width(4, '.'), "..-7");
+    assert_eq((-128i8).format_width(5, ' '), " -128");
+    assert_eq((-32768i16).format_width(3, '.'), "-32768");
+    assert_eq((-2147483648i32).format_width(0, '.'), "-2147483648");
+    assert_eq((-9223372036854775808i64).format_width(21, '.'), ".-9223372036854775808");
+    assert_eq((-7isize).format_width(3, '0'), "0-7");
+
+    let minimum: Int128 = -170141183460469231731687303715884105728i128;
+    assert_eq(minimum.format_width(42, '界'), "界界-170141183460469231731687303715884105728");
+    assert_eq(f"{minimum:42}", "  -170141183460469231731687303715884105728");
+}
+
+@test
+fn unsigned_width_preserves_the_high_bit() {
+    assert_eq(255u8.format_width(4, 'λ'), "λ255");
+    assert_eq(65535u16.format_width(5, '.'), "65535");
+    assert_eq(4294967295u32.format_width(-1, '.'), "4294967295");
+    assert_eq(18446744073709551615u64.format_width(21, '.'), ".18446744073709551615");
+    assert_eq(7usize.format_width(3, '0'), "007");
+
+    let maximum: UInt128 = 340282366920938463463374607431768211455u128;
+    assert_eq(maximum.format_width(41, '🞄'), "🞄🞄340282366920938463463374607431768211455");
+    assert_eq(f"{maximum:40}", " 340282366920938463463374607431768211455");
+    assert_eq(18446744073709551617u128.format_width(0, '.'), "18446744073709551617");
+}
+
+@test
+fn float_width_uses_the_default_decimal_representation() {
+    assert_eq((-1.25).format_width(7, '.'), "..-1.25");
+    assert_eq(1.25f32.format_width(6, 'λ'), "λλ1.25");
+    assert_eq(1.25f64.format_width(0, '.'), "1.25");
+}
+
+@test
+fn alignment_preserves_multibyte_fill_and_input() {
+    let text = "é7";
+    assert_eq(Text.pad_left(&text, 4, '界'), "界界é7");
+    assert_eq(Text.pad_right(&text, 4, '界'), "é7界界");
+    assert_eq(Text.pad_center(&text, 5, '🞄'), "🞄é7🞄🞄");
+    assert_eq(Text.pad_left(&text, -1, '界'), "é7");
+    assert_eq(text.pad_right(-1, '界'), "é7");
+    assert_eq(text.center(-1, '界'), "é7");
+    assert_eq("-42".zfill(-1), "-42");
+    assert_eq(text, "é7");
+}

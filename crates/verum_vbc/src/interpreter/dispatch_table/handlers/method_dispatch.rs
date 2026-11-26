@@ -5021,6 +5021,12 @@ fn map_entry_slots(
 #[path = "../../../../tests/unit/map_slot_extent_tests.rs"]
 mod map_slot_extent_tests;
 
+fn text_padding_width(value: Value) -> InterpreterResult<usize> {
+    usize::try_from(value.as_i64().max(0)).map_err(|_| InterpreterError::IntegerOverflow {
+        operation: "text padding width",
+    })
+}
+
 /// Read the capacity of a Text Value, dispatching by representation.
 /// Returns the byte budget the buffer can hold without reallocating.
 ///
@@ -9772,7 +9778,7 @@ pub(super) fn dispatch_primitive_method(
                 // via `as_i64` → `char::from_u32`, NOT via
                 // `extract_string` which fell through to `<value:N>` and
                 // returned '<' as the pad char.
-                let width = state.get_reg(Reg(args.start.0)).as_i64() as usize;
+                let width = text_padding_width(state.get_reg(args.start))?;
                 let pad_char = if args.count > 1 {
                     let pad_arg = state.get_reg(Reg(args.start.0 + 1));
                     let arg = if is_cbgr_ref(&pad_arg) {
@@ -9802,7 +9808,7 @@ pub(super) fn dispatch_primitive_method(
                 }
             }
             "pad_right" | "pad_end" => {
-                let width = state.get_reg(Reg(args.start.0)).as_i64() as usize;
+                let width = text_padding_width(state.get_reg(args.start))?;
                 let pad_char = if args.count > 1 {
                     let pad_arg = state.get_reg(Reg(args.start.0 + 1));
                     let arg = if is_cbgr_ref(&pad_arg) {
@@ -9835,7 +9841,7 @@ pub(super) fn dispatch_primitive_method(
                 // `Text.center(&self, width: Int, fill: Char) -> Text`.
                 // Pads on both sides; extra char (when imbalance) goes
                 // to the right side (matches Python `str.center`).
-                let width = state.get_reg(Reg(args.start.0)).as_i64() as usize;
+                let width = text_padding_width(state.get_reg(args.start))?;
                 let pad_char = if args.count > 1 {
                     let pad_arg = state.get_reg(Reg(args.start.0 + 1));
                     let arg = if is_cbgr_ref(&pad_arg) {
@@ -9869,7 +9875,7 @@ pub(super) fn dispatch_primitive_method(
             "zfill" => {
                 // `Text.zfill(&self, width: Int) -> Text`. Pads with '0'
                 // on the left, preserving leading sign character.
-                let width = state.get_reg(Reg(args.start.0)).as_i64() as usize;
+                let width = text_padding_width(state.get_reg(args.start))?;
                 let char_count = text.chars().count();
                 if char_count >= width {
                     return Ok(Some(alloc_string_value(state, &text)?));
