@@ -71,9 +71,9 @@ fn test_engine_trace_v2_install_then_note() {
     );
     assert(e.is_enabled());
     assert(e.note_event(SQLITE_TRACE_STMT));
-    assert_eq(e.events_delivered, 1 as Int64);
+    assert_eq(e.events_delivered(), 1 as Int64);
     assert(!e.note_event(SQLITE_TRACE_ROW));   // not in mask
-    assert_eq(e.events_dropped, 1 as Int64);
+    assert_eq(e.events_dropped(), 1 as Int64);
 }
 
 fn test_engine_null_callback_disables() {
@@ -91,7 +91,7 @@ fn test_engine_empty_mask_disables() {
 fn test_engine_drops_when_disabled() {
     let mut e = new_engine();
     assert(!e.note_event(SQLITE_TRACE_STMT));
-    assert_eq(e.events_dropped, 1 as Int64);
+    assert_eq(e.events_dropped(), 1 as Int64);
 }
 
 fn main() {

@@ -17,7 +17,7 @@ module core.database.sqlite.native.preupdate_api.value_view;
 
 mount base.{Bool, Maybe, Text};
 mount core.database.sqlite.native.preupdate_api.context.{
-    PreupdateContext,
+    PreupdateContext, sqlite3_preupdate_count,
 };
 
 public type PreupdateValueError is
@@ -72,7 +72,7 @@ public fn validate_old(c: &PreupdateContext, col: Int) -> ValidateResult {
     if !c.has_old_values() {
         return VrErr(PveWrongOp("old requested on INSERT".clone()));
     }
-    if col < 0 || col >= c.n_columns {
+    if col < 0 || col >= sqlite3_preupdate_count(c) {
         return VrErr(PveOutOfRange);
     }
     VrOk
@@ -82,7 +82,7 @@ public fn validate_new(c: &PreupdateContext, col: Int) -> ValidateResult {
     if !c.has_new_values() {
         return VrErr(PveWrongOp("new requested on DELETE".clone()));
     }
-    if col < 0 || col >= c.n_columns {
+    if col < 0 || col >= sqlite3_preupdate_count(c) {
         return VrErr(PveOutOfRange);
     }
     VrOk

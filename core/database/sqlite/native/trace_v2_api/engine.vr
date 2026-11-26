@@ -13,7 +13,7 @@ module core.database.sqlite.native.trace_v2_api.engine;
 
 mount base.{Bool};
 mount core.database.sqlite.native.trace_v2_api.mask.{
-    TraceEventMask, empty_mask, is_empty,
+    TraceEventMask, empty_mask, has, is_empty,
 };
 mount core.database.sqlite.native.trace_v2_api.callback.{
     CallbackSpec, null_spec, is_null,
@@ -54,15 +54,14 @@ implement TraceEngine {
     /// Record an event delivery / drop. `bit` is a single SQLITE_TRACE_*
     /// constant.
     public fn note_event(&mut self, bit: Int) -> Bool {
-        if !self.is_enabled() {
-            self.events_dropped = self.events_dropped + 1_i64;
-            return false;
-        }
-        if (self.mask.bits & bit) == 0 {
+        if is_null(&self.callback) || !has(&self.mask, bit) {
             self.events_dropped = self.events_dropped + 1_i64;
             return false;
         }
         self.events_delivered = self.events_delivered + 1_i64;
         true
     }
+
+    public fn events_delivered(&self) -> Int64 { self.events_delivered }
+    public fn events_dropped(&self) -> Int64 { self.events_dropped }
 }
