@@ -288,6 +288,7 @@ impl TypeChecker {
         scheme: &TypeScheme,
         span: Span,
     ) -> Result<InstantiatedScheme> {
+        self.check_value_declaration_visibility(scheme, span)?;
         let instance = scheme
             .try_instantiate()
             .map_err(|message| TypeError::UniverseBinding { message, span })?;

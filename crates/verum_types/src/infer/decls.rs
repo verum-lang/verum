@@ -5081,7 +5081,7 @@ impl TypeChecker {
                                             .map_err(|message| TypeError::UniverseBinding { message, span: func.span })?;
                                     func_scheme.impl_self_type = Some(self_type.clone());
                                     func_scheme.receiver_kind = Some(crate::core_metadata::ReceiverKind::from_declaration(func));
-                                    checker.record_callable_declaration(&mut func_scheme, func);
+                                    checker.record_inherent_method_declaration(&mut func_scheme, func);
                                     // Record how many ordered vars are impl-level so method-level params
                                     // (e.g., method's own <U>) aren't bound from receiver type args at call time.
                                     func_scheme.impl_var_count = type_param_names.len();
@@ -5222,7 +5222,7 @@ impl TypeChecker {
                                         Some(crate::core_metadata::ReceiverKind::from_declaration(func));
                                     method_scheme.impl_var_count = impl_vars_in_for_type.len();
                                     method_scheme.impl_self_type = Some(self_type.clone());
-                                    checker.record_callable_declaration(&mut method_scheme, func);
+                                    checker.record_inherent_method_declaration(&mut method_scheme, func);
                                     if std::env::var("VERUM_TRACE_METHOD_LOOKUP").is_ok() { eprintln!("[implvc-set] site=decls.rs:5370 count={}", impl_vars_in_for_type.len()); }
 
                                     // Register in inherent_methods map — guarded ONE

@@ -159,6 +159,26 @@ fn incompatible_scalar_glue_is_not_silently_discarded() {
 }
 
 #[test]
+fn aliases_execute_the_selected_inherent_method_body() {
+    let source = r#"
+        module scalar_call;
+        implement UInt8 { fn digit(self, radix: Int) -> Int { (self as Int) * radix } }
+        implement Byte { fn octet(&self) -> Int { 8 } }
+        fn through_byte(value: Byte) -> Int { value.digit(16) }
+        fn through_uint(value: UInt8) -> Int { value.octet() }
+        fn probe() -> Int { through_byte(7_u8) + through_uint(1_u8) }
+    "#;
+    let ast = Parser::new(source).parse_module().unwrap();
+    let module = wire(&codegen().compile_module(&ast).unwrap());
+    let entry = module.functions.iter()
+        .find(|function| module.get_string(function.name)
+            .is_some_and(|name| name == "probe" || name.ends_with(".probe")))
+        .expect("probe entry").id;
+    let mut vm = verum_vbc::interpreter::Interpreter::new(verum_common::Shared::new(module).into_arc());
+    assert_eq!(vm.execute_function(entry).unwrap().as_i64(), 120);
+}
+
+#[test]
 fn scalar_alias_methods_and_associated_metadata_survive_runtime_assembly() {
     let source = r#"
         module callable_carriers;

@@ -22071,14 +22071,20 @@ impl TypeChecker {
         Ok(None)
     }
 
-    /// The lookup order is the exact receiver, its referent, then its supported views.
+    /// Methods may be declared using another spelling of the same builtin.
+    /// Only the registered scalar identity can contribute these owner keys.
     pub(super) fn inherent_method_owners(&self, receiver: &Type) -> List<Text> {
         let mut owners = List::new();
         if let Some(exact) = self.get_exact_type_name(receiver) {
             owners.push(exact);
         }
-        let alternatives = self.get_type_name(receiver)
-            .into_iter()
+        let referent = self.unwrap_reference_type(receiver);
+        let scalar = self.protocol_checker.read().builtin_source_receiver_name(referent);
+        let scalar_owners = scalar.as_deref().into_iter()
+            .flat_map(wkt_names::primitive_identity_spellings)
+            .map(|name| Text::from(*name));
+        let alternatives = self.get_type_name(receiver).into_iter()
+            .chain(scalar_owners)
             .chain(self.get_fallback_type_names(receiver));
         for owner in alternatives {
             if !owners.contains(&owner) {

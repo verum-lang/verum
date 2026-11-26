@@ -956,6 +956,35 @@ fn inherent_calls_must_prove_the_declaring_implementations_conditions() {
 }
 
 #[test]
+fn scalar_receiver_aliases_use_the_methods_of_the_same_language_type() {
+    let modules = [
+        ("demo.numbers", r#"
+            implement UInt8 {
+                public fn digit(&self, radix: Int) -> Int { radix }
+                private fn secret(&self) -> Int { 13 }
+            }
+            implement Byte { public fn octet(&self) -> Int { 8 } }
+        "#),
+        ("demo.foreign", "public type Byte is { public value: Int };"),
+    ];
+    for body in [
+        "fn read(value: &Byte) -> Int { value.digit(16) }",
+        "fn read(value: UInt8) -> Int { value.octet() }",
+    ] {
+        let errors = check(&format!("mount demo.numbers.*; {body}"), &modules);
+        assert!(errors.is_empty(), "{body}: {errors:?}");
+    }
+    for body in [
+        "fn bad(value: Byte) -> Int { value.digit(false) }",
+        "fn bad(value: Byte) -> Int { value.secret() }",
+        "fn bad(value: Int8) -> Int { value.digit(16) }",
+        "mount demo.foreign.Byte as Foreign; fn bad(value: Foreign) -> Int { value.digit(16) }",
+    ] {
+        assert!(!check(&format!("mount demo.numbers.*; {body}"), &modules).is_empty(), "{body}");
+    }
+}
+
+#[test]
 fn a_public_type_alias_uses_its_targets_static_method_owner() {
     let modules = [
         ("demo.model", r#"

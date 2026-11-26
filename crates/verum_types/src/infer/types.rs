@@ -2659,6 +2659,21 @@ fn substitute_refinement_binder(
         }
     }
 
+    /// Inherent members carry their declaring visibility through every receiver spelling.
+    pub(super) fn record_inherent_method_declaration(
+        &self,
+        scheme: &mut crate::context::TypeScheme,
+        function: &verum_ast::decl::FunctionDecl,
+    ) {
+        self.record_callable_declaration(scheme, function);
+        scheme.value_declaration = Some(Shared::new(crate::context::ValueDeclaration {
+            name: function.name.name.clone(),
+            owner: self.current_module_path.clone(),
+            visibility: function.visibility.clone(),
+            constructor_owner: None,
+        }));
+    }
+
     /// Capture source identity and declaration-owned slots before the generic scope is left.
     /// Non-type parameters occupy a slot; implicit parameters occupy none.
     pub(super) fn record_callable_declaration(
