@@ -33,6 +33,8 @@
 )
 module core.cli.types;
 
+mount core.collections.slice.*;
+
 mount core.{Maybe, Result, List, Text, Heap};
 mount core.base.protocols.{Display, Debug, Clone, Eq};
 mount core.cli.error.{ParseError, ParseErrorKind};

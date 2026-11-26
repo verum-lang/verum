@@ -40,6 +40,8 @@
 )
 module core.shell.escape;
 
+mount core.collections.slice.*;
+
 mount core.{Maybe, Result, List, Text};
 mount core.base.protocols.{Display, Debug, Clone, Eq};
 mount core.text.format.{Formatter};
@@ -141,7 +143,7 @@ implement ShellEscape for Int {
 
 implement ShellEscape for Bool {
     fn shell_quote(&self, _flavour: ShellFlavour) -> Text {
-        if *self { "true".into() } else { "false".into() }
+        if *self { "true" } else { "false" }
     }
 }
 
@@ -170,7 +172,7 @@ implement<T: ShellEscape> ShellEscape for Maybe<T> {
     fn shell_quote(&self, flavour: ShellFlavour) -> Text {
         match self {
             Maybe.Some(v) => v.shell_quote(flavour),
-            Maybe.None    => "".into(),
+            Maybe.None    => "",
         }
     }
 }
@@ -233,7 +235,7 @@ implement Escaper {
 
     public fn posix(s: &Text) -> Text {
         if s.is_empty() {
-            return "''".into();
+            return "''";
         }
         // Fast path: argument matches [A-Za-z0-9._/=:+-@-]* — emit verbatim.
         if Escaper.posix_safe_unquoted(s) {
@@ -288,7 +290,7 @@ implement Escaper {
     // logic differs slightly from POSIX.
 
     public fn fish(s: &Text) -> Text {
-        if s.is_empty() { return "''".into(); }
+        if s.is_empty() { return "''"; }
         let mut out = Text.with_capacity(s.len() + 2);
         out.push('\'');
         for ch in s.chars() {
@@ -314,7 +316,7 @@ implement Escaper {
     // points outside quoted runs.
 
     public fn cmd_exe(s: &Text) -> Text {
-        if s.is_empty() { return "\"\"".into(); }
+        if s.is_empty() { return "\"\""; }
         let needs_quoting = Escaper.cmd_needs_quoting(s);
         if !needs_quoting {
             // Still need to caret-escape control metacharacters
