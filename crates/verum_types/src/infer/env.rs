@@ -1782,7 +1782,7 @@ impl TypeChecker {
                     .register_tuple(var_name, element_types.len());
             }
             Type::Array {
-                size: Some(len), ..
+                size: Some(crate::ty::ArrayLength::Known(len)), ..
             } => {
                 // Track fixed-size array for element-by-element initialization
                 self.init_tracker.register_array(var_name, *len);
@@ -2209,7 +2209,7 @@ impl TypeChecker {
     pub(super) fn get_array_size(ty: &Type) -> Option<u64> {
         match ty {
             Type::Array {
-                size: Some(size), ..
+                size: Some(crate::ty::ArrayLength::Known(size)), ..
             } => Some(*size as u64),
             Type::Reference { inner, .. } => Self::get_array_size(inner),
             Type::CheckedReference { inner, .. } => Self::get_array_size(inner),

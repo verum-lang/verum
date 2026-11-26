@@ -318,6 +318,9 @@ fn apply_scoped<'a>(ty: &'a Type, scope: Scope<'a>, max_depth: usize) -> Result<
                 });
                 debug_assert!(values.next().is_none());
                 drop(values);
+                if let Type::Array { size: Some(length), .. } = shape.as_mut() {
+                    length.normalize()?;
+                }
                 match if reduce {
                     reduce_application(*shape)
                 } else {

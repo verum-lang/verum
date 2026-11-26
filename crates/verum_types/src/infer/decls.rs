@@ -3919,7 +3919,7 @@ impl TypeChecker {
                 element: Box::new(
                     self.substitute_placeholders_impl(element, next_depth, resolving),
                 ),
-                size: *size,
+                size: size.clone(),
             },
 
             Slice { element } => Slice {

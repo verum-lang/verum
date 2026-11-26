@@ -1699,7 +1699,7 @@ impl MethodSignature {
             },
             Type::Array { element, size } => Type::Array {
                 element: Box::new(Self::apply_tv_mapping(element, mapping)),
-                size: *size,
+                size: size.clone(),
             },
             _ => ty.clone(),
         }
@@ -7105,7 +7105,7 @@ impl ProtocolChecker {
             ),
             Type::Array { element, size } => Type::Array {
                 element: Box::new(self.apply_substitution(element, substitution)),
-                size: *size,
+                size: size.clone(),
             },
             Type::Slice { element } => Type::Slice {
                 element: Box::new(self.apply_substitution(element, substitution)),
@@ -8652,7 +8652,7 @@ impl ProtocolChecker {
             ),
             Type::Array { element, size } => Type::Array {
                 element: Box::new(self.apply_type_substitution_impl(element, subst, d)),
-                size: *size,
+                size: size.clone(),
             },
             Type::Function {
                 property_requirement,
@@ -9210,7 +9210,7 @@ impl ProtocolChecker {
             },
             Type::Array { element, size } => Type::Array {
                 element: Box::new(self.apply_type_substitution_with_map(element, subst)),
-                size: *size,
+                size: size.clone(),
             },
             Type::Slice { element } => Type::Slice {
                 element: Box::new(self.apply_type_substitution_with_map(element, subst)),
@@ -12169,7 +12169,7 @@ impl ProtocolChecker {
             // Array: substitute in element type
             Type::Array { element, size } => Type::Array {
                 element: Box::new(self.substitute_type_params(element, subst_map)),
-                size: *size,
+                size: size.clone(),
             },
 
             // Slice: substitute in element type

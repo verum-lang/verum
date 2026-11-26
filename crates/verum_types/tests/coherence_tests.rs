@@ -598,10 +598,7 @@ fn test_coherence_array_types() {
 
     let checker = ProtocolChecker::new();
 
-    let array_type = Type::Array {
-        element: Box::new(Type::Int),
-        size: Some(10),
-    };
+    let array_type = Type::array(Type::Int, Some(10));
 
     let impl1 = make_impl("Show", array_type.clone(), Some("crate1"));
     let impl2 = make_impl("Show", array_type, Some("crate2"));

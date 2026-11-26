@@ -1,0 +1,15 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L1
+// @tags: generics, const-generics, arrays, borrow
+// @expected-error: E413
+// @expected-error-count: 1
+
+fn extent<const N: Int>(bytes: &mut [Byte; N]) -> Int {
+    bytes.len()
+}
+
+fn main() {
+    let mut nonce: [Byte; 12] = [0_u8; 12];
+    let _ = extent<16>(&mut nonce);
+}

@@ -146,7 +146,7 @@ impl Motive {
             // Array type - substitute in element type
             Type::Array { element, size } => Type::Array {
                 element: Box::new(self.substitute_term_in_type(element, var, term)),
-                size: *size,
+                size: size.clone(),
             },
             // Reference types
             Type::Reference { mutable, inner } => Type::Reference {
@@ -422,7 +422,7 @@ impl Motive {
             ),
             Type::Array { element, size } => Type::Array {
                 element: Box::new(self.substitute_type_in_type(element, var, replacement)),
-                size: *size,
+                size: size.clone(),
             },
             _ => ty.clone(),
         }
@@ -518,7 +518,7 @@ impl ConstructorRefinement {
             ),
             Type::Array { element, size } => Type::Array {
                 element: Box::new(self.substitute_in_type(element, var, replacement)),
-                size: *size,
+                size: size.clone(),
             },
             Type::Reference { mutable, inner } => Type::Reference {
                 inner: Box::new(self.substitute_in_type(inner, var, replacement)),
@@ -1080,7 +1080,7 @@ impl<'a> DependentPatternChecker<'a> {
             ),
             Type::Array { element, size } => Type::Array {
                 element: Box::new(self.substitute_type_params(element, type_args)),
-                size: *size,
+                size: size.clone(),
             },
             Type::Reference { mutable, inner } => Type::Reference {
                 mutable: *mutable,

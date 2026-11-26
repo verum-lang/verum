@@ -77,7 +77,7 @@ fn constant_in_carrier(value: &verum_common::ConstValue, carrier: &Type) -> bool
     }
     if let Some((element, size)) = carrier.sequence_domain() {
         return matches!(value, ConstValue::Array(values)
-            if size.is_none_or(|count| count == values.len())
+            if size.is_none_or(|count| count.known() == Some(values.len()))
                 && values.iter().all(|item| constant_in_carrier(item, element)));
     }
     match (value, carrier) {

@@ -173,7 +173,7 @@ fn test_meta_param_tensor_shape() {
             match *ty {
                 Type::Array { element, size } => {
                     assert_eq!(*element, Type::Int);
-                    assert_eq!(size, Some(2));
+                    assert_eq!(size, Some(verum_types::ty::ArrayLength::Known(2)));
                 }
                 _ => panic!("Expected Array type for tensor shape"),
             }

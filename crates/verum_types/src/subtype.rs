@@ -1086,9 +1086,9 @@ impl Subtyping {
     fn check_array_subtype(
         &self,
         elem1: &Type,
-        size1: &Option<usize>,
+        size1: &Option<crate::ty::ArrayLength>,
         elem2: &Type,
-        size2: &Option<usize>,
+        size2: &Option<crate::ty::ArrayLength>,
     ) -> bool {
         // Sizes must match exactly (invariant)
         if size1 != size2 {

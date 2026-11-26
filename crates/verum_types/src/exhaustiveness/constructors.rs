@@ -161,7 +161,7 @@ pub fn get_type_constructors(ty: &Type, env: &TypeEnv) -> TypeConstructors {
 
         // Array - single constructor with element pattern
         Type::Array { element, size } => {
-            if let Some(n) = size {
+            if let Some(crate::ty::ArrayLength::Known(n)) = size {
                 let args = (0..*n).map(|_| element.as_ref().clone()).collect();
                 TypeConstructors::single(Constructor::with_args("[]", args))
             } else {

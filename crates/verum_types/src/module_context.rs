@@ -1907,10 +1907,7 @@ fn convert_ast_type_to_internal(ast_ty: &verum_ast::ty::Type) -> Type {
             } else {
                 None
             };
-            Type::Array {
-                element: Box::new(elem_type),
-                size: size_val,
-            }
+            Type::array(elem_type, size_val)
         }
 
         // Slice types: [T]

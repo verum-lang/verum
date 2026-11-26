@@ -591,7 +591,7 @@ impl OverlapDetector {
 
             Type::Array { element, size } => Type::Array {
                 element: Box::new(self.apply_subst(element.as_ref(), subst)),
-                size: *size,
+                size: size.clone(),
             },
 
             Type::Reference { inner, mutable } => Type::Reference {

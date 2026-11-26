@@ -412,10 +412,7 @@ fn test_reference_to_tuple_implements_deref() {
 fn test_reference_to_array_implements_deref() {
     let checker = ProtocolChecker::new();
 
-    let array_type = Type::Array {
-        element: Box::new(Type::Int),
-        size: Some(10),
-    };
+    let array_type = Type::array(Type::Int, Some(10));
     let ref_type = Type::Reference {
         mutable: true,
         inner: Box::new(array_type.clone()),

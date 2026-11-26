@@ -185,7 +185,7 @@ fn test_array_type() {
     match array {
         Type::Array { element, size } => {
             assert!(matches!(*element, Type::Int));
-            assert_eq!(size, Some(10));
+            assert_eq!(size, Some(verum_types::ty::ArrayLength::Known(10)));
         }
         _ => panic!("Expected array type"),
     }

@@ -704,7 +704,7 @@ impl TypeChecker {
         } else {
             None
         };
-        Ok(Type::array(elem_ty, array_size))
+        Ok(Type::Array { element: Box::new(elem_ty), size: array_size })
     }
 
     fn ast_to_type_inner(&mut self, ast_ty: &verum_ast::ty::Type, form: ApplicationForm) -> Result<Type> {
@@ -2703,7 +2703,7 @@ fn substitute_refinement_binder(
 
     /// A bare underscore leaves the extent open. Other written counts must
     /// be checked constants or declaration-owned integer parameters.
-    pub(super) fn checked_array_length(&mut self, expr: &Expr) -> Result<Option<usize>> {
+    pub(super) fn checked_array_length(&mut self, expr: &Expr) -> Result<Option<crate::ty::ArrayLength>> {
         let mut leaf = expr;
         let mut depth = 0;
         while let ExprKind::Paren(inner) = &leaf.kind {
@@ -2727,15 +2727,15 @@ fn substitute_refinement_binder(
             && let Some(parameter) = self.lookup_decl_param(name.name.as_str()).cloned()
             && (self.resolving_source_signature || !self.ctx.env.shadows_meta_parameter(name.name.as_str(), &parameter))
         {
-            if let Type::Meta { ty, value: crate::ty::ValueTerm::Parameter(_), .. } = parameter {
-                let carrier = self.normalize_type(&ty);
+            if let Type::Meta { ty, value: crate::ty::ValueTerm::Parameter(_), .. } = &parameter {
+                let carrier = self.normalize_type(ty);
                 let integer = match carrier.base() {
                     Type::Int => true,
                     Type::Named { path, args } if args.is_empty() => path.as_ident()
                         .is_some_and(|name| wkt_names::is_integer_type(name.as_str())),
                     _ => false,
                 };
-                if integer { return Ok(None); }
+                if integer { return Ok(Some(crate::ty::ArrayLength::Value(Box::new(parameter)))); }
             }
             return Err(TypeError::OtherWithCodeSpanned {
                 code: "E400".into(),
@@ -2748,7 +2748,7 @@ fn substitute_refinement_binder(
             msg: format!("array length requires a checked nonnegative constant or an exact declaration-owned integer parameter; compound symbolic lengths are not represented: {error}").into(),
             span: expr.span,
         })?;
-        usize::try_from(value).map(Some).map_err(|_| TypeError::OtherWithCodeSpanned {
+        usize::try_from(value).map(|n| Some(crate::ty::ArrayLength::Known(n))).map_err(|_| TypeError::OtherWithCodeSpanned {
             code: "E400".into(),
             msg: "array length is negative or exceeds the supported size range".into(),
             span: expr.span,
@@ -3717,7 +3717,7 @@ fn substitute_refinement_binder(
             // Array and slice types
             Type::Array { element, size } => Type::Array {
                 element: Box::new(self.substitute_self_type(element, self_ty)),
-                size: *size,
+                size: size.clone(),
             },
             Type::Slice { element } => Type::Slice {
                 element: Box::new(self.substitute_self_type(element, self_ty)),
@@ -4145,7 +4145,7 @@ fn substitute_refinement_binder(
             // Array types
             Type::Array { element, size } => Type::Array {
                 element: Box::new(self.substitute_self_hkt_in_type(element, hkt_name, constructor)),
-                size: *size,
+                size: size.clone(),
             },
 
             // Other types - no substitution needed
@@ -4488,7 +4488,7 @@ fn substitute_refinement_binder(
 
             Array { element, size } => Array {
                 element: Box::new(self.normalize_type_impl(element, depth + 1)),
-                size: *size,
+                size: size.clone(),
             },
 
             Slice { element } => Slice {
@@ -5545,7 +5545,7 @@ fn substitute_refinement_binder(
                 element: Box::new(
                     self.substitute_term_in_type_impl(element, var_name, term, next_depth),
                 ),
-                size: *size,
+                size: size.clone(),
             },
 
             Slice { element } => Slice {

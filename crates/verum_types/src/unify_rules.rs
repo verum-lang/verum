@@ -258,20 +258,44 @@ impl Unifier {
             unreachable!("unification rule selected for different constructors")
         };
 
-        // Array size unification rules:
-        // 1. If both have sizes, they must match exactly
-        // 2. If one has size and the other doesn't, unify with the known size
-        // 3. If neither has size, they unify (both unknown)
-        match (s1, s2) {
-            (Some(n1), Some(n2)) if n1 != n2 => Err(TypeError::ConstMismatch {
+        let lengths = self.unify_array_lengths(s1.as_ref(), s2.as_ref(), span)?;
+        if lengths.is_empty() {
+            return self.unify_inner(e1, e2, span);
+        }
+        let apply = |element: &Type| element.try_apply_subst(&lengths)
+            .map_err(|message| TypeError::UniverseBinding { message, span });
+        let elements = self.unify_inner(&apply(e1)?, &apply(e2)?, span)?;
+        lengths.compose(&elements).map_err(|message| TypeError::UniverseBinding { message, span })
+    }
+
+    fn unify_array_lengths(
+        &mut self,
+        left: Option<&crate::ty::ArrayLength>,
+        right: Option<&crate::ty::ArrayLength>,
+        span: Span,
+    ) -> Result<Substitution> {
+        use crate::ty::ArrayLength::{Known, Value};
+        match (left, right) {
+            (Some(Known(n1)), Some(Known(n2))) if n1 != n2 => Err(TypeError::ConstMismatch {
                 expected: n2.to_string().into(),
                 actual: n1.to_string().into(),
                 span,
             }),
-            _ => {
-                // Either sizes match, or at least one is None
-                self.unify_inner(e1, e2, span)
+            (Some(Value(left)), Some(Value(right))) => self.unify_inner(left, right, span),
+            (Some(Value(value)), Some(Known(n))) | (Some(Known(n)), Some(Value(value))) => {
+                let Type::Meta { ty, .. } = value.as_ref() else {
+                    unreachable!("an array length value is a declaration-owned integer")
+                };
+                let carrier = self.normalize_aliases(ty);
+                let constant = crate::value_parameter_domain::integer_literal_in_carrier(*n as i128, &carrier)
+                    .ok_or_else(|| TypeError::ConstMismatch {
+                        expected: ty.diagnostic_text(),
+                        actual: n.to_string().into(),
+                        span,
+                    })?;
+                self.unify_inner(value, &constant, span)
             }
+            _ => Ok(Substitution::new()),
         }
     }
     pub(super) fn unify_array_application(

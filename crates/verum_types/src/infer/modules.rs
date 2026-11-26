@@ -14326,7 +14326,7 @@ impl TypeChecker {
                 let subst_elem = Box::new(self.substitute_type_vars_impl(element, subst, d));
                 Type::Array {
                     element: subst_elem,
-                    size: *size,
+                    size: size.clone(),
                 }
             }
             Type::Slice { element } => {
@@ -14610,7 +14610,7 @@ impl TypeChecker {
             // Array type: substitute element type
             Type::Array { element, size } => Type::Array {
                 element: Box::new(self.substitute_type_params_impl(element, param_subst, d)),
-                size: *size,
+                size: size.clone(),
             },
             // Slice type: substitute element type
             Type::Slice { element } => Type::Slice {
@@ -16517,7 +16517,7 @@ impl TypeChecker {
             },
             Type::Array { element, size } => Type::Array {
                 element: Box::new(Self::substitute_named_params_in_type(element, subst)),
-                size: *size,
+                size: size.clone(),
             },
             Type::Slice { element } => Type::Slice {
                 element: Box::new(Self::substitute_named_params_in_type(element, subst)),
@@ -16629,7 +16629,7 @@ impl TypeChecker {
             },
             Type::Array { element, size } => Type::Array {
                 element: Box::new(Self::substitute_typevars_in_type(element, subst)),
-                size: *size,
+                size: size.clone(),
             },
             Type::Slice { element } => Type::Slice {
                 element: Box::new(Self::substitute_typevars_in_type(element, subst)),

@@ -1044,7 +1044,7 @@ impl TypeLevelEvaluator {
 
             Type::Array { element, size } => Ok(Type::Array {
                 element: Box::new(self.substitute_meta(element)?),
-                size: *size,
+                size: size.clone(),
             }),
 
             Type::Tuple(elements) => {
@@ -2933,22 +2933,10 @@ mod tests {
     fn test_type_equality_arrays() {
         use super::equality::types_equal;
 
-        let arr1 = Type::Array {
-            element: Box::new(Type::Int),
-            size: Some(10),
-        };
-        let arr2 = Type::Array {
-            element: Box::new(Type::Int),
-            size: Some(10),
-        };
-        let arr3 = Type::Array {
-            element: Box::new(Type::Int),
-            size: Some(20),
-        };
-        let arr4 = Type::Array {
-            element: Box::new(Type::Bool),
-            size: Some(10),
-        };
+        let arr1 = Type::array(Type::Int, Some(10));
+        let arr2 = Type::array(Type::Int, Some(10));
+        let arr3 = Type::array(Type::Int, Some(20));
+        let arr4 = Type::array(Type::Bool, Some(10));
 
         assert!(types_equal(&arr1, &arr2));
         assert!(!types_equal(&arr1, &arr3)); // Different size

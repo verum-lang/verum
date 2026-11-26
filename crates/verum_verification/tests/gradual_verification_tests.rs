@@ -403,10 +403,7 @@ fn test_integration_type_system() {
     ));
 
     // Test arrays containing refined types
-    let array_of_refined = Type::Array {
-        element: Box::new(refined_type),
-        size: Some(10),
-    };
+    let array_of_refined = Type::array(refined_type, Some(10));
     assert!(TypeSystemIntegration::requires_verification(
         &array_of_refined
     ));

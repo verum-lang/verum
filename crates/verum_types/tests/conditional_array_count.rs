@@ -286,7 +286,7 @@ fn checked_array_lengths_keep_nearest_and_explicit_declaration_owners() {
         let result = checker.ast_to_type(&syntax);
         if let Some(expected) = expected {
             let verum_types::ty::Type::Array { size, .. } = result.unwrap() else { panic!("expected array type") };
-            assert_eq!(size, Some(expected), "{scope}: {count}");
+            assert_eq!(size, Some(verum_types::ty::ArrayLength::Known(expected)), "{scope}: {count}");
         } else {
             assert!(matches!(result, Err(verum_types::TypeError::OtherWithCodeSpanned { code, .. }) if code == "E400"), "unknown owner must refuse");
         }

@@ -35,8 +35,11 @@ impl Type {
                     visit(ty);
                 }
             }
-            Type::Array { element, .. }
-            | Type::Slice { element }
+            Type::Array { element, size } => {
+                visit(element);
+                if let Some(super::ArrayLength::Value(value)) = size { visit(value); }
+            }
+            Type::Slice { element }
             | Type::Tensor { element, .. } => visit(element),
             Type::Reference { inner, .. }
             | Type::CheckedReference { inner, .. }
@@ -134,7 +137,10 @@ impl Type {
             Type::Tuple(types) => Type::Tuple(types.iter().map(|t| map(t)).collect()),
             Type::Array { element, size } => Type::Array {
                 element: Box::new(map(element)),
-                size: *size,
+                size: size.as_ref().map(|extent| match extent {
+                    super::ArrayLength::Known(n) => super::ArrayLength::Known(*n),
+                    super::ArrayLength::Value(value) => super::ArrayLength::Value(Box::new(map(value))),
+                }),
             },
             Type::Record(fields) => {
                 Type::Record(fields.iter().map(|(k, v)| (k.clone(), map(v))).collect())

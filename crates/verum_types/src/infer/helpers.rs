@@ -776,14 +776,14 @@ impl TypeChecker {
             // Array with known size: element_size * count
             Type::Array {
                 element,
-                size: Some(count),
+                size: Some(crate::ty::ArrayLength::Known(count)),
             } => {
                 let elem_size = self.calculate_type_size_impl(element, visited)?;
                 Some(elem_size * (*count as u64))
             }
 
             // Array without known size - dynamic, can't determine
-            Type::Array { size: None, .. } => None,
+            Type::Array { .. } => None,
 
             // Slice is fat pointer (ptr + len) — canonical SLICE_FAT_PTR_SIZE.
             Type::Slice { .. } => Some(SLICE_FAT_PTR_SIZE),

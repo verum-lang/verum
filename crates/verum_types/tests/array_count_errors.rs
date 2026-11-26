@@ -68,6 +68,43 @@ fn exact_declared_integer_parameters_remain_supported() {
         "type Shape<N:meta Int> is {values:[Int;N]};",
     ] { accept(&mut checker(), source); }
 }
+
+#[test]
+fn borrowed_array_counts_check_explicit_and_inferred_arguments() {
+    let signature = "fn take<const N:Int>(bytes:&mut [Byte;N])->Int {N}";
+    for call in ["take<12>(&mut bytes)", "take(&mut bytes)"] {
+        accept(&mut checker(), &format!("{signature} fn run(mut bytes:[Byte;12])->Int {{{call}}}"));
+    }
+    let wrong = format!("{signature} fn run(mut bytes:[Byte;12])->Int {{take<16>(&mut bytes)}}");
+    let errors = check(&mut checker(), &wrong);
+    assert!(errors.iter().any(|msg| msg.contains("12") && msg.contains("16")), "{errors:?}");
+}
+
+#[test]
+fn equal_rigid_counts_forward_and_distinct_counts_cannot_unify() {
+    accept(&mut checker(), "fn size<const N:Int>(values:&[Int;N])->Int {N}
+        fn forward<const M:Int>(values:&[Int;M])->Int {size(values)}");
+    let bad = "fn wrong<const N:Int, const M:Int>(values:[Int;N])->[Int;M] {values}";
+    assert!(check(&mut checker(), bad).iter().any(|msg| msg.contains("exact value index")));
+
+    let two = "fn take<const N:Int>(a:&[Int;N],b:&[Int;N])->Int {N}";
+    accept(&mut checker(), &format!("{two} fn same(a:&[Int;2], b:&[Int;2])->Int {{take(a,b)}}"));
+    let errors = check(&mut checker(), &format!("{two} fn mixed(a:&[Int;2],b:&[Int;3])->Int {{take(a,b)}}"));
+    assert!(errors.iter().any(|msg| msg.contains("2") && msg.contains("3")), "{errors:?}");
+}
+
+#[test]
+fn inferred_counts_respect_the_declared_integer_width() {
+    let width = "fn width<N:meta UInt8>(a:&[Int;N])->Int {0}";
+    accept(&mut checker(), &format!("{width} fn small(a:&[Int;12])->Int {{width(a)}}"));
+    let errors = check(&mut checker(), &format!("{width} fn large(a:&[Int;300])->Int {{width(a)}}"));
+    assert!(errors.iter().any(|msg| msg.contains("300") && msg.contains("UInt8")), "{errors:?}");
+}
+
+#[test]
+fn an_unconstrained_repeat_can_use_a_runtime_count() {
+    accept(&mut checker(), "fn repeat(count:Int)->Int {let values=[1;count]; 0}");
+}
 #[test]
 fn non_integer_and_type_parameters_cannot_be_lengths() {
     for source in [

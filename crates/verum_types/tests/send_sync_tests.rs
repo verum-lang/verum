@@ -141,21 +141,12 @@ fn test_array_send_sync_derivation() {
     let derivation = create_derivation(&checker);
 
     // [Int; 10] should be Send + Sync
-    let array = Type::Array {
-        element: Box::new(Type::Int),
-        size: Some(10),
-    };
+    let array = Type::array(Type::Int, Some(10));
     assert!(derivation.is_send(&array), "[Int; 10] should be Send");
     assert!(derivation.is_sync(&array), "[Int; 10] should be Sync");
 
     // Nested arrays
-    let nested_array = Type::Array {
-        element: Box::new(Type::Array {
-            element: Box::new(Type::Bool),
-            size: Some(5),
-        }),
-        size: Some(3),
-    };
+    let nested_array = Type::array(Type::array(Type::Bool, Some(5)), Some(3));
     assert!(
         derivation.is_send(&nested_array),
         "[[Bool; 5]; 3] should be Send"

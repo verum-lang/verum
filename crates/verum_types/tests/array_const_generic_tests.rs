@@ -42,7 +42,7 @@ fn test_array_literal_infers_size() {
     match result.ty {
         Type::Array { element, size } => {
             assert_eq!(*element, Type::float());
-            assert_eq!(size, Some(5), "Array literal should infer size as 5");
+            assert_eq!(size, Some(verum_types::ty::ArrayLength::Known(5)), "Array literal should infer size as 5");
         }
         _ => panic!("Expected Array type, got {:?}", result.ty),
     }
@@ -145,7 +145,7 @@ fn test_array_repeat_syntax() {
     match result.ty {
         Type::Array { element, size } => {
             assert_eq!(*element, Type::int());
-            assert_eq!(size, Some(10), "Array repeat should infer size as 10");
+            assert_eq!(size, Some(verum_types::ty::ArrayLength::Known(10)), "Array repeat should infer size as 10");
         }
         _ => panic!("Expected Array type, got {:?}", result.ty),
     }
@@ -196,7 +196,7 @@ fn test_array_empty() {
     // Check that empty array has size 0
     match result.ty {
         Type::Array { size, .. } => {
-            assert_eq!(size, Some(0), "Empty array should have size 0");
+            assert_eq!(size, Some(verum_types::ty::ArrayLength::Known(0)), "Empty array should have size 0");
         }
         _ => panic!("Expected Array type, got {:?}", result.ty),
     }
@@ -221,7 +221,7 @@ fn test_array_single_element() {
     match result.ty {
         Type::Array { element, size } => {
             assert_eq!(*element, Type::int());
-            assert_eq!(size, Some(1), "Single element array should have size 1");
+            assert_eq!(size, Some(verum_types::ty::ArrayLength::Known(1)), "Single element array should have size 1");
         }
         _ => panic!("Expected Array type, got {:?}", result.ty),
     }

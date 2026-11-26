@@ -1884,10 +1884,7 @@ impl TacticEvaluator {
                     }
                     None
                 });
-                Type::Array {
-                    element: Box::new(self.ast_type_to_type(element)),
-                    size: size_val,
-                }
+                Type::array(self.ast_type_to_type(element), size_val)
             }
             TypeKind::Reference { inner, mutable } => Type::Reference {
                 mutable: *mutable,

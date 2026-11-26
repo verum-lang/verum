@@ -618,7 +618,7 @@ impl<'a> ProjectionResolver<'a> {
                 let normalized_elem = self.normalize(element)?;
                 Ok(Type::Array {
                     element: Box::new(normalized_elem),
-                    size: *size,
+                    size: size.clone(),
                 })
             }
 

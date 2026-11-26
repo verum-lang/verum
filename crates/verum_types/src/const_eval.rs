@@ -1689,7 +1689,7 @@ impl ConstEvaluator {
             }
             Type::Array { element, size } => Ok(Type::Array {
                 element: Box::new(self.eval_meta_type(element)?),
-                size: *size,
+                size: size.clone(),
             }),
             Type::Named { path, args } => {
                 let mut new_args = List::with_capacity(args.len());

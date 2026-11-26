@@ -242,14 +242,8 @@ fn test_array_subtyping_same_size() {
     let s = Subtyping::new();
 
     // [Int; 10] <: [Int; 10]
-    let a1 = Type::Array {
-        element: Box::new(Type::int()),
-        size: Some(10),
-    };
-    let a2 = Type::Array {
-        element: Box::new(Type::int()),
-        size: Some(10),
-    };
+    let a1 = Type::array(Type::int(), Some(10));
+    let a2 = Type::array(Type::int(), Some(10));
 
     assert!(s.is_subtype(&a1, &a2));
 }
@@ -259,14 +253,8 @@ fn test_array_subtyping_different_size_not_subtype() {
     let s = Subtyping::new();
 
     // [Int; 10] </: [Int; 20] (size mismatch)
-    let a1 = Type::Array {
-        element: Box::new(Type::int()),
-        size: Some(10),
-    };
-    let a2 = Type::Array {
-        element: Box::new(Type::int()),
-        size: Some(20),
-    };
+    let a1 = Type::array(Type::int(), Some(10));
+    let a2 = Type::array(Type::int(), Some(20));
 
     assert!(!s.is_subtype(&a1, &a2));
 }
@@ -276,14 +264,8 @@ fn test_array_element_covariance() {
     let s = Subtyping::new();
 
     // Arrays are covariant in element type
-    let a1 = Type::Array {
-        element: Box::new(Type::int()),
-        size: Some(5),
-    };
-    let a2 = Type::Array {
-        element: Box::new(Type::int()),
-        size: Some(5),
-    };
+    let a1 = Type::array(Type::int(), Some(5));
+    let a2 = Type::array(Type::int(), Some(5));
 
     assert!(s.is_subtype(&a1, &a2));
 }
@@ -310,10 +292,7 @@ fn test_array_sized_vs_unsized_not_subtype() {
     let s = Subtyping::new();
 
     // [Int; 10] </: [Int] (sized vs unsized)
-    let a1 = Type::Array {
-        element: Box::new(Type::int()),
-        size: Some(10),
-    };
+    let a1 = Type::array(Type::int(), Some(10));
     let a2 = Type::Array {
         element: Box::new(Type::int()),
         size: None,

@@ -536,7 +536,11 @@ fn hash_type_inner(ty: &Type, hasher: &mut impl Hasher) {
         }
         Type::Array { element, size } => {
             hash_type_inner(element, hasher);
-            size.hash(hasher);
+            match size {
+                Some(crate::ty::ArrayLength::Known(n)) => { 1u8.hash(hasher); n.hash(hasher); }
+                Some(crate::ty::ArrayLength::Value(value)) => { 2u8.hash(hasher); hash_type_inner(value, hasher); }
+                None => 0u8.hash(hasher),
+            }
         }
         Type::Refined { base, .. } => {
             hash_type_inner(base, hasher);

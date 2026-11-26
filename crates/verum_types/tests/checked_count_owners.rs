@@ -97,7 +97,7 @@ fn selected_owner_has_the_exact_declared_count() {
         else {
             panic!("array")
         };
-        assert_eq!(size, Some(expected));
+        assert_eq!(size, Some(verum_types::ty::ArrayLength::Known(expected)));
     }
 }
 
@@ -153,7 +153,7 @@ fn installed_file_scope_keeps_qualified_and_explicit_root_counts() {
             else {
                 panic!("array")
             };
-            assert_eq!(size, Some(3), "{header}: {count}");
+            assert_eq!(size, Some(verum_types::ty::ArrayLength::Known(3)), "{header}: {count}");
         }
     }
 }
@@ -177,7 +177,7 @@ fn a_later_forward_is_not_mistaken_for_the_file_header() {
         let result = checker.ast_to_type(&syntax);
         if let Some(expected) = expected {
             let verum_types::ty::Type::Array { size, .. } = result.unwrap() else { panic!("array") };
-            assert_eq!(size, Some(expected), "{count}");
+            assert_eq!(size, Some(verum_types::ty::ArrayLength::Known(expected)), "{count}");
         } else {
             assert!(matches!(result, Err(verum_types::TypeError::OtherWithCodeSpanned { code, .. }) if code == "E400"), "missing owned count must refuse");
         }

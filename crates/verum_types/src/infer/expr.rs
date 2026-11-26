@@ -938,14 +938,19 @@ impl TypeChecker {
             match arr_expr {
                 verum_ast::expr::ArrayExpr::List(exprs) => {
                     // Check size matches if both are known
-                    if let Some(expected_n) = expected_size {
-                        if expected_n != exprs.len() {
+                    match expected_size {
+                        Some(crate::ty::ArrayLength::Known(n)) if *n != exprs.len() => {
                             return Err(TypeError::Mismatch {
-                                expected: format!("[_; {}]", expected_n).into(),
+                                expected: format!("[_; {n}]").into(),
                                 actual: format!("[_; {}]", exprs.len()).into(),
                                 span: expr.span,
                             });
                         }
+                        Some(crate::ty::ArrayLength::Value(_)) => {
+                            let actual = Type::array(expected_elem.clone(), Some(exprs.len()));
+                            self.unifier.unify(&actual, expected, expr.span)?;
+                        }
+                        _ => {}
                     }
 
                     // Check each element against expected element type
@@ -965,17 +970,23 @@ impl TypeChecker {
                     self.unifier
                         .unify(&count_result.ty, &Type::int(), count.span)?;
 
-                    if let Some(expected_size) = expected_size
-                        && self.checked_array_length(count)? != Some(expected_size)
-                    {
-                        return Err(TypeError::OtherWithCodeSpanned {
-                            code: "E405".into(),
-                            msg: format!(
-                                "array repeat must produce exactly {expected_size} elements"
-                            )
-                            .into(),
-                            span: count.span,
-                        });
+                    if let Some(length) = expected_size {
+                        let size = self.checked_array_length(count)?;
+                        if let crate::ty::ArrayLength::Known(expected) = length
+                            && matches!(size.as_ref(), None | Some(crate::ty::ArrayLength::Known(_)))
+                            && size.as_ref().and_then(crate::ty::ArrayLength::known) != Some(*expected)
+                        {
+                            return Err(TypeError::OtherWithCodeSpanned {
+                                code: "E405".into(),
+                                msg: format!("array repeat must produce exactly {expected} elements").into(),
+                                span: count.span,
+                            });
+                        }
+                        let actual = Type::Array {
+                            element: Box::new(expected_elem.clone()),
+                            size,
+                        };
+                        self.unifier.unify(&actual, expected, count.span)?;
                     }
                     Ok(InferResult::new(expected.clone()))
                 }
@@ -9810,19 +9821,10 @@ impl TypeChecker {
                 self.unifier
                     .unify(&count_result.ty, &Type::int(), count.span)?;
 
-                // Meta system: unified compile-time computation via "meta fn", "meta" parameters, @derive macros, tagged literals, all under single "meta" concept — Evaluate count at compile time for size
-                let array_size = match self.const_eval.eval_source(count, self.current_module_path.as_str(), !self.resolving_source_signature, &self.ctx.env.unavailable_constant_names()) {
-                    Ok(const_val) => {
-                        // Successfully evaluated to constant
-                        const_val.as_u128().map(|n| n as usize)
-                    }
-                    Err(_) => {
-                        // Not a compile-time constant, size remains None
-                        None
-                    }
-                };
-
-                Ok(InferResult::new(Type::array(elem_result.ty, array_size)))
+                // A repeat without a fixed expectation may use a runtime count.
+                // A constant or an exact value parameter gives it a static extent.
+                let size = self.checked_array_length(count).ok().flatten();
+                Ok(InferResult::new(Type::Array { element: Box::new(elem_result.ty), size }))
             }
         }
     }

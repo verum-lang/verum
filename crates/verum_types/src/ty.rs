@@ -44,6 +44,40 @@ pub enum ValueTerm {
     Inference(ValueId),
     Constant(verum_common::ConstValue),
 }
+
+/// A written array count. An absent count is the open extent `_`.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ArrayLength {
+    Known(usize),
+    /// The declaration's integer value binder, freshened with its enclosing type.
+    Value(Box<Type>),
+}
+
+impl ArrayLength {
+    pub fn known(&self) -> Option<usize> {
+        match self {
+            Self::Known(n) => Some(*n),
+            Self::Value(_) => None,
+        }
+    }
+
+    /// Substitution can turn the declared value into a concrete count.
+    fn normalize(&mut self) -> Result<(), Text> {
+        let Self::Value(parameter) = self else { return Ok(()); };
+        let Type::Meta { value, .. } = parameter.as_ref() else {
+            return Err("array length must refer to an integer value parameter".into());
+        };
+        if let ValueTerm::Constant(constant) = value {
+            let count = match constant {
+                verum_common::ConstValue::Int(n) => usize::try_from(*n).ok(),
+                verum_common::ConstValue::UInt(n) => usize::try_from(*n).ok(),
+                _ => None,
+            }.ok_or_else(|| Text::from("array length must be a representable nonnegative integer"))?;
+            *self = Self::Known(count);
+        }
+        Ok(())
+    }
+}
 #[path = "value_constant_identity.rs"]
 mod value_constant_identity;
 pub(crate) use value_constant_identity::same_constant_identity;
@@ -516,7 +550,7 @@ pub enum Type {
     /// Array type with size: [T; N]
     Array {
         element: Box<Type>,
-        size: Option<usize>,
+        size: Option<ArrayLength>,
     },
 
     /// Slice type: [T] (dynamically-sized view)
@@ -1833,7 +1867,7 @@ impl Type {
     pub fn array(element: Type, size: Option<usize>) -> Self {
         Type::Array {
             element: Box::new(element),
-            size,
+            size: size.map(ArrayLength::Known),
         }
     }
 
@@ -1900,9 +1934,9 @@ impl Type {
         }
     }
 
-    pub(crate) fn sequence_domain(&self) -> Option<(&Type, Option<usize>)> {
+    pub(crate) fn sequence_domain(&self) -> Option<(&Type, Option<&ArrayLength>)> {
         match self {
-            Self::Array { element, size } => Some((element, *size)),
+            Self::Array { element, size } => Some((element, size.as_ref())),
             Self::Slice { element } => Some((element, None)),
             _ => None,
         }
@@ -2562,8 +2596,11 @@ impl Type {
                     ty.collect_type_variables(vars, include_bound, remaining_depth)?;
                 }
             }
-            Type::Array { element, .. } => {
+            Type::Array { element, size } => {
                 element.collect_type_variables(vars, include_bound, remaining_depth)?;
+                if let Some(ArrayLength::Value(value)) = size {
+                    value.collect_type_variables(vars, include_bound, remaining_depth)?;
+                }
             }
             Type::Record(fields) => {
                 for ty in fields.values() {
@@ -3037,10 +3074,13 @@ impl fmt::Display for TypeDisplay<'_> {
                 write!(f, ")")
             }
             Type::Array { element, size } => {
-                if let Some(n) = size {
-                    write!(f, "[{}; {}]", self.child(element), n)
-                } else {
-                    write!(f, "[{}]", self.child(element))
+                match size {
+                    Some(ArrayLength::Known(n)) => write!(f, "[{}; {n}]", self.child(element)),
+                    Some(ArrayLength::Value(value)) => match value.as_ref() {
+                        Type::Meta { name, .. } => write!(f, "[{}; {name}]", self.child(element)),
+                        other => write!(f, "[{}; {}]", self.child(element), self.child(other)),
+                    },
+                    None => write!(f, "[{}]", self.child(element)),
                 }
             }
             // Slice represents an unsized array type [T], NOT a reference &[T]

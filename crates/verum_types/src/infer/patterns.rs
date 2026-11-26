@@ -227,7 +227,7 @@ impl TypeChecker {
                         let elem_var = Type::Var(crate::ty::TypeVar::fresh());
                         let array_ty = Type::Array {
                             element: Box::new(elem_var.clone()),
-                            size: Some(patterns.len()),
+                            size: Some(crate::ty::ArrayLength::Known(patterns.len())),
                         };
                         self.unifier.unify(value_ty, &array_ty, span)?;
                         elem_var
@@ -2423,7 +2423,7 @@ impl TypeChecker {
                 //
                 // A `..` rest pattern means "and the others", so a
                 // pattern containing one is checked as a LOWER bound.
-                if let Type::Array { size: Some(n), .. } = &effective_ty {
+                if let Type::Array { size: Some(crate::ty::ArrayLength::Known(n)), .. } = &effective_ty {
                     let has_rest = patterns
                         .iter()
                         .any(|p| matches!(p.kind, verum_ast::PatternKind::Rest));
@@ -2481,7 +2481,7 @@ impl TypeChecker {
                 // `Slice`, not `Array`, so the two forms take two arms.
                 // Recorded as unreached in that commit rather than
                 // guessed at; this is where it lives.
-                if let Type::Array { size: Some(n), .. } = &effective_ty {
+                if let Type::Array { size: Some(crate::ty::ArrayLength::Known(n)), .. } = &effective_ty {
                     let bound = before.len() + after.len();
                     if bound > *n {
                         return Err(TypeError::OtherWithCodeSpanned {

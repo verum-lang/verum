@@ -411,10 +411,7 @@ fn test_variance_with_array() {
     let param = make_param("T", Variance::Covariant);
 
     let t_var = make_type_param("T");
-    let body = Type::Array {
-        element: Box::new(t_var),
-        size: Some(10),
-    };
+    let body = Type::array(t_var, Some(10));
 
     let inferred = checker.infer_variance(&param, &body);
     assert_eq!(inferred, Variance::Covariant);

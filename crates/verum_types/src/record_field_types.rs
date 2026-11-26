@@ -57,7 +57,11 @@ macro_rules! push_type_children {
                 $stack.push(constructor);
                 $stack.extend(args);
             }
-            Type::Array { element, .. } | Type::Slice { element }
+            Type::Array { element, size } => {
+                $stack.push(element);
+                if let Some(super::ArrayLength::Value(value)) = size { $stack.push(value); }
+            }
+            Type::Slice { element }
             | Type::Tensor { element, .. } => $stack.push(element),
             Type::Record(fields) | Type::Variant(fields)
             | Type::ExtensibleRecord { fields, .. } => {

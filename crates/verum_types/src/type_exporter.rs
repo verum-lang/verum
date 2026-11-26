@@ -782,13 +782,16 @@ impl BinaryWriter {
                 self.write_u8(TAG_ARRAY);
                 self.write_type(element)?;
                 match size {
-                    Some(n) => {
+                    Some(crate::ty::ArrayLength::Known(n)) => {
                         self.write_bool(true);
                         self.write_u32(u32::try_from(*n).map_err(|_| {
                             ExportError("array size exceeds the wire range".into())
                         })?);
                     }
                     None => self.write_bool(false),
+                    Some(crate::ty::ArrayLength::Value(_)) => return Err(ExportError(
+                        "a symbolic array extent requires declaration-owned semantic replay".into(),
+                    )),
                 }
             }
 
@@ -1191,10 +1194,7 @@ impl<'a> BinaryReader<'a> {
                 } else {
                     None
                 };
-                Some(Type::Array {
-                    element: Box::new(element),
-                    size,
-                })
+                Some(Type::array(element, size))
             }
 
             TAG_SLICE => {

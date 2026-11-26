@@ -1013,20 +1013,11 @@ mod specialization_overlap {
     fn test_overlap_detection_array_types() {
         let detector = OverlapDetector::new();
 
-        let arr1 = Type::Array {
-            element: Box::new(Type::Int),
-            size: Some(5),
-        };
-        let arr2 = Type::Array {
-            element: Box::new(Type::Int),
-            size: Some(5),
-        };
+        let arr1 = Type::array(Type::Int, Some(5));
+        let arr2 = Type::array(Type::Int, Some(5));
         assert!(detector.check_overlap(&arr1, &arr2).is_some());
 
-        let arr3 = Type::Array {
-            element: Box::new(Type::Int),
-            size: Some(10),
-        };
+        let arr3 = Type::array(Type::Int, Some(10));
         assert!(detector.check_overlap(&arr1, &arr3).is_none()); // Different sizes
 
         let arr4 = Type::Array {

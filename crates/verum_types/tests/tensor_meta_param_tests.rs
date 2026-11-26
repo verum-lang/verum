@@ -233,7 +233,7 @@ fn test_array_with_computed_size() {
     match result.ty {
         verum_types::ty::Type::Array { element, size } => {
             assert_eq!(*element, verum_types::ty::Type::Int);
-            assert_eq!(size, Some(5));
+            assert_eq!(size, Some(verum_types::ty::ArrayLength::Known(5)));
         }
         _ => panic!("Expected Array type"),
     }
@@ -256,7 +256,7 @@ fn test_tensor_shape_with_meta_param() {
             match *ty {
                 Type::Array { element, size } => {
                     assert_eq!(*element, Type::Int);
-                    assert_eq!(size, Some(2));
+                    assert_eq!(size, Some(verum_types::ty::ArrayLength::Known(2)));
                 }
                 _ => panic!("Expected Array type"),
             }

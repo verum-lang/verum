@@ -511,21 +511,20 @@ pub fn convert_internal_to_ast(ty: &InternalType) -> Type {
 
         // Array and slice types
         InternalType::Array { element, size } => {
-            use verum_ast::expr::ExprKind;
-            use verum_ast::literal::{IntLit, Literal, LiteralKind};
-
-            let size_maybe = if let Some(s) = size {
-                let size_expr = Expr::new(
-                    ExprKind::Literal(Literal {
-                        kind: LiteralKind::Int(IntLit::new(*s as i128)),
-                        span: Span::dummy(),
-                    }),
-                    Span::dummy(),
-                );
-                verum_common::Maybe::Some(verum_common::Heap::new(size_expr))
-            } else {
-                verum_common::Maybe::None
-            };
+            let size_maybe = size.as_ref().map(|length| {
+                let span = Span::dummy();
+                let expr = match length {
+                    crate::ty::ArrayLength::Known(n) =>
+                        Expr::literal(verum_ast::literal::Literal::int(*n as i128, span)),
+                    crate::ty::ArrayLength::Value(value) => {
+                        let InternalType::Meta { name, .. } = value.as_ref() else {
+                            unreachable!("a symbolic extent is an integer value parameter")
+                        };
+                        Expr::ident(verum_ast::Ident::new(name.clone(), span))
+                    }
+                };
+                verum_common::Heap::new(expr)
+            });
             Type {
                 kind: TypeKind::Array {
                     element: verum_common::Heap::new(convert_internal_to_ast(element)),

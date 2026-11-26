@@ -1148,7 +1148,7 @@ impl Unifier {
                 self.try_expand_alias_impl(element, depth + 1)
                     .map(|element| Type::Array {
                         element: Box::new(element),
-                        size: *size,
+                        size: size.clone(),
                     })
             }
             Type::Slice { element } => {
@@ -3474,7 +3474,7 @@ impl Unifier {
             // Array types
             Type::Array { element, size } => Type::Array {
                 element: Box::new(Self::rename_bound_var(element, from, to)),
-                size: *size,
+                size: size.clone(),
             },
 
             // Slice types

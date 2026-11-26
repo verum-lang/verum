@@ -2027,10 +2027,7 @@ mod tests {
 
     #[test]
     fn lift_types_type_array_recurses_into_element() {
-        let ty = TypesType::Array {
-            element: Box::new(TypesType::Bool),
-            size: Some(8),
-        };
+        let ty = TypesType::array(TypesType::Bool, Some(8));
         match super::lift_types_type_to_core(&ty) {
             CoreTerm::Var(name) => assert_eq!(name.as_str(), "Bool"),
             other => panic!("expected Var(Bool), got {:?}", other),
