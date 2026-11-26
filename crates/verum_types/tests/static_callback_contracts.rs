@@ -7,6 +7,16 @@ fn errors(source: &str) -> List<Text> {
     errors_with_provider(source, None)
 }
 
+#[test]
+fn mutually_recursive_functions_can_be_used_as_synchronous_callbacks() {
+    let source = "fn odd(n:Int)->Bool {if n<=0 {false} else {even(n-1)}}
+        fn even(n:Int)->Bool {if n<=0 {true} else {odd(n-1)}}
+        fn apply(predicate:fn(Int)->Bool,n:Int)->Bool {predicate(n)}
+        fn run()->Bool {apply(even,10)}";
+    let found = errors(source);
+    assert!(found.is_empty(), "{found:?}");
+}
+
 fn errors_with_provider(source: &str, provider: Option<&str>) -> List<Text> {
     let ast = Parser::new(source).parse_module().unwrap();
     let mut checker = TypeChecker::new();
