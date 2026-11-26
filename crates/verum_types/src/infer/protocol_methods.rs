@@ -658,13 +658,8 @@ impl TypeChecker {
             .filter(|other| !other.is_negative && checker.same_associated_owner(other, bound))
             .cloned().collect();
         drop(checker);
-        let premises = [crate::protocol::WhereClause { ty: receiver.clone(), bounds: selected }];
-        self.resolve_call_output_projections(&signature, &super::call_obligations::CallProjectionScope {
-            declaration: &premises,
-            caller: Some(&premises),
-            arguments: &crate::ty::Substitution::new(),
-            span,
-        })
+        let premise = crate::protocol::WhereClause { ty: receiver.clone(), bounds: selected };
+        self.resolve_bounded_method_signature(&signature, &premise, span)
     }
 
     /// Freshen method-local quantifiers only. The owner's arguments may be

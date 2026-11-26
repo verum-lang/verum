@@ -52,6 +52,20 @@ fn bounded_method_signatures_use_the_selected_receivers_item() {
 }
 
 #[test]
+fn method_local_projection_remains_bound_to_the_method_argument() {
+    let declarations = "type Port is protocol { type Error; };
+        type Dispatch is protocol { fn send<P: Port>(&self, port: &mut P) -> P.Error; };
+        type Parse<T> is protocol { type Error; };
+        type Token is {}; implement Parse<Int> for Token { type Error = Bool; }
+        implement Parse<Bool> for Token { type Error = Int; }";
+    let caller = "fn send<D: Dispatch, P: Port>(d: &D, port: &mut P) -> P.Error { d.send(port) }";
+    let findings = errors(&format!("{declarations} {caller}"));
+    assert!(findings.is_empty(), "{findings:#?}");
+    let wrong = caller.replace("-> P.Error", "-> Bool");
+    assert!(!errors(&format!("{declarations} {wrong}")).is_empty());
+}
+
+#[test]
 fn abstract_projection_is_not_any_concrete_type() {
     let item = projection("Item", Type::Var(TypeVar::fresh()));
     for other in [Type::Bool, Type::Int, Type::Text, Type::Unit] {

@@ -6,6 +6,12 @@
 //! - Block and statement-level inference (`infer_block`, `check_block`)
 //! - Iterative inference for deeply-nested expressions (`synth_expr_iterative`)
 
+#[derive(Clone, Copy)]
+enum MethodProjection<'a> {
+    Implementation(&'a Type, &'a verum_ast::Path),
+    ReceiverBound(&'a crate::protocol::WhereClause),
+}
+
 #[allow(unused_imports)]
 use crate::const_eval::ConstEvaluator;
 #[allow(unused_imports)]
@@ -6600,8 +6606,18 @@ impl TypeChecker {
     pub(super) fn resolve_method_output_projections(
         &self, ty: &Type, receiver: &Type, protocol: &verum_ast::Path,
     ) -> Type {
-        self.resolve_assoc_projections_in_scope(ty, Some((receiver, protocol)), None, 0)
+        self.resolve_assoc_projections_in_scope(ty, Some(MethodProjection::Implementation(receiver, protocol)), None, 0)
             .unwrap_or_else(|_| ty.clone())
+    }
+
+    pub(super) fn resolve_bounded_method_signature(
+        &self, ty: &Type, premise: &crate::protocol::WhereClause, span: verum_ast::Span,
+    ) -> Result<Type> {
+        self.resolve_assoc_projections_in_scope(ty, Some(MethodProjection::ReceiverBound(premise)), None, 0)
+            .map_err(|error| match error {
+                TypeError::Other(msg) => TypeError::OtherWithCodeSpanned { code: "E405".into(), msg, span },
+                other => other,
+            })
     }
 
     pub(super) fn resolve_call_output_projections(
@@ -6619,7 +6635,7 @@ impl TypeChecker {
     fn resolve_assoc_projections_in_scope(
         &self,
         ty: &Type,
-        selected: Option<(&Type, &verum_ast::Path)>,
+        selected: Option<MethodProjection<'_>>,
         call: Option<&super::call_obligations::CallProjectionScope<'_>>,
         depth: usize,
     ) -> Result<Type> {
@@ -6698,7 +6714,19 @@ impl TypeChecker {
             };
             let checker = self.protocol_checker.read();
             let found = match selected {
-                Some((receiver, protocol)) if arguments.is_empty()
+                Some(MethodProjection::ReceiverBound(premise)) => {
+                    // A method-local parameter has its own telescope and may
+                    // still be unbound when the receiver selects this method.
+                    // Only projections of this receiver belong to its bound.
+                    let premises = std::slice::from_ref(premise);
+                    if checker.types_structurally_equal(&premise.ty, base)
+                        && checker.associated_projection_owner(base, &assoc, premises).map_err(TypeError::Other)?.is_some()
+                    {
+                        checker.resolve_associated_family(base, &assoc, &arguments, premises)
+                            .map_err(TypeError::Other)?.map(|application| application.result)
+                    } else { None }
+                }
+                Some(MethodProjection::Implementation(receiver, protocol)) if arguments.is_empty()
                     && checker.types_structurally_equal(receiver, base) =>
                     checker.resolve_selected_method_association(base, protocol, &assoc),
                 _ if call.is_some() || !arguments.is_empty() => checker.resolve_associated_family(
@@ -6727,11 +6755,11 @@ impl TypeChecker {
             Type::Record(fields) | Type::Variant(fields) if selected.is_some() || call.is_some() => {
                 for field in fields.values_mut() { *field = nested(field)?; }
             }
-            Type::Function { params, return_type, .. } if call.is_some() => {
+            Type::Function { params, return_type, .. } if call.is_some() || matches!(selected, Some(MethodProjection::ReceiverBound(_))) => {
                 *params = params.iter().map(nested).collect::<Result<_>>()?;
                 **return_type = nested(return_type)?;
             }
-            Type::TypeApp { constructor, args } if call.is_some() => {
+            Type::TypeApp { constructor, args } if call.is_some() || matches!(selected, Some(MethodProjection::ReceiverBound(_))) => {
                 **constructor = nested(constructor)?;
                 *args = args.iter().map(nested).collect::<Result<_>>()?;
             }
