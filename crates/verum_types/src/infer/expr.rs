@@ -10846,7 +10846,27 @@ impl TypeChecker {
         use ExprKind::*;
         let ExprKind::Comprehension { expr, clauses } = &current_expr.kind else { unreachable!() };
         self.ctx.enter_scope();
+        let element = self.infer_comprehension_element(expr, clauses);
+        self.ctx.exit_scope();
+        let element = element?;
+        // Comprehensions construct the language's list carrier even when a
+        // user declaration shadows its short name.
+        let name = WKT::List.as_str();
+        let owner = WKT::List.canonical_archive_modules()[0];
+        let key = Self::source_type_declaration_key(owner, name);
+        let ty = if self.ctx.lookup_type(&key).is_some()
+            || self.resolve_qualified_source_type_with_parameter_key(&key, current_expr.span)?.is_some()
+        {
+            Type::Named { path: Self::text_to_path(&key), args: List::from_iter([element]) }
+        } else {
+            Type::list(element)
+        };
+        Ok(InferResult::new(ty))
+    }
 
+    fn infer_comprehension_element(
+        &mut self, expr: &Expr, clauses: &[verum_ast::expr::ComprehensionClause],
+    ) -> Result<Type> {
         // Process each clause to introduce bindings
         for clause in clauses.iter() {
             use verum_ast::expr::ComprehensionClauseKind;
@@ -10891,13 +10911,7 @@ impl TypeChecker {
             }
         }
 
-        // Type check the output expression
-        let elem_result = self.synth_expr(expr)?;
-
-        self.ctx.exit_scope();
-
-        // Result is a List<T> where T is the type of the output expression
-        Ok(InferResult::new(Type::list(elem_result.ty)))
+        Ok(self.synth_expr(expr)?.ty)
     }
 
     fn infer_expr_stream_comprehension(&mut self, current_expr: &Expr) -> Result<InferResult> {

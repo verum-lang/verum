@@ -49,12 +49,13 @@ module core.math.graph;
 // name resolved to nothing and every `Edge` field access fell through to the
 // positional GUESS path (T0723).
 mount core.collections.graph.{Edge, UEdge};
+mount core.collections.adjacency_list.AdjacencyList;
 mount core.math.category.{Category, Functor};
 mount core.math.simplicial.{SimplicialSet, Simplex};
 mount core.math.algebra.{Semiring};
 mount core.math.topology.{TopologicalSpace, ConnectedSpace, PathConnectedSpace};
 mount core.math.linalg.{Matrix, Vector, EigenDecomposition, eigh};
-mount core.base.protocols.{Eq, Ord};
+mount core.base.protocols.{Add, Clone, Eq, Hash, Ord, Zero};
 
 // =============================================================================
 // §1. Directed edges and walks
@@ -119,6 +120,43 @@ public type Graph<V, L> is protocol {
     axiom truncation(n: Int{>= 2})
         ensures n >= 2;
 };
+
+// =============================================================================
+// AdjacencyList adapter: the protocol layer owns this dependency
+// =============================================================================
+
+implement<V: Eq + Hash + Clone, L: Clone> Graph<V, L> for AdjacencyList<V, L> {
+    fn vertices(&self) -> List<V> {
+        self.vertices_ref().clone()
+    }
+
+    fn edges(&self) -> List<Edge<V, L>> {
+        [edge.clone() for vertex in self.vertices_ref().iter()
+            for edge in self.out_edges_ref(vertex).expect("vertex has no adjacency entry").iter()]
+    }
+
+    fn out_edges(&self, v: &V) -> List<Edge<V, L>> {
+        match self.out_edges_ref(v) {
+            Maybe.Some(edges) => edges.clone(),
+            Maybe.None => List.new(),
+        }
+    }
+
+    fn in_edges(&self, v: &V) -> List<Edge<V, L>> {
+        [edge.clone() for vertex in self.vertices_ref().iter()
+            for edge in self.out_edges_ref(vertex).expect("vertex has no adjacency entry").iter()
+            if edge.tgt == *v]
+    }
+
+    fn degree(&self, v: &V) -> Int{>= 0} {
+        match self.out_edges_ref(v) {
+            Maybe.Some(edges) => edges.len(),
+            Maybe.None => 0,
+        }
+    }
+
+    proof truncation by trivial;
+}
 
 /// An undirected graph is a directed graph whose edge relation is
 /// symmetric — for every edge `u → v` there is a matching `v → u`.
@@ -242,7 +280,7 @@ public type DAG<V, L> is protocol extends Graph<V, L> {
 /// most once, provided the graph's `out_edges` and vertex-equality
 /// operations are O(1).
 public fn bfs<V, L, G>(g: &G, start: V) -> List<V>
-    where type G: Graph<V, L>, type V: Eq
+    where type G: Graph<V, L>, type V: Eq + Clone
 {
     let mut visited: List<V> = List.new();
     let mut frontier: List<V> = List.new();
@@ -274,7 +312,7 @@ public fn bfs<V, L, G>(g: &G, start: V) -> List<V>
 
 /// Complexity: O(|V| + |E|) with O(1) vertex equality.
 public fn dfs<V, L, G>(g: &G, start: V) -> List<V>
-    where type G: Graph<V, L>, type V: Eq
+    where type G: Graph<V, L>, type V: Eq + Clone
 {
     let mut visited: List<V> = List.new();
     let mut stack: List<V> = List.new();
@@ -302,7 +340,7 @@ public fn dfs<V, L, G>(g: &G, start: V) -> List<V>
 /// in the free category on `g` has source `start` and target `v`.
 /// Implemented as BFS membership.
 public fn reachable<V, L, G>(g: &G, start: V, target: V) -> Bool
-    where type G: Graph<V, L>, type V: Eq
+    where type G: Graph<V, L>, type V: Eq + Clone
 {
     let visited = bfs(g, start);
     visited.contains(&target)
@@ -328,7 +366,7 @@ public fn euler_characteristic<V, L, G>(g: &G) -> Int
 
 /// Complexity: O(|V| + |E|) total across all components.
 public fn connected_components<V, L, G>(g: &G) -> List<List<V>>
-    where type G: UndirectedGraph<V, L>, type V: Eq
+    where type G: UndirectedGraph<V, L>, type V: Eq + Clone
 {
     let verts = g.vertices();
     let mut seen: List<V> = List.new();
@@ -357,7 +395,7 @@ public fn connected_components<V, L, G>(g: &G) -> List<List<V>>
 
 /// Complexity: O(|V| + |E|) with O(1) vertex equality.
 public fn topological_sort<V, L, G>(g: &G) -> List<V>
-    where type G: DAG<V, L>, type V: Eq
+    where type G: DAG<V, L>, type V: Eq + Clone
 {
     // in_degree[v] = number of unprocessed predecessors of v.
     let verts = g.vertices();
@@ -433,8 +471,8 @@ public fn topological_sort<V, L, G>(g: &G) -> List<V>
 /// instead of true shortest paths.
 public fn dijkstra<V, W, G>(g: &G, start: V) -> Map<V, W>
     where type G: Graph<V, W>,
-          type V: Eq,
-          type W: Ord + Add<W, Output = W> + Zero
+          type V: Eq + Hash + Clone,
+          type W: Ord + Clone + Add<W, Output = W> + Zero
 {
     let mut dist: Map<V, W> = Map.new();
     let mut visited: List<V> = List.new();
@@ -473,14 +511,14 @@ public fn dijkstra<V, W, G>(g: &G, start: V) -> Map<V, W>
                 // Relax: dist[u] is the shortest path so far to u
                 // (Dijkstra invariant: once visited, dist[u] is final
                 // for non-negative edge weights).
-                let dist_u = dist.get(&u).expect("u in dist by selection").clone();
+                let dist_u = dist.get(u.clone()).expect("u in dist by selection");
                 for edge in g.out_edges(&u).iter() {
                     let tgt = edge.tgt.clone();
                     let w = edge.label.clone();
                     let candidate = dist_u.clone().add(w);
-                    let should_update = match dist.get(&tgt) {
+                    let should_update = match dist.get(tgt.clone()) {
                         Maybe.None => true,
-                        Maybe.Some(existing) => candidate < *existing,
+                        Maybe.Some(existing) => candidate < existing,
                     };
                     if should_update {
                         dist.insert(tgt, candidate);
@@ -521,16 +559,16 @@ public fn laplacian_matrix<V, G>(g: &G) -> Matrix<Float>
 
     let mut l: Matrix<Float> = Matrix.zeros(n, n);
     for i in 0..n {
-        let row: &List<Float> = adj.get(i);
+        let row = &adj[i];
         assert(row.len() == n, "adjacency row length must match matrix size");
         for j in 0..n {
-            let a_ij: Float = row.get(j);
+            let a_ij = row[j];
             if i == j {
                 // Diagonal = degree − self-loop weight. For graphs
                 // without self-loops `a_ii = 0`, so this reduces to
                 // `deg[i]`; keeping the subtraction makes the
                 // definition correct on multigraphs too.
-                l.set(i, i, deg.get(i) - a_ij);
+                l.set(i, i, deg[i] - a_ij);
             } else {
                 l.set(i, j, -a_ij);
             }
@@ -587,7 +625,7 @@ public fn algebraic_connectivity<V, G>(g: &G) -> Float
     // `eigh` returns values in descending order, so the two smallest
     // eigenvalues sit at the end of the list. We return the
     // penultimate entry — the Fiedler value.
-    spectrum.get(n - 2)
+    spectrum[n - 2]
 }
 
 // =============================================================================

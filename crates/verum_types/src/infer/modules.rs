@@ -21709,13 +21709,13 @@ impl TypeChecker {
         let protocol_method_result = self
             .protocol_checker
             .read()
-            .lookup_protocol_method_with_type_param_names(&recv_ty, &method_name_text);
+            .lookup_implementation_method(recv_ty, &method_name_text);
         #[cfg(debug_assertions)]
         if method.name.as_str() == "next" {
             // #[cfg(debug_assertions)]
             // eprintln!("[DEBUG fallback_protocol_method] lookup_protocol_method returned: {:?}", protocol_method_result);
         }
-        if let Ok(Maybe::Some((raw_method_ty, method_type_param_names))) =
+        if let Ok(Maybe::Some((raw_method_ty, method_type_param_names, receiver_kind))) =
             protocol_method_result
         {
             // Freshen method-level type parameters to avoid sharing TypeVars across call sites.
@@ -21751,7 +21751,8 @@ impl TypeChecker {
                 }
 
                 let resolved_return = self.unifier.apply(return_type);
-                return Ok(Some(InferResult::new(resolved_return)));
+                self.type_registry.register_call_target(span, method_ty.clone());
+                return Ok(Some(InferResult::method(resolved_return, receiver_kind)));
             }
         }
 
@@ -22050,9 +22051,9 @@ impl TypeChecker {
         // Find a protocol that declares `method` AND has an impl applicable to
         // the concrete receiver.  Resolve the concrete signature within the
         // read guard, then drop it before the &mut-self arg checking below.
-        let concrete_method_ty: Option<Type> = {
+        let selected = {
             let pc = self.protocol_checker.read();
-            let mut found: Option<Type> = None;
+            let mut found = None;
             // Do NOT gate on proto.methods.contains_key — From/Default proto
             // methods can be sparse; consult each applicable impl's own methods.
             for proto in pc.all_protocols() {
@@ -22067,7 +22068,9 @@ impl TypeChecker {
                         proto.methods.get(&method_name).map(|pm| pm.ty.clone())
                     });
                     if let Some(raw_ty) = raw_ty {
-                        found = Some(raw_ty.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?);
+                        let ty = raw_ty.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?;
+                        let receiver = pc.implementation_receiver_kind(impl_, &method_name, proto.methods.get(&method_name));
+                        found = Some((ty, receiver));
                         break;
                     }
                 }
@@ -22075,7 +22078,7 @@ impl TypeChecker {
             found
         };
 
-        let Some(method_ty) = concrete_method_ty else {
+        let Some((method_ty, receiver)) = selected else {
             return Ok(None);
         };
 
@@ -22096,7 +22099,8 @@ impl TypeChecker {
                 }
                 let subst_return = self.unifier.apply(return_type);
                 let normalized = self.normalize_type(&subst_return);
-                return Ok(Some(InferResult::new(normalized)));
+                self.type_registry.register_call_target(span, method_ty.clone());
+                return Ok(Some(InferResult::method(normalized, receiver)));
             }
         }
         Ok(None)

@@ -10617,11 +10617,11 @@ impl ProtocolChecker {
     ///
     /// The caller can then create fresh TypeVars for these method-level type params
     /// to avoid sharing the same TypeVar across multiple call sites.
-    pub fn lookup_protocol_method_with_type_param_names(
+    pub(crate) fn lookup_implementation_method(
         &self,
         ty: &Type,
         method_name: &Text,
-    ) -> Result<Maybe<(Type, List<Text>)>, ProtocolError> {
+    ) -> Result<Maybe<(Type, List<Text>, Option<ReceiverKind>)>, ProtocolError> {
         let impls = self.get_implementations(ty);
 
         for impl_ in impls.iter() {
@@ -10632,28 +10632,30 @@ impl ProtocolChecker {
                     continue;
                 };
 
-                // Find the protocol definition to get method-level type_param_names
-                let protocol_name = impl_
-                    .protocol
-                    .as_ident()
-                    .map(|id| id.name.clone())
-                    .unwrap_or_default();
-                let type_param_names =
-                    if let Maybe::Some(protocol) = self.get_protocol(&protocol_name) {
-                        if let Some(proto_method) = protocol.methods.get(method_name) {
-                            proto_method.type_param_names.clone()
-                        } else {
-                            List::new()
-                        }
-                    } else {
-                        List::new()
-                    };
-
-                return Ok(Maybe::Some((result_ty, type_param_names)));
+                let declaration = self.lookup_protocol(&impl_.protocol)
+                    .and_then(|protocol| protocol.methods.get(method_name));
+                let names = declaration.map(|method| method.type_param_names.clone()).unwrap_or_default();
+                let receiver = self.implementation_receiver_kind(impl_, method_name, declaration);
+                return Ok(Some((result_ty, names, receiver)));
             }
         }
 
         Ok(Maybe::None)
+    }
+
+    pub(crate) fn implementation_receiver_kind(
+        &self, implementation: &ProtocolImpl, name: &Text, declaration: Option<&ProtocolMethod>,
+    ) -> Option<ReceiverKind> {
+        let declared = declaration.and_then(ProtocolMethod::receiver_kind);
+        let implemented = self.method_source_for_implementation(implementation, name)
+            .and_then(|(_, source, index)| match &source.items[index].kind {
+                verum_ast::decl::ImplItemKind::Function(function) => Some(ReceiverKind::from_declaration(function)),
+                _ => None,
+            });
+        match (declared, implemented) {
+            (Some(left), Some(right)) if left != right => None,
+            (left, right) => left.or(right),
+        }
     }
 
     /// Look up all protocol methods with a given name for a type.
