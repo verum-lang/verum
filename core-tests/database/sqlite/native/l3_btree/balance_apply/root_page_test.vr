@@ -1,0 +1,107 @@
+module core.database.sqlite.native.l3_btree.tests.root_page;
+mount core.collections.list.List;
+mount core.encoding.hex.decode;
+mount core.database.sqlite.native.l3_btree.balance.{BalanceDecision, balance_context_new};
+mount core.database.sqlite.native.l3_btree.balance_apply.{PageBuf, apply_balance_decision, page_buf};
+
+// These fixtures retain SQLite's live header, pointers and single CREATE
+// TABLE row on 512-byte pages. Free space is zero-filled. Distinct eight-byte
+// trailers identify each physical page across a root change.
+fn append_hex(out: &mut List<Byte>, text: Text) {
+    for b in decode(&text).unwrap() { out.push(b); }
+}
+
+fn pad(out: &mut List<Byte>, length: Int, item: Byte) {
+    while out.len() < length { out.push(item); }
+}
+
+fn schema_root() -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    append_hex(&mut out, "53514c69746520666f726d617420330002000101084020200000000400000003");
+    append_hex(&mut out, "0000000000000000000000020000000400000000000000000000000100000000");
+    pad(&mut out, 92, 0 as Byte);
+    append_hex(&mut out, "00000004002e99b1050000000001f80000000003");
+    pad(&mut out, 504, 0 as Byte);
+    append_hex(&mut out, "a0a1a2a3a4a5a6a7");
+    out
+}
+
+fn schema_child(large: Bool) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    if large {
+        append_hex(&mut out, "0d00000001003f00003f");
+        pad(&mut out, 63, 0 as Byte);
+        append_hex(&mut out, "83360107170f0f01865b");
+    } else {
+        append_hex(&mut out, "0d000000010161000161");
+        pad(&mut out, 353, 0 as Byte);
+        append_hex(&mut out, "81140107170f0f018217");
+    }
+    append_hex(&mut out, "7461626c65747402435245415445205441424c452074287620544558542044454641554c542022");
+    pad(&mut out, 502, 0x61 as Byte);
+    append_hex(&mut out, "2229b0b1b2b3b4b5b6b7");
+    out
+}
+
+fn root_and_child(root: List<Byte>, child: List<Byte>) -> List<PageBuf> {
+    let mut pages: List<PageBuf> = List.new();
+    pages.push(page_buf(3, child));
+    pages.push(page_buf(1, root));
+    pages
+}
+
+@test
+fn test_shrink_then_grow_preserves_physical_headers_and_cell_bytes() {
+    let original = schema_root();
+    let child = schema_child(false);
+    let pages = root_and_child(original, child);
+    let ctx = balance_context_new(512, 8);
+    let shrunk = apply_balance_decision(&BalanceDecision.ShrinkRoot(1, -1), &pages, &ctx).unwrap();
+    let (updated, retired, _) = shrunk.into_parts();
+    assert_eq(updated.len(), 1);
+    assert_eq(retired.len(), 1);
+    assert_eq(retired[0], 3);
+    let (number, root_bytes) = updated[0].into_parts();
+    assert_eq(number, 1);
+    assert_eq(root_bytes[100] as Int, 13);
+    let mut i = 0;
+    while i < 100 { assert_eq(root_bytes[i], original[i]); i = i + 1; }
+    i = 353;
+    while i < 504 { assert_eq(root_bytes[i], child[i]); i = i + 1; }
+    i = 504;
+    while i < 512 { assert_eq(root_bytes[i], original[i]); i = i + 1; }
+
+    let mut no_destination: List<PageBuf> = List.new();
+    no_destination.push(page_buf(1, root_bytes));
+    assert(apply_balance_decision(&BalanceDecision.GrowRoot(1, 3), &no_destination, &ctx).is_err());
+    let allocated = root_and_child(root_bytes, child);
+    let grown = apply_balance_decision(&BalanceDecision.GrowRoot(1, 3), &allocated, &ctx).unwrap();
+    let (writes, freed, _) = grown.into_parts();
+    assert_eq(writes.len(), 2);
+    assert_eq(freed.len(), 0);
+    let (root_number, rebuilt_root) = writes[0].into_parts();
+    let (child_number, rebuilt_child) = writes[1].into_parts();
+    assert_eq(root_number, 1);
+    assert_eq(child_number, 3);
+    assert_eq(rebuilt_root, original);
+    assert_eq(rebuilt_child, child);
+}
+
+@test
+fn test_large_child_stays_in_place_and_wrong_child_is_rejected() {
+    let root = schema_root();
+    let child = schema_child(true);
+    let pages = root_and_child(root, child);
+    let ctx = balance_context_new(512, 8);
+    let outcome = apply_balance_decision(&BalanceDecision.ShrinkRoot(1, 3), &pages, &ctx).unwrap();
+    let (writes, freed, _) = outcome.into_parts();
+    assert_eq(writes.len(), 0);
+    assert_eq(freed.len(), 0);
+    assert(apply_balance_decision(&BalanceDecision.ShrinkRoot(1, 4), &pages, &ctx).is_err());
+    let (_, stored_child) = pages[0].into_parts();
+    let (_, stored_root) = pages[1].into_parts();
+    assert_eq(stored_root, root);
+    assert_eq(stored_child, child);
+}
+
+fn main() {}

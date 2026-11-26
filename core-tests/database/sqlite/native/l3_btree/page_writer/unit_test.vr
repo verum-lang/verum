@@ -99,7 +99,7 @@ fn test_payload_limits_and_the_four_byte_overflow_link() {
 }
 
 @test
-fn test_invalid_links_and_reserved_formats_return_errors() {
+fn test_invalid_links_and_cells_in_reserved_space_return_errors() {
     let missing_link = payload_page(PageKind.IndexLeaf, 103, 39, 0 as Byte);
     match materialize_page(&missing_link, 0, &compute_local_payload_budget(512, 0)) {
         Result.Err(PageLayoutError.InvalidCell) => {}
@@ -107,8 +107,8 @@ fn test_invalid_links_and_reserved_formats_return_errors() {
     }
     let ordinary = payload_page(PageKind.TableLeaf, 101, 101, 0 as Byte);
     match materialize_page(&ordinary, 0, &compute_local_payload_budget(512, 8)) {
-        Result.Err(PageLayoutError.UnsupportedReservedSpace(8)) => {}
-        _ => panic("expected reserved-space repacking to be refused"),
+        Result.Err(PageLayoutError.ShortBuffer) => {}
+        _ => panic("expected the cell extending into reserved space to be refused"),
     }
     let page = materialize_page(&ordinary, 0, &compute_local_payload_budget(512, 0)).unwrap();
     match serialize_page(&page, 1024) {

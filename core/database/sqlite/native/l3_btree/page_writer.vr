@@ -29,8 +29,8 @@ module core.database.sqlite.native.l3_btree.page_writer;
 //
 //   * `serialize_page(mp, page_size)` — rebuild the on-disk byte
 //     layout from a MaterializedPage.  Allocates a fresh buffer of
-//     page_size bytes, writes header, packs cell-pointer array
-//     pointing to cell content laid out from page_size downward.
+//     page_size bytes, writes the header, and packs cell content
+//     downward from the end of the usable region.
 //     O(N) where N = cell_count.
 //
 // All functions are PURE — no pager I/O.  Callers (balance_apply.vr)
@@ -93,6 +93,8 @@ public type MaterializedPage is {
     /// Preserved prefix of a materialized page one.
     database_header: List<Byte>,
     source_page_size: Int,
+    usable_size: Int,
+    reserved_tail: List<Byte>,
 }
 
 public fn materialized_page(
@@ -107,6 +109,8 @@ public fn materialized_page(
         db_header_offset: db_header_offset,
         database_header: List.new(),
         source_page_size: 0,
+        usable_size: 0,
+        reserved_tail: List.new(),
     }
 }
 
@@ -176,6 +180,7 @@ implement MaterializedPage {
     public(in core.database.sqlite.native.l3_btree) fn split_right(&mut self, at: Int) -> MaterializedPage {
         let mut right = materialized_page(self.kind, self.right_ptr, 0);
         right.source_page_size = self.source_page_size;
+        right.usable_size = self.usable_size;
         right.cells = self.cells.split_off(at);
         self.right_ptr = 0_u32;
         right
@@ -203,12 +208,54 @@ implement MaterializedPage {
         true
     }
 
-    public(in core.database.sqlite.native.l3_btree) fn empty_parent(&self, child_page: UInt32, db_header_offset: Int) -> MaterializedPage {
-        let kind = match self.kind {
+    fn parent_kind(&self) -> PageKind {
+        match self.kind {
             TableLeaf | TableInterior => TableInterior,
             IndexLeaf | IndexInterior => IndexInterior,
-        };
-        materialized_page(kind, child_page, db_header_offset)
+        }
+    }
+
+    public(in core.database.sqlite.native.l3_btree) fn only_child(&self) -> Maybe<UInt32> {
+        if !page_kind_is_interior(self.kind) || self.cell_count() != 0 { return Maybe.None; }
+        if self.right_ptr < 2_u32 || self.right_ptr == 0xffffffff_u32 { return Maybe.None; }
+        Maybe.Some(self.right_ptr)
+    }
+
+    /// Move the root body to the allocated child and keep fixed bytes at
+    /// their physical page locations. A reserved tail belongs to the supplied
+    /// destination page, including when that page came from the freelist.
+    public(in core.database.sqlite.native.l3_btree) fn grow_into(
+        &mut self, child_page: UInt32, destination: &List<Byte>,
+    ) -> Result<MaterializedPage, PageLayoutError> {
+        let reserved = self.source_page_size - self.usable_size;
+        if destination.len() != self.source_page_size {
+            if destination.len() != 0 { return Result.Err(PageLayoutError.InvalidPageGeometry); }
+            if reserved != 0 { return Result.Err(PageLayoutError.UnsupportedReservedSpace(reserved)); }
+        }
+        let mut child = materialized_page(self.kind, self.right_ptr, 0);
+        child.source_page_size = self.source_page_size;
+        child.usable_size = self.usable_size;
+        let mut pos = self.usable_size;
+        while pos < self.source_page_size {
+            child.reserved_tail.push(destination[pos]);
+            pos = pos + 1;
+        }
+        child.cells = self.cells;
+        self.cells = List.new();
+        self.kind = self.parent_kind();
+        self.right_ptr = child_page;
+        Result.Ok(child)
+    }
+
+    public(in core.database.sqlite.native.l3_btree) fn shrink_from(
+        &mut self, child: MaterializedPage,
+    ) -> Result<Bool, PageLayoutError> {
+        if self.kind != child.parent_kind() { return Result.Err(PageLayoutError.InvalidCell); }
+        if child.storage_cost() > self.usable_size - self.db_header_offset { return Result.Ok(false); }
+        self.kind = child.kind;
+        self.cells = child.cells;
+        self.right_ptr = child.right_ptr;
+        Result.Ok(true)
     }
 
     /// Set right_ptr (interior pages).  No-op for leaves but the
@@ -224,7 +271,7 @@ implement MaterializedPage {
 
 /// Copy the complete on-page cells, in pointer order, using the database's
 /// page size and reserved-byte count. Use offset 100 for page one and zero
-/// for other pages. A nonzero reserved-byte count precludes repacking.
+/// for other pages. Reserved bytes remain at the end of their physical page.
 public fn materialize_page(
     bytes: &List<Byte>,
     db_header_offset: Int,
@@ -232,8 +279,13 @@ public fn materialize_page(
 ) -> Result<MaterializedPage, PageLayoutError> {
     budget.check_repack_size(bytes.len())?;
     if db_header_offset != 0 && db_header_offset != 100 { return Result.Err(PageLayoutError.InvalidPageGeometry); }
-    if db_header_offset == 100 && bytes[20] != (0 as Byte) {
-        return Result.Err(PageLayoutError.UnsupportedReservedSpace(bytes[20] as Int));
+    let usable = budget.usable_bytes();
+    if db_header_offset == 100 {
+        let encoded = ((bytes[16] as Int) << 8) | (bytes[17] as Int);
+        let declared = if encoded == 1 { 65536 } else { encoded };
+        if declared != bytes.len() || bytes[20] as Int != bytes.len() - usable {
+            return Result.Err(PageLayoutError.InvalidPageGeometry);
+        }
     }
     let hdr = match parse_page_header(bytes.as_slice(), db_header_offset) {
         Result.Ok(p)  => p,
@@ -246,18 +298,24 @@ public fn materialize_page(
     let mut mp = materialized_page(hdr.kind(), hdr.right_child(), db_header_offset);
 
     mp.source_page_size = bytes.len();
+    mp.usable_size = usable;
     let mut prefix: Int = 0;
     while prefix < db_header_offset {
         mp.database_header.push(bytes[prefix]);
         prefix = prefix + 1;
     }
+    let mut tail = usable;
+    while tail < bytes.len() {
+        mp.reserved_tail.push(bytes[tail]);
+        tail = tail + 1;
+    }
 
     let first_cell = hdr.content_start();
     let pointer_end = db_header_offset + page_kind_header_size(hdr.kind()) + 2 * pointers.len();
-    if first_cell < pointer_end || first_cell > bytes.len() { return Result.Err(PageLayoutError.InvalidCell); }
+    if first_cell < pointer_end || first_cell > usable { return Result.Err(PageLayoutError.InvalidCell); }
     let mut occupied: List<Bool> = List.new();
     let mut n: Int = first_cell;
-    while n < bytes.len() { occupied.push(false); n = n + 1; }
+    while n < usable { occupied.push(false); n = n + 1; }
     let mut i: Int = 0;
     while i < pointers.len() {
         let cell_off = pointers[i];
@@ -282,9 +340,9 @@ public fn materialize_page(
 // Serialization — MaterializedPage → bytes
 // -----------------------------------------------------------------------------
 
-/// Return the rebuilt page with cell content packed from the end downward.
-/// Preserve the database header on page one and zero unused space between
-/// the cell-pointer array and the packed cells.
+/// Return the rebuilt page with cell content packed from the end of the
+/// usable region. Preserve the fixed prefix and trailer and zero the gap
+/// between the cell-pointer array and the packed cells.
 public fn serialize_page(
     mp: &MaterializedPage,
     page_size: Int,
@@ -292,6 +350,10 @@ public fn serialize_page(
     if mp.source_page_size != 0 && page_size != mp.source_page_size {
         return Result.Err(PageLayoutError.InvalidPageGeometry);
     }
+    if mp.db_header_offset != mp.database_header.len() { return Result.Err(PageLayoutError.InvalidPageGeometry); }
+    let usable = if mp.source_page_size == 0 { page_size } else { mp.usable_size };
+    let reserved = page_size - usable;
+    if mp.reserved_tail.len() != reserved { return Result.Err(PageLayoutError.UnsupportedReservedSpace(reserved)); }
     let hdr_size = page_kind_header_size(mp.kind);
     let n_cells = mp.cells.len();
     let total_cell_bytes = mp.total_cell_bytes();
@@ -300,8 +362,8 @@ public fn serialize_page(
     // Sanity: ensure we fit.  (Header + db_header_offset + ptr_array
     // + cell_content) must fit within page_size.
     let needed = mp.db_header_offset + hdr_size + pointer_array_size + total_cell_bytes;
-    if needed > page_size {
-        return Result.Err(BadCellCount(n_cells as UInt16, page_size / 4));
+    if needed > usable {
+        return Result.Err(BadCellCount(n_cells as UInt16, usable / 4));
     }
 
     // Allocate the output buffer at full page_size + zero-fill.
@@ -317,10 +379,15 @@ public fn serialize_page(
         out[prefix] = mp.database_header[prefix];
         prefix = prefix + 1;
     }
+    let mut tail: Int = 0;
+    while tail < reserved {
+        out[usable + tail] = mp.reserved_tail[tail];
+        tail = tail + 1;
+    }
 
     // 1. Write the page header at db_header_offset.
     let header = PageHeader.packed(
-        mp.kind, n_cells as UInt16, page_size - total_cell_bytes, mp.right_ptr,
+        mp.kind, n_cells as UInt16, usable - total_cell_bytes, mp.right_ptr,
     );
     let hdr_bytes = serialize_page_header(&header);
     let mut hb: Int = 0;
@@ -329,15 +396,10 @@ public fn serialize_page(
         hb = hb + 1;
     }
 
-    // 2. Write cell content from page_size downward.  Cells are
-    //    written in REVERSE order so cell[0]'s content sits at the
-    //    LOWEST offset (which is where cell-content-start points).
-    //    SQLite's convention: pointer array is sorted by key; cell
-    //    contents can be in any order but the dense packing here
-    //    happens to put cell[0]'s content at the highest offset.
-    //    Either layout is spec-compliant.
+    // The pointer array retains logical key order. Pack cell zero nearest
+    // the end of the usable region and subsequent cells at lower offsets.
     let mut cell_offsets: List<Int> = List.new();
-    let mut next_offset: Int = page_size;
+    let mut next_offset: Int = usable;
     let mut i: Int = 0;
     while i < n_cells {
         let cell = &mp.cells[i];

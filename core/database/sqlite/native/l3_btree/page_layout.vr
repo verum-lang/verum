@@ -178,7 +178,7 @@ implement Display for PageLayoutError {
         match self {
             PageLayoutError.ShortBuffer                => f.write_str("sqlite btree page: short buffer"),
             InvalidPageGeometry => f.write_str("sqlite btree: invalid page size or header offset"),
-            UnsupportedReservedSpace(n) => f.write_str(f"sqlite btree: repacking with {n} reserved bytes is unsupported".as_str()),
+            UnsupportedReservedSpace(n) => f.write_str(f"sqlite btree: destination page is missing {n} reserved bytes".as_str()),
             InvalidCell => f.write_str("sqlite btree: invalid cell layout"),
             BadKind(raw)               => f.write_str(f"sqlite btree page: bad kind byte {raw}".as_str()),
             BadCellCount(count, max)   => f.write_str(f"sqlite btree page: bad cell count {count} (max {max})".as_str()),
@@ -489,9 +489,10 @@ implement LocalPayloadBudget {
         if reserved < 0 || reserved > 255 || self.usable_size < 480 {
             return Result.Err(InvalidPageGeometry);
         }
-        if reserved != 0 { return Result.Err(UnsupportedReservedSpace(reserved)); }
         Result.Ok(())
     }
+
+    public(in core.database.sqlite.native.l3_btree) fn usable_bytes(&self) -> Int { self.usable_size }
 
     /// Physical bytes occupied by one cell, including a local overflow link.
     /// The payload-length varint precedes the rowid on table leaves and follows
@@ -510,6 +511,7 @@ implement LocalPayloadBudget {
             Result.Err(_) => return Result.Err(PageLayoutError.ShortBuffer),
         };
         pos = pos + width;
+        if pos > self.usable_size { return Result.Err(PageLayoutError.ShortBuffer); }
         if kind == TableInterior { return Result.Ok(pos - cell_off); }
         let payload_size = first as Int;
         if first < 0_i64 || (payload_size as Int64) != first { return Result.Err(InvalidCell); }

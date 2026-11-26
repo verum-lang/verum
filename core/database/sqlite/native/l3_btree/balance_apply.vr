@@ -321,32 +321,28 @@ fn apply_grow_root(
         Maybe.Some(p) => p,
         Maybe.None    => return Result.Err(InvalidInput("grow_root: old_root missing".clone())),
     };
-    if new_root <= 0 {
-        return Result.Err(InvalidInput("grow_root: new_root must be > 0".clone()));
+    if old_root <= 0 || new_root <= 1 || new_root == old_root || new_root > 4294967294 {
+        return Result.Err(InvalidInput("grow_root: invalid root or allocated child".clone()));
     }
 
-    let old_mp = match materialize_page(&old_buf.bytes, 0, ctx.payload_budget()) {
+    let db_offset = if old_root == 1 { 100 } else { 0 };
+    let mut root = match materialize_page(&old_buf.bytes, db_offset, ctx.payload_budget()) {
         Result.Ok(mp) => mp,
         Result.Err(_) => return Result.Err(InvalidInput("grow_root: old materialize failed".clone())),
     };
-
-    // Old root's cells migrate to new_root location verbatim — we
-    // just write the same bytes under the new page number.  The
-    // BTree's internal `root_page` field is updated by the caller
-    // (it's outside the page-level concern).
-    let migrated_bytes = match serialize_page(&old_mp, ctx.page_size()) {
+    let destination = match find_page(pages_in, new_root) {
+        Maybe.Some(p) => p.bytes,
+        Maybe.None => List.new(),
+    };
+    let child = match root.grow_into(new_root as UInt32, &destination) {
+        Result.Ok(mp) => mp,
+        Result.Err(_) => return Result.Err(InvalidInput("grow_root: allocated child page geometry is missing or inconsistent".clone())),
+    };
+    let migrated_bytes = match serialize_page(&child, ctx.page_size()) {
         Result.Ok(b)  => b,
         Result.Err(_) => return Result.Err(OverCapacity),
     };
-
-    // The old_root location becomes a fresh interior page with
-    // right_ptr = new_root_page.  No cells (cell-count = 0); the
-    // first split that occurs at new_root depth populates it with
-    // a separator.
-    let db_hdr_off = if old_root == 1 { 100 } else { 0 };
-    let fresh_root = old_mp.empty_parent(new_root as UInt32, db_hdr_off);
-
-    let fresh_bytes = match serialize_page(&fresh_root, ctx.page_size()) {
+    let fresh_bytes = match serialize_page(&root, ctx.page_size()) {
         Result.Ok(b)  => b,
         Result.Err(_) => return Result.Err(OverCapacity),
     };
@@ -358,11 +354,7 @@ fn apply_grow_root(
     Result.Ok(ApplyOutcome {
         updated_pages: updated,
         freed_pages: List.new(),
-        ripple: Maybe.Some(RippleHint {
-            parent_page: old_root,
-            parent_cell_idx: 0,
-            parent_grew: true,
-        }),
+        ripple: Maybe.None,
     })
 }
 
@@ -376,25 +368,38 @@ fn apply_shrink_root(
     new_root: Int,
     ctx: &BalanceContext,
 ) -> Result<ApplyOutcome, BalanceError> {
-    let _ = new_root;
     let old_buf = match find_page(pages_in, old_root) {
         Maybe.Some(p) => p,
         Maybe.None    => return Result.Err(InvalidInput("shrink_root: old_root missing".clone())),
     };
-    // pages_in[1] should be the only-child whose cells we promote.
-    if pages_in.len() < 2 {
-        return Result.Err(InvalidInput("shrink_root: only-child page not supplied".clone()));
+    if old_root <= 0 { return Result.Err(InvalidInput("shrink_root: invalid root page".clone())); }
+    let db_offset = if old_root == 1 { 100 } else { 0 };
+    let mut root = match materialize_page(&old_buf.bytes, db_offset, ctx.payload_budget()) {
+        Result.Ok(mp) => mp,
+        Result.Err(_) => return Result.Err(InvalidInput("shrink_root: invalid root page".clone())),
+    };
+    let child_no = match root.only_child() {
+        Maybe.Some(p) => p as Int,
+        Maybe.None => return Result.Err(InvalidInput("shrink_root: root must have exactly one child".clone())),
+    };
+    if child_no == old_root || (new_root != -1 && new_root != child_no) {
+        return Result.Err(InvalidInput("shrink_root: child does not match root pointer".clone()));
     }
-    let child_buf = &pages_in[1];
-
+    let child_buf = match find_page(pages_in, child_no) {
+        Maybe.Some(p) => p,
+        Maybe.None => return Result.Err(InvalidInput("shrink_root: only-child page not supplied".clone())),
+    };
     let child_mp = match materialize_page(&child_buf.bytes, 0, ctx.payload_budget()) {
         Result.Ok(mp) => mp,
         Result.Err(_) => return Result.Err(InvalidInput("shrink_root: child materialize failed".clone())),
     };
 
-    // The child's cells become the new root content — same bytes
-    // under old_root's page number.
-    let promoted_bytes = match serialize_page(&child_mp, ctx.page_size()) {
+    match root.shrink_from(child_mp) {
+        Result.Err(_) => return Result.Err(InvalidInput("shrink_root: child belongs to a different B-tree kind".clone())),
+        Result.Ok(false) => return Result.Ok(outcome_empty()),
+        Result.Ok(true) => {},
+    };
+    let promoted_bytes = match serialize_page(&root, ctx.page_size()) {
         Result.Ok(b)  => b,
         Result.Err(_) => return Result.Err(OverCapacity),
     };
@@ -405,7 +410,6 @@ fn apply_shrink_root(
     let mut freed: List<Int> = List.new();
     freed.push(child_buf.page_no);
 
-    let _ = old_buf;
     Result.Ok(ApplyOutcome {
         updated_pages: updated,
         freed_pages: freed,

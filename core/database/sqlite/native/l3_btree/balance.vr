@@ -65,10 +65,9 @@ public type BalanceDecision is
     // Rotate `count` cells from `donor_page` to `recipient_page` (positive
     // count ⇒ rotate right; negative ⇒ rotate left).
     | Rotate(donor_page: Int, recipient_page: Int, count: Int, parent_cell_idx: Int)
-    // Grow tree height — the old root `old_root` becomes a new child
-    // of a fresh root `new_root`; subsequent split happens there.
+    // Keep the root at its page number and move its body to the allocated child.
     | GrowRoot(old_root: Int, new_root: Int)
-    // Collapse single-child root.
+    // Promote the root's only child in place. A -1 child is read from the page.
     | ShrinkRoot(old_root: Int, new_root: Int);
 
 public type BalanceError is
