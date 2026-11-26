@@ -1,0 +1,16 @@
+// @test: typecheck-pass
+// @level: L0
+// @tier: 0
+// @description: Shared reads and checked exclusive access use different receivers.
+module core.shared_handle_access;
+
+mount core.base.memory.Shared;
+mount core.base.maybe.Maybe;
+
+fn read(handle: &Shared<Int>) -> &Int {
+    handle.borrow()
+}
+
+fn exclusive(handle: &mut Shared<Int>) -> Maybe<&mut Int> {
+    handle.get_mut()
+}

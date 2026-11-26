@@ -808,14 +808,6 @@ implement<T> Shared<T> {
         unsafe { &(*self.ptr).value }
     }
 
-    /// Get a mutable reference to the inner value.
-    /// SAFETY: Caller must ensure no concurrent mutable borrows exist.
-    /// This provides interior mutability without runtime checks.
-    /// For thread-safe interior mutability, use Mutex<T> or RwLock<T>.
-    public fn borrow_mut(&self) -> &mut T {
-        unsafe { &mut (*self.ptr).value }
-    }
-
     /// Get an immutable reference to the inner value.
     ///
 

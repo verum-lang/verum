@@ -211,7 +211,7 @@ fn benchmark_cycle_collection() -> GCBenchmarkResult {
 
     type Node is {
         data: [u8; 64],
-        next: Maybe<Shared<Node>>,
+        next: Maybe<Shared<RefCell<Node>>>,
     };
 
     let start = Instant.now();
@@ -223,9 +223,9 @@ fn benchmark_cycle_collection() -> GCBenchmarkResult {
 
         // Create a cycle
         for _ in 0..100 {
-            let a = Shared.new(Node { data: [0; 64], next: None });
-            let b = Shared.new(Node { data: [0; 64], next: Some(a.clone()) });
-            a.borrow_mut().next = Some(b.clone());
+            let a = Shared.new(RefCell.new(Node { data: [0; 64], next: None }));
+            let b = Shared.new(RefCell.new(Node { data: [0; 64], next: Some(a.clone()) }));
+            (*a).borrow_mut().next = Some(b.clone());
             allocations += 2;
             // Drop a and b - creates garbage cycle
         }
@@ -401,6 +401,7 @@ fn percentile(sorted_data: &[u64], p: f64) -> u64 {
 }
 
 mount core.prelude.*;
+mount core.base.cell.RefCell;
 
 fn main() {
     println("=== GC Pause Time Benchmark ===\n");

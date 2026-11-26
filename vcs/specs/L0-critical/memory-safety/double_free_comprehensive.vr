@@ -9,6 +9,7 @@
 /// Spec: cbgr-implementation.md#double-free
 
 mount core.panic;
+mount core.base.cell.{Cell, RefCell};
 
 fn main() {
     test_ownership_prevents_double_free();
@@ -57,15 +58,15 @@ fn test_move_prevents_double_free() {
 
 /// Test that Drop is called exactly once
 fn test_drop_called_once() {
-    let drop_count = Shared.new(0);
+    let drop_count = Shared.new(Cell.new(0));
 
     type CountedDrop is {
-        counter: Shared<Int>,
+        counter: Shared<Cell<Int>>,
     };
 
     implement Drop for CountedDrop {
         fn drop(&mut self) {
-            *self.counter.borrow_mut() += 1;
+            (*self.counter).update(|count| count + 1);
         }
     }
 
@@ -74,21 +75,21 @@ fn test_drop_called_once() {
         // _item will be dropped once at end of scope
     }
 
-    assert(*drop_count.borrow() == 1);  // Dropped exactly once
+    assert((*drop_count).get() == 1);  // Dropped exactly once
 }
 
 /// Test collection properly drops items once
 fn test_collection_item_drop() {
-    let drop_counts = Shared.new([0, 0, 0, 0, 0]);
+    let drop_counts = Shared.new(RefCell.new([0, 0, 0, 0, 0]));
 
     type TrackedItem is {
         index: usize,
-        counts: Shared<List<Int>>,
+        counts: Shared<RefCell<List<Int>>>,
     };
 
     implement Drop for TrackedItem {
         fn drop(&mut self) {
-            self.counts.borrow_mut()[self.index] += 1;
+            (*self.counts).borrow_mut()[self.index] += 1;
         }
     }
 
@@ -101,28 +102,28 @@ fn test_collection_item_drop() {
     }
 
     // Each item dropped exactly once
-    for count in drop_counts.borrow().iter() {
+    for count in (*drop_counts).borrow().iter() {
         assert(*count == 1);
     }
 }
 
 /// Test conditional paths drop once
 fn test_conditional_drop() {
-    let dropped = Shared.new(false);
+    let dropped = Shared.new(Cell.new(false));
 
     type ConditionalDrop is {
-        flag: Shared<Bool>,
+        flag: Shared<Cell<Bool>>,
     };
 
     implement Drop for ConditionalDrop {
         fn drop(&mut self) {
-            assert(!*self.flag.borrow());  // Should not already be dropped
-            *self.flag.borrow_mut() = true;
+            assert(!(*self.flag).get());  // Should not already be dropped
+            (*self.flag).set(true);
         }
     }
 
     fn conditional_path(condition: Bool) {
-        let dropped = Shared.new(false);
+        let dropped = Shared.new(Cell.new(false));
         let item = ConditionalDrop { flag: dropped.clone() };
 
         if condition {
@@ -136,7 +137,7 @@ fn test_conditional_drop() {
         }
         // Either way, exactly one drop
 
-        assert(*dropped.borrow() == true);
+        assert((*dropped).get() == true);
     }
 
     conditional_path(true);
@@ -145,15 +146,15 @@ fn test_conditional_drop() {
 
 /// Test loop drops correctly
 fn test_loop_drop_safety() {
-    let total_drops = Shared.new(0);
+    let total_drops = Shared.new(Cell.new(0));
 
     type LoopItem is {
-        counter: Shared<Int>,
+        counter: Shared<Cell<Int>>,
     };
 
     implement Drop for LoopItem {
         fn drop(&mut self) {
-            *self.counter.borrow_mut() += 1;
+            (*self.counter).update(|count| count + 1);
         }
     }
 
@@ -163,7 +164,7 @@ fn test_loop_drop_safety() {
     }
 
     // 5 items created, 5 dropped (each once)
-    assert(*total_drops.borrow() == 5);
+    assert((*total_drops).get() == 5);
 }
 
 /// Test CBGR detects double free in unsafe code
@@ -191,15 +192,15 @@ fn test_cbgr_double_free_detection() {
 
 /// Test that forget prevents drop (not double-free)
 fn test_forget_prevents_drop() {
-    let dropped = Shared.new(false);
+    let dropped = Shared.new(Cell.new(false));
 
     type ForgottenItem is {
-        flag: Shared<Bool>,
+        flag: Shared<Cell<Bool>>,
     };
 
     implement Drop for ForgottenItem {
         fn drop(&mut self) {
-            *self.flag.borrow_mut() = true;
+            (*self.flag).set(true);
         }
     }
 
@@ -210,7 +211,7 @@ fn test_forget_prevents_drop() {
         // This is a memory leak, not a double-free
     }
 
-    assert(!*dropped.borrow());  // Drop was not called
+    assert(!(*dropped).get());  // Drop was not called
 
     // Note: forget() causes a memory leak, which is safe but not ideal
     // Use only when transferring ownership to external code
@@ -218,16 +219,16 @@ fn test_forget_prevents_drop() {
 
 /// Test swap prevents double-free
 fn test_swap_safety() {
-    let drops = Shared.new(List.new());
+    let drops = Shared.new(RefCell.new(List.new()));
 
     type SwapItem is {
         id: Int,
-        log: Shared<List<Int>>,
+        log: Shared<RefCell<List<Int>>>,
     };
 
     implement Drop for SwapItem {
         fn drop(&mut self) {
-            self.log.borrow_mut().push(self.id);
+            (*self.log).borrow_mut().push(self.id);
         }
     }
 
@@ -242,30 +243,30 @@ fn test_swap_safety() {
     assert(b.id == 1);
 
     // Nothing dropped yet
-    assert(drops.borrow().is_empty());
+    assert((*drops).borrow().is_empty());
 
     // Now let them drop
     drop(a);
     drop(b);
 
     // Each dropped exactly once
-    assert(drops.borrow().len() == 2);
-    assert(drops.borrow().contains(&1));
-    assert(drops.borrow().contains(&2));
+    assert((*drops).borrow().len() == 2);
+    assert((*drops).borrow().contains(&1));
+    assert((*drops).borrow().contains(&2));
 }
 
 /// Test replace returns old value (no double free)
 fn test_replace_safety() {
-    let drops = Shared.new(List.new());
+    let drops = Shared.new(RefCell.new(List.new()));
 
     type ReplaceItem is {
         id: Int,
-        log: Shared<List<Int>>,
+        log: Shared<RefCell<List<Int>>>,
     };
 
     implement Drop for ReplaceItem {
         fn drop(&mut self) {
-            self.log.borrow_mut().push(self.id);
+            (*self.log).borrow_mut().push(self.id);
         }
     }
 
@@ -278,15 +279,15 @@ fn test_replace_safety() {
     assert(old.id == 1);
 
     // Nothing dropped yet (old is returned, not dropped)
-    assert(drops.borrow().is_empty());
+    assert((*drops).borrow().is_empty());
 
     // Explicitly drop old
     drop(old);
-    assert(drops.borrow() == [1]);
+    assert((*drops).borrow() == [1]);
 
     // drop slot at scope end
     drop(slot);
-    assert(drops.borrow() == [1, 2]);
+    assert((*drops).borrow() == [1, 2]);
 }
 
 /// Test take moves out, preventing double free

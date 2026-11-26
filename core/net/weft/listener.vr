@@ -58,6 +58,7 @@ mount core.net.weft.io_uring_accept.{IoUringAcceptConfig};
 // Reached through ambient visibility rather than a request
 // until now (T0780 census).
 mount core.collections.list.{List};
+mount core.collections.map.Map;
 
 // =============================================================================
 // Config
@@ -260,7 +261,7 @@ public async fn accept_loop<R: ConnectionRunner + Clone + Send + Sync + 'static>
     // for the release. No new runtime infrastructure; the type
     // system makes both leak classes impossible at compile time.
     let limiter = ConnectionLimiter.new(config.max_concurrent_connections);
-    let per_ip = PerIpLimiter.new(config.per_ip_max);
+    let mut per_ip = PerIpLimiter.new(config.per_ip_max);
 
     loop {
         if token.is_cancelled() { break; }
@@ -435,26 +436,11 @@ implement Drop for ConnectionTicket {
 // =============================================================================
 //
 
-// Pre-fix the listener had only a *global* `max_concurrent_connections`
-// cap. A single attacker IP could open all 10 000 slots from one
-// box, shutting out every legitimate client. The DoS surface
-// included everyone NAT'd behind the same egress.
-//
-
-// Post-fix `PerIpLimiter` keys an `AtomicInt` per peer-IP via a
-// `Shared<Map<IpAddr, Shared<AtomicInt>>>`. The check fires
-// BEFORE `task.spawn` so attackers can't even sustain the per-conn
-// task-spawn cost. Eviction: when the per-IP counter reaches 0,
-// the map entry is reaped on next access (no background sweeper —
-// the lazy-evict pattern keeps the limiter zero-cost during steady
-// state).
-//
-
-// `per_ip_max == 0` disables the limiter entirely — recommended
-// only on internal services where peer IPs are trusted.
+// The accept loop owns the peer map. Only the per-peer atomic counters
+// travel to connection tasks, which release their slots when a ticket drops.
 
 public type PerIpLimiter is {
-    counters: Shared<core.collections.map.Map<IpAddr, Shared<AtomicInt>>>,
+    counters: Map<IpAddr, Shared<AtomicInt>>,
     max: Int,
 };
 
@@ -464,7 +450,7 @@ implement PerIpLimiter {
     /// (limiter disabled).
     public fn new(max: Int) -> PerIpLimiter {
         PerIpLimiter {
-            counters: Shared.new(core.collections.map.Map.new()),
+            counters: Map.new(),
             max: max,
         }
     }
@@ -474,19 +460,18 @@ implement PerIpLimiter {
     /// 503 + close. On `Maybe.Some(slot)` the caller stores the
     /// `Shared<AtomicInt>` inside the connection's `Ticket` so
     /// Drop releases it.
-    public fn try_acquire(&self, peer: &IpAddr) -> Maybe<Shared<AtomicInt>> {
+    public fn try_acquire(&mut self, peer: &IpAddr) -> Maybe<Shared<AtomicInt>> {
         if self.max <= 0 {
             // Disabled — return a dummy slot the ticket will
             // decrement on Drop with no observable effect.
             return Maybe.Some(Shared.new(AtomicInt.new(1)));
         }
         // Look up or create the counter for this IP.
-        let mut map = self.counters.borrow_mut();
-        let slot = match map.get(peer) {
-            Maybe.Some(s) => s.clone(),
+        let slot = match self.counters.get_key_value(peer) {
+            Maybe.Some((_, counter)) => (*counter).clone(),
             Maybe.None => {
                 let s = Shared.new(AtomicInt.new(0));
-                map.insert(peer.clone(), s.clone());
+                self.counters.insert((*peer).clone(), s.clone());
                 s
             }
         };

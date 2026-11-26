@@ -1,0 +1,12 @@
+// @test: typecheck-fail
+// @level: L0
+// @tier: 0
+// @expected-error: E400 "no method named `borrow_mut`"
+// @description: A shared owner does not grant exclusive access to its payload.
+module core.shared_handle_refuses_unguarded_write;
+
+mount core.base.memory.Shared;
+
+fn exclusive(handle: &Shared<Int>) -> &mut Int {
+    handle.borrow_mut()
+}

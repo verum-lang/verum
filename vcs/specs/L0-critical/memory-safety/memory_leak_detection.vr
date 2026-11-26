@@ -9,6 +9,7 @@
 /// Spec: cbgr-implementation.md#leak-detection
 
 mount core.panic;
+mount core.base.cell.{Cell, RefCell};
 
 fn main() {
     test_automatic_cleanup();
@@ -96,29 +97,29 @@ fn test_cycle_detection() {
 
     type Node is {
         value: Int,
-        next: Maybe<Shared<Node>>,
-        prev: Maybe<Weak<Node>>,  // Weak to prevent cycle
+        next: Maybe<Shared<RefCell<Node>>>,
+        prev: Maybe<Weak<RefCell<Node>>>,  // Weak to prevent cycle
     };
 
     let initial = Runtime.allocation_count();
 
     {
         // Create linked list with weak back-references
-        let node1 = Shared.new(Node { value: 1, next: Maybe.None, prev: Maybe.None });
-        let node2 = Shared.new(Node { value: 2, next: Maybe.None, prev: Maybe.None });
-        let node3 = Shared.new(Node { value: 3, next: Maybe.None, prev: Maybe.None });
+        let node1 = Shared.new(RefCell.new(Node { value: 1, next: Maybe.None, prev: Maybe.None }));
+        let node2 = Shared.new(RefCell.new(Node { value: 2, next: Maybe.None, prev: Maybe.None }));
+        let node3 = Shared.new(RefCell.new(Node { value: 3, next: Maybe.None, prev: Maybe.None }));
 
         // Set up forward links (strong)
-        node1.borrow_mut().next = Maybe.Some(node2.clone());
-        node2.borrow_mut().next = Maybe.Some(node3.clone());
+        (*node1).borrow_mut().next = Maybe.Some(node2.clone());
+        (*node2).borrow_mut().next = Maybe.Some(node3.clone());
 
         // Set up back links (weak - doesn't keep alive)
-        node2.borrow_mut().prev = Maybe.Some(Shared.downgrade(&node1));
-        node3.borrow_mut().prev = Maybe.Some(Shared.downgrade(&node2));
+        (*node2).borrow_mut().prev = Maybe.Some(Shared.downgrade(&node1));
+        (*node3).borrow_mut().prev = Maybe.Some(Shared.downgrade(&node2));
 
         // All nodes accessible
-        assert(node1.borrow().next.is_some());
-        assert(node3.borrow().prev.as_ref().unwrap().upgrade().is_some());
+        assert((*node1).borrow().next.is_some());
+        assert((*node3).borrow().prev.as_ref().unwrap().upgrade().is_some());
 
         // Nodes dropped at scope end - no cycle to prevent cleanup
     }
@@ -150,13 +151,13 @@ fn test_weak_reference_cleanup() {
 
 /// Test defer for cleanup
 fn test_defer_cleanup() {
-    let cleanup_ran = Shared.new(false);
+    let cleanup_ran = Shared.new(Cell.new(false));
 
     {
         let cleanup_flag = cleanup_ran.clone();
 
         defer {
-            *cleanup_flag.borrow_mut() = true;
+            (*cleanup_flag).set(true);
         }
 
         // Some work that might panic
@@ -165,18 +166,18 @@ fn test_defer_cleanup() {
         // defer runs at end of scope
     }
 
-    assert(*cleanup_ran.borrow());
+    assert((*cleanup_ran).get());
 }
 
 /// Test defer cleanup even on panic
 fn test_defer_cleanup_on_panic() {
-    let cleanup_ran = Shared.new(false);
+    let cleanup_ran = Shared.new(Cell.new(false));
 
     let result = panic.catch_unwind(|| {
         let cleanup_flag = cleanup_ran.clone();
 
         defer {
-            *cleanup_flag.borrow_mut() = true;
+            (*cleanup_flag).set(true);
         }
 
         panic("intentional panic");
@@ -186,7 +187,7 @@ fn test_defer_cleanup_on_panic() {
     assert(result.is_err());
 
     // Defer still ran
-    assert(*cleanup_ran.borrow());
+    assert((*cleanup_ran).get());
 }
 
 /// Test leak detection API
@@ -238,16 +239,16 @@ fn test_intentional_leak_caught() {
 
 /// Test that Drop is called in correct order
 fn test_drop_order() {
-    let order = Shared.new(List.new());
+    let order = Shared.new(RefCell.new(List.new()));
 
     type Tracked is {
         id: Int,
-        order: Shared<List<Int>>,
+        order: Shared<RefCell<List<Int>>>,
     };
 
     implement Drop for Tracked {
         fn drop(&mut self) {
-            self.order.borrow_mut().push(self.id);
+            (*self.order).borrow_mut().push(self.id);
         }
     }
 
@@ -259,34 +260,34 @@ fn test_drop_order() {
         // Dropped in reverse order: c, b, a
     }
 
-    let drop_order = order.borrow();
+    let drop_order = (*order).borrow();
     assert(*drop_order == [3, 2, 1]);
 }
 
 /// Test nested struct drop order
 fn test_nested_drop_order() {
-    let order = Shared.new(List.new());
+    let order = Shared.new(RefCell.new(List.new()));
 
     type Outer is {
         id: Int,
         inner: Inner,
-        order: Shared<List<Int>>,
+        order: Shared<RefCell<List<Int>>>,
     };
 
     type Inner is {
         id: Int,
-        order: Shared<List<Int>>,
+        order: Shared<RefCell<List<Int>>>,
     };
 
     implement Drop for Outer {
         fn drop(&mut self) {
-            self.order.borrow_mut().push(self.id);
+            (*self.order).borrow_mut().push(self.id);
         }
     }
 
     implement Drop for Inner {
         fn drop(&mut self) {
-            self.order.borrow_mut().push(self.id);
+            (*self.order).borrow_mut().push(self.id);
         }
     }
 
@@ -299,6 +300,6 @@ fn test_nested_drop_order() {
         // Outer dropped first, then Inner
     }
 
-    let drop_order = order.borrow();
+    let drop_order = (*order).borrow();
     assert(*drop_order == [1, 2]);
 }

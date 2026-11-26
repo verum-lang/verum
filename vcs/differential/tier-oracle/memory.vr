@@ -45,9 +45,9 @@ fn test_shared_basic() -> Int {
 
 /// Test shared mutation
 fn test_shared_mutation() -> Int {
-    let shared = Shared.new(0);
+    let mut shared = Shared.new(0);
     {
-        let mut borrow = shared.borrow_mut();
+        let borrow = shared.get_mut().unwrap();
         *borrow = 42;
     }
     *shared
@@ -116,10 +116,10 @@ fn test_generation() -> Int {
 
 /// Test epoch boundary behavior
 fn test_epoch() -> Int {
-    let shared = Shared.new(List.new());
+    let mut shared = Shared.new(List.new());
 
     {
-        let mut borrow = shared.borrow_mut();
+        let borrow = shared.get_mut().unwrap();
         borrow.push(42);
     }
 

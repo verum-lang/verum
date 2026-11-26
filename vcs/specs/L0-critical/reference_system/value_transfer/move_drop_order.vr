@@ -10,14 +10,16 @@
 /// Only affine types have meaningful "move prevents drop" semantics.
 /// Spec: 04-memory-model.md#drop-order
 
+mount core.base.cell.RefCell;
+
 // Affine tracker that logs its drop
 type affine Tracker is {
     name: Text,
-    log: Shared<List<Text>>,
+    log: Shared<RefCell<List<Text>>>,
 };
 
 implement Tracker {
-    fn new(name: Text, log: Shared<List<Text>>) -> Self {
+    fn new(name: Text, log: Shared<RefCell<List<Text>>>) -> Self {
         Tracker {
             name: name,
             log: log,
@@ -27,8 +29,7 @@ implement Tracker {
 
 implement Drop for Tracker {
     fn drop(&mut self) {
-        // Use borrow_mut() to access the inner List and push
-        self.log.borrow_mut().push(self.name);
+        (*self.log).borrow_mut().push(self.name);
     }
 }
 
@@ -50,7 +51,7 @@ fn main() {
 /// Test that drops happen in reverse declaration order
 fn test_reverse_declaration_order() {
     // Track drop order using a shared log
-    let log = Shared.new(List.new());
+    let log = Shared.new(RefCell.new(List.new()));
 
     {
         let _a = Tracker.new("A", log.clone());
@@ -59,7 +60,7 @@ fn test_reverse_declaration_order() {
         // Drops: C, B, A (reverse order)
     }
 
-    let drops = log.borrow();
+    let drops = (*log).borrow();
     assert(drops.len() == 3);
     assert(drops[0] == "C");
     assert(drops[1] == "B");
@@ -69,7 +70,7 @@ fn test_reverse_declaration_order() {
 /// Test struct field drop order
 /// NOTE: Field drop order is implementation-defined due to Map storage
 fn test_struct_field_drop_order() {
-    let log = Shared.new(List.new());
+    let log = Shared.new(RefCell.new(List.new()));
 
     {
         let _s = StructWithTrackers {
@@ -80,7 +81,7 @@ fn test_struct_field_drop_order() {
         // Fields are dropped when struct is dropped
     }
 
-    let drops = log.borrow();
+    let drops = (*log).borrow();
     // All 3 fields should be dropped
     assert(drops.len() == 3);
     // Check all fields were dropped (order is implementation-defined)
@@ -99,7 +100,7 @@ fn test_struct_field_drop_order() {
 
 /// Test tuple element drop order
 fn test_tuple_drop_order() {
-    let log = Shared.new(List.new());
+    let log = Shared.new(RefCell.new(List.new()));
 
     {
         let _tuple = (
@@ -110,7 +111,7 @@ fn test_tuple_drop_order() {
         // Tuple elements dropped in order: 0, 1, 2
     }
 
-    let drops = log.borrow();
+    let drops = (*log).borrow();
     assert(drops.len() == 3);
     assert(drops[0] == "0");
     assert(drops[1] == "1");
@@ -119,7 +120,7 @@ fn test_tuple_drop_order() {
 
 /// Test that moved affine values are NOT dropped at original location
 fn test_affine_move_prevents_drop() {
-    let log = Shared.new(List.new());
+    let log = Shared.new(RefCell.new(List.new()));
 
     {
         let tracker = Tracker.new("moved", log.clone());
@@ -131,16 +132,16 @@ fn test_affine_move_prevents_drop() {
         // Only _moved will drop at end of scope
     }
 
-    let drops = log.borrow();
+    let drops = (*log).borrow();
     assert(drops.len() == 1);  // Only one drop, not two
     assert(drops[0] == "moved");
 }
 
 /// Test drop order with early return
 fn test_early_return_drop() {
-    let log = Shared.new(List.new());
+    let log = Shared.new(RefCell.new(List.new()));
 
-    fn early_return(log: Shared<List<Text>>) {
+    fn early_return(log: Shared<RefCell<List<Text>>>) {
         let _a = Tracker.new("A", log.clone());
         let _b = Tracker.new("B", log.clone());
 
@@ -153,7 +154,7 @@ fn test_early_return_drop() {
 
     early_return(log.clone());
 
-    let drops = log.borrow();
+    let drops = (*log).borrow();
     assert(drops.len() == 2);
     assert(drops[0] == "B");
     assert(drops[1] == "A");
@@ -161,14 +162,14 @@ fn test_early_return_drop() {
 
 /// Test drop order in loops
 fn test_loop_drop() {
-    let log = Shared.new(List.new());
+    let log = Shared.new(RefCell.new(List.new()));
 
     for i in 0..3 {
         let _tracker = Tracker.new(i.to_string(), log.clone());
         // Dropped at end of each iteration
     }
 
-    let drops = log.borrow();
+    let drops = (*log).borrow();
     assert(drops.len() == 3);
     assert(drops[0] == "0");
     assert(drops[1] == "1");
