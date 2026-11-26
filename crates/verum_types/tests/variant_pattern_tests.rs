@@ -40,6 +40,22 @@ use verum_types::infer::*;
 use verum_types::ty::Type;
 
 #[test]
+fn incompatible_variant_pattern_reports_its_source_range() {
+    let source = "type Choice is Found(Int) | Empty; fn probe(x: Int) -> Int { if let Found(n) = x { n } else { 0 } }";
+    let module = verum_fast_parser::Parser::new(source).parse_module().unwrap();
+    let mut checker = TypeChecker::new();
+    checker.register_primitives();
+    let mut errors = checker.prepare_module_declarations(&module);
+    for item in &module.items {
+        if let Err(error) = checker.check_item(item) { errors.push(error); }
+    }
+    errors.extend(checker.take_deferred_errors());
+    let span = errors.iter().find(|error| error.to_string().contains("variant pattern requires variant type"))
+        .expect("expected incompatible variant diagnostic").span();
+    assert_eq!(&source[span.start as usize..span.end as usize], "Found(n)");
+}
+
+#[test]
 fn source_patterns_preserve_nested_tuple_payloads_and_require_their_arity() {
     let prelude = "type Reply<T> is Missing | Found(T);
         type Choice is Absent | Pair(Int, Bool);";

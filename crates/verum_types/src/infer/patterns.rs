@@ -3012,10 +3012,11 @@ impl TypeChecker {
                     // For Unknown/unresolved types, allow variant pattern with fresh bindings
                     Ok(List::new())
                 } else {
-                    Err(TypeError::Other(verum_common::Text::from(format!(
-                        "variant pattern requires variant type, found {} (expanded from {})",
-                        expanded_ty, ty
-                    ))))
+                    Err(TypeError::OtherWithCodeSpanned {
+                        code: "E400".into(),
+                        msg: format!("variant pattern requires variant type, found {expanded_ty} (expanded from {ty})").into(),
+                        span: pattern.span,
+                    })
                 }
             }
 
