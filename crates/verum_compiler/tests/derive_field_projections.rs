@@ -136,3 +136,27 @@ fn generated_hash_visits_named_fields_in_source_order() {
         "Wrapper { first: a, second: b }",
     );
 }
+
+#[test]
+fn generated_equality_uses_the_implementing_type_in_its_signature() {
+    let source = format!(r#"
+        {PARTIAL_EQ}
+        type Pair is {{ first: Int, second: Int }};
+        fn probe(left: Int, right: Int) -> Bool {{
+            let a = Pair {{ first: left, second: 7 }};
+            let b = Pair {{ first: right, second: 7 }};
+            a.eq(&b)
+        }}
+    "#);
+    let mut module = Parser::new(&source).parse_module().unwrap();
+    derive(&mut module, "Pair", "PartialEq");
+    check(&module);
+    let vbc = VbcCodegen::with_config(CodegenConfig::new("projection"))
+        .compile_module(&module).expect("generated equality must lower with its real receiver");
+    let entry = vbc.find_function_by_name("projection.probe").unwrap();
+    let mut vm = Interpreter::new(Arc::new(vbc));
+    for (left, right, equal) in [(2, 2, true), (2, 9, false)] {
+        let result = vm.execute_function_with_args(entry, &[Value::from_i64(left), Value::from_i64(right)]).unwrap();
+        assert_eq!(result.try_as_bool(), Some(equal));
+    }
+}

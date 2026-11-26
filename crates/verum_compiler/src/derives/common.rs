@@ -651,6 +651,12 @@ impl DeriveContext {
         }
     }
 
+    /// The receiver type in a generated signature uses the same path as parsed `Self`.
+    pub(super) fn self_type(span: Span) -> Type {
+        let path = Path::new(std::iter::once(PathSegment::SelfValue).collect(), span);
+        Type::new(TypeKind::Path(path), span)
+    }
+
     /// Create a &self parameter
     pub fn self_ref_param(&self, span: Span) -> FunctionParam {
         FunctionParam::new(FunctionParamKind::SelfRef, span)

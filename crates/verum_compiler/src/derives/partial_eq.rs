@@ -383,10 +383,7 @@ impl DerivePartialEq {
         let other_type = Type::new(
             TypeKind::Reference {
                 mutable: false,
-                inner: Box::new(Type::new(
-                    TypeKind::Path(Path::single(Ident::new("Self", span))),
-                    span,
-                )),
+                inner: Box::new(DeriveContext::self_type(span)),
             },
             span,
         );

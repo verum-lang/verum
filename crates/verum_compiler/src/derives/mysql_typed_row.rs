@@ -274,7 +274,7 @@ impl DeriveMysqlTypedRow {
         let return_ty = self.generic_type(
             "Result",
             vec![
-                Type::new(TypeKind::Path(Path::single(Ident::new("Self", span))), span),
+                DeriveContext::self_type(span),
                 self.qualified_type(
                     &[
                         "core",

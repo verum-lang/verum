@@ -131,7 +131,7 @@ impl DeriveDefault {
     /// Create the default method declaration
     fn create_default_method(&self, ctx: &DeriveContext, body: Block, span: Span) -> FunctionDecl {
         // Return type: Self
-        let return_type = Type::new(TypeKind::Path(Path::single(Ident::new("Self", span))), span);
+        let return_type = DeriveContext::self_type(span);
 
         ctx.method(
             "default",

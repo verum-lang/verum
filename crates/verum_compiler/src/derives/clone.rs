@@ -322,7 +322,7 @@ impl DeriveClone {
     /// Create the clone method declaration
     fn create_clone_method(&self, ctx: &DeriveContext, body: Block, span: Span) -> FunctionDecl {
         // Return type: Self
-        let return_type = Type::new(TypeKind::Path(Path::single(Ident::new("Self", span))), span);
+        let return_type = DeriveContext::self_type(span);
 
         ctx.method(
             "clone",
