@@ -320,7 +320,7 @@ public fn listen_fds() -> Result<Int, ListenFdsError> {
 public fn listen_fd(index: Int) -> Result<FileDesc, ListenFdsError> {
     let n = listen_fds()?;
     if index < 0 || index >= n {
-        return Result.Err(ListenFdsError.ParseError("fd index out of range".into()));
+        return Result.Err(ListenFdsError.ParseError("fd index out of range"));
     }
     Result.Ok((3 + index) as FileDesc)
 }

@@ -33,8 +33,8 @@ implement Resource {
     /// is by far the most common resource shape.
     public fn service(name: &Text, version: &Text) -> Resource {
         let mut attrs = AttributeSet.new();
-        let _ = attrs.set("service.name".into(), AttributeValue.Text(name.clone()));
-        let _ = attrs.set("service.version".into(), AttributeValue.Text(version.clone()));
+        let _ = attrs.set("service.name", AttributeValue.Text(name.clone()));
+        let _ = attrs.set("service.version", AttributeValue.Text(version.clone()));
         Resource {
             attributes: attrs,
             schema_url: Maybe.None,

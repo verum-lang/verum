@@ -451,25 +451,19 @@ public fn accept_key(client_key: &Text) -> Text {
     hasher.update(client_key.as_bytes());
     hasher.update(&WEBSOCKET_MAGIC);
     let digest = hasher.finalize();
-    let mut digest_bytes = List.with_capacity(20);
-    let mut i = 0;
-    while i < 20 {
-        digest_bytes.push(digest[i]);
-        i = i + 1;
-    }
-    base64.encode(&digest_bytes)
+    base64.encode(&digest[..])
 }
 
 /// Validate the required server-side handshake headers. Returns the
 /// client's Sec-WebSocket-Key (for accept_key derivation) on success.
 public fn validate_server_handshake(headers: &Headers) -> Maybe<Text> {
-    let upgrade = headers.get(&"upgrade".into())?;
+    let upgrade = headers.get(&"upgrade")?;
     if !ascii_eq_ci(upgrade.as_bytes(), b"websocket") { return None; }
-    let connection = headers.get(&"connection".into())?;
+    let connection = headers.get(&"connection")?;
     if !contains_token_ci(connection.as_bytes(), b"upgrade") { return None; }
-    let version = headers.get(&"sec-websocket-version".into())?;
-    if *version != "13".into() { return None; }
-    let key = headers.get(&"sec-websocket-key".into())?;
+    let version = headers.get(&"sec-websocket-version")?;
+    if *version != "13" { return None; }
+    let key = headers.get(&"sec-websocket-key")?;
     Some(key.clone())
 }
 

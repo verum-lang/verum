@@ -90,9 +90,9 @@ implement XdsNode {
             locality_region: None,
             locality_zone: None,
             locality_subzone: None,
-            user_agent_name: "verum-xds".into(),
-            user_agent_version: "0.1".into(),
-            metadata_json: "{}".into(),
+            user_agent_name: "verum-xds",
+            user_agent_version: "0.1",
+            metadata_json: "{}",
         }
     }
 

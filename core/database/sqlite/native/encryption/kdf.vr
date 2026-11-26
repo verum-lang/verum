@@ -174,7 +174,7 @@ implement KeyDerivation for Pbkdf2Sha256 {
             params.key_len,
         ) {
             Result.Ok(bytes) => Result.Ok(bytes),
-            Result.Err(e) => Result.Err(KeBadParams(f"pbkdf2_hmac_sha256 rejected params: {e}".into())),
+            Result.Err(e) => Result.Err(KeBadParams(f"pbkdf2_hmac_sha256 rejected params: {e}")),
         }
     }
 }

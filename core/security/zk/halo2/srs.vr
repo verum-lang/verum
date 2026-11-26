@@ -114,7 +114,7 @@ public fn setup_with_entropy(
     contributions: List<List<Byte>>,   // each entry: that participant's signed entropy
 ) -> Result<UniversalSrs, SrsError> {
     if contributions.is_empty() {
-        return Err(SrsError.SetupFailed("zero participants".into()));
+        return Err(SrsError.SetupFailed("zero participants"));
     }
     if contributions.len() != params.participants.len() {
         return Err(SrsError.SetupFailed(f"|contributions| ≠ |participants|"));
