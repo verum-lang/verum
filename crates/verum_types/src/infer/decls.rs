@@ -8324,7 +8324,7 @@ impl TypeChecker {
                             return Err(TypeError::DanglingReference {
                                 var: var_name,
                                 ref_span: return_span,
-                                drop_span: return_span, // Variable dropped at function end
+                                drop_span: None,
                             });
                         }
                     }
@@ -8344,7 +8344,7 @@ impl TypeChecker {
                                 origin.binding, true, self.closure_return_depth,
                             ) {
                                 return Err(TypeError::DanglingReference {
-                                    var, ref_span: return_span, drop_span: return_span,
+                                    var, ref_span: return_span, drop_span: None,
                                 });
                             }
                         }
@@ -8356,7 +8356,7 @@ impl TypeChecker {
                             return Err(TypeError::DanglingReference {
                                 var: borrow.target.clone(),
                                 ref_span: return_span,
-                                drop_span: return_span,
+                                drop_span: None,
                             });
                         }
                     }
@@ -8371,7 +8371,7 @@ impl TypeChecker {
                         return Err(TypeError::DanglingReference {
                             var: var_name,
                             ref_span: return_span,
-                            drop_span: return_span,
+                            drop_span: None,
                         });
                     }
                 }
@@ -8390,7 +8390,7 @@ impl TypeChecker {
                         return Err(TypeError::DanglingReference {
                             var: var_name,
                             ref_span: return_span,
-                            drop_span: return_span,
+                            drop_span: None,
                         });
                     }
                 }

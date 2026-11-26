@@ -35,7 +35,7 @@ fn ownership_errors_keep_the_use_and_the_related_location() {
             DanglingReference {
                 var: "db".into(),
                 ref_span: action,
-                drop_span: origin,
+                drop_span: Some(origin),
             },
             "E312",
             "value goes out of scope here",

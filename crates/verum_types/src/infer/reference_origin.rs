@@ -99,7 +99,7 @@ impl TypeChecker {
                     origin.binding, true, self.closure_return_depth,
                 ) {
                     return Err(crate::TypeError::DanglingReference {
-                        var, ref_span: span, drop_span: span,
+                        var, ref_span: span, drop_span: None,
                     });
                 }
             }
@@ -118,7 +118,7 @@ impl TypeChecker {
                 .ok_or(crate::TypeError::UnknownRecordOrigin { span })?;
             if self.ctx.env.storage_loan_region(origin.binding).is_some_and(|source| source > region) {
                 return Err(crate::TypeError::DanglingReference {
-                    var: root, ref_span: span, drop_span: span,
+                    var: root, ref_span: span, drop_span: None,
                 });
             }
             let field = (!origin.fields.is_empty()).then(|| origin.fields.join("."));
@@ -281,7 +281,7 @@ impl TypeChecker {
                 return Err(crate::TypeError::DanglingReference {
                     var,
                     ref_span: expr.span,
-                    drop_span: expr.span,
+                    drop_span: None,
                 });
             }
         }

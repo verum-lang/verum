@@ -1343,8 +1343,8 @@ pub enum TypeError {
         var: Text,
         /// Span of the reference creation
         ref_span: verum_ast::span::Span,
-        /// Span where the variable goes out of scope
-        drop_span: verum_ast::span::Span,
+        /// Independently located end of the referent's lifetime, when known.
+        drop_span: Option<verum_ast::Span>,
     },
 
     /// &checked reference may escape through function call
@@ -3695,7 +3695,7 @@ impl TypeError {
                 if let Some(diag_span) = convert_span(*ref_span) {
                     builder = builder.span(diag_span);
                 }
-                if let Some(drop) = related_span(*drop_span) {
+                if let Some(drop) = drop_span.and_then(related_span) {
                     builder = builder.secondary_span(drop, "value goes out of scope here");
                 }
                 builder.build()

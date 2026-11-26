@@ -34,6 +34,22 @@ fn a_recovered_variant_error_links_the_owning_function_and_exact_utf16_range() {
 }
 
 #[test]
+fn a_local_borrow_reports_its_range_without_inventing_a_drop_location() {
+    let text = "fn escape() -> &Int {\n    let local = 7;\n    &local\n}";
+    let document = DocumentState::new(text.into(), 1, FileId::new(1));
+    let uri = Url::parse("file:///main.vr").unwrap();
+    let (local, foreign) = verum_lsp::diagnostics::project_diagnostics(
+        &document.diagnostics, text, &uri, &document.diagnostic_sources,
+    );
+    assert!(foreign.is_empty());
+    let finding = local.iter().find(|finding| {
+        finding.code == Some(NumberOrString::String("E312".into()))
+    }).expect("the escaping borrow must still be rejected");
+    assert_eq!(finding.range, Range::new(Position::new(2, 4), Position::new(2, 10)));
+    assert!(finding.related_information.as_ref().is_none_or(|sites| sites.is_empty()));
+}
+
+#[test]
 fn utf16_edits_keep_non_bmp_neighbors_and_apply_in_order() {
     let mut doc = DocumentState::new(
         "// a😀я\nfn answer() -> Int { 42 }".into(),
