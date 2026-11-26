@@ -431,12 +431,15 @@ fn seconds_into_month(p: &CronParts) -> Int {
 // =============================================================================
 
 fn split_whitespace(src: &[Byte]) -> List<List<Byte>> {
-    let mut out: List<List<Byte>> = [];
-    let mut cur: List<Byte> = [];
+    let mut out: List<List<Byte>> = List.new();
+    let mut cur: List<Byte> = List.new();
     let mut i: Int = 0;
     while i < src.len() {
         if is_ws(src[i]) {
-            if cur.len() > 0 { out.push(cur); cur = []; }
+            if cur.len() > 0 {
+                out.push(cur);
+                cur = List.new();
+            }
         } else {
             cur.push(src[i]);
         }
@@ -447,12 +450,13 @@ fn split_whitespace(src: &[Byte]) -> List<List<Byte>> {
 }
 
 fn split_commas(src: &[Byte]) -> List<List<Byte>> {
-    let mut out: List<List<Byte>> = [];
-    let mut cur: List<Byte> = [];
+    let mut out: List<List<Byte>> = List.new();
+    let mut cur: List<Byte> = List.new();
     let mut i: Int = 0;
     while i < src.len() {
         if src[i] == (',' as Byte) {
-            out.push(cur); cur = [];
+            out.push(cur);
+            cur = List.new();
         } else {
             cur.push(src[i]);
         }

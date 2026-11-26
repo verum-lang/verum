@@ -40,4 +40,15 @@ fn regression_e_pre_epoch_daily_schedule_matches() {
     assert_eq(next.unwrap(), -86_400);
 }
 
+@test
+fn regression_delimiters_keep_distinct_fields_and_list_terms() {
+    let cron = CronExpr.parse(&" \t0,7,31   *\t*  *  *\t").unwrap();
+    assert_eq(cron.next_after_unix(0).unwrap(), 420);
+    assert_eq(cron.next_after_unix(420).unwrap(), 1860);
+    assert_eq(cron.next_after_unix(1860).unwrap(), 3600);
+    assert(CronExpr.parse(&"0,,7 * * * *").is_err());
+    assert(CronExpr.parse(&",7 * * * *").is_err());
+    assert(CronExpr.parse(&"7, * * * *").is_err());
+}
+
 fn main() {}
