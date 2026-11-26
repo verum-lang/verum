@@ -17,11 +17,10 @@ module core.database.sqlite.native.l4_vdbe.ssa.cfg;
 // =============================================================================
 
 mount collections.List;
-mount base.{Text, Maybe};
+mount base.{Maybe};
 mount core.database.sqlite.native.l4_vdbe.ssa.block.{
-    BasicBlock, BlockId, block_id, block_id_raw, block_id_eq, block_new
+    BasicBlock, BlockId, block_id, block_id_raw, block_new
 };
-mount core.database.sqlite.native.l4_vdbe.ssa.inst.{SsaInst, inst_terminator_targets};
 
 // -----------------------------------------------------------------------------
 // Cfg
@@ -52,50 +51,55 @@ implement Cfg {
         id
     }
 
-    /// Borrow block by id.  Returns the placeholder/empty block on
-    /// out-of-bounds (matches the defensive convention used by the
-    /// register VM).
+    public fn entry_id(&self) -> BlockId { self.entry }
+
+    fn contains(&self, index: Int) -> Bool { index >= 0 && index < self.blocks.len() }
+
     public fn get(&self, id: &BlockId) -> &BasicBlock {
-        let raw = block_id_raw(id);
-        if raw < 0 || raw >= self.blocks.len() {
-            &self.blocks[0]
-        } else {
-            &self.blocks[raw]
+        let index = block_id_raw(id);
+        assert(self.contains(index), "invalid SQLite SSA block id");
+        &self.blocks[index]
+    }
+
+    public fn try_get_mut(&mut self, id: BlockId) -> Maybe<&mut BasicBlock> {
+        let index = block_id_raw(&id);
+        if !self.contains(index) { return Maybe.None; }
+        Maybe.Some(&mut self.blocks[index])
+    }
+
+    public fn get_mut(&mut self, id: &BlockId) -> &mut BasicBlock {
+        match self.try_get_mut(*id) {
+            Maybe.Some(block) => block,
+            Maybe.None => panic("invalid SQLite SSA block id"),
         }
     }
 
-    /// Mutable borrow for in-place block edits during construction.
-    public fn get_mut(&mut self, id: &BlockId) -> &mut BasicBlock {
-        let raw = block_id_raw(id);
-        // Defensive: caller must guarantee in-bounds; use 0 as fallback
-        // to avoid panic in malformed CFGs.
-        let idx = if raw < 0 || raw >= self.blocks.len() { 0 } else { raw };
-        &mut self.blocks[idx]
+    public fn total_instr_count(&self) -> Int {
+        let mut total = 0;
+        for block in &self.blocks { total = total + block.instr_count(); }
+        total
     }
 
-    /// Compute and cache `predecessors` lists on every block.  Idempotent;
-    /// safe to re-run after CFG mutation (clears existing entries).
+    /// Validate every edge before replacing the cached predecessor lists.
     public fn compute_preds(&mut self) {
-        // Phase 1: clear existing pred lists
-        let mut i: Int = 0;
+        for block in &self.blocks {
+            let targets = block.successors();
+            for target in &targets {
+                assert(self.contains(block_id_raw(target)), "invalid SQLite SSA successor");
+            }
+        }
+        let mut i = 0;
         while i < self.blocks.len() {
-            self.blocks[i].predecessors = List.new();
+            self.blocks[i].clear_predecessors();
             i = i + 1;
         }
-
-        // Phase 2: scan terminators and append pred edges
-        let mut from: Int = 0;
-        while from < self.blocks.len() {
-            let term_targets = inst_terminator_targets(&self.blocks[from].terminator);
-            let mut t: Int = 0;
-            while t < term_targets.len() {
-                let target_raw = block_id_raw(&term_targets[t]);
-                if target_raw >= 0 && target_raw < self.blocks.len() {
-                    self.blocks[target_raw].predecessors.push(block_id(from));
-                }
-                t = t + 1;
+        let mut source = 0;
+        while source < self.blocks.len() {
+            let targets = self.blocks[source].successors();
+            for target in &targets {
+                self.blocks[block_id_raw(target)].add_predecessor(block_id(source));
             }
-            from = from + 1;
+            source = source + 1;
         }
     }
 }

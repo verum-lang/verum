@@ -32,11 +32,10 @@ module core.database.sqlite.native.l4_vdbe.ssa.program;
 mount collections.List;
 mount base.{Text, Maybe};
 mount core.database.sqlite.native.l4_vdbe.program.{
-    ConstantPool, ConstantEntry, ResultColumn, CursorDecl,
+    ConstantPool, ResultColumn, CursorDecl,
     constant_pool_new
 };
-mount core.database.sqlite.native.l4_vdbe.ssa.value.{ValueId, value_id, value_id_raw};
-mount core.database.sqlite.native.l4_vdbe.ssa.block.BasicBlock;
+mount core.database.sqlite.native.l4_vdbe.ssa.value.{ValueId, value_id};
 mount core.database.sqlite.native.l4_vdbe.ssa.cfg.{Cfg, cfg_new};
 
 // -----------------------------------------------------------------------------
@@ -66,9 +65,17 @@ public fn ssa_program_new(sql: Text) -> SsaProgram {
 implement SsaProgram {
     public fn block_count(&self) -> Int { self.cfg.block_count() }
 
+    /// The next value ID. Index zero is reserved.
+    public fn value_count(&self) -> Int { self.value_count }
+
+    public fn graph(&self) -> &Cfg { &self.cfg }
+
+    public(in core.database.sqlite.native.l4_vdbe.ssa) fn graph_mut(&mut self) -> &mut Cfg { &mut self.cfg }
+
     /// Allocate a fresh ValueId.  Used by `SsaBuilder` and by
     /// peephole optimisations that introduce new computations.
     public fn fresh_value_id(&mut self) -> ValueId {
+        assert(self.value_count < Int.MAX, "SQLite SSA value IDs exhausted");
         let id = value_id(self.value_count);
         self.value_count = self.value_count + 1;
         id
@@ -77,25 +84,12 @@ implement SsaProgram {
     /// Total instruction count (sum across all blocks, includes phis
     /// and terminators).  Used by EXPLAIN + sanity checks.
     public fn total_instr_count(&self) -> Int {
-        let mut sum: Int = 0;
-        let mut i: Int = 0;
-        while i < self.cfg.blocks.len() {
-            sum = sum + self.cfg.blocks[i].instr_count();
-            i = i + 1;
-        }
-        sum
+        self.cfg.total_instr_count()
     }
 
     /// Cursor declaration lookup; mirrors the VdbeProgram convenience
     /// used by the L6 bridge.
     public fn get_cursor_decl(&self, i: Int) -> Maybe<CursorDecl> {
-        if i < 0 || i >= self.cursors.len() { return Maybe.None; }
-        let d = &self.cursors[i];
-        Maybe.Some(CursorDecl {
-            cursor_id: d.cursor_id,
-            kind: d.kind,
-            root_page: d.root_page,
-            n_cols: d.n_cols,
-        })
+        self.cursors.get(i)
     }
 }

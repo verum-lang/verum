@@ -1,0 +1,16 @@
+// @test: run-interpreter-panic
+// @tier: 0
+// @level: L2
+// @tags: sqlite, vdbe, ssa, builder
+// @timeout: 15000
+// @expected-panic: SSA block requires a terminator
+
+mount core.database.sqlite.native.l4_vdbe.ssa.value.SValueKind;
+mount core.database.sqlite.native.l4_vdbe.ssa.inst.SsaInst;
+mount core.database.sqlite.native.l4_vdbe.ssa.builder.ssa_builder_new;
+
+fn main() {
+    let mut b = ssa_builder_new("");
+    let dst = b.fresh_value(SValueKind.SkNull);
+    let _ = b.terminate(SsaInst.INull(dst));
+}

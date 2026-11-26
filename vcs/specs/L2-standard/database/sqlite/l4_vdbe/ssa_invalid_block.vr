@@ -1,0 +1,15 @@
+// @test: run-interpreter-panic
+// @tier: 0
+// @level: L2
+// @tags: sqlite, vdbe, ssa, graph
+// @timeout: 15000
+// @expected-panic: invalid SQLite SSA block id
+
+mount core.database.sqlite.native.l4_vdbe.ssa.block.block_id;
+mount core.database.sqlite.native.l4_vdbe.ssa.inst.SsaInst;
+mount core.database.sqlite.native.l4_vdbe.ssa.cfg.cfg_new;
+
+fn main() {
+    let mut graph = cfg_new();
+    graph.get_mut(&block_id(-1)).set_terminator(SsaInst.IHalt(1, "invalid edit"));
+}

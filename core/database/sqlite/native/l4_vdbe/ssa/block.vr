@@ -26,8 +26,9 @@ module core.database.sqlite.native.l4_vdbe.ssa.block;
 // =============================================================================
 
 mount collections.List;
-mount base.{Text, Maybe};
-mount core.database.sqlite.native.l4_vdbe.ssa.inst.{SsaInst, IHalt, inst_terminator_targets};
+mount base.{Maybe};
+mount core.base.protocols.Clone;
+mount core.database.sqlite.native.l4_vdbe.ssa.inst.{SsaInst, inst_is_terminator, inst_terminator_targets};
 
 // -----------------------------------------------------------------------------
 // BlockId
@@ -37,8 +38,12 @@ mount core.database.sqlite.native.l4_vdbe.ssa.inst.{SsaInst, IHalt, inst_termina
 /// entry block; the lifting pass guarantees this.
 public type BlockId is (Int);
 
+implement Clone for BlockId {
+    fn clone(&self) -> BlockId { BlockId(self.0) }
+}
+
 public fn block_id(n: Int) -> BlockId { BlockId(n) }
-public fn block_id_raw(b: &BlockId) -> Int { match b { BlockId(n) => n } }
+public fn block_id_raw(b: &BlockId) -> Int { b.0 }
 public fn block_id_eq(a: &BlockId, b: &BlockId) -> Bool {
     block_id_raw(a) == block_id_raw(b)
 }
@@ -69,9 +74,7 @@ public type BasicBlock is {
     predecessors: List<BlockId>,     // computed by compute_preds(); empty until then
 };
 
-/// Construct an empty block with a placeholder terminator (`IHalt`).
-/// Callers MUST replace the terminator before passing the block to
-/// the CFG.
+/// An empty block halts with code zero until a terminator is assigned.
 public fn block_new(id: BlockId) -> BasicBlock {
     BasicBlock {
         id: id,
@@ -82,10 +85,9 @@ public fn block_new(id: BlockId) -> BasicBlock {
     }
 }
 
-/// Synthetic placeholder: `IHalt(0, "")`.  Replaced before the block
-/// is committed to the CFG.
+/// A newly allocated block has no outgoing edges.
 fn placeholder_terminator() -> SsaInst {
-    IHalt(0, "")
+    SsaInst.IHalt(0, "")
 }
 
 implement BasicBlock {
@@ -93,28 +95,40 @@ implement BasicBlock {
         self.phi_nodes.len() + self.insts.len() + 1   // +1 for terminator
     }
 
-    /// Push a non-terminator instruction.  Caller MUST ensure `inst`
-    /// is not a terminator; the type-checker pass enforces this.
+    /// Append an ordinary instruction to the block body.
     public fn push_inst(&mut self, inst: SsaInst) {
+        assert(!inst_is_terminator(&inst) && !(inst is SsaInst.IPhi(_, _)), "invalid SSA block body instruction");
         self.insts.push(inst);
     }
 
     /// Set the terminator; replaces the placeholder.  Idempotent —
     /// callers may call this multiple times during peephole opt.
     public fn set_terminator(&mut self, inst: SsaInst) {
+        assert(inst_is_terminator(&inst), "SSA block requires a terminator");
         self.terminator = inst;
     }
 
-    /// Successor list derived from the terminator (1 for jump/halt,
-    /// 2 for branch, 0 for halt/return).  Computed on every call —
-    /// O(small) since terminators have ≤ 2 successors.
+    /// Distinct successor IDs in terminator order. Halts and returns have no successors.
     public fn successors(&self) -> List<BlockId> {
         inst_terminator_targets(&self.terminator)
+    }
+
+    public fn predecessor_count(&self) -> Int { self.predecessors.len() }
+
+    public fn predecessor_at(&self, index: Int) -> Maybe<BlockId> { self.predecessors.get(index) }
+
+    public(in core.database.sqlite.native.l4_vdbe.ssa) fn clear_predecessors(&mut self) {
+        self.predecessors.clear();
+    }
+
+    public(in core.database.sqlite.native.l4_vdbe.ssa) fn add_predecessor(&mut self, id: BlockId) {
+        self.predecessors.push(id);
     }
 
     /// Append a phi node; ordered by insertion.  The renaming pass
     /// of phi insertion guarantees unique destination ValueIds.
     public fn push_phi(&mut self, phi: SsaInst) {
+        assert(phi is SsaInst.IPhi(_, _), "SSA block entry requires a phi instruction");
         self.phi_nodes.push(phi);
     }
 }

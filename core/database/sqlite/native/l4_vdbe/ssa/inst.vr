@@ -206,15 +206,15 @@ public fn inst_terminator_targets(inst: &SsaInst) -> List<BlockId> {
     let mut out: List<BlockId> = List.new();
     match inst {
         IBranch(_, then_blk, else_blk) => {
-            out.push(then_blk);
+            out.push(then_blk.clone());
             // Avoid duplicate if both arms target the same block
             // (canonical form after peephole opt).
-            if !block_id_eq(&then_blk, &else_blk) {
-                out.push(else_blk);
+            if !block_id_eq(then_blk, else_blk) {
+                out.push(else_blk.clone());
             }
         }
-        IJump(target)  => { out.push(target); }
-        IYield(target) => { out.push(target); }
+        IJump(target)  => { out.push(target.clone()); }
+        IYield(target) => { out.push(target.clone()); }
         IHalt(_, _)    => {}                // no successors
         IReturn(_)     => {}
         _              => {}                // non-terminators have no targets

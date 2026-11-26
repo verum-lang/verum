@@ -30,6 +30,7 @@ module core.database.sqlite.native.l4_vdbe.ssa.value;
 // =============================================================================
 
 mount base.{Text, Maybe};
+mount core.base.protocols.Clone;
 
 // -----------------------------------------------------------------------------
 // SValueKind — the static type of every SSA value
@@ -115,14 +116,12 @@ fn matches_any(k: &SValueKind)   -> Bool { match k { SkAny   => true, _ => false
 /// `SsaBuilder` (see `builder.vr`) which hands out fresh ids on every
 /// instruction emission.
 ///
-/// Convention: `ValueId(0)` is the synthetic null literal (always
-/// emitted as the first instruction of the entry block).  Backends
-/// MAY rely on this; the back-translation pass guarantees it.
+/// Index zero is reserved. A fresh program allocates its first value at one.
 public type ValueId is (Int);
 
 public fn value_id(n: Int) -> ValueId { ValueId(n) }
 public fn value_id_raw(v: &ValueId) -> Int {
-    match v { ValueId(n) => n }
+    v.0
 }
 
 public fn value_id_eq(a: &ValueId, b: &ValueId) -> Bool {
@@ -146,6 +145,15 @@ public type SsaValue is {
 
 public fn ssa_value(id: ValueId, kind: SValueKind) -> SsaValue {
     SsaValue { id: id, kind: kind }
+}
+
+implement Clone for SsaValue {
+    fn clone(&self) -> SsaValue { ssa_value(self.id, self.kind) }
+}
+
+implement SsaValue {
+    public fn id(&self) -> ValueId { self.id }
+    public fn kind(&self) -> SValueKind { self.kind }
 }
 
 /// Equality: only on `id`.  Two SSA values with same id but different

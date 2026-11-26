@@ -1,0 +1,87 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L2
+// @tags: sqlite, vdbe, ssa, builder, graph
+// @timeout: 15000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.l4_vdbe.ssa.value.{SValueKind, kind_eq, ssa_value, value_id, value_id_raw};
+mount core.database.sqlite.native.l4_vdbe.ssa.block.{block_id, block_id_raw};
+mount core.database.sqlite.native.l4_vdbe.ssa.inst.{SsaInst, inst_terminator_targets};
+mount core.database.sqlite.native.l4_vdbe.ssa.cfg.cfg_new;
+mount core.database.sqlite.native.l4_vdbe.ssa.builder.{ssa_builder_new, emit_int_imm, emit_result_row, emit_jump};
+
+fn test_builder() {
+    let mut b = ssa_builder_new("SELECT 7");
+    assert_eq(block_id_raw(&b.current_block_id()), 0);
+    assert_eq(b.block_count(), 1);
+    assert_eq(b.value_count(), 1);
+    let value = emit_int_imm(&mut b, 2, 7_i64);
+    assert_eq(value_id_raw(&value.id()), 1);
+    assert(kind_eq(&value.kind(), &SValueKind.SkInt));
+    match b.read_reg(2) {
+        Maybe.Some(reg) => { assert_eq(value_id_raw(&reg.id()), 1); },
+        Maybe.None => panic("defined register was lost"),
+    }
+    emit_result_row(&mut b, 2, 1);
+    let next = emit_jump(&mut b, block_id(1));
+    assert_eq(block_id_raw(&next), 1);
+    assert(b.read_reg(2) is Maybe.None);
+    let prog = b.finalize();
+    assert_eq(prog.value_count(), 2);
+    assert_eq(prog.block_count(), 2);
+    assert_eq(prog.total_instr_count(), 4);
+    let graph = prog.graph();
+    assert_eq(graph.get(&next).predecessor_count(), 1);
+    match graph.get(&next).predecessor_at(0) {
+        Maybe.Some(pred) => assert_eq(block_id_raw(&pred), 0),
+        Maybe.None => panic("successor is missing the entry predecessor"),
+    }
+    assert(prog.get_cursor_decl(0) is Maybe.None);
+}
+
+fn test_successors_in_terminator_order() {
+    let condition = ssa_value(value_id(1), SValueKind.SkBool);
+    let left = block_id(3);
+    let right = block_id(4);
+    let split = inst_terminator_targets(&SsaInst.IBranch(condition, left, right));
+    assert_eq(split.len(), 2);
+    assert_eq(block_id_raw(&split[0]), 3);
+    assert_eq(block_id_raw(&split[1]), 4);
+    let joined = inst_terminator_targets(&SsaInst.IBranch(condition, right, right));
+    assert_eq(joined.len(), 1);
+    assert_eq(block_id_raw(&joined[0]), 4);
+    let resumed = inst_terminator_targets(&SsaInst.IYield(left));
+    assert_eq(resumed.len(), 1);
+    assert_eq(block_id_raw(&resumed[0]), 3);
+    assert_eq(inst_terminator_targets(&SsaInst.IHalt(0, "")).len(), 0);
+}
+
+fn test_invalid_edits_preserve_entry() {
+    let mut graph = cfg_new();
+    let entry = graph.entry_id();
+    let next = graph.new_block();
+    graph.get_mut(&entry).set_terminator(SsaInst.IJump(next));
+    for invalid in [-1, 2] {
+        match graph.try_get_mut(block_id(invalid)) {
+            Maybe.Some(block) => {
+                block.set_terminator(SsaInst.IHalt(1, "invalid edit"));
+                panic("invalid block ID was writable");
+            },
+            Maybe.None => {},
+        }
+    }
+    graph.compute_preds();
+    graph.compute_preds();
+    let successors = graph.get(&entry).successors();
+    assert_eq(successors.len(), 1);
+    assert_eq(block_id_raw(&successors[0]), 1);
+    assert_eq(graph.get(&next).predecessor_count(), 1);
+    assert_eq(graph.get(&entry).predecessor_count(), 0);
+}
+
+fn main() {
+    test_successors_in_terminator_order();
+    test_invalid_edits_preserve_entry();
+    test_builder();
+}
