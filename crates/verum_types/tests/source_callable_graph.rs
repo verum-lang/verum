@@ -1,5 +1,5 @@
 //! Declaration preparation must bound shared source-call graphs without
-//! borrowing another declaration's synchrony or proving recursive cycles.
+//! borrowing another declaration's synchrony or overlooking a reachable call.
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 use verum_ast::{FileId, ItemKind};
@@ -49,11 +49,25 @@ fn shared_diamond_retains_a_synchronous_contract() {
 }
 
 #[test]
-fn recursive_cycles_remain_unproved() {
+fn a_closed_recursive_component_excludes_suspension() {
     for source in [
         "fn first()->Int {first()}",
         "fn first()->Int {second()} fn second()->Int {first()}",
         "fn first()->Int {leaf()+second()} fn second()->Int {first()} fn leaf()->Int {1}",
+    ] {
+        assert_eq!(bound(&checker(source), "first"), PropertyRequirement::source_callable(false), "{source}");
+    }
+}
+
+#[test]
+fn a_recursive_component_checks_its_exits_and_contracts() {
+    for source in [
+        "fn first()->Int {second()} fn second()->Int {first()+leaf()} async fn leaf()->Int {1}",
+        "fn first()->Int {leaf()+second()} fn second()->Int {first()} async fn leaf()->Int {1}",
+        "fn first()->Int {second()} fn second()->Int {first()+missing()}",
+        "fn first()->Int {second()} fn second()->Int requires missing_guard() {first()}",
+        "fn first()->Int {second()} fn second()->Int ensures missing_guard() {first()}",
+        "fn first()->Int {second()} fn second()->Int requires ready() {first()} async fn ready()->Bool {true}",
     ] {
         assert!(bound(&checker(source), "first").may_be_async(), "{source}");
     }
@@ -105,6 +119,30 @@ fn same_leaf_names_keep_their_declaring_owner() {
     assert!(errors.is_empty(), "{errors:?}");
     assert!(!bound(&checked, "accept").may_be_async());
     assert!(bound(&checked, "refuse").may_be_async());
+}
+
+#[test]
+fn a_cycle_across_modules_preserves_the_exact_owner_of_an_exit() {
+    let source = "fn entry(n:Int)->Int {providers.left.step(n)}";
+    for (exit, synchronous) in [("public fn exit()->Int {0}", true),
+                               ("public async fn exit()->Int {0}", false)] {
+        let registry = registry(&[
+            ("providers.left", "public fn step(n:Int)->Int {providers.right.step(n)}"),
+            ("providers.right", "public fn step(n:Int)->Int {
+                if n > 0 { providers.left.step(n-1) } else { providers.end.exit() }
+            }"),
+            ("providers.end", exit),
+            ("cog", source),
+        ]);
+        let module = registry.get_by_path("cog").unwrap();
+        let mut checked = TypeChecker::with_minimal_context();
+        checked.register_primitives();
+        checked.set_module_registry_direct(registry);
+        checked.set_current_module_path("cog");
+        let errors = checked.prepare_module_declarations(&module.ast);
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(!bound(&checked, "entry").may_be_async(), synchronous, "{exit}");
+    }
 }
 
 #[test]

@@ -101,7 +101,7 @@ impl SourceFunction {
 
     fn identity(&self) -> usize {
         // This address is used only as identity, never dereferenced. Every
-        // active/proven entry retains its snapshot until this query finishes.
+        // visited entry retains its snapshot until this query finishes.
         std::ptr::from_ref(self.declaration()) as usize
     }
 }
@@ -113,7 +113,6 @@ enum SourceCall {
 
 struct SourceCallFrame {
     owner: Text,
-    declaration: Option<SourceFunction>,
     remaining: List<verum_ast::Path>,
 }
 
@@ -526,19 +525,16 @@ impl TypeChecker {
         let Some(mut calls) = self.source_body_calls(function) else { return false; };
         calls.reverse();
         let mut pending = List::from_single(SourceCallFrame {
-            owner: owner.clone(), declaration: None, remaining: calls,
+            owner: owner.clone(), remaining: calls,
         });
-        let mut active = Set::new();
-        let mut proven = Map::new();
+        // A reachable asynchronous or unknown operation is a witness against
+        // synchrony. Check every reachable body and edge before accepting.
+        // A back edge adds no new obligations and says nothing about termination.
+        let mut visited = Map::new();
         let mut remaining = MAX_SOURCE_CALL_STEPS;
         while let Some(frame) = pending.last_mut() {
             let Some(path) = frame.remaining.pop() else {
-                let frame = pending.pop().expect("active source call frame");
-                if let Some(declaration) = frame.declaration {
-                    let key = (frame.owner, declaration.identity());
-                    active.remove(&key);
-                    proven.insert(key, declaration);
-                }
+                pending.pop();
                 continue;
             };
             let Some(next) = remaining.checked_sub(1) else { return false; };
@@ -549,15 +545,13 @@ impl TypeChecker {
                 SourceCall::Declaration(owner, declaration) => (owner, declaration),
             };
             let key = (owner.clone(), declaration.identity());
-            if proven.contains_key(&key) { continue; }
-            // Recursive source contracts remain unproved. Re-entering an
-            // active node cannot borrow evidence from an unfinished body.
-            if !active.insert(key) { return false; }
+            if visited.contains_key(&key) { continue; }
             let Some(mut calls) = self.source_body_calls(declaration.declaration()) else {
                 return false;
             };
+            visited.insert(key, declaration);
             calls.reverse();
-            pending.push(SourceCallFrame { owner, declaration: Some(declaration), remaining: calls });
+            pending.push(SourceCallFrame { owner, remaining: calls });
         }
         true
     }
@@ -565,7 +559,8 @@ impl TypeChecker {
     /// Analyze local computation once; unresolved source edges are handled by
     /// the bounded graph traversal, without recursively analyzing callees.
     fn source_body_calls(&mut self, function: &FunctionDecl) -> Option<List<verum_ast::Path>> {
-        if function.is_async || function.is_generator {
+        if function.is_async || function.is_generator || function.std_attr.is_some()
+            || !function.contexts.is_empty() {
             return None;
         }
         if let Some(bound) = intrinsic_declaration_bound(function) {
@@ -574,11 +569,11 @@ impl TypeChecker {
         // The ABI is carried by the declaration, including across imports and
         // metadata. Foreign calls return on the calling stack. They may perform
         // IO, mutate and fail; synchronous is not a promise of purity.
-        if function.extern_abi.is_some() {
-            return Some(List::new());
-        }
-        let Some(body) = &function.body else { return None; };
-        let mut local = self.property_inferrer.infer_function_body(body);
+        let mut local = match &function.body {
+            Some(body) => self.property_inferrer.infer_function_body(body),
+            None if function.extern_abi.is_some() => PropertySet::pure(),
+            None => return None,
+        };
         for param in &function.params {
             if let verum_ast::FunctionParamKind::Regular {
                 default_value: Some(value),
@@ -587,6 +582,9 @@ impl TypeChecker {
             {
                 local = local.union(&self.property_inferrer.infer_local_operations(value));
             }
+        }
+        for guard in function.requires.iter().chain(&function.ensures) {
+            local = local.union(&self.property_inferrer.infer_local_operations(guard));
         }
         let mut source = SourceCalls::default();
         let mut calls = Calls {
@@ -607,9 +605,13 @@ impl TypeChecker {
                 }
             }
         }
-        match body {
-            verum_ast::FunctionBody::Block(block) => calls.visit_block(block),
-            verum_ast::FunctionBody::Expr(expr) => calls.visit_expr(expr),
+        for guard in function.requires.iter().chain(&function.ensures) {
+            calls.visit_expr(guard);
+        }
+        match &function.body {
+            Some(verum_ast::FunctionBody::Block(block)) => calls.visit_block(block),
+            Some(verum_ast::FunctionBody::Expr(expr)) => calls.visit_expr(expr),
+            None => {}
         }
         if calls.bound.may_be_async() {
             return None;
