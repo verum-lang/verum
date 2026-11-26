@@ -1,0 +1,61 @@
+mount core.database.sqlite.native.l4_vdbe.opcode.Opcode;
+mount core.database.sqlite.native.l4_vdbe.optimizer.{collapse_move_chains, eliminate_dead_code, eliminate_noops};
+mount core.database.sqlite.native.l4_vdbe.program.program_new;
+
+@test
+fn a_forwarded_move_clears_the_intermediate_register() {
+    let mut program = program_new("forward", 4);
+    program.emit(Opcode.Move(1, 2, 1));
+    program.emit(Opcode.Move(2, 3, 1));
+    assert_eq(collapse_move_chains(&mut program), 1);
+    assert(program.get_opcode(0) is Maybe.Some(Opcode.Move(1, 3, 1)));
+    assert(program.get_opcode(1) is Maybe.Some(Opcode.SoftNull(2)));
+}
+
+@test
+fn an_independent_entry_keeps_the_original_second_move() {
+    let mut program = program_new("branch", 4);
+    program.emit(Opcode.Goto(2));
+    program.emit(Opcode.Move(1, 2, 1));
+    program.emit(Opcode.Move(2, 3, 1));
+    assert_eq(collapse_move_chains(&mut program), 0);
+    assert(program.get_opcode(2) is Maybe.Some(Opcode.Move(2, 3, 1)));
+}
+
+@test
+fn register_aliases_and_indirect_targets_preserve_their_moves() {
+    let mut alias = program_new("round trip", 4);
+    alias.emit(Opcode.Move(1, 2, 1));
+    alias.emit(Opcode.Move(2, 1, 1));
+    assert_eq(collapse_move_chains(&mut alias), 0);
+    let mut indirect = program_new("indirect", 4);
+    indirect.emit(Opcode.Move(1, 2, 1));
+    indirect.emit(Opcode.Move(2, 3, 1));
+    indirect.emit(Opcode.Return(0));
+    assert_eq(collapse_move_chains(&mut indirect), 0);
+}
+
+@test
+fn jumps_to_trailing_noops_and_to_the_end_use_the_compacted_end() {
+    let mut program = program_new("instruction boundaries", 0);
+    program.emit(Opcode.Noop);
+    program.emit(Opcode.Goto(3));
+    program.emit(Opcode.Goto(5));
+    program.emit(Opcode.Noop);
+    program.emit(Opcode.Noop);
+    assert_eq(eliminate_noops(&mut program), 3);
+    assert_eq(program.instruction_count(), 2);
+    assert(program.get_opcode(0) is Maybe.Some(Opcode.Goto(2)));
+    assert(program.get_opcode(1) is Maybe.Some(Opcode.Goto(2)));
+    assert_eq(eliminate_noops(&mut program), 0);
+}
+
+@test
+fn first_visit_to_once_keeps_the_fallthrough_body() {
+    let mut program = program_new("once", 4);
+    program.emit(Opcode.Once(2));
+    program.emit(Opcode.Integer(42, 1));
+    program.emit(Opcode.Halt(0, 0));
+    assert_eq(eliminate_dead_code(&mut program), 0);
+    assert(program.get_opcode(1) is Maybe.Some(Opcode.Integer(42, 1)));
+}

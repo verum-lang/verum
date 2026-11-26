@@ -32,7 +32,7 @@ module core.database.sqlite.native.l4_vdbe.optimizer;
 
 mount collections.List;
 mount base.{Text, Maybe};
-mount core.database.sqlite.native.l4_vdbe.opcode.{Opcode, is_branch};
+mount core.database.sqlite.native.l4_vdbe.opcode.{Opcode, clone_opcode};
 mount core.database.sqlite.native.l4_vdbe.program.VdbeProgram;
 
 // -----------------------------------------------------------------------------
@@ -44,18 +44,20 @@ mount core.database.sqlite.native.l4_vdbe.program.VdbeProgram;
 public fn eliminate_noops(program: &mut VdbeProgram) -> Int {
     // First pass: build old_idx → new_idx mapping.
     let n = program.instructions.len();
-    let mut new_idx: List<Int> = List.new();
+    let mut new_idx: List<Int> = List.with_capacity(n + 1);
     let mut cur: Int = 0;
     let mut i: Int = 0;
     while i < n {
-        match program.instructions[i] {
-            Noop => new_idx.push(-1),
-            _    => { new_idx.push(cur); cur = cur + 1; }
-        }
+        // Each old instruction boundary maps to the number of retained
+        // instructions before it, including a run of trailing Noops.
+        new_idx.push(cur);
+        if !(program.instructions[i] is Opcode.Noop) { cur = cur + 1; }
         i = i + 1;
     }
+    new_idx.push(cur);
     // Second pass: rewrite with remapped jumps.
-    let mut new_ops: List<Opcode> = List.new();
+    if cur == n { return 0; }
+    let mut new_ops: List<Opcode> = List.with_capacity(cur);
     let mut j: Int = 0;
     while j < n {
         match program.instructions[j] {
@@ -76,19 +78,7 @@ fn remap_one(target: Int, mapping: &List<Int>) -> Int {
     if target < 0 || target >= mapping.len() {
         return target;
     }
-    let mapped = mapping[target];
-    if mapped < 0 {
-        // Jumped into a Noop — slide forward to the next live
-        // instruction. Walk until we find one.
-        let mut i: Int = target + 1;
-        while i < mapping.len() {
-            if mapping[i] >= 0 { return mapping[i]; }
-            i = i + 1;
-        }
-        // Fell off the end — stay here.
-        return mapping.len();
-    }
-    mapped
+    mapping[target]
 }
 
 fn remap_jumps(op: &Opcode, mapping: &List<Int>) -> Opcode {
@@ -122,100 +112,7 @@ fn remap_jumps(op: &Opcode, mapping: &List<Int>) -> Opcode {
         IdxLT(c, t, k, n)    => IdxLT(c, remap_one(t, mapping), k, n),
         IdxLE(c, t, k, n)    => IdxLE(c, remap_one(t, mapping), k, n),
         SorterNext(c, t)     => SorterNext(c, remap_one(t, mapping)),
-        other => clone_op(other),
-    }
-}
-
-fn clone_op(op: &Opcode) -> Opcode {
-    match op {
-        Init(t)           => Init(t),
-        Halt(c, m)        => Halt(c, m),
-        Goto(t)           => Goto(t),
-        Gosub(r, t)       => Gosub(r, t),
-        Return(r)         => Return(r),
-        Once(t)           => Once(t),
-        Noop              => Noop,
-        Integer(v, d)     => Integer(v, d),
-        Int64(c, d)       => Int64(c, d),
-        Real(c, d)        => Real(c, d),
-        String8(c, d)     => String8(c, d),
-        BlobLit(c, d)     => BlobLit(c, d),
-        Null(s, e)        => Null(s, e),
-        SoftNull(d)       => SoftNull(d),
-        Move(s, d, c)     => Move(s, d, c),
-        Copy(s, d, c)     => Copy(s, d, c),
-        SCopy(s, d)       => SCopy(s, d),
-        Add(a, b, d)      => Add(a, b, d),
-        Subtract(a, b, d) => Subtract(a, b, d),
-        Multiply(a, b, d) => Multiply(a, b, d),
-        Divide(a, b, d)   => Divide(a, b, d),
-        Remainder(a, b, d)=> Remainder(a, b, d),
-        BitAnd(a, b, d)   => BitAnd(a, b, d),
-        BitOr(a, b, d)    => BitOr(a, b, d),
-        ShiftLeft(a, b, d)=> ShiftLeft(a, b, d),
-        ShiftRight(a, b, d)=> ShiftRight(a, b, d),
-        BitNot(s, d)      => BitNot(s, d),
-        Eq(a, b, t) => Eq(a, b, t),
-        Ne(a, b, t) => Ne(a, b, t),
-        Lt(a, b, t) => Lt(a, b, t),
-        Le(a, b, t) => Le(a, b, t),
-        Gt(a, b, t) => Gt(a, b, t),
-        Ge(a, b, t) => Ge(a, b, t),
-        If(r, t)    => If(r, t),
-        IfNot(r, t) => IfNot(r, t),
-        IfNull(r, t)=> IfNull(r, t),
-        NotNull(r, t)=> NotNull(r, t),
-        OpenRead(c, r, n)  => OpenRead(c, r, n),
-        OpenWrite(c, r, n) => OpenWrite(c, r, n),
-        OpenIndex(c, r, n) => OpenIndex(c, r, n),
-        Close(c)           => Close(c),
-        Rewind(c, t)       => Rewind(c, t),
-        Last(c, t)         => Last(c, t),
-        Next(c, t)         => Next(c, t),
-        Prev(c, t)         => Prev(c, t),
-        Column(c, i, d)    => Column(c, i, d),
-        RowIdOp(c, d)      => RowIdOp(c, d),
-        IdxRowid(c, d)     => IdxRowid(c, d),
-        SeekGE(c, k, n, t) => SeekGE(c, k, n, t),
-        SeekGT(c, k, n, t) => SeekGT(c, k, n, t),
-        SeekLE(c, k, n, t) => SeekLE(c, k, n, t),
-        SeekLT(c, k, n, t) => SeekLT(c, k, n, t),
-        Found(c, t, k, n)    => Found(c, t, k, n),
-        NotFound(c, t, k, n) => NotFound(c, t, k, n),
-        IdxGT(c, t, k, n)    => IdxGT(c, t, k, n),
-        IdxGE(c, t, k, n)    => IdxGE(c, t, k, n),
-        IdxLT(c, t, k, n)    => IdxLT(c, t, k, n),
-        IdxLE(c, t, k, n)    => IdxLE(c, t, k, n),
-        IdxInsert(c, r)    => IdxInsert(c, r),
-        Insert(c, d, k, f) => Insert(c, d, k, f),
-        Delete(c)          => Delete(c),
-        UpdateRow(c, d)    => UpdateRow(c, d),
-        NewRowid(c, d)     => NewRowid(c, d),
-        MakeRecord(s, n, d, a) => MakeRecord(s, n, d, a),
-        OpenEphemeral(c, n) => OpenEphemeral(c, n),
-        OpenAutoindex(c, n) => OpenAutoindex(c, n),
-        SorterOpen(c)       => SorterOpen(c),
-        SorterInsert(c, r)  => SorterInsert(c, r),
-        SorterSort(c)       => SorterSort(c),
-        SorterData(c, d)    => SorterData(c, d),
-        SorterNext(c, t)    => SorterNext(c, t),
-        SortRowStore(c, n, d) => SortRowStore(c, n, d),
-        DedupRowStore(c, n)   => DedupRowStore(c, n),
-        Transaction(w) => Transaction(w),
-        Commit         => Commit,
-        RollbackOp(n)  => RollbackOp(n),
-        SavepointOp(n) => SavepointOp(n),
-        AutoCommit(d, r) => AutoCommit(d, r),
-        ReadCookie(c, d)  => ReadCookie(c, d),
-        WriteCookie(c, s) => WriteCookie(c, s),
-        Function(n, a, d, f) => Function(n, a, d, f),
-        ScalarFn(k, n, a, d) => ScalarFn(k, n, a, d),
-        CastVal(s, k, d)     => CastVal(s, k, d),
-        AggStep(f, n, a, c)  => AggStep(f, n, a, c),
-        AggFinal(f, c)       => AggFinal(f, c),
-        AggStepAvg(n, a, s, c) => AggStepAvg(n, a, s, c),
-        AggFinalAvg(s, c, d)   => AggFinalAvg(s, c, d),
-        ResultRow(s, n) => ResultRow(s, n),
+        other => clone_opcode(other),
     }
 }
 
@@ -232,7 +129,7 @@ public fn thread_jumps(program: &mut VdbeProgram) -> Int {
     let mut changed: Int = 0;
     let mut i: Int = 0;
     while i < n {
-        let op = clone_op(&program.instructions[i]);
+        let op = clone_opcode(&program.instructions[i]);
         let new_op = match op {
             Goto(t)           => { let rt = resolve_goto(t, &program.instructions, n); if rt != t { changed = changed + 1; Goto(rt) } else { Goto(t) } }
             Eq(a, b, t)       => { let rt = resolve_goto(t, &program.instructions, n); if rt != t { changed = changed + 1; Eq(a, b, rt) } else { Eq(a, b, t) } }
@@ -298,15 +195,7 @@ public fn eliminate_dead_code(program: &mut VdbeProgram) -> Int {
     worklist.push(0);
     reachable[0] = true;
 
-    while worklist.len() > 0 {
-        let last = worklist.len() - 1;
-        let pc = worklist[last];
-        // Pop the last element by truncation.
-        let mut new_wl: List<Int> = List.new();
-        let mut k: Int = 0;
-        while k < last { new_wl.push(worklist[k]); k = k + 1; }
-        worklist = new_wl;
-
+    while let Maybe.Some(pc) = worklist.pop() {
         let op = &program.instructions[pc];
 
         // Fall-through successor (pc + 1) unless this is a terminator
@@ -347,15 +236,13 @@ public fn eliminate_dead_code(program: &mut VdbeProgram) -> Int {
 }
 
 /// `true` iff control falls through to PC+1 after `op` executes.
-/// Terminators (Halt, Return) and unconditional branches (Goto, Init,
-/// Once) do NOT fall through.
+/// Halt, Return, Goto and Init have no fall-through. Once falls through on its first visit.
 fn opcode_falls_through(op: &Opcode) -> Bool {
     match op {
         Halt(_, _)        => false,
         Return(_)         => false,
         Goto(_)           => false,
         Init(_)           => false,
-        Once(_)           => false,
         _                 => true,
     }
 }
@@ -403,48 +290,53 @@ fn opcode_jump_targets(op: &Opcode) -> List<Int> {
 // Pass: Move-chain collapse
 // -----------------------------------------------------------------------------
 
-/// Collapse adjacent `Move r1→r2 (count=1); Move r2→r3 (count=1)`
-/// into a single `Move r1→r3`.  Only handles count=1 chains and only
-/// when r2 has no other consumers in between.  Conservative — when
-/// in doubt, leaves the chain alone.
-///
-/// Ported from the now-deleted `optimizer/move_chain.vr` parallel tree
-/// (#133 — single-canonical-tree consolidation).
+/// Forward a single-register move chain and clear its intermediate register.
+/// A jump into the second move must still see the original register contents.
 public fn collapse_move_chains(program: &mut VdbeProgram) -> Int {
-    let n = program.instructions.len();
+    let n = program.instruction_count();
     if n < 2 { return 0; }
+    let mut incoming: List<Bool> = List.with_capacity(n);
+    let mut pc: Int = 0;
+    while pc < n { incoming.push(false); pc = pc + 1; }
+    pc = 0;
+    while pc < n {
+        let op = &program.instructions[pc];
+        // A return resumes at a dynamic continuation outside the explicit jump targets.
+        if op is Opcode.Return(_) { return 0; }
+        for target in opcode_jump_targets(op) {
+            if target >= 0 && target < n { incoming[target] = true; }
+        }
+        pc = pc + 1;
+    }
+
     let mut edits: Int = 0;
-    let mut i: Int = 0;
-    while i + 1 < n {
-        let lhs_src;
-        let lhs_dst;
-        match &program.instructions[i] {
-            Move(s, d, c) => {
-                if c != 1 { i = i + 1; continue; }
-                lhs_src = s;
-                lhs_dst = d;
+    pc = 0;
+    while pc + 1 < n {
+        if !incoming[pc + 1] {
+            let pair = move_chain(&program.instructions[pc], &program.instructions[pc + 1]);
+            if let Maybe.Some((src, via, dst)) = pair {
+                program.replace(pc, Opcode.Move(src, dst, 1));
+                program.replace(pc + 1, Opcode.SoftNull(via));
+                edits = edits + 1;
+                pc = pc + 2;
+                continue;
             }
-            _ => { i = i + 1; continue; }
         }
-        // Look at i+1.
-        let rhs_dst;
-        let rhs_count;
-        match &program.instructions[i + 1] {
-            Move(s2, d2, c2) => {
-                if s2 != lhs_dst { i = i + 1; continue; }
-                if c2 != 1 { i = i + 1; continue; }
-                rhs_dst = d2;
-                rhs_count = c2;
-            }
-            _ => { i = i + 1; continue; }
-        }
-        // Replace [i] with the collapsed move; [i+1] becomes Noop.
-        program.instructions[i] = Opcode.Move(lhs_src, rhs_dst, rhs_count);
-        program.instructions[i + 1] = Noop;
-        edits = edits + 1;
-        i = i + 2;
+        pc = pc + 1;
     }
     edits
+}
+
+fn move_chain(first: &Opcode, second: &Opcode) -> Maybe<(Int, Int, Int)> {
+    match (first, second) {
+        (Opcode.Move(src, via, 1), Opcode.Move(next, dst, 1)) => {
+            if *via == *next && *src != *via && *via != *dst && *src != *dst {
+                return Maybe.Some((*src, *via, *dst));
+            }
+            Maybe.None
+        }
+        _ => Maybe.None,
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -458,7 +350,7 @@ public fn collapse_move_chains(program: &mut VdbeProgram) -> Int {
 ///
 /// Order matters:
 ///   1. `thread_jumps`        — collapse Goto chains so DCE sees real targets
-///   2. `collapse_move_chains` — expose dead Move targets
+///   2. `collapse_move_chains` — forward moves with a single entry
 ///   3. `eliminate_dead_code`  — mark unreachable Noops
 ///   4. `eliminate_noops`     — drop Noops + retarget jumps
 ///
