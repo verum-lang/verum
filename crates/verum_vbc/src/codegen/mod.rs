@@ -20426,7 +20426,8 @@ impl VbcCodegen {
 
         // Compile trailing expression
         if let Some(ref expr) = block.expr {
-            result = self.compile_expr_with_demand(expr, demand)?;
+            result = self.with_forwarded_result(block.span, Self::normalized_place(expr).span, |cg|
+                cg.compile_expr_with_demand(expr, demand))?;
         }
 
         // T1506: preserve the result while its binding is still in scope.

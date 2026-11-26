@@ -44,6 +44,28 @@ fn the_result_of_a_method_does_not_constrain_its_receiver_factory() {
     "#, 73);
 }
 
+#[test]
+fn a_result_only_witness_reaches_both_value_producing_branches() {
+    run(r#"
+        module callback_scope;
+        type Stamp<T> is { number: Int };
+        fn stamp<T>(number: Int) -> Stamp<T> {
+            Stamp { number: if T.id == Bool.id { number } else { -1 } }
+        }
+        fn identity<T>(value: T) -> T { value }
+        fn choose(first: Bool) -> Int {
+            let selected: Stamp<Bool> = if identity(first) {
+                let other: Stamp<Int> = stamp(4);
+                if other.number == -1 { stamp(7) } else { stamp(0) }
+            } else {
+                match identity(first) { true => stamp(0), false => (stamp(3)) }
+            };
+            selected.number
+        }
+        fn probe() -> Int { choose(true) * 10 + choose(false) }
+    "#, 73);
+}
+
 fn run(source: &str, expected: i64) {
     let ast = verum_fast_parser::Parser::new(source)
         .parse_module()

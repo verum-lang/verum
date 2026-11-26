@@ -12,7 +12,7 @@ use verum_vbc::{
 
 fn check(source: &str, constructor: &str) -> Arc<verum_vbc::module::VbcModule> {
     let ast = Parser::new(source).parse_module().unwrap();
-    let module = VbcCodegen::with_config(CodegenConfig::new("witnesses"))
+    let module = VbcCodegen::with_config(CodegenConfig::new("witnesses").with_strict_codegen())
         .compile_module(&ast)
         .unwrap();
     let module = verum_vbc::deserialize::deserialize_module(
@@ -24,7 +24,7 @@ fn check(source: &str, constructor: &str) -> Arc<verum_vbc::module::VbcModule> {
         .functions
         .iter()
         .find(|f| module.strings.get(f.name) == Some(constructor))
-        .unwrap();
+        .unwrap_or_else(|| panic!("missing compiled constructor {constructor}"));
     let body = decode_instructions(
         &module.bytecode[function.bytecode_offset as usize
             ..(function.bytecode_offset + function.bytecode_length) as usize],
@@ -75,7 +75,7 @@ fn record_fields_supply_nested_constructor_witnesses() {
             match state.reason.item { Choice.Empty => 42, Choice.Value(_) => 0 }
         }
     "#),
-        "State.new",
+        "witnesses.State.new",
     );
 }
 

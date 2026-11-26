@@ -488,7 +488,8 @@ impl VbcCodegen {
     pub(super) fn admits_constructor_context(expr: &Expr) -> bool {
         matches!(Self::normalized_place(expr).kind,
             ExprKind::Call { .. } | ExprKind::MethodCall { .. } | ExprKind::Record { .. }
-                | ExprKind::Path(_) | ExprKind::Field { .. })
+                | ExprKind::Path(_) | ExprKind::Field { .. } | ExprKind::Block(_)
+                | ExprKind::Unsafe(_) | ExprKind::If { .. } | ExprKind::Match { .. })
     }
 
     /// A call's expected result can bind its own parameters. Fully bound

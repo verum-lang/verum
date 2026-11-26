@@ -1342,11 +1342,14 @@ impl VbcCodegen {
         self.ctx.selected_call_result_span = matches!(
             expr.kind, ExprKind::Call { .. } | ExprKind::MethodCall { .. },
         ).then_some(expr.span);
-        // A nested producer (including a method's receiver) infers its own
-        // result. An annotation belongs to the expression which consumes it.
-        let outer_expected = match (self.ctx.selected_call_result_span, self.ctx.expected_value_span) {
-            (Some(call), Some(owner)) if call != owner => self.ctx.expected_value_type.take(),
-            _ => None,
+        // Only the selected value producer receives a contextual declaration.
+        // Parentheses preserve it. Control-flow edges forward it explicitly.
+        let outer_expected = if self.ctx.expected_value_type.is_some()
+            && self.ctx.expected_value_span.is_some_and(|owner| owner != Self::normalized_place(expr).span)
+        {
+            self.ctx.expected_value_type.take()
+        } else {
+            None
         };
         let result = self.compile_expr_in_result_scope(expr, demand);
         if let Some(expected) = outer_expected {
@@ -1374,6 +1377,21 @@ impl VbcCodegen {
         }
         self.ctx.selected_call_result_span = outer;
         result.map_err(|error| error.at_source(expr.span))
+    }
+
+    /// A branch or tail supplies its parent's value. Temporarily transfer the
+    /// expectation to that producer, restoring its owner even on failure.
+    pub(super) fn with_forwarded_result<R>(
+        &mut self, owner: verum_ast::Span, producer: verum_ast::Span,
+        compile: impl FnOnce(&mut Self) -> CodegenResult<R>,
+    ) -> CodegenResult<R> {
+        if self.ctx.expected_value_span != Some(owner) {
+            return compile(self);
+        }
+        self.ctx.expected_value_span = Some(producer);
+        let result = compile(self);
+        self.ctx.expected_value_span = Some(owner);
+        result
     }
 
     fn compile_expr_in_result_scope(
@@ -1458,7 +1476,7 @@ impl VbcCodegen {
                 condition,
                 then_branch,
                 else_branch,
-            } => self.compile_if(condition, then_branch, else_branch.as_deref(), demand),
+            } => self.compile_if(condition, then_branch, else_branch.as_deref(), demand, expr.span),
             ExprKind::Match {
                 expr: scrutinee,
                 arms,
@@ -1481,7 +1499,8 @@ impl VbcCodegen {
             } => self.compile_for(label.as_ref().map(|l| l.as_str()), pattern, iter, body),
 
             // === Block ===
-            ExprKind::Block(block) => self.compile_block_with_demand(block, demand),
+            ExprKind::Block(block) => self.with_forwarded_result(expr.span, block.span, |cg|
+                cg.compile_block_with_demand(block, demand)),
 
             // === Return/Break/Continue ===
             ExprKind::Return(value) => self.compile_return(value.as_deref()),
@@ -1620,7 +1639,8 @@ impl VbcCodegen {
             ExprKind::Yield(value) => self.compile_yield(value),
 
             // === Unsafe block ===
-            ExprKind::Unsafe(block) => self.compile_unsafe_block(block, demand),
+            ExprKind::Unsafe(block) => self.with_forwarded_result(expr.span, block.span, |cg|
+                cg.compile_unsafe_block(block, demand)),
 
             // === Meta expressions ===
             ExprKind::Meta(block) => self.compile_meta_block(block),
@@ -18694,6 +18714,7 @@ impl VbcCodegen {
         then_branch: &Block,
         else_branch: Option<&Expr>,
         demand: ResultDemand,
+        span: verum_ast::Span,
     ) -> CodegenResult<Option<Reg>> {
         let result = self.ctx.alloc_temp();
         let else_label = self.ctx.new_label("else");
@@ -18820,7 +18841,8 @@ impl VbcCodegen {
         }
 
         // All conditions passed - compile then branch
-        let then_result = self.compile_block_with_demand(then_branch, demand.for_branch())?;
+        let then_result = self.with_forwarded_result(span, then_branch.span, |cg|
+            cg.compile_block_with_demand(then_branch, demand.for_branch()))?;
         if let Some(reg) = then_result {
             self.ctx.emit(Instruction::Mov {
                 dst: result,
@@ -18854,7 +18876,8 @@ impl VbcCodegen {
 
         // Compile else branch
         if let Some(else_expr) = else_branch {
-            let else_result = self.compile_expr_with_demand(else_expr, demand.for_branch())?;
+            let else_result = self.with_forwarded_result(span, Self::normalized_place(else_expr).span, |cg|
+                cg.compile_expr_with_demand(else_expr, demand.for_branch()))?;
             if let Some(reg) = else_result {
                 self.ctx.emit(Instruction::Mov {
                     dst: result,
@@ -19892,7 +19915,8 @@ impl VbcCodegen {
 
             // Compile arm body
             let arm_start = self.ctx.instructions.len();
-            let arm_result = self.compile_expr_with_demand(&arm.body, demand.for_branch())?;
+            let arm_result = self.with_forwarded_result(span, Self::normalized_place(&arm.body).span, |cg|
+                cg.compile_expr_with_demand(&arm.body, demand.for_branch()))?;
             let arm_type = self.declared_expression_result(
                 &arm.body, arm_result, arm_start, self.ctx.instructions.len(),
             );
