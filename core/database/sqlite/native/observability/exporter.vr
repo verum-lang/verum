@@ -26,6 +26,7 @@ module core.database.sqlite.native.observability.exporter;
 
 mount base.{Text, Bool};
 mount collections.List;
+mount core.encoding.json.emit_string;
 mount core.database.sqlite.native.observability.registry.{MetricRegistry};
 
 // -----------------------------------------------------------------------------
@@ -125,9 +126,9 @@ implement MetricExporter for JsonLineExporter {
         let mut i: Int = 0;
         while i < registry.counter_count() {
             let c = registry.counter_at(i);
-            append_text(&mut out, &"{\"type\":\"counter\",\"name\":\"".clone());
-            append_text(&mut out, c.name());
-            append_text(&mut out, &"\",\"value\":".clone());
+            append_text(&mut out, &"{\"type\":\"counter\",\"name\":".clone());
+            emit_string(c.name(), &mut out);
+            append_text(&mut out, &",\"value\":".clone());
             append_int64(&mut out, c.get());
             append_text(&mut out, &"}\n".clone());
             i = i + 1;
@@ -135,9 +136,9 @@ implement MetricExporter for JsonLineExporter {
         i = 0;
         while i < registry.gauge_count() {
             let g = registry.gauge_at(i);
-            append_text(&mut out, &"{\"type\":\"gauge\",\"name\":\"".clone());
-            append_text(&mut out, g.name());
-            append_text(&mut out, &"\",\"value\":".clone());
+            append_text(&mut out, &"{\"type\":\"gauge\",\"name\":".clone());
+            emit_string(g.name(), &mut out);
+            append_text(&mut out, &",\"value\":".clone());
             append_int64(&mut out, g.get());
             append_text(&mut out, &"}\n".clone());
             i = i + 1;
@@ -145,9 +146,9 @@ implement MetricExporter for JsonLineExporter {
         i = 0;
         while i < registry.histogram_count() {
             let h = registry.histogram_at(i);
-            append_text(&mut out, &"{\"type\":\"histogram\",\"name\":\"".clone());
-            append_text(&mut out, h.name());
-            append_text(&mut out, &"\",\"count\":".clone());
+            append_text(&mut out, &"{\"type\":\"histogram\",\"name\":".clone());
+            emit_string(h.name(), &mut out);
+            append_text(&mut out, &",\"count\":".clone());
             append_int64(&mut out, h.count());
             append_text(&mut out, &",\"sum_ns\":".clone());
             append_int64(&mut out, h.sum());

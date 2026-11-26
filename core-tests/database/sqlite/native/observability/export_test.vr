@@ -32,4 +32,22 @@ fn test_registry_values_and_exported_buckets() {
     assert_eq(otlp_export(&otlp(), &reg).len(), 3);
 }
 
+fn escaped_name_observations() -> Text {
+    let mut reg = registry_new();
+    reg.inc_counter("read\"\\\n\t雪");
+    reg.set_gauge("поток🙂\r\u{1f}", -2_i64);
+    reg.observe("ms\b\f\"\\", 17_i64);
+    json_lines().render(&reg)
+}
+
+@test
+fn test_json_lines_preserves_quotes_controls_and_unicode() {
+    let encoded = escaped_name_observations();
+    let mut expected = Text.new();
+    expected.push_str("{\"type\":\"counter\",\"name\":\"read\\\"\\\\\\n\\t雪\",\"value\":1}\n");
+    expected.push_str("{\"type\":\"gauge\",\"name\":\"поток🙂\\r\\u001f\",\"value\":-2}\n");
+    expected.push_str("{\"type\":\"histogram\",\"name\":\"ms\\b\\f\\\"\\\\\",\"count\":1,\"sum_ns\":17}\n");
+    assert_eq(encoded, expected);
+}
+
 fn main() {}
