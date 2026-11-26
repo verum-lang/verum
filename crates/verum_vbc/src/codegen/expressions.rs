@@ -1342,7 +1342,16 @@ impl VbcCodegen {
         self.ctx.selected_call_result_span = matches!(
             expr.kind, ExprKind::Call { .. } | ExprKind::MethodCall { .. },
         ).then_some(expr.span);
+        // A nested producer (including a method's receiver) infers its own
+        // result. An annotation belongs to the expression which consumes it.
+        let outer_expected = match (self.ctx.selected_call_result_span, self.ctx.expected_value_span) {
+            (Some(call), Some(owner)) if call != owner => self.ctx.expected_value_type.take(),
+            _ => None,
+        };
         let result = self.compile_expr_in_result_scope(expr, demand);
+        if let Some(expected) = outer_expected {
+            self.ctx.expected_value_type = Some(expected);
+        }
         // A nullary variant read is also a constructor, despite having no call
         // syntax. Retain its selected producer and contextual owner together;
         // an expected type alone cannot establish the variant's declaration.

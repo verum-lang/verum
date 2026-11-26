@@ -29,6 +29,21 @@ fn a_shadowed_callable_parameter_keeps_the_receivers_residual_result_witness() {
     run(source, 43);
 }
 
+#[test]
+fn the_result_of_a_method_does_not_constrain_its_receiver_factory() {
+    run(r#"
+        module callback_scope;
+        type Cell is { value: Int };
+        implement Cell { fn positive(&self) -> Bool { self.value > 0 } }
+        fn identity<T>(value: T) -> T { value }
+        fn probe() -> Int {
+            let cell: Cell = Cell { value: 73 };
+            let positive: Bool = identity(cell).positive();
+            if positive { cell.value } else { 0 }
+        }
+    "#, 73);
+}
+
 fn run(source: &str, expected: i64) {
     let ast = verum_fast_parser::Parser::new(source)
         .parse_module()
