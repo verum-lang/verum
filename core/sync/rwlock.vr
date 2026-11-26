@@ -18,56 +18,16 @@
     lifecycle: Lifecycle.Definition
 )
 module core.sync.rwlock;
-mount super.atomic.*;
-
-// Cross-platform futex imports for OS-level blocking
-@cfg(target_os = "linux")
-mount sys.linux.thread.{
-    futex_wait as sys_futex_wait,
-    futex_wake as sys_futex_wake,
-};
-
-@cfg(target_os = "macos")
-mount sys.darwin.thread.{
-    futex_wait as sys_futex_wait,
-    futex_wake as sys_futex_wake,
-};
-
-@cfg(target_os = "windows")
-mount sys.windows.thread.{
-    futex_wait as sys_futex_wait,
-    futex_wake as sys_futex_wake,
-};
-
-mount core.intrinsics.spin_hint;
-// Mounted rather than inherited: §4ter — the prelude carries only what
-// the LANGUAGE requires, and this is library API.
-mount core.sync.atomic.{AtomicInt, AtomicBool};
+mount core.sync.atomic.{AtomicBool, AtomicInt, AtomicU32, MemoryOrdering};
 
 // =============================================================================
 // RwLock<T>
 // =============================================================================
 
-// Read-write lock allowing multiple readers or one writer.
-//
-
-// **Fairness model: writer-preferred.** When at least one
-// writer is queued (`writers_waiting > 0`), incoming readers
-// step aside and sleep on the futex even if they could
-// otherwise CAS the reader count up. This prevents the
-// classic readers-preferred starvation pattern where a steady
-// stream of new readers keeps the state positive and writers
-// never observe the `state == 0` window they need. The cost
-// is mild reader latency under sustained writer pressure;
-// the benefit is bounded writer wait-time.
-//
-
-// `writers_waiting` is incremented by `write()` BEFORE its
-// futex_wait registration (Release, paired with the
-// `read()`-side Acquire load) and decremented after the CAS
-// from 0 → WRITE_LOCKED succeeds (or after we exit the loop
-// via giving up — none of the current paths give up, but
-// future try_write_for_timeout would).
+// Multiple readers can hold the lock together. Incoming readers that
+// observe a registered writer wait for the write phase to end.
+// Reader and writer wait addresses are separate so that the last reader
+// can hand an idle lock to a writer even when readers are also asleep.
 public type RwLock<T> is {
     // State encoding:
     // - 0: unlocked
@@ -77,11 +37,26 @@ public type RwLock<T> is {
     // Number of writers blocked in write() awaiting state==0.
     // Readers must yield to queued writers.
     writers_waiting: AtomicInt,
+    reader_sequence: AtomicU32,
+    writer_sequence: AtomicU32,
     data: T,
     poisoned: AtomicBool,
 };
 
 const WRITE_LOCKED: Int = -1;
+
+// The caller snapshots the sequence before testing its acquisition predicate.
+// A release between that test and registration changes the expected word.
+fn park_until_change(sequence: &AtomicU32, expected: UInt32) {
+    if let Result.Err(status) = sequence.park_if_equal(expected, 0) {
+        panic(f"rwlock wait failed with status {status}");
+    }
+}
+
+fn wake_on_release(sequence: &AtomicU32, count: UInt32) {
+    sequence.fetch_add(1, MemoryOrdering.Release);
+    sequence.wake_waiters(count);
+}
 
 implement<T> RwLock<T> {
     // Create new unlocked RwLock.
@@ -90,23 +65,17 @@ implement<T> RwLock<T> {
         RwLock {
             state: AtomicInt.new(0),
             writers_waiting: AtomicInt.new(0),
+            reader_sequence: AtomicU32.new(0),
+            writer_sequence: AtomicU32.new(0),
             data: data,
             poisoned: AtomicBool.new(false),
         }
     }
 
-    // Acquire read lock.
-    //
-
-    // Blocks via futex until no writer holds the lock AND no writer
-    // is queued. The "no writer queued" check is the writer-preference
-    // gate: when `writers_waiting > 0`, incoming readers step aside
-    // and sleep, letting the queued writer drain the reader pile and
-    // acquire the lock. Without this gate a steady stream of new
-    // readers could keep `state` positive indefinitely and starve
-    // every writer.
+    // Acquire a shared guard once the active or queued writers have passed.
     public fn read(&self) -> LockResult<RwLockReadGuard<T>> {
         loop {
+            let sequence = self.reader_sequence.load(MemoryOrdering.Acquire);
             let state = self.state.load(MemoryOrdering.Acquire);
             // Yield to any queued writer (writer-preference fairness).
             let queued_writers = self.writers_waiting.load(MemoryOrdering.Acquire);
@@ -119,11 +88,7 @@ implement<T> RwLock<T> {
                     return Result.Ok(RwLockReadGuard { rwlock: self });
                 }
             } else {
-                // Writer present OR queued — sleep via futex until state changes.
-                // futex_wait checks state.value == state and returns
-                // EAGAIN if it doesn't match (covers the race where
-                // state changes between our load and our wait).
-                let _ = sys_futex_wait(&self.state.value, state, Maybe.None);
+                park_until_change(&self.reader_sequence, sequence);
             }
         }
     }
@@ -147,19 +112,11 @@ implement<T> RwLock<T> {
         Result.Err(TryLockError.WouldBlock)
     }
 
-    // Acquire write lock.
-    //
-
-    // Blocks via futex until no readers or writers hold the lock.
-    // Increments `writers_waiting` on entry to gate incoming readers
-    // (writer-preference fairness — see `read()` doc). The counter
-    // is decremented exactly once: on successful CAS into
-    // WRITE_LOCKED state. The `Release` ordering on the increment
-    // synchronises-with the `Acquire` load in `read()` / `try_read()`
-    // so an incoming reader observing our registration yields.
+    // Register once and hold the reader gate until the exclusive CAS succeeds.
     public fn write(&self) -> LockResult<RwLockWriteGuard<T>> {
         self.writers_waiting.fetch_add(1, MemoryOrdering.Release);
         loop {
+            let sequence = self.writer_sequence.load(MemoryOrdering.Acquire);
             let state = self.state.load(MemoryOrdering.Acquire);
             if state == 0 {
                 if self.state.compare_exchange(0, WRITE_LOCKED, MemoryOrdering.AcqRel, MemoryOrdering.Relaxed).is_ok() {
@@ -170,8 +127,7 @@ implement<T> RwLock<T> {
                     return Result.Ok(RwLockWriteGuard { rwlock: self });
                 }
             } else {
-                // Readers or writer present — sleep via futex until state changes
-                let _ = sys_futex_wait(&self.state.value, state, Maybe.None);
+                park_until_change(&self.writer_sequence, sequence);
             }
         }
     }
@@ -239,16 +195,18 @@ implement<T> RwLock<T> {
     fn release_read(&self) {
         let prev = self.state.fetch_sub(1, MemoryOrdering.Release);
         if prev == 1 {
-            // Last reader — wake one writer that may be waiting
-            let _ = sys_futex_wake(&self.state.value, 1);
+            // Only a writer can be waiting for the last reader to leave.
+            wake_on_release(&self.writer_sequence, 1);
         }
     }
 
     // Internal: release write lock.
     fn release_write(&self) {
         self.state.store(0, MemoryOrdering.Release);
-        // Wake all waiters — both readers and writers may be waiting
-        let _ = sys_futex_wake(&self.state.value, Int.MAX);
+        wake_on_release(&self.writer_sequence, 1);
+        // Readers recheck the writer gate. A new writer may already hold or
+        // be acquiring the lock while this release signals its waiters.
+        wake_on_release(&self.reader_sequence, Int32.MAX as UInt32);
     }
 }
 

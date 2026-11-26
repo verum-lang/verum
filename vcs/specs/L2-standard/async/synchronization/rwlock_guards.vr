@@ -1,0 +1,50 @@
+// @test: run
+// @tier: all
+// @level: L2
+// @tags: rwlock, guards, poisoning
+// @timeout: 10000
+// @expected-exit: 0
+
+mount core.sync.rwlock.{RwLock, TryLockError};
+
+fn main() -> Int {
+    let lock = RwLock.new(19);
+    let first = lock.read().unwrap();
+    let second = lock.try_read().unwrap();
+    assert_eq(*first, 19);
+    assert_eq(*second, 19);
+    drop(first);
+    match lock.try_write() {
+        Result.Err(TryLockError.WouldBlock) => (),
+        _ => panic("a remaining reader must exclude a writer"),
+    };
+    drop(second);
+
+    let mut writer = lock.write().unwrap();
+    *writer = 23;
+    match lock.try_read() {
+        Result.Err(TryLockError.WouldBlock) => (),
+        _ => panic("a writer must exclude readers"),
+    };
+    drop(writer);
+
+    lock.poison();
+    let recovered = match lock.try_read() {
+        Result.Err(TryLockError.Poisoned(cause)) => cause.into_inner(),
+        _ => panic("a poisoned read must carry its guard"),
+    };
+    assert_eq(*recovered, 23);
+    drop(recovered);
+    let mut repaired = match lock.write() {
+        Result.Err(cause) => cause.into_inner(),
+        Result.Ok(_) => panic("a poisoned write must carry its guard"),
+    };
+    *repaired = 29;
+    lock.clear_poison();
+    drop(repaired);
+    let last = lock.try_write().unwrap();
+    assert_eq(*last, 29);
+    drop(last);
+    assert_eq(lock.into_inner().unwrap(), 29);
+    0
+}

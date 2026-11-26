@@ -1,6 +1,6 @@
 # `sync/rwlock` audit
 
-Module: `core/sync/rwlock.vr` (341 LOC) — `RwLock<T>` (read-write
+Module: `core/sync/rwlock.vr` — `RwLock<T>` (read-write
 lock with writer-preferred fairness), `RwLockReadGuard<T>` /
 `RwLockWriteGuard<T>` (RAII guards), re-exports `LockResult` /
 `TryLockResult` / `PoisonError` / `TryLockError` from
@@ -12,15 +12,15 @@ State encoding:
 * `writers_waiting: AtomicInt` — writer-preference gate.  When
   `writers_waiting > 0`, incoming readers step aside and sleep so
   queued writers can drain the reader pile and acquire.
+* `reader_sequence` and `writer_sequence` are private `AtomicU32` words.
+  Each waiter class registers on its own address.
 * `data: T` — protected data.
 * `poisoned: AtomicBool` — advisory poison flag (same protocol as
   `Mutex<T>`; see `core-tests/sync/mutex/audit.md` §3.2).
 
-Tests focus on the static + single-threaded uncontended surface:
-constructor, poison protocol, advisory state.  Live `read()` /
-`write()` blocking + reader/writer fairness require a multi-
-threaded harness — tested at the language level in
-`vcs/specs/L2-standard/sync/rwlock/`.
+The local suites check construction, advisory poisoning and uncontended
+acquisitions on separate locks. The public fixtures below exercise successive
+guards on one lock and a contended handoff.
 
 ## 1. Cross-stdlib usage
 
@@ -32,48 +32,70 @@ threaded harness — tested at the language level in
 | `core.collections.frozen_map` | Reader-heavy concurrent map exposes `RwLock<Map<K,V>>` |
 | `core.io.fs.watcher`         | Inotify path-set protected by RwLock for many readers + occasional updates |
 
-## 2. Crate-side hardcodes
+## 2. Acquisition and release
 
-* `WRITE_LOCKED: Int = -1` — the sentinel value for the write-locked
-  state.  Codegen consumes the same constant when emitting the
-  inline `compare_exchange(0, WRITE_LOCKED, ...)` in `try_write()`.
-  Drift here breaks every `try_write` call site.
-* `sys.{linux,darwin,windows}.thread.{futex_wait, futex_wake}` —
-  per-platform OS-blocking primitives. The `&self.state.value`
-  pointer-into-AtomicInt is passed verbatim to the futex syscall;
-  changing `AtomicInt`'s record-layout (which is a single
-  `value: Int`) silently breaks every RwLock blocking path.
-* `RwLockReadGuard` / `RwLockWriteGuard` `Drop` impls call
-  `self.rwlock.release_read()` / `release_write()` — these are
-  package-private accessors (not `public`) intentionally; the only
-  release path is via the RAII guard's drop.
+The full-width signed state holds the reader count or the exclusive
+sentinel. A successful acquire CAS synchronizes with release by the prior
+holder. A waiting writer increments `writers_waiting` once and removes its
+registration after acquiring exclusive ownership. A reader checks that gate
+before trying to increment the shared state.
 
-## 3. Language-implementation gaps
+Each contender samples its class's sequence before inspecting the lock state.
+A release advances the relevant 32-bit sequence before waking, so a contender
+between inspection and parking rechecks its acquisition predicate. The last
+reader signals one writer. A departing writer signals one writer and
+broadcasts to readers, which recheck the writer gate. The atomic owner forms
+the wait address from the same field used for increment and comparison.
 
-### §3.1 Live read/write require multi-threaded harness
+## 3. Execution coverage
 
-Cannot be tested at the data-shape level.  See `vcs/specs/L2-standard/sync/rwlock/`.
+### §3.1 Public guard contract
 
-### §3.2 Writer-preference fairness gate
+The [guard fixture](../../../vcs/specs/L2-standard/async/synchronization/rwlock_guards.vr)
+acquires two read guards, checks writer exclusion after one drops, writes
+through an exclusive guard and checks reader exclusion. Both read and write
+poison errors must return the held guard. The fixture repairs the value and
+checks the final contents. Ordinary `verum check` admits the full fixture.
+The development CLI stops before execution on both tiers because it lacks
+the embedded standard-library archive. The existing local regression records
+an earlier interpreter in which an exclusive guard remained held after scope
+exit; its two-lock control cannot exercise reacquisition of the same lock.
 
-`rwlock.vr:57-67, 106-128, 160-178` documents the fairness model:
-writer-preferred via the `writers_waiting` gate.  The architectural
-rationale (readers-preferred starves writers) is pinned in the
-doc-comment; runtime verification is a multi-threaded job.
+### §3.2 Last-reader handoff and writer preference
+
+With a single mixed wait queue, a final reader could wake another reader.
+That reader would observe a queued writer and park again while the lock was
+free. The final reader now signals only the writer address. Writer preference
+places no bound on OS scheduling or on a specific writer's wait time.
+
+The [VBC release test](../../../crates/verum_vbc/tests/stdlib_rwlock_release.rs)
+compiles the real owner methods, typed atomic operations and registered
+futex wake. The probe sets up two readers. Releasing the first leaves both
+sequences unchanged; releasing the last advances just the writer sequence.
+An exclusive release resets the state and advances both sequences. The
+probe calls the release methods directly and does not exercise guard drop.
+
+The [threaded fixture](../../../vcs/specs/L2-standard/async/synchronization/rwlock_writer_handoff.vr)
+holds a read guard until a second `try_read` observes the queued writer.
+A later reader must observe the writer's published value. Ordinary source
+checking rejects both `ThreadBuilder.spawn` callbacks with E400 because
+their synchronous callable properties are unknown. The
+[VBC futex tests](../../../crates/verum_vbc/tests/futex_waiters.rs) execute
+typed wait, wake and address isolation beneath this public handoff.
 
 ### §3.3 Re-exported error types from `sync.mutex`
 
-`rwlock.vr:338-341` re-exports `LockResult` / `TryLockResult` /
+The owner re-exports `LockResult` / `TryLockResult` /
 `PoisonError` / `TryLockError`.  Drift between mutex.vr's and
 rwlock.vr's view of these is structurally invisible until a
 caller-side type confusion blows up at compile-time.  Pinned in
 `unit_test.vr` §3 by importing the same names from rwlock and
 checking construction works for both paths.
 
-### §3.4 `Default<T>` for `RwLock<T>` substitutes literal `0`
+### §3.4 Default construction
 
-`rwlock.vr:257-261` — same task #17 workaround as Mutex.  LOCK-IN
-pinned in `regression_test.vr`.
+`RwLock<T>.default()` delegates to `T.default()`. The local construction
+regression uses `RwLock.new(0)`; that test exercises the explicit constructor.
 
 ### §3.5 Read/Write guards do not share an ancestor protocol
 
@@ -83,22 +105,8 @@ correct algebraic distinction; the alternative (a single guard
 type with a Bool discriminator) would conflate read-vs-write
 safety.
 
-## Action items landed in this branch
+## Local suites
 
-* `core-tests/sync/rwlock/unit_test.vr` — `@test`s covering
-  `RwLock.new` + poison protocol + WRITE_LOCKED-sentinel-equivalent
-  state observation + re-exported error types.
-* `core-tests/sync/rwlock/property_test.vr` — poison-flag idempotence
-  + state-machine laws + multi-RwLock independence.
-* `core-tests/sync/rwlock/regression_test.vr` — LOCK-IN pin for §3.4
-  (Default literal-0 workaround) + writer-preference gate documented
-  in audit.
-* `core-tests/sync/rwlock/audit.md` — this file.
-
-## Action items deferred
-
-| Item | Scope | Estimated effort |
-|---|---|---|
-| Live concurrent read+write tests | `vcs/specs/L2-standard/sync/rwlock/` | 1 day |
-| Writer-preference fairness verification | multi-threaded harness | 1 day |
-| Per-tier `--interp` vs `--aot` parity gate | full cross-tier run | 30 min once binary + runtime.vbca co-built |
+* [Unit tests](unit_test.vr) cover construction, poison state and error types.
+* [Property tests](property_test.vr) cover poison idempotence and independent locks.
+* [Regression tests](regression_test.vr) also acquire read and write guards on separate uncontended locks.

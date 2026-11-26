@@ -1,0 +1,46 @@
+// @test: run
+// @tier: all
+// @level: L2
+// @tags: rwlock, threads, handoff
+// @timeout: 10000
+// @expected-exit: 0
+
+mount core.runtime.thread.{Thread, ThreadBuilder, ThreadJoinHandle};
+mount core.sync.rwlock.{RwLock, TryLockError};
+mount core.time.instant.{Instant};
+
+static LOCK: RwLock<Int> = RwLock.new(0);
+
+fn publish() -> Int {
+    let mut writer = LOCK.write().unwrap();
+    *writer = 37;
+    11
+}
+
+fn observe() -> Int {
+    let reader = LOCK.read().unwrap();
+    *reader
+}
+
+fn main() -> Int {
+    let held = LOCK.read().unwrap();
+    let writer: ThreadJoinHandle<Int> = ThreadBuilder.new().spawn(publish).unwrap();
+
+    // With one reader still holding the lock, a blocked second try_read
+    // observes that the writer has registered its preference.
+    let started = Instant.now();
+    loop {
+        match LOCK.try_read() {
+            Result.Err(TryLockError.WouldBlock) => break,
+            Result.Err(TryLockError.Poisoned(_)) => panic("unexpected poison"),
+            Result.Ok(another) => drop(another),
+        };
+        assert(started.elapsed().as_nanos() < 2_000_000_000);
+        Thread.yield_now();
+    }
+    let reader: ThreadJoinHandle<Int> = ThreadBuilder.new().spawn(observe).unwrap();
+    drop(held);
+    assert_eq(writer.join().unwrap(), 11);
+    assert_eq(reader.join().unwrap(), 37);
+    0
+}
