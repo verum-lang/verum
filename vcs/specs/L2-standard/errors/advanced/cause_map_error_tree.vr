@@ -1,0 +1,28 @@
+// @test: run-interpreter
+// @level: L2
+// @tier: 0
+// @description: Mapping a captured predicate preserves both branches and empty leaves.
+module cause_map_error_tree;
+
+mount core.base.memory.Heap;
+mount core.base.result.Cause;
+
+fn main() -> Int {
+    let low: Cause<Int> = Cause.Fail(7);
+    let high: Cause<Int> = Cause.Fail(13);
+    let empty: Cause<Int> = Cause.Empty;
+    let parallel: Cause<Int> = Cause.Both(Heap.new(high), Heap.new(empty));
+    let sequential: Cause<Int> = Cause.Then(Heap.new(low), Heap.new(parallel));
+    let threshold = 10;
+    let mapped: Cause<Bool> = sequential.map_error(|value| value > threshold);
+    match &mapped {
+        Then(left, right) => match (left.as_ref(), right.as_ref()) {
+            (Fail(false), Both(high, empty)) => match (high.as_ref(), empty.as_ref()) {
+                (Fail(true), Empty) => 0,
+                _ => 1,
+            },
+            _ => 2,
+        },
+        _ => 3,
+    }
+}

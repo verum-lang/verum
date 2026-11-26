@@ -770,6 +770,9 @@ pub struct InterpreterState {
     /// to detect CBGR header pointers and use raw u32 field access instead of
     /// the normal ObjectHeader + Value-sized field layout.
     pub cbgr_allocations: HashSet<usize>,
+    /// Element witness captured by an owning VBC cell constructor. Raw
+    /// transfer preserves it until the allocation is retired.
+    pub(super) heap_cell_elements: verum_common::Map<usize, crate::types::TypeRef>,
 
     /// Interval index over the live **bridge allocations** — the packed byte
     /// blocks `cbgr_allocate` / `cbgr_alloc_zeroed` hand to Verum code
@@ -2718,6 +2721,7 @@ impl InterpreterState {
             intercept_verdicts: Vec::new(),
             cbgr_generation_counter: u64::from(verum_common::cbgr::GEN_INITIAL),
             cbgr_allocations: HashSet::new(),
+            heap_cell_elements: Default::default(),
             cbgr_bridge_extents: std::collections::BTreeMap::new(),
             user_tls_slots: std::collections::HashMap::new(),
             cbgr_deref_source: None,
@@ -3227,6 +3231,7 @@ impl InterpreterState {
         self.cbgr_epoch = 1;
         self.cbgr_bypass_depth = 0;
         self.cbgr_allocations.clear();
+        self.heap_cell_elements.clear();
         self.cbgr_bridge_extents.clear();
         self.cbgr_deref_source = None;
         self.cbgr_mutable_ptrs.clear();

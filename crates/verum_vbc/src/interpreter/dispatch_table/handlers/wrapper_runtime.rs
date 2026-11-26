@@ -36,6 +36,46 @@ pub(super) fn heap_cell_method(name: &str) -> Option<HeapCellMethod> {
     (owner == Some(WellKnownType::Heap)).then_some(operation)
 }
 
+pub(super) fn allocate_heap_cell(
+    state: &mut InterpreterState,
+    value: Value,
+    witnesses: Option<&[crate::types::TypeRef]>,
+) -> InterpreterResult<Value> {
+    use verum_common::layout::{ALLOCATION_HEADER_SIZE, ALLOCATION_HEADER_TYPE_ID_OFFSET};
+    let element = match witnesses {
+        Some([element]) => Some(element),
+        None if value.is_int() || value.is_bool() || value.is_float() || value.is_unit()
+            || value.is_small_string() => None,
+        _ => return Err(crate::interpreter::InterpreterError::InvalidOperand {
+            message: "managed allocation requires its payload type witness".into(),
+        }),
+    };
+    let size = std::mem::size_of::<Value>();
+    let address = super::ffi_extended::cbgr_user_allocate(
+        state,
+        size as i64,
+        std::mem::align_of::<Value>() as i64,
+    );
+    if address == 0 {
+        return Err(crate::interpreter::InterpreterError::OutOfMemory {
+            requested: size,
+            available: 0,
+        });
+    }
+    let data = address as *mut Value;
+    let header = address as usize - ALLOCATION_HEADER_SIZE as usize;
+    // SAFETY: this allocation owns one aligned Value and its initialized CBGR header.
+    unsafe {
+        ((header + ALLOCATION_HEADER_TYPE_ID_OFFSET as usize) as *mut u32).write(TypeId::HEAP.0);
+        data.write(value);
+    }
+    state.record_allocation();
+    if let Some(element) = element {
+        state.heap_cell_elements.insert(address as usize, element.clone());
+    }
+    Ok(Value::from_ptr(data))
+}
+
 pub(super) fn is_heap_cell(state: &InterpreterState, value: Value) -> bool {
     use verum_common::layout::{ALLOCATION_HEADER_SIZE, ALLOCATION_HEADER_TYPE_ID_OFFSET};
 
@@ -118,6 +158,42 @@ pub(super) fn borrow_heap_cell(
             Capabilities(requested),
         )
         .map(Some)
+}
+
+/// Resolve the owned payload only when both the declared plan and the live
+/// allocation identify the standard Heap. A source record keeps its own glue.
+pub(super) fn cell_drop_payload(
+    state: &InterpreterState,
+    cell: Value,
+    plan: &crate::drop_plan::DropPlan,
+) -> InterpreterResult<Option<(Value, crate::drop_plan::DropPlan)>> {
+    use crate::interpreter::InterpreterError;
+    let Some(args) = plan.standard_record_arguments(&state.module, WellKnownType::Heap) else {
+        return Ok(None);
+    };
+    if !is_heap_cell(state, cell) {
+        return Ok(None);
+    }
+    validate_reference(state, cell)?;
+    let [element] = args else {
+        return Err(InterpreterError::InvalidOperand {
+            message: "Heap destruction requires one payload type".into(),
+        });
+    };
+    if state.heap_cell_elements.get(&(cell.as_ptr::<Value>() as usize))
+        .is_some_and(|issued| issued != element)
+    {
+        return Err(InterpreterError::InvalidOperand {
+            message: "Heap payload type differs from the allocating constructor".into(),
+        });
+    }
+    let element = crate::drop_plan::build(&state.module, element).map_err(|message| {
+        InterpreterError::InvalidOperand {
+            message: message.into_string(),
+        }
+    })?;
+    // SAFETY: the live runtime cell owns exactly one initialized Value.
+    Ok(Some((unsafe { cell.as_ptr::<Value>().read() }, element)))
 }
 
 pub(super) fn try_intercept_wrapper_call(

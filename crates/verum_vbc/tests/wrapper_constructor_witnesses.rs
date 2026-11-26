@@ -8,6 +8,9 @@ use verum_vbc::{
     interpreter::Interpreter,
 };
 
+#[path = "fixtures/canonical_drop.rs"]
+mod canonical_drop;
+
 #[test]
 fn wrapper_static_initializer_and_generic_forwarder_receive_witnesses() {
     for wrapper in ["Shared", "Heap"] {
@@ -261,6 +264,41 @@ fn a_named_unique_allocation_survives_the_submitting_frame() {
         let returned = Interpreter::new(Arc::new(archive)).execute_function(entry).unwrap();
         assert_eq!(returned.try_as_i64(), Some(73), "{annotation}");
     }
+}
+
+#[test]
+fn managed_cell_retires_its_named_payload_once_after_a_generic_handoff() {
+    let memory = canonical_allocation_declarations();
+    let source = r#"
+        module managed_cell;
+        mount core.base.memory.Heap;
+        mount core.base.protocols.Drop;
+        type affine Guard is { counter: &mut Int };
+        implement Drop for Guard {
+            fn drop(&mut self) { *self.counter = *self.counter + 1; }
+        }
+        fn wrap<T>(value: T) -> Heap<T> { Heap.new(value) }
+        fn check() -> Int {
+            let mut counter = 0;
+            {
+                let guard = Guard { counter: &mut counter };
+                let cell: Heap<Guard> = wrap(guard);
+            }
+            counter
+        }
+    "#;
+    let client = Parser::new(source).parse_module().unwrap();
+    let mut cg = VbcCodegen::with_config(CodegenConfig::new("managed_cell"));
+    canonical_drop::initialize(&mut cg);
+    cg.collect_unit_declarations(&[&memory, &client]).unwrap();
+    cg.resolve_pending_imports();
+    cg.compile_unit_items(&[&client], ItemFailurePolicy::Strict).unwrap();
+    let archive = cg.finalize_module_from_state().unwrap();
+    let wire = verum_vbc::serialize::serialize_module(&archive).unwrap();
+    let archive = verum_vbc::deserialize::deserialize_module(&wire).unwrap();
+    let entry = archive.find_function_by_name("managed_cell.check").unwrap();
+    let result = Interpreter::new(Arc::new(archive)).execute_function(entry).unwrap();
+    assert_eq!(result.try_as_i64(), Some(1));
 }
 
 #[test]

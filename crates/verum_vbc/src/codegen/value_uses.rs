@@ -647,6 +647,12 @@ impl super::VbcCodegen {
         declared: Option<&TypeRef>,
         store: impl FnOnce(Reg) -> Instruction,
     ) -> super::CodegenResult<()> {
+        if let Some(ty) = self.generic_named_place(expr, value) {
+            let received = self.emit_generic_value_handoff(value, ty, true);
+            self.ctx.emit(store(received));
+            self.ctx.free_temp(received);
+            return Ok(());
+        }
         if self.consumes_named_place(expr, value) {
             match store(value) {
                 Instruction::Mov { dst, src } => self.ctx.emit_transferring_value(dst, src),

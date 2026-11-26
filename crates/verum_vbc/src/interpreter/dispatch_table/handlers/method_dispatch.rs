@@ -1949,68 +1949,8 @@ fn execute_method_call(
                     receiver
                 };
 
-                // Allocate CBGR object: 32-byte AllocationHeader + 8-byte Value
-                // Layout: [size:4][align:4][generation:4][epoch:2][caps:2][type_id:4][flags:4][reserved:8]
-                const CBGR_HEADER_SIZE: usize =
-                    verum_common::layout::ALLOCATION_HEADER_SIZE as usize;
-                let data_size = std::mem::size_of::<Value>() as u32;
-                let alloc_size = CBGR_HEADER_SIZE + data_size as usize;
-                let layout = std::alloc::Layout::from_size_align(alloc_size, 32).map_err(|_| {
-                    InterpreterError::OutOfMemory {
-                        requested: alloc_size,
-                        available: 0,
-                    }
-                })?;
-                let raw_ptr = unsafe { std::alloc::alloc_zeroed(layout) };
-                if raw_ptr.is_null() {
-                    return Err(InterpreterError::OutOfMemory {
-                        requested: alloc_size,
-                        available: 0,
-                    });
-                }
-
-                // Initialize CBGR AllocationHeader (32 bytes): [size:u32, align:u32,
-                // generation:u32, epoch:u16, flags:u16, type_id:u32, padding:u32, reserved:u64]
-                // The generation counter enables use-after-free detection at ~15ns per check.
-                let generation = state.heap.next_generation();
-                let epoch = state.cbgr_epoch as u16;
-                unsafe {
-                    *(raw_ptr as *mut u32) = data_size; // offset 0: size
-                    *(raw_ptr.add(4) as *mut u32) = 8; // offset 4: alignment
-                    *(raw_ptr.add(8) as *mut u32) = generation; // offset 8: generation
-                    *(raw_ptr.add(12) as *mut u16) = epoch; // offset 12: epoch (u16)
-                    *(raw_ptr.add(14) as *mut u16) = 0x03; // offset 14: capabilities (read+write)
-                    // **Task #18 fix 2026-05-25** — stamp TypeId::HEAP
-                    // (519) into the CBGR header instead of the
-                    // default 0.  Pre-fix the runtime saw the
-                    // receiver's kind as `MemoryOrder` (TypeId 0
-                    // happens to alias to that enum), causing
-                    // `h.into_inner()` method dispatch to miss the
-                    // Heap.into_inner entry and surface as
-                    // "method 'Heap.into_inner' not found on
-                    // receiver of runtime kind `MemoryOrder`".
-                    // The TypeId stamped here is consulted by
-                    // dispatch_table/handlers/method_dispatch.rs
-                    // when reading `header.type_id` to classify
-                    // the receiver's runtime kind.
-                    // The reader of this stamp (`is_heap_cbgr_cell`) goes
-                    // through `verum_common::layout`; the writer must use
-                    // the same names or the two drift apart silently.
-                    *(raw_ptr
-                        .add(verum_common::layout::ALLOCATION_HEADER_TYPE_ID_OFFSET as usize)
-                        as *mut u32) = crate::types::TypeId::HEAP.0;
-                    *(raw_ptr.add(20) as *mut u32) = 0; // offset 20: flags (0 = allocated)
-                    // offsets 24-31: reserved (already zeroed)
-                    // Write user data value after the header
-                    *(raw_ptr.add(CBGR_HEADER_SIZE) as *mut Value) = value;
-                }
-                // Track this as a CBGR allocation for raw field access in GetField
-                state.cbgr_allocations.insert(raw_ptr as usize);
-
-                // Return pointer to data portion (after header)
-                let data_ptr = unsafe { raw_ptr.add(CBGR_HEADER_SIZE) };
-                state.set_reg(dst, Value::from_ptr(data_ptr));
-                state.record_allocation();
+                let cell = super::wrapper_runtime::allocate_heap_cell(state, value, call_witness_sidecar.as_deref())?;
+                state.set_reg(dst, cell);
                 return Ok(DispatchResult::Continue);
             }
         }
@@ -5589,21 +5529,11 @@ pub(super) fn dispatch_primitive_method(
                 // Value from the CBGR data slot and frees the
                 // allocation via the dealloc bookkeeping that
                 // sys_dealloc/cbgr_dealloc usually run.
-                "into_inner" => {
-                    // SAFETY: CBGR alloc layout is OBJECT_HEADER (32B)
-                    // + payload (8B Value).  data_ptr points at the
-                    // payload; reading 8 bytes yields the stored
-                    // Value (the wrapped T).
-                    let inner = unsafe { *(data_ptr as *const Value) };
-                    // Mark the CBGR allocation as freed by removing
-                    // it from the live-set and bumping generation.
-                    // Mirrors the stdlib body's `cbgr_dealloc` call.
-                    state.cbgr_allocations.remove(&header_addr);
-                    state.cbgr_bridge_extents.remove(&data_ptr);
-                    state.heap.revoke_projections(data_ptr);
-                    // Note: we don't actually free the memory here
-                    // (matching cbgr_dealloc's semantics — it bumps
-                    // generation but keeps the pointer live until GC).
+                "into_inner" if super::wrapper_runtime::is_heap_cell(state, *receiver) => {
+                    super::cbgr::validate_reference(state, *receiver)?;
+                    // SAFETY: only the live, stamped cell stores an initialized Value.
+                    let inner = unsafe { (data_ptr as *const Value).read() };
+                    super::ffi_extended::cbgr_user_deallocate(state, data_ptr as i64);
                     return Ok(Some(inner));
                 }
                 // AllocationHeader layout: [size:4][align:4][generation:4][epoch:2][caps:2][type_id:4][flags:4][reserved:8]

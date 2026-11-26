@@ -13,6 +13,7 @@
     lifecycle: Lifecycle.Definition
 )
 module core.base.result;
+mount core.base.memory.replace;
 
 // Import types from other core modules
 mount core.base.maybe.{Maybe, Some, None};
@@ -1086,41 +1087,38 @@ implement<E> Cause<E> {
 
     /// Combine two causes sequentially (first caused second).
     public fn then(self, other: Cause<E>) -> Cause<E> {
-        match (&self, &other) {
-            (Empty, _) => other,
-            (_, Empty) => self,
-            _ => Then(Heap.new(self), Heap.new(other)),
-        }
+        if self.is_empty() { return other; }
+        if other.is_empty() { return self; }
+        Then(Heap.new(self), Heap.new(other))
     }
 
     /// Combine two causes in parallel (independent errors).
     public fn both(self, other: Cause<E>) -> Cause<E> {
-        match (&self, &other) {
-            (Empty, _) => other,
-            (_, Empty) => self,
-            _ => Both(Heap.new(self), Heap.new(other)),
-        }
+        if self.is_empty() { return other; }
+        if other.is_empty() { return self; }
+        Both(Heap.new(self), Heap.new(other))
     }
 
-    /// Map over the error type.
-    public fn map_error<F, O: fn(E) -> F>(self, f: O) -> Cause<F>
-    where E: Clone {
+    // Move a child out while its containing branch still owns the allocation.
+    fn take_child(slot: &mut Cause<E>) -> Cause<E> {
+        let empty: Cause<E> = Cause.Empty;
+        replace(slot, empty)
+    }
+
+    /// Transform failures from left to right, preserving the shape of the cause.
+    public fn map_error<F, O: fn(E) -> F>(self, f: O) -> Cause<F> {
         match self {
-            Fail(e) => Fail(f(e)),
-            Die(d) => Die(d),
-            Then(first, second) => {
-                Then(
-                    Heap.new((*first).clone().map_error(&f)),
-                    Heap.new((*second).clone().map_error(f))
-                )
-            }
-            Both(left, right) => {
-                Both(
-                    Heap.new((*left).clone().map_error(&f)),
-                    Heap.new((*right).clone().map_error(f))
-                )
-            }
-            Empty => Empty,
+            Fail(error) => Cause.Fail(f(error)),
+            Die(defect) => Cause.Die(defect),
+            Empty => Cause.Empty,
+            Then(mut first, mut second) => Cause.Then(
+                Heap.new(Cause.take_child(first.as_mut()).map_error(f)),
+                Heap.new(Cause.take_child(second.as_mut()).map_error(f))
+            ),
+            Both(mut left, mut right) => Cause.Both(
+                Heap.new(Cause.take_child(left.as_mut()).map_error(f)),
+                Heap.new(Cause.take_child(right.as_mut()).map_error(f))
+            ),
         }
     }
 }

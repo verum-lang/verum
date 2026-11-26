@@ -2333,6 +2333,7 @@ pub(super) fn cbgr_user_invalidate(state: &mut InterpreterState, user: i64) -> O
             .store(verum_common::cbgr::GEN_UNALLOCATED, Ordering::Release);
     }
     state.heap.revoke_projections(user as usize);
+    state.heap_cell_elements.remove(&(user as usize));
     state.cbgr_bridge_extents.remove(&(user as usize));
     state.cbgr_mutable_ptrs.remove(&(user as usize));
     state.cbgr_ref_creation_epoch.remove(&(user as usize));

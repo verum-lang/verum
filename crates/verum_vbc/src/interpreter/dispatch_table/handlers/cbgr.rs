@@ -1379,7 +1379,11 @@ fn typed_drop_fields<'a>(state: &InterpreterState, value: Value, plan: &'a crate
     }
     let pointer = value.as_ptr::<heap::ObjectHeader>();
     if !state.heap.contains(pointer) {
-        return Err(InterpreterError::Panic { message: "typed destruction value is not a live owned object".into() });
+        return Err(InterpreterError::Panic { message: format!(
+            "typed destruction value is not a live owned object for {} in {}",
+            state.module.get_type_name(owner).unwrap_or_else(|| format!("{owner:?}")),
+            state.call_stack.frame_names(&state.module, 8),
+        ) });
     }
     // SAFETY: exact allocation membership precedes all header/payload reads.
     let header = unsafe { &*pointer };
@@ -1484,6 +1488,7 @@ pub(super) fn validate_typed_drop(state: &InterpreterState, value: Value, plan: 
     use crate::drop_plan::DropPlan;
     let mut work = verum_common::List::new();
     let mut budget = state.config.typed_copy_limits.max_work;
+    let mut cells = verum_common::Set::new();
     let mut callables = verum_common::Set::new();
     push_drop_work(&mut work, DropWork::Value(value, plan.clone()), &mut budget)?;
     while let Some(DropWork::Value(value, plan)) = work.pop() {
@@ -1498,6 +1503,15 @@ pub(super) fn validate_typed_drop(state: &InterpreterState, value: Value, plan: 
                     }
                 }
             }
+            continue;
+        }
+        if let Some((payload, element)) = super::wrapper_runtime::cell_drop_payload(state, value, &plan)? {
+            if !cells.insert(value.as_ptr::<Value>() as usize) {
+                return Err(InterpreterError::InvalidOperand {
+                    message: "two exclusive owners refer to one Heap cell".into(),
+                });
+            }
+            push_drop_work(&mut work, DropWork::Value(payload, element), &mut budget)?;
             continue;
         }
         if let Some(list) = super::list_storage::OwnedElements::resolve(state, value, &plan)? {
@@ -1588,6 +1602,12 @@ pub(super) fn execute_typed_drop(state: &mut InterpreterState, value: Value, pla
             }
             continue;
         }
+        if let Some((payload, element)) = super::wrapper_runtime::cell_drop_payload(state, value, &plan)? {
+            // Retire all borrows before invoking the payload's destructor.
+            super::ffi_extended::cbgr_user_deallocate(state, value.as_ptr::<Value>() as i64);
+            push_drop_work(&mut work, DropWork::Value(payload, element), &mut budget)?;
+            continue;
+        }
         if let Some((plan, elements)) = super::list_storage::take_owned_elements(state, value, &plan)? {
             for value in elements.into_iter().rev() {
                 push_drop_work(&mut work, DropWork::Value(value, plan.clone()), &mut budget)?;
@@ -1668,6 +1688,20 @@ pub(in super::super) fn handle_drop_ref(
         // DEBUG: eprintln!("[DEBUG DropRef] Processing pending field drop: {:?}", val);
     }
 
+    if val.is_regular_ptr()
+        && let Some(element) = state.heap_cell_elements.get(&(val.as_ptr::<Value>() as usize))
+    {
+        let plan = crate::drop_plan::build(&state.module, element)
+            .map_err(|reason| InterpreterError::InvalidOperand { message: reason.into_string() })?;
+        validate_reference(state, val)?;
+        // SAFETY: the constructor issued this witness for its initialized Value slot.
+        let payload = unsafe { val.as_ptr::<Value>().read() };
+        validate_typed_drop(state, payload, &plan)?;
+        retire_typed_slot(state, src);
+        cbgr_user_deallocate(state, val.as_ptr::<Value>() as i64);
+        execute_typed_drop(state, payload, &plan)?;
+        return Ok(DispatchResult::Continue);
+    }
     if let Some(signature) = state.heap.owned_callable_signature(&state.module, val)? {
         let plan = crate::drop_plan::DropPlan::Callable { signature };
         validate_typed_drop(state, val, &plan)?;

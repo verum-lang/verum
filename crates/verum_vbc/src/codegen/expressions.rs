@@ -14061,8 +14061,10 @@ impl VbcCodegen {
             let expected = contextual.as_ref().and_then(|params| params.first()?.as_ref());
             let inferred = selected.as_ref()
                 .and_then(|info| self.infer_call_instantiation(info.id.0, None, args, type_args));
+            let argument_start = self.ctx.instructions.len();
             let inner = self.compile_call_operand(&args[0], expected)?
                 .or_internal("allocation argument has no value")?;
+            let declared = self.copy_source_type(&args[0], inner, argument_start, self.ctx.instructions.len());
             let inferred = inferred.or_else(|| {
                 self.generic_named_place(&args[0], inner).map(|ty| CallInstantiation::known([ty]))
             });
@@ -14076,15 +14078,12 @@ impl VbcCodegen {
                 const_id: name_const.0,
             });
 
-            // Place inner value in a consecutive arg register
+            // The cell owns its payload as an aggregate field. A bare Mov
+            // would leave two owners of the same storage at scope exit.
             let arg_reg = self.ctx.registers.alloc_fresh();
-            if inner != arg_reg {
-                self.ctx.emit(Instruction::Mov {
-                    dst: arg_reg,
-                    src: inner,
-                });
-                self.ctx.free_temp(inner);
-            }
+            self.emit_declared_value_store(&args[0], inner, declared.as_ref(), |src|
+                Instruction::Mov { dst: arg_reg, src })?;
+            self.ctx.free_temp(inner);
 
             let result = self.ctx.alloc_temp();
             let method_id = self.call_method_id(Some(carrier.as_str()), "new");
