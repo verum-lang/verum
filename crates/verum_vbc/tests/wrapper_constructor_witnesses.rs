@@ -298,7 +298,10 @@ fn canonical_raw_owner_recovery_retains_declared_call_witnesses() {
         .unwrap();
     protocols.items.retain(|item| matches!(&item.kind, ItemKind::Module(_))
         || matches!(&item.kind, ItemKind::Type(owner) if matches!(owner.name.as_str(), "Deref" | "DerefMut")));
-    for pointer in ["&unsafe Receipt<T>", "&mut Receipt<T>", "&Receipt<T>"] {
+    for (pointer, mutable) in [
+        ("&unsafe mut Receipt<T>", true), ("&unsafe Receipt<T>", false),
+        ("&Receipt<T>", false),
+    ] {
         let source = r#"
         module raw_owner;
         mount core.base.memory.Heap;
@@ -324,8 +327,14 @@ fn canonical_raw_owner_recovery_retains_declared_call_witnesses() {
         cg.collect_unit_declarations(&[&protocols, &memory, &client])
             .unwrap();
         cg.resolve_pending_imports();
-        cg.compile_unit_items(&[&client], ItemFailurePolicy::Strict)
-            .unwrap();
+        let result = cg.compile_unit_items(&[&client], ItemFailurePolicy::Strict);
+        if !mutable {
+            let error = result.expect_err("shared pointer granted exclusive ownership");
+            assert!(matches!(error.kind, verum_vbc::codegen::CodegenErrorKind::TypeInference(_)),
+                "{pointer}: {error:?}");
+            continue;
+        }
+        result.unwrap();
         let archive = cg.finalize_module_from_state().unwrap();
         let wire = verum_vbc::serialize::serialize_module(&archive).unwrap();
         let archive = verum_vbc::deserialize::deserialize_module(&wire).unwrap();

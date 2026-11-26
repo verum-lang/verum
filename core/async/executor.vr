@@ -524,8 +524,7 @@ implement ChaseLevDeque {
 
         if t < b {
             // Multi-element — owner wins unconditionally.
-            let raw_ptr = raw_int as &unsafe Byte;
-            return Maybe.Some(unsafe { Heap.from_raw(raw_ptr as &unsafe TaskEntry) });
+            return Maybe.Some(unsafe { Heap.from_raw(raw_int as &unsafe mut TaskEntry) });
         }
 
         // t == b: last element — race with stealers via CAS.
@@ -537,8 +536,7 @@ implement ChaseLevDeque {
             Result.Ok(_) => {
                 // Owner won.
                 self.bottom.store(b + 1, MemoryOrdering.Relaxed);
-                let raw_ptr = raw_int as &unsafe Byte;
-                Maybe.Some(unsafe { Heap.from_raw(raw_ptr as &unsafe TaskEntry) })
+                Maybe.Some(unsafe { Heap.from_raw(raw_int as &unsafe mut TaskEntry) })
             }
             Result.Err(_) => {
                 // Stealer won — empty deque, restore bottom.
@@ -567,8 +565,7 @@ implement ChaseLevDeque {
             MemoryOrdering.Relaxed,
         ) {
             Result.Ok(_) => {
-                let raw_ptr = raw_int as &unsafe Byte;
-                Maybe.Some(unsafe { Heap.from_raw(raw_ptr as &unsafe TaskEntry) })
+                Maybe.Some(unsafe { Heap.from_raw(raw_int as &unsafe mut TaskEntry) })
             }
             Result.Err(_) => Maybe.None, // race lost
         }
@@ -1581,7 +1578,7 @@ implement AsyncRuntime {
 
         // Define drop function
         let drop_fn = |state_ptr: &unsafe Byte| {
-            let _ = unsafe { Heap.from_raw(state_ptr as &unsafe TaskState<F>) };
+            let _ = unsafe { Heap.from_raw(state_ptr as &unsafe mut TaskState<F>) };
         };
 
         // Create task entry
@@ -1698,21 +1695,19 @@ implement AsyncRuntime {
         // not a replacement for the main-thread loop.
         let _spawned = self.start_worker_pool();
 
-        // Create IOEngine for this event loop if I/O is enabled
-        if self.config.enable_io {
+        // Keep the concrete engine owner alive until the context slot is cleared.
+        let mut engine_owner = if self.config.enable_io {
             match create_io_engine(self.config.io_sq_entries) {
-                Result.Ok(engine) => {
-                    // Store IOEngine pointer both in AsyncRuntime (for wait_for_events)
-                    // and in context slot (for async operations to submit I/O)
-                    let engine_ptr = Heap.new(engine);
-                    let raw_ptr = Heap.into_raw(engine_ptr);
-                    self.io_engine_ptr = raw_ptr as Int;
-                    ctx_set(SLOT_IO_ENGINE, raw_ptr as &unsafe Byte);
-                }
-                Result.Err(_) => {
-                    // IOEngine creation failed — fall back to poll-based
-                }
+                Result.Ok(engine) => Maybe.Some(Heap.new(engine)),
+                Result.Err(_) => Maybe.None,
             }
+        } else {
+            Maybe.None
+        };
+        if let Maybe.Some(owner) = &mut engine_owner {
+            let raw = owner.as_mut() as &unsafe mut Byte;
+            self.io_engine_ptr = raw as Int;
+            ctx_set(SLOT_IO_ENGINE, raw);
         }
 
         // Create task state with result storage
@@ -1775,8 +1770,6 @@ implement AsyncRuntime {
         // Clean up IOEngine
         if self.io_engine_ptr != 0 {
             ctx_clear(SLOT_IO_ENGINE);
-            // Reclaim and drop the IOEngine
-            let _ = unsafe { Heap.from_raw(self.io_engine_ptr as &unsafe Byte) };
             self.io_engine_ptr = 0;
         }
 
@@ -2301,7 +2294,7 @@ implement LocalExecutor {
 
         // Define drop function
         let drop_fn = |state_ptr: &unsafe Byte| {
-            let _ = unsafe { Heap.from_raw(state_ptr as &unsafe TaskState<F>) };
+            let _ = unsafe { Heap.from_raw(state_ptr as &unsafe mut TaskState<F>) };
         };
 
         let entry = Heap.new(TaskEntry {
@@ -2810,7 +2803,7 @@ fn runtime_waker_clone(data: &unsafe Byte) -> RawWaker {
 
 /// Wake task (consume waker).
 fn runtime_waker_wake(data: &unsafe Byte) {
-    let waker_data = unsafe { Heap.from_raw(data as &unsafe RuntimeWakerData) };
+    let waker_data = unsafe { Heap.from_raw(data as &unsafe mut RuntimeWakerData) };
     waker_data.runtime.wake_task(waker_data.task_id);
     // waker_data is dropped here
 }
@@ -2823,7 +2816,7 @@ fn runtime_waker_wake_by_ref(data: &unsafe Byte) {
 
 /// Drop waker data.
 fn runtime_waker_drop(data: &unsafe Byte) {
-    let _ = unsafe { Heap.from_raw(data as &unsafe RuntimeWakerData) };
+    let _ = unsafe { Heap.from_raw(data as &unsafe mut RuntimeWakerData) };
 }
 
 /// VTable for runtime wakers.

@@ -175,7 +175,7 @@ public fn is_null<T>(ptr: &unsafe T) -> Bool {
 /// - If they don't match, use-after-free is detected at ~15ns cost
 @opaque
 public type affine Heap<T> is {
-    ptr: &unsafe T,
+    ptr: &unsafe mut T,
     generation: UInt32,
     epoch: UInt16,
 };
@@ -197,7 +197,7 @@ implement<T> Heap<T> {
             Result.Err(e) => panic(f"Out of memory: {e.message()}"),
         };
 
-        let typed_ptr = ptr as &unsafe T;
+        let typed_ptr = ptr as &unsafe mut T;
 
         // Write the value to allocated memory
         unsafe {
@@ -236,7 +236,7 @@ implement<T> Heap<T> {
         };
 
         Heap {
-            ptr: ptr as &unsafe T,
+            ptr: ptr as &unsafe mut T,
             generation: gen,
             epoch: epoch,
         }
@@ -251,7 +251,7 @@ implement<T> Heap<T> {
         let align = T.alignment;
 
         let (ptr, gen, epoch) = cbgr_alloc(size, align)?;
-        let typed_ptr = ptr as &unsafe T;
+        let typed_ptr = ptr as &unsafe mut T;
 
         unsafe {
             ptr_write(typed_ptr, value);
@@ -338,10 +338,10 @@ implement<T> Heap<T> {
 
     /// The caller is responsible for eventually freeing the memory
     /// by calling `from_raw` and then dropping it or calling `into_inner`.
-    // NOTE: `ptr` is a `&unsafe T` MOVED into the return — the codegen must
+    // NOTE: `ptr` is a `&unsafe mut T` MOVED into the return — the codegen must
     // not DropRef it at scope exit (that would read the pointee's header and
     // panic); see the by-value-return skip in scan_expr_as_return.
-    public fn into_raw(self) -> &unsafe T {
+    public fn into_raw(self) -> &unsafe mut T {
         let ptr = self.ptr;
         forget(self);
         ptr
@@ -355,7 +355,7 @@ implement<T> Heap<T> {
 
     /// The pointer must have been obtained from `into_raw` on a Heap<T>.
     /// The generation and epoch are read from the allocation header.
-    public unsafe fn from_raw(ptr: &unsafe T) -> Heap<T> {
+    public unsafe fn from_raw(ptr: &unsafe mut T) -> Heap<T> {
         let header = get_header_from_ptr(ptr as &unsafe Byte);
         let gen = header.load_generation();
         let epoch = header.load_epoch();
@@ -399,7 +399,7 @@ implement<T> Heap<T> {
     public fn leak(self) -> &mut T {
         let ptr = self.ptr;
         forget(self);
-        unsafe { &mut (*ptr).value }
+        unsafe { &mut *ptr }
     }
 
     /// Get the CBGR generation counter from the allocation header.
