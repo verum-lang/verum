@@ -37,6 +37,27 @@ fn copied_payload_return_does_not_borrow_the_local_container_or_lookup_key() {
 }
 
 #[test]
+fn a_borrowed_receiver_can_return_its_own_type_with_different_provenance() {
+    let declaration = "type Duplicate is protocol {fn duplicate(&self)->Self;};";
+    let caller = "fn receive(input:&Int)->Payload {
+        let local=Payload{ptr:input,marker:2}; local.duplicate()
+    }";
+    for (pointer, borrows_local) in [("self.ptr", false), ("&self.marker", true)] {
+        let implementation = format!("{declaration}
+            implement Duplicate for Payload {{
+                fn duplicate(&self)->Self {{Payload{{ptr:{pointer},marker:self.marker}}}}
+            }}");
+        let errors = diagnostics(&implementation, caller);
+        if borrows_local {
+            assert!(errors.iter().any(|error| error.contains("local")
+                && error.contains("does not live long enough")), "{errors:?}");
+        } else {
+            assert!(errors.is_empty(), "{errors:?}");
+        }
+    }
+}
+
+#[test]
 fn branch_results_keep_only_the_loans_in_the_returned_payload() {
     for (source, escapes) in [("input", false), ("&local", true)] {
         let caller = format!("fn receive(input:&Int,choose:Bool)->Payload {{

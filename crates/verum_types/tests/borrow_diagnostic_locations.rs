@@ -2,6 +2,37 @@ use verum_ast::Span;
 use verum_types::{TypeError, source_files::SourceFileRegistry};
 
 #[test]
+fn an_escaping_protocol_result_points_to_the_call_inside_a_nested_record() {
+    let source = "
+        type Pair<T> is { first:T, second:T };
+        type Envelope<T> is { pair:Pair<T>, serial:Int };
+        type Sequence is protocol {
+            fn duplicate(&self) -> Self;
+            fn pair(self) -> Envelope<Self> {
+                Envelope {pair:Pair {first:self.duplicate(), second:self}, serial:10}
+            }
+        };
+    ";
+    let module = verum_fast_parser::FastParser::new()
+        .parse_module_str(source, verum_ast::FileId::new(1)).unwrap();
+    let mut checker = verum_types::TypeChecker::with_minimal_context();
+    checker.register_primitives();
+    checker.set_current_module_path("demo");
+    let mut errors = checker.prepare_module_declarations(&module);
+    for item in &module.items {
+        if let Err(error) = checker.check_item(item) {
+            errors.push(error);
+        }
+    }
+    errors.extend(checker.take_deferred_errors());
+    let error = errors.iter().chain(checker.diagnostic_sources())
+        .find(|error| error.to_string().contains("does not live long enough"))
+        .unwrap_or_else(|| panic!("{errors:?}"));
+    let span = error.span();
+    assert_eq!(&source[span.start as usize..span.end as usize], "self.duplicate()");
+}
+
+#[test]
 fn ownership_errors_keep_the_use_and_the_related_location() {
     use TypeError::*;
     let files = SourceFileRegistry::new();

@@ -280,12 +280,43 @@ impl TypeChecker {
             {
                 return Err(crate::TypeError::DanglingReference {
                     var,
-                    ref_span: expr.span,
+                    ref_span: self.escaping_operand_span(expr, &source),
                     drop_span: None,
                 });
             }
         }
         Ok(())
+    }
+
+    /// Narrow the error to an operand observed to carry this exact loan.
+    /// Re-reading a place here could attribute an earlier field's loan to a
+    /// later assignment. Missing observations leave the enclosing span intact.
+    fn escaping_operand_span(&self, expression: &Expr, source: &RecordReceiver) -> verum_ast::Span {
+        let carries = |span| self.evaluated_value_origins.get(&span)
+            .and_then(Option::as_ref).is_some_and(|origins| origins.contains(source));
+        let mut value = expression;
+        loop {
+            let next = match &unparen(value).kind {
+                ExprKind::Record { fields, base, .. } => {
+                    let mut child = None;
+                    for field in fields {
+                        match &field.value {
+                            Some(value) if carries(value.span) => { child = Some(value); break; }
+                            None if carries(field.span) => return field.name.span,
+                            _ => {}
+                        }
+                    }
+                    child.or_else(|| base.as_deref().filter(|base| carries(base.span)))
+                }
+                ExprKind::Tuple(values) | ExprKind::Array(verum_ast::ArrayExpr::List(values)) =>
+                    values.iter().find(|child| carries(child.span)),
+                ExprKind::Array(verum_ast::ArrayExpr::Repeat { value, .. }) =>
+                    Some(value.as_ref()).filter(|child| carries(child.span)),
+                _ => None,
+            };
+            let Some(child) = next else { return value.span };
+            value = child;
+        }
     }
 
     pub(super) fn check_return_value_loans(
