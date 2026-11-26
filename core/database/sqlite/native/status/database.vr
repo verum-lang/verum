@@ -1,9 +1,4 @@
-// =============================================================================
-// status/database.vr — DbStatus aggregator (per-SqliteNativeConnection)
-// =============================================================================
-// Spec: SQLite C API — sqlite3_db_status
-// =============================================================================
-
+// Spec: SQLite C API — sqlite3_db_status.
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LFnd,
@@ -11,73 +6,111 @@
 )
 module core.database.sqlite.native.status.database;
 
-mount base.{Bool};
-mount core.database.sqlite.native.status.kind.{
-    DbKind,
-    DsLookasideUsed, DsCacheUsed, DsSchemaUsed, DsStmtUsed,
-    DsLookasideHit, DsLookasideMissSize, DsLookasideMissFull,
-    DsCacheHit, DsCacheMiss, DsCacheWrite, DsDeferredFks,
-    DsCacheUsedShared, DsCacheSpill,
-};
+mount core.database.sqlite.native.status.kind.DbKind;
 mount core.database.sqlite.native.status.counter.{
     StatusCounter, CounterPair, counter_zero, counter_pair_zero,
 };
 
 public type DbStatus is {
     lookaside_used: StatusCounter,
-    schema_used: StatusCounter,
-    stmt_used: StatusCounter,
-    cache_used: StatusCounter,
-    cache_used_shared: StatusCounter,
-    cache_spill: StatusCounter,
-    deferred_fks: StatusCounter,
-    /// Hit/miss pairs.
-    lookaside: CounterPair,
+    lookaside_hits: Int64,
+    lookaside_miss_size: Int64,
+    lookaside_miss_full: Int64,
     cache: CounterPair,
-    /// Cache writes — incremented per dirty page write-back.
-    cache_writes: StatusCounter,
+    cache_used: Int64,
+    cache_used_shared: Int64,
+    schema_used: Int64,
+    stmt_used: Int64,
+    cache_writes: Int64,
+    cache_spills: Int64,
+    deferred_fks: Int64,
 }
 
 public fn db_status_new() -> DbStatus {
     DbStatus {
-        lookaside_used: counter_zero(),
-        schema_used: counter_zero(),
-        stmt_used: counter_zero(),
-        cache_used: counter_zero(),
-        cache_used_shared: counter_zero(),
-        cache_spill: counter_zero(),
-        deferred_fks: counter_zero(),
-        lookaside: counter_pair_zero(),
-        cache: counter_pair_zero(),
-        cache_writes: counter_zero(),
+        lookaside_used: counter_zero(), lookaside_hits: 0_i64,
+        lookaside_miss_size: 0_i64, lookaside_miss_full: 0_i64, cache: counter_pair_zero(),
+        cache_used: 0_i64, cache_used_shared: 0_i64, schema_used: 0_i64, stmt_used: 0_i64,
+        cache_writes: 0_i64, cache_spills: 0_i64, deferred_fks: 0_i64,
     }
 }
 
 implement DbStatus {
     public fn read(&self, kind: &DbKind) -> (Int64, Int64) {
         match kind {
-            DsLookasideUsed       => self.lookaside_used.snapshot(),
-            DsCacheUsed           => self.cache_used.snapshot(),
-            DsSchemaUsed          => self.schema_used.snapshot(),
-            DsStmtUsed            => self.stmt_used.snapshot(),
-            DsLookasideHit        => self.lookaside.hits.snapshot(),
-            DsLookasideMissSize   => (0 as Int64, 0 as Int64),
-            DsLookasideMissFull   => self.lookaside.misses.snapshot(),
-            DsCacheHit            => self.cache.hits.snapshot(),
-            DsCacheMiss           => self.cache.misses.snapshot(),
-            DsCacheWrite          => self.cache_writes.snapshot(),
-            DsDeferredFks         => self.deferred_fks.snapshot(),
-            DsCacheUsedShared     => self.cache_used_shared.snapshot(),
-            DsCacheSpill          => self.cache_spill.snapshot(),
+            DbKind.DsLookasideUsed => self.lookaside_used.snapshot(),
+            DbKind.DsLookasideHit => (0_i64, self.lookaside_hits),
+            DbKind.DsLookasideMissSize => (0_i64, self.lookaside_miss_size),
+            DbKind.DsLookasideMissFull => (0_i64, self.lookaside_miss_full),
+            DbKind.DsCacheHit => (self.cache.hit_count(), 0_i64),
+            DbKind.DsCacheMiss => (self.cache.miss_count(), 0_i64),
+            DbKind.DsCacheWrite => (self.cache_writes, 0_i64),
+            DbKind.DsCacheSpill => (self.cache_spills, 0_i64),
+            DbKind.DsCacheUsed => (self.cache_used, 0_i64),
+            DbKind.DsCacheUsedShared => (self.cache_used_shared, 0_i64),
+            DbKind.DsSchemaUsed => (self.schema_used, 0_i64),
+            DbKind.DsStmtUsed => (self.stmt_used, 0_i64),
+            DbKind.DsDeferredFks => (self.deferred_fks, 0_i64),
         }
     }
 
-    public fn note_lookaside_hit(&mut self) { self.lookaside.note_hit(); }
-    public fn note_lookaside_miss(&mut self) { self.lookaside.note_miss(); }
+    /// Read before resetting. Live memory and constraint values still describe the connection.
+    public fn read_and_reset(&mut self, kind: &DbKind) -> (Int64, Int64) {
+        let sample = self.read(kind);
+        match kind {
+            DbKind.DsLookasideUsed => self.lookaside_used.reset_high_water(),
+            DbKind.DsLookasideHit => { self.lookaside_hits = 0_i64; },
+            DbKind.DsLookasideMissSize => { self.lookaside_miss_size = 0_i64; },
+            DbKind.DsLookasideMissFull => { self.lookaside_miss_full = 0_i64; },
+            DbKind.DsCacheHit => self.cache.reset_hits(),
+            DbKind.DsCacheMiss => self.cache.reset_misses(),
+            DbKind.DsCacheWrite => { self.cache_writes = 0_i64; },
+            DbKind.DsCacheSpill => { self.cache_spills = 0_i64; },
+            DbKind.DsCacheUsed | DbKind.DsCacheUsedShared | DbKind.DsSchemaUsed | DbKind.DsStmtUsed | DbKind.DsDeferredFks => {},
+        }
+        sample
+    }
+
+    public fn note_lookaside_hit(&mut self) {
+        self.lookaside_hits = self.lookaside_hits.checked_add(1_i64).expect("SQLite event count exceeds Int64");
+    }
+    public fn note_lookaside_miss_size(&mut self) {
+        self.lookaside_miss_size = self.lookaside_miss_size.checked_add(1_i64).expect("SQLite event count exceeds Int64");
+    }
+    public fn note_lookaside_miss_full(&mut self) {
+        self.lookaside_miss_full = self.lookaside_miss_full.checked_add(1_i64).expect("SQLite event count exceeds Int64");
+    }
     public fn note_cache_hit(&mut self) { self.cache.note_hit(); }
     public fn note_cache_miss(&mut self) { self.cache.note_miss(); }
-    public fn note_cache_write(&mut self) { self.cache_writes.add(1_i64); }
-    public fn note_cache_spill(&mut self) { self.cache_spill.add(1_i64); }
+    public fn note_cache_write(&mut self) {
+        self.cache_writes = self.cache_writes.checked_add(1_i64).expect("SQLite event count exceeds Int64");
+    }
+    public fn note_cache_spill(&mut self) {
+        self.cache_spills = self.cache_spills.checked_add(1_i64).expect("SQLite event count exceeds Int64");
+    }
+
+    public fn observe_lookaside_slots(&mut self, used: Int64) { self.lookaside_used.observe(used); }
+
+    /// Total pager cache bytes and this connection's share of those bytes.
+    public fn observe_cache_bytes(&mut self, total: Int64, share: Int64) {
+        assert(share >= 0_i64 && share <= total, "invalid SQLite cache memory observation");
+        self.cache_used = total;
+        self.cache_used_shared = share;
+    }
+
+    public fn observe_schema_bytes(&mut self, bytes: Int64) {
+        assert(bytes >= 0_i64, "negative SQLite schema size");
+        self.schema_used = bytes;
+    }
+
+    public fn observe_statement_bytes(&mut self, bytes: Int64) {
+        assert(bytes >= 0_i64, "negative SQLite statement size");
+        self.stmt_used = bytes;
+    }
+
+    public fn observe_unresolved_fks(&mut self, unresolved: Bool) {
+        self.deferred_fks = if unresolved { 1_i64 } else { 0_i64 };
+    }
 
     public fn cache_hit_ratio(&self) -> Float64 { self.cache.ratio() }
 }

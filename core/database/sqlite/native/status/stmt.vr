@@ -1,9 +1,4 @@
-// =============================================================================
-// status/stmt.vr — StmtStatus aggregator (per-PreparedStatement)
-// =============================================================================
-// Spec: SQLite C API — sqlite3_stmt_status
-// =============================================================================
-
+// Spec: SQLite C API — sqlite3_stmt_status.
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LFnd,
@@ -11,76 +6,41 @@
 )
 module core.database.sqlite.native.status.stmt;
 
-mount base.{Bool};
-mount core.database.sqlite.native.status.kind.{
-    SqliteStatStmtKind, SqliteStatStmtKind.SsFullscanStep, SqliteStatStmtKind.SsSort, SqliteStatStmtKind.SsAutoindex, SqliteStatStmtKind.SsVmStep,
-    SsReprepare, SsRun, SsFilterMiss, SsFilterHit,
-};
-mount core.database.sqlite.native.status.counter.{StatusCounter, counter_zero};
+mount core.database.sqlite.native.status.kind.{SqliteStatStmtKind, stmt_code};
 
-public type StmtStatus is {
-    fullscan_step: StatusCounter,
-    sort: StatusCounter,
-    autoindex: StatusCounter,
-    vm_step: StatusCounter,
-    reprepare: StatusCounter,
-    run: StatusCounter,
-    filter_miss: StatusCounter,
-    filter_hit: StatusCounter,
-}
+/// One count per statement event selector (SQLite codes 1 through 8).
+public type StmtStatus is { counts: [Int64; 8] }
 
-public fn stmt_status_new() -> StmtStatus {
-    StmtStatus {
-        fullscan_step: counter_zero(),
-        sort: counter_zero(),
-        autoindex: counter_zero(),
-        vm_step: counter_zero(),
-        reprepare: counter_zero(),
-        run: counter_zero(),
-        filter_miss: counter_zero(),
-        filter_hit: counter_zero(),
-    }
-}
+public fn stmt_status_new() -> StmtStatus { StmtStatus { counts: [0_i64; 8] } }
 
 implement StmtStatus {
-    public fn read(&self, kind: &SqliteStatStmtKind) -> (Int64, Int64) {
-        match kind {
-            SsFullscanStep => self.fullscan_step.snapshot(),
-            SsSort         => self.sort.snapshot(),
-            SsAutoindex    => self.autoindex.snapshot(),
-            SsVmStep       => self.vm_step.snapshot(),
-            SsReprepare    => self.reprepare.snapshot(),
-            SsRun          => self.run.snapshot(),
-            SsFilterMiss   => self.filter_miss.snapshot(),
-            SsFilterHit    => self.filter_hit.snapshot(),
-        }
+    public fn read(&self, kind: &SqliteStatStmtKind) -> Int64 {
+        self.counts[stmt_code(kind) - 1]
     }
 
-    public fn reset_high_water(&mut self, kind: &SqliteStatStmtKind) {
-        match kind {
-            SsFullscanStep => self.fullscan_step.reset_high_water(),
-            SsSort         => self.sort.reset_high_water(),
-            SsAutoindex    => self.autoindex.reset_high_water(),
-            SsVmStep       => self.vm_step.reset_high_water(),
-            SsReprepare    => self.reprepare.reset_high_water(),
-            SsRun          => self.run.reset_high_water(),
-            SsFilterMiss   => self.filter_miss.reset_high_water(),
-            SsFilterHit    => self.filter_hit.reset_high_water(),
-        }
+    public fn read_and_reset(&mut self, kind: &SqliteStatStmtKind) -> Int64 {
+        let slot = stmt_code(kind) - 1;
+        let count = self.counts[slot];
+        self.counts[slot] = 0_i64;
+        count
     }
 
-    public fn note_full_scan_step(&mut self) { self.fullscan_step.add(1_i64); }
-    public fn note_sort(&mut self) { self.sort.add(1_i64); }
-    public fn note_autoindex(&mut self) { self.autoindex.add(1_i64); }
-    public fn note_vm_step(&mut self) { self.vm_step.add(1_i64); }
-    public fn note_reprepare(&mut self) { self.reprepare.add(1_i64); }
-    public fn note_run(&mut self) { self.run.add(1_i64); }
-    public fn note_filter_hit(&mut self) { self.filter_hit.add(1_i64); }
-    public fn note_filter_miss(&mut self) { self.filter_miss.add(1_i64); }
+    fn note(&mut self, kind: &SqliteStatStmtKind) {
+        let slot = stmt_code(kind) - 1;
+        self.counts[slot] = self.counts[slot].checked_add(1_i64).expect("SQLite event count exceeds Int64");
+    }
 
-    /// Cheap "did this statement spend more time in scans than indexed
-    /// access" predicate.
+    public fn note_full_scan_step(&mut self) { self.note(&SqliteStatStmtKind.SsFullscanStep); }
+    public fn note_sort(&mut self) { self.note(&SqliteStatStmtKind.SsSort); }
+    public fn note_autoindex(&mut self) { self.note(&SqliteStatStmtKind.SsAutoindex); }
+    public fn note_vm_step(&mut self) { self.note(&SqliteStatStmtKind.SsVmStep); }
+    public fn note_reprepare(&mut self) { self.note(&SqliteStatStmtKind.SsReprepare); }
+    public fn note_run(&mut self) { self.note(&SqliteStatStmtKind.SsRun); }
+    public fn note_filter_miss(&mut self) { self.note(&SqliteStatStmtKind.SsFilterMiss); }
+    public fn note_filter_hit(&mut self) { self.note(&SqliteStatStmtKind.SsFilterHit); }
+
+    /// More than one full-scan step per ten VM steps.
     public fn is_scan_heavy(&self) -> Bool {
-        self.fullscan_step.current > (self.vm_step.current / 10_i64)
+        self.read(&SqliteStatStmtKind.SsFullscanStep) > self.read(&SqliteStatStmtKind.SsVmStep) / 10_i64
     }
 }

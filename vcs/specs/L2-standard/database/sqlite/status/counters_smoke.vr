@@ -1,206 +1,184 @@
-// @test: typecheck-pass
+// @test: run-interpreter
 // @tier: 0
 // @level: L2
 // @tags: sqlite, status, counter, db_status, stmt_status
 // @timeout: 5000
 // @expected-exit: 0
-//
-// status/ surface:
-//   * StatusKind code → name round-trip
-//   * Counter observe / add / sub + high-water-mark semantics
-//   * CounterPair hit/miss ratio
-//   * ProcessStatus note_allocation / note_free arithmetic
-//   * DbStatus cache_hit_ratio + counters
-//   * StmtStatus is_scan_heavy classifier
 
 mount core.database.sqlite.native.status.kind.{
-    ProcessKind, PsMemoryUsed, PsPagecacheUsed, PsMallocCount,
-    DbKind, DsCacheHit, DsCacheMiss, DsCacheUsed,
-    StmtKind, SsFullscanStep, SsVmStep,
+    ProcessKind, DbKind, SqliteStatStmtKind,
     process_code, process_name, db_code, db_name, stmt_code, stmt_name,
 };
-mount core.database.sqlite.native.status.counter.{
-    Counter, counter_zero,
-    CounterPair, counter_pair_zero,
-};
-mount core.database.sqlite.native.status.process.{
-    ProcessStatus, process_status_new,
-};
-mount core.database.sqlite.native.status.database.{
-    DbStatus, db_status_new,
-};
-mount core.database.sqlite.native.status.stmt.{
-    StmtStatus, stmt_status_new,
-};
-mount base.{Bool};
+mount core.database.sqlite.native.status.counter.{counter_zero, counter_pair_zero};
+mount core.database.sqlite.native.status.process.process_status_new;
+mount core.database.sqlite.native.status.database.db_status_new;
+mount core.database.sqlite.native.status.stmt.stmt_status_new;
 
-// -----------------------------------------------------------------------------
-// Kind taxonomy
-// -----------------------------------------------------------------------------
-
-fn test_process_codes_distinct() {
-    assert_eq(process_code(&PsMemoryUsed), 0);
-    assert_eq(process_code(&PsPagecacheUsed), 1);
-    assert_eq(process_code(&PsMallocCount), 9);
+fn check_sample(sample: (Int64, Int64), current: Int64, peak: Int64) {
+    let (actual, high) = sample;
+    assert_eq(actual, current);
+    assert_eq(high, peak);
 }
 
-fn test_process_names_unique() {
-    assert(process_name(&PsMemoryUsed) == "memory_used".clone());
-    assert(process_name(&PsPagecacheUsed) == "pagecache_used".clone());
+fn test_kind_codes_and_names() {
+    assert_eq(process_code(&ProcessKind.PsMemoryUsed), 0);
+    assert_eq(process_code(&ProcessKind.PsPagecacheUsed), 1);
+    assert_eq(process_code(&ProcessKind.PsMallocCount), 9);
+    assert_eq(process_name(&ProcessKind.PsMemoryUsed), "memory_used");
+    assert_eq(process_name(&ProcessKind.PsPagecacheUsed), "pagecache_used");
+    assert_eq(db_code(&DbKind.DsCacheHit), 7);
+    assert_eq(db_code(&DbKind.DsCacheMiss), 8);
+    assert_eq(db_name(&DbKind.DsCacheHit), "cache_hit");
+    assert_eq(stmt_code(&SqliteStatStmtKind.SsFullscanStep), 1);
+    assert_eq(stmt_code(&SqliteStatStmtKind.SsVmStep), 4);
+    assert_eq(stmt_name(&SqliteStatStmtKind.SsFilterHit), "filter_hit");
 }
 
-fn test_db_codes_distinct() {
-    assert_eq(db_code(&DsCacheHit), 7);
-    assert_eq(db_code(&DsCacheMiss), 8);
-}
-
-fn test_stmt_codes_distinct() {
-    assert_eq(stmt_code(&SsFullscanStep), 1);
-    assert_eq(stmt_code(&SsVmStep), 4);
-}
-
-// -----------------------------------------------------------------------------
-// Counter
-// -----------------------------------------------------------------------------
-
-fn test_counter_observe_advances_hwm() {
+fn test_counter_and_pair() {
     let mut c = counter_zero();
     c.observe(50_i64);
-    let (cur, hwm) = c.snapshot();
-    assert_eq(cur, 50 as Int64);
-    assert_eq(hwm, 50 as Int64);
-}
-
-fn test_counter_add_sub() {
-    let mut c = counter_zero();
-    c.add(100_i64);
-    c.sub(40_i64);
-    let (cur, hwm) = c.snapshot();
-    assert_eq(cur, 60 as Int64);
-    assert_eq(hwm, 100 as Int64);    // sub doesn't move HWM
-}
-
-fn test_counter_reset_high_water() {
-    let mut c = counter_zero();
-    c.observe(100_i64);
-    c.observe(20_i64);
+    check_sample(c.snapshot(), 50_i64, 50_i64);
+    c.add(60_i64);
+    c.sub(90_i64);
+    check_sample(c.snapshot(), 20_i64, 110_i64);
     c.reset_high_water();
-    let (cur, hwm) = c.snapshot();
-    assert_eq(cur, 20 as Int64);
-    assert_eq(hwm, 20 as Int64);
-}
-
-fn test_counter_pair_ratio() {
+    check_sample(c.snapshot(), 20_i64, 20_i64);
     let mut p = counter_pair_zero();
-    p.note_hit();
-    p.note_hit();
-    p.note_hit();
+    assert(p.ratio() == 0.0);
     p.note_miss();
-    let r = p.ratio();
-    assert(r > (0.7 as Float64));
-    assert(r < (0.8 as Float64));
+    p.note_hit();
+    p.note_hit();
+    p.note_hit();
+    assert(p.ratio() == 0.75);
 }
 
-// -----------------------------------------------------------------------------
-// ProcessStatus
-// -----------------------------------------------------------------------------
-
-fn test_process_note_allocation_increments_memory() {
+fn test_process_allocations() {
     let mut p = process_status_new();
-    p.note_allocation(1024_i64);
-    p.note_allocation(2048_i64);
-    let (cur, _) = p.read(&PsMemoryUsed);
-    assert_eq(cur, 3072 as Int64);
+    p.note_allocation(1_i64, 16_i64);
+    p.note_allocation(64_i64, 64_i64);
+    check_sample(p.read(&ProcessKind.PsMemoryUsed), 80_i64, 80_i64);
+    check_sample(p.read(&ProcessKind.PsMallocCount), 2_i64, 2_i64);
+    check_sample(p.read_and_reset(&ProcessKind.PsMallocSize), 0_i64, 64_i64);
+    check_sample(p.read(&ProcessKind.PsMallocSize), 0_i64, 0_i64);
+    p.note_free(64_i64);
+    check_sample(p.read_and_reset(&ProcessKind.PsMallocCount), 1_i64, 2_i64);
+    check_sample(p.read(&ProcessKind.PsMallocCount), 1_i64, 1_i64);
+    check_sample(p.read_and_reset(&ProcessKind.PsMemoryUsed), 16_i64, 80_i64);
+    check_sample(p.read(&ProcessKind.PsMemoryUsed), 16_i64, 16_i64);
+    p.note_allocation_request(99_i64);
+    check_sample(p.read(&ProcessKind.PsMallocSize), 0_i64, 99_i64);
+    p.note_free(16_i64);
+    check_sample(p.read(&ProcessKind.PsMemoryUsed), 0_i64, 16_i64);
+    check_sample(p.read(&ProcessKind.PsMallocCount), 0_i64, 1_i64);
 }
 
-fn test_process_note_free_subtracts() {
+fn test_process_pagecache_and_parser() {
     let mut p = process_status_new();
-    p.note_allocation(2048_i64);
-    p.note_free(1024_i64);
-    let (cur, _) = p.read(&PsMemoryUsed);
-    assert_eq(cur, 1024 as Int64);
+    p.observe_pagecache_usage(3_i64, 64_i64);
+    p.observe_pagecache_usage(1_i64, 128_i64);
+    p.note_pagecache_request(4096_i64);
+    p.note_parser_depth(12_i64);
+    p.note_parser_depth(7_i64);
+    check_sample(p.read_and_reset(&ProcessKind.PsPagecacheUsed), 1_i64, 3_i64);
+    check_sample(p.read(&ProcessKind.PsPagecacheUsed), 1_i64, 1_i64);
+    check_sample(p.read(&ProcessKind.PsPagecacheOverflow), 128_i64, 128_i64);
+    check_sample(p.read_and_reset(&ProcessKind.PsPagecacheSize), 0_i64, 4096_i64);
+    check_sample(p.read(&ProcessKind.PsPagecacheSize), 0_i64, 0_i64);
+    check_sample(p.read_and_reset(&ProcessKind.PsParserStack), 0_i64, 12_i64);
+    check_sample(p.read(&ProcessKind.PsParserStack), 0_i64, 0_i64);
+    check_sample(p.read(&ProcessKind.PsScratchUsed), 0_i64, 0_i64);
+    check_sample(p.read(&ProcessKind.PsScratchOverflow), 0_i64, 0_i64);
+    check_sample(p.read(&ProcessKind.PsScratchSize), 0_i64, 0_i64);
 }
 
-fn test_process_malloc_count_advances() {
-    let mut p = process_status_new();
-    p.note_allocation(64_i64);
-    p.note_allocation(64_i64);
-    let (cur, _) = p.read(&PsMallocCount);
-    assert_eq(cur, 2 as Int64);
-}
-
-// -----------------------------------------------------------------------------
-// DbStatus
-// -----------------------------------------------------------------------------
-
-fn test_db_cache_hit_ratio() {
+fn test_db_events_and_isolation() {
     let mut d = db_status_new();
+    let other = db_status_new();
     d.note_cache_hit();
     d.note_cache_hit();
     d.note_cache_hit();
     d.note_cache_miss();
-    let r = d.cache_hit_ratio();
-    assert(r > (0.7 as Float64));
+    d.note_cache_write();
+    d.note_cache_spill();
+    assert(d.cache_hit_ratio() == 0.75);
+    check_sample(d.read_and_reset(&DbKind.DsCacheHit), 3_i64, 0_i64);
+    check_sample(d.read(&DbKind.DsCacheHit), 0_i64, 0_i64);
+    check_sample(d.read_and_reset(&DbKind.DsCacheMiss), 1_i64, 0_i64);
+    check_sample(d.read(&DbKind.DsCacheMiss), 0_i64, 0_i64);
+    check_sample(d.read_and_reset(&DbKind.DsCacheWrite), 1_i64, 0_i64);
+    check_sample(d.read(&DbKind.DsCacheWrite), 0_i64, 0_i64);
+    check_sample(d.read_and_reset(&DbKind.DsCacheSpill), 1_i64, 0_i64);
+    check_sample(d.read(&DbKind.DsCacheSpill), 0_i64, 0_i64);
+    d.note_lookaside_hit();
+    d.note_lookaside_miss_size();
+    d.note_lookaside_miss_size();
+    d.note_lookaside_miss_full();
+    check_sample(d.read_and_reset(&DbKind.DsLookasideMissSize), 0_i64, 2_i64);
+    check_sample(d.read(&DbKind.DsLookasideMissSize), 0_i64, 0_i64);
+    check_sample(d.read_and_reset(&DbKind.DsLookasideHit), 0_i64, 1_i64);
+    check_sample(d.read(&DbKind.DsLookasideHit), 0_i64, 0_i64);
+    check_sample(d.read_and_reset(&DbKind.DsLookasideMissFull), 0_i64, 1_i64);
+    check_sample(d.read(&DbKind.DsLookasideMissFull), 0_i64, 0_i64);
+    check_sample(other.read(&DbKind.DsCacheHit), 0_i64, 0_i64);
 }
 
-fn test_db_cache_writes_increment() {
+fn test_db_gauges() {
     let mut d = db_status_new();
-    d.note_cache_write();
-    d.note_cache_write();
-    let (cur, _) = d.read(&DsCacheHit);
-    assert_eq(cur, 0 as Int64);   // hits separately tracked
+    d.observe_lookaside_slots(3_i64);
+    d.observe_lookaside_slots(1_i64);
+    check_sample(d.read_and_reset(&DbKind.DsLookasideUsed), 1_i64, 3_i64);
+    check_sample(d.read(&DbKind.DsLookasideUsed), 1_i64, 1_i64);
+    d.observe_cache_bytes(800_i64, 400_i64);
+    d.observe_schema_bytes(42_i64);
+    d.observe_statement_bytes(24_i64);
+    d.observe_unresolved_fks(true);
+    check_sample(d.read_and_reset(&DbKind.DsCacheUsed), 800_i64, 0_i64);
+    check_sample(d.read(&DbKind.DsCacheUsed), 800_i64, 0_i64);
+    check_sample(d.read(&DbKind.DsCacheUsedShared), 400_i64, 0_i64);
+    check_sample(d.read(&DbKind.DsSchemaUsed), 42_i64, 0_i64);
+    check_sample(d.read(&DbKind.DsStmtUsed), 24_i64, 0_i64);
+    check_sample(d.read_and_reset(&DbKind.DsDeferredFks), 1_i64, 0_i64);
+    check_sample(d.read(&DbKind.DsDeferredFks), 1_i64, 0_i64);
+    d.observe_unresolved_fks(false);
+    check_sample(d.read(&DbKind.DsDeferredFks), 0_i64, 0_i64);
 }
 
-fn test_db_cache_used_starts_zero() {
-    let d = db_status_new();
-    let (cur, _) = d.read(&DsCacheUsed);
-    assert_eq(cur, 0 as Int64);
-}
-
-// -----------------------------------------------------------------------------
-// StmtStatus
-// -----------------------------------------------------------------------------
-
-fn test_stmt_status_increment_full_scan() {
+fn test_statement_events_and_resets() {
     let mut s = stmt_status_new();
-    s.note_full_scan_step();
-    s.note_full_scan_step();
-    let (cur, _) = s.read(&SsFullscanStep);
-    assert_eq(cur, 2 as Int64);
-}
-
-fn test_stmt_is_scan_heavy_when_majority_scans() {
-    let mut s = stmt_status_new();
+    let other = stmt_status_new();
+    s.note_run();
+    s.note_sort();
+    s.note_autoindex();
+    s.note_reprepare();
+    s.note_filter_miss();
+    s.note_filter_hit();
+    s.note_filter_hit();
+    assert_eq(s.read_and_reset(&SqliteStatStmtKind.SsRun), 1_i64);
+    assert_eq(s.read(&SqliteStatStmtKind.SsRun), 0_i64);
+    assert_eq(s.read_and_reset(&SqliteStatStmtKind.SsSort), 1_i64);
+    assert_eq(s.read(&SqliteStatStmtKind.SsSort), 0_i64);
+    assert_eq(s.read(&SqliteStatStmtKind.SsAutoindex), 1_i64);
+    assert_eq(s.read(&SqliteStatStmtKind.SsReprepare), 1_i64);
+    assert_eq(s.read(&SqliteStatStmtKind.SsFilterMiss), 1_i64);
+    assert_eq(s.read(&SqliteStatStmtKind.SsFilterHit), 2_i64);
+    assert_eq(other.read(&SqliteStatStmtKind.SsFilterHit), 0_i64);
     s.note_full_scan_step();
     s.note_full_scan_step();
     s.note_vm_step();
     assert(s.is_scan_heavy());
-}
-
-fn test_stmt_is_scan_heavy_false_when_indexed() {
-    let mut s = stmt_status_new();
-    let mut i: Int = 0;
-    while i < 100 { s.note_vm_step(); i = i + 1; }
-    s.note_full_scan_step();
+    let mut steps = 1;
+    while steps < 20 { s.note_vm_step(); steps = steps + 1; }
+    assert_eq(s.read(&SqliteStatStmtKind.SsFullscanStep), 2_i64);
+    assert_eq(s.read(&SqliteStatStmtKind.SsVmStep), 20_i64);
     assert(!s.is_scan_heavy());
 }
 
 fn main() {
-    test_process_codes_distinct();
-    test_process_names_unique();
-    test_db_codes_distinct();
-    test_stmt_codes_distinct();
-    test_counter_observe_advances_hwm();
-    test_counter_add_sub();
-    test_counter_reset_high_water();
-    test_counter_pair_ratio();
-    test_process_note_allocation_increments_memory();
-    test_process_note_free_subtracts();
-    test_process_malloc_count_advances();
-    test_db_cache_hit_ratio();
-    test_db_cache_writes_increment();
-    test_db_cache_used_starts_zero();
-    test_stmt_status_increment_full_scan();
-    test_stmt_is_scan_heavy_when_majority_scans();
-    test_stmt_is_scan_heavy_false_when_indexed();
+    test_kind_codes_and_names();
+    test_counter_and_pair();
+    test_process_allocations();
+    test_process_pagecache_and_parser();
+    test_db_events_and_isolation();
+    test_db_gauges();
+    test_statement_events_and_resets();
 }

@@ -1,0 +1,14 @@
+// @test: run-interpreter-panic
+// @tier: 0
+// @level: L2
+// @tags: sqlite, status, counter, overflow
+// @timeout: 5000
+// @expected-panic: invalid SQLite status increment
+
+mount core.database.sqlite.native.status.counter.counter_zero;
+
+fn main() {
+    let mut c = counter_zero();
+    c.add(Int64.MAX);
+    c.add(1_i64);
+}

@@ -1,0 +1,13 @@
+// @test: run-interpreter-panic
+// @tier: 0
+// @level: L2
+// @tags: sqlite, status, allocator
+// @timeout: 5000
+// @expected-panic: no matching SQLite allocation
+
+mount core.database.sqlite.native.status.process.process_status_new;
+
+fn main() {
+    let mut p = process_status_new();
+    p.note_free(8_i64);
+}

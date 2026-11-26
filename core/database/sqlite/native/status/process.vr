@@ -1,9 +1,4 @@
-// =============================================================================
-// status/process.vr — ProcessStatus aggregator
-// =============================================================================
-// Spec: SQLite C API — sqlite3_status64
-// =============================================================================
-
+// Spec: SQLite C API — sqlite3_status64.
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LFnd,
@@ -11,15 +6,7 @@
 )
 module core.database.sqlite.native.status.process;
 
-mount base.{Bool, Maybe};
-mount collections.List;
-mount core.database.sqlite.native.status.kind.{
-    ProcessKind,
-    PsMemoryUsed, PsPagecacheUsed, PsPagecacheOverflow,
-    PsScratchUsed, PsScratchOverflow, PsMallocSize, PsParserStack,
-    PsPagecacheSize, PsScratchSize, PsMallocCount,
-    process_code, process_name,
-};
+mount core.database.sqlite.native.status.kind.ProcessKind;
 mount core.database.sqlite.native.status.counter.{StatusCounter, counter_zero};
 
 public type ProcessStatus is {
@@ -34,54 +21,76 @@ public type ProcessStatus is {
 
 public fn process_status_new() -> ProcessStatus {
     ProcessStatus {
-        memory_used: counter_zero(),
-        pagecache_used: counter_zero(),
-        pagecache_overflow: counter_zero(),
-        pagecache_size: counter_zero(),
-        malloc_size: counter_zero(),
-        malloc_count: counter_zero(),
-        parser_stack: counter_zero(),
+        memory_used: counter_zero(), pagecache_used: counter_zero(),
+        pagecache_overflow: counter_zero(), pagecache_size: counter_zero(),
+        malloc_size: counter_zero(), malloc_count: counter_zero(), parser_stack: counter_zero(),
     }
 }
 
 implement ProcessStatus {
-    /// Mirror of sqlite3_status64(op, *p, *pHwm, resetFlag).
+    /// Return the current value and maximum observed since reset. Peak-only
+    /// selectors leave the current component at zero.
     public fn read(&self, kind: &ProcessKind) -> (Int64, Int64) {
         match kind {
-            PsMemoryUsed         => self.memory_used.snapshot(),
-            PsPagecacheUsed      => self.pagecache_used.snapshot(),
-            PsPagecacheOverflow  => self.pagecache_overflow.snapshot(),
-            PsPagecacheSize      => self.pagecache_size.snapshot(),
-            PsMallocSize         => self.malloc_size.snapshot(),
-            PsMallocCount        => self.malloc_count.snapshot(),
-            PsParserStack        => self.parser_stack.snapshot(),
-            _                     => (0 as Int64, 0 as Int64),
+            ProcessKind.PsMemoryUsed => self.memory_used.snapshot(),
+            ProcessKind.PsPagecacheUsed => self.pagecache_used.snapshot(),
+            ProcessKind.PsPagecacheOverflow => self.pagecache_overflow.snapshot(),
+            ProcessKind.PsPagecacheSize => self.pagecache_size.snapshot(),
+            ProcessKind.PsMallocSize => self.malloc_size.snapshot(),
+            ProcessKind.PsMallocCount => self.malloc_count.snapshot(),
+            ProcessKind.PsParserStack => self.parser_stack.snapshot(),
+            ProcessKind.PsScratchUsed | ProcessKind.PsScratchOverflow | ProcessKind.PsScratchSize => (0_i64, 0_i64),
         }
     }
 
     public fn reset_high_water(&mut self, kind: &ProcessKind) {
         match kind {
-            PsMemoryUsed         => self.memory_used.reset_high_water(),
-            PsPagecacheUsed      => self.pagecache_used.reset_high_water(),
-            PsPagecacheOverflow  => self.pagecache_overflow.reset_high_water(),
-            PsPagecacheSize      => self.pagecache_size.reset_high_water(),
-            PsMallocSize         => self.malloc_size.reset_high_water(),
-            PsMallocCount        => self.malloc_count.reset_high_water(),
-            PsParserStack        => self.parser_stack.reset_high_water(),
-            _                     => {}
+            ProcessKind.PsMemoryUsed => self.memory_used.reset_high_water(),
+            ProcessKind.PsPagecacheUsed => self.pagecache_used.reset_high_water(),
+            ProcessKind.PsPagecacheOverflow => self.pagecache_overflow.reset_high_water(),
+            ProcessKind.PsPagecacheSize => self.pagecache_size.reset_high_water(),
+            ProcessKind.PsMallocSize => self.malloc_size.reset_high_water(),
+            ProcessKind.PsMallocCount => self.malloc_count.reset_high_water(),
+            ProcessKind.PsParserStack => self.parser_stack.reset_high_water(),
+            ProcessKind.PsScratchUsed | ProcessKind.PsScratchOverflow | ProcessKind.PsScratchSize => {},
         }
     }
 
-    /// Allocation tracking — bumps both memory_used and malloc_count.
-    public fn note_allocation(&mut self, bytes: Int64) {
-        self.memory_used.add(bytes);
+    public fn read_and_reset(&mut self, kind: &ProcessKind) -> (Int64, Int64) {
+        let sample = self.read(kind);
+        self.reset_high_water(kind);
+        sample
+    }
+
+    public fn note_allocation_request(&mut self, requested_bytes: Int64) {
+        self.malloc_size.observe_peak(requested_bytes);
+    }
+
+    /// Record one successful request and the actual size charged by the allocator.
+    public fn note_allocation(&mut self, requested_bytes: Int64, allocated_bytes: Int64) {
+        assert(requested_bytes > 0_i64 && allocated_bytes >= requested_bytes, "invalid SQLite allocation size");
+        self.memory_used.add(allocated_bytes);
         self.malloc_count.add(1_i64);
-        if bytes > self.malloc_size.current {
-            self.malloc_size.observe(bytes);
-        }
+        self.note_allocation_request(requested_bytes);
     }
 
-    public fn note_free(&mut self, bytes: Int64) {
-        self.memory_used.sub(bytes);
+    public fn note_free(&mut self, allocated_bytes: Int64) {
+        let (allocations, _) = self.malloc_count.snapshot();
+        assert(allocated_bytes > 0_i64 && allocations > 0_i64, "no matching SQLite allocation");
+        let (bytes, _) = self.memory_used.snapshot();
+        let remaining = allocations - 1_i64;
+        assert(allocated_bytes <= bytes && bytes - allocated_bytes >= remaining &&
+            (remaining > 0_i64 || allocated_bytes == bytes), "free size disagrees with outstanding SQLite allocations");
+        self.memory_used.sub(allocated_bytes);
+        self.malloc_count.sub(1_i64);
     }
+
+    public fn observe_pagecache_usage(&mut self, pages: Int64, overflow_bytes: Int64) {
+        assert(pages >= 0_i64 && overflow_bytes >= 0_i64, "negative SQLite page cache usage");
+        self.pagecache_used.observe(pages);
+        self.pagecache_overflow.observe(overflow_bytes);
+    }
+
+    public fn note_pagecache_request(&mut self, bytes: Int64) { self.pagecache_size.observe_peak(bytes); }
+    public fn note_parser_depth(&mut self, depth: Int64) { self.parser_stack.observe_peak(depth); }
 }

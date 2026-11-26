@@ -1,14 +1,4 @@
-// =============================================================================
-// status/counter.vr — StatusCounter w/ value + high-water-mark
-// =============================================================================
-// Spec: SQLite C API
-//
-
-// SQLite's counter API returns BOTH the current value and the
-// high-water-mark since the last reset. `StatusCounter.observe(v)` advances
-// both; `reset_high_water` clears just the HWM.
-// =============================================================================
-
+// Spec: SQLite C API — runtime status counters.
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LFnd,
@@ -16,57 +6,63 @@
 )
 module core.database.sqlite.native.status.counter;
 
-mount base.{Bool};
-
+/// A nonnegative quantity and its maximum since the last reset.
 public type StatusCounter is {
     current: Int64,
     high_water: Int64,
 }
 
 public fn counter_zero() -> StatusCounter {
-    StatusCounter { current: 0 as Int64, high_water: 0 as Int64 }
+    StatusCounter { current: 0_i64, high_water: 0_i64 }
 }
 
 implement StatusCounter {
-    public fn observe(&mut self, v: Int64) {
-        self.current = v;
-        if v > self.high_water { self.high_water = v; }
+    public fn observe(&mut self, value: Int64) {
+        self.observe_peak(value);
+        self.current = value;
+    }
+
+    public(in core.database.sqlite.native.status) fn observe_peak(&mut self, value: Int64) {
+        assert(value >= 0_i64, "negative SQLite status observation");
+        if value > self.high_water { self.high_water = value; }
     }
 
     public fn add(&mut self, delta: Int64) {
-        self.current = self.current + delta;
-        if self.current > self.high_water { self.high_water = self.current; }
+        assert(delta >= 0_i64 && delta <= Int64.MAX - self.current, "invalid SQLite status increment");
+        self.observe(self.current + delta);
     }
 
     public fn sub(&mut self, delta: Int64) {
+        assert(delta >= 0_i64 && delta <= self.current, "invalid SQLite status decrement");
         self.current = self.current - delta;
-        // sub never advances HWM.
     }
 
-    /// SQLite's reset semantics: leave `current` alone; clear `high_water`
-    /// to `current`.
     public fn reset_high_water(&mut self) { self.high_water = self.current; }
 
     public fn snapshot(&self) -> (Int64, Int64) { (self.current, self.high_water) }
 }
 
-// -----------------------------------------------------------------------------
-// CounterPair — for counters where both directions matter (hits/misses)
-// -----------------------------------------------------------------------------
+/// Independent hit and miss counts since their respective resets.
+public type CounterPair is { hits: Int64, misses: Int64 }
 
-public type CounterPair is { hits: StatusCounter, misses: StatusCounter }
-
-public fn counter_pair_zero() -> CounterPair {
-    CounterPair { hits: counter_zero(), misses: counter_zero() }
-}
+public fn counter_pair_zero() -> CounterPair { CounterPair { hits: 0_i64, misses: 0_i64 } }
 
 implement CounterPair {
-    public fn note_hit(&mut self) { self.hits.add(1_i64); }
-    public fn note_miss(&mut self) { self.misses.add(1_i64); }
+    public fn note_hit(&mut self) {
+        self.hits = self.hits.checked_add(1_i64).expect("SQLite event count exceeds Int64");
+    }
+    public fn note_miss(&mut self) {
+        self.misses = self.misses.checked_add(1_i64).expect("SQLite event count exceeds Int64");
+    }
+
+    public(in core.database.sqlite.native.status) fn hit_count(&self) -> Int64 { self.hits }
+    public(in core.database.sqlite.native.status) fn miss_count(&self) -> Int64 { self.misses }
+    public(in core.database.sqlite.native.status) fn reset_hits(&mut self) { self.hits = 0_i64; }
+    public(in core.database.sqlite.native.status) fn reset_misses(&mut self) { self.misses = 0_i64; }
 
     public fn ratio(&self) -> Float64 {
-        let total = self.hits.current + self.misses.current;
-        if total == 0_i64 { return 0.0 as Float64; }
-        (self.hits.current as Float64) / (total as Float64)
+        let total = (self.hits as Float64) + (self.misses as Float64);
+        if total == 0.0 { return 0.0; }
+        (self.hits as Float64) / total
     }
 }
