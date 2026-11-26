@@ -35,16 +35,8 @@ module core.database.sqlite.native.l4_vdbe.ssa.cfg_construction;
 // =============================================================================
 
 mount collections.List;
-mount base.{Text, Maybe};
-mount core.database.sqlite.native.l4_vdbe.opcode.{
-    Opcode,
-    Init, Halt, Goto, Gosub, Return, Once,
-    Eq, Ne, Lt, Le, Gt, Ge,
-    If, IfNot, IfNull, NotNull,
-    Rewind, Last, Next, Prev,
-    SeekGE, SeekGT, SeekLE, SeekLT,
-    Found, NotFound, IdxGT, IdxGE, IdxLT, IdxLE, SorterNext
-};
+mount core.base.maybe.Maybe;
+mount core.database.sqlite.native.l4_vdbe.opcode.{Opcode, jump_target};
 mount core.database.sqlite.native.l4_vdbe.ssa.block.{BlockId, block_id, block_id_raw};
 
 // -----------------------------------------------------------------------------
@@ -95,20 +87,16 @@ public fn build_cfg_skeleton(instructions: &List<Opcode>) -> CfgSkeleton {
     while idx < n {
         let op = &instructions[idx];
 
-        // Mark every jump target as a leader.
-        let targets = jump_targets_of(op);
-        let mut t: Int = 0;
-        while t < targets.len() {
-            let tgt = targets[t];
-            if tgt >= 0 && tgt < n {
-                is_leader[tgt] = true;
+        // Every branch target begins a block. The next instruction also begins
+        // one after an explicit jump, a return or a halt, even if unreachable.
+        let ends_block = match jump_target(op) {
+            Maybe.Some(tgt) => {
+                if tgt >= 0 && tgt < n { is_leader[tgt] = true; }
+                true
             }
-            t = t + 1;
-        }
-
-        // If `op` is a control-flow instruction, the next instruction
-        // (if any) is a leader too.
-        if is_control_flow(op) && idx + 1 < n {
+            Maybe.None => op is Opcode.Return(_) || op is Opcode.Halt(_, _),
+        };
+        if ends_block && idx + 1 < n {
             is_leader[idx + 1] = true;
         }
 
@@ -164,88 +152,5 @@ public fn build_cfg_skeleton(instructions: &List<Opcode>) -> CfgSkeleton {
     CfgSkeleton {
         spans: spans,
         instr_to_block: instr_to_block,
-    }
-}
-
-// -----------------------------------------------------------------------------
-// Per-opcode classification helpers
-// -----------------------------------------------------------------------------
-
-/// All instruction-index operands of `op` that act as jump targets.
-/// Includes both unconditional jumps and conditional branches.
-fn jump_targets_of(op: &Opcode) -> List<Int> {
-    let mut out: List<Int> = List.new();
-    match op {
-        Init(t)              => { out.push(t); }
-        Goto(t)              => { out.push(t); }
-        Gosub(_, t)          => { out.push(t); }
-        Once(t)              => { out.push(t); }
-        Eq(_, _, t)          => { out.push(t); }
-        Ne(_, _, t)          => { out.push(t); }
-        Lt(_, _, t)          => { out.push(t); }
-        Le(_, _, t)          => { out.push(t); }
-        Gt(_, _, t)          => { out.push(t); }
-        Ge(_, _, t)          => { out.push(t); }
-        If(_, t)             => { out.push(t); }
-        IfNot(_, t)          => { out.push(t); }
-        IfNull(_, t)         => { out.push(t); }
-        NotNull(_, t)        => { out.push(t); }
-        Rewind(_, t)         => { out.push(t); }
-        Last(_, t)           => { out.push(t); }
-        Next(_, t)           => { out.push(t); }
-        Prev(_, t)           => { out.push(t); }
-        SeekGE(_, _, _, t)   => { out.push(t); }
-        SeekGT(_, _, _, t)   => { out.push(t); }
-        SeekLE(_, _, _, t)   => { out.push(t); }
-        SeekLT(_, _, _, t)   => { out.push(t); }
-        Found(_, t, _, _)    => { out.push(t); }
-        NotFound(_, t, _, _) => { out.push(t); }
-        IdxGT(_, t, _, _)    => { out.push(t); }
-        IdxGE(_, t, _, _)    => { out.push(t); }
-        IdxLT(_, t, _, _)    => { out.push(t); }
-        IdxLE(_, t, _, _)    => { out.push(t); }
-        SorterNext(_, t)     => { out.push(t); }
-        _ => {}
-    }
-    out
-}
-
-/// `true` iff `op` ends a basic block.  Includes unconditional
-/// (Goto/Halt/Return) and conditional (all comparison/branch
-/// opcodes).  The instruction AFTER such an op is a leader.
-fn is_control_flow(op: &Opcode) -> Bool {
-    match op {
-        Init(_)              => true,
-        Halt(_, _)           => true,
-        Goto(_)              => true,
-        Gosub(_, _)          => true,
-        Return(_)            => true,
-        Once(_)              => true,
-        Eq(_, _, _)          => true,
-        Ne(_, _, _)          => true,
-        Lt(_, _, _)          => true,
-        Le(_, _, _)          => true,
-        Gt(_, _, _)          => true,
-        Ge(_, _, _)          => true,
-        If(_, _)             => true,
-        IfNot(_, _)          => true,
-        IfNull(_, _)         => true,
-        NotNull(_, _)        => true,
-        Rewind(_, _)         => true,
-        Last(_, _)           => true,
-        Next(_, _)           => true,
-        Prev(_, _)           => true,
-        SeekGE(_, _, _, _)   => true,
-        SeekGT(_, _, _, _)   => true,
-        SeekLE(_, _, _, _)   => true,
-        SeekLT(_, _, _, _)   => true,
-        Found(_, _, _, _)    => true,
-        NotFound(_, _, _, _) => true,
-        IdxGT(_, _, _, _)    => true,
-        IdxGE(_, _, _, _)    => true,
-        IdxLT(_, _, _, _)    => true,
-        IdxLE(_, _, _, _)    => true,
-        SorterNext(_, _)     => true,
-        _ => false,
     }
 }

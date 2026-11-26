@@ -32,6 +32,7 @@ module core.database.sqlite.native.l4_vdbe.opcode;
 // =============================================================================
 
 mount base.Text;
+mount core.base.maybe.Maybe;
 
 // -----------------------------------------------------------------------------
 // Opcode sum type
@@ -305,14 +306,52 @@ public fn opcode_name(op: &Opcode) -> Text {
     }
 }
 
-/// Does this opcode read the current PC + 1, or jump elsewhere?
-/// `true` if control may proceed to the next instruction.
+/// Whether the next instruction is reachable by fall-through or subroutine return.
+/// Once falls through on its first visit and Gosub saves PC + 1 as its continuation.
 public fn falls_through(op: &Opcode) -> Bool {
     match op {
         Halt(_, _) => false,
         Goto(_)    => false,
+        Init(_)    => false,
         Return(_)  => false,
         _          => true,
+    }
+}
+
+/// Absolute instruction target encoded in the opcode, when present.
+/// Return resumes through the subroutine continuation and has no immediate target.
+public(in super) fn jump_target(op: &Opcode) -> Maybe<Int> {
+    match op {
+        Init(t)                => Maybe.Some(*t),
+        Goto(t)                => Maybe.Some(*t),
+        Gosub(_, t)            => Maybe.Some(*t),
+        Once(t)                => Maybe.Some(*t),
+        Eq(_, _, t)            => Maybe.Some(*t),
+        Ne(_, _, t)            => Maybe.Some(*t),
+        Lt(_, _, t)            => Maybe.Some(*t),
+        Le(_, _, t)            => Maybe.Some(*t),
+        Gt(_, _, t)            => Maybe.Some(*t),
+        Ge(_, _, t)            => Maybe.Some(*t),
+        If(_, t)               => Maybe.Some(*t),
+        IfNot(_, t)            => Maybe.Some(*t),
+        IfNull(_, t)           => Maybe.Some(*t),
+        NotNull(_, t)          => Maybe.Some(*t),
+        Rewind(_, t)           => Maybe.Some(*t),
+        Last(_, t)             => Maybe.Some(*t),
+        Next(_, t)             => Maybe.Some(*t),
+        Prev(_, t)             => Maybe.Some(*t),
+        SeekGE(_, _, _, t)     => Maybe.Some(*t),
+        SeekGT(_, _, _, t)     => Maybe.Some(*t),
+        SeekLE(_, _, _, t)     => Maybe.Some(*t),
+        SeekLT(_, _, _, t)     => Maybe.Some(*t),
+        Found(_, t, _, _)      => Maybe.Some(*t),
+        NotFound(_, t, _, _)   => Maybe.Some(*t),
+        IdxGT(_, t, _, _)      => Maybe.Some(*t),
+        IdxGE(_, t, _, _)      => Maybe.Some(*t),
+        IdxLT(_, t, _, _)      => Maybe.Some(*t),
+        IdxLE(_, t, _, _)      => Maybe.Some(*t),
+        SorterNext(_, t)       => Maybe.Some(*t),
+        _ => Maybe.None,
     }
 }
 

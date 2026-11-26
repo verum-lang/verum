@@ -31,8 +31,8 @@ module core.database.sqlite.native.l4_vdbe.optimizer;
 // =============================================================================
 
 mount collections.List;
-mount base.{Text, Maybe};
-mount core.database.sqlite.native.l4_vdbe.opcode.{Opcode, clone_opcode};
+mount core.base.maybe.Maybe;
+mount core.database.sqlite.native.l4_vdbe.opcode.{Opcode, clone_opcode, falls_through, jump_target};
 mount core.database.sqlite.native.l4_vdbe.program.VdbeProgram;
 
 // -----------------------------------------------------------------------------
@@ -200,7 +200,7 @@ public fn eliminate_dead_code(program: &mut VdbeProgram) -> Int {
 
         // Fall-through successor (pc + 1) unless this is a terminator
         // or unconditional branch.
-        if opcode_falls_through(op) {
+        if falls_through(op) {
             let nxt = pc + 1;
             if nxt < n && !reachable[nxt] {
                 reachable[nxt] = true;
@@ -209,15 +209,11 @@ public fn eliminate_dead_code(program: &mut VdbeProgram) -> Int {
         }
 
         // Jump targets.
-        let targets = opcode_jump_targets(op);
-        let mut t: Int = 0;
-        while t < targets.len() {
-            let tgt = targets[t];
+        if let Maybe.Some(tgt) = jump_target(op) {
             if tgt >= 0 && tgt < n && !reachable[tgt] {
                 reachable[tgt] = true;
                 worklist.push(tgt);
             }
-            t = t + 1;
         }
     }
 
@@ -233,57 +229,6 @@ public fn eliminate_dead_code(program: &mut VdbeProgram) -> Int {
         j = j + 1;
     }
     edits
-}
-
-/// `true` iff control falls through to PC+1 after `op` executes.
-/// Halt, Return, Goto and Init have no fall-through. Once falls through on its first visit.
-fn opcode_falls_through(op: &Opcode) -> Bool {
-    match op {
-        Halt(_, _)        => false,
-        Return(_)         => false,
-        Goto(_)           => false,
-        Init(_)           => false,
-        _                 => true,
-    }
-}
-
-/// All jump-target instruction indices reachable from `op`.  Empty
-/// for non-branching instructions.
-fn opcode_jump_targets(op: &Opcode) -> List<Int> {
-    let mut out: List<Int> = List.new();
-    match op {
-        Init(t)              => { out.push(t); }
-        Goto(t)              => { out.push(t); }
-        Gosub(_, t)          => { out.push(t); }
-        Once(t)              => { out.push(t); }
-        Eq(_, _, t)          => { out.push(t); }
-        Ne(_, _, t)          => { out.push(t); }
-        Lt(_, _, t)          => { out.push(t); }
-        Le(_, _, t)          => { out.push(t); }
-        Gt(_, _, t)          => { out.push(t); }
-        Ge(_, _, t)          => { out.push(t); }
-        If(_, t)             => { out.push(t); }
-        IfNot(_, t)          => { out.push(t); }
-        IfNull(_, t)         => { out.push(t); }
-        NotNull(_, t)        => { out.push(t); }
-        Rewind(_, t)         => { out.push(t); }
-        Last(_, t)           => { out.push(t); }
-        Next(_, t)           => { out.push(t); }
-        Prev(_, t)           => { out.push(t); }
-        SeekGE(_, _, _, t)   => { out.push(t); }
-        SeekGT(_, _, _, t)   => { out.push(t); }
-        SeekLE(_, _, _, t)   => { out.push(t); }
-        SeekLT(_, _, _, t)   => { out.push(t); }
-        Found(_, t, _, _)    => { out.push(t); }
-        NotFound(_, t, _, _) => { out.push(t); }
-        IdxGT(_, t, _, _)    => { out.push(t); }
-        IdxGE(_, t, _, _)    => { out.push(t); }
-        IdxLT(_, t, _, _)    => { out.push(t); }
-        IdxLE(_, t, _, _)    => { out.push(t); }
-        SorterNext(_, t)     => { out.push(t); }
-        _ => {}
-    }
-    out
 }
 
 // -----------------------------------------------------------------------------
@@ -303,7 +248,7 @@ public fn collapse_move_chains(program: &mut VdbeProgram) -> Int {
         let op = &program.instructions[pc];
         // A return resumes at a dynamic continuation outside the explicit jump targets.
         if op is Opcode.Return(_) { return 0; }
-        for target in opcode_jump_targets(op) {
+        if let Maybe.Some(target) = jump_target(op) {
             if target >= 0 && target < n { incoming[target] = true; }
         }
         pc = pc + 1;

@@ -59,3 +59,48 @@ fn first_visit_to_once_keeps_the_fallthrough_body() {
     assert_eq(eliminate_dead_code(&mut program), 0);
     assert(program.get_opcode(1) is Maybe.Some(Opcode.Integer(42, 1)));
 }
+
+fn check_target_operand(op: Opcode) {
+    let mut program = program_new("branch target", 4);
+    program.emit(op);
+    program.emit(Opcode.Halt(0, 0));
+    program.emit(Opcode.Integer(99, 1));
+    program.emit(Opcode.Integer(42, 1));
+    program.emit(Opcode.Halt(0, 0));
+    eliminate_dead_code(&mut program);
+    assert(program.get_opcode(2) is Maybe.Some(Opcode.Noop));
+    assert(program.get_opcode(3) is Maybe.Some(Opcode.Integer(42, 1)));
+}
+
+@test
+fn all_immediate_targets_reach_the_declared_instruction() {
+    check_target_operand(Opcode.Init(3));
+    check_target_operand(Opcode.Goto(3));
+    check_target_operand(Opcode.Once(3));
+    check_target_operand(Opcode.Gosub(1, 3));
+    check_target_operand(Opcode.If(1, 3));
+    check_target_operand(Opcode.IfNot(1, 3));
+    check_target_operand(Opcode.IfNull(1, 3));
+    check_target_operand(Opcode.NotNull(1, 3));
+    check_target_operand(Opcode.Rewind(1, 3));
+    check_target_operand(Opcode.Last(1, 3));
+    check_target_operand(Opcode.Next(1, 3));
+    check_target_operand(Opcode.Prev(1, 3));
+    check_target_operand(Opcode.SorterNext(1, 3));
+    check_target_operand(Opcode.Eq(1, 2, 3));
+    check_target_operand(Opcode.Ne(1, 2, 3));
+    check_target_operand(Opcode.Lt(1, 2, 3));
+    check_target_operand(Opcode.Le(1, 2, 3));
+    check_target_operand(Opcode.Gt(1, 2, 3));
+    check_target_operand(Opcode.Ge(1, 2, 3));
+    check_target_operand(Opcode.SeekGE(1, 2, 1, 3));
+    check_target_operand(Opcode.SeekGT(1, 2, 1, 3));
+    check_target_operand(Opcode.SeekLE(1, 2, 1, 3));
+    check_target_operand(Opcode.SeekLT(1, 2, 1, 3));
+    check_target_operand(Opcode.Found(1, 3, 2, 1));
+    check_target_operand(Opcode.NotFound(1, 3, 2, 1));
+    check_target_operand(Opcode.IdxGT(1, 3, 2, 1));
+    check_target_operand(Opcode.IdxGE(1, 3, 2, 1));
+    check_target_operand(Opcode.IdxLT(1, 3, 2, 1));
+    check_target_operand(Opcode.IdxLE(1, 3, 2, 1));
+}
