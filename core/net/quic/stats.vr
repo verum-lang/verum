@@ -1,52 +1,5 @@
-// =============================================================================
-// net/quic/stats.vr — Observability: per-connection + per-endpoint stats
-// =============================================================================
-// Layer: 5 (Network — QUIC)
-// Dependencies: core, core.time
-// =============================================================================
-//
-
-// Production QUIC deployments need rich observability. This module
-// ships a single aggregated `QuicStats` struct, plus a Prometheus
-// renderer for it. The fields mirror the well-trodden set that appears
-// in every production QUIC library (quiche, msquic, gQUIC) so
-// operators moving between stacks see familiar metrics.
-//
-// WHO FILLS IT IN: YOU DO. Measured 2026-09-10 (T1326): nothing in the
-// QUIC stack constructs, stores or returns a `QuicStats` — the only
-// mention outside this file and `stats_prometheus.vr` is the re-export
-// in `mod.vr`. The rx/tx/recovery/key-update paths do not feed it,
-// because they do not run: `QuicConnection`'s whole surface is
-// `@intrinsic("verum.quic.*")`, and those seventeen keys have no
-// implementation, so a connection traps on its first call with
-// `@intrinsic(...) is not implemented in this build`.
-//
-// That does NOT make this module dead. The renderer is real and was
-// measured working: a hand-built `QuicStats` renders 5917 bytes of
-// Prometheus text. So this is a FORM THE CALLER FILLS IN — accumulate
-// the counters yourself, hand them to `render_connection`. Treat it as
-// a shape and an exporter, not as something a connection hands you.
-//
-// The condition under which this note expires, so it cannot go stale
-// in silence: the moment any `verum.quic.*` intrinsic is implemented
-// and a connection begins accumulating, this paragraph is wrong and
-// must be replaced by the accessor's name.
-//
-
-// # Design
-//
-
-//  * Every field is a simple counter or gauge — no locks, no
-//  derived rates. Rate computation is the scraper's job.
-//  * Atomic-free: one struct per connection; the owning task updates
-//  it from its own path. Cross-thread reads get a snapshot via
-//  `QuicStats.clone()` at scrape time.
-//  * Endpoint-level aggregation is a sum of per-connection stats
-//  + a small set of `EndpointStats` counters (new connections,
-//  stateless resets emitted, version negotiations, etc.).
-//
-
-// =============================================================================
+// Applications record observed QUIC counters and gauges in snapshots.
+// The Prometheus exporter reads the same public measurements as other consumers.
 
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
@@ -55,192 +8,193 @@
 )
 module core.net.quic.stats;
 
+public type QuicCounter is
+      DatagramsSent
+    | DatagramsReceived
+    | DatagramsDropped
+    | BytesSent
+    | BytesReceived
+    | InitialPacketsSent
+    | InitialPacketsReceived
+    | HandshakePacketsSent
+    | HandshakePacketsReceived
+    | OneRttPacketsSent
+    | OneRttPacketsReceived
+    | PacketsLost
+    | PacketsSpuriouslyLost
+    | RetransmittedPackets
+    | TimeoutsFired
+    | StreamsOpenedBidi
+    | StreamsOpenedUni
+    | StreamsClosed
+    | StreamBytesSent
+    | StreamBytesReceived
+    | ZeroRttOffered
+    | ZeroRttAccepted
+    | ZeroRttRejected
+    | KeyUpdatesInitiated
+    | KeyUpdatesReceived
+    | IntegrityFailures
+    | PathsValidated
+    | MigrationsCompleted
+    | CidsIssued
+    | CidsRetired;
 
-// =============================================================================
-// Per-connection stats
-// =============================================================================
-
-public type QuicStats is {
-    // Datagram counters
-    datagrams_sent:        UInt64,
-    datagrams_recv:        UInt64,
-    datagrams_dropped:     UInt64,       // parser or AEAD failure, or below MTU floor
-    bytes_sent:            UInt64,       // wire bytes including IP/UDP headers excluded (QUIC-level)
-    bytes_recv:            UInt64,
-
-    // Packet-space counters, broken down by encryption level
-    initial_packets_sent:     UInt64,
-    initial_packets_recv:     UInt64,
-    handshake_packets_sent:   UInt64,
-    handshake_packets_recv:   UInt64,
-    onertt_packets_sent:      UInt64,
-    onertt_packets_recv:      UInt64,
-
-    // Recovery / loss detection
-    packets_lost:             UInt64,
-    packets_spuriously_lost:  UInt64,    // later ACKed; PTO false positives
-    retransmitted_packets:    UInt64,
-    timeouts_fired:           UInt64,    // PTO fires + idle-timeout fires
-
-    // Congestion control (RFC 9002)
-    congestion_window_bytes:  UInt64,    // gauge
-    bytes_in_flight:          UInt64,    // gauge
-    rtt_smoothed_us:          UInt64,    // microseconds
-    rtt_min_us:               UInt64,
-    rtt_var_us:               UInt64,
-
-    // Stream-level counters
-    streams_opened_bidi:      UInt64,
-    streams_opened_uni:       UInt64,
-    streams_closed:           UInt64,
-    stream_bytes_sent:        UInt64,
-    stream_bytes_recv:        UInt64,
-
-    // 0-RTT / resumption
-    zero_rtt_offered:         UInt64,    // we offered early data
-    zero_rtt_accepted:        UInt64,    // peer accepted + we flushed early data
-    zero_rtt_rejected:        UInt64,    // peer rejected; we fell back to 1-RTT
-
-    // Key rotation (RFC 9001 §6)
-    key_updates_initiated:    UInt64,
-    key_updates_received:     UInt64,
-    integrity_failures:       UInt64,
-
-    // Migration / path validation (RFC 9000 §8–§9)
-    paths_validated:          UInt64,
-    migrations_completed:     UInt64,
-
-    // CIDs
-    cids_issued:              UInt64,
-    cids_retired:             UInt64,
-};
-
-implement QuicStats {
-    /// Zero-initialised stats snapshot.
-    public fn new() -> QuicStats {
-        QuicStats {
-            datagrams_sent:        0_u64, datagrams_recv:        0_u64,
-            datagrams_dropped:     0_u64,
-            bytes_sent:            0_u64, bytes_recv:            0_u64,
-            initial_packets_sent:     0_u64, initial_packets_recv:     0_u64,
-            handshake_packets_sent:   0_u64, handshake_packets_recv:   0_u64,
-            onertt_packets_sent:      0_u64, onertt_packets_recv:      0_u64,
-            packets_lost:             0_u64, packets_spuriously_lost:  0_u64,
-            retransmitted_packets:    0_u64, timeouts_fired:           0_u64,
-            congestion_window_bytes:  0_u64, bytes_in_flight:          0_u64,
-            rtt_smoothed_us:          0_u64, rtt_min_us:               0_u64,
-            rtt_var_us:               0_u64,
-            streams_opened_bidi:      0_u64, streams_opened_uni:       0_u64,
-            streams_closed:           0_u64,
-            stream_bytes_sent:        0_u64, stream_bytes_recv:        0_u64,
-            zero_rtt_offered:         0_u64, zero_rtt_accepted:        0_u64,
-            zero_rtt_rejected:        0_u64,
-            key_updates_initiated:    0_u64, key_updates_received:     0_u64,
-            integrity_failures:       0_u64,
-            paths_validated:          0_u64, migrations_completed:     0_u64,
-            cids_issued:              0_u64, cids_retired:             0_u64,
+implement QuicCounter {
+    fn slot(&self) -> Int {
+        match self {
+            DatagramsSent => 0,
+            DatagramsReceived => 1,
+            DatagramsDropped => 2,
+            BytesSent => 3,
+            BytesReceived => 4,
+            InitialPacketsSent => 5,
+            InitialPacketsReceived => 6,
+            HandshakePacketsSent => 7,
+            HandshakePacketsReceived => 8,
+            OneRttPacketsSent => 9,
+            OneRttPacketsReceived => 10,
+            PacketsLost => 11,
+            PacketsSpuriouslyLost => 12,
+            RetransmittedPackets => 13,
+            TimeoutsFired => 14,
+            StreamsOpenedBidi => 15,
+            StreamsOpenedUni => 16,
+            StreamsClosed => 17,
+            StreamBytesSent => 18,
+            StreamBytesReceived => 19,
+            ZeroRttOffered => 20,
+            ZeroRttAccepted => 21,
+            ZeroRttRejected => 22,
+            KeyUpdatesInitiated => 23,
+            KeyUpdatesReceived => 24,
+            IntegrityFailures => 25,
+            PathsValidated => 26,
+            MigrationsCompleted => 27,
+            CidsIssued => 28,
+            CidsRetired => 29,
         }
-    }
-
-    /// Accumulate another `QuicStats` into this one. Used to fold
-    /// per-connection snapshots into endpoint-wide aggregates.
-    public fn merge(&mut self, other: &QuicStats) {
-        self.datagrams_sent        = self.datagrams_sent + other.datagrams_sent;
-        self.datagrams_recv        = self.datagrams_recv + other.datagrams_recv;
-        self.datagrams_dropped     = self.datagrams_dropped + other.datagrams_dropped;
-        self.bytes_sent            = self.bytes_sent + other.bytes_sent;
-        self.bytes_recv            = self.bytes_recv + other.bytes_recv;
-        self.initial_packets_sent     = self.initial_packets_sent + other.initial_packets_sent;
-        self.initial_packets_recv     = self.initial_packets_recv + other.initial_packets_recv;
-        self.handshake_packets_sent   = self.handshake_packets_sent + other.handshake_packets_sent;
-        self.handshake_packets_recv   = self.handshake_packets_recv + other.handshake_packets_recv;
-        self.onertt_packets_sent      = self.onertt_packets_sent + other.onertt_packets_sent;
-        self.onertt_packets_recv      = self.onertt_packets_recv + other.onertt_packets_recv;
-        self.packets_lost             = self.packets_lost + other.packets_lost;
-        self.packets_spuriously_lost  = self.packets_spuriously_lost + other.packets_spuriously_lost;
-        self.retransmitted_packets    = self.retransmitted_packets + other.retransmitted_packets;
-        self.timeouts_fired           = self.timeouts_fired + other.timeouts_fired;
-        // Gauges (cwnd / in_flight / rtt) stay per-connection; merge
-        // simply keeps the "other" snapshot's latest value for the
-        // first non-zero seen — operators normally aggregate these
-        // via avg/p50/p99 externally, not sum.
-        if other.congestion_window_bytes > 0_u64 {
-            self.congestion_window_bytes = other.congestion_window_bytes;
-        }
-        if other.bytes_in_flight > 0_u64 {
-            self.bytes_in_flight = other.bytes_in_flight;
-        }
-        if other.rtt_smoothed_us > 0_u64 { self.rtt_smoothed_us = other.rtt_smoothed_us; }
-        if other.rtt_min_us > 0_u64      { self.rtt_min_us      = other.rtt_min_us; }
-        if other.rtt_var_us > 0_u64      { self.rtt_var_us      = other.rtt_var_us; }
-
-        self.streams_opened_bidi   = self.streams_opened_bidi + other.streams_opened_bidi;
-        self.streams_opened_uni    = self.streams_opened_uni + other.streams_opened_uni;
-        self.streams_closed        = self.streams_closed + other.streams_closed;
-        self.stream_bytes_sent     = self.stream_bytes_sent + other.stream_bytes_sent;
-        self.stream_bytes_recv     = self.stream_bytes_recv + other.stream_bytes_recv;
-
-        self.zero_rtt_offered      = self.zero_rtt_offered + other.zero_rtt_offered;
-        self.zero_rtt_accepted     = self.zero_rtt_accepted + other.zero_rtt_accepted;
-        self.zero_rtt_rejected     = self.zero_rtt_rejected + other.zero_rtt_rejected;
-
-        self.key_updates_initiated = self.key_updates_initiated + other.key_updates_initiated;
-        self.key_updates_received  = self.key_updates_received + other.key_updates_received;
-        self.integrity_failures    = self.integrity_failures + other.integrity_failures;
-
-        self.paths_validated       = self.paths_validated + other.paths_validated;
-        self.migrations_completed  = self.migrations_completed + other.migrations_completed;
-
-        self.cids_issued           = self.cids_issued + other.cids_issued;
-        self.cids_retired          = self.cids_retired + other.cids_retired;
     }
 }
 
-// =============================================================================
-// Endpoint-level stats
-// =============================================================================
+public type QuicGauge is
+      CongestionWindowBytes
+    | BytesInFlight
+    | RttSmoothedUs
+    | RttMinUs
+    | RttVarUs;
+
+implement QuicGauge {
+    fn slot(&self) -> Int {
+        match self {
+            CongestionWindowBytes => 0,
+            BytesInFlight => 1,
+            RttSmoothedUs => 2,
+            RttMinUs => 3,
+            RttVarUs => 4,
+        }
+    }
+}
+
+public type QuicStats is {
+    counters: [UInt64; 30],
+    gauges: [UInt64; 5],
+};
+
+implement QuicStats {
+    public fn new() -> QuicStats {
+        QuicStats { counters: [0_u64; 30], gauges: [0_u64; 5] }
+    }
+
+    public fn counter(&self, metric: QuicCounter) -> UInt64 {
+        self.counters[metric.slot()]
+    }
+
+    /// Record the observed cumulative total for this snapshot.
+    public fn set_counter(&mut self, metric: QuicCounter, total: UInt64) {
+        self.counters[metric.slot()] = total;
+    }
+
+    public fn gauge(&self, metric: QuicGauge) -> UInt64 {
+        self.gauges[metric.slot()]
+    }
+
+    public fn set_gauge(&mut self, metric: QuicGauge, value: UInt64) {
+        self.gauges[metric.slot()] = value;
+    }
+
+    /// Add the counters and retain the latest nonzero value of each gauge.
+    public fn merge(&mut self, other: &QuicStats) {
+        let mut i: Int = 0;
+        while i < self.counters.len() {
+            self.counters[i] = self.counters[i] + other.counters[i];
+            i = i + 1;
+        }
+        let mut j: Int = 0;
+        while j < self.gauges.len() {
+            if other.gauges[j] > 0_u64 {
+                self.gauges[j] = other.gauges[j];
+            }
+            j = j + 1;
+        }
+    }
+}
+
+public type EndpointCounter is
+      ConnectionsOpened
+    | ConnectionsClosed
+    | StatelessResetsEmitted
+    | VersionNegotiationsSent
+    | RetriesEmitted
+    | AmplificationLimitHits
+    | DatagramsDroppedUntracked;
+
+implement EndpointCounter {
+    fn slot(&self) -> Int {
+        match self {
+            ConnectionsOpened => 0,
+            ConnectionsClosed => 1,
+            StatelessResetsEmitted => 2,
+            VersionNegotiationsSent => 3,
+            RetriesEmitted => 4,
+            AmplificationLimitHits => 5,
+            DatagramsDroppedUntracked => 6,
+        }
+    }
+}
 
 public type EndpointStats is {
-    /// Running connections right now.
-    connections_active:         UInt64,
-    connections_opened_total:   UInt64,
-    connections_closed_total:   UInt64,
-
-    /// Rejected / dropped datagrams that never reached a connection
-    /// (parser failure, unknown CID, amplification-limit violation).
-    datagrams_dropped_untracked:  UInt64,
-
-    /// RFC 9000 §10.3 — reset packets we emitted.
-    stateless_resets_emitted:   UInt64,
-
-    /// RFC 9000 §6 — version negotiations we served (server role).
-    version_negotiations_sent:  UInt64,
-
-    /// RFC 9000 §17.2.5 — Retry packets we emitted (server, under
-    /// address-validation pressure).
-    retries_emitted:            UInt64,
-
-    /// Amplification-limit-triggered drops (server sending < 3× rx
-    /// bytes before peer validates address).
-    amplification_limit_hits:   UInt64,
-
-    /// Aggregated per-connection stats (sum where sum makes sense;
-    /// see `QuicStats.merge` for gauge semantics).
-    aggregate:                  QuicStats,
+    counters: [UInt64; 7],
+    connections_active: UInt64,
+    aggregate: QuicStats,
 };
 
 implement EndpointStats {
     public fn new() -> EndpointStats {
         EndpointStats {
-            connections_active:        0_u64,
-            connections_opened_total:  0_u64,
-            connections_closed_total:  0_u64,
-            datagrams_dropped_untracked: 0_u64,
-            stateless_resets_emitted:  0_u64,
-            version_negotiations_sent: 0_u64,
-            retries_emitted:           0_u64,
-            amplification_limit_hits:  0_u64,
-            aggregate:                 QuicStats.new(),
+            counters: [0_u64; 7],
+            connections_active: 0_u64,
+            aggregate: QuicStats.new(),
         }
     }
+
+    public fn counter(&self, metric: EndpointCounter) -> UInt64 {
+        self.counters[metric.slot()]
+    }
+
+    public fn set_counter(&mut self, metric: EndpointCounter, total: UInt64) {
+        self.counters[metric.slot()] = total;
+    }
+
+    public fn active_connections(&self) -> UInt64 { self.connections_active }
+
+    public fn set_active_connections(&mut self, count: UInt64) {
+        self.connections_active = count;
+    }
+
+    public fn merge_connection(&mut self, stats: &QuicStats) {
+        self.aggregate.merge(stats);
+    }
+
+    public fn aggregate(&self) -> &QuicStats { &self.aggregate }
 }

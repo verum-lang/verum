@@ -135,7 +135,7 @@ public mount .key_update.{
 };
 
 // Re-exports — observability
-public mount .stats.{QuicStats, EndpointStats};
+public mount .stats.{QuicStats, QuicCounter, QuicGauge, EndpointStats, EndpointCounter};
 
 // Re-exports — send pacer
 public mount .pacer.{Pacer, PacerDecision};

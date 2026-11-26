@@ -44,7 +44,7 @@
 module core.net.quic.stats_prometheus;
 
 mount core.collections.list.{List};
-mount core.net.quic.stats.{QuicStats, EndpointStats};
+mount core.net.quic.stats.{QuicStats, QuicCounter, QuicGauge, EndpointStats, EndpointCounter};
 
 // =============================================================================
 // Public API
@@ -67,38 +67,38 @@ public fn render_endpoint(stats: &EndpointStats) -> Text {
     emit_counter(&mut out,
         "verum_quic_endpoint_connections_opened_total",
         "Connections opened since process start",
-        stats.connections_opened_total, &[]);
+        stats.counter(EndpointCounter.ConnectionsOpened), &[]);
     emit_counter(&mut out,
         "verum_quic_endpoint_connections_closed_total",
         "Connections closed since process start",
-        stats.connections_closed_total, &[]);
+        stats.counter(EndpointCounter.ConnectionsClosed), &[]);
     emit_gauge(&mut out,
         "verum_quic_endpoint_connections_active",
         "Currently active QUIC connections",
-        stats.connections_active, &[]);
+        stats.active_connections(), &[]);
     emit_counter(&mut out,
         "verum_quic_endpoint_stateless_resets_emitted_total",
         "Stateless reset packets emitted (RFC 9000 §10.3)",
-        stats.stateless_resets_emitted, &[]);
+        stats.counter(EndpointCounter.StatelessResetsEmitted), &[]);
     emit_counter(&mut out,
         "verum_quic_endpoint_version_negotiations_sent_total",
         "Version negotiation packets emitted",
-        stats.version_negotiations_sent, &[]);
+        stats.counter(EndpointCounter.VersionNegotiationsSent), &[]);
     emit_counter(&mut out,
         "verum_quic_endpoint_retries_emitted_total",
         "Retry packets emitted (server address-validation)",
-        stats.retries_emitted, &[]);
+        stats.counter(EndpointCounter.RetriesEmitted), &[]);
     emit_counter(&mut out,
         "verum_quic_endpoint_amplification_limit_hits_total",
         "Amplification-limit drops (sending < 3x inbound)",
-        stats.amplification_limit_hits, &[]);
+        stats.counter(EndpointCounter.AmplificationLimitHits), &[]);
     emit_counter(&mut out,
         "verum_quic_endpoint_datagrams_dropped_untracked_total",
         "Inbound datagrams dropped before matching a connection",
-        stats.datagrams_dropped_untracked, &[]);
+        stats.counter(EndpointCounter.DatagramsDroppedUntracked), &[]);
 
     // Embed the aggregate view labelled conn=aggregate.
-    emit_connection(&mut out, &stats.aggregate, &Text.from("aggregate"));
+    emit_connection(&mut out, stats.aggregate(), &Text.from("aggregate"));
     out.finish()
 }
 
@@ -109,49 +109,49 @@ public fn render_endpoint(stats: &EndpointStats) -> Text {
 fn emit_connection(out: &mut TextBuilder, s: &QuicStats, conn_label: &Text) {
     let labels = build_conn_labels(conn_label);
 
-    emit_counter(out, "verum_quic_datagrams_sent_total", "Datagrams sent", s.datagrams_sent, labels.as_slice());
-    emit_counter(out, "verum_quic_datagrams_recv_total", "Datagrams received", s.datagrams_recv, labels.as_slice());
-    emit_counter(out, "verum_quic_datagrams_dropped_total", "Inbound datagrams dropped (parse/AEAD failure)", s.datagrams_dropped, labels.as_slice());
-    emit_counter(out, "verum_quic_bytes_sent_total", "QUIC-payload bytes sent", s.bytes_sent, labels.as_slice());
-    emit_counter(out, "verum_quic_bytes_recv_total", "QUIC-payload bytes received", s.bytes_recv, labels.as_slice());
+    emit_counter(out, "verum_quic_datagrams_sent_total", "Datagrams sent", s.counter(QuicCounter.DatagramsSent), labels.as_slice());
+    emit_counter(out, "verum_quic_datagrams_recv_total", "Datagrams received", s.counter(QuicCounter.DatagramsReceived), labels.as_slice());
+    emit_counter(out, "verum_quic_datagrams_dropped_total", "Inbound datagrams dropped (parse/AEAD failure)", s.counter(QuicCounter.DatagramsDropped), labels.as_slice());
+    emit_counter(out, "verum_quic_bytes_sent_total", "QUIC-payload bytes sent", s.counter(QuicCounter.BytesSent), labels.as_slice());
+    emit_counter(out, "verum_quic_bytes_recv_total", "QUIC-payload bytes received", s.counter(QuicCounter.BytesReceived), labels.as_slice());
 
-    emit_counter(out, "verum_quic_packets_initial_sent_total", "Initial packets sent", s.initial_packets_sent, labels.as_slice());
-    emit_counter(out, "verum_quic_packets_initial_recv_total", "Initial packets received", s.initial_packets_recv, labels.as_slice());
-    emit_counter(out, "verum_quic_packets_handshake_sent_total", "Handshake packets sent", s.handshake_packets_sent, labels.as_slice());
-    emit_counter(out, "verum_quic_packets_handshake_recv_total", "Handshake packets received", s.handshake_packets_recv, labels.as_slice());
-    emit_counter(out, "verum_quic_packets_onertt_sent_total", "1-RTT packets sent", s.onertt_packets_sent, labels.as_slice());
-    emit_counter(out, "verum_quic_packets_onertt_recv_total", "1-RTT packets received", s.onertt_packets_recv, labels.as_slice());
+    emit_counter(out, "verum_quic_packets_initial_sent_total", "Initial packets sent", s.counter(QuicCounter.InitialPacketsSent), labels.as_slice());
+    emit_counter(out, "verum_quic_packets_initial_recv_total", "Initial packets received", s.counter(QuicCounter.InitialPacketsReceived), labels.as_slice());
+    emit_counter(out, "verum_quic_packets_handshake_sent_total", "Handshake packets sent", s.counter(QuicCounter.HandshakePacketsSent), labels.as_slice());
+    emit_counter(out, "verum_quic_packets_handshake_recv_total", "Handshake packets received", s.counter(QuicCounter.HandshakePacketsReceived), labels.as_slice());
+    emit_counter(out, "verum_quic_packets_onertt_sent_total", "1-RTT packets sent", s.counter(QuicCounter.OneRttPacketsSent), labels.as_slice());
+    emit_counter(out, "verum_quic_packets_onertt_recv_total", "1-RTT packets received", s.counter(QuicCounter.OneRttPacketsReceived), labels.as_slice());
 
-    emit_counter(out, "verum_quic_packets_lost_total", "Packets declared lost (RFC 9002)", s.packets_lost, labels.as_slice());
-    emit_counter(out, "verum_quic_packets_spuriously_lost_total", "Packets declared lost then later ACKed", s.packets_spuriously_lost, labels.as_slice());
-    emit_counter(out, "verum_quic_retransmitted_packets_total", "Retransmitted packets", s.retransmitted_packets, labels.as_slice());
-    emit_counter(out, "verum_quic_timeouts_fired_total", "Timeout events (PTO + idle)", s.timeouts_fired, labels.as_slice());
+    emit_counter(out, "verum_quic_packets_lost_total", "Packets declared lost (RFC 9002)", s.counter(QuicCounter.PacketsLost), labels.as_slice());
+    emit_counter(out, "verum_quic_packets_spuriously_lost_total", "Packets declared lost then later ACKed", s.counter(QuicCounter.PacketsSpuriouslyLost), labels.as_slice());
+    emit_counter(out, "verum_quic_retransmitted_packets_total", "Retransmitted packets", s.counter(QuicCounter.RetransmittedPackets), labels.as_slice());
+    emit_counter(out, "verum_quic_timeouts_fired_total", "Timeout events (PTO + idle)", s.counter(QuicCounter.TimeoutsFired), labels.as_slice());
 
-    emit_gauge(out, "verum_quic_congestion_window_bytes", "Congestion window", s.congestion_window_bytes, labels.as_slice());
-    emit_gauge(out, "verum_quic_bytes_in_flight", "Bytes in flight", s.bytes_in_flight, labels.as_slice());
-    emit_gauge(out, "verum_quic_rtt_smoothed_microseconds", "Smoothed RTT (μs)", s.rtt_smoothed_us, labels.as_slice());
-    emit_gauge(out, "verum_quic_rtt_min_microseconds", "Min RTT observed (μs)", s.rtt_min_us, labels.as_slice());
-    emit_gauge(out, "verum_quic_rtt_var_microseconds", "RTT variance (μs)", s.rtt_var_us, labels.as_slice());
+    emit_gauge(out, "verum_quic_congestion_window_bytes", "Congestion window", s.gauge(QuicGauge.CongestionWindowBytes), labels.as_slice());
+    emit_gauge(out, "verum_quic_bytes_in_flight", "Bytes in flight", s.gauge(QuicGauge.BytesInFlight), labels.as_slice());
+    emit_gauge(out, "verum_quic_rtt_smoothed_microseconds", "Smoothed RTT (μs)", s.gauge(QuicGauge.RttSmoothedUs), labels.as_slice());
+    emit_gauge(out, "verum_quic_rtt_min_microseconds", "Min RTT observed (μs)", s.gauge(QuicGauge.RttMinUs), labels.as_slice());
+    emit_gauge(out, "verum_quic_rtt_var_microseconds", "RTT variance (μs)", s.gauge(QuicGauge.RttVarUs), labels.as_slice());
 
-    emit_counter(out, "verum_quic_streams_opened_bidi_total", "Bidirectional streams opened", s.streams_opened_bidi, labels.as_slice());
-    emit_counter(out, "verum_quic_streams_opened_uni_total", "Unidirectional streams opened", s.streams_opened_uni, labels.as_slice());
-    emit_counter(out, "verum_quic_streams_closed_total", "Streams closed", s.streams_closed, labels.as_slice());
-    emit_counter(out, "verum_quic_stream_bytes_sent_total", "Bytes written on streams", s.stream_bytes_sent, labels.as_slice());
-    emit_counter(out, "verum_quic_stream_bytes_recv_total", "Bytes read from streams", s.stream_bytes_recv, labels.as_slice());
+    emit_counter(out, "verum_quic_streams_opened_bidi_total", "Bidirectional streams opened", s.counter(QuicCounter.StreamsOpenedBidi), labels.as_slice());
+    emit_counter(out, "verum_quic_streams_opened_uni_total", "Unidirectional streams opened", s.counter(QuicCounter.StreamsOpenedUni), labels.as_slice());
+    emit_counter(out, "verum_quic_streams_closed_total", "Streams closed", s.counter(QuicCounter.StreamsClosed), labels.as_slice());
+    emit_counter(out, "verum_quic_stream_bytes_sent_total", "Bytes written on streams", s.counter(QuicCounter.StreamBytesSent), labels.as_slice());
+    emit_counter(out, "verum_quic_stream_bytes_recv_total", "Bytes read from streams", s.counter(QuicCounter.StreamBytesReceived), labels.as_slice());
 
-    emit_counter(out, "verum_quic_zero_rtt_offered_total", "0-RTT flights the client offered", s.zero_rtt_offered, labels.as_slice());
-    emit_counter(out, "verum_quic_zero_rtt_accepted_total", "0-RTT flights the peer accepted", s.zero_rtt_accepted, labels.as_slice());
-    emit_counter(out, "verum_quic_zero_rtt_rejected_total", "0-RTT flights the peer rejected", s.zero_rtt_rejected, labels.as_slice());
+    emit_counter(out, "verum_quic_zero_rtt_offered_total", "0-RTT flights the client offered", s.counter(QuicCounter.ZeroRttOffered), labels.as_slice());
+    emit_counter(out, "verum_quic_zero_rtt_accepted_total", "0-RTT flights the peer accepted", s.counter(QuicCounter.ZeroRttAccepted), labels.as_slice());
+    emit_counter(out, "verum_quic_zero_rtt_rejected_total", "0-RTT flights the peer rejected", s.counter(QuicCounter.ZeroRttRejected), labels.as_slice());
 
-    emit_counter(out, "verum_quic_key_updates_initiated_total", "Self-initiated 1-RTT key updates", s.key_updates_initiated, labels.as_slice());
-    emit_counter(out, "verum_quic_key_updates_received_total", "Peer-initiated 1-RTT key updates", s.key_updates_received, labels.as_slice());
-    emit_counter(out, "verum_quic_integrity_failures_total", "AEAD integrity failures", s.integrity_failures, labels.as_slice());
+    emit_counter(out, "verum_quic_key_updates_initiated_total", "Self-initiated 1-RTT key updates", s.counter(QuicCounter.KeyUpdatesInitiated), labels.as_slice());
+    emit_counter(out, "verum_quic_key_updates_received_total", "Peer-initiated 1-RTT key updates", s.counter(QuicCounter.KeyUpdatesReceived), labels.as_slice());
+    emit_counter(out, "verum_quic_integrity_failures_total", "AEAD integrity failures", s.counter(QuicCounter.IntegrityFailures), labels.as_slice());
 
-    emit_counter(out, "verum_quic_paths_validated_total", "Paths validated (RFC 9000 §8)", s.paths_validated, labels.as_slice());
-    emit_counter(out, "verum_quic_migrations_completed_total", "QuicConnection migrations completed", s.migrations_completed, labels.as_slice());
+    emit_counter(out, "verum_quic_paths_validated_total", "Paths validated (RFC 9000 §8)", s.counter(QuicCounter.PathsValidated), labels.as_slice());
+    emit_counter(out, "verum_quic_migrations_completed_total", "QuicConnection migrations completed", s.counter(QuicCounter.MigrationsCompleted), labels.as_slice());
 
-    emit_counter(out, "verum_quic_cids_issued_total", "QuicConnection IDs issued", s.cids_issued, labels.as_slice());
-    emit_counter(out, "verum_quic_cids_retired_total", "QuicConnection IDs retired", s.cids_retired, labels.as_slice());
+    emit_counter(out, "verum_quic_cids_issued_total", "QuicConnection IDs issued", s.counter(QuicCounter.CidsIssued), labels.as_slice());
+    emit_counter(out, "verum_quic_cids_retired_total", "QuicConnection IDs retired", s.counter(QuicCounter.CidsRetired), labels.as_slice());
 }
 
 fn build_conn_labels(conn_label: &Text) -> List<(Text, Text)> {
