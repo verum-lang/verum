@@ -34,31 +34,32 @@ const MYSQL_ER_PARSE_ERROR:      Int = 1064;
 ///  * 1062 (dup entry) → QueryFailed with SQLSTATE 23000 — is_constraint_violation = true
 ///  * everything else → QueryFailed with the decoded SQLSTATE if the server provided one
 public fn dberr_from_mysql(err: ErrPacket) -> DbError {
-    if err.code == MYSQL_ER_LOCK_DEADLOCK || err.code == MYSQL_ER_LOCK_WAIT_TIMEOUT {
+    let (code, sql_state, message) = err.into_parts();
+    if code == MYSQL_ER_LOCK_DEADLOCK || code == MYSQL_ER_LOCK_WAIT_TIMEOUT {
         return DbError.Adapter(AdapterSpecific.new(
-            AdMysql,
-            itoa(err.code),
-            err.message,
+            AdapterId.AdMysql,
+            f"{code}",
+            message,
             true,
         ));
     }
-    if err.code == MYSQL_ER_ACCESS_DENIED {
+    if code == MYSQL_ER_ACCESS_DENIED {
         return DbError.AuthFailed {
-            kind: AuthErrorKind.AekRoleNotPermitted(err.message),
+            kind: AuthErrorKind.AekRoleNotPermitted(message),
         };
     }
-    let state_text = if err.sql_state.len() == 5 {
-        err.sql_state.clone()
+    let state_text = if sql_state.len() == 5 {
+        sql_state
     } else {
-        infer_state_from_code(err.code)
+        infer_state_from_code(code)
     };
     let state = match SqlState.parse(&state_text) {
         Maybe.Some(s) => s,
-        Maybe.None    => SqlState.parse(&"XX000".clone()).unwrap(),
+        Maybe.None    => SqlState.parse(&"XX000").unwrap(),
     };
     DbError.QueryFailed {
         sql_state: state,
-        message: err.message,
+        message,
         position: Maybe.None,
     }
 }
@@ -70,24 +71,3 @@ fn infer_state_from_code(code: Int) -> Text {
     if code == MYSQL_ER_PARSE_ERROR    { return "42000".clone(); }
     "HY000".clone()
 }
-
-fn itoa(n: Int) -> Text {
-    if n == 0 { return "0".clone(); }
-    let neg = n < 0;
-    let mut abs = if neg { -n } else { n };
-    let mut digits: List<Byte> = List.new();
-    while abs > 0 {
-        digits.push(((abs % 10) + 0x30) as Byte);
-        abs = abs / 10;
-    }
-    let mut out: List<Byte> = List.new();
-    if neg { out.push(0x2D as Byte); }
-    let mut i = (digits.len() as Int) - 1;
-    while i >= 0 {
-        out.push(digits[i]);
-        i = i - 1;
-    }
-    Text.from_utf8(out.as_slice()).unwrap_or("0".clone())
-}
-
-mount collections.List;

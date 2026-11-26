@@ -1,0 +1,49 @@
+// @test: run-interpreter
+// @level: L2
+// @tier: 0
+// @tags: database, mysql, wire
+// @expected-exit: 0
+
+mount core.base.result.Result;
+mount core.database.common.error.DbError;
+mount core.database.mysql.error.dberr_from_mysql;
+mount core.database.mysql.wire.backend.{parse_auth_more, parse_err, parse_stmt_prepare_ok};
+mount core.database.mysql.wire.frame.{MyFrameError, decode_lei};
+
+fn main() {
+    let auth: [Byte; 2] = [1_u8, 3_u8];
+    assert(parse_auth_more(&auth[..]).is_ok());
+
+    let short: [Byte; 2] = [255_u8, 0_u8];
+    match parse_err(&short[..], 0) {
+        Result.Err(MyFrameError.FeShort { wanted, available }) => {
+            assert_eq(wanted, 3);
+            assert_eq(available, 2);
+        },
+        _ => panic("expected the ERR packet minimum"),
+    }
+    match parse_stmt_prepare_ok(&auth[..]) {
+        Result.Err(MyFrameError.FeUnexpectedHeader { expected, actual }) => {
+            assert_eq(expected, 0_u8);
+            assert_eq(actual, 1_u8);
+        },
+        _ => panic("expected the PREPARE_OK discriminator"),
+    }
+    let duplicate: [Byte; 6] = [255_u8, 38_u8, 4_u8, 100_u8, 117_u8, 112_u8];
+    let error = dberr_from_mysql(parse_err(&duplicate[..], 0).unwrap());
+    assert(error.is_constraint_violation());
+    match error {
+        DbError.QueryFailed { message, .. } => assert_eq(message, "dup"),
+        _ => panic("expected the decoded query diagnostic"),
+    }
+    let deadlock: [Byte; 3] = [255_u8, 189_u8, 4_u8];
+    assert(dberr_from_mysql(parse_err(&deadlock[..], 0).unwrap()).is_retryable());
+    let lei: [Byte; 3] = [252_u8, 52_u8, 18_u8];
+    match decode_lei(&lei[..], 0) {
+        Result.Ok((value, _, consumed)) => {
+            assert_eq(value, 4660);
+            assert_eq(consumed, 3);
+        },
+        _ => panic("expected a two-byte length-encoded integer"),
+    }
+}

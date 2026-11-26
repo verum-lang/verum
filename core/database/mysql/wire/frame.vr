@@ -22,8 +22,9 @@ mount collections.List;
 // -----------------------------------------------------------------------------
 
 public type MyFrameError is
-      FeShort { wanted: Int, available: Int }
-    | FeBadLength { len: Int }
+      FeShort { public wanted: Int, public available: Int }
+    | FeBadLength { public len: Int }
+    | FeUnexpectedHeader { public expected: Byte, public actual: Byte }
     | FeInvalidUtf8;
 
 implement Display for MyFrameError {
@@ -33,6 +34,8 @@ implement Display for MyFrameError {
                 f.write_str(f"mysql frame short: wanted {wanted}, available {available}".as_str()),
             FeBadLength { len } =>
                 f.write_str(f"mysql frame bad length {len}".as_str()),
+            FeUnexpectedHeader { expected, actual } =>
+                f.write_str(f"mysql packet header: expected {expected}, received {actual}".as_str()),
             FeInvalidUtf8 =>
                 f.write_str("mysql frame invalid UTF-8"),
         }
@@ -46,6 +49,8 @@ implement Debug for MyFrameError {
                 f.write_str(f"FeShort {{ wanted: {wanted}, available: {available} }}".as_str()),
             FeBadLength { len } =>
                 f.write_str(f"FeBadLength {{ len: {len} }}".as_str()),
+            FeUnexpectedHeader { expected, actual } =>
+                f.write_str(f"FeUnexpectedHeader {{ expected: {expected}, actual: {actual} }}".as_str()),
             FeInvalidUtf8 =>
                 f.write_str("FeInvalidUtf8"),
         }
@@ -58,6 +63,8 @@ implement PartialEq for MyFrameError {
             (FeShort { wanted: wa, available: aa },
              FeShort { wanted: wb, available: ab }) => wa == wb && aa == ab,
             (FeBadLength { len: a }, FeBadLength { len: b }) => a == b,
+            (FeUnexpectedHeader { expected: ea, actual: aa },
+             FeUnexpectedHeader { expected: eb, actual: ab }) => ea == eb && aa == ab,
             (FeInvalidUtf8, FeInvalidUtf8) => true,
             _ => false,
         }
@@ -120,7 +127,7 @@ public fn try_parse_packet(buf: &[Byte]) -> Result<Maybe<FrameParseOutcome>, MyF
         | (((buf[1] as Int) & 0xFF) << 8)
         | (((buf[2] as Int) & 0xFF) << 16);
     if len < 0 {
-        return Result.Err(FeBadLength { len: len });
+        return Result.Err(MyFrameError.FeBadLength { len: len });
     }
     let total = 4 + len;
     if (buf.len() as Int) < total {
@@ -183,7 +190,7 @@ public fn encode_lei(buf: &mut List<Byte>, v: Int) {
 /// `Result.Ok((value, kind, bytes_consumed))`.
 public fn decode_lei(buf: &[Byte], offset: Int) -> Result<(Int, LeiKind, Int), MyFrameError> {
     if offset >= buf.len() as Int {
-        return Result.Err(FeShort { wanted: 1, available: 0 });
+        return Result.Err(MyFrameError.FeShort { wanted: 1, available: 0 });
     }
     let first = (buf[offset] as Int) & 0xFF;
     if first < 0xFB {
@@ -194,14 +201,14 @@ public fn decode_lei(buf: &[Byte], offset: Int) -> Result<(Int, LeiKind, Int), M
     }
     if first == 0xFC {
         if (buf.len() as Int) < offset + 3 {
-            return Result.Err(FeShort { wanted: 3, available: (buf.len() as Int) - offset });
+            return Result.Err(MyFrameError.FeShort { wanted: 3, available: (buf.len() as Int) - offset });
         }
         let v = ((buf[offset + 1] as Int) & 0xFF) | (((buf[offset + 2] as Int) & 0xFF) << 8);
         return Result.Ok((v, LkTwoBytes, 3));
     }
     if first == 0xFD {
         if (buf.len() as Int) < offset + 4 {
-            return Result.Err(FeShort { wanted: 4, available: (buf.len() as Int) - offset });
+            return Result.Err(MyFrameError.FeShort { wanted: 4, available: (buf.len() as Int) - offset });
         }
         let v =
               ((buf[offset + 1] as Int) & 0xFF)
@@ -211,7 +218,7 @@ public fn decode_lei(buf: &[Byte], offset: Int) -> Result<(Int, LeiKind, Int), M
     }
     if first == 0xFE {
         if (buf.len() as Int) < offset + 9 {
-            return Result.Err(FeShort { wanted: 9, available: (buf.len() as Int) - offset });
+            return Result.Err(MyFrameError.FeShort { wanted: 9, available: (buf.len() as Int) - offset });
         }
         let mut v: Int = 0;
         let mut k: Int = 0;
@@ -221,7 +228,7 @@ public fn decode_lei(buf: &[Byte], offset: Int) -> Result<(Int, LeiKind, Int), M
         }
         return Result.Ok((v, LkEightBytes, 9));
     }
-    Result.Err(FeBadLength { len: first })
+    Result.Err(MyFrameError.FeBadLength { len: first })
 }
 
 // -----------------------------------------------------------------------------
@@ -269,14 +276,14 @@ public fn put_lenenc_string(buf: &mut List<Byte>, s: &[Byte]) {
 
 public fn read_u8(buf: &[Byte], off: Int) -> Result<Int, MyFrameError> {
     if off >= buf.len() as Int {
-        return Result.Err(FeShort { wanted: 1, available: 0 });
+        return Result.Err(MyFrameError.FeShort { wanted: 1, available: 0 });
     }
     Result.Ok((buf[off] as Int) & 0xFF)
 }
 
 public fn read_u16_le(buf: &[Byte], off: Int) -> Result<Int, MyFrameError> {
     if (buf.len() as Int) < off + 2 {
-        return Result.Err(FeShort { wanted: 2, available: (buf.len() as Int) - off });
+        return Result.Err(MyFrameError.FeShort { wanted: 2, available: (buf.len() as Int) - off });
     }
     let v = ((buf[off] as Int) & 0xFF) | (((buf[off + 1] as Int) & 0xFF) << 8);
     Result.Ok(v)
@@ -284,7 +291,7 @@ public fn read_u16_le(buf: &[Byte], off: Int) -> Result<Int, MyFrameError> {
 
 public fn read_u32_le(buf: &[Byte], off: Int) -> Result<Int, MyFrameError> {
     if (buf.len() as Int) < off + 4 {
-        return Result.Err(FeShort { wanted: 4, available: (buf.len() as Int) - off });
+        return Result.Err(MyFrameError.FeShort { wanted: 4, available: (buf.len() as Int) - off });
     }
     let mut v: Int = 0;
     let mut k = 0;
@@ -297,7 +304,7 @@ public fn read_u32_le(buf: &[Byte], off: Int) -> Result<Int, MyFrameError> {
 
 public fn read_u64_le(buf: &[Byte], off: Int) -> Result<Int, MyFrameError> {
     if (buf.len() as Int) < off + 8 {
-        return Result.Err(FeShort { wanted: 8, available: (buf.len() as Int) - off });
+        return Result.Err(MyFrameError.FeShort { wanted: 8, available: (buf.len() as Int) - off });
     }
     let mut v: Int = 0;
     let mut k = 0;
@@ -312,7 +319,7 @@ public fn read_cstr(buf: &[Byte], off: Int) -> Result<(Text, Int), MyFrameError>
     let mut i = off;
     let n = buf.len() as Int;
     while i < n && (buf[i] as Int) != 0 { i = i + 1; }
-    if i >= n { return Result.Err(FeShort { wanted: 1, available: 0 }); }
+    if i >= n { return Result.Err(MyFrameError.FeShort { wanted: 1, available: 0 }); }
     let s = match Text.from_utf8(&buf[off..i]) {
         Result.Ok(t)  => t,
         Result.Err(_) => { return Result.Err(FeInvalidUtf8); }
@@ -322,7 +329,7 @@ public fn read_cstr(buf: &[Byte], off: Int) -> Result<(Text, Int), MyFrameError>
 
 public fn read_bytes(buf: &[Byte], off: Int, n: Int) -> Result<List<Byte>, MyFrameError> {
     if (buf.len() as Int) < off + n {
-        return Result.Err(FeShort { wanted: n, available: (buf.len() as Int) - off });
+        return Result.Err(MyFrameError.FeShort { wanted: n, available: (buf.len() as Int) - off });
     }
     let mut out: List<Byte> = List.new();
     let mut i = 0;

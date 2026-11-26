@@ -21,7 +21,7 @@ module core.database.mysql.wire.backend;
 mount base.{Result, Ok, Err, Text, Maybe, None, Some};
 mount collections.List;
 mount core.database.mysql.wire.frame.{
-    MyFrameError, FeShort, FeBadLength, FeInvalidUtf8,
+    MyFrameError,
     decode_lei, read_u8, read_u16_le, read_u32_le, read_cstr, read_bytes,
     read_lenenc_string, LkNull,
 };
@@ -47,13 +47,21 @@ public type InitialHandshake is {
     auth_plugin_name: Text,
 };
 
-public fn parse_initial_handshake(payload: &[Byte]) -> Result<InitialHandshake, MyFrameError> {
-    let mut off: Int = 0;
-    let proto = read_u8(payload, off)?;
-    off = off + 1;
-    if proto != 10 {
-        return Result.Err(FeBadLength { len: proto });
+fn check_packet_header(payload: &[Byte], expected: Byte, minimum: Int{it > 0}) -> Result<Byte, MyFrameError> {
+    let available = payload.len() as Int;
+    if available < minimum {
+        return Result.Err(MyFrameError.FeShort { wanted: minimum, available });
     }
+    let actual = payload[0];
+    if actual != expected {
+        return Result.Err(MyFrameError.FeUnexpectedHeader { expected, actual });
+    }
+    Result.Ok(actual)
+}
+
+public fn parse_initial_handshake(payload: &[Byte]) -> Result<InitialHandshake, MyFrameError> {
+    let proto = check_packet_header(payload, 10_u8, 1)?;
+    let mut off: Int = 1;
     let (server_ver, used) = read_cstr(payload, off)?;
     off = off + used;
     let conn_id = read_u32_le(payload, off)?;
@@ -104,7 +112,7 @@ public fn parse_initial_handshake(payload: &[Byte]) -> Result<InitialHandshake, 
     }
 
     Result.Ok(InitialHandshake {
-        protocol_version: proto,
+        protocol_version: proto as Int,
         server_version: server_ver,
         connection_id: conn_id,
         auth_plugin_data: full,
@@ -128,12 +136,7 @@ public type OkPacket is {
 };
 
 public fn parse_ok(payload: &[Byte], capabilities: Int) -> Result<OkPacket, MyFrameError> {
-    if (payload.len() as Int) < 1 {
-        return Result.Err(FeShort { wanted: 1, available: 0 });
-    }
-    if payload[0] != PKT_OK {
-        return Result.Err(FeBadLength { len: payload[0] as Int });
-    }
+    check_packet_header(payload, PKT_OK, 1)?;
     let mut off: Int = 1;
     let (affected, _, used) = decode_lei(payload, off)?;
     off = off + used;
@@ -170,13 +173,16 @@ public type ErrPacket is {
     message: Text,
 };
 
+implement ErrPacket {
+    /// Consume the decoded diagnostic in wire order.
+    public fn into_parts(self) -> (Int, Text, Text) {
+        let ErrPacket { code, sql_state, message } = self;
+        (code, sql_state, message)
+    }
+}
+
 public fn parse_err(payload: &[Byte], capabilities: Int) -> Result<ErrPacket, MyFrameError> {
-    if (payload.len() as Int) < 3 {
-        return Result.Err(FeShort { wanted: 3, available: payload.len() as Int });
-    }
-    if payload[0] != PKT_ERROR {
-        return Result.Err(FeBadLength { len: payload[0] as Int });
-    }
+    check_packet_header(payload, PKT_ERROR, 3)?;
     let code = read_u16_le(payload, 1)?;
     let mut off: Int = 3;
     let mut sql_state: Text = "".clone();
@@ -206,9 +212,7 @@ public type AuthSwitch is {
 };
 
 public fn parse_auth_switch(payload: &[Byte]) -> Result<AuthSwitch, MyFrameError> {
-    if (payload.len() as Int) < 1 || payload[0] != PKT_AUTH_SW {
-        return Result.Err(FeBadLength { len: 0 });
-    }
+    check_packet_header(payload, PKT_AUTH_SW, 1)?;
     let (name, used) = read_cstr(payload, 1)?;
     let mut data: List<Byte> = List.new();
     let mut i = 1 + used;
@@ -225,9 +229,7 @@ public fn parse_auth_switch(payload: &[Byte]) -> Result<AuthSwitch, MyFrameError
 public type AuthMore is { data: List<Byte> };
 
 public fn parse_auth_more(payload: &[Byte]) -> Result<AuthMore, MyFrameError> {
-    if (payload.len() as Int) < 1 || payload[0] != PKT_AUTH_MORE {
-        return Result.Err(FeBadLength { len: 0 });
-    }
+    check_packet_header(payload, PKT_AUTH_MORE, 1)?;
     let mut data: List<Byte> = List.new();
     let mut i = 1;
     while i < payload.len() as Int {
@@ -325,14 +327,8 @@ public type StmtPrepareOk is {
 public fn parse_stmt_prepare_ok(payload: &[Byte])
     -> Result<StmtPrepareOk, MyFrameError>
 {
-    let mut off: Int = 0;
-    // Status byte must be 0x00 — caller has already routed via classify().
-    let status = read_u8(payload, off)?; off = off + 1;
-    if status != 0 {
-        return Result.Err(MyFrameError.PayloadTooShort {
-            wanted: 1, available: 0,
-        });
-    }
+    check_packet_header(payload, PKT_OK, 1)?;
+    let mut off: Int = 1;
     let stmt_id = read_u32_le(payload, off)?;     off = off + 4;
     let n_cols  = read_u16_le(payload, off)?;     off = off + 2;
     let n_params = read_u16_le(payload, off)?;    off = off + 2;
@@ -367,12 +363,8 @@ public fn parse_binary_row(
     column_types: &List<Int>,
 ) -> Result<List<Maybe<List<Byte>>>, MyFrameError> {
     let n = column_types.len();
-    let mut off: Int = 0;
-    let header = read_u8(payload, off)?; off = off + 1;
-    if header != 0 {
-        return Result.Err(MyFrameError.PayloadTooShort { wanted: 1, available: 0 });
-    }
-
+    check_packet_header(payload, PKT_OK, 1)?;
+    let mut off: Int = 1;
     let bitmap_len = (n + 7 + 2) / 8;
     let mut nulls: List<Bool> = List.with_capacity(n);
     let mut i: Int = 0;
