@@ -50,6 +50,7 @@
 module core.security.x509.crl;
 
 mount core.collections.list.{List};
+mount core.security.x509.name.{DistinguishedName};
 mount core.encoding.der.{DerReader, DerError, DerTime as Time};
 
 // =============================================================================
@@ -96,6 +97,34 @@ public type CertificateList is {
     /// bytes opaque.
     raw_crl_extensions: Maybe<List<Byte>>,
 };
+
+implement CertificateList {
+    public(in core.security.x509) fn update_bounds(&self) -> (Int64, Maybe<Int64>) {
+        let next = match &self.next_update {
+            Maybe.Some(t) => Maybe.Some(t.unix_seconds()),
+            Maybe.None => Maybe.None,
+        };
+        (self.this_update.unix_seconds(), next)
+    }
+
+    public(in core.security.x509) fn has_issuer(&self, name: &DistinguishedName) -> Bool {
+        name.matches_der(self.issuer_der.as_slice())
+    }
+}
+
+implement Clone for RevokedEntry {
+    fn clone(&self) -> RevokedEntry {
+        let extensions = match &self.raw_entry_extensions {
+            Maybe.Some(bytes) => Maybe.Some(bytes.clone()),
+            Maybe.None => Maybe.None,
+        };
+        RevokedEntry {
+            serial_number: self.serial_number.clone(),
+            revocation_date: self.revocation_date,
+            raw_entry_extensions: extensions,
+        }
+    }
+}
 
 public type CrlError is
       DerParseError(DerError)

@@ -86,7 +86,10 @@ implement Display for CborError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
             Truncated(off)        => f.write_str(f"CBOR: truncated at offset {off}".as_str()),
-            InvalidHeader(b)      => f.write_str(f"CBOR: invalid header byte 0x{b:x}".as_str()),
+            InvalidHeader(b)      => {
+                let hex = core.encoding.hex.encode(&[*b]);
+                f.write_str(f"CBOR: invalid header byte 0x{hex}".as_str())
+            },
             InvalidUtf8           => f.write_str("CBOR: invalid UTF-8 in text string"),
             InvalidIndefinite     => f.write_str("CBOR: invalid indefinite-length encoding"),
             NestingTooDeep        => f.write_str("CBOR: nesting too deep"),
@@ -101,7 +104,10 @@ implement Debug for CborError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
             Truncated(off)        => f.write_str(f"Truncated({off})".as_str()),
-            InvalidHeader(b)      => f.write_str(f"InvalidHeader(0x{b:x})".as_str()),
+            InvalidHeader(b)      => {
+                let hex = core.encoding.hex.encode(&[*b]);
+                f.write_str(f"InvalidHeader(0x{hex})".as_str())
+            },
             InvalidUtf8           => f.write_str("InvalidUtf8"),
             InvalidIndefinite     => f.write_str("InvalidIndefinite"),
             NestingTooDeep        => f.write_str("NestingTooDeep"),
@@ -167,6 +173,15 @@ public const MAX_CBOR_MAP_ENTRIES: Int = 1_000_000;
 /// rather than `Result` matches the call sites, which chain
 /// `.ok_or_else(...)` with their own domain error.
 implement CborValue {
+    /// Decode either integer major type when its value fits in a signed Int.
+    public fn as_int(&self) -> Maybe<Int> {
+        match self {
+            CborValue.CborUint(n) if *n <= (Int.MAX as UInt64) => Maybe.Some(*n as Int),
+            CborValue.CborNint(n) if *n <= (Int.MAX as UInt64) => Maybe.Some(-1 - (*n as Int)),
+            _ => Maybe.None,
+        }
+    }
+
     /// The text of a `CborText`, if this is one.
     public fn as_text(&self) -> Maybe<Text> {
         match self {
@@ -178,7 +193,7 @@ implement CborValue {
     /// The entries of a `CborMap`, if this is one.
     public fn as_map(&self) -> Maybe<List<(CborValue, CborValue)>> {
         match self {
-            CborValue.CborMap(entries) => Maybe.Some(entries.clone()),
+            CborValue.CborMap(entries) => Maybe.Some(clone_entries(entries)),
             _ => Maybe.None,
         }
     }
@@ -186,7 +201,7 @@ implement CborValue {
     /// The items of a `CborArray`, if this is one.
     public fn as_array(&self) -> Maybe<List<CborValue>> {
         match self {
-            CborValue.CborArray(items) => Maybe.Some(items.clone()),
+            CborValue.CborArray(items) => Maybe.Some(clone_items(items)),
             _ => Maybe.None,
         }
     }
@@ -262,7 +277,7 @@ fn encode_into(v: &CborValue, out: &mut List<Byte>) {
         },
         CborValue.CborTag { tag, value } => {
             write_head(out, 6_u8, tag);
-            encode_into(&*value, out);
+            encode_into(value.as_ref(), out);
         },
         CborValue.CborBool(b) => {
             out.push(if *b { 0xF5_u8 } else { 0xF4_u8 });
@@ -634,49 +649,41 @@ fn f16_to_f64(hi: Byte, lo: Byte) -> Float {
 /// CBOR-encoded byte lexicographic order. Used for deterministic
 /// signing (COSE).
 public fn encode_canonical(v: &CborValue) -> List<Byte> {
-    let canon = canonicalise(v);
-    encode(&canon)
+    let mut out: List<Byte> = List.new();
+    encode_canonical_into(v, &mut out);
+    out
 }
 
-fn canonicalise(v: &CborValue) -> CborValue {
+fn encode_canonical_into(v: &CborValue, out: &mut List<Byte>) {
     match v {
-        CborValue.CborArray(arr) => {
-            let mut out: List<CborValue> = [];
-            let mut i: Int = 0;
-            while i < arr.len() { out.push(canonicalise(&arr[i])); i = i + 1; }
-            CborValue.CborArray(out)
+        CborValue.CborArray(items) => {
+            write_head(out, 4_u8, items.len() as UInt64);
+            for item in items.iter() { encode_canonical_into(item, out); }
         },
         CborValue.CborMap(entries) => {
-            // Encode every key, sort by byte order, reassemble.
-            let mut tagged: List<(List<Byte>, CborValue, CborValue)> = [];
-            let mut i: Int = 0;
-            while i < entries.len() {
-                let (k, vv) = &entries[i];
-                let enc = encode(k);
-                tagged.push((enc, clone_value(k), canonicalise(vv)));
-                i = i + 1;
+            let count = entries.len();
+            let mut keys: List<List<Byte>> = List.with_capacity(count);
+            let mut order: List<Int> = List.with_capacity(count);
+            let mut scratch: List<Int> = List.with_capacity(count);
+            for i in 0..count {
+                let (key, _) = &entries[i];
+                keys.push(encode_canonical(key));
+                order.push(i);
+                scratch.push(0);
             }
-            // Merge sort by encoded-key byte order. Previously
-            // insertion sort, which under the parser's
-            // MAX_CBOR_MAP_ENTRIES=1M cap could spend hours of CPU
-            // on a single hostile request — same DoS class as the
-            // jcs.sort_keys_utf16 fix (7a2ab0dc). O(n log n) brings
-            // worst-case 1M-entry canonicalisation back into the
-            // surrounding crypto operation's per-request budget.
-            let n = tagged.len();
-            if n > 1 {
-                merge_sort_tagged(&mut tagged, 0, n);
+            sort_key_indices(&keys, &mut order, &mut scratch, 0, count);
+            write_head(out, 5_u8, count as UInt64);
+            for index in order.iter() {
+                out.extend_from_slice(keys[*index].as_slice());
+                let (_, item) = &entries[*index];
+                encode_canonical_into(item, out);
             }
-            let mut out_entries: List<(CborValue, CborValue)> = [];
-            let mut z: Int = 0;
-            while z < tagged.len() {
-                let (_, kk, vv) = &tagged[z];
-                out_entries.push((clone_value(kk), clone_value(vv)));
-                z = z + 1;
-            }
-            CborValue.CborMap(out_entries)
         },
-        _ => clone_value(v),
+        CborValue.CborTag { tag, value } => {
+            write_head(out, 6_u8, *tag);
+            encode_canonical_into(value.as_ref(), out);
+        },
+        _ => encode_into(v, out),
     }
 }
 
@@ -686,24 +693,10 @@ fn clone_value(v: &CborValue) -> CborValue {
         CborValue.CborNint(n) => CborValue.CborNint(*n),
         CborValue.CborBytes(b) => CborValue.CborBytes(b.clone()),
         CborValue.CborText(t) => CborValue.CborText(t.clone()),
-        CborValue.CborArray(a) => {
-            let mut out: List<CborValue> = [];
-            let mut i: Int = 0;
-            while i < a.len() { out.push(clone_value(&a[i])); i = i + 1; }
-            CborValue.CborArray(out)
-        },
-        CborValue.CborMap(m) => {
-            let mut out: List<(CborValue, CborValue)> = [];
-            let mut i: Int = 0;
-            while i < m.len() {
-                let (k, v) = &m[i];
-                out.push((clone_value(k), clone_value(v)));
-                i = i + 1;
-            }
-            CborValue.CborMap(out)
-        },
+        CborValue.CborArray(a) => CborValue.CborArray(clone_items(a)),
+        CborValue.CborMap(m) => CborValue.CborMap(clone_entries(m)),
         CborValue.CborTag { tag, value } => CborValue.CborTag {
-            tag: *tag, value: Heap.new(clone_value(&*value)),
+            tag: *tag, value: Heap.new(clone_value(value.as_ref())),
         },
         CborValue.CborBool(b) => CborValue.CborBool(*b),
         CborValue.CborNull => CborValue.CborNull,
@@ -712,8 +705,16 @@ fn clone_value(v: &CborValue) -> CborValue {
     }
 }
 
-fn clone_tagged(t: &(List<Byte>, CborValue, CborValue)) -> (List<Byte>, CborValue, CborValue) {
-    (t.0.clone(), clone_value(&t.1), clone_value(&t.2))
+fn clone_items(items: &List<CborValue>) -> List<CborValue> {
+    let mut copy: List<CborValue> = List.with_capacity(items.len());
+    for item in items.iter() { copy.push(clone_value(item)); }
+    copy
+}
+
+fn clone_entries(entries: &List<(CborValue, CborValue)>) -> List<(CborValue, CborValue)> {
+    let mut copy: List<(CborValue, CborValue)> = List.with_capacity(entries.len());
+    for (key, item) in entries.iter() { copy.push((clone_value(key), clone_value(item))); }
+    copy
 }
 
 fn bytes_lt(a: &List<Byte>, b: &List<Byte>) -> Bool {
@@ -727,43 +728,22 @@ fn bytes_lt(a: &List<Byte>, b: &List<Byte>) -> Bool {
     a.len() < b.len()
 }
 
-// Top-down merge sort for canonical-CBOR map ordering.
-// O(n log n) replacement for the previous insertion sort.
-fn merge_sort_tagged(arr: &mut List<(List<Byte>, CborValue, CborValue)>, start: Int, end: Int) {
+// Merge only indices. Encoded keys and recursive values retain their owners.
+fn sort_key_indices(keys: &List<List<Byte>>, order: &mut List<Int>, scratch: &mut List<Int>, start: Int, end: Int) {
     if end - start <= 1 { return; }
     let mid = start + (end - start) / 2;
-    merge_sort_tagged(arr, start, mid);
-    merge_sort_tagged(arr, mid, end);
-    merge_tagged(arr, start, mid, end);
-}
-
-fn merge_tagged(arr: &mut List<(List<Byte>, CborValue, CborValue)>, start: Int, mid: Int, end: Int) {
-    let mut left: List<(List<Byte>, CborValue, CborValue)> = [];
-    let mut right: List<(List<Byte>, CborValue, CborValue)> = [];
-    let mut i: Int = start;
-    while i < mid { left.push(clone_tagged(&arr[i])); i = i + 1; }
-    while i < end { right.push(clone_tagged(&arr[i])); i = i + 1; }
-    let mut li: Int = 0;
-    let mut ri: Int = 0;
-    let mut wi: Int = start;
-    while li < left.len() && ri < right.len() {
-        if bytes_lt(&right[ri].0, &left[li].0) {
-            arr[wi] = clone_tagged(&right[ri]);
-            ri = ri + 1;
+    sort_key_indices(keys, order, scratch, start, mid);
+    sort_key_indices(keys, order, scratch, mid, end);
+    for i in start..end { scratch[i] = order[i]; }
+    let mut left = start;
+    let mut right = mid;
+    for i in start..end {
+        if left == mid || (right < end && bytes_lt(&keys[scratch[right]], &keys[scratch[left]])) {
+            order[i] = scratch[right];
+            right = right + 1;
         } else {
-            arr[wi] = clone_tagged(&left[li]);
-            li = li + 1;
+            order[i] = scratch[left];
+            left = left + 1;
         }
-        wi = wi + 1;
-    }
-    while li < left.len() {
-        arr[wi] = clone_tagged(&left[li]);
-        li = li + 1;
-        wi = wi + 1;
-    }
-    while ri < right.len() {
-        arr[wi] = clone_tagged(&right[ri]);
-        ri = ri + 1;
-        wi = wi + 1;
     }
 }

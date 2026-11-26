@@ -226,6 +226,19 @@ pub type AuthenticatorData is {
     raw:                       List<Byte>,
 };
 
+implement AuthenticatorData {
+    public(in core.security.webauthn) fn signed_bytes(&self) -> &[Byte] { self.raw.as_slice() }
+    public(in core.security.webauthn) fn relying_party_hash(&self) -> &[Byte; 32] { &self.rp_id_hash }
+    public(in core.security.webauthn) fn attested_credential(&self) -> Maybe<&AttestedCredentialData> {
+        self.attested_credential_data.as_ref()
+    }
+}
+
+implement AttestedCredentialData {
+    public(in core.security.webauthn) fn key_value(&self) -> &CborValue { &self.credential_public_key }
+    public(in core.security.webauthn) fn id_bytes(&self) -> &[Byte] { self.credential_id.as_slice() }
+}
+
 // =============================================================================
 // AttestationObject (WebAuthn §6.5)
 // =============================================================================

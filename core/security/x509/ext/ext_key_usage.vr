@@ -46,31 +46,25 @@ public type ExtKeyUsage is {
 };
 
 implement ExtKeyUsage {
-    public fn allows_server_auth(&self) -> Bool {
-        let mut i: Int = 0;
-        while i < self.purposes.len() {
-            match &self.purposes[i] {
-                ExtKeyUsagePurpose.ServerAuth => return true,
-                ExtKeyUsagePurpose.AnyPurpose => return true,
+    public(in core.security.x509) fn permits(&self, purpose: &ExtKeyUsagePurpose) -> Bool {
+        for entry in self.purposes.iter() {
+            match (entry, purpose) {
+                (ExtKeyUsagePurpose.AnyPurpose, _) => return true,
+                (ExtKeyUsagePurpose.ServerAuth, ExtKeyUsagePurpose.ServerAuth) => return true,
+                (ExtKeyUsagePurpose.ClientAuth, ExtKeyUsagePurpose.ClientAuth) => return true,
+                (ExtKeyUsagePurpose.CodeSigning, ExtKeyUsagePurpose.CodeSigning) => return true,
+                (ExtKeyUsagePurpose.EmailProtection, ExtKeyUsagePurpose.EmailProtection) => return true,
+                (ExtKeyUsagePurpose.TimeStamping, ExtKeyUsagePurpose.TimeStamping) => return true,
+                (ExtKeyUsagePurpose.OcspSigning, ExtKeyUsagePurpose.OcspSigning) => return true,
+                (ExtKeyUsagePurpose.Other(a), ExtKeyUsagePurpose.Other(b)) => { if a.eq(b) { return true; } },
                 _ => {},
             }
-            i = i + 1;
         }
         false
     }
 
-    public fn allows_client_auth(&self) -> Bool {
-        let mut i: Int = 0;
-        while i < self.purposes.len() {
-            match &self.purposes[i] {
-                ExtKeyUsagePurpose.ClientAuth => return true,
-                ExtKeyUsagePurpose.AnyPurpose => return true,
-                _ => {},
-            }
-            i = i + 1;
-        }
-        false
-    }
+    public fn allows_server_auth(&self) -> Bool { self.permits(&ExtKeyUsagePurpose.ServerAuth) }
+    public fn allows_client_auth(&self) -> Bool { self.permits(&ExtKeyUsagePurpose.ClientAuth) }
 }
 
 public fn parse(value: &[Byte]) -> Result<ExtKeyUsage, DerError> {

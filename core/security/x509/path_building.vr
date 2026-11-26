@@ -61,7 +61,6 @@ module core.security.x509.path_building;
 
 mount core.collections.{List};
 mount core.security.x509.certificate.{X509Certificate};
-mount core.security.x509.name.{DistinguishedName};
 mount core.security.x509.trust_store.{TrustStore};
 
 // =============================================================================
@@ -96,6 +95,14 @@ public type CandidatePath is {
     /// hops, longer-validity anchors.
     score:  Int,
 };
+
+implement CandidatePath {
+    public(in core.security.x509) fn certificate_at(&self, index: Int) -> &X509Certificate {
+        if index == 0 { return &self.ee; }
+        if index == self.inters.len() + 1 { return &self.root; }
+        &self.inters[index - 1]
+    }
+}
 
 public fn candidate_path_length(p: &CandidatePath) -> Int {
     2 + p.inters.len()
@@ -189,11 +196,12 @@ fn enumerate_anchor_candidates(
     trust: &TrustStore,
 ) -> List<X509Certificate> {
     let mut out: List<X509Certificate> = List.new();
-    let issuer_dn = &current.tbs.issuer;
+    let issuer_dn = current.issuer_name();
     let mut i: Int = 0;
-    while i < trust.anchors.len() {
-        let a = &trust.anchors[i];
-        if a.tbs.subject.raw_eq(issuer_dn) {
+    let anchors = trust.certificates();
+    while i < anchors.len() {
+        let a = &anchors[i];
+        if a.subject_name().raw_eq(issuer_dn) {
             // Optional AKI→SKI bond: stronger match if both present and equal.
             if anchor_aki_ski_match(current, a) {
                 out.insert(0, a.clone()); // AKI/SKI-bonded entries get pushed up
@@ -215,11 +223,11 @@ fn enumerate_intermediate_candidates(
     path: &List<X509Certificate>,
 ) -> List<X509Certificate> {
     let mut out: List<X509Certificate> = List.new();
-    let issuer_dn = &current.tbs.issuer;
+    let issuer_dn = current.issuer_name();
     let mut i: Int = 0;
     while i < intermediates.len() {
         let cand = &intermediates[i];
-        if cand.tbs.subject.raw_eq(issuer_dn) && !path_contains_certificate(ee, path, cand) {
+        if cand.subject_name().raw_eq(issuer_dn) && !path_contains_certificate(ee, path, cand) {
             if anchor_aki_ski_match(current, cand) {
                 out.insert(0, cand.clone());
             } else {
@@ -235,18 +243,10 @@ fn enumerate_intermediate_candidates(
 /// equals parent's `subject_key_id`, both bytes-equal. Weaker bond
 /// (DN-only) is the fallback when one or both extensions are absent.
 fn anchor_aki_ski_match(child: &X509Certificate, parent: &X509Certificate) -> Bool {
-    let aki = match &child.tbs.extensions.authority_key_id {
-        Maybe.Some((_, kid)) => kid,
-        Maybe.None => return false,
-    };
-    let ski = match &parent.tbs.extensions.subject_key_id {
-        Maybe.Some((_, kid)) => kid,
-        Maybe.None => return false,
-    };
-    bytes_eq(aki, ski)
+    child.extensions().matches_issuer_key_id(parent.extensions())
 }
 
-fn bytes_eq(a: &List<Byte>, b: &List<Byte>) -> Bool {
+fn bytes_eq(a: &[Byte], b: &[Byte]) -> Bool {
     if a.len() != b.len() { return false; }
     let mut i: Int = 0;
     while i < a.len() {
@@ -266,7 +266,7 @@ fn score_path(inters: &List<X509Certificate>, anchor: &X509Certificate) -> Int {
     s = s + (MAX_PATH_LENGTH - inters.len()) * 10;
     // Anchor with longer validity remaining is preferred (proxy:
     // SKI-present indicates a modern, well-formed CA).
-    if anchor.tbs.extensions.subject_key_id.is_some() {
+    if anchor.extensions().has_subject_key_id() {
         s = s + 5;
     }
     s
@@ -290,7 +290,7 @@ fn sort_by_score_desc(paths: &mut List<CandidatePath>) {
 // =============================================================================
 
 fn is_self_signed(cert: &X509Certificate) -> Bool {
-    cert.tbs.subject.raw_eq(&cert.tbs.issuer)
+    cert.subject_name().raw_eq(cert.issuer_name())
 }
 
 /// The current path is bounded by MAX_PATH_LENGTH. Compare its existing DER
@@ -300,10 +300,10 @@ fn path_contains_certificate(
     path: &List<X509Certificate>,
     candidate: &X509Certificate,
 ) -> Bool {
-    if bytes_eq(&ee.raw_der, &candidate.raw_der) { return true; }
+    if bytes_eq(ee.der_bytes(), candidate.der_bytes()) { return true; }
     let mut i: Int = 0;
     while i < path.len() {
-        if bytes_eq(&path[i].raw_der, &candidate.raw_der) { return true; }
+        if bytes_eq(path[i].der_bytes(), candidate.der_bytes()) { return true; }
         i = i + 1;
     }
     false
@@ -327,12 +327,14 @@ fn dfs_walk(
     depth:         Int,
 ) {
     if paths.len() >= MAX_TOTAL_PATHS { return; }
-    if depth >= MAX_PATH_LENGTH { return; }
+    if depth + 2 > MAX_PATH_LENGTH { return; }
 
-    // Self-signed + in trust store = `current_cert` IS a trust anchor.
-    if is_self_signed(current_cert) && trust.contains(current_cert) {
-        emit_path(ee, current_cert, current_inters, paths);
-        return;
+    // Matching subject and key identify the anchor. Emit its stored certificate.
+    if is_self_signed(current_cert) {
+        if let Maybe.Some(anchor) = trust.trusted_equivalent(current_cert) {
+            emit_path(ee, anchor, current_inters, paths);
+            return;
+        }
     }
 
     // Try anchors first (faster termination + higher score).

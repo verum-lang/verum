@@ -159,6 +159,42 @@ public type CertId is {
     serial_number:      List<Byte>,
 };
 
+implement CertId {
+    public(in core.security.x509) fn from_hashes(algorithm: List<Byte>, name_hash: List<Byte>,
+            key_hash: List<Byte>, serial: &[Byte]) -> CertId {
+        CertId { raw_hash_algorithm: algorithm, issuer_name_hash: name_hash,
+            issuer_key_hash: key_hash, serial_number: List.from_slice(serial) }
+    }
+
+    public(in core.security.x509) fn encoded_request(&self) -> List<Byte> {
+        let mut fields = self.raw_hash_algorithm.clone();
+        core.encoding.der.append_octet_string(&mut fields, self.issuer_name_hash.as_slice());
+        core.encoding.der.append_octet_string(&mut fields, self.issuer_key_hash.as_slice());
+        core.encoding.der.append_signed_integer(&mut fields, self.serial_number.as_slice());
+        let id = core.encoding.der.encode_sequence(fields.as_slice());
+        let request = core.encoding.der.encode_sequence(id.as_slice());
+        let request_list = core.encoding.der.encode_sequence(request.as_slice());
+        let tbs = core.encoding.der.encode_sequence(request_list.as_slice());
+        core.encoding.der.encode_sequence(tbs.as_slice())
+    }
+
+    fn matches_request(&self, other: &CertId) -> Bool {
+        self.raw_hash_algorithm == other.raw_hash_algorithm &&
+        self.issuer_name_hash == other.issuer_name_hash &&
+        self.issuer_key_hash == other.issuer_key_hash &&
+        self.serial_number == other.serial_number
+    }
+}
+
+implement CertStatus {
+    public(in core.security.x509) fn revocation_description(&self) -> Text {
+        match self {
+            CertStatus.Revoked { reason, .. } => f"{reason}",
+            _ => "".to_text(),
+        }
+    }
+}
+
 public type SingleResponse is {
     cert_id:        CertId,
     cert_status:    CertStatus,
@@ -197,6 +233,36 @@ public type OcspResponse is {
     /// Maybe.None iff status != Successful (RFC 6960 §4.2.1).
     basic:   Maybe<BasicOcspResponse>,
 };
+
+implement OcspResponse {
+    public(in core.security.x509) fn into_successful_basic(self) -> Result<BasicOcspResponse, OcspError> {
+        if !(self.status is OcspResponseStatus.Successful) {
+            return Result.Err(OcspError.BadStatus(self.status.to_u8()));
+        }
+        self.basic.ok_or(OcspError.BadStructure("successful OCSP response has no BasicOCSPResponse".to_text()))
+    }
+}
+
+implement BasicOcspResponse {
+    public(in core.security.x509) fn response_for(&self, request: &CertId) -> Maybe<&SingleResponse> {
+        for response in self.responses.iter() {
+            if response.cert_id.matches_request(request) { return Maybe.Some(response); }
+        }
+        Maybe.None
+    }
+}
+
+implement SingleResponse {
+    public(in core.security.x509) fn update_bounds(&self) -> (Int64, Maybe<Int64>) {
+        let next = match &self.next_update {
+            Maybe.Some(time) => Maybe.Some(time.unix_seconds()),
+            Maybe.None => Maybe.None,
+        };
+        (self.this_update.unix_seconds(), next)
+    }
+
+    public(in core.security.x509) fn certificate_status(&self) -> &CertStatus { &self.cert_status }
+}
 
 public type OcspError is
       DerParseError(DerError)

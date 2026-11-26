@@ -146,6 +146,8 @@ implement TrustStore {
         self.anchors.push(cert);
     }
 
+    public(in core.security.x509) fn certificates(&self) -> &[X509Certificate] { self.anchors.as_slice() }
+
     public fn len(&self) -> Int { self.anchors.len() }
 
     /// Does the store contain an anchor with byte-exact subject-DN +
@@ -154,15 +156,16 @@ implement TrustStore {
     /// store (avoid spurious "UnknownIssuer" when chain carries its
     /// own root).
     public fn contains(&self, cert: &X509Certificate) -> Bool {
-        let mut i: Int = 0;
-        while i < self.anchors.len() {
-            let a = &self.anchors[i];
-            if a.subject_name().raw_eq(cert.subject_name()) && a.subject_spki().same_encoding(cert.subject_spki()) {
-                return true;
+        self.trusted_equivalent(cert).is_some()
+    }
+
+    public(in core.security.x509) fn trusted_equivalent(&self, cert: &X509Certificate) -> Maybe<&X509Certificate> {
+        for anchor in self.anchors.iter() {
+            if anchor.subject_name().raw_eq(cert.subject_name()) && anchor.subject_spki().same_encoding(cert.subject_spki()) {
+                return Maybe.Some(anchor);
             }
-            i = i + 1;
         }
-        false
+        Maybe.None
     }
 
     /// Find the first anchor whose subject matches `issuer_dn` byte-exactly.
@@ -173,7 +176,7 @@ implement TrustStore {
         let mut i: Int = 0;
         while i < self.anchors.len() {
             if self.anchors[i].subject_name().raw_eq(issuer_dn) {
-                return Maybe.Some(self.anchors[i]);
+                return Maybe.Some(self.anchors[i].clone());
             }
             i = i + 1;
         }

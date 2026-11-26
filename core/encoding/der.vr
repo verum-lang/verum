@@ -814,6 +814,26 @@ fn append_element(out: &mut List<Byte>, identifier: Byte, contents: &[Byte]) {
     out.extend_from_slice(contents);
 }
 
+public(in core) fn append_octet_string(out: &mut List<Byte>, octets: &[Byte]) {
+    append_element(out, TAG_OCTET_STRING as Byte, octets);
+}
+
+/// Append a signed big-endian integer with minimal two's-complement encoding.
+public(in core) fn append_signed_integer(out: &mut List<Byte>, bytes: &[Byte]) {
+    if bytes.len() == 0 {
+        append_element(out, TAG_INTEGER as Byte, &[0_u8]);
+        return;
+    }
+    let mut start: Int = 0;
+    while start + 1 < bytes.len() {
+        let sign = bytes[start + 1] & 0x80_u8;
+        if (bytes[start] == 0_u8 && sign == 0_u8) || (bytes[start] == 255_u8 && sign != 0_u8) {
+            start = start + 1;
+        } else { break; }
+    }
+    append_element(out, TAG_INTEGER as Byte, &bytes[start..]);
+}
+
 /// DER SEQUENCE of already encoded elements.
 public fn encode_sequence(elements: &[Byte]) -> List<Byte> {
     let mut out: List<Byte> = [];

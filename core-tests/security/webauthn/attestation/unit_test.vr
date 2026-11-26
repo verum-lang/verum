@@ -14,6 +14,24 @@ mount core.base.result.{Result, Ok, Err};
 // Section 1: AttestationType 4-variant construction
 // =============================================================================
 
+mount core.encoding.cbor.{CborValue};
+mount core.security.webauthn.types.{AttestationFormat};
+mount core.security.webauthn.authenticator_data.{parse_authenticator_data};
+mount core.security.webauthn.attestation.{verify_attestation};
+
+@test
+fn parsed_attestation_rejects_unverified_statements() {
+    let raw: [Byte; 37] = [0_u8; 37];
+    let auth = parse_authenticator_data(&raw[..]).unwrap();
+    let client_hash: [Byte; 32] = [0_u8; 32];
+    let empty = CborValue.CborMap([]);
+    assert(verify_attestation(&AttestationFormat.None_, &empty, &auth, &client_hash[..]).is_ok());
+    assert(verify_attestation(&AttestationFormat.None_, &empty, &auth, &client_hash[..31]).is_err());
+    let nonempty = CborValue.CborMap([(CborValue.CborText("x5c"), CborValue.CborArray([]))]);
+    assert(verify_attestation(&AttestationFormat.None_, &nonempty, &auth, &client_hash[..]).is_err());
+    assert(verify_attestation(&AttestationFormat.Apple, &nonempty, &auth, &client_hash[..]).is_err());
+}
+
 @test
 fn test_attestation_type_basic_variant() {
     let t: AttestationType = AttestationType.Basic;

@@ -120,6 +120,22 @@ implement ExtensionSet {
         }
     }
 
+    public(in core.security.x509) fn matches_issuer_key_id(&self, issuer: &ExtensionSet) -> Bool {
+        match (&self.authority_key_id, &issuer.subject_key_id) {
+            (Maybe.Some((_, authority)), Maybe.Some((_, subject))) => authority == subject,
+            _ => false,
+        }
+    }
+
+    public(in core.security.x509) fn has_subject_key_id(&self) -> Bool { self.subject_key_id.is_some() }
+
+    public(in core.security.x509) fn permits_purpose(&self, purpose: &ExtKeyUsagePurpose) -> Bool {
+        match &self.ext_key_usage {
+            Maybe.Some((_, eku)) => eku.permits(purpose),
+            Maybe.None => true,
+        }
+    }
+
     public(in core.security.x509) fn allows_signing_certificates(&self) -> Bool {
         match &self.key_usage {
             Maybe.Some((_, usage)) => usage.allows_signing_certificates(),

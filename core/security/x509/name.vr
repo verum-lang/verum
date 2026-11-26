@@ -247,10 +247,16 @@ fn kind_from_oid(oid: Oid) -> NameAttributeKind {
 implement DistinguishedName {
     /// Byte-exact DN equality (RFC 5280 §4.1.2.6 / §7.1).
     public fn raw_eq(&self, other: &DistinguishedName) -> Bool {
-        if self.raw_der.len() != other.raw_der.len() { return false; }
+        self.matches_der(other.raw_der.as_slice())
+    }
+
+    public(in core.security.x509) fn encoded_name(&self) -> &[Byte] { self.raw_der.as_slice() }
+
+    public(in core.security.x509) fn matches_der(&self, encoded: &[Byte]) -> Bool {
+        if self.raw_der.len() != encoded.len() { return false; }
         let mut i: Int = 0;
         while i < self.raw_der.len() {
-            if self.raw_der[i] != other.raw_der[i] { return false; }
+            if self.raw_der[i] != encoded[i] { return false; }
             i = i + 1;
         }
         true

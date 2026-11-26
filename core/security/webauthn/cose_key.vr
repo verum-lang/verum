@@ -57,6 +57,10 @@ mount core.encoding.cbor.{
     CborValue, decode, encode, from_signed,
     CborError,
 };
+mount core.hash.crypto.sha256.{Sha256};
+mount core.security.ecc.ed25519.{Ed25519};
+mount core.security.ecc.p256.{P256};
+mount core.security.sig.rsa.{RsaPublicKey, RsaHash, verify_pkcs1_v15_prehashed, verify_pss_prehashed};
 mount core.security.webauthn.types.{
     WebAuthnError,
     COSE_ALG_ES256, COSE_ALG_EDDSA, COSE_ALG_PS256, COSE_ALG_RS256,
@@ -105,16 +109,16 @@ pub fn decode_cose_key(bytes: &[Byte]) -> Result<CredentialPublicKey, WebAuthnEr
 /// AttestedCredentialData).
 pub fn decode_cose_key_value(value: &CborValue) -> Result<CredentialPublicKey, WebAuthnError> {
     let map = value.as_map()
-        .ok_or_else(|| WebAuthnError.InvalidCbor("COSE_Key not a map".to_text()))?;
+        .ok_or(WebAuthnError.InvalidCbor("COSE_Key not a map".to_text()))?;
 
-    let kty = get_int(map, 1)
-        .ok_or_else(|| WebAuthnError.InvalidCbor("COSE_Key missing kty (label 1)".to_text()))?;
-    let alg = get_int(map, 3).unwrap_or(0);
+    let kty = get_int(&map, 1)
+        .ok_or(WebAuthnError.InvalidCbor("COSE_Key missing kty (label 1)".to_text()))?;
+    let alg = get_int(&map, 3).unwrap_or(0);
 
     match kty {
-        COSE_KTY_OKP => decode_okp(map, alg),
-        COSE_KTY_EC2 => decode_ec2(map, alg),
-        COSE_KTY_RSA => decode_rsa(map, alg),
+        COSE_KTY_OKP => decode_okp(&map, alg),
+        COSE_KTY_EC2 => decode_ec2(&map, alg),
+        COSE_KTY_RSA => decode_rsa(&map, alg),
         other        => Result.Err(WebAuthnError.UnknownCoseKeyType(other)),
     }
 }
@@ -128,7 +132,7 @@ fn decode_okp(map: &List<(CborValue, CborValue)>, alg: Int) -> Result<Credential
         return Result.Err(WebAuthnError.UnsupportedAlgorithm(alg));
     }
     let x = get_bytes(map, -2)
-        .ok_or_else(|| WebAuthnError.InvalidCbor("OKP missing x (label -2)".to_text()))?;
+        .ok_or(WebAuthnError.InvalidCbor("OKP missing x (label -2)".to_text()))?;
     if x.len() != 32 {
         return Result.Err(WebAuthnError.InvalidCbor(f"Ed25519 x must be 32 bytes, got {x.len()}"));
     }
@@ -137,11 +141,11 @@ fn decode_okp(map: &List<(CborValue, CborValue)>, alg: Int) -> Result<Credential
 
 fn decode_ec2(map: &List<(CborValue, CborValue)>, alg: Int) -> Result<CredentialPublicKey, WebAuthnError> {
     let crv = get_int(map, -1)
-        .ok_or_else(|| WebAuthnError.InvalidCbor("EC2 missing crv (label -1)".to_text()))?;
+        .ok_or(WebAuthnError.InvalidCbor("EC2 missing crv (label -1)".to_text()))?;
     let x = get_bytes(map, -2)
-        .ok_or_else(|| WebAuthnError.InvalidCbor("EC2 missing x (label -2)".to_text()))?;
+        .ok_or(WebAuthnError.InvalidCbor("EC2 missing x (label -2)".to_text()))?;
     let y = get_bytes(map, -3)
-        .ok_or_else(|| WebAuthnError.InvalidCbor("EC2 missing y (label -3)".to_text()))?;
+        .ok_or(WebAuthnError.InvalidCbor("EC2 missing y (label -3)".to_text()))?;
     match crv {
         COSE_CRV_P256 => {
             if alg != 0 && alg != COSE_ALG_ES256 {
@@ -179,9 +183,9 @@ fn decode_rsa(map: &List<(CborValue, CborValue)>, alg: Int) -> Result<Credential
         return Result.Err(WebAuthnError.UnsupportedAlgorithm(alg));
     }
     let n = get_bytes(map, -1)
-        .ok_or_else(|| WebAuthnError.InvalidCbor("RSA missing n (label -1)".to_text()))?;
+        .ok_or(WebAuthnError.InvalidCbor("RSA missing n (label -1)".to_text()))?;
     let e = get_bytes(map, -2)
-        .ok_or_else(|| WebAuthnError.InvalidCbor("RSA missing e (label -2)".to_text()))?;
+        .ok_or(WebAuthnError.InvalidCbor("RSA missing e (label -2)".to_text()))?;
     Result.Ok(CredentialPublicKey.Rsa { n, e, alg })
 }
 
@@ -209,7 +213,7 @@ fn get_bytes(map: &List<(CborValue, CborValue)>, label: Int) -> Maybe<List<Byte>
         let (k, v) = &map[i];
         if let Maybe.Some(ki) = k.as_int() {
             if ki == label {
-                return v.as_bytes().map(|b| b.clone());
+                return v.as_bytes();
             }
         }
         i = i + 1;
@@ -231,6 +235,82 @@ pub fn alg_of(pk: &CredentialPublicKey) -> Int {
         CredentialPublicKey.EcdsaP521 { .. }     => COSE_ALG_ES512,
         CredentialPublicKey.Rsa { alg, .. }      => *alg,
     }
+}
+
+fn encode_p256_point(x: &List<Byte>, y: &List<Byte>) -> List<Byte> {
+    let mut encoded: List<Byte> = List.with_capacity(65);
+    encoded.push(0x04_u8);
+    encoded.extend_from_slice(x.as_slice());
+    encoded.extend_from_slice(y.as_slice());
+    encoded
+}
+
+public(in core.security.webauthn) fn u2f_public_key(pk: &CredentialPublicKey) -> Result<List<Byte>, WebAuthnError> {
+    match pk {
+        CredentialPublicKey.EcdsaP256 { x, y } if x.len() == 32 && y.len() == 32 => Result.Ok(encode_p256_point(x, y)),
+        _ => Result.Err(WebAuthnError.InvalidAttestation("fido-u2f requires a P-256 credential".to_text())),
+    }
+}
+
+public(in core.security.webauthn) fn verify_credential_signature(
+    pk:           &CredentialPublicKey,
+    signed_input: &List<Byte>,
+    sig:          &List<Byte>,
+) -> Result<(), WebAuthnError> {
+    match pk {
+        CredentialPublicKey.Ed25519 { x } => {
+            if sig.len() != 64 { return Result.Err(WebAuthnError.InvalidSignature); }
+            if x.len() != 32 { return Result.Err(WebAuthnError.InvalidSignature); }
+            let mut pk_arr: [Byte; 32] = [0_u8; 32];
+            let mut k: Int = 0;
+            while k < 32 { pk_arr[k] = x[k]; k = k + 1; }
+            let mut sig_arr: [Byte; 64] = [0_u8; 64];
+            let mut m: Int = 0;
+            while m < 64 { sig_arr[m] = sig[m]; m = m + 1; }
+            Ed25519.verify(&pk_arr, signed_input.as_slice(), &sig_arr)
+                .map_err(|_| WebAuthnError.InvalidSignature)
+        }
+        CredentialPublicKey.EcdsaP256 { x, y } => {
+            verify_ecdsa_p256(x, y, signed_input, sig)
+        }
+        CredentialPublicKey.Rsa { n, e, alg } => {
+            verify_rsa(n, e, *alg, signed_input, sig)
+        }
+        _ => Result.Err(WebAuthnError.UnsupportedAlgorithm(alg_of(pk))),
+    }
+}
+
+fn verify_ecdsa_p256(
+    x: &List<Byte>, y: &List<Byte>,
+    signed_input: &List<Byte>,
+    sig: &List<Byte>,
+) -> Result<(), WebAuthnError> {
+    if x.len() != 32 || y.len() != 32 {
+        return Result.Err(WebAuthnError.InvalidSignature);
+    }
+    let uncompressed = encode_p256_point(x, y);
+    let pk = P256.public_key_from_bytes(uncompressed.as_slice())
+        .map_err(|_| WebAuthnError.InvalidSignature)?;
+    let p_sig = P256.signature_from_der(sig.as_slice())
+        .map_err(|_| WebAuthnError.InvalidSignature)?;
+    let digest = Sha256.digest(signed_input.as_slice());
+    P256.verify_prehashed(&pk, &digest, &p_sig)
+        .map_err(|_| WebAuthnError.InvalidSignature)
+}
+
+fn verify_rsa(
+    n: &List<Byte>, e: &List<Byte>, alg: Int,
+    signed_input: &List<Byte>,
+    sig: &List<Byte>,
+) -> Result<(), WebAuthnError> {
+    let vk = RsaPublicKey.new(n.clone(), e.clone());
+    let digest = Sha256.digest(signed_input.as_slice());
+    let res = match alg {
+        COSE_ALG_RS256 => verify_pkcs1_v15_prehashed(&vk, &digest[..], sig.as_slice(), RsaHash.Sha256_),
+        COSE_ALG_PS256 => verify_pss_prehashed(&vk, &digest[..], sig.as_slice(), RsaHash.Sha256_, 32),
+        _              => return Result.Err(WebAuthnError.UnsupportedAlgorithm(alg)),
+    };
+    res.map_err(|_| WebAuthnError.InvalidSignature)
 }
 
 // =============================================================================

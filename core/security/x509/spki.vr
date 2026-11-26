@@ -111,6 +111,7 @@ public type X448PublicKeyBytes    is { bytes: [Byte; 56] };
 public type Spki is {
     algorithm:  PublicKeyAlg,
     public_key: SubjectPublicKey,
+    key_octets: List<Byte>,
     raw_der:    List<Byte>,
 };
 
@@ -118,6 +119,8 @@ implement Spki {
     public(in core.security.x509) fn same_encoding(&self, other: &Spki) -> Bool {
         self.raw_der.eq(&other.raw_der)
     }
+
+    public(in core.security.x509) fn subject_key_octets(&self) -> &[Byte] { self.key_octets.as_slice() }
 
     public(in core.security.x509) fn parsed_key(&self) -> &SubjectPublicKey { &self.public_key }
 }
@@ -150,6 +153,7 @@ public fn parse_spki(r: &mut DerReader) -> Result<Spki, DerError> {
     Result.Ok(Spki {
         algorithm:  alg,
         public_key: key,
+        key_octets: octets,
         raw_der:    raw,
     })
 }

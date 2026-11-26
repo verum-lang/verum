@@ -24,6 +24,16 @@ mount core.encoding.cbor.{
 // =============================================================================
 
 @test
+fn signed_integer_range() {
+    assert_eq(from_signed(Int.MIN).as_int(), Maybe.Some(Int.MIN));
+    assert_eq(from_signed(Int.MAX).as_int(), Maybe.Some(Int.MAX));
+    assert_eq(CborValue.CborNint(0_u64).as_int(), Maybe.Some(-1));
+    assert(CborValue.CborUint((Int.MAX as UInt64) + 1_u64).as_int().is_none());
+    assert(CborValue.CborNint((Int.MAX as UInt64) + 1_u64).as_int().is_none());
+    assert(CborValue.CborBool(true).as_int().is_none());
+}
+
+@test
 fn test_cbor_value_uint() {
     let v: CborValue = CborValue.CborUint(42_u64);
     assert(v is CborValue.CborUint);
@@ -67,14 +77,7 @@ fn test_cbor_value_map() {
 
 @test
 fn test_cbor_value_tag() {
-    let v: CborValue = CborValue.CborTag {
-        tag: 0_u64,
-        // `Heap(x)` is not a constructor — the grammar spells it
-        // `Heap.new(x)` (AGENTS.md, semantic types). The bare form
-        // is refused with `error<E412>: not a function: Heap`, and
-        // that one line took all 40 tests in this file down.
-        value: Heap.new(CborValue.CborText(Text.from("2026-05-24"))),
-    };
+    let v = decode(&[0xc0_u8, 0x61_u8, 0x78_u8]).unwrap();
     assert(v is CborValue.CborTag);
 }
 
@@ -108,10 +111,10 @@ fn test_cbor_value_pairwise_disjoint() {
     let b: CborValue = CborValue.CborBool(true);
     let n: CborValue = CborValue.CborNull;
     let nd: CborValue = CborValue.CborUndefined;
-    assert(u is CborValue.CborUint && !(u is CborValue.CborBool));
-    assert(b is CborValue.CborBool && !(b is CborValue.CborNull));
-    assert(n is CborValue.CborNull && !(n is CborValue.CborUndefined));
-    assert(nd is CborValue.CborUndefined && !(nd is CborValue.CborNull));
+    assert((&u) is CborValue.CborUint && !((&u) is CborValue.CborBool));
+    assert((&b) is CborValue.CborBool && !((&b) is CborValue.CborNull));
+    assert((&n) is CborValue.CborNull && !((&n) is CborValue.CborUndefined));
+    assert((&nd) is CborValue.CborUndefined && !((&nd) is CborValue.CborNull));
 }
 
 // =============================================================================
@@ -304,13 +307,21 @@ fn test_cbor_round_trip_array_empty() {
 
 @test
 fn test_cbor_decode_empty_is_truncated() {
-    let r = decode([].as_slice());
+    let r = decode(&[]);
     assert(r is Err);
 }
 
 // =============================================================================
 // Section 7: canonical encoding produces bytes
 // =============================================================================
+
+@test
+fn test_canonical_map_order_includes_nested_keys_and_tagged_values() {
+    let unordered: List<Byte> = [0xa2_u8, 0xd8_u8, 0x2a_u8, 0xa2_u8, 2_u8, 0xf6_u8, 1_u8, 0xf6_u8, 0xf5_u8, 0_u8, 0xf4_u8];
+    let root = decode(unordered.as_slice()).unwrap();
+    let expected: List<Byte> = [0xa2_u8, 0_u8, 0xf4_u8, 0xd8_u8, 0x2a_u8, 0xa2_u8, 1_u8, 0xf6_u8, 2_u8, 0xf6_u8, 0xf5_u8];
+    assert_eq(encode_canonical(&root), expected);
+}
 
 @test
 fn test_cbor_encode_canonical_produces_bytes() {

@@ -44,14 +44,14 @@
 )
 module core.security.x509.verifier;
 
-mount core.collections.{List, Set};
+mount core.collections.{List};
 mount core.security.x509.certificate.{X509Certificate, parse_certificate};
 mount core.security.x509.trust_store.{TrustStore};
 mount core.security.x509.path_building.{
-    CandidatePath, PathBuildError, build_paths, candidate_path_to_list,
+    CandidatePath, PathBuildError, build_paths, candidate_path_length, candidate_path_to_list,
 };
 mount core.security.x509.path_validation.{
-    PathValidationInput, ValidatedPath, PathError, PolicySet,
+    PathValidationInput, ValidatedPath, PathError,
     input_default, validate_path,
 };
 mount core.security.x509.ocsp_client.{
@@ -65,8 +65,7 @@ mount core.security.x509.crl_client.{
     check_certificate_status_via_crl,
 };
 mount core.security.x509.ocsp.{CertStatus};
-mount core.security.x509.oid.{Oid};
-mount core.security.x509.ext.ext_key_usage.{ExtKeyUsage, ExtKeyUsagePurpose};
+mount core.security.x509.ext.ext_key_usage.{ExtKeyUsagePurpose};
 mount net.http.{HttpClient};
 mount time.system_time.{epoch_seconds};
 
@@ -88,50 +87,17 @@ public type CertPurpose is
     /// Verifier should not enforce any EKU requirements.
     | AnyPurpose;
 
-fn purpose_oid(p: &CertPurpose) -> Maybe<Oid> {
-    match p {
-        ServerAuth      => Maybe.Some(Oid.from(&[1, 3, 6, 1, 5, 5, 7, 3, 1])),
-        ClientAuth      => Maybe.Some(Oid.from(&[1, 3, 6, 1, 5, 5, 7, 3, 2])),
-        CodeSigning     => Maybe.Some(Oid.from(&[1, 3, 6, 1, 5, 5, 7, 3, 3])),
-        EmailProtection => Maybe.Some(Oid.from(&[1, 3, 6, 1, 5, 5, 7, 3, 4])),
-        TimeStamping    => Maybe.Some(Oid.from(&[1, 3, 6, 1, 5, 5, 7, 3, 8])),
-        OcspSigning     => Maybe.Some(Oid.from(&[1, 3, 6, 1, 5, 5, 7, 3, 9])),
-        AnyPurpose      => Maybe.None,
-    }
-}
-
-fn any_extended_key_usage_oid() -> Oid {
-    Oid.from(&[2, 5, 29, 37, 0])  // anyExtendedKeyUsage
-}
-
 fn cert_meets_purpose(cert: &X509Certificate, purpose: &CertPurpose) -> Bool {
-    let want = match purpose_oid(purpose) {
-        Maybe.Some(o) => o,
-        Maybe.None    => return true,
+    let usage = match purpose {
+        CertPurpose.ServerAuth => ExtKeyUsagePurpose.ServerAuth,
+        CertPurpose.ClientAuth => ExtKeyUsagePurpose.ClientAuth,
+        CertPurpose.CodeSigning => ExtKeyUsagePurpose.CodeSigning,
+        CertPurpose.EmailProtection => ExtKeyUsagePurpose.EmailProtection,
+        CertPurpose.TimeStamping => ExtKeyUsagePurpose.TimeStamping,
+        CertPurpose.OcspSigning => ExtKeyUsagePurpose.OcspSigning,
+        CertPurpose.AnyPurpose => return true,
     };
-    match &cert.tbs.extensions.ext_key_usage {
-        Maybe.Some((_, eku)) => eku_contains(eku, &want) || eku_contains(eku, &any_extended_key_usage_oid()),
-        Maybe.None => true, // EKU absent = unrestricted (RFC 5280 §4.2.1.12)
-    }
-}
-
-fn eku_contains(eku: &ExtKeyUsage, want: &Oid) -> Bool {
-    let mut i: Int = 0;
-    while i < eku.purposes.len() {
-        let p = &eku.purposes[i];
-        let oid = match p {
-            ExtKeyUsagePurpose.ServerAuth      => Oid.from(&[1, 3, 6, 1, 5, 5, 7, 3, 1]),
-            ExtKeyUsagePurpose.ClientAuth      => Oid.from(&[1, 3, 6, 1, 5, 5, 7, 3, 2]),
-            ExtKeyUsagePurpose.CodeSigning     => Oid.from(&[1, 3, 6, 1, 5, 5, 7, 3, 3]),
-            ExtKeyUsagePurpose.EmailProtection => Oid.from(&[1, 3, 6, 1, 5, 5, 7, 3, 4]),
-            ExtKeyUsagePurpose.TimeStamping    => Oid.from(&[1, 3, 6, 1, 5, 5, 7, 3, 8]),
-            ExtKeyUsagePurpose.OcspSigning     => Oid.from(&[1, 3, 6, 1, 5, 5, 7, 3, 9]),
-            ExtKeyUsagePurpose.Other(o)        => o.clone(),
-        };
-        if oid.eq(want) { return true; }
-        i = i + 1;
-    }
-    false
+    cert.extensions().permits_purpose(&usage)
 }
 
 // =============================================================================
@@ -283,7 +249,7 @@ public async fn verify_certs<C: HttpClient>(
     while i < chain_der.len() {
         match parse_certificate(chain_der[i].as_slice()) {
             Result.Ok(c)  => parsed.push(c),
-            Result.Err(e) => return Result.Err(ParseFailed { index: i, reason: f"{e}" }),
+            Result.Err(e) => return Result.Err(VerificationError.ParseFailed { index: i, reason: f"{e}" }),
         }
         i = i + 1;
     }
@@ -308,7 +274,7 @@ public async fn verify_parsed<C: HttpClient>(
         .map_err(|e| BuildFailed(e))?;
 
     // Step 3: try each candidate path through path_validation.
-    let now = config.now_override.unwrap_or_else(epoch_seconds);
+    let now = match config.now_override { Maybe.Some(time) => time, Maybe.None => epoch_seconds() };
     let mut last_validation_error: Maybe<PathError> = Maybe.None;
     let mut k: Int = 0;
     while k < candidates.len() {
@@ -318,12 +284,12 @@ public async fn verify_parsed<C: HttpClient>(
         match validate_path(&input) {
             Result.Ok(validated) => {
                 // Step 4: purpose check on EE.
-                if !cert_meets_purpose(&validated.ee, &config.purpose) {
-                    return Result.Err(PurposeNotMet { want: config.purpose.clone() });
+                if !cert_meets_purpose(path.certificate_at(0), &config.purpose) {
+                    return Result.Err(VerificationError.PurposeNotMet { want: config.purpose.clone() });
                 }
                 // Step 5: revocation.
                 let revocation_results = check_revocation(
-                    http, &validated, &config.revocation,
+                    http, path, &config.revocation,
                     &config.ocsp_options, &config.crl_options,
                 ).await?;
                 return Result.Ok(VerificationResult { validated_path: validated, revocation_results });
@@ -332,7 +298,7 @@ public async fn verify_parsed<C: HttpClient>(
         }
         k = k + 1;
     }
-    Result.Err(ValidationFailed(last_validation_error.unwrap_or_else(|| PathError.EmptyChain)))
+    Result.Err(ValidationFailed(last_validation_error.unwrap_or(PathError.EmptyChain)))
 }
 
 fn path_validation_input_for_chain(
@@ -348,7 +314,7 @@ fn path_validation_input_for_chain(
 
 async fn check_revocation<C: HttpClient>(
     http: &C,
-    path: &ValidatedPath,
+    path: &CandidatePath,
     policy: &RevocationPolicy,
     ocsp_opts: &OcspCheckOptions,
     crl_opts: &CrlCheckOptions,
@@ -363,27 +329,14 @@ async fn check_revocation<C: HttpClient>(
         return Result.Ok(out);
     }
 
-    // Build a list of (cert, issuer) pairs to check.
-    let mut pairs: List<(X509Certificate, X509Certificate)> = List.new();
-    pairs.push((path.ee.clone(), issuer_of_ee(path)));
-    let mut i: Int = 0;
-    while i < path.intermediates.len() {
-        let cert = path.intermediates[i].clone();
-        let issuer = if i + 1 < path.intermediates.len() {
-            path.intermediates[i + 1].clone()
-        } else {
-            path.anchor.clone()
-        };
-        pairs.push((cert, issuer));
-        i = i + 1;
-    }
-
+    let count = candidate_path_length(path);
     let crl_cache = crl_cache_new();
-    let mut results: List<PerCertRevocationResult> = List.with_capacity(pairs.len());
+    let mut results: List<PerCertRevocationResult> = List.with_capacity(count - 1);
     let mut idx: Int = 0;
-    while idx < pairs.len() {
-        let (cert, issuer) = &pairs[idx];
-        let res = check_one_revocation(http, &crl_cache, cert, issuer, policy, ocsp_opts, crl_opts).await?;
+    while idx + 1 < count {
+        let cert = path.certificate_at(idx);
+        let issuer = path.certificate_at(idx + 1);
+        let res = check_one_revocation(http, &crl_cache, cert, issuer, idx, policy, ocsp_opts, crl_opts).await?;
         if let RevocationStatus.Revoked { reason } = &res.status {
             return Result.Err(VerificationError.RevokedCert { reason: reason.clone() });
         }
@@ -393,19 +346,12 @@ async fn check_revocation<C: HttpClient>(
     Result.Ok(results)
 }
 
-fn issuer_of_ee(path: &ValidatedPath) -> X509Certificate {
-    if path.intermediates.is_empty() {
-        path.anchor.clone()
-    } else {
-        path.intermediates[0].clone()
-    }
-}
-
 async fn check_one_revocation<C: HttpClient>(
     http: &C,
     crl_cache: &CrlCache,
     cert: &X509Certificate,
     issuer: &X509Certificate,
+    cert_index: Int,
     policy: &RevocationPolicy,
     ocsp_opts: &OcspCheckOptions,
     crl_opts: &CrlCheckOptions,
@@ -414,16 +360,16 @@ async fn check_one_revocation<C: HttpClient>(
     let ocsp_outcome = ocsp_check_status(http, cert, issuer, ocsp_opts).await;
 
     match ocsp_outcome {
-        Result.Ok(check) => match check.status {
+        Result.Ok(check) => match check.certificate_status() {
             CertStatus.Good => return Result.Ok(PerCertRevocationResult {
-                cert_index: 0,
+                cert_index,
                 method:     RevocationMethod.Ocsp,
                 status:     RevocationStatus.Good,
             }),
-            CertStatus.Revoked { reason, .. } => return Result.Ok(PerCertRevocationResult {
-                cert_index: 0,
+            CertStatus.Revoked { .. } => return Result.Ok(PerCertRevocationResult {
+                cert_index,
                 method:     RevocationMethod.Ocsp,
-                status:     RevocationStatus.Revoked { reason: f"{reason}" },
+                status:     RevocationStatus.Revoked { reason: check.certificate_status().revocation_description() },
             }),
             CertStatus.Unknown => {} // try CRL
         },
@@ -439,7 +385,7 @@ async fn check_one_revocation<C: HttpClient>(
             });
         }
         return Result.Ok(PerCertRevocationResult {
-            cert_index: 0,
+            cert_index,
             method:     RevocationMethod.Ocsp,
             status:     RevocationStatus.Unknown,
         });
@@ -451,14 +397,14 @@ async fn check_one_revocation<C: HttpClient>(
 
     match crl_outcome {
         Result.Ok(CrlCheckResult.Good { .. }) => Result.Ok(PerCertRevocationResult {
-            cert_index: 0,
+            cert_index,
             method:     RevocationMethod.Crl,
             status:     RevocationStatus.Good,
         }),
-        Result.Ok(CrlCheckResult.Revoked { reason, .. }) => Result.Ok(PerCertRevocationResult {
-            cert_index: 0,
+        Result.Ok(revoked @ CrlCheckResult.Revoked { .. }) => Result.Ok(PerCertRevocationResult {
+            cert_index,
             method:     RevocationMethod.Crl,
-            status:     RevocationStatus.Revoked { reason: f"{reason}" },
+            status:     RevocationStatus.Revoked { reason: revoked.revocation_description() },
         }),
         Result.Err(e) => match policy {
             RevocationPolicy.HardFail => Result.Err(VerificationError.RevocationCheckFailed {
@@ -466,7 +412,7 @@ async fn check_one_revocation<C: HttpClient>(
                 crl:  Maybe.Some(f"{e}"),
             }),
             _ => Result.Ok(PerCertRevocationResult {
-                cert_index: 0,
+                cert_index,
                 method:     RevocationMethod.Crl,
                 status:     RevocationStatus.Unknown,
             }),

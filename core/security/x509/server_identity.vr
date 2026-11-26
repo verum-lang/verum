@@ -181,8 +181,8 @@ fn verify_ip_identity(
     cert: &X509Certificate,
     ip_bytes: List<Byte>,
 ) -> Result<(), ServerIdentityError> {
-    match &cert.tbs.extensions.subject_alt_name {
-        Maybe.Some((_critical, san)) => {
+    match cert.extensions().alternative_names() {
+        Maybe.Some(san) => {
             if san_has_ip_entries(san) {
                 if san.matches_ip(ip_bytes.as_slice()) {
                     Result.Ok(())
@@ -204,8 +204,8 @@ fn verify_dns_identity(
     cert: &X509Certificate,
     hostname: &Text,
 ) -> Result<(), ServerIdentityError> {
-    match &cert.tbs.extensions.subject_alt_name {
-        Maybe.Some((_critical, san)) => {
+    match cert.extensions().alternative_names() {
+        Maybe.Some(san) => {
             if san.matches_dns(hostname) {
                 Result.Ok(())
             } else {
@@ -222,8 +222,8 @@ fn verify_dns_identity(
 
 fn san_has_ip_entries(san: &SubjectAltName) -> Bool {
     let mut i: Int = 0;
-    while i < san.names.len() {
-        match &san.names[i] {
+    while i < san.names().len() {
+        match &san.names()[i] {
             core.security.x509.ext.subject_alt_name.GeneralName.IpAddress(_) => {
                 return true;
             },

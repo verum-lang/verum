@@ -32,7 +32,7 @@
 //
 // **Cache.** CRLs are large (kilobytes to megabytes for major CAs);
 // fetching them on every chain validation would be prohibitive. We
-// expose a TTL-cached `CrlCache` keyed by URL → (parsed CRL,
+// expose a TTL-cached `CrlCache` keyed by URL → (checked DER,
 // expires_at). Default TTL: min(nextUpdate − thisUpdate, 24h).
 //
 // **HTTP transport.** GET with `accept: application/pkix-crl`.
@@ -90,14 +90,8 @@ public const CONTENT_TYPE_PKIX_CRL: Text = "application/pkix-crl";
 public fn extract_crl_urls(cert: &X509Certificate) -> List<Text> {
     let cdp_oid = Oid.from(&[2, 5, 29, 31]);
     let mut out: List<Text> = List.new();
-    let mut i: Int = 0;
-    while i < cert.tbs.extensions.others.len() {
-        let raw = &cert.tbs.extensions.others[i];
-        if raw.oid.eq(&cdp_oid) {
-            scan_cdp_for_uris(raw.value_der.as_slice(), &mut out);
-            break;
-        }
-        i = i + 1;
+    if let Maybe.Some(der) = cert.extensions().unparsed_value(&cdp_oid) {
+        scan_cdp_for_uris(der, &mut out);
     }
     out
 }
@@ -263,7 +257,7 @@ public async fn fetch_crl<C: HttpClient>(
 
 @derive(Clone, Debug)
 type CacheEntry is {
-    crl:        CertificateList,
+    der:        List<Byte>,
     expires_at: Int,
 };
 
@@ -282,30 +276,39 @@ public async fn crl_cache_get_or_fetch<C: HttpClient>(
     url: &Text,
 ) -> Result<CertificateList, CrlOperationError> {
     let now = epoch_seconds();
-    {
-        let read = cache.inner.read().await;
-        if let Maybe.Some(entry) = read.get(url) {
-            if now < entry.expires_at {
-                return Result.Ok(entry.crl.clone());
-            }
+    let cached = {
+        let read = match cache.inner.read() {
+            Result.Ok(guard) => guard,
+            Result.Err(_) => return Result.Err(CrlOperationError.CachePoisoned),
+        };
+        let entries: &Map<Text, CacheEntry> = read.deref();
+        match entries.get_key_value(url) {
+            Maybe.Some((_, entry)) if now < entry.expires_at => Maybe.Some(entry.der.clone()),
+            _ => Maybe.None,
         }
+    };
+    if let Maybe.Some(der) = cached {
+        return parse_crl(der.as_slice()).map_err(|e| CrlOperationError.Parse(e));
     }
     let bytes = fetch_crl(client, url).await
         .map_err(|e| CrlOperationError.Fetch(e))?;
     let crl = parse_crl(bytes.as_slice())
         .map_err(|e| CrlOperationError.Parse(e))?;
     let ttl = compute_ttl(&crl);
-    let entry = CacheEntry { crl: crl.clone(), expires_at: now + ttl };
-    let mut write = cache.inner.write().await;
-    write.insert(url.clone(), entry);
+    let entry = CacheEntry { der: bytes, expires_at: now + ttl };
+    let mut write = match cache.inner.write() {
+        Result.Ok(guard) => guard,
+        Result.Err(_) => return Result.Err(CrlOperationError.CachePoisoned),
+    };
+    let entries: &mut Map<Text, CacheEntry> = write.deref_mut();
+    entries.insert(url.clone(), entry);
     Result.Ok(crl)
 }
 
 fn compute_ttl(crl: &CertificateList) -> Int {
-    let this_unix = core.security.x509.time.time_to_unix(&crl.this_update);
-    match &crl.next_update {
-        Maybe.Some(next) => {
-            let next_unix = core.security.x509.time.time_to_unix(next);
+    let (this_unix, next) = crl.update_bounds();
+    match next {
+        Maybe.Some(next_unix) => {
             let publisher_ttl = next_unix - this_unix;
             if publisher_ttl > 0 && publisher_ttl < DEFAULT_MAX_CACHE_TTL_SECONDS {
                 publisher_ttl
@@ -344,6 +347,15 @@ public type CrlCheckResult is
     | Good { url: Text, this_update: Int, next_update: Maybe<Int> }
     | Revoked { url: Text, entry: RevokedEntry, reason: Maybe<CrlReason> };
 
+implement CrlCheckResult {
+    public(in core.security.x509) fn revocation_description(&self) -> Text {
+        match self {
+            CrlCheckResult.Revoked { reason, .. } => f"{reason}",
+            _ => "".to_text(),
+        }
+    }
+}
+
 public type CrlOperationError is
     | NoUrlAvailable
     | Fetch(CrlFetchError)
@@ -351,6 +363,7 @@ public type CrlOperationError is
     | Stale { this_update: Int, now: Int }
     | Expired { next_update: Int, now: Int }
     | SignatureFailed
+    | CachePoisoned
     | AllUrlsFailed(List<Text>);
 
 implement Display for CrlOperationError {
@@ -361,6 +374,7 @@ implement Display for CrlOperationError {
             Parse(e)            => f.write_str(f"crl: {e}".as_str()),
             Stale { this_update, now } => f.write_str(f"crl: thisUpdate {this_update} too far in past (now={now})".as_str()),
             Expired { next_update, now } => f.write_str(f"crl: nextUpdate {next_update} elapsed (now={now})".as_str()),
+            CachePoisoned       => f.write_str("crl: cache lock poisoned"),
             SignatureFailed     => f.write_str("crl: signature verification failed"),
             AllUrlsFailed(urls) => f.write_str(f"crl: all distribution points failed: {urls}".as_str()),
         }
@@ -421,7 +435,7 @@ async fn try_one_url<C: HttpClient>(
     let crl = crl_cache_get_or_fetch(cache, client, url).await?;
 
     // Verify CRL issuer DN matches the cert issuer's subject DN.
-    if !crl_issuer_matches(issuer, &crl) {
+    if !crl.has_issuer(issuer.subject_name()) {
         return Result.Err(CrlOperationError.SignatureFailed);
     }
 
@@ -430,15 +444,11 @@ async fn try_one_url<C: HttpClient>(
 
     // Freshness check.
     let now = epoch_seconds();
-    let this_unix = core.security.x509.time.time_to_unix(&crl.this_update);
+    let (this_unix, next_unix) = crl.update_bounds();
     let tol = opts.freshness_tolerance_s;
     if this_unix > now + tol {
         return Result.Err(CrlOperationError.Stale { this_update: this_unix, now });
     }
-    let next_unix = match &crl.next_update {
-        Maybe.Some(t) => Maybe.Some(core.security.x509.time.time_to_unix(t)),
-        Maybe.None    => Maybe.None,
-    };
     if let Maybe.Some(nu) = next_unix {
         if now > nu + tol {
             return Result.Err(CrlOperationError.Expired { next_update: nu, now });
@@ -446,17 +456,17 @@ async fn try_one_url<C: HttpClient>(
     }
 
     // Lookup serial.
-    let serial = cert.tbs.serial_number.as_slice();
+    let serial = cert.serial_bytes();
     match find_revoked(&crl, serial) {
         Maybe.Some(entry) => {
             let reason = extract_reason_code(entry);
-            Result.Ok(Revoked {
+            Result.Ok(CrlCheckResult.Revoked {
                 url: url.clone(),
                 entry: entry.clone(),
                 reason,
             })
         }
-        Maybe.None => Result.Ok(Good {
+        Maybe.None => Result.Ok(CrlCheckResult.Good {
             url: url.clone(),
             this_update: this_unix,
             next_update: next_unix,
@@ -464,23 +474,9 @@ async fn try_one_url<C: HttpClient>(
     }
 }
 
-fn crl_issuer_matches(issuer_cert: &X509Certificate, crl: &CertificateList) -> Bool {
-    if issuer_cert.tbs.subject.raw_der.len() != crl.issuer_der.len() { return false; }
-    let mut i: Int = 0;
-    while i < crl.issuer_der.len() {
-        if issuer_cert.tbs.subject.raw_der[i] != crl.issuer_der[i] { return false; }
-        i = i + 1;
-    }
-    true
-}
-
 fn verify_crl_signature(_crl: &CertificateList, _issuer: &X509Certificate) -> Result<(), CrlOperationError> {
-    // The TBS bytes + signature value need to be surfaced from the
-    // parser. Once parse_crl exposes them, we plug into
-    // chain.verify_signature_raw(tbs_bytes, signature, alg, issuer.spki).
-    // Until then, this returns Ok — and the caller-level documentation
-    // notes the limitation.
-    Result.Ok(())
+    // The CRL parser does not retain the signed envelope yet.
+    Result.Err(CrlOperationError.SignatureFailed)
 }
 
 fn extract_reason_code(_entry: &RevokedEntry) -> Maybe<CrlReason> {

@@ -1,0 +1,14 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L2
+// @tags: security, x509, visibility
+// @expected-error: E202 "'parsed' is Private"
+// @expected-error-count: 1
+
+mount core.security.x509.certificate.{X509Certificate};
+
+fn replace_storage(cert: &mut X509Certificate) {
+    let _ = cert.parsed;
+}
+
+fn main() {}

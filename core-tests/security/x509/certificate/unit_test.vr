@@ -9,6 +9,10 @@ mount core.hash.crypto.sha256.Sha256;
 mount core.encoding.hex.{encode as hex_encode};
 mount core.security.x509.certificate.{X509Version, parse_certificate};
 mount core.encoding.base64;
+mount core.security.x509.trust_store.{TrustStore};
+mount core.security.x509.path_building.{build_paths, build_best_path, candidate_path_to_list};
+mount core.security.x509.server_identity.{verify_server_identity, ServerIdentityError};
+mount core.security.x509.ocsp_client.{CertIdHash, build_ocsp_request};
 mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 
@@ -59,11 +63,18 @@ fn test_x509_version_v3_disjoint() {
     assert(!(v is X509Version.V2));
 }
 
+fn leaf_der() -> List<Byte> {
+    base64.decode(&"MIIBLzCB4qADAgECAgECMAUGAytlcDAaMRgwFgYDVQQDDA9WZXJ1bSBUZXN0IFJvb3QwHhcNMjYxMTAzMjEyNzI4WhcNMjYxMTA1MjEyNzI4WjAYMRYwFAYDVQQDDA12ZXJ1bS5pbnZhbGlkMCowBQYDK2VwAyEAg3q+9yNJk1bHxZIdfw5veheTVuBUZp4WYXADw7ecBKajTzBNMAwGA1UdEwEB/wQCMAAwDgYDVR0PAQH/BAQDAgeAMBMGA1UdJQQMMAoGCCsGAQUFBwMBMBgGA1UdEQQRMA+CDXZlcnVtLmludmFsaWQwBQYDK2VwA0EA/zcVlie8boXjnNJhD19wmG0jZoxIkxDryNn/UmgDtp88aZefy0nZWZASyNGu7oz9u4Y2aiIjVf2x62yBX/yGAA==").unwrap()
+}
+
+fn root_der() -> List<Byte> {
+    base64.decode(&"MIIBJDCB16ADAgECAgEBMAUGAytlcDAaMRgwFgYDVQQDDA9WZXJ1bSBUZXN0IFJvb3QwHhcNMjYxMTAzMjEyNzI4WhcNMjYxMjAzMjEyNzI4WjAaMRgwFgYDVQQDDA9WZXJ1bSBUZXN0IFJvb3QwKjAFBgMrZXADIQC9kwkM7NS1fNIHT7+Z3n5V5VyrWl3H0UAu251nNEHvHqNCMEAwHQYDVR0OBBYEFArq9FRwwRJb/uwpUFaiYLTOmNjgMA8GA1UdEwEB/wQFMAMBAf8wDgYDVR0PAQH/BAQDAgEGMAUGAytlcANBACprbqytBojE+/kZwlR32pCO7QmTcXXIh5fvGB5RJfgcqsZAWJfCyoBv0/cFlKwz2uGHoTScQnZX1GXcMxwkEQk=").unwrap()
+}
+
 @test
 fn test_certificate_validity_is_read_from_its_der() {
     // Ed25519 test certificate for verum.invalid. OpenSSL independently decoded both times.
-    let encoded = "MIIBLzCB4qADAgECAgECMAUGAytlcDAaMRgwFgYDVQQDDA9WZXJ1bSBUZXN0IFJvb3QwHhcNMjYxMTAzMjEyNzI4WhcNMjYxMTA1MjEyNzI4WjAYMRYwFAYDVQQDDA12ZXJ1bS5pbnZhbGlkMCowBQYDK2VwAyEAg3q+9yNJk1bHxZIdfw5veheTVuBUZp4WYXADw7ecBKajTzBNMAwGA1UdEwEB/wQCMAAwDgYDVR0PAQH/BAQDAgeAMBMGA1UdJQQMMAoGCCsGAQUFBwMBMBgGA1UdEQQRMA+CDXZlcnVtLmludmFsaWQwBQYDK2VwA0EA/zcVlie8boXjnNJhD19wmG0jZoxIkxDryNn/UmgDtp88aZefy0nZWZASyNGu7oz9u4Y2aiIjVf2x62yBX/yGAA==";
-    let mut der = base64.decode(&encoded).unwrap();
+    let mut der = leaf_der();
     let certificate = parse_certificate(der.as_slice()).unwrap();
     // OpenSSL asn1parse locates TBS at [4,233) and signature bytes at [243,307).
     let full = certificate.der_bytes();
@@ -98,12 +109,34 @@ fn test_certificate_validity_is_read_from_its_der() {
 
 @test
 fn test_ca_constraints_come_from_the_decoded_certificate() {
-    let encoded = "MIIBJDCB16ADAgECAgEBMAUGAytlcDAaMRgwFgYDVQQDDA9WZXJ1bSBUZXN0IFJvb3QwHhcNMjYxMTAzMjEyNzI4WhcNMjYxMjAzMjEyNzI4WjAaMRgwFgYDVQQDDA9WZXJ1bSBUZXN0IFJvb3QwKjAFBgMrZXADIQC9kwkM7NS1fNIHT7+Z3n5V5VyrWl3H0UAu251nNEHvHqNCMEAwHQYDVR0OBBYEFArq9FRwwRJb/uwpUFaiYLTOmNjgMA8GA1UdEwEB/wQFMAMBAf8wDgYDVR0PAQH/BAQDAgEGMAUGAytlcANBACprbqytBojE+/kZwlR32pCO7QmTcXXIh5fvGB5RJfgcqsZAWJfCyoBv0/cFlKwz2uGHoTScQnZX1GXcMxwkEQk=";
-    let der = base64.decode(&encoded).unwrap();
+    let der = root_der();
     let certificate = parse_certificate(der.as_slice()).unwrap();
     assert(certificate.is_ca());
     assert(certificate.path_len_constraint().is_none());
     assert(!certificate.matches_hostname(&"verum.invalid"));
+}
+
+@test
+fn test_candidates_identity_and_ocsp_request_use_the_parsed_certificate() {
+    let leaf = parse_certificate(leaf_der().as_slice()).unwrap();
+    let root_bytes = root_der();
+    let root = parse_certificate(root_bytes.as_slice()).unwrap();
+    let trust = TrustStore.from_der(&[root_bytes]).unwrap();
+    let candidate = build_best_path(&leaf, &[], &trust).unwrap();
+    let path = candidate_path_to_list(&candidate);
+    assert_eq(path.len(), 2);
+    assert_eq(hex_encode(path[0].der_bytes()), hex_encode(leaf.der_bytes()));
+    assert_eq(hex_encode(path[1].der_bytes()), hex_encode(root.der_bytes()));
+    assert(build_paths(&leaf, &[], &TrustStore.empty()).is_err());
+    assert(verify_server_identity(&path[0], &"verum.invalid").is_ok());
+    assert(verify_server_identity(&path[0], &"wrong.invalid").is_err());
+    assert(verify_server_identity(&path[0], &"192.0.2.1") is Result.Err(ServerIdentityError.IpLiteralRequiresIpSan));
+
+    // Independently encoded with openssl ocsp -issuer root.pem -cert leaf.pem -no_nonce.
+    let sha1_request = build_ocsp_request(&leaf, &root, CertIdHash.Sha1Hash);
+    assert_eq(hex_encode(sha1_request.as_slice()), "30423040303e303c303a300906052b0e03021a0500041495fdc96671f5085b4651746e3dfa63597d446e7c04140aeaf45470c1125bfeec295056a260b4ce98d8e0020102");
+    let sha256_request = build_ocsp_request(&leaf, &root, CertIdHash.Sha256Hash);
+    assert_eq(hex_encode(sha256_request.as_slice()), "305e305c305a30583056300d060960864801650304020105000420e4d5750192ef1826aef5fd2112f481af08b3d41417a381fb1e9a459cf33c4f100420c70a8dcf77db9a729d512119347c07cf4bcce4a30cc640a2db661c71bd592fa5020102");
 }
 
 fn main() {}
