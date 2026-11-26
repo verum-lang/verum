@@ -114,11 +114,11 @@ fn imported_payload_keeps_its_qualified_owner_in_both_registration_orders() {
     for (owner, source) in [
         (
             "alpha",
-            "module alpha; type Payload is { message: Int }; type Choice<T, E> is Good(T) | Bad(E);",
+            "module alpha; public type Payload is { public message: Int }; public type Choice<T, E> is Good(T) | Bad(E);",
         ),
         (
             "beta",
-            "module beta; type Payload is { other: Int, message: Int }; type Noise is Good(Text) | Bad(Payload);",
+            "module beta; public type Payload is { public other: Int, public message: Int }; public type Noise is Good(Text) | Bad(Payload);",
         ),
     ] {
         let ast = Parser::new(source).parse_module().unwrap();
@@ -276,7 +276,7 @@ fn explicit_variant_test_reads_the_serialized_owner_tag() {
         VbcCodegen::with_config(CodegenConfig::new(name))
             .compile_module(&Parser::new(source).parse_module().unwrap()).unwrap()
     };
-    let sum = module("alpha", "module alpha; type Event is Empty | Ready(Int);");
+    let sum = module("alpha", "module alpha; public type Event is Empty | Ready(Int);");
     let sum = verum_vbc::deserialize::deserialize_module(
         &verum_vbc::serialize::serialize_module(&sum).unwrap(),
     ).unwrap();
@@ -303,8 +303,8 @@ fn explicit_variant_test_reads_the_serialized_owner_tag() {
 fn imported_named_variant_field_owns_its_conversion_target() {
     let dependency = Parser::new(r#"
         module owner;
-        type Amount is { n: Int };
-        type Event is Present { amount: Amount } | Absent;
+        public type Amount is { public n: Int };
+        public type Event is Present { amount: Amount } | Absent;
     "#).parse_module().unwrap();
     let dependency = VbcCodegen::with_config(CodegenConfig::new("owner")).compile_module(&dependency).unwrap();
     let ast = Parser::new(r#"
@@ -332,7 +332,7 @@ fn imported_named_variant_field_owns_its_conversion_target() {
 #[test]
 fn archived_collection_payload_selects_native_iteration_by_owner() {
     for (owner, native) in [("core.collections.list", true), ("foreign", false)] {
-        let source = format!("module {owner}; type List<T> is {{ storage: T }};");
+        let source = format!("module {owner}; public type List<T> is {{ storage: T }};");
         let ast = Parser::new(&source).parse_module().unwrap();
         let dependency = VbcCodegen::with_config(CodegenConfig::new(owner))
             .compile_module(&ast).unwrap();
