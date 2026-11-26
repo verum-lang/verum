@@ -8,6 +8,28 @@ fn errors(source: &str) -> List<Text> {
 }
 
 #[test]
+fn imported_inherent_method_proves_the_domain_of_its_actual_receiver() {
+    let provider = "module platform;
+        public type Stamp is protocol { fn stamp(&self) -> Int; };
+        public type Key is { tag: Int };
+        public type Wrapped<T> is { value: T };
+        implement Stamp for Key { fn stamp(&self) -> Int { self.tag } }
+        implement<T: Stamp> Stamp for Wrapped<T> { fn stamp(&self) -> Int { self.value.stamp() } }
+        public type Directory<K, V> is { first: K, payload: V, count: Int };
+        implement<K: Stamp, V> Directory<K,V> { public fn count_items(&self) -> Int { self.count } }
+        public type Measure is protocol { fn count_items(&self) -> Int; };
+        implement<K: Stamp, V> Measure for Directory<K,V> { fn count_items(&self) -> Int { self.count } }";
+    let accepted = errors_with_provider("mount platform.*;
+        fn borrowed(d: &Directory<Key,Bool>) -> Int { d.count_items() }
+        fn owned(d: Directory<Wrapped<Key>,Bool>) -> Int { d.count_items() }", Some(provider));
+    assert!(accepted.is_empty(), "{accepted:?}");
+    let rejected = errors_with_provider("mount platform.*;
+        type Unmarked is { tag: Int };
+        fn rejected(d: &Directory<Unmarked,Bool>) -> Int { d.count_items() }", Some(provider));
+    assert!(rejected.iter().any(|error| error.contains("Stamp")), "{rejected:?}");
+}
+
+#[test]
 fn mutually_recursive_functions_can_be_used_as_synchronous_callbacks() {
     let source = "fn odd(n:Int)->Bool {if n<=0 {false} else {even(n-1)}}
         fn even(n:Int)->Bool {if n<=0 {true} else {odd(n-1)}}

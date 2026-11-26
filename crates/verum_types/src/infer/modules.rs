@@ -5288,7 +5288,8 @@ impl TypeChecker {
             // Collect static method registrations to apply after exiting scope.
             // We need to process them while in scope (to resolve type params),
             // but register them outside the scope (so they persist).
-            let mut static_method_registrations: Vec<(String, TypeScheme)> = Vec::new();
+            let mut declared_methods: List<(Text, TypeScheme)> = List::new();
+            let mut static_method_registrations = List::new();
 
             // Collect associated constant registrations to apply after exiting scope.
             let mut const_registrations: Vec<(String, TypeScheme)> = Vec::new();
@@ -5449,7 +5450,6 @@ impl TypeChecker {
                         method_scheme.impl_var_count = impl_type_vars.len();
                         method_scheme.impl_self_type = self.current_self_type.clone();
                         self.record_callable_declaration(&mut method_scheme, func);
-                        method_scheme.impl_self_type = self.current_self_type.clone();
                         if !method_type_bounds.is_empty() {
                             method_scheme = method_scheme.with_type_bounds(method_type_bounds);
                         }
@@ -5460,19 +5460,7 @@ impl TypeChecker {
                                 qualified_name
                             );
                         }
-                        // Generic static syntax resolves through the same
-                        // owner bucket as ordinary source impl registration.
-                        let static_key = format!("$static${}", func.name.name).into();
-                        self.record_method_publication(&method_owner, &static_key, &method_scheme);
-                        self.inherent_methods
-                            .write()
-                            .entry(method_owner.clone())
-                            .or_default()
-                            .insert(
-                                static_key,
-                                method_scheme.clone(),
-                            );
-                        static_method_registrations.push((qualified_name.clone(), method_scheme));
+                        declared_methods.push((func.name.name.clone(), method_scheme));
 
                         tracing::debug!(
                             "Prepared static method {} from cross-file implement block",
@@ -5553,8 +5541,6 @@ impl TypeChecker {
                             func.is_generator,
                         );
                         let method_ty = Type::function_with_requirement(param_types, final_return_type, self.source_callable_requirement(func));
-                        let type_name_text = method_owner.clone();
-                        let method_name_text = verum_common::Text::from(func.name.name.as_str());
 
                         // A method may shadow an impl parameter's spelling.
                         // Quantify their identities, rather than looking up the
@@ -5580,28 +5566,7 @@ impl TypeChecker {
                             method_scheme = method_scheme.with_type_bounds(method_type_var_bounds);
                         }
 
-                        // Guarded ONE write-path into the single-slot
-                        // inherent bucket (T0585 ERROR-14): a second
-                        // protocol instantiation's same-name method
-                        // POISONS the slot (resolution then falls to the
-                        // protocol search and its overload defer);
-                        // non-protocol collisions keep last-write-wins.
-                        let is_protocol_impl = matches!(
-                            &impl_decl.kind,
-                            verum_ast::decl::ImplKind::Protocol { .. }
-                        );
-                        self.register_inherent_method_guarded(
-                            type_name_text.clone(),
-                            method_name_text.clone(),
-                            method_scheme,
-                            is_protocol_impl,
-                        );
-
-                        {
-                            // #[cfg(debug_assertions)]
-                            // eprintln!("[DEBUG import_impl_blocks] Registered instance method '{}.{}'",
-                            // type_name, func.name.name);
-                        }
+                        declared_methods.push((func.name.name.clone(), method_scheme));
 
                         tracing::debug!(
                             "Imported instance method {}.{} from cross-file implement block",
@@ -5690,31 +5655,27 @@ impl TypeChecker {
                     let resolved_protocol_args = checker.protocol_application_arguments(
                         protocol, ast_protocol_args, Some(&for_type_resolved),
                     )?;
-                    for (_, scheme) in &mut static_method_registrations {
-                        Self::attach_implementation_requirements(
-                            scheme, &where_clauses, &type_param_fn_bounds,
-                        );
-                    }
-
-                    // Defaults inherit the selected application, including owner values.
-                    let mut defaults = Vec::new();
-                    if let Some(declaration) = checker.protocol_checker.read().get_protocol(&identity) {
-                        let impl_variables: List<TypeVar> = impl_type_bindings.iter().filter_map(|(name, _)| {
-                            match checker.ctx.lookup_type(name.as_str()) { Some(Type::Var(var)) => Some(*var), _ => None }
-                        }).collect();
-                        for (name, method) in &declaration.methods {
-                            if methods.contains_key(name) {
-                                for key in [name.clone(), format!("$static${name}").into()] {
-                                    let existing = checker.inherent_methods.read().get(&method_owner).and_then(|methods| methods.get(&key)).cloned();
-                                    if let Some(mut scheme) = existing {
-                                        checker.attach_protocol_method_requirements(&mut scheme, method, &resolved_protocol_args, &for_type_resolved, impl_decl.span)?;
-                                        Self::attach_implementation_requirements(
-                                            &mut scheme, &where_clauses, &type_param_fn_bounds,
-                                        );
-                                        checker.inherent_methods.write().entry(method_owner.clone()).or_default().insert(key, scheme);
-                                    }
-                                }
+                    // Attach obligations to the declaration that owns their binders.
+                    // The dispatch cache may already select another implementation of
+                    // this name, with an entirely different parameter scope.
+                    let mut defaults = List::new();
+                    {
+                        let protocols = checker.protocol_checker.read();
+                        let declaration = protocols.get_protocol(&identity);
+                        for (name, scheme) in &mut declared_methods {
+                            Self::attach_implementation_requirements(scheme, &where_clauses, &type_param_fn_bounds);
+                            if let Some(method) = declaration.and_then(|protocol| protocol.methods.get(name)) {
+                                checker.attach_protocol_method_requirements(
+                                    scheme, method, &resolved_protocol_args, &for_type_resolved, impl_decl.span,
+                                )?;
                             }
+                        }
+                    }
+                    if let Some(declaration) = checker.protocol_checker.read().get_protocol(&identity) {
+                        let impl_variables: List<TypeVar> = owner_frame.values()
+                            .filter_map(|ty| if let Type::Var(variable) = ty { Some(*variable) } else { None })
+                            .collect();
+                        for (name, method) in &declaration.methods {
                             if method.has_default && !methods.contains_key(name) {
                                 let mut scheme = checker.inherited_protocol_method_scheme(method, &resolved_protocol_args, &for_type_resolved, &impl_variables)?;
                                 Self::attach_implementation_requirements(
@@ -5724,10 +5685,6 @@ impl TypeChecker {
                                 defaults.push((name.clone(), scheme));
                             }
                         }
-                    }
-
-                    for (name, scheme) in defaults {
-                        checker.register_inherited_method(&method_owner, &name, scheme);
                     }
 
                     // Create and register the ProtocolImpl
@@ -5750,7 +5707,22 @@ impl TypeChecker {
 
                     checker.protocol_checker.write().register_source_impl(
                         &checker.current_module_path, impl_decl, protocol_impl,
-                    )
+                    )?;
+                    for (name, scheme) in declared_methods {
+                        if scheme.receiver_kind == Some(crate::core_metadata::ReceiverKind::None) {
+                            let key = format!("$static${name}").into();
+                            checker.record_method_publication(&method_owner, &key, &scheme);
+                            checker.inherent_methods.write().entry(method_owner.clone()).or_default()
+                                .insert(key, scheme.clone());
+                            static_method_registrations.push((format!("{method_owner}.{name}"), scheme));
+                        } else {
+                            checker.register_inherent_method_guarded(method_owner.clone(), name, scheme, true);
+                        }
+                    }
+                    for (name, scheme) in defaults {
+                        checker.register_inherited_method(&method_owner, &name, scheme);
+                    }
+                    Ok(())
                 });
                 self.pop_decl_param_frame();
                 if let Err(error) = publication {
