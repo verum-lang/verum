@@ -213,8 +213,10 @@ fn test_type_display() {
     assert_eq!(format!("{}", Type::float()), "Float");
     assert_eq!(format!("{}", Type::text()), "Text");
 
-    let fn_ty = Type::function(vec![Type::int()].into(), Type::bool());
-    assert_eq!(format!("{}", fn_ty), "fn(Int) -> Bool");
+    let unrestricted = Type::function(vec![Type::int()].into(), Type::bool());
+    assert_eq!(unrestricted.to_string(), "async fn(Int) -> Bool");
+    let synchronous = Type::function_with_async(vec![Type::int()].into(), Type::bool(), false);
+    assert_eq!(synchronous.to_string(), "fn(Int) -> Bool");
 
     let tuple = Type::tuple(vec![Type::int(), Type::bool()].into());
     assert_eq!(format!("{}", tuple), "(Int, Bool)");
