@@ -1,0 +1,80 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L2
+// @tags: sqlite, session, changeset, patchset
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.l4_vdbe.register.Register;
+mount core.database.sqlite.native.session.change.{Change, SessionChangeOp, change_insert, changeset_empty};
+mount core.database.sqlite.native.session.patch.from_changeset;
+mount core.database.sqlite.native.session.recorder.{attached_table, session_new};
+mount core.database.sqlite.native.session.combinator.{concat, filter, invert, strip_table};
+
+fn items_only(change: &Change) -> Bool {
+    change.table_name() == "items"
+}
+
+fn test_ordered_selection() {
+    let mut a = changeset_empty();
+    a.record(change_insert("items", [true], [Register.RInt(1_i64)]));
+    a.record(change_insert("other", [true], [Register.RInt(2_i64)]));
+    let mut b = changeset_empty();
+    b.record(change_insert("items", [true], [Register.RInt(3_i64)]));
+    let joined = concat(&a, &b);
+    let chosen = filter(&joined, items_only);
+    assert_eq(chosen.len(), 2);
+    assert(chosen.entries()[0].primary_key()[0] is Register.RInt(1_i64));
+    assert(chosen.entries()[1].primary_key()[0] is Register.RInt(3_i64));
+    let rest = strip_table(&joined, &Text.from("items"));
+    assert_eq(rest.len(), 1);
+    assert(rest.entries()[0].primary_key()[0] is Register.RInt(2_i64));
+    assert_eq(a.len(), 2);
+    assert_eq(b.len(), 1);
+    let first_key = change_insert("items", [true, false], [Register.RInt(1_i64), Register.RInt(1_i64)]);
+    let second_key = change_insert("items", [false, true], [Register.RInt(1_i64), Register.RInt(1_i64)]);
+    assert(!first_key.pk_matches(&second_key));
+    assert(!second_key.pk_matches(&first_key));
+}
+
+fn test_owned_rows_patch_null_and_inversion_order() {
+    let payload: List<Byte> = [0_u8, 255_u8];
+    let before: List<Register> = [Register.RInt(7_i64), Register.RBlob(payload.clone()), Register.RText("before")];
+    let after: List<Register> = [Register.RInt(7_i64), Register.RBlob(payload.clone()), Register.RNull];
+    let mut session = session_new();
+    session.attach(attached_table("items", [true, false, false]));
+    session.record_update("items", before, after);
+    session.record_delete("items", [Register.RInt(8_i64), Register.RBlob(payload), Register.RText("removed")]);
+    let captured = session.take_changeset();
+    assert_eq(session.change_count(), 0);
+    session.record_insert("items", [Register.RInt(9_i64), Register.RNull, Register.RNull]);
+    assert_eq(captured.len(), 2);
+
+    let changes = captured.iter();
+    let updated = &changes[0];
+    assert_eq(updated.table_name().clone(), Text.from("items"));
+    assert(updated.operation() is SessionChangeOp.OpUpdate);
+    assert(updated.primary_key()[0] is Register.RInt(7_i64));
+    match &updated.old_values()[1] {
+        Register.RBlob(bytes) => { assert_eq(bytes.len(), 2); assert_eq(bytes[1], 255_u8); }
+        _ => panic("recorded BLOB"),
+    }
+    let patches = from_changeset(&captured);
+    let patch = &patches.entries()[0];
+    assert(patch.primary_key()[0] is Register.RInt(7_i64));
+    assert(patch.cells()[1].value() is Maybe.None);
+    assert(patch.cells()[2].value() is Maybe.Some(Register.RNull));
+    let inverse = invert(&captured);
+    let first = &inverse.entries()[0];
+    let second = &inverse.entries()[1];
+    assert(first.operation() is SessionChangeOp.OpInsert);
+    assert(first.new_values()[0] is Register.RInt(8_i64));
+    assert(second.operation() is SessionChangeOp.OpUpdate);
+    assert(second.old_values()[2] is Register.RNull);
+    assert(second.new_values()[2] is Register.RText("before"));
+}
+
+fn main() {
+    test_owned_rows_patch_null_and_inversion_order();
+    test_ordered_selection();
+}

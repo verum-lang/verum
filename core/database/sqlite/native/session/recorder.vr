@@ -24,10 +24,11 @@ mount base.{Text, Bool};
 mount collections.List;
 mount core.database.sqlite.native.l4_vdbe.register.{Register};
 mount core.database.sqlite.native.ext.hooks.{
-    PreUpdateHook, UpdateHook, UpdateOp, UoInsert, UoUpdate, UoDelete,
+    PreUpdateHook, UpdateHook,
 };
+mount core.database.sqlite.native.hooks_api.op.UpdateOp;
 mount core.database.sqlite.native.session.change.{
-    Change, SessionChangeOp, ChangeSet, OpInsert, OpUpdate, OpDelete,
+    ChangeSet,
     changeset_empty, change_insert, change_update, change_delete,
 };
 
@@ -80,7 +81,7 @@ implement Session {
             if self.attached[i].name == t.name {
                 self.attached[i] = AttachedTable {
                     name: t.name.clone(),
-                    pk_columns: clone_bools(&t.pk_columns),
+                    pk_columns: t.pk_columns.clone(),
                 };
                 return;
             }
@@ -99,7 +100,7 @@ implement Session {
             } else {
                 new_list.push(AttachedTable {
                     name: self.attached[i].name.clone(),
-                    pk_columns: clone_bools(&self.attached[i].pk_columns),
+                    pk_columns: self.attached[i].pk_columns.clone(),
                 });
             }
             i = i + 1;
@@ -117,9 +118,9 @@ implement Session {
 
     /// Take ownership of the recorded changeset and reset the session.
     public fn take_changeset(&mut self) -> ChangeSet {
-        let cs = clone_changeset(&self.changeset);
+        let captured = self.changeset;
         self.changeset = changeset_empty();
-        cs
+        captured
     }
 
     fn lookup_attached(&self, name: &Text) -> Maybe<AttachedTable> {
@@ -128,7 +129,7 @@ implement Session {
             if self.attached[i].name == name {
                 return Maybe.Some(AttachedTable {
                     name: self.attached[i].name.clone(),
-                    pk_columns: clone_bools(&self.attached[i].pk_columns),
+                    pk_columns: self.attached[i].pk_columns.clone(),
                 });
             }
             i = i + 1;
@@ -198,69 +199,12 @@ implement PreUpdateHook for Session {
             Maybe.Some(t) => t,
             Maybe.None    => { return; }
         };
-        let old_clone = clone_row(old_row);
-        let new_clone = clone_row(new_row);
+        let old_clone = old_row.clone();
+        let new_clone = new_row.clone();
         match op {
-            UoInsert => self.changeset.record(change_insert(table_text, attached.pk_columns, new_clone)),
-            UoUpdate => self.changeset.record(change_update(table_text, attached.pk_columns, old_clone, new_clone)),
-            UoDelete => self.changeset.record(change_delete(table_text, attached.pk_columns, old_clone)),
+            UpdateOp.UoInsert => self.changeset.record(change_insert(table_text, attached.pk_columns, new_clone)),
+            UpdateOp.UoUpdate => self.changeset.record(change_update(table_text, attached.pk_columns, old_clone, new_clone)),
+            UpdateOp.UoDelete => self.changeset.record(change_delete(table_text, attached.pk_columns, old_clone)),
         }
-    }
-}
-
-// -----------------------------------------------------------------------------
-// Helpers
-// -----------------------------------------------------------------------------
-
-fn clone_bools(b: &List<Bool>) -> List<Bool> {
-    let mut out: List<Bool> = List.with_capacity(b.len());
-    out.extend_from_slice(b.as_slice());
-    out
-}
-
-fn clone_row(r: &List<Register>) -> List<Register> {
-    let mut out: List<Register> = List.with_capacity(r.len());
-    let mut i: Int = 0;
-    while i < r.len() { out.push(clone_register(&r[i])); i = i + 1; }
-    out
-}
-
-fn clone_register(r: &Register) -> Register {
-    match r {
-        core.database.sqlite.native.l4_vdbe.register.RNull     => core.database.sqlite.native.l4_vdbe.register.RNull,
-        core.database.sqlite.native.l4_vdbe.register.RInt(x)   => core.database.sqlite.native.l4_vdbe.register.RInt(x),
-        core.database.sqlite.native.l4_vdbe.register.RReal(x)  => core.database.sqlite.native.l4_vdbe.register.RReal(x),
-        core.database.sqlite.native.l4_vdbe.register.RText(s)  => core.database.sqlite.native.l4_vdbe.register.RText(s.clone()),
-        core.database.sqlite.native.l4_vdbe.register.RBlob(b)  => {
-            let mut out: List<Byte> = List.with_capacity(b.len());
-            out.extend_from_slice(b.as_slice());
-            core.database.sqlite.native.l4_vdbe.register.RBlob(out)
-        }
-        core.database.sqlite.native.l4_vdbe.register.RRowId(x) => core.database.sqlite.native.l4_vdbe.register.RRowId(x),
-    }
-}
-
-fn clone_changeset(cs: &ChangeSet) -> ChangeSet {
-    let mut out = changeset_empty();
-    let items = cs.iter();
-    let mut i: Int = 0;
-    while i < items.len() {
-        out.record(Change {
-            op: clone_change_op(&items[i].op),
-            table: items[i].table.clone(),
-            pk_columns: clone_bools(&items[i].pk_columns),
-            old_row: clone_row(&items[i].old_row),
-            new_row: clone_row(&items[i].new_row),
-        });
-        i = i + 1;
-    }
-    out
-}
-
-fn clone_change_op(o: &SessionChangeOp) -> SessionChangeOp {
-    match o {
-        OpInsert => OpInsert,
-        OpUpdate => OpUpdate,
-        OpDelete => OpDelete,
     }
 }

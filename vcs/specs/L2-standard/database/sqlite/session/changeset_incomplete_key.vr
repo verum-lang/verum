@@ -1,0 +1,16 @@
+// @test: run-interpreter-panic
+// @tier: 0
+// @level: L2
+// @tags: sqlite, session, changeset, primary-key
+// @timeout: 5000
+// @expected-panic: changeset row is missing a primary-key column
+
+mount core.database.sqlite.native.l4_vdbe.register.Register;
+mount core.database.sqlite.native.session.change.{change_update, changeset_empty};
+mount core.database.sqlite.native.session.patch.from_changeset;
+
+fn main() {
+    let mut set = changeset_empty();
+    set.record(change_update("items", [true, true], [Register.RInt(3_i64)], [Register.RInt(3_i64)]));
+    let _ = from_changeset(&set);
+}

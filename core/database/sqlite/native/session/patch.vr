@@ -28,12 +28,9 @@ module core.database.sqlite.native.session.patch;
 
 mount base.{Bool, Maybe};
 mount collections.List;
-mount core.database.sqlite.native.l4_vdbe.register.{
-    Register, RNull, RInt, RReal, RText, RBlob, RRowId,
-};
+mount core.database.sqlite.native.l4_vdbe.register.Register;
 mount core.database.sqlite.native.session.change.{
-    Change, SessionChangeOp, ChangeSet, OpInsert, OpUpdate, OpDelete,
-    change_op_name,
+    Change, SessionChangeOp, ChangeSet,
 };
 
 // -----------------------------------------------------------------------------
@@ -56,6 +53,19 @@ public type SessionPatch is {
     new_cells: List<PatchCell>,
 }
 
+implement PatchCell {
+    /// None preserves the old value. Some(RNull) writes SQL NULL.
+    public fn value(&self) -> &Maybe<Register> { &self.value }
+}
+
+implement SessionPatch {
+    public fn operation(&self) -> SessionChangeOp { self.op.clone() }
+    public fn table_name(&self) -> &Text { &self.table }
+    public fn key_columns(&self) -> &[Bool] { self.pk_columns.as_slice() }
+    public fn primary_key(&self) -> &[Register] { self.pk_values.as_slice() }
+    public fn cells(&self) -> &[PatchCell] { self.new_cells.as_slice() }
+}
+
 // -----------------------------------------------------------------------------
 // PatchSet
 // -----------------------------------------------------------------------------
@@ -66,6 +76,7 @@ public fn patchset_empty() -> PatchSet { PatchSet { patches: List.new() } }
 
 implement PatchSet {
     public fn len(&self) -> Int { self.patches.len() }
+    public fn entries(&self) -> &[SessionPatch] { self.patches.as_slice() }
 
     public fn record(&mut self, p: SessionPatch) {
         self.patches.push(p);
@@ -78,7 +89,7 @@ implement PatchSet {
 
 public fn from_changeset(cs: &ChangeSet) -> PatchSet {
     let mut out = patchset_empty();
-    let changes = cs.iter();
+    let changes = cs.entries();
     let mut i: Int = 0;
     while i < changes.len() {
         out.record(patch_from_change(&changes[i]));
@@ -88,53 +99,42 @@ public fn from_changeset(cs: &ChangeSet) -> PatchSet {
 }
 
 fn patch_from_change(c: &Change) -> SessionPatch {
-    let mut pk_values: List<Register> = List.new();
-    let mut k: Int = 0;
-    while k < c.pk_columns.len() {
-        if c.pk_columns[k] {
-            // PK is read from old_row for UPDATE/DELETE, new_row for INSERT.
-            let src = match c.op {
-                OpInsert => &c.new_row,
-                _        => &c.old_row,
-            };
-            if k < src.len() { pk_values.push(clone_register(&src[k])); }
-        }
-        k = k + 1;
-    }
+    let before = c.old_values();
+    let after = c.new_values();
     let mut new_cells: List<PatchCell> = List.new();
-    match c.op {
-        OpInsert => {
+    match c.operation() {
+        SessionChangeOp.OpInsert => {
             // Every cell present.
             let mut i: Int = 0;
-            while i < c.new_row.len() {
-                new_cells.push(PatchCell { value: Maybe.Some(clone_register(&c.new_row[i])) });
+            while i < after.len() {
+                new_cells.push(PatchCell { value: Maybe.Some(after[i].clone()) });
                 i = i + 1;
             }
         }
-        OpUpdate => {
+        SessionChangeOp.OpUpdate => {
             // Maybe.None for cells that didn't change.
             let mut i: Int = 0;
-            while i < c.new_row.len() {
-                let unchanged: Bool = if i < c.old_row.len() {
-                    registers_equal(&c.old_row[i], &c.new_row[i])
+            while i < after.len() {
+                let unchanged: Bool = if i < before.len() {
+                    registers_equal(&before[i], &after[i])
                 } else { false };
                 if unchanged {
                     new_cells.push(PatchCell { value: Maybe.None });
                 } else {
-                    new_cells.push(PatchCell { value: Maybe.Some(clone_register(&c.new_row[i])) });
+                    new_cells.push(PatchCell { value: Maybe.Some(after[i].clone()) });
                 }
                 i = i + 1;
             }
         }
-        OpDelete => {
+        SessionChangeOp.OpDelete => {
             // No new values for delete.
         }
     }
     SessionPatch {
-        op: clone_op(&c.op),
-        table: c.table.clone(),
-        pk_columns: clone_bools(&c.pk_columns),
-        pk_values: pk_values,
+        op: c.operation(),
+        table: c.table_name().clone(),
+        pk_columns: List.from_slice(c.key_columns()),
+        pk_values: c.primary_key(),
         new_cells: new_cells,
     }
 }
@@ -143,48 +143,21 @@ fn patch_from_change(c: &Change) -> SessionPatch {
 // Helpers
 // -----------------------------------------------------------------------------
 
-fn clone_register(r: &Register) -> Register {
-    match r {
-        RNull     => RNull,
-        RInt(x)   => RInt(x),
-        RReal(x)  => RReal(x),
-        RText(s)  => RText(s.clone()),
-        RBlob(b)  => {
-            let mut out: List<Byte> = List.new();
-            let mut i: Int = 0;
-            while i < b.len() { out.push(b[i]); i = i + 1; }
-            RBlob(out)
-        }
-        RRowId(x) => RRowId(x),
-    }
-}
-
-fn clone_op(o: &SessionChangeOp) -> SessionChangeOp {
-    match o { OpInsert => OpInsert, OpUpdate => OpUpdate, OpDelete => OpDelete }
-}
-
-fn clone_bools(b: &List<Bool>) -> List<Bool> {
-    let mut out: List<Bool> = List.new();
-    let mut i: Int = 0;
-    while i < b.len() { out.push(b[i]); i = i + 1; }
-    out
-}
-
 fn registers_equal(a: &Register, b: &Register) -> Bool {
     match a {
-        RNull => match b { RNull => true, _ => false },
-        RInt(x) => match b {
-            RInt(y) => x == y,
-            RRowId(y) => x == y,
+        Register.RNull => match b { Register.RNull => true, _ => false },
+        Register.RInt(x) => match b {
+            Register.RInt(y) => x == y,
+            Register.RRowId(y) => x == y,
             _ => false,
         },
-        RReal(x) => match b {
-            RReal(y) => x == y,
+        Register.RReal(x) => match b {
+            Register.RReal(y) => x == y,
             _ => false,
         },
-        RText(xs) => match b { RText(ys) => xs == ys, _ => false },
-        RBlob(xb) => match b {
-            RBlob(yb) => {
+        Register.RText(xs) => match b { Register.RText(ys) => xs == ys, _ => false },
+        Register.RBlob(xb) => match b {
+            Register.RBlob(yb) => {
                 if xb.len() != yb.len() { return false; }
                 let mut i: Int = 0;
                 while i < xb.len() {
@@ -195,6 +168,6 @@ fn registers_equal(a: &Register, b: &Register) -> Bool {
             }
             _ => false,
         },
-        RRowId(x) => match b { RRowId(y) => x == y, _ => false },
+        Register.RRowId(x) => match b { Register.RRowId(y) => x == y, _ => false },
     }
 }

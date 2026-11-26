@@ -30,9 +30,8 @@ module core.database.sqlite.native.session.change;
 
 mount base.{Text, Bool, Maybe};
 mount collections.List;
-mount core.database.sqlite.native.l4_vdbe.register.{
-    Register, RNull, RInt, RReal, RText, RBlob, RRowId,
-};
+mount core.base.protocols.Clone;
+mount core.database.sqlite.native.l4_vdbe.register.Register;
 
 // -----------------------------------------------------------------------------
 // Op
@@ -105,24 +104,72 @@ public fn change_delete(table: Text, pk_columns: List<Bool>, old_row: List<Regis
     }
 }
 
+implement Clone for SessionChangeOp {
+    fn clone(&self) -> SessionChangeOp {
+        match self { OpInsert => OpInsert, OpUpdate => OpUpdate, OpDelete => OpDelete }
+    }
+}
+
+implement Clone for Change {
+    fn clone(&self) -> Change {
+        Change {
+            op: self.op.clone(),
+            table: self.table.clone(),
+            pk_columns: self.pk_columns.clone(),
+            old_row: self.old_row.clone(),
+            new_row: self.new_row.clone(),
+        }
+    }
+}
+
 implement Change {
     public fn column_count(&self) -> Int { self.pk_columns.len() }
 
-    /// Fast equality check on the primary-key portion of two rows.
+    public fn operation(&self) -> SessionChangeOp { self.op.clone() }
+    public fn table_name(&self) -> &Text { &self.table }
+    public fn key_columns(&self) -> &[Bool] { self.pk_columns.as_slice() }
+    public fn old_values(&self) -> &[Register] { self.old_row.as_slice() }
+    public fn new_values(&self) -> &[Register] { self.new_row.as_slice() }
+
+    fn key_row(&self) -> &[Register] {
+        match self.op { OpInsert => self.new_values(), _ => self.old_values() }
+    }
+
+    /// Extract the complete key in schema order. Each flagged column must be present.
+    public fn primary_key(&self) -> List<Register> {
+        let row = self.key_row();
+        let mut key: List<Register> = List.new();
+        let mut i = 0;
+        while i < self.pk_columns.len() {
+            if self.pk_columns[i] {
+                assert(i < row.len(), "changeset row is missing a primary-key column");
+                key.push(row[i].clone());
+            }
+            i = i + 1;
+        }
+        key
+    }
+
+    public(in core.database.sqlite.native.session) fn inverted(&self) -> Change {
+        let table = self.table.clone();
+        let mask = self.pk_columns.clone();
+        match self.op {
+            OpInsert => change_delete(table, mask, self.new_row.clone()),
+            OpDelete => change_insert(table, mask, self.old_row.clone()),
+            OpUpdate => change_update(table, mask, self.new_row.clone(), self.old_row.clone()),
+        }
+    }
+
+    /// Compare the primary-key columns of two changes on the same table.
     public fn pk_matches(&self, other: &Change) -> Bool {
         if self.table != other.table { return false; }
         if self.pk_columns.len() != other.pk_columns.len() { return false; }
+        let a = self.key_row();
+        let b = other.key_row();
         let mut i: Int = 0;
         while i < self.pk_columns.len() {
+            if self.pk_columns[i] != other.pk_columns[i] { return false; }
             if self.pk_columns[i] {
-                let a = match self.op {
-                    OpInsert => &self.new_row,
-                    _        => &self.old_row,
-                };
-                let b = match other.op {
-                    OpInsert => &other.new_row,
-                    _        => &other.old_row,
-                };
                 if i >= a.len() || i >= b.len() { return false; }
                 if !registers_equal(&a[i], &b[i]) { return false; }
             }
@@ -150,15 +197,11 @@ implement ChangeSet {
         self.changes.push(c);
     }
 
-    public fn iter(&self) -> List<Change> {
-        let mut out: List<Change> = List.new();
-        let mut i: Int = 0;
-        while i < self.changes.len() {
-            out.push(clone_change(&self.changes[i]));
-            i = i + 1;
-        }
-        out
-    }
+    /// Borrow the events in their recorded order.
+    public fn entries(&self) -> &[Change] { self.changes.as_slice() }
+
+    /// Return independent copies of the recorded events.
+    public fn iter(&self) -> List<Change> { self.changes.clone() }
 
     /// Group changes by table — used by the applier to batch by
     /// target table and avoid repeatedly looking up schema metadata.
@@ -175,10 +218,10 @@ implement ChangeSet {
             }
             if found_idx < 0 {
                 let mut bucket: List<Change> = List.new();
-                bucket.push(clone_change(&self.changes[i]));
+                bucket.push(self.changes[i].clone());
                 buckets.push((table, bucket));
             } else {
-                buckets[found_idx].1.push(clone_change(&self.changes[i]));
+                buckets[found_idx].1.push(self.changes[i].clone());
             }
             i = i + 1;
         }
@@ -202,68 +245,24 @@ implement ChangeSet {
 // Helpers
 // -----------------------------------------------------------------------------
 
-fn clone_change(c: &Change) -> Change {
-    Change {
-        op: clone_op(&c.op),
-        table: c.table.clone(),
-        pk_columns: clone_bools(&c.pk_columns),
-        old_row: clone_row(&c.old_row),
-        new_row: clone_row(&c.new_row),
-    }
-}
-
-fn clone_op(o: &SessionChangeOp) -> SessionChangeOp {
-    match o { OpInsert => OpInsert, OpUpdate => OpUpdate, OpDelete => OpDelete }
-}
-
-fn clone_bools(b: &List<Bool>) -> List<Bool> {
-    let mut out: List<Bool> = List.new();
-    let mut i: Int = 0;
-    while i < b.len() { out.push(b[i]); i = i + 1; }
-    out
-}
-
-fn clone_row(r: &List<Register>) -> List<Register> {
-    let mut out: List<Register> = List.new();
-    let mut i: Int = 0;
-    while i < r.len() { out.push(clone_register(&r[i])); i = i + 1; }
-    out
-}
-
-fn clone_register(r: &Register) -> Register {
-    match r {
-        RNull     => RNull,
-        RInt(x)   => RInt(x),
-        RReal(x)  => RReal(x),
-        RText(s)  => RText(s.clone()),
-        RBlob(b)  => {
-            let mut out: List<Byte> = List.new();
-            let mut i: Int = 0;
-            while i < b.len() { out.push(b[i]); i = i + 1; }
-            RBlob(out)
-        }
-        RRowId(x) => RRowId(x),
-    }
-}
-
 fn registers_equal(a: &Register, b: &Register) -> Bool {
     match a {
-        RNull => match b { RNull => true, _ => false },
-        RInt(x) => match b {
-            RInt(y) => x == y,
-            RRowId(y) => x == y,
+        Register.RNull => match b { Register.RNull => true, _ => false },
+        Register.RInt(x) => match b {
+            Register.RInt(y) => x == y,
+            Register.RRowId(y) => x == y,
             _ => false,
         },
-        RReal(x) => match b {
-            RReal(y) => x == y,
-            RInt(y) => x == (y as Float64),
+        Register.RReal(x) => match b {
+            Register.RReal(y) => x == y,
+            Register.RInt(y) => x == (y as Float64),
             _ => false,
         },
-        RText(xs) => match b { RText(ys) => xs == ys, _ => false },
-        RBlob(xb) => match b { RBlob(yb) => bytes_equal(xb, yb), _ => false },
-        RRowId(x) => match b {
-            RRowId(y) => x == y,
-            RInt(y) => x == y,
+        Register.RText(xs) => match b { Register.RText(ys) => xs == ys, _ => false },
+        Register.RBlob(xb) => match b { Register.RBlob(yb) => bytes_equal(xb, yb), _ => false },
+        Register.RRowId(x) => match b {
+            Register.RRowId(y) => x == y,
+            Register.RInt(y) => x == y,
             _ => false,
         },
     }
