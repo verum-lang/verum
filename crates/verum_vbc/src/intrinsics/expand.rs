@@ -734,16 +734,11 @@ fn expand_sequence(
             }
             e.emit(Instruction::LoadNil { dst: dest });
         }
-        InlineSequenceId::MakeSlice if args.len() >= 2 => {
-            let mut operands = Vec::with_capacity(7);
-            crate::encoding::encode_reg(dest, &mut operands);
-            crate::encoding::encode_reg(args[0], &mut operands);
-            crate::encoding::encode_reg(args[1], &mut operands);
-            operands.push(byte_width);
-            e.emit(Instruction::CbgrExtended {
-                sub_op: crate::instruction::CbgrSubOpcode::RefSliceRaw as u8,
-                operands,
-            });
+        InlineSequenceId::MakeSlice => {
+            let [ptr, len] = args else { return false; };
+            let Some(view) = crate::encoding::RawSliceOperands::new(dest, *ptr, *len, byte_width)
+                else { return false; };
+            e.emit(view.instruction());
         }
         InlineSequenceId::Uninit => {
             e.emit(Instruction::LoadUnit { dst: dest });

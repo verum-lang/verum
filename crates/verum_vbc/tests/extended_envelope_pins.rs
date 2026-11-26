@@ -92,6 +92,43 @@ fn incomplete_operands_fail_inside_the_envelope() {
     }
 }
 
+#[test]
+fn raw_slice_uses_its_exact_operand_envelope_and_element_width() {
+    use verum_vbc::{encoding::RawSliceOperands, instruction::CbgrSubOpcode};
+    for stride in [1, 2, 4, 8] {
+        let view = RawSliceOperands::new(Reg(270), Reg(128), Reg(258), stride).unwrap();
+        let operation = view.instruction();
+        let Instruction::CbgrExtended { ref operands, .. } = operation else { unreachable!() };
+        assert_eq!(RawSliceOperands::decode(operands, &mut 0).unwrap(), view);
+        let storage = [0_u64; 73];
+        let mut length_operands = vec![];
+        verum_vbc::encoding::encode_reg(Reg(0), &mut length_operands);
+        verum_vbc::encoding::encode_reg(view.dst, &mut length_operands);
+        let result = run_with_regs(&[
+            Instruction::LoadI { dst: view.ptr, value: storage.as_ptr() as i64 },
+            Instruction::LoadI { dst: view.len, value: 73 },
+            operation,
+            Instruction::CbgrExtended {
+                sub_op: CbgrSubOpcode::SliceLen as u8,
+                operands: length_operands,
+            },
+            Instruction::Ret { value: Reg(0) },
+        ], 271);
+        assert_eq!(result.as_i64(), 73);
+    }
+    for invalid in [&[0, 1, 2][..], &[0, 1, 2, 3], &[0, 1, 2, 1, 8], &[0x81]] {
+        let instructions = [Instruction::CbgrExtended {
+            sub_op: CbgrSubOpcode::RefSliceRaw as u8,
+            operands: invalid.into(),
+        }, Instruction::RetV];
+        let mut bytes = vec![];
+        bytecode::encode_instructions(&instructions, &mut bytes);
+        let module = create_module(bytes, 3);
+        let error = Interpreter::new(module).execute_function(FunctionId(0)).unwrap_err();
+        assert!(matches!(error, InterpreterError::InvalidBytecode { .. }), "{error}");
+    }
+}
+
 // ============================================================================
 // Over-declared envelopes — surplus bytes must be skipped, not executed.
 // ============================================================================

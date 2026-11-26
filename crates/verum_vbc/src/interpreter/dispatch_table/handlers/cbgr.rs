@@ -2715,36 +2715,10 @@ fn cbgr_extended_body(
         }
 
         Some(CbgrSubOpcode::RefSliceRaw) => {
-            // Create a FatRef directly from a raw pointer + length, with
-            // elem_size=1 (byte slice). Used to lower the generic
-            // `slice_from_raw_parts<T>` stdlib intrinsic when the pointer
-            // does not point to an ObjectHeader (raw buffer addresses).
-            // NOTE: `Text.as_bytes()` no longer produces this shape — it
-            // allocates a typed BYTE_SLICE (528) object (ARCH-P5).
-            //
-
-            // Format: dst:reg, ptr:reg, len:reg[, elem:byte]
-            // #48 phase-2: the optional 4th operand is the ELEMENT
-            // STRIDE the emitter derived from the ptr arg's spelling
-            // (`&unsafe Byte` → 1; `*const T`/Value backings → 8).
-            // Legacy 3-operand streams keep the historic byte
-            // semantics.
-            let dst = read_reg(state)?;
-            let ptr_reg = read_reg(state)?;
-            let len_reg = read_reg(state)?;
-            // Fixed 4-operand format (emitter always writes the stride
-            // byte; the operand stream is self-describing so an optional
-            // read would desynchronise on legacy 3-operand streams —
-            // instead the PRECOMPILE_SCHEMA_VERSION bump forces a rebake).
-            let elem_raw = read_u8(state)?;
-            let elem: u8 = if matches!(elem_raw, 1 | 2 | 4 | 8) {
-                elem_raw
-            } else {
-                1
-            };
-
-            let ptr_val = state.get_reg(ptr_reg);
-            let len = state.get_reg(len_reg).as_i64() as u64;
+            let view = super::bytecode_io::read_operand(state, crate::encoding::RawSliceOperands::decode)?;
+            let ptr_val = state.get_reg(view.ptr);
+            let len = state.get_reg(view.len).as_i64() as u64;
+            let elem = view.stride();
 
             let raw_ptr = if ptr_val.is_thin_ref() {
                 ptr_val.raw_thin_ref()?.ptr
@@ -2770,7 +2744,7 @@ fn cbgr_extended_body(
             // the 8-byte case IS the Value-array case for raw parts).
             fat_ref.reserved = if elem == 8 { 0 } else { elem as u32 };
 
-            state.set_reg(dst, Value::from_fat_ref(fat_ref));
+            state.set_reg(view.dst, Value::from_fat_ref(fat_ref));
             Ok(DispatchResult::Continue)
         }
 

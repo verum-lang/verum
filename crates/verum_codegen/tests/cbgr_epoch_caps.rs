@@ -313,6 +313,32 @@ fn malformed_snapshot_operands_cannot_alias_an_existing_register() {
 }
 
 #[test]
+fn raw_slice_lowering_requires_the_complete_storage_layout() {
+    use verum_vbc::{Reg, encoding::RawSliceOperands};
+    let context = Context::create();
+    let module = context.create_module("raw_slice_layout");
+    let function = module.add_function("raw_slice", context.void_type().fn_type(&[], false), None);
+    let mut ctx = FunctionContext::new(&context, &module, function, "raw_slice");
+    ctx.builder().position_at_end(context.append_basic_block(function, "entry"));
+    for operands in [&[0, 1, 2][..], &[0, 1, 2, 3], &[0, 1, 2, 1, 8], &[0x81]] {
+        let op = Instruction::CbgrExtended {
+            sub_op: CbgrSubOpcode::RefSliceRaw as u8, operands: operands.into(),
+        };
+        assert!(matches!(lower_instruction(&mut ctx, &op),
+            Err(LlvmLoweringError::UnsupportedInstruction(_))));
+    }
+    ctx.set_register(128, context.i64_type().const_zero().into());
+    ctx.set_register(258, context.i64_type().const_int(73, false).into());
+    for stride in [1, 2, 4, 8] {
+        let view = RawSliceOperands::new(Reg(270), Reg(128), Reg(258), stride).unwrap();
+        lower_instruction(&mut ctx, &view.instruction()).unwrap();
+        assert!(ctx.get_register(270).unwrap().is_pointer_value());
+    }
+    ctx.builder().build_return(None).unwrap();
+    module.verify().unwrap();
+}
+
+#[test]
 fn wide_snapshot_registers_keep_their_encoded_identity() {
     use verum_common::List;
     use verum_vbc::{Reg, encoding::encode_reg};

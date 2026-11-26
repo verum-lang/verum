@@ -287,6 +287,56 @@ pub fn decode_reg(data: &[u8], offset: &mut usize) -> VbcResult<Reg> {
     }
 }
 
+/// Operands of a raw slice view. Both VBC producers and both execution tiers
+/// use the same register encoding and element-stride domain.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RawSliceOperands {
+    pub dst: Reg,
+    pub ptr: Reg,
+    pub len: Reg,
+    stride: u8,
+}
+
+impl RawSliceOperands {
+    pub fn new(dst: Reg, ptr: Reg, len: Reg, stride: u8) -> Option<Self> {
+        matches!(stride, 1 | 2 | 4 | 8).then_some(Self { dst, ptr, len, stride })
+    }
+
+    pub fn stride(self) -> u8 {
+        self.stride
+    }
+
+    pub fn instruction(self) -> crate::Instruction {
+        let mut operands = Vec::with_capacity(7);
+        for register in [self.dst, self.ptr, self.len] {
+            encode_reg(register, &mut operands);
+        }
+        operands.push(self.stride);
+        crate::Instruction::CbgrExtended {
+            sub_op: crate::instruction::CbgrSubOpcode::RefSliceRaw as u8,
+            operands,
+        }
+    }
+
+    /// `data` ends at the extended instruction's declared operand boundary.
+    pub fn decode(data: &[u8], cursor: &mut usize) -> VbcResult<Self> {
+        let dst = decode_reg(data, cursor)?;
+        let ptr = decode_reg(data, cursor)?;
+        let len = decode_reg(data, cursor)?;
+        let offset = *cursor;
+        let stride = decode_u8(data, cursor)?;
+        let operands = Self::new(dst, ptr, len, stride).ok_or_else(|| VbcError::InvalidInstructionEncoding {
+            offset, reason: format!("invalid raw slice element stride {stride}"),
+        })?;
+        if *cursor != data.len() {
+            return Err(VbcError::InvalidInstructionEncoding {
+                offset: *cursor, reason: "trailing raw slice operands".into(),
+            });
+        }
+        Ok(operands)
+    }
+}
+
 /// Encodes a register range.
 #[inline]
 pub fn encode_reg_range(range: RegRange, output: &mut Vec<u8>) {

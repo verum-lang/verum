@@ -37697,46 +37697,12 @@ impl VbcCodegen {
             }
 
             InlineSequenceId::MakeSlice => {
-                // Lower `slice_from_raw_parts(ptr, len)` to a FatRef directly.
-                //
-
-                // Previously this packed (ptr, len) into a heap tuple, but the
-                // resulting Value was not recognised as a slice by any downstream
-                // opcode: `.len()` returned 2 (tuple arity), `bytes[i]` read a
-                // NaN-boxed Value instead of a byte, and every CBGR slice op
-                // fell through its `is_fat_ref()` guard. Emitting a proper
-                // FatRef via CbgrSubOpcode::RefSliceRaw makes SliceLen, SliceGet,
-                // and the Len opcode all hit their FatRef fast paths and return
-                // the correct byte length / byte value.
-                if args.len() >= 2 {
-                    let mut operands = Vec::with_capacity(7);
-                    let push_reg = |operands: &mut Vec<u8>, r: Reg| {
-                        if r.is_short() {
-                            operands.push(r.0 as u8);
-                        } else {
-                            operands.push(0x80 | ((r.0 >> 8) as u8));
-                            operands.push(r.0 as u8);
-                        }
-                    };
-                    push_reg(&mut operands, dest);
-                    push_reg(&mut operands, args[0]);
-                    push_reg(&mut operands, args[1]);
-                    // #48 phase-2: 4th operand — ELEMENT STRIDE, derived
-                    // at the call site from the ptr arg's spelling (the
-                    // ptr_intrinsic_byte_stride discipline: `&unsafe
-                    // Byte` → 1, everything else → 8-byte Values). Both
-                    // tiers' RefSliceRaw handlers carry it into the
-                    // slice representation (FatRef.reserved / canonical
-                    // cell elem) — retiring the hardcoded elem=1 that
-                    // byte-strided every &[T] raw-parts view.
-                    operands.push(byte_width);
-                    self.ctx.emit(Instruction::CbgrExtended {
-                        sub_op: crate::instruction::CbgrSubOpcode::RefSliceRaw as u8,
-                        operands,
-                    });
-                } else {
-                    self.ctx.emit(Instruction::LoadNil { dst: dest });
-                }
+                let [ptr, len] = args else {
+                    return Err(CodegenError::internal("raw slice requires a pointer and length"));
+                };
+                let view = crate::encoding::RawSliceOperands::new(dest, *ptr, *len, byte_width)
+                    .ok_or_else(|| CodegenError::internal(format!("invalid raw slice stride {byte_width}")))?;
+                self.ctx.emit(view.instruction());
             }
 
             InlineSequenceId::Uninit => {
