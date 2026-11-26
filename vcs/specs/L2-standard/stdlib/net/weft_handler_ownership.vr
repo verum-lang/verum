@@ -1,0 +1,27 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @description: Plain and TLS connections can share a handler with no Clone bound.
+module core.weft_handler_ownership;
+
+mount core.async.cancellation.CancellationToken;
+mount core.base.memory.Shared;
+mount core.net.tls.TlsConfig;
+mount core.net.weft.connection.ConnectionConfig;
+mount core.net.weft.handler.Handler;
+mount core.net.weft.listener.PlainHttp1Runner;
+mount core.net.weft.tls.TlsHttp1Runner;
+mount core.sync.{Send, Sync};
+mount core.sync.atomic.AtomicBool;
+
+fn plain<H: Handler + Send + Sync + 'static>(
+    app: Shared<H>, token: CancellationToken, draining: Shared<AtomicBool>, config: ConnectionConfig,
+) -> PlainHttp1Runner<H> {
+    PlainHttp1Runner.new(app, token, draining, config)
+}
+
+fn encrypted<H: Handler + Send + Sync + 'static>(
+    app: Shared<H>, token: CancellationToken, draining: Shared<AtomicBool>, config: ConnectionConfig, tls: TlsConfig,
+) -> TlsHttp1Runner<H> {
+    TlsHttp1Runner.new(app, token, draining, config, tls)
+}

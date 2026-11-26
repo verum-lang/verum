@@ -124,10 +124,9 @@ implement WeftTransport for TlsTransport {
 /// wrap the result in `TlsTransport`, then drive `serve_http1`.
 ///
 
-/// Cloned once per spawned connection (everything inside is
-/// Shared/Heap, so clone is cheap pointer copies).
+/// Each connection retains the shared handler and its cancellation state.
 public type TlsHttp1Runner<H> is {
-    app: Heap<H>,
+    app: Shared<H>,
     token: CancellationToken,
     draining: Shared<AtomicBool>,
     connection_cfg: ConnectionConfig,
@@ -136,7 +135,7 @@ public type TlsHttp1Runner<H> is {
 
 implement<H: Handler + Send + Sync + 'static> TlsHttp1Runner<H> {
     public fn new(
-        app: Heap<H>,
+        app: Shared<H>,
         token: CancellationToken,
         draining: Shared<AtomicBool>,
         connection_cfg: ConnectionConfig,
@@ -176,7 +175,7 @@ implement<H: Handler + Send + Sync + 'static> ConnectionRunner for TlsHttp1Runne
                 let transport = TlsTransport.new(tls_stream, peer);
                 let _ = serve_http1(
                     transport, peer,
-                    self.app.clone(),
+                    &*self.app,
                     self.token.clone(),
                     self.draining.clone(),
                     self.connection_cfg.clone(),

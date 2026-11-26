@@ -162,7 +162,7 @@ public type ConnectionRunner is protocol {
 // =============================================================================
 
 public type PlainHttp1Runner<H> is {
-    app: Heap<H>,
+    app: Shared<H>,
     token: CancellationToken,
     draining: Shared<AtomicBool>,
     connection_cfg: ConnectionConfig,
@@ -170,7 +170,7 @@ public type PlainHttp1Runner<H> is {
 
 implement<H: Handler + Send + Sync + 'static> PlainHttp1Runner<H> {
     public fn new(
-        app: Heap<H>,
+        app: Shared<H>,
         token: CancellationToken,
         draining: Shared<AtomicBool>,
         connection_cfg: ConnectionConfig,
@@ -199,7 +199,7 @@ implement<H: Handler + Send + Sync + 'static> ConnectionRunner for PlainHttp1Run
     async fn run(&self, stream: TcpStream, peer: SocketAddr) {
         let _ = serve_http1(
             stream, peer,
-            self.app.clone(),
+            &*self.app,
             self.token.clone(),
             self.draining.clone(),
             self.connection_cfg.clone(),
@@ -501,7 +501,7 @@ implement PerIpLimiter {
 ///  after `drain_grace_ms` any still-running handler is dropped.
 public type Server<H> is {
     listener: TcpListener,
-    app: Heap<H>,
+    app: Shared<H>,
     config: ListenerConfig,
     token: CancellationToken,
     draining: Shared<AtomicBool>,
@@ -520,7 +520,7 @@ implement<H: Handler + Send + Sync + 'static> Server<H> {
             Result.Err(e) => Result.Err(f"bind failed: {e}"),
             Result.Ok(listener) => Result.Ok(Server {
                 listener: listener,
-                app: Heap.new(app),
+                app: Shared.new(app),
                 config: config,
                 token: CancellationToken.new(),
                 draining: Shared.new(AtomicBool.new(false)),

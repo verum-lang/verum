@@ -280,12 +280,13 @@ type KeepAlive is
 public async fn serve_http1<T: WeftTransport, S: Handler>(
     mut stream: T,
     peer_addr: SocketAddr,
-    app: Heap<S>,
+    app: &S,
     token: CancellationToken,
     draining: Shared<AtomicBool>,
-    config: ConnectionConfig,
+    mut config: ConnectionConfig,
 ) -> Result<(), ConnError> {
     let mut waiting_for_next_request = false;
+    let allow_keep_alive = config.keep_alive;
     loop {
         if token.is_cancelled() {
             return Result.Err(ConnError.Cancelled);
@@ -293,12 +294,8 @@ public async fn serve_http1<T: WeftTransport, S: Handler>(
         // If the listener started draining, disable keep-alive for the
         // next message so this connection closes cleanly afterwards.
         let drain_now = draining.load(MemoryOrdering.Acquire);
-        let effective_cfg: ConnectionConfig = if drain_now {
-            ConnectionConfig { keep_alive: false, ..config.clone() }
-        } else {
-            config.clone()
-        };
-        match serve_one_message(&mut stream, &peer_addr, &*app, &token, &effective_cfg, waiting_for_next_request).await {
+        config.keep_alive = allow_keep_alive && !drain_now;
+        match serve_one_message(&mut stream, &peer_addr, app, &token, &config, waiting_for_next_request).await {
             Result.Ok(KeepAlive.Continue) => {
                 waiting_for_next_request = true;
                 continue;
