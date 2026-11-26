@@ -67,24 +67,34 @@ a constant to `fn() -> Int` succeeds. Introducing only `PHASE.lock()` or only
 
 ### §3.2 Interpreter wake registration
 
-The interpreter routes the futex operations through
-`crates/verum_vbc/src/interpreter/dispatch_table/handlers/sync_extended.rs`.
-The underlying `futex_park` in `ffi_extended.rs` checks for a wake token before
-parking, while the notification side updates tokens and signals without
-holding the parking mutex. A wake can land between that check and the park.
+In the VBC interpreter, the futex word is a 32-bit atomic. The wait handler
+compares the word and registers the caller under the same queue lock that
+wake uses. A broadcast selects the currently registered waiters at that
+address. A timeout removes its own registration. Wake and timeout both
+remove an empty address entry. This implements the atomic compare-and-block
+and bounded wake-count contracts. [Futex wait semantics](https://man7.org/linux/man-pages/man2/futex.2.html) · [Futex wake semantics](https://man7.org/linux/man-pages/man2/FUTEX_WAKE.2const.html)
 
-An independent execution of the actual parking module on an unchanged
-`AtomicI32` initialized to 7 produced the following results. Both waits used
-expected value 7 and a timeout of 2,000,000 ns.
+The former parking implementation kept wake tokens after a timeout. With an
+unchanged word of 7 and 2 ms waits, a wait, an empty broadcast and a second
+wait returned `-110, 2147483647, 0`. The corrected results are
+`-110, 0, -110`. The empty broadcast also returned `2147483647` when
+reproduced through the former VBC instruction handler.
 
-| Operation | Result | Expected |
-|---|---:|---:|
-| First wait | -110 | -110 |
-| Wake with count 2147483647 after the only waiter timed out | 2147483647 | 0 |
-| Second wait | 0 | -110 |
+The [VBC execution tests](../../../crates/verum_vbc/tests/futex_waiters.rs)
+compile callers of the standard-library intrinsic declarations. Interpreter
+workers exercise empty, capped and repeated wakes, a broadcast, an
+indefinite wait, address isolation and reuse. An owned Verum record also
+compares its second field through the same direct pointer cast used by
+`AtomicU32.park_if_equal`. Each run races a VBC
+release store and wake against registration 128 times, and timeout against
+wake 64 times. The host test provides threads and shared word lifetimes.
 
-This exercises the Rust parking implementation. The public handoff fixture
-requires the compiler, archive, VBC dispatch and guard cleanup in addition.
+The neighboring `raw_field_reference_cast` test exposes a separate operand
+conversion defect. Converting a forwarded `&Int` field to `&unsafe Byte`
+passes a protected field handle to the raw-address decoder. It fails before
+the wait handler compares the word, with both parking implementations.
+The public threaded handoff still requires callback admission, a matching
+archive and guard cleanup.
 
 ### §3.3 `producer_consumer_pair` returns `(Mutex<T>, Condvar)`
 
