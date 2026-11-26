@@ -16,14 +16,7 @@
 )
 module core.database.sqlite.native.limits_api.budget;
 
-mount base.{Bool};
-mount core.database.sqlite.native.limits_api.category.{
-    LimitCategory,
-    LcLength, LcSqlLength, LcColumn, LcExprDepth, LcCompoundSelect,
-    LcVdbeOp, LcFunctionArg, LcAttached, LcLikePatternLength,
-    LcVariableNumber, LcTriggerDepth, LcWorkerThreads,
-    default_hard_max,
-};
+mount core.database.sqlite.native.limits_api.category.{LimitCategory, default_hard_max};
 
 public type LimitBudget is {
     length: Int,
@@ -42,42 +35,36 @@ public type LimitBudget is {
 
 public fn new_budget() -> LimitBudget {
     LimitBudget {
-        length:              default_hard_max(&LcLength),
-        sql_length:          default_hard_max(&LcSqlLength),
-        column:              default_hard_max(&LcColumn),
-        expr_depth:          default_hard_max(&LcExprDepth),
-        compound_select:     default_hard_max(&LcCompoundSelect),
-        vdbe_op:             default_hard_max(&LcVdbeOp),
-        function_arg:        default_hard_max(&LcFunctionArg),
-        attached:            default_hard_max(&LcAttached),
-        like_pattern_length: default_hard_max(&LcLikePatternLength),
-        variable_number:     default_hard_max(&LcVariableNumber),
-        trigger_depth:       default_hard_max(&LcTriggerDepth),
-        worker_threads:      default_hard_max(&LcWorkerThreads),
+        length:              default_hard_max(&LimitCategory.LcLength),
+        sql_length:          default_hard_max(&LimitCategory.LcSqlLength),
+        column:              default_hard_max(&LimitCategory.LcColumn),
+        expr_depth:          default_hard_max(&LimitCategory.LcExprDepth),
+        compound_select:     default_hard_max(&LimitCategory.LcCompoundSelect),
+        vdbe_op:             default_hard_max(&LimitCategory.LcVdbeOp),
+        function_arg:        default_hard_max(&LimitCategory.LcFunctionArg),
+        attached:            default_hard_max(&LimitCategory.LcAttached),
+        like_pattern_length: default_hard_max(&LimitCategory.LcLikePatternLength),
+        variable_number:     default_hard_max(&LimitCategory.LcVariableNumber),
+        trigger_depth:       default_hard_max(&LimitCategory.LcTriggerDepth),
+        worker_threads:      default_hard_max(&LimitCategory.LcWorkerThreads),
     }
-}
-
-fn clamp(requested: Int, hard_max: Int) -> Int {
-    if requested > hard_max { return hard_max; }
-    if requested < 0 { return 0; }
-    requested
 }
 
 implement LimitBudget {
     public fn get(&self, c: &LimitCategory) -> Int {
         match c {
-            LcLength             => self.length,
-            LcSqlLength          => self.sql_length,
-            LcColumn             => self.column,
-            LcExprDepth          => self.expr_depth,
-            LcCompoundSelect     => self.compound_select,
-            LcVdbeOp             => self.vdbe_op,
-            LcFunctionArg        => self.function_arg,
-            LcAttached           => self.attached,
-            LcLikePatternLength  => self.like_pattern_length,
-            LcVariableNumber     => self.variable_number,
-            LcTriggerDepth       => self.trigger_depth,
-            LcWorkerThreads      => self.worker_threads,
+            LimitCategory.LcLength             => self.length,
+            LimitCategory.LcSqlLength          => self.sql_length,
+            LimitCategory.LcColumn             => self.column,
+            LimitCategory.LcExprDepth          => self.expr_depth,
+            LimitCategory.LcCompoundSelect     => self.compound_select,
+            LimitCategory.LcVdbeOp             => self.vdbe_op,
+            LimitCategory.LcFunctionArg        => self.function_arg,
+            LimitCategory.LcAttached           => self.attached,
+            LimitCategory.LcLikePatternLength  => self.like_pattern_length,
+            LimitCategory.LcVariableNumber     => self.variable_number,
+            LimitCategory.LcTriggerDepth       => self.trigger_depth,
+            LimitCategory.LcWorkerThreads      => self.worker_threads,
         }
     }
 
@@ -87,20 +74,20 @@ implement LimitBudget {
         let prev = self.get(c);
         if n < 0 { return prev; }
         let hard = default_hard_max(c);
-        let clamped = clamp(n, hard);
+        let clamped = if n > hard { hard } else { n };
         match c {
-            LcLength             => self.length = clamped,
-            LcSqlLength          => self.sql_length = clamped,
-            LcColumn             => self.column = clamped,
-            LcExprDepth          => self.expr_depth = clamped,
-            LcCompoundSelect     => self.compound_select = clamped,
-            LcVdbeOp             => self.vdbe_op = clamped,
-            LcFunctionArg        => self.function_arg = clamped,
-            LcAttached           => self.attached = clamped,
-            LcLikePatternLength  => self.like_pattern_length = clamped,
-            LcVariableNumber     => self.variable_number = clamped,
-            LcTriggerDepth       => self.trigger_depth = clamped,
-            LcWorkerThreads      => self.worker_threads = clamped,
+            LimitCategory.LcLength             => self.length = clamped,
+            LimitCategory.LcSqlLength          => self.sql_length = clamped,
+            LimitCategory.LcColumn             => self.column = clamped,
+            LimitCategory.LcExprDepth          => self.expr_depth = clamped,
+            LimitCategory.LcCompoundSelect     => self.compound_select = clamped,
+            LimitCategory.LcVdbeOp             => self.vdbe_op = clamped,
+            LimitCategory.LcFunctionArg        => self.function_arg = clamped,
+            LimitCategory.LcAttached           => self.attached = clamped,
+            LimitCategory.LcLikePatternLength  => self.like_pattern_length = clamped,
+            LimitCategory.LcVariableNumber     => self.variable_number = clamped,
+            LimitCategory.LcTriggerDepth       => self.trigger_depth = clamped,
+            LimitCategory.LcWorkerThreads      => self.worker_threads = clamped,
         }
         prev
     }

@@ -22,6 +22,19 @@ public type ZeroBlobSpec is {
     api: ZeroBlobApi,
 }
 
+implement ZeroBlobSpec {
+    public(in core.database.sqlite.native.bind_zeroblob) fn size(&self) -> Int64 {
+        if self.size_bytes < 0_i64 { 0_i64 } else { self.size_bytes }
+    }
+
+    public(in core.database.sqlite.native.bind_zeroblob) fn exceeds_bind_limit(&self, limit: Int) -> Bool {
+        match &self.api {
+            ZaV1 => false,
+            ZaV2 => self.size_bytes < 0_i64 || self.size_bytes > (limit as Int64),
+        }
+    }
+}
+
 public fn v1_spec(size_bytes: Int) -> ZeroBlobSpec {
     ZeroBlobSpec { size_bytes: size_bytes as Int64, api: ZaV1 }
 }
@@ -30,15 +43,11 @@ public fn v2_spec(size_bytes: Int64) -> ZeroBlobSpec {
     ZeroBlobSpec { size_bytes: size_bytes, api: ZaV2 }
 }
 
-/// sqlite3_bind_zeroblob (32-bit) rejects N < 0 OR N > INT32_MAX.
-/// The 64-bit variant only rejects negative.
+/// The V1 size must fit a signed C int. A negative V1 size binds an empty BLOB.
+/// The V2 constructor accepts the nonnegative range of its Int64 argument.
 public fn is_valid(s: &ZeroBlobSpec) -> Bool {
-    if s.size_bytes < 0_i64 { return false; }
     match &s.api {
-        ZaV1 => {
-            let max32: Int64 = 2147483647 as Int64;
-            s.size_bytes <= max32
-        }
-        ZaV2 => true,
+        ZaV1 => s.size_bytes >= -2147483648_i64 && s.size_bytes <= 2147483647_i64,
+        ZaV2 => s.size_bytes >= 0_i64,
     }
 }

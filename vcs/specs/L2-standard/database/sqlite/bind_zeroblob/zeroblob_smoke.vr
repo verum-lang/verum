@@ -1,4 +1,4 @@
-// @test: typecheck-pass
+// @test: run-interpreter
 // @tier: 0
 // @level: L2
 // @tags: sqlite, bind_zeroblob, blob, capi
@@ -6,14 +6,13 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.bind_zeroblob.spec.{
-    ZeroBlobSpec, ZeroBlobApi, ZaV1, ZaV2,
     v1_spec, v2_spec, is_valid,
 };
 mount core.database.sqlite.native.bind_zeroblob.engine.{
-    ZeroBlobSlot, ZeroBlobBindEngine,
-    empty_slot, new_engine,
+    new_engine,
 };
-mount base.{Bool, Maybe};
+mount core.database.sqlite.native.limits_api.category.LimitCategory;
+mount core.database.sqlite.native.limits_api.budget.new_budget;
 
 fn test_v1_spec_valid_in_range() {
     let s = v1_spec(1024);
@@ -21,8 +20,9 @@ fn test_v1_spec_valid_in_range() {
 }
 
 fn test_v1_spec_rejects_above_int32_max() {
-    let s = v1_spec(-1);
-    assert(!is_valid(&s));
+    assert(!is_valid(&v1_spec(2147483648)));
+    assert(!is_valid(&v1_spec(-2147483649)));
+    assert(is_valid(&v1_spec(-2147483648)));
 }
 
 fn test_v2_spec_accepts_large_sizes() {
@@ -53,9 +53,11 @@ fn test_engine_bind_out_of_range_is_sqlite_range() {
 
 fn test_engine_bind_invalid_spec_is_sqlite_toobig() {
     let mut e = new_engine(4);
-    let r = e.sqlite3_bind_zeroblob(1, v1_spec(-1));
+    assert_eq(e.sqlite3_bind_zeroblob(1, v1_spec(17)), 0);
+    let r = e.sqlite3_bind_zeroblob(1, v1_spec(2147483648));
     assert_eq(r, 18);  // SQLITE_TOOBIG
-    assert_eq(e.rejections, 1 as Int64);
+    assert_eq(e.rejection_count(), 1_i64);
+    assert_eq(e.slot_size(1), 17_i64);
 }
 
 fn test_engine_clear_zeroes_slot() {
@@ -63,6 +65,45 @@ fn test_engine_clear_zeroes_slot() {
     let _ = e.sqlite3_bind_zeroblob(2, v1_spec(1024));
     assert(e.clear(2));
     assert_eq(e.slot_size(2), 0 as Int64);
+}
+
+fn test_zero_length_binds_and_parameter_isolation() {
+    let mut e = new_engine(2);
+    assert(e.bound_size(1) is Maybe.None);
+    assert_eq(e.sqlite3_bind_zeroblob(1, v1_spec(6)), 0);
+    assert_eq(e.sqlite3_bind_zeroblob(2, v2_spec(12_i64)), 0);
+    assert_eq(e.sqlite3_bind_zeroblob(1, v1_spec(9)), 0);
+    assert_eq(e.sqlite3_bind_zeroblob(0, v1_spec(1)), 25);
+    assert_eq(e.sqlite3_bind_zeroblob(3, v1_spec(1)), 25);
+    assert_eq(e.slot_size(1), 9_i64);
+    assert_eq(e.slot_size(2), 12_i64);
+    assert_eq(e.sqlite3_bind_zeroblob(1, v1_spec(-1)), 0);
+    assert(e.bound_size(1) is Maybe.Some(0_i64));
+    assert(e.clear(1));
+    assert(e.bound_size(1) is Maybe.None);
+    assert(e.clear(1));
+    assert(!e.clear(0));
+    assert(!e.clear(3));
+    assert_eq(e.slot_size(2), 12_i64);
+    assert_eq(e.rejection_count(), 2_i64);
+}
+
+fn test_64_bit_bind_checks_the_current_connection_limit() {
+    let mut e = new_engine(2);
+    let mut budget = new_budget();
+    let previous = budget.sqlite3_limit(&LimitCategory.LcLength, 64);
+    assert(previous >= 64);
+    assert_eq(e.bind_with_budget(1, v2_spec(64_i64), &budget), 0);
+    assert_eq(e.bind_with_budget(1, v2_spec(65_i64), &budget), 18);
+    assert_eq(e.bind_with_budget(3, v2_spec(65_i64), &budget), 18);
+    assert_eq(e.bound_size(1).unwrap(), 64_i64);
+    assert_eq(e.bind_with_budget(2, v1_spec(65), &budget), 0);
+    assert_eq(e.slot_size(2), 65_i64);
+    let _ = budget.sqlite3_limit(&LimitCategory.LcLength, 80);
+    assert_eq(e.bind_with_budget(1, v2_spec(65_i64), &budget), 0);
+    assert_eq(e.sqlite3_bind_zeroblob(1, v2_spec(4000000000_i64)), 18);
+    assert_eq(e.slot_size(1), 65_i64);
+    assert_eq(e.rejection_count(), 3_i64);
 }
 
 fn main() {
@@ -74,4 +115,6 @@ fn main() {
     test_engine_bind_out_of_range_is_sqlite_range();
     test_engine_bind_invalid_spec_is_sqlite_toobig();
     test_engine_clear_zeroes_slot();
+    test_zero_length_binds_and_parameter_isolation();
+    test_64_bit_bind_checks_the_current_connection_limit();
 }
