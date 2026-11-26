@@ -98,7 +98,7 @@ implement Sampler for AlwaysOn {
         SamplingResult.new(SamplingDecision.RecordAndSample, parent.trace_state())
     }
 
-    fn description(&self) -> Text { "AlwaysOnSampler".into() }
+    fn description(&self) -> Text { "AlwaysOnSampler" }
 }
 
 public type AlwaysOff is ();
@@ -119,7 +119,7 @@ implement Sampler for AlwaysOff {
         SamplingResult.new(SamplingDecision.Drop, parent.trace_state())
     }
 
-    fn description(&self) -> Text { "AlwaysOffSampler".into() }
+    fn description(&self) -> Text { "AlwaysOffSampler" }
 }
 
 // =============================================================================
@@ -319,8 +319,8 @@ implement SamplerHandle {
 
     public fn description(&self) -> Text {
         match self {
-            SamplerHandle.ShAlwaysOn => "AlwaysOnSampler".into(),
-            SamplerHandle.ShAlwaysOff => "AlwaysOffSampler".into(),
+            SamplerHandle.ShAlwaysOn => "AlwaysOnSampler",
+            SamplerHandle.ShAlwaysOff => "AlwaysOffSampler",
             SamplerHandle.ShRatio(r) => r.ratio_describe(),
             SamplerHandle.ShParentBased(p) => p.parent_describe(),
             SamplerHandle.ShCustom(s) => s.description(),

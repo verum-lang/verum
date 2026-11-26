@@ -78,17 +78,17 @@ implement TextMapPropagator for W3CTraceContext {
     ) {
         if !context.is_valid() { return; }
         let tp = encode_traceparent(context);
-        headers.push(("traceparent".into(), tp));
+        headers.push(("traceparent", tp));
         let state = context.trace_state();
         if !state.is_empty() {
             let ts = encode_tracestate(&state);
-            headers.push(("tracestate".into(), ts));
+            headers.push(("tracestate", ts));
         }
     }
 
     fn extract(&self, headers: &List<(Text, Text)>) -> SpanContext {
-        let tp_name: Text = "traceparent".into();
-        let ts_name: Text = "tracestate".into();
+        let tp_name: Text = "traceparent";
+        let ts_name: Text = "tracestate";
         let tp = find_header(headers, &tp_name);
         match tp {
             Maybe.None => SpanContext.invalid(),
@@ -110,8 +110,8 @@ implement TextMapPropagator for W3CTraceContext {
 
     fn fields(&self) -> List<Text> {
         let mut out = List.with_capacity(2);
-        out.push("traceparent".into());
-        out.push("tracestate".into());
+        out.push("traceparent");
+        out.push("tracestate");
         out
     }
 }
@@ -123,7 +123,7 @@ implement TextMapPropagator for W3CTraceContext {
 /// Inject a traceparent header; returns the encoded string (or empty
 /// if the context is invalid).
 public fn inject_traceparent(context: &SpanContext) -> Text {
-    if !context.is_valid() { return "".into(); }
+    if !context.is_valid() { return ""; }
     encode_traceparent(context)
 }
 

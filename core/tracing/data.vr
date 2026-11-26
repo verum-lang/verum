@@ -156,7 +156,7 @@ implement ExportError {
     public fn queue_full() -> ExportError {
         ExportError {
             kind: ExportErrorKind.QueueFull,
-            message: "bounded export queue is full".into(),
+            message: "bounded export queue is full",
             retryable: true,
         }
     }
@@ -165,7 +165,7 @@ implement ExportError {
     public fn shut_down() -> ExportError {
         ExportError {
             kind: ExportErrorKind.ShutDown,
-            message: "exporter or processor already shut down".into(),
+            message: "exporter or processor already shut down",
             retryable: false,
         }
     }
@@ -551,7 +551,7 @@ type LineState is
 implement LineCell {
     public fn line_cell_push(&self, line: Text) {
         let mut guard = self.state.lock().unwrap_or_else(|p| p.into_inner());
-        let mut next: LineBuf = LineBuf { count: 0, text: "".into() };
+        let mut next: LineBuf = LineBuf { count: 0, text: "" };
         match &*guard {
             LineState.Lines(buf) => {
                 next = buf.buf_appended(line);
@@ -562,13 +562,13 @@ implement LineCell {
 
     public fn line_cell_take(&self) -> Text {
         let mut guard = self.state.lock().unwrap_or_else(|p| p.into_inner());
-        let mut out: Text = "".into();
+        let mut out: Text = "";
         match &*guard {
             LineState.Lines(buf) => {
                 out = buf.buf_text();
             }
         }
-        *guard = LineState.Lines(LineBuf { count: 0, text: "".into() });
+        *guard = LineState.Lines(LineBuf { count: 0, text: "" });
         out
     }
 
@@ -590,7 +590,7 @@ public type InMemoryExporter is
 implement InMemoryExporter {
     public fn new() -> InMemoryExporter {
         InMemoryExporter.MemLines(Shared.new(LineCell {
-            state: Mutex.new(LineState.Lines(LineBuf { count: 0, text: "".into() })),
+            state: Mutex.new(LineState.Lines(LineBuf { count: 0, text: "" })),
         }))
     }
 
@@ -685,7 +685,7 @@ implement FileExporter {
     public fn file_export(&self, spans: &List<SpanData>) -> TraceExportResult {
         let mut blob: Text = match file_read_to_string(&self.path) {
             Result.Ok(existing) => existing,
-            Result.Err(_) => "".into(),
+            Result.Err(_) => "",
         };
         let mut i = 0;
         while i < spans.len() {
@@ -697,7 +697,7 @@ implement FileExporter {
         match file_write(&self.path, &blob) {
             Result.Ok(_) => TraceExportResult.Success,
             Result.Err(_) => TraceExportResult.Failure(ExportError.transport(
-                "file exporter: write failed".into(),
+                "file exporter: write failed",
             )),
         }
     }
@@ -815,7 +815,7 @@ fn format_span_line(s: &SpanData) -> Text {
     let sampled = if ctx.is_sampled() { "true" } else { "false" };
     let parent = match s.parent_span_id() {
         Maybe.Some(pid) => pid.to_hex(),
-        Maybe.None => "-".into(),
+        Maybe.None => "-",
     };
     let events_n = s.events().len();
     let attr_set = s.attributes();
@@ -827,16 +827,16 @@ fn format_span_line(s: &SpanData) -> Text {
 
 fn kind_name(k: SpanKind) -> Text {
     match k {
-        SpanKind.KindInternal => "INTERNAL".into(),
-        SpanKind.KindClient => "CLIENT".into(),
-        SpanKind.KindServer => "SERVER".into(),
-        SpanKind.KindProducer => "PRODUCER".into(),
-        SpanKind.KindConsumer => "CONSUMER".into(),
+        SpanKind.KindInternal => "INTERNAL",
+        SpanKind.KindClient => "CLIENT",
+        SpanKind.KindServer => "SERVER",
+        SpanKind.KindProducer => "PRODUCER",
+        SpanKind.KindConsumer => "CONSUMER",
     }
 }
 
 fn format_attrs(entries: &List<(Text, AttributeValue)>) -> Text {
-    if entries.is_empty() { return "".into(); }
+    if entries.is_empty() { return ""; }
     let mut out = Text.with_capacity(64);
     out.push_str("attrs={");
     let mut i = 0;
@@ -1066,7 +1066,7 @@ fn wait_reply(rx: &mut Receiver<TraceExportResult>, timeout: Duration) -> TraceE
         }
         if Instant.now() >= deadline {
             return TraceExportResult.Failure(ExportError.timeout(
-                "batch worker did not confirm within the deadline".into(),
+                "batch worker did not confirm within the deadline",
             ));
         }
         Time.sleep_ms(1);
@@ -1587,9 +1587,9 @@ implement Span {
         // Skip the AttributeSet allocations entirely on inactive spans.
         if !self.is_recording() { return; }
         let mut attrs = AttributeSet.new();
-        let _ = attrs.set("exception.type".into(), AttributeValue.Text(type_name.clone()));
-        let _ = attrs.set("exception.message".into(), AttributeValue.Text(message.clone()));
-        self.add_event("exception".into(), attrs);
+        let _ = attrs.set("exception.type", AttributeValue.Text(type_name.clone()));
+        let _ = attrs.set("exception.message", AttributeValue.Text(message.clone()));
+        self.add_event("exception", attrs);
     }
 
     /// Finalise at the current instant. The frozen SpanData is delivered
@@ -1635,7 +1635,7 @@ implement Display for Span {
 }
 
 fn span_name_snapshot(span: &Span) -> Text {
-    if !span.recording { return "".into(); }
+    if !span.recording { return ""; }
     span.inner.body_name()
 }
 
@@ -1761,7 +1761,7 @@ implement SpanInner {
 /// frozen (every path gates on `recording` first).
 fn empty_inner() -> SpanInner {
     SpanInner {
-        name: "".into(),
+        name: "",
         parent_span_id: Maybe.None,
         kind: SpanKind.KindInternal,
         start_time: Instant.now(),
@@ -1772,8 +1772,8 @@ fn empty_inner() -> SpanInner {
         links: List.new(),
         status: SpanStatus.unset(),
         resource: Shared.new(Resource.empty()),
-        instrumentation_scope: "".into(),
-        instrumentation_version: "".into(),
+        instrumentation_scope: "",
+        instrumentation_version: "",
     }
 }
 

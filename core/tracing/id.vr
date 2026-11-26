@@ -266,7 +266,7 @@ implement DefaultIdGenerator {
 implement IdGenerator for DefaultIdGenerator {
     fn new_trace_id(&self) -> TraceId { generate_trace_id() }
     fn new_span_id(&self) -> SpanId { generate_span_id() }
-    fn description(&self) -> Text { "DefaultIdGenerator".into() }
+    fn description(&self) -> Text { "DefaultIdGenerator" }
 }
 
 /// Closed-world dispatch over id generators. `IghCustom` carries a
@@ -296,7 +296,7 @@ implement IdGeneratorHandle {
 
     public fn description(&self) -> Text {
         match self {
-            IdGeneratorHandle.IghDefault => "DefaultIdGenerator".into(),
+            IdGeneratorHandle.IghDefault => "DefaultIdGenerator",
             IdGeneratorHandle.IghCustom(g) => g.description(),
         }
     }
