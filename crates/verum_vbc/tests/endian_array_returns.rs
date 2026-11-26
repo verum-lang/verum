@@ -68,9 +68,12 @@ fn inline_little_endian_has_the_declared_fixed_byte_carrier() {
 
 #[test]
 fn full_primitive_source_declarations_preserve_byte_array_elements() {
-    let ast = Parser::new(include_str!("../../../core/base/primitives.vr")).parse_module().expect("complete primitive source");
-    let mut codegen = VbcCodegen::with_config(CodegenConfig::new("core.base.primitives"));
-    codegen.collect_unit_declarations(&[&ast]).expect("all source declarations");
+    let consumer = Parser::new("module endian_source; mount core.base.primitives.*;")
+        .parse_module().expect("source module");
+    let mut codegen = VbcCodegen::with_config(CodegenConfig::new("endian_source"));
+    let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core");
+    codegen.compile_module_with_mounts(&consumer, "endian_source.vr", root)
+        .expect("load complete primitive declarations and their real dependencies");
     let functions = codegen.export_functions();
     for (owner, length) in [("Int", 8), ("UInt64", 8), ("UInt32", 4), ("UInt16", 2)] {
         for method in ["to_be_bytes", "to_le_bytes"] {
