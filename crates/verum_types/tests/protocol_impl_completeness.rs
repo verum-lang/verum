@@ -140,11 +140,7 @@ fn assert_standalone_implementation(owner: &str) {
         "{:?}",
         checker.diagnostics()
     );
-    let identity = if owner == "cog" {
-        "Demand".to_owned()
-    } else {
-        format!("{owner}.Demand")
-    };
+    let identity = format!("{owner}.Demand");
     assert!(
         checker
             .protocol_checker
@@ -211,14 +207,14 @@ fn qualified_protocol_cannot_borrow_a_leaf_declarations_requirements() {
     );
 }
 
-fn standalone_protocol_fixture(body: &str) -> (TypeChecker, verum_ast::decl::ImplDecl) {
+fn standalone_protocol_fixture(visibility: &str, body: &str) -> (TypeChecker, verum_ast::decl::ImplDecl) {
     let mut checker = TypeChecker::new();
     checker.register_primitives();
     checker.set_current_module_path("demo.main");
     let source = format!(
         r#"
-        type Demand is protocol {{ fn keep(&self, value: Int) -> Int; }};
-        type Receiver is {{ value: Int }};
+        {visibility} type Demand is protocol {{ fn keep(&self, value: Int) -> Int; }};
+        {visibility} type Receiver is {{ value: Int }};
         implement demo.main.Demand for demo.main.Receiver {{
             fn keep(&self, value: Int) -> Int {{ {body} }}
         }}
@@ -240,7 +236,7 @@ fn standalone_protocol_fixture(body: &str) -> (TypeChecker, verum_ast::decl::Imp
 
 #[test]
 fn repeated_exact_source_registration_is_idempotent() {
-    let (mut checker, declaration) = standalone_protocol_fixture("value");
+    let (mut checker, declaration) = standalone_protocol_fixture("", "value");
     checker.register_impl_block(&declaration).unwrap();
     let before = checker.protocol_checker.read().all_implementations().len();
     checker.register_impl_block(&declaration).unwrap();
@@ -251,8 +247,17 @@ fn repeated_exact_source_registration_is_idempotent() {
 }
 
 #[test]
+fn a_standalone_registration_preserves_qualified_receiver_privacy() {
+    let (mut checker, declaration) = standalone_protocol_fixture("", "value");
+    checker.set_current_module_path("demo.other");
+    let error = checker.register_impl_block(&declaration).unwrap_err();
+    assert!(matches!(error, verum_types::TypeError::VisibilityError { ref module_path, .. }
+        if module_path.as_str() == "demo.main"), "{error:?}");
+}
+
+#[test]
 fn identical_source_impls_in_distinct_owners_do_not_share_a_receipt() {
-    let (mut checker, declaration) = standalone_protocol_fixture("value");
+    let (mut checker, declaration) = standalone_protocol_fixture("public", "value");
     checker.register_impl_block(&declaration).unwrap();
     checker.set_current_module_path("demo.other");
     let error = checker.register_impl_block(&declaration).unwrap_err();
@@ -313,7 +318,7 @@ fn a_registration_receipt_does_not_skip_method_body_checking() {
 
 #[test]
 fn source_receipt_requires_exact_declaration_at_its_recorded_location() {
-    let (mut checker, mut declaration) = standalone_protocol_fixture("value");
+    let (mut checker, mut declaration) = standalone_protocol_fixture("", "value");
     checker.register_impl_block(&declaration).unwrap();
     declaration.is_unsafe = !declaration.is_unsafe;
     let error = checker.register_impl_block(&declaration).unwrap_err();

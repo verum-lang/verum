@@ -653,7 +653,25 @@ impl TypeChecker {
         {
             let registry = self.module_registry.read();
             let Some(module) = self.get_module_with_path_aliases(module_name, &registry) else {
-                return Ok(None);
+                let owner: Text = module_name.into();
+                // A standalone checker can receive a complete buffer or individual
+                // declarations. An active buffer supersedes earlier registrations.
+                let declaration = if let Some((_, file)) = self.source_type_registration
+                    .local_declarations.iter().rev().find(|(path, _)| path == &owner)
+                {
+                    self.local_source_type_declaration_index(file, type_name)
+                        .map(|item| SourceTypeDeclaration::Lexical { module: file.clone(), item })
+                } else {
+                    let source = if owner == self.current_module_path {
+                        self.source_type_registration.declaration(qualified)
+                    } else {
+                        self.source_type_registration.completed_declaration(qualified)
+                    };
+                    source.map(|source| SourceTypeDeclaration::Owned(Shared::new(source.clone())))
+                };
+                let Some(declaration) = declaration else { return Ok(None); };
+                self.check_qualified_declaration_visibility(&declaration, &owner, span)?;
+                return Ok(Some((owner.clone(), Some((declaration, owner)))));
             };
             // Archive-backed modules can be empty, or contain source consumers
             // of declarations supplied only by metadata. Source declarations
@@ -664,22 +682,7 @@ impl TypeChecker {
             let owner: Text = module.path.to_string().into();
             let declaration = if let Some(item) = self.local_source_type_declaration_index(&module.ast, type_name) {
                 let declaration = SourceTypeDeclaration::Registered { module: module.clone(), item };
-                let visibility = declaration.visibility.resolve_declared_scope(owner.as_str())
-                    .map_err(|message| TypeError::VisibilityError {
-                        declaration_span: Some(declaration.name.span),
-                        name: type_name.into(), visibility: message,
-                        module_path: owner.clone(), span,
-                    })?;
-                if !VisibilityChecker::new().is_visible(
-                    visibility.clone(), &module.path,
-                    &ModulePath::from_str(self.current_module_path.as_str()),
-                ) {
-                    return Err(TypeError::VisibilityError {
-                        declaration_span: Some(declaration.name.span),
-                        name: type_name.into(), visibility: format!("{visibility:?}").into(),
-                        module_path: owner, span,
-                    });
-                }
+                self.check_qualified_declaration_visibility(&declaration, &owner, span)?;
                 Some((declaration, owner.clone()))
             } else {
                 // Reuse the exact re-export walker, with no parent-module
@@ -700,6 +703,20 @@ impl TypeChecker {
             }
             Ok(Some((owner, declaration)))
         }
+    }
+
+    fn check_qualified_declaration_visibility(
+        &self, declaration: &verum_ast::TypeDecl, owner: &Text, span: Span,
+    ) -> Result<()> {
+        let denied = |visibility| TypeError::VisibilityError {
+            declaration_span: Some(declaration.name.span), name: declaration.name.name.clone(),
+            visibility, module_path: owner.clone(), span,
+        };
+        let visibility = declaration.visibility.resolve_declared_scope(owner.as_str()).map_err(denied)?;
+        if VisibilityChecker::new().is_visible(
+            visibility.clone(), &ModulePath::from_str(owner),
+            &ModulePath::from_str(&self.current_module_path),
+        ) { Ok(()) } else { Err(denied(format!("{visibility:?}").into())) }
     }
 
     pub(super) fn load_source_type_declaration_with_parameter_key(
