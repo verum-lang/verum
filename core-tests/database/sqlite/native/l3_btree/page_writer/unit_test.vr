@@ -1,0 +1,49 @@
+mount core.base.result.Result;
+mount core.collections.list.List;
+mount core.database.sqlite.native.l3_btree.page_layout.{PageKind, PageLayoutError};
+mount core.database.sqlite.native.l3_btree.page_writer.{
+    MaterializedCell, materialized_cell, materialized_page, materialize_page, serialize_page,
+};
+
+fn leaf_cell(rowid: Byte, value: Byte) -> MaterializedCell {
+    let mut bytes: List<Byte> = List.new();
+    bytes.push(1 as Byte);
+    bytes.push(rowid);
+    bytes.push(value);
+    materialized_cell(bytes)
+}
+
+@test
+fn test_repacking_preserves_cell_bytes_and_pointer_order() {
+    let mut page = materialized_page(PageKind.TableLeaf, 0_u32, 0);
+    page.append_cell(leaf_cell(2 as Byte, 0xa2 as Byte));
+    page.append_cell(leaf_cell(9 as Byte, 0xa9 as Byte));
+    let input = serialize_page(&page, 512).unwrap();
+    let restored = materialize_page(&input, 0).unwrap();
+    assert_eq(restored.cell_count(), 2);
+    let output = serialize_page(&restored, 512).unwrap();
+    assert_eq(output, input);
+    assert_eq(output[8] as Int, 1);
+    assert_eq(output[9] as Int, 253);
+    assert_eq(output[10] as Int, 1);
+    assert_eq(output[11] as Int, 250);
+    assert_eq(output[510] as Int, 2);
+    assert_eq(output[511] as Int, 0xa2);
+    assert_eq(output[507] as Int, 9);
+    assert_eq(output[508] as Int, 0xa9);
+}
+
+@test
+fn test_materialization_rejects_a_truncated_cell_varint() {
+    let mut page = materialized_page(PageKind.TableLeaf, 0_u32, 0);
+    let mut truncated: List<Byte> = List.new();
+    truncated.push(0x80 as Byte);
+    page.append_cell(materialized_cell(truncated));
+    let input = serialize_page(&page, 512).unwrap();
+    match materialize_page(&input, 0) {
+        Result.Err(PageLayoutError.ShortBuffer) => {}
+        _ => panic("expected a short-buffer error for an incomplete varint"),
+    }
+}
+
+fn main() {}

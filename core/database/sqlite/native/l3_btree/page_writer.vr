@@ -170,6 +170,45 @@ implement MaterializedPage {
         Maybe.Some(removed)
     }
 
+    /// Leave the first `at` cells on the left. The original rightmost
+    /// child belongs to the new right sibling.
+    public(in core.database.sqlite.native.l3_btree) fn split_right(&mut self, at: Int) -> MaterializedPage {
+        let mut right = materialized_page(self.kind, self.right_ptr, self.db_header_offset);
+        right.cells = self.cells.split_off(at);
+        self.right_ptr = 0_u32;
+        right
+    }
+
+    public(in core.database.sqlite.native.l3_btree) fn merge_right(&mut self, mut right: MaterializedPage) {
+        self.cells.append(&mut right.cells);
+        self.right_ptr = right.right_ptr;
+    }
+
+    /// Positive counts move a suffix to the front of the right neighbor.
+    /// Negative counts move a prefix to the end of the left neighbor.
+    public(in core.database.sqlite.native.l3_btree) fn rotate_into(&mut self, neighbor: &mut MaterializedPage, count: Int) -> Bool {
+        let n = self.cell_count();
+        if count > n || count < -n { return false; }
+        if count > 0 {
+            let mut suffix = self.cells.split_off(n - count);
+            suffix.append(&mut neighbor.cells);
+            neighbor.cells = suffix;
+        } else if count < 0 {
+            let suffix = self.cells.split_off(-count);
+            neighbor.cells.append(&mut self.cells);
+            self.cells = suffix;
+        }
+        true
+    }
+
+    public(in core.database.sqlite.native.l3_btree) fn empty_parent(&self, child_page: UInt32, db_header_offset: Int) -> MaterializedPage {
+        let kind = match self.kind {
+            TableLeaf | TableInterior => TableInterior,
+            IndexLeaf | IndexInterior => IndexInterior,
+        };
+        materialized_page(kind, child_page, db_header_offset)
+    }
+
     /// Set right_ptr (interior pages).  No-op for leaves but the
     /// caller is expected to pass right_ptr=0 in that case.
     public fn set_right_ptr(&mut self, p: UInt32) {
@@ -193,21 +232,21 @@ public fn materialize_page(
     bytes: &List<Byte>,
     db_header_offset: Int,
 ) -> Result<MaterializedPage, PageLayoutError> {
-    let (hdr, _) = match parse_page_header(bytes, db_header_offset) {
+    let hdr = match parse_page_header(bytes.as_slice(), db_header_offset) {
         Result.Ok(p)  => p,
         Result.Err(e) => return Result.Err(e),
     };
-    let pointers = match parse_cell_pointer_array(bytes, db_header_offset, &hdr) {
+    let pointers = match parse_cell_pointer_array(bytes.as_slice(), db_header_offset, &hdr) {
         Result.Ok(p)  => p,
         Result.Err(e) => return Result.Err(e),
     };
-    let mut mp = materialized_page(hdr.kind.clone(), hdr.right_ptr, db_header_offset);
+    let mut mp = materialized_page(hdr.kind(), hdr.right_child(), db_header_offset);
 
     let local_max: Int = 100;     // foundation: assumes small payload threshold
     let mut i: Int = 0;
     while i < pointers.len() {
         let cell_off = pointers[i];
-        let cell_size = compute_cell_size(bytes, cell_off, &hdr.kind, local_max);
+        let cell_size = compute_cell_size(bytes.as_slice(), cell_off, hdr.kind(), local_max)?;
         if cell_off + cell_size > bytes.len() {
             return Result.Err(PageLayoutError.ShortBuffer);
         }
@@ -227,41 +266,27 @@ public fn materialize_page(
 /// Uses `parse_cell` to find the local payload end, then accounts
 /// for the optional 4-byte overflow pointer.
 fn compute_cell_size(
-    bytes: &List<Byte>,
+    bytes: &[Byte],
     cell_off: Int,
-    kind: &PageKind,
+    kind: PageKind,
     local_max: Int,
-) -> Int {
-    match parse_cell(bytes, cell_off, kind.clone(), local_max) {
-        Result.Ok(parts) => match parts {
-            TableLeafCell(_payload_len, _rowid, local_end, overflow) => {
-                let base = local_end - cell_off;
-                if overflow != (0 as UInt32) { base + 4 } else { base }
-            }
-            TableInteriorCell(_left, _rowid) => {
-                // 4-byte left_child + payload-length varint (varies);
-                // simplest: re-derive via local_end-equivalent parsing.
-                // For interior table cells the payload IS just the
-                // rowid; cell size is fixed at 4 + varint(rowid).
-                // We fall back to recomputing via parse_cell return.
-                cell_size_table_interior(bytes, cell_off)
-            }
-            IndexLeafCell(_payload_len, local_end, overflow) => {
-                let base = local_end - cell_off;
-                if overflow != (0 as UInt32) { base + 4 } else { base }
-            }
-            IndexInteriorCell(_left, _payload_len, local_end, overflow) => {
-                let base = local_end - cell_off;
-                if overflow != (0 as UInt32) { base + 4 } else { base }
-            }
+) -> Result<Int, PageLayoutError> {
+    let parts = parse_cell(bytes, cell_off, kind, local_max)?;
+    let size = match parts {
+        TableInteriorCell(_, _) => cell_size_table_interior(bytes, cell_off),
+        TableLeafCell(_, _, local_end, overflow)
+        | IndexLeafCell(_, local_end, overflow)
+        | IndexInteriorCell(_, _, local_end, overflow) => {
+            let base = local_end - cell_off;
+            if overflow != 0_u32 { base + 4 } else { base }
         }
-        Result.Err(_) => 0,
-    }
+    };
+    Result.Ok(size)
 }
 
 /// TableInterior cell size: 4-byte left_child + rowid varint.
 /// Computed by walking the rowid varint after the 4-byte child.
-fn cell_size_table_interior(bytes: &List<Byte>, cell_off: Int) -> Int {
+fn cell_size_table_interior(bytes: &[Byte], cell_off: Int) -> Int {
     let mut p: Int = cell_off + 4;
     let mut nbytes: Int = 0;
     while p < bytes.len() && nbytes < 9 {
@@ -310,14 +335,10 @@ public fn serialize_page(
     }
 
     // 1. Write the page header at db_header_offset.
-    let hdr_bytes = serialize_page_header(&PageHeader {
-        kind: mp.kind.clone(),
-        first_freeblock: 0 as UInt16,           // dense pack — no freeblocks
-        cell_count: n_cells as UInt16,
-        cell_content_start: page_size - total_cell_bytes,
-        fragmented_free_bytes: 0 as Byte,
-        right_ptr: mp.right_ptr,
-    });
+    let header = PageHeader.packed(
+        mp.kind, n_cells as UInt16, page_size - total_cell_bytes, mp.right_ptr,
+    );
+    let hdr_bytes = serialize_page_header(&header);
     let mut hb: Int = 0;
     while hb < hdr_bytes.len() {
         out[mp.db_header_offset + hb] = hdr_bytes[hb];

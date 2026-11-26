@@ -143,6 +143,26 @@ public type PageHeader is {
     right_ptr: UInt32,            // 0 if leaf
 };
 
+implement PageHeader {
+    public(in core.database.sqlite.native.l3_btree) fn kind(&self) -> PageKind { self.kind }
+    public(in core.database.sqlite.native.l3_btree) fn cell_count(&self) -> Int { self.cell_count as Int }
+    public(in core.database.sqlite.native.l3_btree) fn right_child(&self) -> UInt32 { self.right_ptr }
+
+    /// Dense repacking removes the freeblock chain and fragmented bytes.
+    public(in core.database.sqlite.native.l3_btree) fn packed(
+        kind: PageKind, cell_count: UInt16, cell_content_start: Int, right_child: UInt32,
+    ) -> PageHeader {
+        PageHeader {
+            kind: kind,
+            first_freeblock: 0_u16,
+            cell_count: cell_count,
+            cell_content_start: cell_content_start,
+            fragmented_free_bytes: 0 as Byte,
+            right_ptr: right_child,
+        }
+    }
+}
+
 public type PageLayoutError is
       ShortBuffer
     | BadKind(raw: Byte)

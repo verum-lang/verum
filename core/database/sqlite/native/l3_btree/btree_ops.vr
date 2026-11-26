@@ -65,7 +65,7 @@ mount core.database.sqlite.native.l3_btree.balance.{
     plan_overflow, plan_underflow, BalanceError,
 };
 mount core.database.sqlite.native.l3_btree.balance_apply.{
-    apply_balance_decision, ApplyOutcome, RippleHint, PageBuf, page_buf,
+    apply_balance_decision, PageBuf, page_buf,
 };
 
 // -----------------------------------------------------------------------------
@@ -209,13 +209,12 @@ public fn btree_insert_at_cursor(
         decision: clone_decision(&plan),
     });
 
-    // Write back updated pages; release freed pages.
-    write_back(pages, &outcome.updated_pages);
+    let (updated, _, mut ripple) = outcome.into_parts();
+    write_back(pages, updated);
 
     // Ripple: as long as the outcome carries a RippleHint, ascend
     // and re-plan.  Foundation: walk up the cursor path; the full
     // implementation also re-plans at each parent.
-    let mut ripple: Maybe<RippleHint> = outcome.ripple;
     let mut depth_guard: Int = 0;
     while depth_guard < 64 {
         let hint = match ripple {
@@ -285,8 +284,9 @@ public fn btree_delete_at_cursor(
         page_no: current_page,
         decision: clone_decision(&plan),
     });
-    write_back(pages, &outcome.updated_pages);
-    free_pages(pages, &outcome.freed_pages);
+    let (updated, freed, _) = outcome.into_parts();
+    write_back(pages, updated);
+    free_pages(pages, &freed);
     Result.Ok(log)
 }
 
@@ -294,30 +294,17 @@ public fn btree_delete_at_cursor(
 // Helpers
 // -----------------------------------------------------------------------------
 
-fn write_back(pages: &mut PageStore, updated: &List<PageBuf>) {
-    let mut i: Int = 0;
-    while i < updated.len() {
-        pages.install(updated[i].page_no, clone_bytes(&updated[i].bytes));
-        i = i + 1;
+fn write_back(pages: &mut PageStore, updated: List<PageBuf>) {
+    for page in updated {
+        let (page_no, bytes) = page.into_parts();
+        pages.install(page_no, bytes);
     }
 }
 
 fn free_pages(pages: &mut PageStore, freed: &List<Int>) {
-    // Foundation: drop from the in-memory store.  Production wraps
-    // the pager's free_page callback (returns to the freelist for
-    // re-use by future alloc_page calls).
+    // Page retirement must be coordinated with the parent separator update.
     let _ = pages;
     let _ = freed;
-}
-
-fn clone_bytes(src: &List<Byte>) -> List<Byte> {
-    let mut out: List<Byte> = List.new();
-    let mut i: Int = 0;
-    while i < src.len() {
-        out.push(src[i]);
-        i = i + 1;
-    }
-    out
 }
 
 fn clone_decision(d: &BalanceDecision) -> BalanceDecision {
@@ -333,7 +320,7 @@ fn clone_decision(d: &BalanceDecision) -> BalanceDecision {
 
 fn format_balance_error(e: &BalanceError) -> Text {
     match e {
-        InvalidInput(r) => f"InvalidInput({r})".as_str().to_owned(),
+        InvalidInput(r) => f"InvalidInput({r})",
         _ => "BalanceError".clone(),
     }
 }

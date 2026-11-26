@@ -49,11 +49,7 @@ mount core.database.sqlite.native.l3_btree.balance.{
     BalanceError, InvalidInput, OverCapacity, UnderCapacity,
     BalanceContext,
 };
-mount core.database.sqlite.native.l3_btree.page_layout.{
-    PageKind, PageHeader, page_kind_is_interior, page_kind_is_table,
-};
 mount core.database.sqlite.native.l3_btree.page_writer.{
-    MaterializedPage, MaterializedCell, materialized_page, materialized_cell,
     materialize_page, serialize_page,
 };
 
@@ -70,6 +66,10 @@ public fn page_buf(page_no: Int, bytes: List<Byte>) -> PageBuf {
     PageBuf { page_no: page_no, bytes: bytes }
 }
 
+implement PageBuf {
+    public(in core.database.sqlite.native.l3_btree) fn into_parts(self) -> (Int, List<Byte>) { (self.page_no, self.bytes) }
+}
+
 // -----------------------------------------------------------------------------
 // ApplyOutcome — rebuilt pages + ripple hint
 // -----------------------------------------------------------------------------
@@ -84,6 +84,12 @@ public type RippleHint is {
     parent_page: Int,
     parent_cell_idx: Int,
     parent_grew: Bool,
+}
+
+implement ApplyOutcome {
+    public(in core.database.sqlite.native.l3_btree) fn into_parts(self) -> (List<PageBuf>, List<Int>, Maybe<RippleHint>) {
+        (self.updated_pages, self.freed_pages, self.ripple)
+    }
 }
 
 fn outcome_empty() -> ApplyOutcome {
@@ -128,7 +134,7 @@ fn apply_split(
     donor_page: Int,
     left_cells: Int,
     right_cells: Int,
-    separator_cell: Int,
+    _separator_cell: Int,
     parent_cell_idx: Int,
     ctx: &BalanceContext,
 ) -> Result<ApplyOutcome, BalanceError> {
@@ -144,27 +150,27 @@ fn apply_split(
     // detection is the caller's job — for simplicity at the
     // balance layer, we treat all pages as "non-root"; root
     // splits go through GrowRoot first).
-    let donor_mp = match materialize_page(&donor_buf.bytes, 0) {
+    let mut left_mp = match materialize_page(&donor_buf.bytes, 0) {
         Result.Ok(mp) => mp,
         Result.Err(_) => return Result.Err(InvalidInput("split: donor materialize failed".clone())),
     };
 
-    let total = donor_mp.cell_count();
-    if left_cells + right_cells > total {
+    let total = left_mp.cell_count();
+    if left_cells != total - right_cells {
         return Result.Err(InvalidInput(
-            "split: left+right exceeds donor cell count".clone(),
+            "split: left and right counts must cover the donor".clone(),
         ));
     }
 
     // Build the new donor (left half) and new sibling (right half).
-    let (left_mp, right_mp) = split_cells(&donor_mp, left_cells, right_cells, separator_cell);
+    let right_mp = left_mp.split_right(left_cells);
 
     // Reserialize.
-    let left_bytes = match serialize_page(&left_mp, ctx.page_size) {
+    let left_bytes = match serialize_page(&left_mp, ctx.page_size()) {
         Result.Ok(b)  => b,
         Result.Err(_) => return Result.Err(InvalidInput("split: left reserialize overflowed".clone())),
     };
-    let right_bytes = match serialize_page(&right_mp, ctx.page_size) {
+    let right_bytes = match serialize_page(&right_mp, ctx.page_size()) {
         Result.Ok(b)  => b,
         Result.Err(_) => return Result.Err(InvalidInput("split: right reserialize overflowed".clone())),
     };
@@ -189,42 +195,6 @@ fn apply_split(
             parent_grew: true,
         }),
     })
-}
-
-/// Distribute `donor_mp.cells` into two MaterializedPages: left
-/// gets cells[0..left_cells]; right gets cells[left_cells..].
-/// `separator_cell` is the index whose key gets promoted to the
-/// parent; foundation: we leave the separator IN the right page
-/// (matching SQLite's "left-leaning split" convention).
-fn split_cells(
-    donor_mp: &MaterializedPage,
-    left_cells: Int,
-    right_cells: Int,
-    _separator_cell: Int,
-) -> (MaterializedPage, MaterializedPage) {
-    let _ = right_cells;
-    let mut left = materialized_page(
-        donor_mp.kind.clone(),
-        0 as UInt32,
-        donor_mp.db_header_offset,
-    );
-    let mut right = materialized_page(
-        donor_mp.kind.clone(),
-        donor_mp.right_ptr,
-        donor_mp.db_header_offset,
-    );
-
-    let mut i: Int = 0;
-    while i < donor_mp.cell_count() {
-        let cell = clone_cell_ref(&donor_mp.cells[i]);
-        if i < left_cells {
-            left.append_cell(cell);
-        } else {
-            right.append_cell(cell);
-        }
-        i = i + 1;
-    }
-    (left, right)
 }
 
 // -----------------------------------------------------------------------------
@@ -256,16 +226,9 @@ fn apply_merge(
         Result.Err(_) => return Result.Err(InvalidInput("merge: right materialize failed".clone())),
     };
 
-    // Append every right cell to left.
-    let mut i: Int = 0;
-    while i < right_mp.cell_count() {
-        left_mp.append_cell(clone_cell_ref(&right_mp.cells[i]));
-        i = i + 1;
-    }
-    // Inherit right's right_ptr (interior-page chain continuation).
-    left_mp.set_right_ptr(right_mp.right_ptr);
+    left_mp.merge_right(right_mp);
 
-    let merged_bytes = match serialize_page(&left_mp, ctx.page_size) {
+    let merged_bytes = match serialize_page(&left_mp, ctx.page_size()) {
         Result.Ok(b)  => b,
         Result.Err(_) => return Result.Err(OverCapacity),
     };
@@ -320,72 +283,15 @@ fn apply_rotate(
         Result.Err(_) => return Result.Err(InvalidInput("rotate: recipient materialize failed".clone())),
     };
 
-    if count > 0 {
-        // Move donor's last `count` cells to recipient's left.
-        let n = donor_mp.cell_count();
-        if count > n {
-            return Result.Err(InvalidInput("rotate: count > donor cell_count".clone()));
-        }
-        let mut moved: List<MaterializedCell> = List.new();
-        let mut i: Int = n - count;
-        while i < n {
-            moved.push(clone_cell_ref(&donor_mp.cells[i]));
-            i = i + 1;
-        }
-        // Drop donor's tail.
-        let mut keep: List<MaterializedCell> = List.new();
-        let mut j: Int = 0;
-        while j < n - count {
-            keep.push(clone_cell_ref(&donor_mp.cells[j]));
-            j = j + 1;
-        }
-        donor_mp.cells = keep;
-        // Prepend moved into recipient.
-        let mut new_recip: List<MaterializedCell> = List.new();
-        let mut k: Int = 0;
-        while k < moved.len() {
-            new_recip.push(clone_cell_ref(&moved[k]));
-            k = k + 1;
-        }
-        let mut m: Int = 0;
-        while m < recipient_mp.cell_count() {
-            new_recip.push(clone_cell_ref(&recipient_mp.cells[m]));
-            m = m + 1;
-        }
-        recipient_mp.cells = new_recip;
-    } else {
-        // Negative count: move donor's first |count| cells to recipient's right.
-        let take = -count;
-        let n = donor_mp.cell_count();
-        if take > n {
-            return Result.Err(InvalidInput("rotate: take > donor cell_count".clone()));
-        }
-        let mut moved: List<MaterializedCell> = List.new();
-        let mut i: Int = 0;
-        while i < take {
-            moved.push(clone_cell_ref(&donor_mp.cells[i]));
-            i = i + 1;
-        }
-        let mut keep: List<MaterializedCell> = List.new();
-        let mut j: Int = take;
-        while j < n {
-            keep.push(clone_cell_ref(&donor_mp.cells[j]));
-            j = j + 1;
-        }
-        donor_mp.cells = keep;
-        // Append moved to recipient's tail.
-        let mut k: Int = 0;
-        while k < moved.len() {
-            recipient_mp.append_cell(clone_cell_ref(&moved[k]));
-            k = k + 1;
-        }
+    if !donor_mp.rotate_into(&mut recipient_mp, count) {
+        return Result.Err(InvalidInput("rotate: count exceeds donor cell count".clone()));
     }
 
-    let donor_bytes = match serialize_page(&donor_mp, ctx.page_size) {
+    let donor_bytes = match serialize_page(&donor_mp, ctx.page_size()) {
         Result.Ok(b)  => b,
         Result.Err(_) => return Result.Err(OverCapacity),
     };
-    let recipient_bytes = match serialize_page(&recipient_mp, ctx.page_size) {
+    let recipient_bytes = match serialize_page(&recipient_mp, ctx.page_size()) {
         Result.Ok(b)  => b,
         Result.Err(_) => return Result.Err(OverCapacity),
     };
@@ -428,7 +334,7 @@ fn apply_grow_root(
     // just write the same bytes under the new page number.  The
     // BTree's internal `root_page` field is updated by the caller
     // (it's outside the page-level concern).
-    let migrated_bytes = match serialize_page(&old_mp, ctx.page_size) {
+    let migrated_bytes = match serialize_page(&old_mp, ctx.page_size()) {
         Result.Ok(b)  => b,
         Result.Err(_) => return Result.Err(OverCapacity),
     };
@@ -437,22 +343,10 @@ fn apply_grow_root(
     // right_ptr = new_root_page.  No cells (cell-count = 0); the
     // first split that occurs at new_root depth populates it with
     // a separator.
-    let fresh_root_kind = if page_kind_is_interior(old_mp.kind) {
-        old_mp.kind.clone()
-    } else {
-        // Old root was a leaf; the new root must be interior of
-        // the corresponding kind (TableLeaf → TableInterior, etc.).
-        promote_to_interior(&old_mp.kind)
-    };
     let db_hdr_off = if old_root == 1 { 100 } else { 0 };
-    let mut fresh_root = materialized_page(
-        fresh_root_kind,
-        new_root as UInt32,
-        db_hdr_off,
-    );
-    let _ = fresh_root.cells;       // empty; right_ptr holds the only child
+    let fresh_root = old_mp.empty_parent(new_root as UInt32, db_hdr_off);
 
-    let fresh_bytes = match serialize_page(&fresh_root, ctx.page_size) {
+    let fresh_bytes = match serialize_page(&fresh_root, ctx.page_size()) {
         Result.Ok(b)  => b,
         Result.Err(_) => return Result.Err(OverCapacity),
     };
@@ -470,14 +364,6 @@ fn apply_grow_root(
             parent_grew: true,
         }),
     })
-}
-
-fn promote_to_interior(leaf_kind: &PageKind) -> PageKind {
-    match leaf_kind {
-        TableLeaf  => TableInterior,
-        IndexLeaf  => IndexInterior,
-        other      => other.clone(),
-    }
 }
 
 // -----------------------------------------------------------------------------
@@ -508,7 +394,7 @@ fn apply_shrink_root(
 
     // The child's cells become the new root content — same bytes
     // under old_root's page number.
-    let promoted_bytes = match serialize_page(&child_mp, ctx.page_size) {
+    let promoted_bytes = match serialize_page(&child_mp, ctx.page_size()) {
         Result.Ok(b)  => b,
         Result.Err(_) => return Result.Err(OverCapacity),
     };
@@ -550,14 +436,4 @@ fn clone_bytes(src: &List<Byte>) -> List<Byte> {
         i = i + 1;
     }
     out
-}
-
-fn clone_cell_ref(src: &MaterializedCell) -> MaterializedCell {
-    let mut bs: List<Byte> = List.new();
-    let mut i: Int = 0;
-    while i < src.raw_bytes.len() {
-        bs.push(src.raw_bytes[i]);
-        i = i + 1;
-    }
-    MaterializedCell { raw_bytes: bs }
 }

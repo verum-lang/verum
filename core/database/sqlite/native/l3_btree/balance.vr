@@ -130,6 +130,10 @@ public type BalanceContext is {
     budget: LocalPayloadBudget,
 };
 
+implement BalanceContext {
+    public(in core.database.sqlite.native.l3_btree) fn page_size(&self) -> Int { self.page_size }
+}
+
 public fn balance_context_new(page_size: Int, reserved: Int) -> BalanceContext {
     BalanceContext {
         page_size: page_size,
