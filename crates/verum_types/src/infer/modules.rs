@@ -20647,7 +20647,12 @@ impl TypeChecker {
         }
 
 
-        if let Some(r) = self.try_blanket_and_ufcs_dispatch(&recv_ty, method, args, span)? {
+        if let Some(r) = self.try_inherent_blanket_dispatch(&recv_ty, method, args, span)? {
+            return Ok(r);
+        }
+        if !specialization_rejected
+            && let Some(r) = self.try_ufcs_dispatch(&recv_ty, method, args, span)?
+        {
             return Ok(r);
         }
 
@@ -20685,7 +20690,7 @@ impl TypeChecker {
 
         // A structural copy borrows its input. Only a checked layout can
         // authorize the implicit operation after declared methods miss.
-        if method.name == "clone" && args.is_empty()
+        if !specialization_rejected && method.name == "clone" && args.is_empty()
             && matches!(recv_ty, Type::Named { .. } | Type::Generic { .. } | Type::Record(_) | Type::Variant(_))
         {
             self.check_structural_clone(&recv_ty, span)?;
@@ -21537,7 +21542,8 @@ impl TypeChecker {
             let methods = self.inherent_methods.read();
             self.ctx.type_aliases.iter().find_map(|(name, target)| {
                 if target == recv_ty {
-                    methods.get(name).and_then(|entries| entries.get(&method.name)).cloned()
+                    methods.get(name)?.get(&method.name)
+                        .filter(|scheme| self.inherent_receiver_allows(recv_ty, scheme)).cloned()
                 } else {
                     None
                 }
@@ -21630,7 +21636,8 @@ impl TypeChecker {
             let scheme = {
                 let methods = self.inherent_methods.read();
                 base_name_candidates.iter().find_map(|name| {
-                    methods.get(name).and_then(|entries| entries.get(&method_name_text)).cloned()
+                    methods.get(name)?.get(&method_name_text)
+                        .filter(|scheme| self.inherent_receiver_allows(recv_ty, scheme)).cloned()
                 })
             };
             if let Some(scheme) = scheme {
@@ -21882,9 +21889,8 @@ impl TypeChecker {
         Ok(None)
     }
 
-    /// Check inherent blanket impls (`implement<I: Iterator> I { fn ... }`) and
-    /// UFCS (Uniform Function Call Syntax) free-function fallback.
-    fn try_blanket_and_ufcs_dispatch(
+    /// Resolve an inherent blanket implementation under its protocol bounds.
+    fn try_inherent_blanket_dispatch(
         &mut self,
         recv_ty: &Type,
         method: &Ident,
@@ -21923,9 +21929,18 @@ impl TypeChecker {
             }
         }
 
-        // UFCS (Uniform Function Call Syntax) fallback
-        // Try to find a free function with this name and call it with receiver as first argument
-        // Syntax grammar: recursive-descent parseable (LL(k), k<=3), reserved keywords only let/fn/is, unified "type X is" definitions — UFCS allows x.foo(args) to resolve as foo(x, args)
+        Ok(None)
+    }
+
+    /// A free function can act as a method only when the receiver has no
+    /// conflicting declared specialization of that name.
+    fn try_ufcs_dispatch(
+        &mut self,
+        recv_ty: &Type,
+        method: &Ident,
+        args: &[Expr],
+        span: Span,
+    ) -> Result<Option<InferResult>> {
         let method_name_str = method.name.as_str();
 
         // First try local environment, then module-level functions
@@ -21973,15 +21988,8 @@ impl TypeChecker {
     /// Last-resort protocol-method dispatch for a CONCRETE receiver type via
     /// the protocol-impl table — including blanket `implement<T> P<..> for T`.
     ///
-    /// No earlier cascade arm consults `protocol_checker`'s impl table for a
-    /// concrete receiver: `try_inherent_method_dispatch` reads only
-    /// `inherent_methods`, `try_blanket_and_ufcs_dispatch` reads only INHERENT
-    /// blanket impls (`implement<I: Iterator> I`, statics skipped) plus free
-    /// functions, and `resolve_method_via_protocol_search` handles only
-    /// BOUNDED type-vars.  So a *static* protocol method on a concrete type —
-    /// e.g. `Int.from(n)`, provided by the reflexive `implement<T> From<T> for
-    /// T` in core/base/protocols.vr — reaches the terminal error unresolved
-    /// and surfaces as E400 "no method `from` found for type `Int`" (T0402).
+    /// An associated protocol function without a value receiver can still be
+    /// selected by its implementation, as in the reflexive `From<T> for T`.
     ///
     /// Resolution mirrors the bounded-var path: find an applicable impl and
     /// concretise its method signature with the SAME substitution that matched
@@ -22374,17 +22382,13 @@ impl TypeChecker {
         skip_static_lookup: bool,
         specialization_rejected: bool,
     ) -> Result<InferResult> {
-        // If method was found but rejected by specialization, produce E400 instead of generic "method not found"
         if specialization_rejected {
-            return Err(TypeError::Mismatch {
-                expected: format!(
-                    "a type implementing `{}` for `{}`",
-                    method.name.as_str(),
-                    recv_ty
-                )
-                .into(),
-                actual: format!("{}", recv_ty).into(),
+            return Err(TypeError::MethodNotFound {
+                ty: recv_ty.to_string().into(),
+                method: method.name.clone(),
                 span,
+                did_you_mean: None,
+                field_fn: None,
             });
         }
 
