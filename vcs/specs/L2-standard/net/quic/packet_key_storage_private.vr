@@ -1,0 +1,14 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L2
+// @tags: net, quic, visibility
+// @expected-error: E202 "'hp_key' is Private"
+// @expected-error-count: 1
+
+mount core.net.quic.connection_sm.aead.{QuicSpaceKeys};
+
+fn extract_header_key(keys: &QuicSpaceKeys) {
+    let _ = keys.hp_key;
+}
+
+fn main() {}

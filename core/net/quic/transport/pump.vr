@@ -715,10 +715,9 @@ implement ConnectionPump {
                 self.negotiated_aead = Maybe.Some(suite.aead_kind());
                 // Derive + install 1-RTT keys; mark Handshake keys for
                 // discard on first Application-space send.
-                let aead_len = aead_key_len_for(&suite.aead_kind());
-                let use_chacha = is_chacha_aead(&suite.aead_kind());
-                match derive_space_keys(client_traffic, aead_len, use_chacha) {
-                    Result.Ok(ktx) => match derive_space_keys(server_traffic, aead_len, use_chacha) {
+                let suite_aead = suite.aead_kind();
+                match derive_space_keys(client_traffic, &suite_aead) {
+                    Result.Ok(ktx) => match derive_space_keys(server_traffic, &suite_aead) {
                         Result.Ok(krx) => {
                             self.connection.keys.app = Maybe.Some((ktx, krx));
                             self.phase_tag = PumpPhase.PumpOneRtt;
@@ -731,10 +730,9 @@ implement ConnectionPump {
             Maybe.Some(HandshakeOutput.ServerHandshakeOutput(c)) => {
                 self.negotiated_hash = Maybe.Some(c.hash.clone());
                 self.negotiated_aead = Maybe.Some(c.suite.aead_kind());
-                let aead_len = aead_key_len_for(&c.suite.aead_kind());
-                let use_chacha = is_chacha_aead(&c.suite.aead_kind());
-                match derive_space_keys(&c.server_ap_traffic, aead_len, use_chacha) {
-                    Result.Ok(ktx) => match derive_space_keys(&c.client_ap_traffic, aead_len, use_chacha) {
+                let suite_aead = c.suite.aead_kind();
+                match derive_space_keys(&c.server_ap_traffic, &suite_aead) {
+                    Result.Ok(ktx) => match derive_space_keys(&c.client_ap_traffic, &suite_aead) {
                         Result.Ok(krx) => {
                             self.connection.keys.app = Maybe.Some((ktx, krx));
                             self.phase_tag = PumpPhase.PumpOneRtt;

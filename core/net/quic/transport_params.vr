@@ -36,6 +36,7 @@ mount core.time.duration.{Duration};
 mount core.collections.list.{List};
 mount core.encoding.varint.{quic_encode_into, quic_decode, VarintError};
 mount core.net.quic.connection_id.{ConnectionId, MAX_CID_LEN};
+mount core.net.quic.stream_sm.flow_control.{ConnFlowControl};
 
 // =============================================================================
 // Typed parameter catalogue
@@ -103,6 +104,22 @@ implement TransportParams {
             && self.active_connection_id_limit >= MIN_ACTIVE_CID_LIMIT
             && self.max_udp_payload_size     >= MIN_MAX_UDP_PAYLOAD_SIZE
     }
+
+    pub(in core.net.quic) fn local_flow_control(&self) -> ConnFlowControl {
+        ConnFlowControl.new(0_u64, self.initial_max_data,
+                            0_u64, self.initial_max_streams_bidi,
+                            0_u64, self.initial_max_streams_uni)
+    }
+
+    pub(in core.net.quic) fn grant_peer_credit(&self, flow: &mut ConnFlowControl) {
+        flow.on_peer_max_data(self.initial_max_data);
+        flow.on_peer_max_streams_bidi(self.initial_max_streams_bidi);
+        flow.on_peer_max_streams_uni(self.initial_max_streams_uni);
+    }
+
+    pub(in core.net.quic) fn local_bidi_receive_limit(&self) -> UInt64 { self.initial_max_stream_data_bidi_local }
+    pub(in core.net.quic) fn remote_bidi_receive_limit(&self) -> UInt64 { self.initial_max_stream_data_bidi_remote }
+    pub(in core.net.quic) fn uni_receive_limit(&self) -> UInt64 { self.initial_max_stream_data_uni }
 
     /// Default values per RFC 9000 §18.2.
     public fn defaults() -> TransportParams {

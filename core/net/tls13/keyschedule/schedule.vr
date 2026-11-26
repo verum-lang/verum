@@ -109,8 +109,8 @@ implement EarlySecret {
     public fn derive_with_psk(hash: HashKind, psk: &[Byte]) -> Result<EarlySecret, HkdfError> {
         let zero_salt: List<Byte> = [];
         let prk = match hash {
-            HashKind.Sha256 => hkdf_extract_sha256(zero_salt.as_slice(), psk).to_list(),
-            HashKind.Sha384 => hkdf_extract_sha384(zero_salt.as_slice(), psk).to_list(),
+            HashKind.Sha256 => List<Byte>.from_slice(&hkdf_extract_sha256(zero_salt.as_slice(), psk)),
+            HashKind.Sha384 => List<Byte>.from_slice(&hkdf_extract_sha384(zero_salt.as_slice(), psk)),
         };
         Result.Ok(EarlySecret { secret: SecretBytes.from(prk), hash: hash })
     }
@@ -170,8 +170,8 @@ implement HandshakeSecret {
         dhe: &[Byte],
     ) -> Result<HandshakeSecret, HkdfError> {
         let prk = match hash {
-            HashKind.Sha256 => hkdf_extract_sha256(derived_from_early, dhe).to_list(),
-            HashKind.Sha384 => hkdf_extract_sha384(derived_from_early, dhe).to_list(),
+            HashKind.Sha256 => List<Byte>.from_slice(&hkdf_extract_sha256(derived_from_early, dhe)),
+            HashKind.Sha384 => List<Byte>.from_slice(&hkdf_extract_sha384(derived_from_early, dhe)),
         };
         Result.Ok(HandshakeSecret { secret: SecretBytes.from(prk), hash: hash })
     }
@@ -230,8 +230,8 @@ implement MasterSecret {
         let out_len = match hash { HashKind.Sha256 => 32, HashKind.Sha384 => 48 };
         let zeros = make_zeros(out_len);
         let prk = match hash {
-            HashKind.Sha256 => hkdf_extract_sha256(derived_from_handshake, zeros.as_slice()).to_list(),
-            HashKind.Sha384 => hkdf_extract_sha384(derived_from_handshake, zeros.as_slice()).to_list(),
+            HashKind.Sha256 => List<Byte>.from_slice(&hkdf_extract_sha256(derived_from_handshake, zeros.as_slice())),
+            HashKind.Sha384 => List<Byte>.from_slice(&hkdf_extract_sha384(derived_from_handshake, zeros.as_slice())),
         };
         Result.Ok(MasterSecret { secret: SecretBytes.from(prk), hash: hash })
     }
@@ -297,15 +297,18 @@ public type TrafficKeys is {
 };
 
 implement TrafficSecret {
+    /// Expand a protocol label under the negotiated traffic hash.
+    pub(in core.net) fn expand_traffic_label(&self, label: &[Byte], out_len: Int) -> Result<List<Byte>, HkdfError> {
+        hkdf_expand_label(self.hash, self.secret.as_slice(), label, &[], out_len)
+    }
+
     /// Derive (key, iv) for AEAD encryption using this traffic secret.
     /// `key_len` / `iv_len` come from the negotiated AEAD; warp ships
     /// 16 / 32 / 12 combinations (AES-128-GCM, AES-256-GCM, ChaCha20-Poly1305).
     public fn derive_keys(&self, key_len: Int, iv_len: Int) -> Result<TrafficKeys, HkdfError> {
-        let key = hkdf_expand_label(self.hash, self.secret.as_slice(), &LABEL_KEY, &[], key_len)?;
-        let iv_vec = hkdf_expand_label(self.hash, self.secret.as_slice(), &LABEL_IV, &[], iv_len)?;
-        if iv_len != 12 {
-            return Result.Err(HkdfError.OutputTooLong { requested: iv_len, limit: 12 });
-        }
+        if iv_len != 12 { return Result.Err(HkdfError.output_too_long(iv_len, 12)); }
+        let key = self.expand_traffic_label(&LABEL_KEY, key_len)?;
+        let iv_vec = self.expand_traffic_label(&LABEL_IV, 12)?;
         let mut iv: [Byte; 12] = [0_u8; 12];
         let mut i: Int = 0;
         while i < 12 { iv[i] = iv_vec[i]; i = i + 1; }
@@ -323,8 +326,12 @@ implement TrafficSecret {
     /// Key update (RFC 8446 §4.6.3):
     ///  next = HKDF-Expand-Label(current, "traffic upd", "", Hash.length)
     public fn next_generation(&self) -> Result<TrafficSecret, HkdfError> {
+        self.next_generation_with_label(&LABEL_TRAFFIC_UPD)
+    }
+
+    pub(in core.net) fn next_generation_with_label(&self, label: &[Byte]) -> Result<TrafficSecret, HkdfError> {
         let out_len = match self.hash { HashKind.Sha256 => 32, HashKind.Sha384 => 48 };
-        let next = hkdf_expand_label(self.hash, self.secret.as_slice(), &LABEL_TRAFFIC_UPD, &[], out_len)?;
+        let next = self.expand_traffic_label(label, out_len)?;
         Result.Ok(TrafficSecret {
             secret: SecretBytes.from(next),
             hash:   self.hash,

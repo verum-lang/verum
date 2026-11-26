@@ -77,6 +77,12 @@ public type HkdfError is
     | OutputTooLong { requested: Int, limit: Int }
     | InvalidPrk { len: Int };
 
+implement HkdfError {
+    pub(in core) fn output_too_long(requested: Int, limit: Int) -> HkdfError {
+        HkdfError.OutputTooLong { requested: requested, limit: limit }
+    }
+}
+
 // Display + Debug + Eq for HkdfError — standard stdlib
 // protocol impls. Pre-fix had no impls.
 

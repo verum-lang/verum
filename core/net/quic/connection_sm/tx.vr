@@ -44,9 +44,7 @@ mount core.net.quic.connection_id.{ConnectionId};
 mount core.net.quic.frame.{QuicFrame, encode_frame};
 mount core.net.quic.packet.{LongPacketType, encode_packet_number_len};
 mount core.net.quic.version as qv;
-mount core.net.quic.crypto.header_protection.{HpKey, compute_hp_mask, apply_hp_mask};
-mount core.net.quic.connection_sm.{QuicSpaceKeys};
-mount core.net.quic.connection_sm.aead.{seal, QuicAeadError};
+mount core.net.quic.connection_sm.aead.{QuicSpaceKeys, seal};
 
 // =============================================================================
 // Error
@@ -147,7 +145,7 @@ public fn build_long_packet(input: LongPacketInput) -> Result<List<Byte>, TxErro
     match input.ptype {
         LongPacketType.Initial => {
             let _ = quic_encode_into(&mut header, input.token.len() as UInt64);
-            header.extend_from_slice(input.token.as_slice());
+            header.extend_from_slice(input.token);
         },
         _ => {},
     }
@@ -167,7 +165,7 @@ public fn build_long_packet(input: LongPacketInput) -> Result<List<Byte>, TxErro
     wire.extend_from_slice(ciphertext.as_slice());
 
     // Header protection.
-    apply_hp(&mut wire, pn_field_offset, pn_len, &input.keys.hp_key, /* is_long */ true)?;
+    apply_hp(&mut wire, pn_field_offset, pn_len, input.keys, /* is_long */ true)?;
 
     Result.Ok(wire)
 }
@@ -209,7 +207,7 @@ public fn build_short_packet(input: ShortPacketInput) -> Result<List<Byte>, TxEr
     wire.extend_from_slice(header.as_slice());
     wire.extend_from_slice(ciphertext.as_slice());
 
-    apply_hp(&mut wire, pn_field_offset, pn_len, &input.keys.hp_key, /* is_long */ false)?;
+    apply_hp(&mut wire, pn_field_offset, pn_len, input.keys, /* is_long */ false)?;
 
     Result.Ok(wire)
 }
@@ -243,7 +241,7 @@ fn apply_hp(
     wire: &mut List<Byte>,
     pn_offset: Int,
     pn_len: UInt8,
-    hp: &HpKey,
+    keys: &QuicSpaceKeys,
     is_long: Bool,
 ) -> Result<(), TxError> {
     let sample_start = pn_offset + 4;
@@ -253,7 +251,7 @@ fn apply_hp(
     let mut sample: [Byte; 16] = [0_u8; 16];
     let mut i: Int = 0;
     while i < 16 { sample[i] = wire[sample_start + i]; i = i + 1; }
-    let mask = compute_hp_mask(hp, &sample);
+    let mask = keys.header_mask(&sample);
 
     // Build a temporary view over wire's prefix (first byte + PN bytes)
     // and apply the mask in-place.

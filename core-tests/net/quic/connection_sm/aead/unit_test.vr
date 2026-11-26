@@ -3,11 +3,13 @@
 // =============================================================================
 //
 // `core/net/quic/connection_sm/aead.vr`:
-//   * QuicAeadError : BadKeyLength(Int) | AeadFailure  (AeadFailure value-blind).
+//   * RFC 9001 Appendix A.3 server Initial protection and authentication failure.
 // Qualified `Type.Variant` form (BAREVAR-ADT-1 discipline).
 // =============================================================================
 
-mount core.net.quic.connection_sm.aead.{QuicAeadError};
+mount core.net.quic.connection_sm.aead.{QuicAeadError, seal};
+mount core.net.quic.connection_sm.rx.{parse_long_packet, InboundPacket, RxError};
+mount core.net.quic.crypto.initial.{derive_initial_secrets};
 
 @test
 fn test_quic_aead_error_bad_key_length_ctor() {
@@ -32,4 +34,78 @@ fn test_quic_aead_error_bad_key_length_distinct_payload() {
 @test
 fn test_quic_aead_error_variants_distinct() {
     assert(QuicAeadError.BadKeyLength(0) != QuicAeadError.AeadFailure);
+}
+
+@test
+fn test_rfc9001_server_initial() {
+    let dcid: [Byte; 8] = [
+        0x83_u8, 0x94_u8, 0xc8_u8, 0xf0_u8, 0x3e_u8, 0x51_u8, 0x57_u8, 0x08_u8,
+    ];
+    let secrets = match derive_initial_secrets(&dcid) {
+        Result.Ok(v) => v, Result.Err(_) => panic("Initial secret derivation failed"),
+    };
+    let server = match secrets.server_packet_keys() {
+        Result.Ok(v) => v, Result.Err(_) => panic("server Initial keys missing"),
+    };
+    let client = match secrets.client_packet_keys() {
+        Result.Ok(v) => v, Result.Err(_) => panic("client Initial keys missing"),
+    };
+    let header: [Byte; 20] = [
+        0xc1_u8, 0x00_u8, 0x00_u8, 0x00_u8, 0x01_u8, 0x00_u8, 0x08_u8, 0xf0_u8, 0x67_u8, 0xa5_u8, 0x50_u8, 0x2a_u8,
+        0x42_u8, 0x62_u8, 0xb5_u8, 0x00_u8, 0x40_u8, 0x75_u8, 0x00_u8, 0x01_u8,
+    ];
+    let plaintext: [Byte; 99] = [
+        0x02_u8, 0x00_u8, 0x00_u8, 0x00_u8, 0x00_u8, 0x06_u8, 0x00_u8, 0x40_u8, 0x5a_u8, 0x02_u8, 0x00_u8, 0x00_u8,
+        0x56_u8, 0x03_u8, 0x03_u8, 0xee_u8, 0xfc_u8, 0xe7_u8, 0xf7_u8, 0xb3_u8, 0x7b_u8, 0xa1_u8, 0xd1_u8, 0x63_u8,
+        0x2e_u8, 0x96_u8, 0x67_u8, 0x78_u8, 0x25_u8, 0xdd_u8, 0xf7_u8, 0x39_u8, 0x88_u8, 0xcf_u8, 0xc7_u8, 0x98_u8,
+        0x25_u8, 0xdf_u8, 0x56_u8, 0x6d_u8, 0xc5_u8, 0x43_u8, 0x0b_u8, 0x9a_u8, 0x04_u8, 0x5a_u8, 0x12_u8, 0x00_u8,
+        0x13_u8, 0x01_u8, 0x00_u8, 0x00_u8, 0x2e_u8, 0x00_u8, 0x33_u8, 0x00_u8, 0x24_u8, 0x00_u8, 0x1d_u8, 0x00_u8,
+        0x20_u8, 0x9d_u8, 0x3c_u8, 0x94_u8, 0x0d_u8, 0x89_u8, 0x69_u8, 0x0b_u8, 0x84_u8, 0xd0_u8, 0x8a_u8, 0x60_u8,
+        0x99_u8, 0x3c_u8, 0x14_u8, 0x4e_u8, 0xca_u8, 0x68_u8, 0x4d_u8, 0x10_u8, 0x81_u8, 0x28_u8, 0x7c_u8, 0x83_u8,
+        0x4d_u8, 0x53_u8, 0x11_u8, 0xbc_u8, 0xf3_u8, 0x2b_u8, 0xb9_u8, 0xda_u8, 0x1a_u8, 0x00_u8, 0x2b_u8, 0x00_u8,
+        0x02_u8, 0x03_u8, 0x04_u8,
+    ];
+    let mut wire: [Byte; 135] = [
+        0xcf_u8, 0x00_u8, 0x00_u8, 0x00_u8, 0x01_u8, 0x00_u8, 0x08_u8, 0xf0_u8, 0x67_u8, 0xa5_u8, 0x50_u8, 0x2a_u8,
+        0x42_u8, 0x62_u8, 0xb5_u8, 0x00_u8, 0x40_u8, 0x75_u8, 0xc0_u8, 0xd9_u8, 0x5a_u8, 0x48_u8, 0x2c_u8, 0xd0_u8,
+        0x99_u8, 0x1c_u8, 0xd2_u8, 0x5b_u8, 0x0a_u8, 0xac_u8, 0x40_u8, 0x6a_u8, 0x58_u8, 0x16_u8, 0xb6_u8, 0x39_u8,
+        0x41_u8, 0x00_u8, 0xf3_u8, 0x7a_u8, 0x1c_u8, 0x69_u8, 0x79_u8, 0x75_u8, 0x54_u8, 0x78_u8, 0x0b_u8, 0xb3_u8,
+        0x8c_u8, 0xc5_u8, 0xa9_u8, 0x9f_u8, 0x5e_u8, 0xde_u8, 0x4c_u8, 0xf7_u8, 0x3c_u8, 0x3e_u8, 0xc2_u8, 0x49_u8,
+        0x3a_u8, 0x18_u8, 0x39_u8, 0xb3_u8, 0xdb_u8, 0xcb_u8, 0xa3_u8, 0xf6_u8, 0xea_u8, 0x46_u8, 0xc5_u8, 0xb7_u8,
+        0x68_u8, 0x4d_u8, 0xf3_u8, 0x54_u8, 0x8e_u8, 0x7d_u8, 0xde_u8, 0xb9_u8, 0xc3_u8, 0xbf_u8, 0x9c_u8, 0x73_u8,
+        0xcc_u8, 0x3f_u8, 0x3b_u8, 0xde_u8, 0xd7_u8, 0x4b_u8, 0x56_u8, 0x2b_u8, 0xfb_u8, 0x19_u8, 0xfb_u8, 0x84_u8,
+        0x02_u8, 0x2f_u8, 0x8e_u8, 0xf4_u8, 0xcd_u8, 0xd9_u8, 0x37_u8, 0x95_u8, 0xd7_u8, 0x7d_u8, 0x06_u8, 0xed_u8,
+        0xbb_u8, 0x7a_u8, 0xaf_u8, 0x2f_u8, 0x58_u8, 0x89_u8, 0x18_u8, 0x50_u8, 0xab_u8, 0xbd_u8, 0xca_u8, 0x3d_u8,
+        0x20_u8, 0x39_u8, 0x8c_u8, 0x27_u8, 0x64_u8, 0x56_u8, 0xcb_u8, 0xc4_u8, 0x21_u8, 0x58_u8, 0x40_u8, 0x7d_u8,
+        0xd0_u8, 0x74_u8, 0xee_u8,
+    ];
+    let sealed = match seal(&server, 1_u64, &header, &plaintext) {
+        Result.Ok(v) => v, Result.Err(_) => panic("server Initial seal failed"),
+    };
+    assert(sealed.len() == wire.len() - header.len());
+    let mut i = 0;
+    while i < sealed.len() {
+        assert(sealed[i] == wire[header.len() + i]);
+        i = i + 1;
+    }
+    match parse_long_packet(&wire, &server, Maybe.None) {
+        Result.Ok(InboundPacket.Long(packet)) => {
+            assert(packet.packet_number() == 1_u64);
+            assert(packet.consumed() == wire.len());
+            assert(packet.payload().len() == plaintext.len());
+            let mut j = 0;
+            while j < plaintext.len() {
+                assert(packet.payload()[j] == plaintext[j]);
+                j = j + 1;
+            }
+        },
+        _ => panic("server Initial failed to authenticate"),
+    }
+    assert(parse_long_packet(&wire, &client, Maybe.None).is_err());
+    let last = wire.len() - 1;
+    wire[last] = wire[last] ^ 1_u8;
+    match parse_long_packet(&wire, &server, Maybe.None) {
+        Result.Err(RxError.AeadFailure) => {},
+        _ => panic("altered Initial tag accepted"),
+    }
 }

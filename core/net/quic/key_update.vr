@@ -62,8 +62,8 @@ module core.net.quic.key_update;
 
 mount core.net.tls13.cipher_suite.{AeadKind};
 mount core.net.tls13.keyschedule.schedule.{TrafficSecret};
-mount core.net.quic.connection_sm.{QuicSpaceKeys};
-mount core.net.quic.connection_sm.keys.{derive_space_keys, aead_key_len_for, is_chacha_aead, QuicKeyError};
+mount core.net.quic.connection_sm.aead.{QuicSpaceKeys};
+mount core.net.quic.connection_sm.keys.{derive_space_keys, rotate_space_keys};
 
 // =============================================================================
 // Per-phase counters — drive key-update cadence + enforce RFC 9001 §6.6
@@ -176,8 +176,6 @@ public type InboundPhaseAction is
 
 public type KeyUpdateSm is {
     aead:                 AeadKind,
-    key_len:              Int,
-    use_chacha:           Bool,
 
     /// Current bit — flips 0 → 1 → 0 on each rotation.
     phase:                UInt8,
@@ -213,26 +211,21 @@ implement KeyUpdateSm {
         rx_secret: TrafficSecret,
         tx_secret: TrafficSecret,
     ) -> Result<KeyUpdateSm, KeyUpdateError> {
-        let key_len = aead_key_len_for(&aead);
-        let chacha  = is_chacha_aead(&aead);
-
-        let current_rx_keys = derive_space_keys(&rx_secret, key_len, chacha)
-            .map_err(|_| KeyUpdateError.DeriveFailed)?;
-        let current_tx_keys = derive_space_keys(&tx_secret, key_len, chacha)
-            .map_err(|_| KeyUpdateError.DeriveFailed)?;
-
-        let next_rx_secret = rx_secret.next_generation()
-            .map_err(|_| KeyUpdateError.DeriveFailed)?;
-        let next_tx_secret = tx_secret.next_generation()
-            .map_err(|_| KeyUpdateError.DeriveFailed)?;
-
-        let next_rx_keys = derive_space_keys(&next_rx_secret, key_len, chacha)
-            .map_err(|_| KeyUpdateError.DeriveFailed)?;
-        let next_tx_keys = derive_space_keys(&next_tx_secret, key_len, chacha)
-            .map_err(|_| KeyUpdateError.DeriveFailed)?;
+        let current_rx_keys = match derive_space_keys(&rx_secret, &aead) {
+            Result.Ok(v) => v, Result.Err(_) => return Result.Err(KeyUpdateError.DeriveFailed),
+        };
+        let current_tx_keys = match derive_space_keys(&tx_secret, &aead) {
+            Result.Ok(v) => v, Result.Err(_) => return Result.Err(KeyUpdateError.DeriveFailed),
+        };
+        let (next_rx_secret, next_rx_keys) = match rotate_space_keys(&rx_secret, &current_rx_keys) {
+            Result.Ok(v) => v, Result.Err(_) => return Result.Err(KeyUpdateError.DeriveFailed),
+        };
+        let (next_tx_secret, next_tx_keys) = match rotate_space_keys(&tx_secret, &current_tx_keys) {
+            Result.Ok(v) => v, Result.Err(_) => return Result.Err(KeyUpdateError.DeriveFailed),
+        };
 
         Result.Ok(KeyUpdateSm {
-            aead: aead, key_len: key_len, use_chacha: chacha,
+            aead: aead,
             phase: 0_u8,
             current_rx_secret: rx_secret, current_tx_secret: tx_secret,
             current_rx_keys: current_rx_keys, current_tx_keys: current_tx_keys,
@@ -307,27 +300,17 @@ implement KeyUpdateSm {
             return Result.Err(KeyUpdateError.PendingRotationInProgress);
         }
         // Swap current ← next for tx side immediately.
-        self.current_tx_secret = core.base.memory.replace(
-            &mut self.next_tx_secret,
-            self.current_tx_secret.clone(),
-        );
-        self.current_tx_keys = core.base.memory.replace(
-            &mut self.next_tx_keys,
-            self.current_tx_keys.clone(),
-        );
+        let (next_secret, next_keys) = match rotate_space_keys(&self.next_tx_secret, &self.next_tx_keys) {
+            Result.Ok(v) => v, Result.Err(_) => return Result.Err(KeyUpdateError.DeriveFailed),
+        };
+        self.current_tx_secret = core.base.memory.replace(&mut self.next_tx_secret, next_secret);
+        self.current_tx_keys = core.base.memory.replace(&mut self.next_tx_keys, next_keys);
         // Flip phase, reset counters, block further initiation until
         // we see an ACK protected under the new phase.
         self.phase = if self.phase == 0_u8 { 1_u8 } else { 0_u8 };
         self.usage = KeyPhaseUsage.new();
         self.current_phase_ack = false;
 
-        // Prepare next-next-phase tx secret/keys.
-        let nn_secret = self.current_tx_secret.next_generation()
-            .map_err(|_| KeyUpdateError.DeriveFailed)?;
-        let nn_keys = derive_space_keys(&nn_secret, self.key_len, self.use_chacha)
-            .map_err(|_| KeyUpdateError.DeriveFailed)?;
-        self.next_tx_secret = nn_secret;
-        self.next_tx_keys = nn_keys;
         Result.Ok(())
     }
 
@@ -345,21 +328,11 @@ implement KeyUpdateSm {
     /// an inbound packet under `next_rx_keys`.
     public fn commit_inbound_phase_flip(&mut self) -> Result<(), KeyUpdateError> {
         // Swap current ← next for rx side.
-        self.current_rx_secret = core.base.memory.replace(
-            &mut self.next_rx_secret,
-            self.current_rx_secret.clone(),
-        );
-        self.current_rx_keys = core.base.memory.replace(
-            &mut self.next_rx_keys,
-            self.current_rx_keys.clone(),
-        );
-        // Prepare next-next rx secret/keys.
-        let nn_secret = self.current_rx_secret.next_generation()
-            .map_err(|_| KeyUpdateError.DeriveFailed)?;
-        let nn_keys = derive_space_keys(&nn_secret, self.key_len, self.use_chacha)
-            .map_err(|_| KeyUpdateError.DeriveFailed)?;
-        self.next_rx_secret = nn_secret;
-        self.next_rx_keys = nn_keys;
+        let (next_secret, next_keys) = match rotate_space_keys(&self.next_rx_secret, &self.next_rx_keys) {
+            Result.Ok(v) => v, Result.Err(_) => return Result.Err(KeyUpdateError.DeriveFailed),
+        };
+        self.current_rx_secret = core.base.memory.replace(&mut self.next_rx_secret, next_secret);
+        self.current_rx_keys = core.base.memory.replace(&mut self.next_rx_keys, next_keys);
         Result.Ok(())
     }
 

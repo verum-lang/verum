@@ -22,24 +22,20 @@
 )
 module core.net.quic.connection_sm.keys;
 
-mount core.collections.list.{List};
-mount core.security.kdf.hkdf.{HkdfError};
-mount core.net.tls13.keyschedule.hkdf_label.{hkdf_expand_label};
 mount core.net.tls13.keyschedule.schedule.{TrafficSecret};
-mount core.net.tls13.cipher_suite.{HashKind, AeadKind};
-mount core.net.quic.crypto.labels.{
-    LABEL_QUIC_KEY, LABEL_QUIC_IV, LABEL_QUIC_HP,
-};
-mount core.net.quic.crypto.header_protection.{HpKey};
-mount core.net.quic.connection_sm.{QuicSpaceKeys};
+mount core.net.tls13.cipher_suite.{AeadKind};
+mount core.net.quic.crypto.labels.{LABEL_QUIC_KEY, LABEL_QUIC_IV, LABEL_QUIC_HP, LABEL_QUIC_KU};
+mount core.net.quic.connection_sm.aead.{QuicSpaceKeys, QuicAeadError};
 
 public type QuicKeyError is
       HkdfFailure
-    | BadKeyLength(Int);
+    | BadKeyLength(Int)
+    | UnsupportedAlgorithm;
 
 implement Display for QuicKeyError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
+            UnsupportedAlgorithm => f.write_str("QUIC keys: unsupported algorithm"),
             HkdfFailure       => f.write_str("QUIC keys: HKDF derivation failed"),
             BadKeyLength(n)   => f.write_str(f"QUIC keys: bad key length {n}".as_str()),
         }
@@ -49,6 +45,7 @@ implement Display for QuicKeyError {
 implement Debug for QuicKeyError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
+            UnsupportedAlgorithm => f.write_str("UnsupportedAlgorithm"),
             HkdfFailure       => f.write_str("HkdfFailure"),
             BadKeyLength(n)   => f.write_str(f"BadKeyLength({n})".as_str()),
         }
@@ -58,6 +55,7 @@ implement Debug for QuicKeyError {
 implement PartialEq for QuicKeyError {
     fn eq(&self, other: &QuicKeyError) -> Bool {
         match (self, other) {
+            (UnsupportedAlgorithm, UnsupportedAlgorithm) => true,
             (HkdfFailure,    HkdfFailure)    => true,
             (BadKeyLength(a), BadKeyLength(b)) => a == b,
             _ => false,
@@ -67,61 +65,51 @@ implement PartialEq for QuicKeyError {
 
 implement Eq for QuicKeyError {}
 
-/// Derive `QuicSpaceKeys` (AEAD key + IV + HP key) from a TLS traffic
-/// secret per RFC 9001 §5.1. `aead_key_len` is determined by the
-/// negotiated cipher suite (16 for AES-128-GCM, 32 for AES-256-GCM or
-/// ChaCha20-Poly1305); `use_chacha` picks the HP key flavour when the
-/// key is 32 bytes.
-public fn derive_space_keys(
-    secret: &TrafficSecret,
-    aead_key_len: Int,
-    use_chacha: Bool,
-) -> Result<QuicSpaceKeys, QuicKeyError> {
-    let hash = secret.hash.clone();
-    let secret_bytes = secret.secret.as_slice();
-
-    let aead_key = hkdf_expand_label(hash.clone(), secret_bytes, &LABEL_QUIC_KEY, &[], aead_key_len)
-        .map_err(|_| QuicKeyError.HkdfFailure)?;
-    let iv_vec = hkdf_expand_label(hash.clone(), secret_bytes, &LABEL_QUIC_IV, &[], 12)
-        .map_err(|_| QuicKeyError.HkdfFailure)?;
-    let hp_vec = hkdf_expand_label(hash.clone(), secret_bytes, &LABEL_QUIC_HP, &[], aead_key_len)
-        .map_err(|_| QuicKeyError.HkdfFailure)?;
-
-    let mut iv: [Byte; 12] = [0_u8; 12];
-    let mut i: Int = 0;
-    while i < 12 { iv[i] = iv_vec[i]; i = i + 1; }
-
-    let hp_key: HpKey = if aead_key_len == 16 {
-        let mut k: [Byte; 16] = [0_u8; 16];
-        let mut j: Int = 0;
-        while j < 16 { k[j] = hp_vec[j]; j = j + 1; }
-        HpKey.AesEcb128(k)
-    } else if aead_key_len == 32 {
-        let mut k: [Byte; 32] = [0_u8; 32];
-        let mut j: Int = 0;
-        while j < 32 { k[j] = hp_vec[j]; j = j + 1; }
-        if use_chacha { HpKey.ChaCha20Block(k) } else { HpKey.AesEcb256(k) }
-    } else {
-        return Result.Err(QuicKeyError.BadKeyLength(aead_key_len));
-    };
-
-    Result.Ok(QuicSpaceKeys {
-        aead_key: aead_key,
-        aead_iv:  iv,
-        hp_key:   hp_key,
-    })
+pub(in core.net.quic) fn key_error(error: QuicAeadError) -> QuicKeyError {
+    match error {
+        QuicAeadError.BadKeyLength(n) => QuicKeyError.BadKeyLength(n),
+        QuicAeadError.UnsupportedAlgorithm => QuicKeyError.UnsupportedAlgorithm,
+        QuicAeadError.AeadFailure => QuicKeyError.HkdfFailure,
+    }
 }
 
-/// RFC 9001 §6.1 key update: next-generation traffic secret + keys.
-/// Returns the new `QuicSpaceKeys` derived from next traffic secret.
+/// Derive QUIC v1 packet and header protection for the negotiated TLS suite.
+public fn derive_space_keys(secret: &TrafficSecret, suite: &AeadKind) -> Result<QuicSpaceKeys, QuicKeyError> {
+    let key_len = match suite {
+        AeadKind.Aes128Gcm => 16,
+        AeadKind.Aes256Gcm | AeadKind.ChaCha20Poly1305 => 32,
+        _ => return Result.Err(QuicKeyError.UnsupportedAlgorithm),
+    };
+    let key = match secret.expand_traffic_label(&LABEL_QUIC_KEY, key_len) {
+        Result.Ok(v) => v, Result.Err(_) => return Result.Err(QuicKeyError.HkdfFailure),
+    };
+    let iv = match secret.expand_traffic_label(&LABEL_QUIC_IV, 12) {
+        Result.Ok(v) => v, Result.Err(_) => return Result.Err(QuicKeyError.HkdfFailure),
+    };
+    let hp = match secret.expand_traffic_label(&LABEL_QUIC_HP, key_len) {
+        Result.Ok(v) => v, Result.Err(_) => return Result.Err(QuicKeyError.HkdfFailure),
+    };
+    match QuicSpaceKeys.from_derived(suite, key.as_slice(), iv.as_slice(), hp.as_slice()) {
+        Result.Ok(keys) => Result.Ok(keys), Result.Err(e) => Result.Err(key_error(e)),
+    }
+}
+
+/// Update the QUIC v1 packet key and IV while retaining header protection (RFC 9001 §6).
 public fn rotate_space_keys(
-    secret: &TrafficSecret,
-    aead_key_len: Int,
-    use_chacha: Bool,
+    secret: &TrafficSecret, current: &QuicSpaceKeys,
 ) -> Result<(TrafficSecret, QuicSpaceKeys), QuicKeyError> {
-    let next = secret.next_generation().map_err(|_| QuicKeyError.HkdfFailure)?;
-    let keys = derive_space_keys(&next, aead_key_len, use_chacha)?;
-    Result.Ok((next, keys))
+    let next = match secret.next_generation_with_label(&LABEL_QUIC_KU) {
+        Result.Ok(v) => v, Result.Err(_) => return Result.Err(QuicKeyError.HkdfFailure),
+    };
+    let key = match next.expand_traffic_label(&LABEL_QUIC_KEY, current.packet_key_len()) {
+        Result.Ok(v) => v, Result.Err(_) => return Result.Err(QuicKeyError.HkdfFailure),
+    };
+    let iv = match next.expand_traffic_label(&LABEL_QUIC_IV, 12) {
+        Result.Ok(v) => v, Result.Err(_) => return Result.Err(QuicKeyError.HkdfFailure),
+    };
+    match current.updated(key.as_slice(), iv.as_slice()) {
+        Result.Ok(keys) => Result.Ok((next, keys)), Result.Err(e) => Result.Err(key_error(e)),
+    }
 }
 
 /// Pick the AEAD key length given a negotiated AeadKind.

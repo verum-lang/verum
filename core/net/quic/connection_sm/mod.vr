@@ -108,8 +108,7 @@ mount core.net.quic.connection_id.{ConnectionId};
 mount core.net.quic.transport_params.{TransportParams};
 mount core.net.quic.recovery.{LossDetection, NewReno, CongestionCtrl};
 mount core.net.quic.stream_sm.{SendStream, RecvStream, ConnFlowControl};
-mount core.net.quic.crypto.initial.{InitialKeys};
-mount core.net.quic.crypto.header_protection.{HpKey};
+public mount .aead.{QuicSpaceKeys};
 mount core.net.quic.error.{QuicError};
 
 // Re-exports
@@ -128,15 +127,6 @@ public type Datagram is {
 // =============================================================================
 // Keys per PN space
 // =============================================================================
-
-/// Per-direction AEAD + HP key material for one PN space. Filled on
-/// phase promotion (derive_initial_keys / derive_handshake_keys_from_tls /
-/// derive_app_keys_from_tls).
-public type QuicSpaceKeys is {
-    aead_key:  List<Byte>,
-    aead_iv:   [Byte; 12],
-    hp_key:    HpKey,
-};
 
 public type QuicKeys is {
     initial:    Maybe<(QuicSpaceKeys, QuicSpaceKeys)>,  // (tx, rx) — client sends with .0, receives with .1
@@ -196,6 +186,38 @@ public type ConnState is {
 // QuicConnectionSm<S> — typed outer wrapper
 // =============================================================================
 
+implement ConnState {
+    pub(in core.net.quic) fn initial(
+        role: QuicRole, peer_dcid: ConnectionId, scid_local: ConnectionId,
+        params_local: TransportParams, initial_keys_tx: QuicSpaceKeys,
+        initial_keys_rx: QuicSpaceKeys, now: Instant,
+    ) -> ConnState {
+        let mut keys = QuicKeys.empty();
+        keys.initial = Maybe.Some((initial_keys_tx, initial_keys_rx));
+        let flow = params_local.local_flow_control();
+        ConnState {
+            role:          role,
+            version:       0x00000001_u32,
+            dcid_peer:     peer_dcid,
+            scid_local:    scid_local,
+            retry_src_cid: Maybe.None,
+            params_local:  params_local,
+            params_remote: Maybe.None,
+            keys:          keys,
+            loss:          LossDetection.new(),
+            cc:            NewReno.new(),
+            flow:          flow,
+            send_streams:  [],
+            recv_streams:  [],
+            opened_at:     now,
+            idle_deadline: Maybe.None,
+            close_reason:  Maybe.None,
+            close_sent_at: Maybe.None,
+            drain_expiry:  Maybe.None,
+        }
+    }
+}
+
 public type QuicConnectionSm<S> is {
     inner: ConnState,
     // `_phase` is conceptual — compilers track via the generic parameter.
@@ -213,37 +235,9 @@ implement QuicConnectionSm<Initial> {
         initial_keys_rx: QuicSpaceKeys,
         now: Instant,
     ) -> QuicConnectionSm<Initial> {
-        let mut keys = QuicKeys.empty();
-        keys.initial = Maybe.Some((initial_keys_tx, initial_keys_rx));
-        let flow = ConnFlowControl.new(
-            params_local.initial_max_data,
-            params_local.initial_max_data,
-            params_local.initial_max_streams_bidi,
-            params_local.initial_max_streams_bidi,
-            params_local.initial_max_streams_uni,
-            params_local.initial_max_streams_uni,
-        );
         QuicConnectionSm {
-            inner: ConnState {
-                role:          QuicRole.ClientEnd,
-                version:       0x00000001_u32,
-                dcid_peer:     peer_dcid,
-                scid_local:    scid_local,
-                retry_src_cid: Maybe.None,
-                params_local:  params_local,
-                params_remote: Maybe.None,
-                keys:          keys,
-                loss:          LossDetection.new(),
-                cc:            NewReno.new(),
-                flow:          flow,
-                send_streams:  [],
-                recv_streams:  [],
-                opened_at:     now,
-                idle_deadline: Maybe.None,
-                close_reason:  Maybe.None,
-                close_sent_at: Maybe.None,
-                drain_expiry:  Maybe.None,
-            },
+            inner: ConnState.initial(QuicRole.ClientEnd, peer_dcid, scid_local, params_local,
+                                     initial_keys_tx, initial_keys_rx, now),
         }
     }
 
@@ -272,6 +266,16 @@ implement QuicConnectionSm<Handshake> {
         QuicConnectionSm { inner: self.inner }
     }
 
+    /// Install peer transport parameters once after the caller authenticates them.
+    public fn install_peer_parameters(&mut self, params: TransportParams) -> Result<(), QuicError> {
+        if self.inner.params_remote.is_some() || !params.bounds_ok() {
+            return Result.Err(QuicError.InvalidTransportParameter(Text.from("invalid or repeated peer parameters")));
+        }
+        params.grant_peer_credit(&mut self.inner.flow);
+        self.inner.params_remote = Maybe.Some(params);
+        Result.Ok(())
+    }
+
     /// RFC 9001 §4.9.1 — drop Initial keys on first Handshake packet
     /// successfully validated (client) or after sending a Handshake
     /// packet (server). Idempotent.
@@ -298,10 +302,11 @@ implement QuicConnectionSm<OneRtt> {
         };
         match self.inner.flow.alloc_stream_bidi(is_server) {
             Maybe.Some(sid) => {
-                let max_sd = self.inner.params_remote
-                    .clone().map(|p| p.initial_max_stream_data_bidi_remote).unwrap_or_else(|| 0_u64);
+                let max_sd = match &self.inner.params_remote {
+                    Maybe.Some(p) => p.remote_bidi_receive_limit(), Maybe.None => 0_u64,
+                };
                 let send = SendStream.new(sid, max_sd);
-                let recv = RecvStream.new(sid, self.inner.params_local.initial_max_stream_data_bidi_local);
+                let recv = RecvStream.new(sid, self.inner.params_local.local_bidi_receive_limit());
                 self.inner.send_streams.push((sid, send));
                 self.inner.recv_streams.push((sid, recv));
                 Result.Ok(sid)
@@ -318,8 +323,9 @@ implement QuicConnectionSm<OneRtt> {
         };
         match self.inner.flow.alloc_stream_uni(is_server) {
             Maybe.Some(sid) => {
-                let max_sd = self.inner.params_remote
-                    .clone().map(|p| p.initial_max_stream_data_uni).unwrap_or_else(|| 0_u64);
+                let max_sd = match &self.inner.params_remote {
+                    Maybe.Some(p) => p.uni_receive_limit(), Maybe.None => 0_u64,
+                };
                 let send = SendStream.new(sid, max_sd);
                 self.inner.send_streams.push((sid, send));
                 Result.Ok(sid)

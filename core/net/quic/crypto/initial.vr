@@ -39,7 +39,9 @@ module core.net.quic.crypto.initial;
 
 mount core.collections.list.{List};
 mount core.security.kdf.hkdf.{hkdf_extract_sha256, HkdfError};
-mount core.net.tls13.cipher_suite.{HashKind};
+mount core.net.tls13.cipher_suite.{HashKind, AeadKind};
+mount core.net.quic.connection_sm.aead.{QuicSpaceKeys};
+mount core.net.quic.connection_sm.keys.{QuicKeyError, key_error};
 mount core.net.tls13.keyschedule.hkdf_label.{hkdf_expand_label};
 mount core.net.quic.crypto.labels.{
     QUIC_INITIAL_SALT_V1,
@@ -66,6 +68,27 @@ public type InitialKeys is {
     hp:  List<Byte>,
 };
 
+implement InitialSecrets {
+    /// Packet protection for Initial packets sent by the client.
+    public fn client_packet_keys(&self) -> Result<QuicSpaceKeys, QuicKeyError> {
+        initial_packet_keys(self.client.as_slice())
+    }
+
+    /// Packet protection for Initial packets sent by the server.
+    public fn server_packet_keys(&self) -> Result<QuicSpaceKeys, QuicKeyError> {
+        initial_packet_keys(self.server.as_slice())
+    }
+}
+
+fn initial_packet_keys(secret: &[Byte]) -> Result<QuicSpaceKeys, QuicKeyError> {
+    let keys = match derive_initial_keys(secret) {
+        Result.Ok(v) => v, Result.Err(_) => return Result.Err(QuicKeyError.HkdfFailure),
+    };
+    match QuicSpaceKeys.from_derived(&AeadKind.Aes128Gcm, keys.key.as_slice(), &keys.iv, keys.hp.as_slice()) {
+        Result.Ok(v) => Result.Ok(v), Result.Err(e) => Result.Err(key_error(e)),
+    }
+}
+
 // =============================================================================
 // Derivation
 // =============================================================================
@@ -75,14 +98,14 @@ public type InitialKeys is {
 /// client used in its first Initial packet's Destination CID field.
 public fn derive_initial_secrets(dcid: &[Byte]) -> Result<InitialSecrets, HkdfError> {
     // initial_secret = HKDF-Extract(salt, DCID)
-    let prk = hkdf_extract_sha256(&QUIC_INITIAL_SALT_V1, dcid).to_list();
+    let prk = hkdf_extract_sha256(&QUIC_INITIAL_SALT_V1, dcid);
 
     // Per-role secrets via HKDF-Expand-Label with SHA-256.
     let client = hkdf_expand_label(
-        HashKind.Sha256, prk.as_slice(), &LABEL_CLIENT_IN, &[], 32,
+        HashKind.Sha256, &prk, &LABEL_CLIENT_IN, &[], 32,
     )?;
     let server = hkdf_expand_label(
-        HashKind.Sha256, prk.as_slice(), &LABEL_SERVER_IN, &[], 32,
+        HashKind.Sha256, &prk, &LABEL_SERVER_IN, &[], 32,
     )?;
     Result.Ok(InitialSecrets { client: client, server: server })
 }

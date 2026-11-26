@@ -44,9 +44,7 @@ mount core.encoding.varint.{quic_decode};
 mount core.net.quic.connection_id.{ConnectionId, MAX_CID_LEN};
 mount core.net.quic.packet.{LongPacketType, decode_packet_number};
 mount core.net.quic.version as qv;
-mount core.net.quic.crypto.header_protection.{HpKey, compute_hp_mask};
-mount core.net.quic.connection_sm.{QuicSpaceKeys};
-mount core.net.quic.connection_sm.aead.{open, QuicAeadError};
+mount core.net.quic.connection_sm.aead.{QuicSpaceKeys};
 
 // =============================================================================
 // Error
@@ -138,6 +136,19 @@ public type InboundShortPacket is {
     consumed:      Int,
 };
 
+implement InboundLongPacket {
+    public fn packet_number(&self) -> UInt64 { self.packet_number }
+    public fn payload(&self) -> &[Byte] { self.payload.as_slice() }
+    public fn consumed(&self) -> Int { self.consumed }
+    pub(in core.net.quic) fn packet_type(&self) -> &LongPacketType { &self.ptype }
+}
+
+implement InboundShortPacket {
+    public fn packet_number(&self) -> UInt64 { self.packet_number }
+    public fn payload(&self) -> &[Byte] { self.payload.as_slice() }
+    public fn consumed(&self) -> Int { self.consumed }
+}
+
 public type InboundPacket is
       Long(InboundLongPacket)
     | Short(InboundShortPacket)
@@ -198,8 +209,8 @@ public fn parse_long_packet(
     let (token, after_token) = match ptype {
         LongPacketType.Initial => {
             let (tl, p1) = quic_decode(wire, scid_end).map_err(|_| RxError.VarintFailure)?;
+            if tl > (wire.len() - p1) as UInt64 { return Result.Err(RxError.Truncated); }
             let token_end = p1 + (tl as Int);
-            if token_end > wire.len() { return Result.Err(RxError.Truncated); }
             let mut t: List<Byte> = List.with_capacity(token_end - p1);
             t.extend_from_slice(&wire[p1..token_end]);
             (t, token_end)
@@ -210,19 +221,19 @@ public fn parse_long_packet(
             // from this entry point so the caller routes there.
             return Result.Err(RxError.UnknownPacketType);
         },
-        _ => ([], scid_end),
+        _ => (List<Byte>.new(), scid_end),
     };
 
     // Length varint
     let (length_field, after_length) = quic_decode(wire, after_token)
         .map_err(|_| RxError.VarintFailure)?;
+    if length_field > (wire.len() - after_length) as UInt64 { return Result.Err(RxError.Truncated); }
     let packet_end = after_length + (length_field as Int);
-    if packet_end > wire.len() { return Result.Err(RxError.Truncated); }
 
     // HP-protected region starts at `after_length` (PN bytes).
     let pn_offset = after_length;
-    let (full_pn, pn_len, first_byte_clear) = unprotect_header(
-        wire, pn_offset, packet_end, &keys.hp_key, largest_acked_received, /* is_long */ true,
+    let (full_pn, pn_len, first_byte_clear, mask) = unprotect_header(
+        wire, pn_offset, packet_end, keys, largest_acked_received, /* is_long */ true,
     )?;
 
     // Assemble the AAD = header with HP-cleared first byte + cleared PN bytes.
@@ -230,11 +241,9 @@ public fn parse_long_packet(
     aad.push(first_byte_clear);
     aad.extend_from_slice(&wire[1..pn_offset]);
     // PN bytes, unmasked
-    let mut pn_buf: List<Byte> = [];
     let mut p: Int = 0;
     while p < (pn_len as Int) {
-        let b = wire[pn_offset + p] ^ hp_mask_byte_at(wire, pn_offset, &keys.hp_key, p + 1)?;
-        pn_buf.push(b);
+        let b = wire[pn_offset + p] ^ mask[p + 1];
         aad.push(b);
         p = p + 1;
     }
@@ -275,6 +284,7 @@ public fn parse_short_packet(
     keys: &QuicSpaceKeys,
     largest_acked_received: Maybe<UInt64>,
 ) -> Result<InboundPacket, RxError> {
+    if dcid_len < 0 || dcid_len > MAX_CID_LEN { return Result.Err(RxError.InvalidCidLength(dcid_len)); }
     if wire.len() < 1 + dcid_len + 1 { return Result.Err(RxError.Truncated); }
     let first_raw = wire[0];
     if (first_raw & 0x80_u8) != 0_u8 { return Result.Err(RxError.InvalidHeaderForm); }
@@ -285,18 +295,16 @@ public fn parse_short_packet(
     // (caller sliced to a single packet already).
     let packet_end = wire.len();
 
-    let (full_pn, pn_len, first_byte_clear) = unprotect_header(
-        wire, pn_offset, packet_end, &keys.hp_key, largest_acked_received, /* is_long */ false,
+    let (full_pn, pn_len, first_byte_clear, mask) = unprotect_header(
+        wire, pn_offset, packet_end, keys, largest_acked_received, /* is_long */ false,
     )?;
 
     let mut aad: List<Byte> = List.with_capacity(pn_offset + 4);
     aad.push(first_byte_clear);
     aad.extend_from_slice(&wire[1..pn_offset]);
-    let mut pn_buf: List<Byte> = [];
     let mut p: Int = 0;
     while p < (pn_len as Int) {
-        let b = wire[pn_offset + p] ^ hp_mask_byte_at(wire, pn_offset, &keys.hp_key, p + 1)?;
-        pn_buf.push(b);
+        let b = wire[pn_offset + p] ^ mask[p + 1];
         aad.push(b);
         p = p + 1;
     }
@@ -336,10 +344,10 @@ fn unprotect_header(
     wire: &[Byte],
     pn_offset: Int,
     packet_end: Int,
-    hp: &HpKey,
+    keys: &QuicSpaceKeys,
     largest_acked: Maybe<UInt64>,
     is_long: Bool,
-) -> Result<(UInt64, UInt8, Byte), RxError> {
+) -> Result<(UInt64, UInt8, Byte, [Byte; 5]), RxError> {
     let sample_start = pn_offset + 4;
     if sample_start + 16 > packet_end {
         return Result.Err(RxError.SampleUnavailable);
@@ -347,7 +355,7 @@ fn unprotect_header(
     let mut sample: [Byte; 16] = [0_u8; 16];
     let mut i: Int = 0;
     while i < 16 { sample[i] = wire[sample_start + i]; i = i + 1; }
-    let mask = compute_hp_mask(hp, &sample);
+    let mask = keys.header_mask(&sample);
 
     // Unmask first byte (low 4 bits for long, 5 for short).
     let first_mask: Byte = if is_long { mask[0] & 0x0F_u8 } else { mask[0] & 0x1F_u8 };
@@ -374,28 +382,7 @@ fn unprotect_header(
     let pn_nbits: UInt32 = (pn_len as UInt32) * 8_u32;
     let full_pn = decode_packet_number(largest, truncated, pn_nbits);
 
-    Result.Ok((full_pn, pn_len, first_clear))
-}
-
-fn hp_mask_byte_at(
-    wire: &[Byte],
-    pn_offset: Int,
-    hp: &HpKey,
-    byte_index: Int,
-) -> Result<Byte, RxError> {
-    // Re-derive the mask for byte `byte_index` of the 5-byte mask.
-    // Caller computes mask once; this is the per-byte fallback when we
-    // didn't cache. For simplicity + locality, just recompute — cheap
-    // vs AEAD open.
-    let sample_start = pn_offset + 4;
-    if sample_start + 16 > wire.len() {
-        return Result.Err(RxError.SampleUnavailable);
-    }
-    let mut sample: [Byte; 16] = [0_u8; 16];
-    let mut i: Int = 0;
-    while i < 16 { sample[i] = wire[sample_start + i]; i = i + 1; }
-    let mask = compute_hp_mask(hp, &sample);
-    Result.Ok(mask[byte_index])
+    Result.Ok((full_pn, pn_len, first_clear, mask))
 }
 
 // =============================================================================
