@@ -1,0 +1,82 @@
+module core.database.sqlite.native.statistics.tests.estimation;
+mount core.collections.list.List;
+mount core.database.sqlite.native.statistics.stat1.{Stat1Row, stat1_row};
+mount core.database.sqlite.native.statistics.histogram.{SampleKey, Bucket, sample_key, bucket, stat4_histogram};
+mount core.database.sqlite.native.statistics.selectivity.{PredicateShape, estimate_with_stat1, estimate_with_stat4};
+mount core.database.sqlite.native.statistics.analyze.{AnalyzePhase, plan_for, engine_new};
+
+fn key_at(n: Byte) -> SampleKey {
+    let mut raw: List<Byte> = List.new();
+    raw.push(n);
+    sample_key(raw)
+}
+
+fn stat1_observation() -> Stat1Row {
+    let mut prefix: List<Int64> = List.new();
+    prefix.push(4_i64);
+    stat1_row("t", Maybe.Some("ix"), 16_i64, prefix)
+}
+
+@test
+fn test_nonuniform_key_counts_at_sample_boundaries() {
+    // Frequencies for keys 10, 20, 30, 40 are 2, 4, 3, 7. Key 20 is
+    // deliberately omitted from the histogram, as real samples can be sparse.
+    let mut samples: List<Bucket> = List.new();
+    samples.push(bucket(key_at(10 as Byte), 0_i64, 2_i64));
+    samples.push(bucket(key_at(30 as Byte), 6_i64, 3_i64));
+    samples.push(bucket(key_at(40 as Byte), 9_i64, 7_i64));
+    let hist = stat4_histogram(samples, 16_i64);
+    assert_eq(hist.estimate_lt(&key_at(30 as Byte)), 6_i64);
+    assert_eq(hist.estimate_lt(&key_at(25 as Byte)), 2_i64);
+    let less = PredicateShape.PsLessThan(key_at(30 as Byte));
+    assert_eq(estimate_with_stat4(&less, &hist).estimate_rows(16_i64), 6_i64);
+    let range = PredicateShape.PsRange(key_at(30 as Byte), key_at(40 as Byte));
+    assert_eq(estimate_with_stat4(&range, &hist).estimate_rows(16_i64), 3_i64);
+    assert_eq(hist.estimate_range(&key_at(40 as Byte), &key_at(30 as Byte)), 0_i64);
+    let eq = PredicateShape.PsEquality(key_at(40 as Byte));
+    assert_eq(estimate_with_stat4(&eq, &hist).estimate_rows(16_i64), 7_i64);
+    assert_eq(estimate_with_stat1(&eq, &stat1_observation(), 1).estimate_rows(16_i64), 4_i64);
+    let none = stat4_histogram(List.new(), 0_i64);
+    assert_eq(estimate_with_stat4(&less, &none).estimate_rows(7_i64), 7_i64);
+    let empty_row = stat1_row("empty", Maybe.None, 0_i64, List.new());
+    assert_eq(estimate_with_stat1(&eq, &empty_row, 1).estimate_rows(7_i64), 7_i64);
+}
+
+@test
+fn test_analyze_orders_tables_and_preserves_terminal_phases() {
+    let mut names: List<Text> = List.new();
+    names.push("first");
+    names.push("second");
+    let mut engine = engine_new(plan_for(names));
+    assert(engine.current_phase() is AnalyzePhase.AeInit);
+    engine.advance();
+    assert(engine.current_phase() is AnalyzePhase.AeScanningTable("first"));
+    engine.record_stat1(stat1_observation());
+    engine.advance();
+    assert(engine.current_phase() is AnalyzePhase.AeFlushingStat1("first"));
+    engine.advance();
+    assert(engine.current_phase() is AnalyzePhase.AeSamplingStat4("first"));
+    engine.advance();
+    assert(engine.current_phase() is AnalyzePhase.AeFlushingStat4("first"));
+    engine.advance();
+    assert(engine.current_phase() is AnalyzePhase.AeScanningTable("second"));
+    engine.record_stat1(stat1_observation());
+    engine.advance();
+    engine.advance();
+    engine.advance();
+    engine.advance();
+    assert(engine.is_terminal());
+    assert(engine.current_table() is Maybe.None);
+    assert_eq(engine.finished_stat1_count(), 2);
+    engine.advance();
+    assert(engine.current_phase() is AnalyzePhase.AeDone);
+    let mut failed = engine_new(plan_for(List.new()));
+    failed.fail("read error");
+    failed.advance();
+    assert(failed.current_phase() is AnalyzePhase.AeFailed("read error"));
+    let mut empty = engine_new(plan_for(List.new()));
+    empty.advance();
+    assert(empty.current_phase() is AnalyzePhase.AeDone);
+}
+
+fn main() {}

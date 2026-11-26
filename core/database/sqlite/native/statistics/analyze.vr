@@ -101,26 +101,29 @@ implement AnalyzeEngine {
         Maybe.Some(self.plan.tables[self.table_idx].clone())
     }
 
-    /// Step the state machine. Caller drives execution by feeding back
-    /// the per-phase scan result via `record_stat1` / `record_stat4`.
+    /// Advance one phase. The caller may supply observed rows with record_stat1.
     public fn advance(&mut self) {
-        match &self.phase {
-            AeInit => {
-                if self.plan.tables.len() == 0 { self.phase = AeDone; }
-                else { self.phase = AeScanningTable(self.plan.tables[0].clone()); }
+        let mut next_idx = self.table_idx;
+        let next_phase = match &self.phase {
+            AeInit => self.scan_or_finish(next_idx),
+            AeScanningTable(t) => AeFlushingStat1(t.clone()),
+            AeFlushingStat1(t) => AeSamplingStat4(t.clone()),
+            AeSamplingStat4(t) => AeFlushingStat4(t.clone()),
+            AeFlushingStat4(_) => {
+                next_idx = next_idx + 1;
+                self.scan_or_finish(next_idx)
             }
-            AeScanningTable(t)  => self.phase = AeFlushingStat1(t.clone()),
-            AeFlushingStat1(t)  => self.phase = AeSamplingStat4(t.clone()),
-            AeSamplingStat4(t)  => self.phase = AeFlushingStat4(t.clone()),
-            AeFlushingStat4(_t) => {
-                self.table_idx = self.table_idx + 1;
-                if self.table_idx >= self.plan.tables.len() {
-                    self.phase = AeDone;
-                } else {
-                    self.phase = AeScanningTable(self.plan.tables[self.table_idx].clone());
-                }
-            }
-            AeDone | AeFailed(_) => {}
+            AeDone | AeFailed(_) => return,
+        };
+        self.table_idx = next_idx;
+        self.phase = next_phase;
+    }
+
+    fn scan_or_finish(&self, index: Int) -> AnalyzePhase {
+        if index >= self.plan.tables.len() {
+            AeDone
+        } else {
+            AeScanningTable(self.plan.tables[index].clone())
         }
     }
 

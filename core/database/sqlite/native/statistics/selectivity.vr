@@ -30,7 +30,7 @@ mount core.database.sqlite.native.statistics.histogram.{
 
 public type PredicateShape is
       PsEquality(SampleKey)
-    | PsRange(SampleKey, SampleKey)         // (lo, hi) — closed
+    | PsRange(SampleKey, SampleKey)         // lo inclusive, hi exclusive
     | PsLessThan(SampleKey)
     | PsIsNotNull
     | PsLike;                               // wildcard catch-all
@@ -59,7 +59,7 @@ implement Selectivity {
 // -----------------------------------------------------------------------------
 
 public fn estimate_with_stat1(pred: &PredicateShape, stat: &Stat1Row, n_cols: Int) -> Selectivity {
-    let total = stat.total_rows;
+    let total = stat.row_count();
     if total <= 0_i64 { return selectivity(1.0 as Float64); }
     match pred {
         PsEquality(_) => {
@@ -88,7 +88,7 @@ public fn estimate_with_stat1(pred: &PredicateShape, stat: &Stat1Row, n_cols: In
 }
 
 public fn estimate_with_stat4(pred: &PredicateShape, hist: &Stat4Histogram) -> Selectivity {
-    let total = hist.total_rows;
+    let total = hist.row_count();
     if total <= 0_i64 { return selectivity(1.0 as Float64); }
     match pred {
         PsEquality(k) => {

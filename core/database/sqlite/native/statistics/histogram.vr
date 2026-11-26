@@ -6,8 +6,8 @@
 
 // stat4 stores per-key-prefix sample histograms. Each `Bucket` is
 // one sampled key together with the cumulative count of rows
-// preceding it. Selectivity for `key < ?` reduces to "binary-search
-// for the bucket whose key is closest" + "interpolate linearly".
+// preceding it. At a sampled key its cumulative count is known. Between
+// samples the estimator uses the lower bound from the preceding sample.
 // =============================================================================
 
 @arch_module(
@@ -73,6 +73,10 @@ public fn stat4_histogram(buckets: List<Bucket>, total_rows: Int64) -> Stat4Hist
 }
 
 implement Stat4Histogram {
+    public(in core.database.sqlite.native.statistics) fn row_count(&self) -> Int64 {
+        self.total_rows
+    }
+
     public fn bucket_count(&self) -> Int { self.buckets.len() }
 
     /// Estimate the count of rows with `key == probe`.
@@ -95,10 +99,11 @@ implement Stat4Histogram {
         let mut last: Int64 = 0 as Int64;
         let mut i: Int = 0;
         while i < self.buckets.len() {
-            if key_compare(&self.buckets[i].key, probe) >= 0 {
-                return last;
-            }
-            last = self.buckets[i].cumulative_lt + self.buckets[i].eq_count;
+            let point = &self.buckets[i];
+            let order = key_compare(&point.key, probe);
+            if order == 0 { return point.cumulative_lt; }
+            if order > 0 { return last; }
+            last = point.cumulative_lt + point.eq_count;
             i = i + 1;
         }
         self.total_rows

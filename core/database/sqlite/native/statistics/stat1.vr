@@ -54,6 +54,10 @@ public fn stat1_row(
 }
 
 implement Stat1Row {
+    public(in core.database.sqlite.native.statistics) fn row_count(&self) -> Int64 {
+        self.total_rows
+    }
+
     /// Distinct keys for the first `n_cols` of the index.
     /// Distinct = total_rows / avg_dup
     public fn distinct_keys(&self, n_cols: Int) -> Int64 {
