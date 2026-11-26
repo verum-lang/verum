@@ -133,10 +133,10 @@ public fn sign_cog(
     manifest_canonical_json: &List<Byte>,
     source_archive: &List<Byte>,
 ) -> Result<CogSignature, CogSignatureError> {
-    let manifest_hash = hash.crypto.sha256.digest(manifest_canonical_json);
-    let source_hash = hash.crypto.sha256.digest(source_archive);
+    let manifest_hash = hash.crypto.sha256.digest(manifest_canonical_json.as_slice());
+    let source_hash = hash.crypto.sha256.digest(source_archive.as_slice());
     let to_sign = concat_hashes(&manifest_hash, &source_hash);
-    let signature_bytes = security.ecc.ed25519.sign(seed, &to_sign);
+    let signature_bytes = security.ecc.ed25519.sign(seed, to_sign.as_slice());
     let public_key_bytes = security.ecc.ed25519.public_key(seed);
     Result.Ok(CogSignature {
         public_key:       encoding.hex.encode(&public_key_bytes),
@@ -160,20 +160,20 @@ public fn verify_cog(
     source_archive: &List<Byte>,
 ) -> Result<(), CogSignatureError> {
     // Step 1: compute the two hashes ourselves.
-    let manifest_hash = hash.crypto.sha256.digest(manifest_canonical_json);
-    let source_hash = hash.crypto.sha256.digest(source_archive);
+    let manifest_hash = hash.crypto.sha256.digest(manifest_canonical_json.as_slice());
+    let source_hash = hash.crypto.sha256.digest(source_archive.as_slice());
     let computed_manifest = encoding.hex.encode(&manifest_hash);
     let computed_source = encoding.hex.encode(&source_hash);
 
     // Step 2: compare against the signature's stored hashes.
     if computed_manifest != sig.manifest_sha256 {
-        return Result.Err(HashMismatch {
+        return Result.Err(CogSignatureError.HashMismatch {
             expected: sig.manifest_sha256.clone(),
             computed: computed_manifest,
         });
     }
     if computed_source != sig.source_sha256 {
-        return Result.Err(HashMismatch {
+        return Result.Err(CogSignatureError.HashMismatch {
             expected: sig.source_sha256.clone(),
             computed: computed_source,
         });
@@ -192,7 +192,7 @@ public fn verify_cog(
     // bare a dozen lines away and resolve, because their names are unique.
     // Qualifying is the form that works.
     let to_verify = concat_hashes(&manifest_hash, &source_hash);
-    match security.ecc.ed25519.verify(&public_key, &to_verify, &signature_bytes) {
+    match security.ecc.ed25519.verify(&public_key, to_verify.as_slice(), &signature_bytes) {
         Result.Ok(_)  => Result.Ok(()),
         Result.Err(_) => Result.Err(CogSignatureError.VerificationFailed),
     }
@@ -210,13 +210,13 @@ public fn verify_cog_precomputed_hashes(
     let computed_manifest = encoding.hex.encode(manifest_sha256);
     let computed_source = encoding.hex.encode(source_sha256);
     if computed_manifest != sig.manifest_sha256 {
-        return Result.Err(HashMismatch {
+        return Result.Err(CogSignatureError.HashMismatch {
             expected: sig.manifest_sha256.clone(),
             computed: computed_manifest,
         });
     }
     if computed_source != sig.source_sha256 {
-        return Result.Err(HashMismatch {
+        return Result.Err(CogSignatureError.HashMismatch {
             expected: sig.source_sha256.clone(),
             computed: computed_source,
         });
@@ -224,7 +224,7 @@ public fn verify_cog_precomputed_hashes(
     let public_key = decode_public_key(&sig.public_key)?;
     let signature_bytes = decode_signature(&sig.signature)?;
     let to_verify = concat_hashes(manifest_sha256, source_sha256);
-    match security.ecc.ed25519.verify(&public_key, &to_verify, &signature_bytes) {
+    match security.ecc.ed25519.verify(&public_key, to_verify.as_slice(), &signature_bytes) {
         Result.Ok(_)  => Result.Ok(()),
         Result.Err(_) => Result.Err(CogSignatureError.VerificationFailed),
     }
@@ -237,8 +237,8 @@ public fn signing_message(
     manifest_canonical_json: &List<Byte>,
     source_archive: &List<Byte>,
 ) -> List<Byte> {
-    let manifest_hash = hash.crypto.sha256.digest(manifest_canonical_json);
-    let source_hash = hash.crypto.sha256.digest(source_archive);
+    let manifest_hash = hash.crypto.sha256.digest(manifest_canonical_json.as_slice());
+    let source_hash = hash.crypto.sha256.digest(source_archive.as_slice());
     concat_hashes(&manifest_hash, &source_hash)
 }
 

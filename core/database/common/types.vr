@@ -262,7 +262,7 @@ implement WireBuf {
 
     public fn len(&self) -> Int { self.bytes.len() as Int }
 
-    public fn as_bytes(&self) -> &[Byte] { &self.bytes }
+    public fn as_bytes(&self) -> &[Byte] { self.bytes.as_slice() }
 
     /// Reset for reuse — keeps the underlying capacity so subsequent
     /// requests inherit a warmed buffer.
@@ -394,7 +394,7 @@ implement WireReader {
 
     fn need(&self, n: Int) -> Result<(), WireReadError> {
         if self.remaining() < n {
-            Result.Err(WrShortRead { wanted: n, available: self.remaining() })
+            Result.Err(WireReadError.WrShortRead { wanted: n, available: self.remaining() })
         } else {
             Result.Ok(())
         }
@@ -504,7 +504,7 @@ implement WireReader {
             i = i + 1;
         }
         if i >= n {
-            return Result.Err(WrShortRead { wanted: 1, available: 0 });
+            return Result.Err(WireReadError.WrShortRead { wanted: 1, available: 0 });
         }
         let mut out: List<Byte> = [];
         let mut j = start;
