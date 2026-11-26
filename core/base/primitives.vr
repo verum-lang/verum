@@ -23,7 +23,7 @@ module core.base.primitives;
 // (glob re-exports via core.intrinsics may not propagate properly)
 mount core.intrinsics.arithmetic.{
     add, sub, mul, div, rem, neg,
-    abs_signed, signum, min, max, clamp,
+    abs_signed, signum,
     checked_add, checked_sub, checked_mul, checked_div,
     checked_add_u64, checked_sub_u64, checked_mul_u64,
     overflowing_add, overflowing_sub, overflowing_mul,
@@ -60,13 +60,6 @@ mount core.intrinsics.runtime.text.{
     char_is_uppercase, char_is_lowercase,
     char_to_uppercase, char_to_lowercase, char_encode_utf8, char_escape_debug,
 };
-
-// Aliases for backward compatibility with code using intrinsic_min/max/clamp names
-fn intrinsic_min<T>(a: T, b: T) -> T { min(a, b) }
-fn intrinsic_max<T>(a: T, b: T) -> T { max(a, b) }
-// Fully-qualified path — bare `clamp` resolves to a 2-arg variant
-// at AOT (task #11 defect class).  Use the 3-arg `core.math.libm.clamp`.
-fn intrinsic_clamp<T>(val: T, lo: T, hi: T) -> T { core.math.libm.clamp(val, lo, hi) }
 
 // Popcount and bitreverse: provide as direct intrinsic calls
 fn popcnt<T>(x: T) -> T { @intrinsic("ctpop", x) }
@@ -147,19 +140,19 @@ implement Int {
     /// Minimum of two values.
     @inline(always)
     public fn min(self, other: Int) -> Int {
-        intrinsic_min(self, other)
+        if self < other { self } else { other }
     }
 
     /// Maximum of two values.
     @inline(always)
     public fn max(self, other: Int) -> Int {
-        intrinsic_max(self, other)
+        if self > other { self } else { other }
     }
 
     /// Clamp between min and max (inclusive).
     @inline(always)
     public fn clamp(self, min_val: Int, max_val: Int) -> Int {
-        intrinsic_clamp(self, min_val, max_val)
+        if self < min_val { min_val } else if self > max_val { max_val } else { self }
     }
 
     /// Check if in range [start, end).
@@ -2004,13 +1997,19 @@ implement UInt64 {
     public const BITS: Int = 64;
 
     /// Minimum of two values.
-    public fn min(self, other: UInt64) -> UInt64 { intrinsic_min(self, other) }
+    public fn min(self, other: UInt64) -> UInt64 {
+        if self < other { self } else { other }
+    }
 
     /// Maximum of two values.
-    public fn max(self, other: UInt64) -> UInt64 { intrinsic_max(self, other) }
+    public fn max(self, other: UInt64) -> UInt64 {
+        if self > other { self } else { other }
+    }
 
     /// Clamp value between min and max.
-    public fn clamp(self, min_val: UInt64, max_val: UInt64) -> UInt64 { intrinsic_clamp(self, min_val, max_val) }
+    public fn clamp(self, min_val: UInt64, max_val: UInt64) -> UInt64 {
+        if self < min_val { min_val } else if self > max_val { max_val } else { self }
+    }
 
     /// Convert to bytes (little-endian).
     public fn to_le_bytes(self) -> [Byte; 8] { to_le_bytes_8(self) }
@@ -2204,9 +2203,15 @@ implement UInt32 {
     public const MAX: UInt32 = 4294967295;
     public const BITS: Int = 32;
 
-    public fn min(self, other: UInt32) -> UInt32 { intrinsic_min(self, other) }
-    public fn max(self, other: UInt32) -> UInt32 { intrinsic_max(self, other) }
-    public fn clamp(self, min_val: UInt32, max_val: UInt32) -> UInt32 { intrinsic_clamp(self, min_val, max_val) }
+    public fn min(self, other: UInt32) -> UInt32 {
+        if self < other { self } else { other }
+    }
+    public fn max(self, other: UInt32) -> UInt32 {
+        if self > other { self } else { other }
+    }
+    public fn clamp(self, min_val: UInt32, max_val: UInt32) -> UInt32 {
+        if self < min_val { min_val } else if self > max_val { max_val } else { self }
+    }
 
     public fn to_le_bytes(self) -> [Byte; 4] { to_le_bytes_4(self) }
     public fn to_be_bytes(self) -> [Byte; 4] { to_be_bytes_4(self) }
@@ -2384,9 +2389,15 @@ implement UInt16 {
     public const MAX: UInt16 = 65535;
     public const BITS: Int = 16;
 
-    public fn min(self, other: UInt16) -> UInt16 { intrinsic_min(self, other) }
-    public fn max(self, other: UInt16) -> UInt16 { intrinsic_max(self, other) }
-    public fn clamp(self, min_val: UInt16, max_val: UInt16) -> UInt16 { intrinsic_clamp(self, min_val, max_val) }
+    public fn min(self, other: UInt16) -> UInt16 {
+        if self < other { self } else { other }
+    }
+    public fn max(self, other: UInt16) -> UInt16 {
+        if self > other { self } else { other }
+    }
+    public fn clamp(self, min_val: UInt16, max_val: UInt16) -> UInt16 {
+        if self < min_val { min_val } else if self > max_val { max_val } else { self }
+    }
 
     public fn to_le_bytes(self) -> [Byte; 2] { to_le_bytes_2(self) }
     public fn to_be_bytes(self) -> [Byte; 2] { to_be_bytes_2(self) }
@@ -2542,9 +2553,15 @@ implement UInt8 {
     public const MAX: UInt8 = 255;
     public const BITS: Int = 8;
 
-    public fn min(self, other: UInt8) -> UInt8 { intrinsic_min(self, other) }
-    public fn max(self, other: UInt8) -> UInt8 { intrinsic_max(self, other) }
-    public fn clamp(self, min_val: UInt8, max_val: UInt8) -> UInt8 { intrinsic_clamp(self, min_val, max_val) }
+    public fn min(self, other: UInt8) -> UInt8 {
+        if self < other { self } else { other }
+    }
+    public fn max(self, other: UInt8) -> UInt8 {
+        if self > other { self } else { other }
+    }
+    public fn clamp(self, min_val: UInt8, max_val: UInt8) -> UInt8 {
+        if self < min_val { min_val } else if self > max_val { max_val } else { self }
+    }
 
     public fn checked_add(self, rhs: UInt8) -> Maybe<UInt8> { checked_add(self, rhs) }
     public fn checked_sub(self, rhs: UInt8) -> Maybe<UInt8> { checked_sub(self, rhs) }
@@ -2699,9 +2716,15 @@ implement UInt128 {
     public const MAX: UInt128 = 340282366920938463463374607431768211455;
     public const BITS: Int = 128;
 
-    public fn min(self, other: UInt128) -> UInt128 { intrinsic_min(self, other) }
-    public fn max(self, other: UInt128) -> UInt128 { intrinsic_max(self, other) }
-    public fn clamp(self, min_val: UInt128, max_val: UInt128) -> UInt128 { intrinsic_clamp(self, min_val, max_val) }
+    public fn min(self, other: UInt128) -> UInt128 {
+        if self < other { self } else { other }
+    }
+    public fn max(self, other: UInt128) -> UInt128 {
+        if self > other { self } else { other }
+    }
+    public fn clamp(self, min_val: UInt128, max_val: UInt128) -> UInt128 {
+        if self < min_val { min_val } else if self > max_val { max_val } else { self }
+    }
 
     public fn to_le_bytes(self) -> [Byte; 16] { to_le_bytes(self) }
     public fn to_be_bytes(self) -> [Byte; 16] { to_be_bytes(self) }
@@ -2859,9 +2882,15 @@ implement Int8 {
 
     public fn abs(self) -> Int8 { abs_signed(self) }
     public fn signum(self) -> Int8 { signum(self) }
-    public fn min(self, other: Int8) -> Int8 { intrinsic_min(self, other) }
-    public fn max(self, other: Int8) -> Int8 { intrinsic_max(self, other) }
-    public fn clamp(self, min_val: Int8, max_val: Int8) -> Int8 { intrinsic_clamp(self, min_val, max_val) }
+    public fn min(self, other: Int8) -> Int8 {
+        if self < other { self } else { other }
+    }
+    public fn max(self, other: Int8) -> Int8 {
+        if self > other { self } else { other }
+    }
+    public fn clamp(self, min_val: Int8, max_val: Int8) -> Int8 {
+        if self < min_val { min_val } else if self > max_val { max_val } else { self }
+    }
     public fn checked_add(self, rhs: Int8) -> Maybe<Int8> { checked_add(self, rhs) }
     public fn checked_sub(self, rhs: Int8) -> Maybe<Int8> { checked_sub(self, rhs) }
     public fn checked_mul(self, rhs: Int8) -> Maybe<Int8> { checked_mul(self, rhs) }
@@ -3032,9 +3061,15 @@ implement Int16 {
 
     public fn abs(self) -> Int16 { abs_signed(self) }
     public fn signum(self) -> Int16 { signum(self) }
-    public fn min(self, other: Int16) -> Int16 { intrinsic_min(self, other) }
-    public fn max(self, other: Int16) -> Int16 { intrinsic_max(self, other) }
-    public fn clamp(self, min_val: Int16, max_val: Int16) -> Int16 { intrinsic_clamp(self, min_val, max_val) }
+    public fn min(self, other: Int16) -> Int16 {
+        if self < other { self } else { other }
+    }
+    public fn max(self, other: Int16) -> Int16 {
+        if self > other { self } else { other }
+    }
+    public fn clamp(self, min_val: Int16, max_val: Int16) -> Int16 {
+        if self < min_val { min_val } else if self > max_val { max_val } else { self }
+    }
     public fn checked_add(self, rhs: Int16) -> Maybe<Int16> { checked_add(self, rhs) }
     public fn checked_sub(self, rhs: Int16) -> Maybe<Int16> { checked_sub(self, rhs) }
     public fn wrapping_add(self, rhs: Int16) -> Int16 { wrapping_add(self, rhs) }
@@ -3201,9 +3236,15 @@ implement Int32 {
 
     public fn abs(self) -> Int32 { abs_signed(self) }
     public fn signum(self) -> Int32 { signum(self) }
-    public fn min(self, other: Int32) -> Int32 { intrinsic_min(self, other) }
-    public fn max(self, other: Int32) -> Int32 { intrinsic_max(self, other) }
-    public fn clamp(self, min_val: Int32, max_val: Int32) -> Int32 { intrinsic_clamp(self, min_val, max_val) }
+    public fn min(self, other: Int32) -> Int32 {
+        if self < other { self } else { other }
+    }
+    public fn max(self, other: Int32) -> Int32 {
+        if self > other { self } else { other }
+    }
+    public fn clamp(self, min_val: Int32, max_val: Int32) -> Int32 {
+        if self < min_val { min_val } else if self > max_val { max_val } else { self }
+    }
     public fn checked_add(self, rhs: Int32) -> Maybe<Int32> { checked_add(self, rhs) }
     public fn checked_sub(self, rhs: Int32) -> Maybe<Int32> { checked_sub(self, rhs) }
     public fn checked_mul(self, rhs: Int32) -> Maybe<Int32> { checked_mul(self, rhs) }
@@ -3371,9 +3412,15 @@ implement Int64 {
 
     public fn abs(self) -> Int64 { abs_signed(self) }
     public fn signum(self) -> Int64 { signum(self) }
-    public fn min(self, other: Int64) -> Int64 { intrinsic_min(self, other) }
-    public fn max(self, other: Int64) -> Int64 { intrinsic_max(self, other) }
-    public fn clamp(self, min_val: Int64, max_val: Int64) -> Int64 { intrinsic_clamp(self, min_val, max_val) }
+    public fn min(self, other: Int64) -> Int64 {
+        if self < other { self } else { other }
+    }
+    public fn max(self, other: Int64) -> Int64 {
+        if self > other { self } else { other }
+    }
+    public fn clamp(self, min_val: Int64, max_val: Int64) -> Int64 {
+        if self < min_val { min_val } else if self > max_val { max_val } else { self }
+    }
     public fn checked_add(self, rhs: Int64) -> Maybe<Int64> { checked_add(self, rhs) }
     public fn checked_sub(self, rhs: Int64) -> Maybe<Int64> { checked_sub(self, rhs) }
     public fn checked_mul(self, rhs: Int64) -> Maybe<Int64> { checked_mul(self, rhs) }
@@ -3542,9 +3589,15 @@ implement Int128 {
 
     public fn abs(self) -> Int128 { abs_signed(self) }
     public fn signum(self) -> Int128 { signum(self) }
-    public fn min(self, other: Int128) -> Int128 { intrinsic_min(self, other) }
-    public fn max(self, other: Int128) -> Int128 { intrinsic_max(self, other) }
-    public fn clamp(self, min_val: Int128, max_val: Int128) -> Int128 { intrinsic_clamp(self, min_val, max_val) }
+    public fn min(self, other: Int128) -> Int128 {
+        if self < other { self } else { other }
+    }
+    public fn max(self, other: Int128) -> Int128 {
+        if self > other { self } else { other }
+    }
+    public fn clamp(self, min_val: Int128, max_val: Int128) -> Int128 {
+        if self < min_val { min_val } else if self > max_val { max_val } else { self }
+    }
     public fn checked_add(self, rhs: Int128) -> Maybe<Int128> { checked_add(self, rhs) }
     public fn checked_sub(self, rhs: Int128) -> Maybe<Int128> { checked_sub(self, rhs) }
     public fn checked_mul(self, rhs: Int128) -> Maybe<Int128> { checked_mul(self, rhs) }
@@ -3695,9 +3748,15 @@ implement ISize {
 
     public fn abs(self) -> ISize { abs_signed(self) }
     public fn signum(self) -> ISize { signum(self) }
-    public fn min(self, other: ISize) -> ISize { intrinsic_min(self, other) }
-    public fn max(self, other: ISize) -> ISize { intrinsic_max(self, other) }
-    public fn clamp(self, min_val: ISize, max_val: ISize) -> ISize { intrinsic_clamp(self, min_val, max_val) }
+    public fn min(self, other: ISize) -> ISize {
+        if self < other { self } else { other }
+    }
+    public fn max(self, other: ISize) -> ISize {
+        if self > other { self } else { other }
+    }
+    public fn clamp(self, min_val: ISize, max_val: ISize) -> ISize {
+        if self < min_val { min_val } else if self > max_val { max_val } else { self }
+    }
     public fn checked_add(self, rhs: ISize) -> Maybe<ISize> { checked_add(self, rhs) }
     public fn checked_sub(self, rhs: ISize) -> Maybe<ISize> { checked_sub(self, rhs) }
     public fn checked_mul(self, rhs: ISize) -> Maybe<ISize> { checked_mul(self, rhs) }
@@ -3858,9 +3917,15 @@ implement USize {
     public const MAX: USize = 18446744073709551615;
     public const BITS: Int = 64;
 
-    public fn min(self, other: USize) -> USize { intrinsic_min(self, other) }
-    public fn max(self, other: USize) -> USize { intrinsic_max(self, other) }
-    public fn clamp(self, min_val: USize, max_val: USize) -> USize { intrinsic_clamp(self, min_val, max_val) }
+    public fn min(self, other: USize) -> USize {
+        if self < other { self } else { other }
+    }
+    public fn max(self, other: USize) -> USize {
+        if self > other { self } else { other }
+    }
+    public fn clamp(self, min_val: USize, max_val: USize) -> USize {
+        if self < min_val { min_val } else if self > max_val { max_val } else { self }
+    }
     public fn checked_add(self, rhs: USize) -> Maybe<USize> { checked_add(self, rhs) }
     public fn checked_sub(self, rhs: USize) -> Maybe<USize> { checked_sub(self, rhs) }
     public fn checked_mul(self, rhs: USize) -> Maybe<USize> { checked_mul(self, rhs) }
