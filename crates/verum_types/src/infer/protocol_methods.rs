@@ -640,6 +640,33 @@ impl TypeChecker {
         Ok(Some(instance))
     }
 
+    /// A bounded receiver can expose an associated equality in both argument
+    /// and result positions. Carry the selected protocol application through
+    /// the whole method signature, including any nested nominal constructors.
+    pub(super) fn instantiate_bounded_protocol_method(
+        &mut self,
+        method: &ProtocolMethod,
+        receiver: &Type,
+        bound: &crate::protocol::ProtocolBound,
+        bounds: &[crate::protocol::ProtocolBound],
+        arguments: &List<verum_ast::GenericArg>,
+        span: Span,
+    ) -> Result<Type> {
+        let signature = self.instantiate_applied_protocol_method(method, receiver, arguments, span)?;
+        let checker = self.protocol_checker.read();
+        let selected: List<_> = bounds.iter()
+            .filter(|other| !other.is_negative && checker.same_associated_owner(other, bound))
+            .cloned().collect();
+        drop(checker);
+        let premises = [crate::protocol::WhereClause { ty: receiver.clone(), bounds: selected }];
+        self.resolve_call_output_projections(&signature, &super::call_obligations::CallProjectionScope {
+            declaration: &premises,
+            caller: Some(&premises),
+            arguments: &crate::ty::Substitution::new(),
+            span,
+        })
+    }
+
     /// Freshen method-local quantifiers only. The owner's arguments may be
     /// rigid parameters of the caller and must retain their identity.
     pub(super) fn instantiate_applied_protocol_method(

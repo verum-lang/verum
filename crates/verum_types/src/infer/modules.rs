@@ -19518,8 +19518,8 @@ impl TypeChecker {
                                     span,
                                 });
 
-                                let instantiated_method_ty = self.instantiate_applied_protocol_method(
-                                    &declaration, &recv_ty, type_args, span,
+                                let instantiated_method_ty = self.instantiate_bounded_protocol_method(
+                                    &declaration, &recv_ty, bound, &bounds, type_args, span,
                                 )?;
                                 self.type_registry.register_call_target(span, instantiated_method_ty.clone());
 
@@ -21182,8 +21182,11 @@ impl TypeChecker {
                                     // Protocol methods use Self as a placeholder for the implementing type.
                                     // For bounded type params like T: Default, calling T.default()
                                     // should return T, not Self.
-                                    let applied = self.applied_protocol_method(method, &bound.args, recv_ty)?;
-                                    let method_ty = self.instantiate_applied_protocol_method(&applied, recv_ty, type_args, span)?;
+                                    let subject = Type::Var(*receiver_var);
+                                    let applied = self.applied_protocol_method(method, &bound.args, &subject)?;
+                                    let method_ty = self.instantiate_bounded_protocol_method(
+                                        &applied, &subject, bound, &receiver_bounds, type_args, span,
+                                    )?;
 
                                     // Type check arguments against method signature
                                     if let Type::Function {

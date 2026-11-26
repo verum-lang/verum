@@ -28,6 +28,29 @@ fn errors(source: &str) -> Vec<String> {
         .collect()
 }
 const RULE: &str = "type Rule is protocol { type Item; type Other; };";
+
+#[test]
+fn bounded_method_signatures_use_the_selected_receivers_item() {
+    let prelude = "type Reply<T> is Found(T) | Missing;
+        type Reader is protocol {
+            type Item;
+            fn read(&self) -> Reply<Self.Item>;
+            fn put(&self, item: Self.Item);
+        };";
+    let good = "fn read<A: Reader<Item=Reply<Int>>, B: Reader<Item=Bool>>(a: A, b: B) -> Int {
+        b.put(true); match a.read() { Found(Found(n)) => n, _ => 0 }
+    }";
+    let failures = errors(&format!("{prelude} {good}"));
+    assert!(failures.is_empty(), "{failures:#?}");
+    for bad in [
+        good.replace("a.read()", "b.read()"),
+        good.replace("b.put(true)", "a.put(true)"),
+        good.replace("A: Reader<Item=Reply<Int>>", "A: Reader"),
+    ] {
+        assert!(!errors(&format!("{prelude} {bad}")).is_empty(), "{bad}");
+    }
+}
+
 #[test]
 fn abstract_projection_is_not_any_concrete_type() {
     let item = projection("Item", Type::Var(TypeVar::fresh()));
