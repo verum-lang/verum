@@ -89,14 +89,12 @@ const PG_TYPE_VARCHAR_ARRAY: Int = 1015; // _varchar
 const PG_TYPE_BPCHAR_ARRAY:  Int = 1014; // _bpchar
 
 // =============================================================================
-// PgRow — façade over (RowDescription, &List<WireValue>)
+// PgRow — owned row description and wire values
 // =============================================================================
 
 @derive(Clone, Debug)
 public type PgRow is {
-    /// Borrowed reference into the result's RowDescription.  Cloned
-    /// at row-construction time (cheap — RowDescription is a thin
-    /// `List<ColumnDesc>` wrapper).
+    /// Owned wire metadata used for name lookup and OID validation.
     description: RowDescription,
     /// One WireValue per column.  Position-aligned with
     /// `description.columns`.
@@ -113,7 +111,7 @@ implement PgRow {
 
     /// Number of columns.
     public fn column_count(&self) -> Int {
-        self.description.columns.len() as Int
+        self.description.columns().len() as Int
     }
 
     /// Lookup a column index by name.  Returns the first match
@@ -121,9 +119,9 @@ implement PgRow {
     /// callers should disambiguate via aliases when this matters).
     pub fn column_index(&self, name: &Text) -> Maybe<Int> {
         let mut i: Int = 0;
-        let cols = &self.description.columns;
+        let cols = self.description.columns();
         while i < cols.len() as Int {
-            if cols[i].name.as_str() == name {
+            if cols[i].name() == name {
                 return Maybe.Some(i);
             }
             i = i + 1;
@@ -148,18 +146,18 @@ implement PgRow {
     /// `type_oid` doesn't match the text family.
     public fn get_text(&self, name: &Text) -> Result<Text, DbError> {
         let (col_idx, col) = self.column_or_error(name)?;
-        guard_text_family(&col, name)?;
+        guard_text_family(col, name)?;
         decode_text_value(&self.values[col_idx], col_idx, name)
     }
 
     /// Nullable text — `Result.Ok(Maybe.None)` if the column is SQL-NULL.
     public fn get_text_opt(&self, name: &Text) -> Result<Maybe<Text>, DbError> {
         let (col_idx, col) = self.column_or_error(name)?;
-        guard_text_family(&col, name)?;
+        guard_text_family(col, name)?;
         if self.values[col_idx] is WvNull {
             return Result.Ok(Maybe.None);
         }
-        decode_text_value(&self.values[col_idx], col_idx, name).map(Some)
+        Result.Ok(Maybe.Some(decode_text_value(&self.values[col_idx], col_idx, name)?))
     }
 
     // -------------------------------------------------------------------------
@@ -170,7 +168,7 @@ implement PgRow {
     /// BINARY format is one byte (`0x00`/`0x01`).
     public fn get_bool(&self, name: &Text) -> Result<Bool, DbError> {
         let (col_idx, col) = self.column_or_error(name)?;
-        guard_oid(&col, PG_TYPE_BOOL, "bool", name)?;
+        guard_oid(col, PG_TYPE_BOOL, "bool", name)?;
         match &self.values[col_idx] {
             WvNull => Result.Err(null_decode_failed(col_idx, name, "bool")),
             WvPresent { bytes, format } => match format {
@@ -180,7 +178,7 @@ implement PgRow {
                             b't' => Result.Ok(true),
                             b'f' => Result.Ok(false),
                             _    => Result.Err(text_decode_failed(col_idx, name, "bool",
-                                f"unexpected byte 0x{bytes[0]:x} for BOOL")),
+                                f"unexpected byte 0x{(bytes[0] as Int):x} for BOOL")),
                         }
                     } else {
                         Result.Err(text_decode_failed(col_idx, name, "bool",
@@ -202,12 +200,12 @@ implement PgRow {
     /// Nullable BOOLEAN. Returns `Result.Ok(Maybe.None)` for SQL NULL.
     public fn get_bool_opt(&self, name: &Text) -> Result<Maybe<Bool>, DbError> {
         let (col_idx, col) = self.column_or_error(name)?;
-        guard_oid(&col, PG_TYPE_BOOL, "bool", name)?;
+        guard_oid(col, PG_TYPE_BOOL, "bool", name)?;
         if self.values[col_idx] is WvNull {
             return Result.Ok(Maybe.None);
         }
         // Reuse the panicking variant by re-fetching; it cannot be NULL here.
-        self.get_bool(name).map(Some)
+        Result.Ok(Maybe.Some(self.get_bool(name)?))
     }
 
     // -------------------------------------------------------------------------
@@ -218,18 +216,18 @@ implement PgRow {
     /// converge on `Int`.  Errors on NULL or non-integer OID.
     public fn get_int(&self, name: &Text) -> Result<Int, DbError> {
         let (col_idx, col) = self.column_or_error(name)?;
-        guard_int_family(&col, name)?;
-        decode_int_value(&self.values[col_idx], col_idx, name, col.type_oid)
+        guard_int_family(col, name)?;
+        decode_int_value(&self.values[col_idx], col_idx, name, col.type_oid())
     }
 
     /// Nullable integer.
     public fn get_int_opt(&self, name: &Text) -> Result<Maybe<Int>, DbError> {
         let (col_idx, col) = self.column_or_error(name)?;
-        guard_int_family(&col, name)?;
+        guard_int_family(col, name)?;
         if self.values[col_idx] is WvNull {
             return Result.Ok(Maybe.None);
         }
-        decode_int_value(&self.values[col_idx], col_idx, name, col.type_oid).map(Some)
+        Result.Ok(Maybe.Some(decode_int_value(&self.values[col_idx], col_idx, name, col.type_oid())?))
     }
 
     // -------------------------------------------------------------------------
@@ -241,7 +239,7 @@ implement PgRow {
     /// byte stream.
     public fn get_bytes(&self, name: &Text) -> Result<List<Byte>, DbError> {
         let (col_idx, col) = self.column_or_error(name)?;
-        guard_oid(&col, PG_TYPE_BYTEA, "bytea", name)?;
+        guard_oid(col, PG_TYPE_BYTEA, "bytea", name)?;
         match &self.values[col_idx] {
             WvNull => Result.Err(null_decode_failed(col_idx, name, "bytea")),
             WvPresent { bytes, format } => match format {
@@ -254,12 +252,12 @@ implement PgRow {
     /// Nullable BYTEA. Returns `Result.Ok(Maybe.None)` for SQL NULL.
     public fn get_bytes_opt(&self, name: &Text) -> Result<Maybe<List<Byte>>, DbError> {
         let (col_idx, col) = self.column_or_error(name)?;
-        guard_oid(&col, PG_TYPE_BYTEA, "bytea", name)?;
+        guard_oid(col, PG_TYPE_BYTEA, "bytea", name)?;
         match &self.values[col_idx] {
             WvNull => Result.Ok(Maybe.None),
             WvPresent { bytes, format } => match format {
                 FmtBinary => Result.Ok(Maybe.Some(bytes.clone())),
-                FmtText => decode_bytea_hex(bytes, col_idx, name).map(Some),
+                FmtText => Result.Ok(Maybe.Some(decode_bytea_hex(bytes, col_idx, name)?)),
             }
         }
     }
@@ -271,18 +269,18 @@ implement PgRow {
     /// Decode a TIMESTAMP / TIMESTAMPTZ column to RFC 3339.
     public fn get_timestamp(&self, name: &Text) -> Result<Rfc3339Time, DbError> {
         let (col_idx, col) = self.column_or_error(name)?;
-        guard_timestamp_family(&col, name)?;
+        guard_timestamp_family(col, name)?;
         decode_timestamp_value(&self.values[col_idx], col_idx, name)
     }
 
     /// Nullable timestamp.
     public fn get_timestamp_opt(&self, name: &Text) -> Result<Maybe<Rfc3339Time>, DbError> {
         let (col_idx, col) = self.column_or_error(name)?;
-        guard_timestamp_family(&col, name)?;
+        guard_timestamp_family(col, name)?;
         if self.values[col_idx] is WvNull {
             return Result.Ok(Maybe.None);
         }
-        decode_timestamp_value(&self.values[col_idx], col_idx, name).map(Some)
+        Result.Ok(Maybe.Some(decode_timestamp_value(&self.values[col_idx], col_idx, name)?))
     }
 
     // -------------------------------------------------------------------------
@@ -295,7 +293,7 @@ implement PgRow {
     /// Supports the three interchangeable text-family array OIDs.
     public fn get_text_array(&self, name: &Text) -> Result<List<Text>, DbError> {
         let (col_idx, col) = self.column_or_error(name)?;
-        let oid = col.type_oid;
+        let oid = col.type_oid();
         if oid != PG_TYPE_TEXT_ARRAY
            && oid != PG_TYPE_VARCHAR_ARRAY
            && oid != PG_TYPE_BPCHAR_ARRAY {
@@ -322,9 +320,9 @@ implement PgRow {
     // Internal helpers
     // -------------------------------------------------------------------------
 
-    fn column_or_error(&self, name: &Text) -> Result<(Int, ColumnDesc), DbError> {
+    fn column_or_error(&self, name: &Text) -> Result<(Int, &ColumnDesc), DbError> {
         match self.column_index(name) {
-            Maybe.Some(i) => Result.Ok((i, self.description.columns[i].clone())),
+            Maybe.Some(i) => Result.Ok((i, &self.description.columns()[i])),
             Maybe.None    => Result.Err(column_not_found(name)),
         }
     }
@@ -337,14 +335,14 @@ implement PgRow {
 fn guard_oid(col: &ColumnDesc, expected_oid: Int, expected_name: &Text, col_name: &Text)
     -> Result<(), DbError>
 {
-    if col.type_oid != expected_oid {
+    if col.type_oid() != expected_oid {
         Result.Err(DbError.DecodeFailed {
             fault: DecodeFault {
                 column_index: 0,
                 column_name:  col_name.to_text(),
                 expected_type: expected_name.to_text(),
-                found_oid:    col.type_oid,
-                detail: f"OID mismatch: column has OID {col.type_oid}, getter expects {expected_oid}",
+                found_oid:    col.type_oid(),
+                detail: f"OID mismatch: column has OID {col.type_oid()}, getter expects {expected_oid}",
             },
         })
     } else {
@@ -353,7 +351,7 @@ fn guard_oid(col: &ColumnDesc, expected_oid: Int, expected_name: &Text, col_name
 }
 
 fn guard_text_family(col: &ColumnDesc, col_name: &Text) -> Result<(), DbError> {
-    let oid = col.type_oid;
+    let oid = col.type_oid();
     if oid == PG_TYPE_TEXT || oid == PG_TYPE_VARCHAR || oid == PG_TYPE_BPCHAR {
         Result.Ok(())
     } else {
@@ -370,7 +368,7 @@ fn guard_text_family(col: &ColumnDesc, col_name: &Text) -> Result<(), DbError> {
 }
 
 fn guard_int_family(col: &ColumnDesc, col_name: &Text) -> Result<(), DbError> {
-    let oid = col.type_oid;
+    let oid = col.type_oid();
     if oid == PG_TYPE_INT2 || oid == PG_TYPE_INT4 || oid == PG_TYPE_INT8 {
         Result.Ok(())
     } else {
@@ -387,7 +385,7 @@ fn guard_int_family(col: &ColumnDesc, col_name: &Text) -> Result<(), DbError> {
 }
 
 fn guard_timestamp_family(col: &ColumnDesc, col_name: &Text) -> Result<(), DbError> {
-    let oid = col.type_oid;
+    let oid = col.type_oid();
     if oid == PG_TYPE_TIMESTAMP || oid == PG_TYPE_TIMESTAMPTZ {
         Result.Ok(())
     } else {
@@ -483,16 +481,19 @@ fn decode_bytea_hex(bytes: &List<Byte>, col_idx: Int, name: &Text)
         return Result.Err(text_decode_failed(col_idx, name, "bytea",
             "bytea TEXT format must be hex (\\x...); legacy escape format not supported".to_text()));
     }
-    let hex_part = bytes.as_slice().sub_slice(2, bytes.len());
-    let mut out: List<Byte> = List.with_capacity(hex_part.len() / 2);
-    let mut i: Int = 0;
-    while i + 1 < hex_part.len() as Int {
-        let hi = hex_nibble(hex_part[i]);
-        let lo = hex_nibble(hex_part[i + 1]);
+    let len = bytes.len() as Int;
+    if len % 2 != 0 {
+        return Result.Err(text_decode_failed(col_idx, name, "bytea", "incomplete hex byte".to_text()));
+    }
+    let mut out: List<Byte> = List.with_capacity((len - 2) / 2);
+    let mut i: Int = 2;
+    while i < len {
+        let hi = hex_nibble(bytes[i]);
+        let lo = hex_nibble(bytes[i + 1]);
         match (hi, lo) {
             (Maybe.Some(h), Maybe.Some(l)) => out.push(((h << 4) | l) as Byte),
             _ => return Result.Err(text_decode_failed(col_idx, name, "bytea",
-                f"invalid hex byte at offset {i + 2}")),
+                f"invalid hex byte at offset {i}")),
         }
         i = i + 2;
     }
@@ -520,8 +521,11 @@ fn decode_timestamp_value(v: &WireValue, col_idx: Int, name: &Text)
             match Text.from_bytes(bytes.as_slice()) {
                 Result.Ok(t) => {
                     let normalised = normalise_pg_timestamp(&t);
-                    core.time.rfc3339.parse(&normalised).map_err(|e|
-                        text_decode_failed(col_idx, name, "timestamp", f"rfc3339 parse: {e}"))
+                    match core.time.rfc3339.parse(&normalised) {
+                        Result.Ok(ts) => Result.Ok(ts),
+                        Result.Err(e) => Result.Err(text_decode_failed(
+                            col_idx, name, "timestamp", f"rfc3339 parse: {e}")),
+                    }
                 },
                 Result.Err(_) => Result.Err(text_decode_failed(col_idx, name, "timestamp",
                     "non-UTF-8 in TIMESTAMP TEXT".to_text())),
@@ -574,22 +578,18 @@ fn parse_text_array_text(bytes: &List<Byte>, col_idx: Int, name: &Text)
         Result.Err(_) => return Result.Err(text_decode_failed(col_idx, name, "text[]",
             "non-UTF-8 in text-array TEXT".to_text())),
     };
-    let s = raw.as_str();
-    if s.is_empty() || s.as_bytes()[0] != b'{' || s.as_bytes()[s.len() - 1] != b'}' {
+    let bs = raw.as_bytes();
+    if bs.len() < 2 || bs[0] != b'{' || bs[bs.len() - 1] != b'}' {
         return Result.Err(text_decode_failed(col_idx, name, "text[]",
             "text-array TEXT must be wrapped in braces".to_text()));
     }
-    let inner = &s[1..s.len() - 1];
     let mut out: List<Text> = List.new();
-    if inner.is_empty() {
-        return Result.Ok(out);
-    }
-    let bs = inner.as_bytes();
-    let mut i: Int = 0;
-    let n = bs.len() as Int;
+    let mut i: Int = 1;
+    let n = (bs.len() as Int) - 1;
     while i < n {
         let mut buf: List<Byte> = List.new();
-        if bs[i] == b'"' {
+        let quoted = bs[i] == b'"';
+        if quoted {
             // Quoted field.
             i = i + 1;
             while i < n && bs[i] != b'"' {
@@ -601,7 +601,11 @@ fn parse_text_array_text(bytes: &List<Byte>, col_idx: Int, name: &Text)
                     i = i + 1;
                 }
             }
-            i = i + 1; // skip closing "
+            if i == n {
+                return Result.Err(text_decode_failed(col_idx, name, "text[]",
+                    "unterminated quoted array element".to_text()));
+            }
+            i = i + 1;
         } else {
             while i < n && bs[i] != b',' {
                 buf.push(bs[i]);
@@ -615,7 +619,7 @@ fn parse_text_array_text(bytes: &List<Byte>, col_idx: Int, name: &Text)
         // text-array columns are NOT NULL by convention.
         match Text.from_bytes(buf.as_slice()) {
             Result.Ok(t) => {
-                if t.as_str() == "NULL" {
+                if !quoted && t == "NULL" {
                     out.push("".to_text());
                 } else {
                     out.push(t);
@@ -624,7 +628,13 @@ fn parse_text_array_text(bytes: &List<Byte>, col_idx: Int, name: &Text)
             Result.Err(_) => return Result.Err(text_decode_failed(col_idx, name, "text[]",
                 "non-UTF-8 in text-array element".to_text())),
         }
-        if i < n && bs[i] == b',' { i = i + 1; }
+        if i < n {
+            if bs[i] != b',' || i + 1 == n {
+                return Result.Err(text_decode_failed(col_idx, name, "text[]",
+                    "invalid array element separator".to_text()));
+            }
+            i = i + 1;
+        }
     }
     Result.Ok(out)
 }
@@ -648,12 +658,21 @@ fn parse_text_array_binary(bytes: &List<Byte>, col_idx: Int, name: &Text)
             "binary text-array too short".to_text()));
     }
     let ndim = read_i32_be(r, 0);
+    if ndim == 0 && r.len() == 12 { return Result.Ok(List.new()); }
     if ndim != 1 {
         return Result.Err(text_decode_failed(col_idx, name, "text[]",
             f"binary text-array supports only 1-dimensional arrays; got ndim={ndim}"));
     }
+    if r.len() < 20 {
+        return Result.Err(text_decode_failed(col_idx, name, "text[]",
+            "binary text-array truncated at dimension".to_text()));
+    }
     // Skip has_nulls (offset 4) + element_oid (offset 8).
     let length = read_i32_be(r, 12);
+    if length < 0 || length > ((r.len() as Int) - 20) / 4 {
+        return Result.Err(text_decode_failed(col_idx, name, "text[]",
+            "binary text-array element count exceeds payload".to_text()));
+    }
     // Skip lower_bound (offset 16).
     let mut off: Int = 20;
     let mut out: List<Text> = List.with_capacity(length);
@@ -665,15 +684,15 @@ fn parse_text_array_binary(bytes: &List<Byte>, col_idx: Int, name: &Text)
         }
         let elen = read_i32_be(r, off);
         off = off + 4;
-        if elen < 0 {
+        if elen == -1 {
             // NULL element — match TEXT-format collapse semantics.
             out.push("".to_text());
         } else {
-            if off + elen > r.len() as Int {
+            if elen < 0 || elen > (r.len() as Int) - off {
                 return Result.Err(text_decode_failed(col_idx, name, "text[]",
                     "binary text-array truncated at element bytes".to_text()));
             }
-            let elem = r.sub_slice(off, off + elen);
+            let elem = r[off..off + elen];
             match Text.from_bytes(elem) {
                 Result.Ok(t)  => out.push(t),
                 Result.Err(_) => return Result.Err(text_decode_failed(col_idx, name, "text[]",
@@ -682,6 +701,10 @@ fn parse_text_array_binary(bytes: &List<Byte>, col_idx: Int, name: &Text)
             off = off + elen;
         }
         i = i + 1;
+    }
+    if off != r.len() as Int {
+        return Result.Err(text_decode_failed(col_idx, name, "text[]",
+            "trailing bytes after binary text-array".to_text()));
     }
     Result.Ok(out)
 }

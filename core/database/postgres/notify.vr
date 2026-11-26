@@ -125,9 +125,9 @@ implement Notification {
     /// constructed by user code.
     public fn from_wire(resp: &NotificationResponse) -> Notification {
         Notification {
-            channel: resp.channel.clone(),
-            payload: resp.payload.clone(),
-            sender_pid: resp.process_id,
+            channel: resp.channel().clone(),
+            payload: resp.payload().clone(),
+            sender_pid: resp.process_id(),
             received_at: Instant.now(),
         }
     }
@@ -329,7 +329,7 @@ implement NotificationStream {
             return Result.Ok(Drained);
         }
         if (guard.queue.len() as Int) > 0 {
-            return Result.Ok(Got(pop_head_locked(&mut guard)));
+            return Result.Ok(Got(pop_head_locked(&mut *guard)));
         }
         match self.sink.notify.wait_timeout(guard, timeout_ns) {
             Result.Ok((mut g, timed_out)) => {
@@ -337,7 +337,7 @@ implement NotificationStream {
                     return Result.Ok(Drained);
                 }
                 if (g.queue.len() as Int) > 0 {
-                    Result.Ok(Got(pop_head_locked(&mut g)))
+                    Result.Ok(Got(pop_head_locked(&mut *g)))
                 } else if g.closed {
                     Result.Ok(Drained)
                 } else {
@@ -560,7 +560,7 @@ implement NotifyDispatcher {
         let mut found_idx: Int = -1;
         let mut i: Int = 0;
         while i < guard.routes.len() as Int {
-            if guard.routes[i].channel == resp.channel {
+            if guard.routes[i].channel == notif.channel {
                 found_idx = i;
                 break;
             }

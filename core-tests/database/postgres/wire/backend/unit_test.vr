@@ -5,12 +5,22 @@
 // `core/database/postgres/wire/backend.vr` — backend message types.
 // =============================================================================
 
+module core.database.postgres.tests.backend;
+
+mount core.base.maybe.Maybe;
+mount collections.List;
+mount core.database.common.types.WireBuf;
+mount core.database.postgres.row.PgRow;
 mount core.database.postgres.wire.backend.{
-    TxStatus, ParameterStatus, BackendKeyData, ColumnDesc,
-    RowDescription, CommandComplete,
+    TxStatus, parse_parameter_status, parse_backend_key_data, parse_command_complete,
+    parse_row_description, parse_data_row,
 };
-mount core.base.maybe.{Maybe, Some, None};
-mount core.base.result.{Result, Ok, Err};
+
+fn payload(buf: &WireBuf) -> List<Byte> {
+    let mut bytes: List<Byte> = [];
+    bytes.extend_from_slice(buf.as_bytes());
+    bytes
+}
 
 // =============================================================================
 // Section 1: TxStatus 3-variant ADT
@@ -56,87 +66,75 @@ fn test_tx_status_failed_transaction_disjoint() {
 }
 
 // =============================================================================
-// Section 2: ParameterStatus record
+// ParameterStatus, BackendKeyData and CommandComplete use the driver's projections.
 // =============================================================================
 
 @test
-fn test_parameter_status_construction() {
-    let p: ParameterStatus = ParameterStatus {
-        name: "server_version".to_text(),
-        value: "16.1".to_text(),
-    };
-    assert_eq(p.name, "server_version");
-    assert_eq(p.value, "16.1");
+fn test_parameter_status_pairs() {
+    let status = parse_parameter_status([b'T', b'Z', 0, b'U', b'T', b'C', 0]).unwrap();
+    let (name, value) = status.into_pair();
+    assert_eq(name, "TZ");
+    assert_eq(value, "UTC");
+    assert(parse_parameter_status([b'T', b'Z', 0, b'U']).is_err());
 }
 
 @test
-fn test_parameter_status_timezone() {
-    let p: ParameterStatus = ParameterStatus {
-        name: "TimeZone".to_text(),
-        value: "UTC".to_text(),
-    };
-    assert_eq(p.name, "TimeZone");
-    assert_eq(p.value, "UTC");
-}
-
-// =============================================================================
-// Section 3: BackendKeyData record
-// =============================================================================
-
-@test
-fn test_backend_key_data_construction() {
-    let b: BackendKeyData = BackendKeyData {
-        process_id: 12345,
-        secret_key: 0x12345678,
-    };
-    assert_eq(b.process_id, 12345);
-    assert_eq(b.secret_key, 0x12345678);
+fn test_backend_key_pair() {
+    let key = parse_backend_key_data([0, 0, 48, 57, 18, 52, 86, 120]).unwrap();
+    let (pid, secret) = key.into_pair();
+    assert_eq(pid, 12345);
+    assert_eq(secret, 0x12345678);
+    assert(parse_backend_key_data([0, 0, 0, 1, 2]).is_err());
 }
 
 @test
-fn test_backend_key_data_field_independence() {
-    let a: BackendKeyData = BackendKeyData { process_id: 1, secret_key: 100 };
-    let b: BackendKeyData = BackendKeyData { process_id: 2, secret_key: 200 };
-    assert_eq(a.process_id, 1);
-    assert_eq(b.process_id, 2);
-    assert_eq(a.secret_key, 100);
-    assert_eq(b.secret_key, 200);
+fn test_command_complete_tags() {
+    for tag in ["SELECT 42", "INSERT 0 1", "UPDATE 5", "DELETE 3"] {
+        let mut buf = WireBuf.new();
+        buf.put_cstr(&tag);
+        let command = parse_command_complete(payload(&buf)).unwrap();
+        assert_eq(*command.tag(), tag);
+        assert_eq(command.into_tag(), tag);
+    }
 }
 
-// =============================================================================
-// Section 4: CommandComplete record
-// =============================================================================
-
-@test
-fn test_command_complete_select() {
-    let c: CommandComplete = CommandComplete {
-        tag: "SELECT 42".to_text(),
-    };
-    assert_eq(c.tag, "SELECT 42");
-}
-
-@test
-fn test_command_complete_insert() {
-    let c: CommandComplete = CommandComplete {
-        tag: "INSERT 0 1".to_text(),
-    };
-    assert_eq(c.tag, "INSERT 0 1");
-}
-
-@test
-fn test_command_complete_update() {
-    let c: CommandComplete = CommandComplete {
-        tag: "UPDATE 5".to_text(),
-    };
-    assert_eq(c.tag, "UPDATE 5");
+fn parse_column(oid: Int, format: Int, value: List<Byte>) -> PgRow {
+    let mut desc = WireBuf.new();
+    desc.put_u16_be(1);
+    desc.put_cstr("val");
+    desc.put_i32_be(0);
+    desc.put_u16_be(0);
+    desc.put_i32_be(oid);
+    desc.put_u16_be(65535);
+    desc.put_i32_be(-1);
+    desc.put_u16_be(format);
+    let description = parse_row_description(payload(&desc)).unwrap();
+    let mut data = WireBuf.new();
+    data.put_u16_be(1);
+    data.put_lp_bytes(Maybe.Some(value.as_slice()));
+    let row = parse_data_row(payload(&data), &description.formats()).unwrap();
+    PgRow.new(description, row.into_values())
 }
 
 @test
-fn test_command_complete_delete() {
-    let c: CommandComplete = CommandComplete {
-        tag: "DELETE 3".to_text(),
-    };
-    assert_eq(c.tag, "DELETE 3");
+fn test_bytea_complete_hex_pairs() {
+    let good = parse_column(17, 0, [92, b'x', b'a', b'f']);
+    let bytes = good.get_bytes("val").unwrap();
+    assert_eq(bytes.len(), 1);
+    assert_eq(bytes[0], 175 as Byte);
+    assert(parse_column(17, 0, [92, b'x', b'a']).get_bytes("val").is_err());
+}
+
+@test
+fn test_text_array_payload_bounds() {
+    let quoted_null = parse_column(1009, 0, [b'{', b'"', b'N', b'U', b'L', b'L', b'"', b'}']);
+    let values = quoted_null.get_text_array("val").unwrap();
+    assert_eq(values[0], "NULL");
+    assert(parse_column(1009, 0, [b'{', b'"', b'a', b'}']).get_text_array("val").is_err());
+    let empty = parse_column(1009, 1, [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 25]);
+    assert_eq(empty.get_text_array("val").unwrap().len(), 0);
+    let truncated = parse_column(1009, 1, [0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 25]);
+    assert(truncated.get_text_array("val").is_err());
 }
 
 fn main() {}

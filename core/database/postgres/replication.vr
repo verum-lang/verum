@@ -503,7 +503,7 @@ implement PgReplicationConnection {
                     // Server told us no more data (e.g. slot
                     // dropped, max position reached). We surface
                     // this via Other so the caller decides.
-                    return Result.Ok(RmOther { tag: 0 as Byte, payload: List.new() });
+                    return Result.Ok(ReplicationMessage.RmOther { tag: 0 as Byte, payload: List.new() });
                 }
                 BmError(d) => { return Result.Err(dberr_from_pg(d)); }
                 BmNotice(_) => { continue; }
@@ -543,7 +543,7 @@ implement PgReplicationConnection {
                             return Result.Ok(Maybe.Some(decode_copy_data(bytes)?));
                         }
                         BmCopyDone => {
-                            return Result.Ok(Maybe.Some(RmOther { tag: 0 as Byte, payload: List.new() }));
+                            return Result.Ok(Maybe.Some(ReplicationMessage.RmOther { tag: 0 as Byte, payload: List.new() }));
                         }
                         BmError(d) => { return Result.Err(dberr_from_pg(d)); }
                         BmNotice(_) | BmParameterStatus(_) => { continue; }
@@ -649,7 +649,7 @@ fn decode_copy_data(bytes: List<Byte>) -> Result<ReplicationMessage, DbError> {
     // Unknown tag — return raw payload so callers can dispatch
     // future variants without rev-locking this module.
     let rest = r.remaining_bytes();
-    Result.Ok(RmOther { tag: tag, payload: rest })
+    Result.Ok(ReplicationMessage.RmOther { tag: tag, payload: rest })
 }
 
 // =============================================================================

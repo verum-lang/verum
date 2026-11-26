@@ -66,6 +66,14 @@ public type ExtendedQueryResult is {
     rows: List<List<WireValue>>,
 };
 
+implement ExtendedQueryResult {
+    public(in core.database.postgres) fn from_parts(
+        tag: Text, description: Maybe<RowDescription>, rows: List<List<WireValue>>,
+    ) -> ExtendedQueryResult {
+        ExtendedQueryResult { command_tag: tag, row_description: description, rows: rows }
+    }
+}
+
 public type PipelineEntry is {
     /// Pre-built Parse payload bytes — empty if the entry is a
     /// cache-hit re-bind.
@@ -209,9 +217,9 @@ implement ExtendedResultBuilder {
                 self.command_tag = "PORTAL_SUSPEND".clone();
             }
             BmRowDescription(rd) => { self.row_desc = Maybe.Some(rd); }
-            BmDataRow(dr)        => { self.rows.push(dr.values); }
+            BmDataRow(dr)        => { self.rows.push(dr.into_values()); }
             BmCommandComplete(cc) => {
-                if self.command_tag.len() == 0 { self.command_tag = cc.tag; }
+                if self.command_tag.len() == 0 { self.command_tag = cc.into_tag(); }
             }
             BmEmptyQueryResponse => {
                 if self.command_tag.len() == 0 { self.command_tag = "EMPTY".clone(); }
@@ -234,11 +242,7 @@ implement ExtendedResultBuilder {
     {
         match self.diagnostic {
             Maybe.Some(d) => Result.Err(error_translator(d)),
-            Maybe.None    => Result.Ok(ExtendedQueryResult {
-                command_tag: self.command_tag,
-                row_description: self.row_desc,
-                rows: self.rows,
-            }),
+            Maybe.None    => Result.Ok(ExtendedQueryResult.from_parts(self.command_tag, self.row_desc, self.rows)),
         }
     }
 }
@@ -292,7 +296,7 @@ implement ExtendedResultArenaBuilder {
             BmaRowDescription(rd) => { self.row_desc = Maybe.Some(rd); }
             BmaDataRow(arow)      => { self.rows.push(arow); }
             BmaCommandComplete(cc) => {
-                if self.command_tag.len() == 0 { self.command_tag = cc.tag; }
+                if self.command_tag.len() == 0 { self.command_tag = cc.into_tag(); }
             }
             BmaEmptyQueryResponse => {
                 if self.command_tag.len() == 0 { self.command_tag = "EMPTY".clone(); }
@@ -434,15 +438,7 @@ public fn decode_typed_result(
 ) -> Result<List<List<Maybe<TypedValue>>>, DbError> {
     let oids: List<Int> = match &result.row_description {
         Maybe.None => List.new(),
-        Maybe.Some(rd) => {
-            let mut v: List<Int> = List.with_capacity(rd.fields.len() as Int);
-            let mut i: Int = 0;
-            while i < rd.fields.len() as Int {
-                v.push(rd.fields[i].type_oid);
-                i = i + 1;
-            }
-            v
-        }
+        Maybe.Some(rd) => rd.type_oids(),
     };
     let mut out: List<List<Maybe<TypedValue>>> = List.with_capacity(result.rows.len() as Int);
     let mut k: Int = 0;

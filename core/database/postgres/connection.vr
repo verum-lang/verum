@@ -40,7 +40,7 @@
 module core.database.postgres.connection;
 
 mount base.{Result, Ok, Err, Text, Maybe, None, Some};
-mount base.memory.Shared;
+mount base.memory.{Shared, replace};
 mount collections.List;
 mount core.net.tcp.TcpStream;
 mount core.net.addr.{SocketAddr};
@@ -362,7 +362,7 @@ implement PgConnection {
     public fn state(&self) -> PgConnState { self.state.clone() }
     public fn tx_status(&self) -> TxStatus { self.tx_status.clone() }
     public fn parameters(&self) -> &List<(Text, Text)> { &self.parameters }
-    public fn backend_key(&self) -> Maybe<(Int, Int)> { self.backend_key.clone() }
+    public fn backend_key(&self) -> Maybe<(Int, Int)> { self.backend_key_view() }
 
     /// Look up a server parameter (e.g. "server_version", "DateStyle").
     public fn parameter(&self, name: &Text) -> Maybe<Text> {
@@ -403,12 +403,12 @@ implement PgConnection {
             let msg = read_message(self)?;
             match msg {
                 BmRowDescription(rd) => {
-                    self.last_formats = collect_formats(&rd);
+                    self.last_formats = rd.formats();
                     row_desc = Maybe.Some(rd);
                 }
                 BmDataRow(dr) => {
                     if rows.len() == 0 || command_tag.len() == 0 {
-                        rows.push(dr.values);
+                        rows.push(dr.into_values());
                     } else {
                         // Subsequent result-sets are dropped; we still
                         // consume them so ReadyForQuery arrives.
@@ -416,7 +416,7 @@ implement PgConnection {
                     }
                 }
                 BmCommandComplete(cc) => {
-                    if command_tag.len() == 0 { command_tag = cc.tag; }
+                    if command_tag.len() == 0 { command_tag = cc.into_tag(); }
                 }
                 BmEmptyQueryResponse => {
                     if command_tag.len() == 0 { command_tag = "EMPTY".clone(); }
@@ -424,7 +424,7 @@ implement PgConnection {
                 BmError(d) => { diagnostic = Maybe.Some(d); }
                 BmNotice(_) => {}     // log ignored in v0.1
                 BmParameterStatus(ps) => {
-                    self.parameters.push((ps.name, ps.value));
+                    self.parameters.push(ps.into_pair());
                 }
                 BmReadyForQuery(s) => {
                     self.tx_status = s;
@@ -485,7 +485,7 @@ implement PgConnection {
             let msg = read_message_arena(self)?;
             match msg {
                 BmaRowDescription(rd) => {
-                    self.last_formats = collect_formats(&rd);
+                    self.last_formats = rd.formats();
                     row_desc = Maybe.Some(rd);
                 }
                 BmaDataRow(arow) => {
@@ -498,7 +498,7 @@ implement PgConnection {
                     }
                 }
                 BmaCommandComplete(cc) => {
-                    if command_tag.len() == 0 { command_tag = cc.tag; }
+                    if command_tag.len() == 0 { command_tag = cc.into_tag(); }
                 }
                 BmaEmptyQueryResponse => {
                     if command_tag.len() == 0 { command_tag = "EMPTY".clone(); }
@@ -506,7 +506,7 @@ implement PgConnection {
                 BmaError(d) => { diagnostic = Maybe.Some(d); }
                 BmaNotice(_) => {}
                 BmaParameterStatus(ps) => {
-                    self.parameters.push((ps.name, ps.value));
+                    self.parameters.push(ps.into_pair());
                 }
                 BmaReadyForQuery(s) => {
                     self.tx_status = s;
@@ -553,16 +553,8 @@ implement PgConnection {
     /// Convenience — run a SELECT and return only the first row.
     /// `Result.Ok(Maybe.None)` when the query completes with no rows.
     public fn query_first(&mut self, sql: &Text) -> Result<Maybe<List<WireValue>>, DbError> {
-        match self.simple_query(sql) {
-            Result.Ok(result) => {
-                if (result.rows.len() as Int) == 0 {
-                    Result.Ok(Maybe.None)
-                } else {
-                    Result.Ok(Maybe.Some(result.rows[0].clone()))
-                }
-            }
-            Result.Err(e) => Result.Err(e),
-        }
+        let mut result = self.simple_query(sql)?;
+        Result.Ok(result.rows.pop_front())
     }
 
     /// Read the (process_id, secret_key) pair captured at startup.
@@ -609,7 +601,7 @@ implement PgConnection {
             match msg {
                 BmCopyInResponse(_) => { break; }
                 BmParameterStatus(ps) => {
-                    self.parameters.push((ps.name, ps.value));
+                    self.parameters.push(ps.into_pair());
                 }
                 BmNotice(_) => {}
                 BmError(d) => {
@@ -648,13 +640,13 @@ implement PgConnection {
             let msg = read_message(self)?;
             match msg {
                 BmCommandComplete(cc) => {
-                    command_tag = cc.tag;
+                    command_tag = cc.into_tag();
                     row_count = parse_copy_command_count(&command_tag);
                 }
                 BmError(d) => { diagnostic = Maybe.Some(d); }
                 BmNotice(_) => {}
                 BmParameterStatus(ps) => {
-                    self.parameters.push((ps.name, ps.value));
+                    self.parameters.push(ps.into_pair());
                 }
                 BmReadyForQuery(s) => {
                     self.tx_status = s;
@@ -787,12 +779,12 @@ implement PgConnection {
             let msg = read_message(self)?;
             match msg {
                 BmCommandComplete(cc) => {
-                    row_count = parse_copy_command_count(&cc.tag);
+                    row_count = parse_copy_command_count(cc.tag());
                 }
                 BmError(d) => { diagnostic = Maybe.Some(d); }
                 BmNotice(_) => {}
                 BmParameterStatus(ps) => {
-                    self.parameters.push((ps.name, ps.value));
+                    self.parameters.push(ps.into_pair());
                 }
                 BmReadyForQuery(s) => {
                     self.tx_status = s;
@@ -893,12 +885,12 @@ implement PgConnection {
             let msg = read_message(self)?;
             match msg {
                 BmCommandComplete(cc) => {
-                    row_count = parse_copy_command_count(&cc.tag);
+                    row_count = parse_copy_command_count(cc.tag());
                 }
                 BmError(d) => { diagnostic = Maybe.Some(d); }
                 BmNotice(_) => {}
                 BmParameterStatus(ps) => {
-                    self.parameters.push((ps.name, ps.value));
+                    self.parameters.push(ps.into_pair());
                 }
                 BmReadyForQuery(s) => {
                     self.tx_status = s;
@@ -950,7 +942,7 @@ implement PgConnection {
                 BmError(d) => { diagnostic = Maybe.Some(d); }
                 BmNotice(_) => {}
                 BmParameterStatus(ps) => {
-                    self.parameters.push((ps.name, ps.value));
+                    self.parameters.push(ps.into_pair());
                 }
                 BmReadyForQuery(s) => {
                     self.tx_status = s;
@@ -1016,13 +1008,13 @@ implement PgConnection {
             let msg = read_message(self)?;
             match msg {
                 BmParseComplete => {}
-                BmParameterDescription(pd) => { param_oids = pd.type_oids; }
+                BmParameterDescription(pd) => { param_oids = pd.into_type_oids(); }
                 BmRowDescription(rd) => { row_desc = Maybe.Some(rd); }
                 BmNoData => { row_desc = Maybe.None; }
                 BmError(d) => { diagnostic = Maybe.Some(d); }
                 BmNotice(_) => {}
                 BmParameterStatus(ps) => {
-                    self.parameters.push((ps.name, ps.value));
+                    self.parameters.push(ps.into_pair());
                 }
                 BmReadyForQuery(s) => {
                     self.tx_status = s;
@@ -1081,7 +1073,7 @@ implement PgConnection {
         // Update last_formats from the prepared row description so
         // BmDataRow decoders pick the right per-column format.
         match &stmt.row_description {
-            Maybe.Some(rd) => { self.last_formats = collect_formats(rd); }
+            Maybe.Some(rd) => { self.last_formats = rd.formats(); }
             Maybe.None    => {}
         }
 
@@ -1093,17 +1085,17 @@ implement PgConnection {
             match msg {
                 BmBindComplete => {}
                 BmRowDescription(rd) => {
-                    self.last_formats = collect_formats(&rd);
+                    self.last_formats = rd.formats();
                 }
-                BmDataRow(dr) => { rows.push(dr.values); }
-                BmCommandComplete(cc) => { command_tag = cc.tag; }
+                BmDataRow(dr) => { rows.push(dr.into_values()); }
+                BmCommandComplete(cc) => { command_tag = cc.into_tag(); }
                 BmEmptyQueryResponse => {
                     if command_tag.len() == 0 { command_tag = "EMPTY".clone(); }
                 }
                 BmError(d) => { diagnostic = Maybe.Some(d); }
                 BmNotice(_) => {}
                 BmParameterStatus(ps) => {
-                    self.parameters.push((ps.name, ps.value));
+                    self.parameters.push(ps.into_pair());
                 }
                 BmReadyForQuery(s) => {
                     self.tx_status = s;
@@ -1117,7 +1109,7 @@ implement PgConnection {
             Maybe.Some(d) => Result.Err(dberr_from_pg(d)),
             Maybe.None => Result.Ok(PgSimpleQueryResult {
                 command_tag: command_tag,
-                row_description: stmt.row_description.clone(),
+                row_description: stmt.row_description,
                 rows: rows,
             }),
         }
@@ -1167,7 +1159,7 @@ implement PgConnection {
         // All-binary param_formats, all-binary result_formats.
         let param_formats: List<Int> = vec_repeat_int(1, oids.len() as Int);
         let result_formats: List<Int> = match &stmt.row_description {
-            Maybe.Some(rd) => vec_repeat_int(1, rd.columns.len() as Int),
+            Maybe.Some(rd) => vec_repeat_int(1, rd.columns().len() as Int),
             Maybe.None     => List.new(),
         };
         let portal = "".clone();
@@ -1203,15 +1195,7 @@ implement PgConnection {
         // Build the column-OID vector from the prepared statement
         // for typed decode dispatch.
         let column_oids: List<Int> = match &stmt.row_description {
-            Maybe.Some(rd) => {
-                let mut oids: List<Int> = List.with_capacity(rd.columns.len());
-                let mut i: Int = 0;
-                while i < (rd.columns.len() as Int) {
-                    oids.push(rd.columns[i].type_oid);
-                    i = i + 1;
-                }
-                oids
-            }
+            Maybe.Some(rd) => rd.type_oids(),
             Maybe.None => List.new(),
         };
 
@@ -1232,27 +1216,28 @@ implement PgConnection {
             match msg {
                 BmBindComplete => {}
                 BmRowDescription(rd) => {
-                    self.last_formats = collect_formats(&rd);
+                    self.last_formats = rd.formats();
                 }
                 BmDataRow(dr) => {
                     // A recoverable value error must not strand unread frames.
                     // Retain the first error, discard later rows, and drain to
                     // ReadyForQuery before returning it to the caller.
                     if decode_failure is Maybe.Some(_) || diagnostic is Maybe.Some(_) { continue; }
-                    if stmt.row_description is Maybe.None || dr.values.len() != column_oids.len() {
+                    let values = dr.values();
+                    if stmt.row_description is Maybe.None || values.len() != column_oids.len() {
                         decode_failure = Maybe.Some(DbError.Adapter(AdapterSpecific.new(
                             AdPostgres, "TYPED_ROW_WIDTH",
-                            f"row does not match prepared description: expected {column_oids.len()} columns, received {dr.values.len()}",
+                            f"row does not match prepared description: expected {column_oids.len()} columns, received {values.len()}",
                             false,
                         )));
                         rows.clear();
                         continue;
                     }
-                    let mut typed_row: List<TypedValue> = List.with_capacity(dr.values.len());
+                    let mut typed_row: List<TypedValue> = List.with_capacity(values.len());
                     let mut i: Int = 0;
-                    while i < dr.values.len() {
+                    while i < values.len() {
                         let oid = column_oids[i];
-                        match &dr.values[i] {
+                        match &values[i] {
                             WvNull => { typed_row.push(TvNull); }
                             WvPresent { bytes, .. } => {
                                 match decode_typed_from_bytes(oid, bytes.as_slice(), &mut self.arena) {
@@ -1269,7 +1254,7 @@ implement PgConnection {
                     if decode_failure is Maybe.None { rows.push(typed_row); }
                     else { rows.clear(); }
                 }
-                BmCommandComplete(cc) => { command_tag = cc.tag; }
+                BmCommandComplete(cc) => { command_tag = cc.into_tag(); }
                 BmEmptyQueryResponse => {
                     if command_tag.len() == 0 { command_tag = "EMPTY".clone(); }
                 }
@@ -1279,7 +1264,7 @@ implement PgConnection {
                 }
                 BmNotice(_) => {}
                 BmParameterStatus(ps) => {
-                    self.parameters.push((ps.name, ps.value));
+                    self.parameters.push(ps.into_pair());
                 }
                 BmReadyForQuery(s) => {
                     self.tx_status = s;
@@ -1298,7 +1283,7 @@ implement PgConnection {
                 Maybe.Some(error) => Result.Err(error),
                 Maybe.None => Result.Ok(PgTypedQueryResult {
                     command_tag: command_tag,
-                    row_description: stmt.row_description.clone(),
+                    row_description: stmt.row_description,
                     rows: rows,
                 }),
             },
@@ -1335,7 +1320,7 @@ implement PgConnection {
                 BmError(d) => { diagnostic = Maybe.Some(d); }
                 BmNotice(_) => {}
                 BmParameterStatus(ps) => {
-                    self.parameters.push((ps.name, ps.value));
+                    self.parameters.push(ps.into_pair());
                 }
                 BmReadyForQuery(s) => {
                     self.tx_status = s;
@@ -1801,9 +1786,7 @@ implement PgConnection {
     /// loops, or with the connection's own `simple_query` /
     /// `execute` for opportunistic poll.
     public fn take_notifications(&mut self) -> List<NotificationResponse> {
-        let out = self.notifications.clone();
-        self.notifications = List.new();
-        out
+        replace(&mut self.notifications, List.new())
     }
 
     /// Whether the buffer currently holds any notifications. O(1).
@@ -2196,8 +2179,8 @@ fn drive_until_ready(conn: &mut PgConnection, config: &PgConfig) -> Result<(), D
                     }
                 }
             }
-            BmParameterStatus(ps) => { conn.parameters.push((ps.name, ps.value)); }
-            BmBackendKeyData(k)  => { conn.backend_key = Maybe.Some((k.process_id, k.secret_key)); }
+            BmParameterStatus(ps) => { conn.parameters.push(ps.into_pair()); }
+            BmBackendKeyData(k)  => { conn.backend_key = Maybe.Some(k.into_pair()); }
             BmReadyForQuery(s)   => {
                 conn.tx_status = s;
                 conn.state = PcsReady;
@@ -2573,16 +2556,6 @@ fn drop_front(buf: &mut List<Byte>, n: Int) {
     }
 }
 
-fn collect_formats(rd: &RowDescription) -> List<Int> {
-    let mut out: List<Int> = List.new();
-    let mut i = 0;
-    while i < rd.columns.len() as Int {
-        out.push(rd.columns[i].format);
-        i = i + 1;
-    }
-    out
-}
-
 /// Drain backend frames until ReadyForQuery — used after error to
 /// resync the connection without surfacing the intermediate frames.
 fn drain_to_ready(conn: &mut PgConnection) -> Result<(), DbError> {
@@ -2595,7 +2568,7 @@ fn drain_to_ready(conn: &mut PgConnection) -> Result<(), DbError> {
                 return Result.Ok(());
             }
             BmParameterStatus(ps) => {
-                conn.parameters.push((ps.name, ps.value));
+                conn.parameters.push(ps.into_pair());
             }
             _ => {}
         }

@@ -1,0 +1,87 @@
+// @test: run
+// @level: L2
+// @tier: 0
+// @tags: database, postgres, wire, decoding
+// @expected-exit: 0
+
+mount core.*;
+mount collections.List;
+mount core.database.common.arena.SpindleArena;
+mount core.database.common.error.DbError;
+mount core.database.postgres.error.dberr_from_pg;
+mount core.database.postgres.notify.Notification;
+mount core.database.postgres.wire.backend.{
+    BackendMessage, BackendDecodeError, parse_backend, parse_data_row_arena,
+};
+mount core.database.postgres.wire.frame.{frame_payload, try_parse_tagged};
+
+fn reply(tag: Byte, payload: List<Byte>) -> Result<BackendMessage, BackendDecodeError> {
+    let bytes = frame_payload(tag, payload.as_slice());
+    let frame = try_parse_tagged(bytes.as_slice()).unwrap().unwrap().into_frame();
+    let formats: List<Int> = [];
+    parse_backend(frame, &formats)
+}
+
+fn main() {
+    // The adapter transfers SQLSTATE, message and position from an ErrorResponse.
+    let error = reply(b'E', [b'C', b'4', b'0', b'0', b'0', b'1', 0,
+                             b'M', b'b', b'u', b's', b'y', 0, b'P', b'7', 0, 0]).unwrap();
+    match error {
+        BackendMessage.BmError(diag) => {
+            let db_error = dberr_from_pg(diag);
+            assert(db_error.is_retryable());
+            match db_error {
+                DbError.QueryFailed { sql_state, message, position } => {
+                    assert_eq(*sql_state.code(), "40001");
+                    assert_eq(message, "busy");
+                    assert(position is Maybe.Some(7));
+                }
+                _ => panic("expected query failure"),
+            }
+        }
+        _ => panic("expected ErrorResponse"),
+    }
+
+    let notification = reply(b'A', [0, 0, 0, 42, b'c', 0, b'p', 0]).unwrap();
+    match notification {
+        BackendMessage.BmNotification(resp) => {
+            let event = Notification.from_wire(&resp);
+            assert(event.is_self_emitted(42));
+            assert(!event.is_self_emitted(41));
+        }
+        _ => panic("expected NotificationResponse"),
+    }
+
+    // SQL NULL, a present empty value and one binary byte retain distinct meanings.
+    let payload: List<Byte> = [0, 3, 255, 255, 255, 255, 0, 0, 0, 0, 0, 0, 0, 1, 219];
+    assert(reply(b'D', payload.clone()).unwrap() is BackendMessage.BmDataRow(_));
+    let mut arena = SpindleArena.new_connection(42);
+    let formats: List<Int> = [0, 0, 1];
+    let row = parse_data_row_arena(payload, &formats, &mut arena).unwrap();
+    assert_eq(row.column_count(), 3);
+    assert(row.is_null(0));
+    assert(!row.is_null(1));
+    let empty = row.slice(1).unwrap();
+    assert(empty.is_empty());
+    assert(!empty.is_stale(&arena));
+    let data = row.slice(2).unwrap();
+    assert_eq(data.byte_at(0, &arena).unwrap(), 219);
+    arena.reset();
+    assert(empty.is_stale(&arena));
+    assert(data.byte_at(0, &arena).is_none());
+
+    assert(reply(b'E', [b'M', b'x', 0]).is_err());
+    assert(reply(b'C', [b'O', b'K']).is_err());
+    assert(reply(b'R', [0, 0, 0, 5, 1]).is_err());
+    assert(reply(b'D', [0, 1, 0, 0, 0, 2, 7]).is_err());
+    assert(parse_data_row_arena([0, 1, 0, 0, 0, 2, 7], &formats, &mut arena).is_err());
+    assert(reply(b'D', [0, 1, 255, 255, 255, 254]).is_err());
+    assert(parse_data_row_arena([0, 1, 255, 255, 255, 254], &formats, &mut arena).is_err());
+    assert(reply(b'D', [0, 0, 1]).is_err());
+    assert(parse_data_row_arena([0, 0, 1], &formats, &mut arena).is_err());
+    let used = arena.used();
+    let partial: List<Byte> = [0, 2, 0, 0, 0, 1, 7, 0, 0, 0, 2, 8];
+    assert(parse_data_row_arena(partial, &formats, &mut arena).is_err());
+    assert_eq(arena.used(), used);
+    assert(reply(b'H', [0, 0, 1, 0, 2]).is_err());
+}

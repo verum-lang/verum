@@ -180,12 +180,14 @@ implement RowSchema {
 // WireRow — one row as the connection saw it on the wire.
 // -----------------------------------------------------------------------------
 
-/// One column's bytes plus the format it was sent in. `bytes` is
-/// borrowed from the per-query CBGR arena; never holds heap unless the
-/// caller `to_owned`s it.
+/// One heap-owned column in wire format. Database adapters match the
+/// payload to decode present bytes separately from SQL NULL.
 public type WireValue is
       WvNull
-    | WvPresent { bytes: List<Byte>, format: WireFormat };
+    | WvPresent {
+        public(in core.database) bytes: List<Byte>,
+        public(in core.database) format: WireFormat,
+    };
 
 public type WireRow is {
     values: List<WireValue>,
@@ -837,6 +839,23 @@ public type ArenaWireValue is
     | AvPresent { slice: ArenaSlice, format: WireFormat };
 
 implement ArenaWireValue {
+    /// Copy one present column into its owning arena. An empty column
+    /// keeps the arena generation and needs no allocation.
+    public(in core.database) fn copy_from(
+        arena: &mut SpindleArena, bytes: &[Byte], format: WireFormat,
+    ) -> Maybe<ArenaWireValue> {
+        let len = bytes.len() as Int;
+        let ptr = if len == 0 { 0 } else { arena.alloc_bytes(len) };
+        if len > 0 && ptr == 0 { return Maybe.None; }
+        let mut i = 0;
+        while i < len {
+            let _ = store_byte(ptr + i, bytes[i] as Int);
+            i = i + 1;
+        }
+        let slice = ArenaSlice { ptr: ptr, len: len, generation: arena.generation() };
+        Maybe.Some(ArenaWireValue.AvPresent { slice: slice, format: format })
+    }
+
     public fn is_null(&self) -> Bool {
         match self { AvNull => true, _ => false }
     }

@@ -67,6 +67,8 @@
 )
 module core.database.postgres.pipeline;
 
+mount core.base.memory.replace;
+
 mount base.{Result, Ok, Err, Text, Maybe, None, Some};
 mount collections.List;
 mount sync.mutex.Mutex;
@@ -308,27 +310,10 @@ implement PipelineResultSink {
                 Result.Ok(g)  => g,
                 Result.Err(_) => return,
             };
-            // Move the per-row state into the result; subsequent
-            // record_* calls (shouldn't happen; defensive) become
-            // no-ops because completion is now Some.
-            let mut rows: List<List<WireValue>> = List.new();
-            let mut tmp = List.new();
-            // Swap rows out: List doesn't expose `take`, so we
-            // build a fresh List + swap pointers via re-assignment.
-            let mut i: Int = 0;
-            while i < guard.rows.len() as Int {
-                rows.push(guard.rows[i].clone());
-                i = i + 1;
-            }
-            let _ = tmp;
-            let row_desc = guard.row_desc.clone();
-            let tag      = guard.command_tag.clone();
-            guard.completion = Maybe.Some(Result.Ok(ExtendedQueryResult {
-                command_tag: tag,
-                row_description: row_desc,
-                rows: rows,
-            }));
-            guard.rows = List.new();
+            let rows = replace(&mut guard.rows, List.new());
+            let row_desc = guard.row_desc.take();
+            let tag = replace(&mut guard.command_tag, "".clone());
+            guard.completion = Maybe.Some(Result.Ok(ExtendedQueryResult.from_parts(tag, row_desc, rows)));
         }
         self.notify.notify_one();
     }
@@ -643,12 +628,12 @@ implement PgPipeline {
             }
             BmDataRow(dr) => {
                 if let Maybe.Some(head) = head_entry(&guard) {
-                    head.sink.record_data_row(dr.values);
+                    head.sink.record_data_row(dr.into_values());
                 }
                 false
             }
             BmCommandComplete(cc) => {
-                terminate_head(&mut guard, &self.cond_space, TerminationKind.TkCommandComplete(cc.tag));
+                terminate_head(&mut guard, &self.cond_space, TerminationKind.TkCommandComplete(cc.into_tag()));
                 false
             }
             BmEmptyQueryResponse => {

@@ -42,7 +42,8 @@ public type PgError is DbError;
 ///  `is_constraint_violation` true via `SqlState.is_integrity()`
 ///  * everything else → QueryFailed
 public fn dberr_from_pg(d: Diagnostic) -> DbError {
-    let class = if d.code.len() >= 2 { take_first_two(&d.code) } else { "".clone() };
+    let (code, message, position_text) = d.into_error_fields();
+    let class = if code.len() >= 2 { take_first_two(&code) } else { "".clone() };
     if class == "08" {
         return DbError.ConnectionFailed {
             source: ConnectionErrorKind.CekServerTerminated,
@@ -51,20 +52,20 @@ public fn dberr_from_pg(d: Diagnostic) -> DbError {
     }
     if class == "28" {
         return DbError.AuthFailed {
-            kind: AuthErrorKind.AekRoleNotPermitted(d.message.clone()),
+            kind: AuthErrorKind.AekRoleNotPermitted(message),
         };
     }
-    let state = match SqlState.parse(&d.code) {
+    let state = match SqlState.parse(&code) {
         Maybe.Some(s) => s,
         Maybe.None    => match SqlState.parse(&"XX000".clone()) {
             Maybe.Some(s2) => s2,
             Maybe.None     => SqlState.parse(&"XX000".clone()).unwrap(),
         }
     };
-    let position = parse_optional_int(&d.position);
+    let position = parse_optional_int(&position_text);
     DbError.QueryFailed {
         sql_state: state,
-        message: d.message,
+        message: message,
         position: position,
     }
 }
