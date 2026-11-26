@@ -61,7 +61,7 @@ module core.net.quic.address_token;
 mount core.collections.list.{List};
 mount core.net.addr.{IpAddr, Ipv4Addr, Ipv6Addr};
 mount core.security.aead.aes_gcm.{aes128_gcm_seal, aes128_gcm_open};
-mount core.random.secure.{fill_secure};
+mount core.random.secure.{fill_secure_array};
 
 // =============================================================================
 // Types
@@ -82,8 +82,8 @@ implement AddressTokenKey {
     public fn generate() -> AddressTokenKey {
         let mut k: [Byte; 16] = [0_u8; 16];
         let mut kid: [Byte; 8] = [0_u8; 8];
-        fill_secure(&mut k);
-        fill_secure(&mut kid);
+        fill_secure_array<16>(&mut k);
+        fill_secure_array<8>(&mut kid);
         AddressTokenKey { key: k, key_id: kid }
     }
 
@@ -175,7 +175,7 @@ public fn issue(
 ) -> Result<List<Byte>, TokenError> {
     // Fresh nonce.
     let mut nonce: [Byte; 12] = [0_u8; 12];
-    fill_secure(&mut nonce);
+    fill_secure_array<12>(&mut nonce);
 
     // Encode plaintext.
     let pt = encode_plaintext(plain);

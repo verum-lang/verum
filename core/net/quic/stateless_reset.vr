@@ -63,7 +63,7 @@ module core.net.quic.stateless_reset;
 
 mount core.collections.list.{List};
 mount core.mac.hmac.{hmac_sha256};
-mount core.random.secure.{fill_secure};
+mount core.random.secure.{fill_secure_array};
 
 // =============================================================================
 // Key + token derivation
@@ -82,7 +82,7 @@ implement StatelessResetKey {
     /// Generate a fresh 32-byte key from the CSPRNG.
     public fn generate() -> StatelessResetKey {
         let mut k: [Byte; 32] = [0_u8; 32];
-        fill_secure(&mut k);
+        fill_secure_array<32>(&mut k);
         StatelessResetKey { key: k }
     }
 
@@ -144,7 +144,7 @@ public fn build_stateless_reset(token: &[Byte; 16], min_size: Int) -> List<Byte>
     };
     // Byte 0: short header with fixed bit set; other bits random.
     let mut first_byte: [Byte; 1] = [0_u8; 1];
-    fill_secure(&mut first_byte);
+    fill_secure_array<1>(&mut first_byte);
     let b0 = (first_byte[0] & 0x3F_u8) | 0x40_u8;   // clear bit7 (long-header=0); set bit6 (fixed=1)
 
     let mut out: List<Byte> = [];
@@ -158,7 +158,7 @@ public fn build_stateless_reset(token: &[Byte; 16], min_size: Int) -> List<Byte>
     let chunk_size: Int = 32;
     while rem > 0 {
         let mut chunk: [Byte; 32] = [0_u8; 32];
-        fill_secure(&mut chunk);
+        fill_secure_array<32>(&mut chunk);
         let take = if rem >= chunk_size { chunk_size } else { rem };
         let mut i: Int = 0;
         while i < take { out.push(chunk[i]); i = i + 1; }
@@ -198,8 +198,7 @@ implement ResetTokenSet {
     public fn remove(&mut self, token: &[Byte; 16]) {
         let mut i: Int = 0;
         while i < self.tokens.len() {
-            let t = &self.tokens[i];
-            if bytes_eq_16(t, token) {
+            if bytes_eq_16(&self.tokens[i], token) {
                 let _ = self.tokens.remove(i);
                 return;
             }

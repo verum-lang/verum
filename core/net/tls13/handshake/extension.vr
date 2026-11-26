@@ -161,6 +161,19 @@ public type EarlyDataIndication is
 // Extension ADT
 // =============================================================================
 
+implement EarlyDataIndication {
+    pub(in core.net.tls13.handshake) fn ticket_limit(limit: UInt32) -> EarlyDataIndication {
+        EarlyDataIndication.EarlyDataTicket { max_early_data_size: limit }
+    }
+
+    pub(in core.net.tls13.handshake) fn max_ticket_data(&self) -> Maybe<UInt32> {
+        match self {
+            EarlyDataIndication.EarlyDataTicket { max_early_data_size } => Maybe.Some(*max_early_data_size),
+            _ => Maybe.None,
+        }
+    }
+}
+
 public type Extension is
     | ServerNameExt { public(in core.net.tls13.handshake) names: List<ServerName> }
     | SupportedGroupsExt { public(in core.net.tls13.handshake) groups: List<NamedGroup> }

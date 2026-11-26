@@ -76,7 +76,7 @@ mount core.collections.list.{List};
 mount core.time.instant.{Instant};
 mount core.time.duration.{Duration};
 mount core.mac.hmac.{hmac_sha256};
-mount core.random.secure.{fill_secure};
+mount core.random.secure.{fill_secure_array};
 
 // =============================================================================
 // Config — capacity + freshness window + false-positive target
@@ -157,7 +157,7 @@ fn new_bucket(cfg: &ReplayConfig, now: Instant) -> Bucket {
     let mut i: Int = 0;
     while i < word_count { bits.push(0_u64); i = i + 1; }
     let mut key: [Byte; 32] = [0_u8; 32];
-    fill_secure(&mut key);
+    fill_secure_array<32>(&mut key);
     Bucket {
         bits:        bits,
         bit_len:     bit_len,
@@ -299,6 +299,10 @@ implement ReplayCache {
         ch_hash: &[Byte],
         now:     Instant,
     ) -> Bool {
+        self.admit_pair(psk_id, ch_hash, now)
+    }
+
+    fn admit_pair(&mut self, psk_id: &[Byte], ch_hash: &[Byte], now: Instant) -> Bool {
         self.rotate_if_due(now.clone());
 
         // First: consult the retired bucket (if any) — a hit there
@@ -388,7 +392,7 @@ public type ReplayGuard is protocol {
 
 implement ReplayGuard for ReplayCache {
     fn try_admit(&mut self, psk_id: &[Byte], ch_hash: &[Byte], now: Instant) -> Bool {
-        ReplayCache.try_admit(self, psk_id, ch_hash, now)
+        self.admit_pair(psk_id, ch_hash, now)
     }
 }
 

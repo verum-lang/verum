@@ -11,22 +11,22 @@ mount core.net.tls13.handshake.{
 };
 mount core.net.tls13.cipher_suite.{CipherSuite};
 mount core.net.tls13.keyschedule.schedule.{SecretBytes};
-mount core.time.instant.{Instant};
+mount core.collections.list.{List};
 mount core.net.h3.client.{H3Client};
 
 fn check_issue() -> Result<(), IssueError> {
     let stek = SessionTicketKey.generate();
-    let rm = SecretBytes.from([0_u8; 32].to_list());
+    let rm = SecretBytes.from(List<Byte>.from_elem(0_u8, 32));
     let opts = IssueOptions.default()
         .with_lifetime(3600_u32)
         .with_0rtt_budget(16384_u32)
-        .with_alpn(b"h3".to_list());
+        .with_alpn([0x68_u8, 0x33_u8]);
 
     let _ = issue_post_handshake_ticket(
-        &stek, CipherSuite.TlsAes128GcmSha256, &rm, &opts, Instant.now(),
+        &stek, CipherSuite.TlsAes128GcmSha256, &rm, &opts, 1_700_000_000_u64,
     )?;
     let _ = issue_post_handshake_tickets(
-        &stek, CipherSuite.TlsAes128GcmSha256, &rm, &opts, 2, Instant.now(),
+        &stek, CipherSuite.TlsAes128GcmSha256, &rm, &opts, 2, 1_700_000_000_u64,
     )?;
     Ok(())
 }

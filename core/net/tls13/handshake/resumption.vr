@@ -64,7 +64,7 @@ mount core.collections.list.{List};
 mount core.time.instant.{Instant};
 mount core.time.duration.{Duration};
 mount core.security.aead.aes_gcm.{aes128_gcm_seal, aes128_gcm_open};
-mount core.random.secure.{fill_secure};
+mount core.random.secure.{fill_secure_array};
 mount core.security.kdf.hkdf.{HkdfError};
 mount core.net.tls13.cipher_suite.{CipherSuite, HashKind};
 mount core.net.tls13.keyschedule.hkdf_label.{hkdf_expand_label};
@@ -157,8 +157,8 @@ implement SessionTicketKey {
     public fn generate() -> SessionTicketKey {
         let mut key: [Byte; 16] = [0_u8; 16];
         let mut kid: [Byte; 8]  = [0_u8; 8];
-        fill_secure(&mut key);
-        fill_secure(&mut kid);
+        fill_secure_array<16>(&mut key);
+        fill_secure_array<8>(&mut kid);
         SessionTicketKey { key: key, key_id: kid, issued_at: Instant.now() }
     }
 }
@@ -263,6 +263,18 @@ implement PartialEq for TicketError {
 
 implement Eq for TicketError {}
 
+pub(in core.net.tls13.handshake) fn seal_session_ticket(key: &SessionTicketKey, suite: CipherSuite,
+                                                       master: &[Byte], nonce: &[Byte], max_early: UInt32,
+                                                       issued_unix: UInt64, alpn: &[Byte])
+    -> Result<List<Byte>, TicketError> {
+    let plain = ServerTicketPlaintext {
+        cipher_suite: suite, resumption_secret: List<Byte>.from_slice(master),
+        ticket_nonce: List<Byte>.from_slice(nonce), max_early_data_size: max_early,
+        issued_at_unix: issued_unix, alpn: List<Byte>.from_slice(alpn),
+    };
+    issue_ticket(key, &plain)
+}
+
 public fn issue_ticket(
     stek: &SessionTicketKey,
     plaintext: &ServerTicketPlaintext,
@@ -271,7 +283,7 @@ public fn issue_ticket(
 
     // Fresh 12-byte nonce per ticket.
     let mut nonce: [Byte; 12] = [0_u8; 12];
-    fill_secure(&mut nonce);
+    fill_secure_array<12>(&mut nonce);
 
     // Encrypt.
     let mut sealed: List<Byte> = [];
@@ -497,19 +509,12 @@ implement ClientSessionStore {
     /// Consume one fresh session for the given authority (removes from
     /// store). Returns Maybe.None when no fresh match is present.
     public fn take(&mut self, authority: &Text, now: Instant) -> Maybe<ClientSession> {
-        let mut i: Int = 0;
+        let mut i = 0;
         while i < self.entries.len() {
-            let (auth, sess) = &self.entries[i];
-            if text_eq(auth, authority) {
-                if sess.is_fresh(now.clone()) {
-                    let (_, s) = self.entries.remove(i);
-                    return Maybe.Some(s);
-                } else {
-                    let _ = self.entries.remove(i);
-                    continue;
-                }
-            }
-            i = i + 1;
+            if text_eq(&self.entries[i].0, authority) {
+                let (_, session) = self.entries.remove(i);
+                if session.is_fresh(now) { return Maybe.Some(session); }
+            } else { i = i + 1; }
         }
         Maybe.None
     }
@@ -540,33 +545,6 @@ public fn client_session_from_nst(
     resumption_master:  List<Byte>,
     now:                Instant,
 ) -> ClientSession {
-    let mut max_early: UInt32 = 0_u32;
-    let mut i: Int = 0;
-    while i < nst.extensions.len() {
-        match &nst.extensions[i] {
-            // The field is `max_early_data_size` (see
-            // handshake/extension.vr); `max_size` named a field the variant
-            // does not have, so the read resolved through a positional GUESS
-            // and the session's early-data limit came from a foreign slot
-            // (T0723). Renamed at bind time to keep the body's short name.
-            Extension.EarlyDataExt(
-                EarlyDataIndication.EarlyDataTicket { max_early_data_size: max_size },
-            ) => {
-                max_early = max_size;
-            },
-            _ => {},
-        }
-        i = i + 1;
-    }
-
-    ClientSession {
-        ticket:              nst.ticket.clone(),
-        ticket_age_add:      nst.ticket_age_add,
-        ticket_lifetime_sec: nst.ticket_lifetime,
-        cipher_suite:        suite,
-        resumption_secret:   resumption_master,
-        max_early_data_size: max_early,
-        created_at:          now,
-        ticket_nonce:        nst.ticket_nonce.clone(),
-    }
+    let (ticket, nonce, age_add, lifetime, max_early) = nst.resumption_fields();
+    session_from_new_ticket(ticket, nonce, age_add, lifetime, suite, resumption_master, max_early, now)
 }

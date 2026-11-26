@@ -41,11 +41,13 @@ module core.net.quic.transport.listener;
 
 mount core.collections.list.{List};
 mount core.time.instant.{Instant};
+mount core.random.secure.{fill_secure_array};
 mount core.time.duration.{Duration};
 mount core.async.nursery.{Nursery};
 mount core.async.cancellation.{CancellationToken};
 mount core.async.channel.{Channel, Sender, Receiver, unbounded_channel};
 mount core.base.memory.{Shared};
+mount core.sync.atomic.{AtomicU64, MemoryOrdering};
 mount core.net.addr.{SocketAddr};
 
 mount core.net.quic.connection_id.{ConnectionId, MAX_CID_LEN};
@@ -172,7 +174,7 @@ public type ServerListener is {
     max_connections: UInt64,
     /// Next ephemeral CID seed — per-listener counter combined with
     /// random bytes for connection IDs we issue to clients.
-    cid_seed:        Shared<UInt64>,
+    cid_seed:        Shared<AtomicU64>,
 };
 
 implement ServerListener {
@@ -195,7 +197,7 @@ implement ServerListener {
             accept_queue:    tx,
             accept_pop:      rx,
             max_connections: max_connections,
-            cid_seed:        Shared.new(0_u64),
+            cid_seed:        Shared.new(AtomicU64.new(0_u64)),
         })
     }
 
@@ -295,7 +297,7 @@ implement ServerListener {
             .map_err(|_| ListenerError.MalformedInitial(Text.from("derive client initial keys")))?;
 
         // Allocate a fresh local (SCID → server-issued CID).
-        let local_cid = self.mint_cid();
+        let local_cid = self.mint_cid()?;
 
         // Build server TLS SM + handshake driver.
         let tls_cfg = self.tls_config.lock().unwrap_or_else(|p| p.into_inner()).clone();
@@ -387,22 +389,22 @@ implement ServerListener {
         Result.Ok(())
     }
 
-    fn mint_cid(&self) -> ConnectionId {
-        let mut seed = self.cid_seed.lock().unwrap_or_else(|p| p.into_inner());
-        let id = *seed;
-        *seed = id + 1_u64;
+    fn mint_cid(&self) -> Result<ConnectionId, ListenerError> {
+        let id = self.cid_seed.get().fetch_add(1_u64, MemoryOrdering.Relaxed);
 
         // 8-byte CID: 2 bytes seed + 6 bytes random.
         let mut bytes: [Byte; 8] = [0_u8; 8];
         bytes[0] = ((id >> 8) & 0xFF_u64) as Byte;
         bytes[1] = (id & 0xFF_u64) as Byte;
         let mut rnd: [Byte; 6] = [0_u8; 6];
-        core.random.secure.fill_secure(&mut rnd);
+        fill_secure_array<6>(&mut rnd);
         let mut i: Int = 0;
         while i < 6 { bytes[2 + i] = rnd[i]; i = i + 1; }
 
-        ConnectionId.from_bytes(&bytes)
-            .unwrap_or_else(|_| ConnectionId.empty())
+        match ConnectionId.from_bytes(&bytes) {
+            Result.Ok(cid) => Result.Ok(cid),
+            Result.Err(_) => Result.Err(ListenerError.MalformedInitial(Text.from("invalid local connection ID"))),
+        }
     }
 
     public fn local_addr(&self) -> SocketAddr { self.local_addr.clone() }

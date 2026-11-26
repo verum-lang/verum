@@ -48,7 +48,7 @@ mount core.net.tls13.handshake.codec.{
     vec_u8, vec_u16, vec_u24,
 };
 mount core.net.tls13.handshake.extension.{
-    Extension, ExtensionContext,
+    Extension, ExtensionContext, EarlyDataIndication,
     encode_extensions_block, decode_extensions_block,
 };
 mount core.net.tls13.version.{ProtocolVersion, LEGACY_VERSION_TLS_1_2};
@@ -153,6 +153,26 @@ public type NewSessionTicket is {
     ticket:             List<Byte>,
     extensions:         List<Extension>,
 };
+
+implement NewSessionTicket {
+    pub(in core.net.tls13.handshake) fn issued(lifetime: UInt32, age_add: UInt32, nonce: List<Byte>,
+                                               ticket: List<Byte>, max_early: UInt32) -> NewSessionTicket {
+        let mut extensions: List<Extension> = [];
+        if max_early > 0_u32 { extensions.push(Extension.EarlyDataExt(EarlyDataIndication.ticket_limit(max_early))); }
+        NewSessionTicket { ticket_lifetime: lifetime, ticket_age_add: age_add, ticket_nonce: nonce,
+                           ticket: ticket, extensions: extensions }
+    }
+
+    pub(in core.net.tls13.handshake) fn resumption_fields(&self) -> (List<Byte>, List<Byte>, UInt32, UInt32, UInt32) {
+        let mut max_early: UInt32 = 0_u32;
+        for ext in &self.extensions {
+            if let Extension.EarlyDataExt(indication) = ext {
+                if let Maybe.Some(limit) = indication.max_ticket_data() { max_early = limit; }
+            }
+        }
+        (self.ticket.clone(), self.ticket_nonce.clone(), self.ticket_age_add, self.ticket_lifetime, max_early)
+    }
+}
 
 public type KeyUpdate is {
     request_update: KeyUpdateRequest,

@@ -1,0 +1,82 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L2
+// @tags: quic, tls13, csprng, address_validation, resumption
+// @expected-stdout: QUIC and TLS entropy consumers passed
+// @expected-exit: 0
+
+mount core.collections.list.{List};
+mount core.time.instant.{Instant};
+mount core.net.addr.{SocketAddr, Ipv4Addr};
+mount core.net.quic.address_token.{AddressTokenKey};
+mount core.net.quic.stateless_reset.{StatelessResetKey};
+mount core.net.quic.path.{QuicPath};
+mount core.net.tls13.cipher_suite.{CipherSuite};
+mount core.net.tls13.keyschedule.schedule.{SecretBytes};
+mount core.net.tls13.handshake.messages.{HandshakeMessage};
+mount core.net.tls13.handshake.resumption.{SessionTicketKey, client_session_from_nst};
+mount core.net.tls13.handshake.ticket_issuer.{IssueOptions, issue_post_handshake_ticket};
+mount core.net.tls13.handshake.zero_rtt_antireplay.{ReplayCache};
+
+fn generated_keys() {
+    let a = AddressTokenKey.generate().key_id();
+    let b = AddressTokenKey.generate().key_id();
+    let mut different = false;
+    let mut i = 0;
+    while i < 8 { if a[i] != b[i] { different = true; } i = i + 1; }
+    assert(different);
+    let key = StatelessResetKey.generate();
+    let cid: List<Byte> = [1_u8, 2_u8, 3_u8, 4_u8];
+    let first = key.token_for_cid(cid.as_slice());
+    let second = key.token_for_cid(cid.as_slice());
+    i = 0;
+    while i < 16 { assert(first[i] + 0_u8 == second[i] + 0_u8); i = i + 1; }
+}
+
+fn match_challenge() {
+    let local = SocketAddr.new_v4(Ipv4Addr.new(127_u8, 0_u8, 0_u8, 1_u8), 443);
+    let peer = SocketAddr.new_v4(Ipv4Addr.new(192_u8, 0_u8, 2_u8, 1_u8), 443);
+    let mut path = QuicPath.new(local, peer, false);
+    let now = Instant.now();
+    path.on_bytes_received(2_u64);
+    path.on_bytes_sent(4_u64);
+    let challenge = path.begin_validation(now);
+    assert(path.can_send(2_u64).is_ok());
+    assert(path.can_send(3_u64).is_err());
+    let mut wrong: [Byte; 8] = challenge;
+    wrong[0] = wrong[0] ^ 1_u8;
+    assert(!path.on_path_response(&wrong, now).unwrap());
+    assert(path.can_send(3_u64).is_err());
+    assert(path.on_path_response(&challenge, now).unwrap());
+    assert(path.can_send(3_u64).is_ok());
+}
+
+fn issued_ticket_and_replay() {
+    let key = SessionTicketKey.generate();
+    let master: List<Byte> = List.from_elem(24_u8, 32);
+    let options = IssueOptions.default().with_lifetime(60_u32);
+    let ticket = issue_post_handshake_ticket(&key, CipherSuite.TlsAes128GcmSha256,
+        &SecretBytes.from(master.clone()), &options, 1_700_000_000_u64).unwrap();
+    let now = Instant.now();
+    match ticket {
+        HandshakeMessage.NewSessionTicketMsg(message) => {
+            let session = client_session_from_nst(&message, CipherSuite.TlsAes128GcmSha256, master, now);
+            assert(session.is_fresh(now));
+        },
+        _ => panic("expected NewSessionTicket"),
+    }
+    let mut cache = ReplayCache.with_defaults();
+    let identity: List<Byte> = [1_u8, 2_u8];
+    let transcript: List<Byte> = List.from_elem(7_u8, 32);
+    assert(cache.try_admit(identity.as_slice(), transcript.as_slice(), now));
+    assert(!cache.try_admit(identity.as_slice(), transcript.as_slice(), now));
+}
+
+@main
+public fn main() -> Int {
+    generated_keys();
+    match_challenge();
+    issued_ticket_and_replay();
+    print("QUIC and TLS entropy consumers passed");
+    0
+}

@@ -45,10 +45,12 @@
 )
 module core.net.quic.path;
 
+mount core.base.primitives.*;
+mount core.base.memory.{replace};
 mount core.time.instant.{Instant};
 mount core.time.duration.{Duration};
 mount core.net.addr.{SocketAddr};
-mount core.random.secure.{fill_secure};
+mount core.random.secure.{fill_secure_array};
 
 // =============================================================================
 // State
@@ -64,6 +66,8 @@ public type QuicPath is {
     local:   SocketAddr,
     remote:  SocketAddr,
     state:   PathState,
+    // In-progress validation retains the preceding unvalidated address budget.
+    validation_budget: Maybe<(UInt64, UInt64)>,
     /// RTT seen on this specific path (populated on PATH_RESPONSE
     /// acceptance). Separate from the overall connection RTT
     /// estimator — useful for migration decisions.
@@ -132,74 +136,59 @@ implement QuicPath {
         } else {
             PathState.Unvalidated { received_bytes: 0_u64, sent_bytes: 0_u64 }
         };
-        QuicPath { local: local, remote: remote, state: state, last_rtt: Maybe.None }
+        QuicPath { local: local, remote: remote, state: state, validation_budget: Maybe.None, last_rtt: Maybe.None }
     }
 
     /// Can we send `n` bytes under the current anti-amplification
     /// budget? Returns Err if the path is Failed or if sending would
     /// exceed the 3× cap while unvalidated.
     public fn can_send(&self, n: UInt64) -> Result<(), PathError> {
+        if self.is_failed() { return Result.Err(PathError.ChallengeTimeout); }
+        if n > self.remaining_budget() { return Result.Err(PathError.AmplificationLimitExceeded); }
+        Result.Ok(())
+    }
+
+    fn budget(&self) -> Maybe<(UInt64, UInt64)> {
         match &self.state {
-            PathState.Validated => Result.Ok(()),
-            PathState.Validating {..} => Result.Ok(()),
-            PathState.Unvalidated { received_bytes, sent_bytes } => {
-                let budget = ANTI_AMPLIFICATION_FACTOR * (received_bytes);
-                if (*sent_bytes) + n > budget {
-                    Result.Err(PathError.AmplificationLimitExceeded)
-                } else {
-                    Result.Ok(())
-                }
-            },
-            PathState.Failed => Result.Err(PathError.ChallengeTimeout),
+            PathState.Unvalidated { received_bytes, sent_bytes } => Maybe.Some((*received_bytes, *sent_bytes)),
+            PathState.Validating { .. } => self.validation_budget,
+            _ => Maybe.None,
         }
     }
 
-    /// THREE SPELLINGS FAIL HERE AND THE FOURTH IS THIS ONE (T1334).
-    /// A `match` arm binds a RECORD-variant field by value, so
-    /// `sent_bytes = sent_bytes + n` assigned to the copy and the
-    /// anti-amplification budget never moved — silently, rc=0, at both
-    /// tiers. `*sent_bytes = …` is refused instead (E409: the binding is
-    /// not a reference). And `{ sent_bytes: ref mut sb } => *sb = …`,
-    /// which is the spelling `docs/language/patterns.md` teaches, is
-    /// silently inert as well. The same `ref mut` on a TUPLE variant
-    /// works, which is what makes the gap invisible. Rebuilding the
-    /// variant is the form that works today.
-    public fn on_bytes_sent(&mut self, n: UInt64) {
-        match &self.state {
-            PathState.Unvalidated { received_bytes, sent_bytes } => {
-                let rb = received_bytes;
-                let sb = sent_bytes + n;
-                self.state = PathState.Unvalidated { received_bytes: rb, sent_bytes: sb };
-            },
-            _ => {},
+    pub(in core.net.quic) fn remaining_budget(&self) -> UInt64 {
+        if self.is_failed() { return 0_u64; }
+        match self.budget() {
+            Maybe.Some((received, sent)) => received.saturating_mul(ANTI_AMPLIFICATION_FACTOR).saturating_sub(sent),
+            Maybe.None => UInt64.MAX,
         }
     }
 
-    /// Same shape as `on_bytes_sent`: the arm binding is a copy, so the
-    /// variant is rebuilt rather than assigned into.
-    public fn on_bytes_received(&mut self, n: UInt64) {
-        match &self.state {
-            PathState.Unvalidated { received_bytes, sent_bytes } => {
-                let rb = received_bytes + n;
-                let sb = sent_bytes;
-                self.state = PathState.Unvalidated { received_bytes: rb, sent_bytes: sb };
-            },
-            _ => {},
+    fn account(&mut self, received: UInt64, sent: UInt64) {
+        if let Maybe.Some((rx, tx)) = self.budget() {
+            let new_rx = rx.saturating_add(received);
+            let new_tx = tx.saturating_add(sent);
+            if self.state is PathState.Validating { .. } {
+                self.validation_budget = Maybe.Some((new_rx, new_tx));
+            } else {
+                self.state = PathState.Unvalidated { received_bytes: new_rx, sent_bytes: new_tx };
+            }
         }
     }
+
+    public fn on_bytes_sent(&mut self, n: UInt64) { self.account(0_u64, n); }
+    public fn on_bytes_received(&mut self, n: UInt64) { self.account(n, 0_u64); }
 
     /// Begin validation — generate an 8-byte challenge and transition
     /// to Validating. Caller MUST emit a PATH_CHALLENGE frame carrying
     /// the returned bytes.
     public fn begin_validation(&mut self, now: Instant) -> [Byte; 8] {
         let mut challenge: [Byte; 8] = [0_u8; 8];
-        fill_secure(&mut challenge);
-        let attempts = match &self.state {
-            PathState.Validating { attempts: a, ..} => a + 1_u32,
-            _ => 1_u32,
-        };
+        fill_secure_array<8>(&mut challenge);
+        let attempts = self.validation_attempts().saturating_add(1_u32);
+        self.validation_budget = self.budget();
         self.state = PathState.Validating {
-            challenge: challenge.clone(),
+            challenge: challenge,
             sent_at:   now,
             attempts:  attempts,
         };
@@ -212,37 +201,49 @@ implement QuicPath {
     /// being validated; Err if genuinely malformed (response on a
     /// Failed path).
     public fn on_path_response(&mut self, data: &[Byte; 8], now: Instant) -> Result<Bool, PathError> {
+        if self.is_failed() { return Result.Err(PathError.UnexpectedResponse); }
+        let sent_at = match self.matching_challenge(data) {
+            Maybe.Some(sent) => sent, Maybe.None => return Result.Ok(false),
+        };
+        self.last_rtt = now.duration_since(sent_at);
+        self.validation_budget = Maybe.None;
+        self.state = PathState.Validated;
+        Result.Ok(true)
+    }
+
+    fn matching_challenge(&self, data: &[Byte; 8]) -> Maybe<Instant> {
         match &self.state {
             PathState.Validating { challenge, sent_at, .. } => {
-                let mut matches = true;
-                let mut i: Int = 0;
+                let mut i = 0;
                 while i < 8 {
-                    if data[i] != challenge[i] { matches = false; break; }
+                    if data[i] != challenge[i] { return Maybe.None; }
                     i = i + 1;
                 }
-                if !matches { return Result.Ok(false); }
-                let rtt = now.duration_since(sent_at.clone())
-                    .unwrap_or_else(|| Duration.from_micros(0));
-                self.last_rtt = Maybe.Some(rtt);
-                self.state = PathState.Validated;
-                Result.Ok(true)
+                Maybe.Some(*sent_at)
             },
-            PathState.Validated => Result.Ok(false),
-            PathState.Unvalidated {..} => Result.Ok(false),
-            PathState.Failed => Result.Err(PathError.UnexpectedResponse),
+            _ => Maybe.None,
         }
+    }
+
+    fn validation_attempts(&self) -> UInt32 {
+        match &self.state { PathState.Validating { attempts, .. } => *attempts, _ => 0_u32 }
     }
 
     /// Timer fire — check for challenge timeout. Returns a signal the
     /// caller uses to re-challenge (if attempts < MAX) or retire the
     /// path (if MAX reached).
     public fn on_timer(&mut self, now: Instant) -> TimerOutcome {
+        let outcome = self.timer_action(now);
+        if outcome is TimerOutcome.Failed { self.state = PathState.Failed; }
+        outcome
+    }
+
+    fn timer_action(&self, now: Instant) -> TimerOutcome {
         match &self.state {
             PathState.Validating { sent_at, attempts, .. } => {
                 if now.duration_since(sent_at.clone())
                     .unwrap_or_else(|| Duration.from_micros(0)) >= CHALLENGE_TIMEOUT {
                     if *attempts >= MAX_CHALLENGE_ATTEMPTS {
-                        self.state = PathState.Failed;
                         TimerOutcome.Failed
                     } else {
                         TimerOutcome.ShouldReChallenge
@@ -262,15 +263,9 @@ implement QuicPath {
     /// longer applies). Useful for both SMT obligations and runtime
     /// DoS-hardening asserts in hot paths.
     public fn amp_budget_ok(&self) -> Bool {
-        match &self.state {
-            PathState.Validated => true,
-            PathState.Validating {..} => true,  // mid-validation — same rule waived
-            PathState.Unvalidated { received_bytes: r, sent_bytes: s } => {
-                let rx: UInt64 = r;
-                let tx: UInt64 = s;
-                tx <= ANTI_AMPLIFICATION_FACTOR * rx
-            },
-            PathState.Failed => true,
+        match self.budget() {
+            Maybe.Some((received, sent)) => sent <= received.saturating_mul(ANTI_AMPLIFICATION_FACTOR),
+            Maybe.None => true,
         }
     }
 
@@ -319,7 +314,7 @@ implement PathManager {
     /// from the current standby, replace it.
     public fn on_new_remote(&mut self, local: SocketAddr, remote: SocketAddr) {
         let replace = match &self.standby {
-            Maybe.Some(s) => !addr_eq(&s.remote, &remote),
+            Maybe.Some(s) => s.remote != remote,
             Maybe.None    => true,
         };
         if replace {
@@ -332,14 +327,13 @@ implement PathManager {
 
     /// Standby path validated → promote it as active; retire old.
     public fn promote_standby(&mut self) -> Maybe<SocketAddr> {
-        match self.standby.clone() {
-            Maybe.Some(s) => {
-                if s.is_validated() {
-                    let retired_remote = self.active.remote.clone();
-                    self.active = s;
-                    self.standby = Maybe.None;
-                    Maybe.Some(retired_remote)
-                } else { Maybe.None }
+        let valid = match &self.standby { Maybe.Some(path) => path.is_validated(), Maybe.None => false };
+        if !valid { return Maybe.None; }
+        match replace(&mut self.standby, Maybe<QuicPath>.None) {
+            Maybe.Some(path) => {
+                let retired = self.active.remote_addr();
+                self.active = path;
+                Maybe.Some(retired)
             },
             Maybe.None => Maybe.None,
         }
@@ -353,11 +347,4 @@ implement PathManager {
             Maybe.None => Maybe.None,
         }
     }
-}
-
-fn addr_eq(a: &SocketAddr, b: &SocketAddr) -> Bool {
-    // SocketAddr's protocol equality — delegate to whatever the
-    // stdlib exposes. If `eq` is missing, wire through string-form
-    // comparison as a safe fallback.
-    a.to_text() == b.to_text()
 }
