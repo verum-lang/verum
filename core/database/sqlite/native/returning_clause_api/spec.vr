@@ -31,6 +31,10 @@ public fn empty_spec() -> ReturningSpec {
     ReturningSpec { exprs: List.new(), has_star: false }
 }
 
+implement ReturningSpec {
+    public fn has_star(&self) -> Bool { self.has_star }
+}
+
 public fn push_star(s: &mut ReturningSpec) {
     s.exprs.push(RekStar);
     s.has_star = true;

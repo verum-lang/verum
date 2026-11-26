@@ -20,8 +20,7 @@ mount core.database.sqlite.native.returning_clause_api.row.{
 };
 
 public type ReturningEngine is {
-    spec: ReturningSpec,
-    table_columns: Int,
+    expands_star: Bool,
     rows_yielded: Int64,
     column_count: Int,
 }
@@ -29,8 +28,7 @@ public type ReturningEngine is {
 public fn new_engine(spec: ReturningSpec, table_columns: Int) -> ReturningEngine {
     let cc = projected_columns(&spec, table_columns);
     ReturningEngine {
-        spec: spec,
-        table_columns: table_columns,
+        expands_star: spec.has_star(),
         rows_yielded: 0 as Int64,
         column_count: cc,
     }
@@ -40,10 +38,12 @@ implement ReturningEngine {
     /// Record one emitted row. Returns false if the supplied row's
     /// column count doesn't match the expected projection.
     public fn emit(&mut self, row: &ReturningRow) -> Bool {
-        if row.cells.len() != self.column_count { return false; }
+        if row.column_count() != self.column_count { return false; }
         self.rows_yielded = self.rows_yielded + 1_i64;
         true
     }
 
-    public fn is_star_expansion(&self) -> Bool { self.spec.has_star }
+    public fn is_star_expansion(&self) -> Bool { self.expands_star }
+    public fn column_count(&self) -> Int { self.column_count }
+    public fn rows_yielded(&self) -> Int64 { self.rows_yielded }
 }

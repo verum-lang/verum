@@ -37,11 +37,13 @@ public fn push_cell(r: &mut ReturningRow, cell: ReturningCell) {
     r.cells.push(cell);
 }
 
-public fn row_byte_count(r: &ReturningRow) -> Int { r.cells.len() }
+implement ReturningRow {
+    public fn column_count(&self) -> Int { self.cells.len() }
+}
 
 public fn column_name(r: &ReturningRow, index: Int) -> Text {
-    match r.cells.as_slice().get(index) {
-        Maybe.Some(cell) => cell.column_name.clone(),
+    match r.cells.get(index) {
+        Maybe.Some(cell) => cell.column_name,
         Maybe.None => Text.new(),
     }
 }

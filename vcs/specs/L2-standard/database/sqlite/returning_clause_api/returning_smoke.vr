@@ -6,31 +6,23 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.returning_clause_api.spec.{
-    ReturningSpec, ReturningExprKind,
-    RekStar, RekColumn, RekRowid, RekExpression,
-    empty_spec, push_star, push_column, push_rowid, push_expression,
-    projected_columns,
+    empty_spec, push_star, push_column, push_rowid, push_expression, projected_columns,
 };
 mount core.database.sqlite.native.returning_clause_api.row.{
-    ReturningCell, ReturningRow,
-    new_cell, new_row, push_cell, row_byte_count, column_name,
+    new_cell, new_row, push_cell, column_name,
 };
-mount core.database.sqlite.native.returning_clause_api.engine.{
-    ReturningEngine,
-    new_engine,
-};
-mount base.{Bool};
+mount core.database.sqlite.native.returning_clause_api.engine.new_engine;
 
 fn test_empty_spec_projects_zero() {
     let s = empty_spec();
     assert_eq(projected_columns(&s, 10), 0);
-    assert(!s.has_star);
+    assert(!s.has_star());
 }
 
 fn test_star_expands_to_table_columns() {
     let mut s = empty_spec();
     push_star(&mut s);
-    assert(s.has_star);
+    assert(s.has_star());
     assert_eq(projected_columns(&s, 7), 7);
 }
 
@@ -61,11 +53,12 @@ fn test_row_push_and_lookup() {
     let mut r = new_row();
     push_cell(&mut r, new_cell("id".clone(), 42 as Int64));
     push_cell(&mut r, new_cell("name".clone(), 99 as Int64));
-    assert_eq(row_byte_count(&r), 2);
+    assert_eq(r.column_count(), 2);
     assert(column_name(&r, 0) == "id".clone());
     assert(column_name(&r, 1) == "name".clone());
+    assert(column_name(&r, 0) == "id".clone());
     assert(column_name(&r, -1).len() == 0);
-    assert(column_name(&r, 9).len() == 0);
+    assert(column_name(&r, r.column_count()).len() == 0);
 }
 
 fn test_engine_emit_matches_projected_columns() {
@@ -77,7 +70,7 @@ fn test_engine_emit_matches_projected_columns() {
     push_cell(&mut row, new_cell("id".clone(), 1 as Int64));
     push_cell(&mut row, new_cell("name".clone(), 2 as Int64));
     assert(e.emit(&row));
-    assert_eq(e.rows_yielded, 1 as Int64);
+    assert_eq(e.rows_yielded(), 1 as Int64);
 }
 
 fn test_engine_rejects_wrong_column_count() {
@@ -95,7 +88,7 @@ fn test_engine_star_flag() {
     push_star(&mut s);
     let e = new_engine(s, 3);
     assert(e.is_star_expansion());
-    assert_eq(e.column_count, 3);
+    assert_eq(e.column_count(), 3);
 }
 
 fn main() {
