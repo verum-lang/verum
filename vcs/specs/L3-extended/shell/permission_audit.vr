@@ -10,12 +10,12 @@
 // this test exercises the runtime gate the audit pass relies on.
 
 mount core.shell.context.{PermissionSet};
-mount core.shell.result.{ShellError};
 
 fn main() {
-    let p = PermissionSet.deny_all().with_run(["kubectl".into()]);
-    assert(p.check_run(&"kubectl".into()).is_ok(),  "kubectl is allow-listed");
-    assert(p.check_run(&"curl".into()).is_err(),    "curl is denied");
-    assert(p.check_run(&"/usr/bin/kubectl".into()).is_ok(),
+    let p = PermissionSet.deny_all().with_run(["kubectl"]);
+    assert(p.check_run(&"kubectl").is_ok(),  "kubectl is allow-listed");
+    assert(p.check_run(&"curl").is_err(),    "curl is denied");
+    assert(p.check_run(&"/usr/bin/kubectl").is_ok(),
            "absolute path matches by basename");
+    assert(p.check_run(&"/инструменты/kubectl").is_ok(), "Unicode directory before the basename");
 }

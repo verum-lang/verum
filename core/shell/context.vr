@@ -35,7 +35,10 @@
 )
 module core.shell.context;
 
-mount core.{Maybe, Result, List, Text};
+mount core.base.maybe.Maybe;
+mount core.base.result.Result;
+mount core.collections.list.List;
+mount core.text.text.Text;
 mount core.base.protocols.{Display, Debug, Clone, Eq};
 mount core.base.env.{var_opt as env_var_opt, shell as host_shell, temp_dir as host_temp_dir};
 mount core.text.format.{Formatter};
@@ -157,13 +160,11 @@ fn clone_opt_list(o: &Maybe<List<Text>>) -> Maybe<List<Text>> {
 }
 
 fn basename_of(p: &Text) -> Text {
-    let mut last_sep: Int = -1;
-    let mut i: Int = 0;
-    for ch in p.chars() {
-        if ch == '/' || ch == '\\' { last_sep = i; }
-        i = i + 1;
+    let mut start: Int = 0;
+    for (offset, ch) in p.char_indices() {
+        if ch == '/' || ch == '\\' { start = offset + 1; }
     }
-    if last_sep < 0 { p.clone() } else { p.slice(last_sep + 1, p.len()).into() }
+    if start == 0 { p.clone() } else { p.slice(start, p.len()) }
 }
 
 // =============================================================================
@@ -379,12 +380,12 @@ implement ShellContext {
             Maybe.Some(s) => s.clone(),
             Maybe.None    => match host_shell() {
                 Maybe.Some(s) => s,
-                Maybe.None    => {
-                    @cfg(any(target_os = "linux", target_os = "macos"))
-                    { "/bin/sh".into() }
-                    @cfg(target_os = "windows")
-                    { "cmd.exe".into() }
-                }
+                Maybe.None => match default_flavour() {
+                    Posix => "/bin/sh",
+                    Fish => "fish",
+                    Cmd => "cmd.exe",
+                    PowerShell => "pwsh",
+                },
             }
         }
     }
@@ -392,10 +393,10 @@ implement ShellContext {
     /// `-c` flag (or its platform equivalent) for spawning a shell command.
     public fn shell_command_flag(&self) -> Text {
         match self.flavour {
-            Posix      => "-c".into(),
-            Fish       => "-c".into(),
-            Cmd        => "/C".into(),
-            PowerShell => "-Command".into(),
+            Posix      => "-c",
+            Fish       => "-c",
+            Cmd        => "/C",
+            PowerShell => "-Command",
         }
     }
 }
