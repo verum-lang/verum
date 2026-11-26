@@ -26,7 +26,7 @@ module core.database.sqlite.native.subprograms.recursion;
 mount base.{Bool, Maybe};
 mount collections.List;
 mount core.database.sqlite.native.subprograms.program.{
-    SubProgramId, id_equal, id_value,
+    SubProgramId, id_equal,
 };
 
 // -----------------------------------------------------------------------------
@@ -87,15 +87,7 @@ implement RecursionGuard {
 
     /// Pop the topmost frame. Returns Maybe.Some(id) when a frame existed.
     public fn leave(&mut self) -> Maybe<SubProgramId> {
-        if self.stack.len() == 0 { return Maybe.None; }
-        let last = self.stack.len() - 1;
-        let id_v = id_value(&self.stack[last]);
-        let popped = SubProgramId { id: id_v };
-        let mut new_stack: List<SubProgramId> = List.new();
-        let mut i: Int = 0;
-        while i < last { new_stack.push(SubProgramId { id: id_value(&self.stack[i]) }); i = i + 1; }
-        self.stack = new_stack;
-        Maybe.Some(popped)
+        self.stack.pop()
     }
 
     fn contains(&self, sp_id: &SubProgramId) -> Bool {
