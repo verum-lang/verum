@@ -66,35 +66,9 @@
 )
 module core.verify.kernel_v0.rules.k_eta;
 
-mount core.prelude.{Heap, Maybe};
-mount super.super.core_term.{CoreTerm};
 mount super.super.context.{Context};
-mount super.super.judgment.{Derivation, DefinitionalEquality};
-
-/// Construct a T-Eta derivation from a base derivation and an
-/// η-equality witness.
-///
-
-/// The `equality_witness` is a `DefinitionalEquality.Eta` (or a
-/// composition via `Trans`) proving `original_type ≡_η new_type`.
-///
-
-/// **Side condition**: the witness's `function` field must NOT have
-/// `Var(0)` free. The elaborator checks this before constructing
-/// the witness; this function trusts the contract.
-public fn introduce_eta(
-    ctx: Context,
-    original: Derivation,
-    equality_witness: DefinitionalEquality,
-    new_type: CoreTerm,
-) -> Maybe<Derivation> {
-    return Maybe.Some(Derivation.EtaConv {
-        context: ctx,
-        original:         Heap.new(original),
-        equality_witness: Heap.new(equality_witness),
-        new_type:         new_type,
-    });
-}
+mount super.super.judgment.{Derivation};
+public mount super.super.judgment.{introduce_eta};
 
 /// **Soundness lemma — ADMITTED.**
 ///

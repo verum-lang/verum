@@ -1,0 +1,15 @@
+// @test: typecheck-fail
+// @level: L2
+// @tags: kernel, visibility
+// @expected-error: E202
+// @description: A name and a proposition cannot authorize a forward axiom.
+
+mount core.verify.kernel_v0.context.{empty};
+mount core.verify.kernel_v0.core_term.{type_universe};
+mount core.verify.kernel_v0.judgment.{ForwardAxiomWitness};
+
+fn forged() -> ForwardAxiomWitness {
+    ForwardAxiomWitness { context: empty(), name: "untrusted", proposition: type_universe() }
+}
+
+fn main() {}

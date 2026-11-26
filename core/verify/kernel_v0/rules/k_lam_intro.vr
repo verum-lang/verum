@@ -58,31 +58,9 @@
 )
 module core.verify.kernel_v0.rules.k_lam_intro;
 
-mount core.prelude.{Heap, Maybe};
-mount super.super.core_term.{CoreTerm};
 mount super.super.context.{Context};
-mount super.super.judgment.{Derivation, type_of};
-
-/// Construct a T-Lam-Intro derivation from the domain-well-typedness
-/// and body-typing premises.
-///
-
-/// The `result_type` parameter is the elaborator's record of `Pi(A, T)`
-/// where T is the body's inferred type. By convention, the elaborator
-/// constructs this via `make_pi(A, T)`.
-public fn introduce_lam(
-    ctx: Context,
-    domain_d: Derivation,
-    body_d: Derivation,
-    result_type: CoreTerm,
-) -> Maybe<Derivation> {
-    return Maybe.Some(Derivation.LamIntro {
-        context: ctx,
-        domain_well_typed: Heap.new(domain_d),
-        body_derivation:   Heap.new(body_d),
-        result_type:       result_type,
-    });
-}
+mount super.super.judgment.{Derivation};
+public mount super.super.judgment.{introduce_lam};
 
 /// **Soundness lemma — ADMITTED.**
 ///

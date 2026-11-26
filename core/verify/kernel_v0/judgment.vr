@@ -40,8 +40,11 @@
 )
 module core.verify.kernel_v0.judgment;
 
-mount core.prelude.{Heap, Maybe, Text};
-mount super.core_term.{CoreTerm};
+mount core.prelude.{Heap, List, Maybe, Text};
+mount super.core_term.{
+    CoreTerm, abstraction, application, application_type, is_strictly_positive, lifted,
+    product, same_term, substitute, universe, universe_level, variable,
+};
 mount super.context.{Context};
 
 /// **Judgment** — `Γ ⊢ t : T` formed by the 10 inference rules.
@@ -53,6 +56,14 @@ public type Judgment is {
     context:    Context,
     term:       CoreTerm,
     expected:   CoreTerm,
+};
+
+/// An axiom declaration accepted by the trusted roster in its original context.
+/// The source model has no public issuer for this authorization.
+public type ForwardAxiomWitness is {
+    context: Context,
+    name: Text,
+    proposition: CoreTerm,
 };
 
 /// **Derivation** — a constructive proof of a Judgment.
@@ -93,6 +104,7 @@ public type Derivation is
     | Univ {
         context: Context,
         level: Int{>= 0},
+        successor: Int{>= 0},
     }
     /// **T-FwAx**: `Γ ⊢ axiom_witness(A) : T` when `A` is on the
     /// trusted-axiom roster and `T` is a sort under Γ. The kernel's
@@ -108,8 +120,8 @@ public type Derivation is
     /// in strictly-positive position in the constructor types.
     | Pos {
         context: Context,
-        constructor_types: Heap<CoreTerm>,
-        result_type: CoreTerm,
+        inductive_index: Int{>= 0},
+        constructor_types: List<CoreTerm>,
     }
     /// **T-Pi-Form**: from `Γ ⊢ A : Univ(n)` and `Γ, A ⊢ B : Univ(m)`,
     /// derive `Γ ⊢ Pi(A, B) : Univ(max(n, m))`.
@@ -167,8 +179,8 @@ public type Derivation is
 /// definitionally equal under the kernel's notion of α + β + η.
 ///
 
-/// The four cases mirror the def_eq rules in
-/// `verum_kernel.proof_checker`:
+/// Each step records oriented syntactic equality. The issuing typing rule
+/// checks the source and target against its premise and requested result.
 public type DefinitionalEquality is
     /// **Refl**: every term is equal to itself.
     | Refl { term: CoreTerm }
@@ -191,74 +203,285 @@ public type DefinitionalEquality is
         second: Heap<DefinitionalEquality>,
     };
 
-/// **Project** — the term whose typing the derivation proves.
-///
-
-/// Each variant reconstructs the term from its sub-derivations:
-///  - `Var { index }` → `CoreTerm.Var { index }` (atomic).
-///  - `Univ { level }` → `CoreTerm.Universe { level }` (atomic).
-///  - `PiForm { domain_d, codomain_d }`
-///  → `Pi { domain: term_of(domain_d), body: term_of(codomain_d) }`.
-///  - `LamIntro { domain_well_typed, body_d }`
-///  → `Lam { domain: term_of(domain_well_typed), body: term_of(body_d) }`.
-///  - `AppElim { function_d, argument_d }`
-///  → `App { function: term_of(function_d), argument: term_of(argument_d) }`.
-///  - `BetaConv | EtaConv | Sub { original }` → `term_of(original)` —
-///  conversion / cumulativity rules change only the type, not the
-///  term being typed.
-///  - `FwAx { axiom_name, .. }` and `Pos { .. }` carry no concrete
-///  CoreTerm (axiom witnesses live outside the algebraic
-///  core-term language; positivity certifies a constructor SET,
-///  not a single term). These return `Var { index: 0 }` as a
-///  soundness-neutral placeholder — `soundness.vr`'s consumers
-///  either short-circuit on these kinds before calling `term_of`
-///  or use the placeholder for diagnostics only.
-public fn term_of(d: &Derivation) -> CoreTerm {
+/// Recover the object-language term of a typing derivation. Positivity
+/// and named axiom witnesses have no term in the five-constructor syntax.
+public fn term_of(d: &Derivation) -> Maybe<CoreTerm> {
     match d {
-        Derivation.Var { index, .. } => CoreTerm.Var { index: index },
-        Derivation.Univ { level, .. } => CoreTerm.Universe { level: level },
+        Derivation.Var { index, .. } => Maybe.Some(variable(index)),
+        Derivation.Univ { level, .. } => Maybe.Some(universe(level)),
         Derivation.PiForm { domain_derivation, codomain_derivation, .. } => {
-            CoreTerm.Pi {
-                domain: Heap.new(term_of(&*domain_derivation)),
-                body:   Heap.new(term_of(&*codomain_derivation)),
-            }
+            let a = term_of(domain_derivation.as_ref())?;
+            let b = term_of(codomain_derivation.as_ref())?;
+            Maybe.Some(product(a, b))
         },
         Derivation.LamIntro { domain_well_typed, body_derivation, .. } => {
-            CoreTerm.Lam {
-                domain: Heap.new(term_of(&*domain_well_typed)),
-                body:   Heap.new(term_of(&*body_derivation)),
-            }
+            let a = term_of(domain_well_typed.as_ref())?;
+            let b = term_of(body_derivation.as_ref())?;
+            Maybe.Some(abstraction(a, b))
         },
         Derivation.AppElim { function_derivation, argument_derivation, .. } => {
-            CoreTerm.App {
-                function: Heap.new(term_of(&*function_derivation)),
-                argument: Heap.new(term_of(&*argument_derivation)),
-            }
+            let f = term_of(function_derivation.as_ref())?;
+            let x = term_of(argument_derivation.as_ref())?;
+            Maybe.Some(application(f, x))
         },
-        Derivation.BetaConv { original, .. } => term_of(&*original),
-        Derivation.EtaConv  { original, .. } => term_of(&*original),
-        Derivation.Sub      { original, .. } => term_of(&*original),
-        // FwAx + Pos do not carry a concrete CoreTerm — see docstring.
-        // Returning Var{0} keeps the function total without claiming
-        // a fictitious term. Verifier consumers gate these kinds
-        // separately (FwAx via the trusted-axiom roster, Pos via
-        // the constructor-set positivity checker).
-        _ => CoreTerm.Var { index: 0 },
-    };
+        Derivation.BetaConv { original, .. } => term_of(original.as_ref()),
+        Derivation.EtaConv { original, .. } => term_of(original.as_ref()),
+        Derivation.Sub { original, .. } => term_of(original.as_ref()),
+        Derivation.FwAx { .. } => Maybe.None,
+        Derivation.Pos { .. } => Maybe.None,
+    }
 }
 
-/// **Project** — the type the derivation establishes for the term.
-public fn type_of(d: &Derivation) -> CoreTerm {
+/// Positivity certifies a declaration and does not assign an object-language type.
+public fn type_of(d: &Derivation) -> Maybe<CoreTerm> {
     match d {
-        Derivation.Var { result_type, .. } => result_type.clone(),
-        Derivation.Univ { level, .. } => CoreTerm.Universe { level: level + 1 },
-        Derivation.FwAx { result_type, .. } => result_type.clone(),
-        Derivation.Pos { result_type, .. } => result_type.clone(),
-        Derivation.PiForm { result_type, .. } => result_type.clone(),
-        Derivation.LamIntro { result_type, .. } => result_type.clone(),
-        Derivation.AppElim { result_type, .. } => result_type.clone(),
-        Derivation.BetaConv { new_type, .. } => new_type.clone(),
-        Derivation.EtaConv { new_type, .. } => new_type.clone(),
-        Derivation.Sub { new_type, .. } => new_type.clone(),
-    };
+        Derivation.Var { result_type, .. } => Maybe.Some(result_type.clone()),
+        Derivation.Univ { successor, .. } => Maybe.Some(universe(successor)),
+        Derivation.FwAx { result_type, .. } => Maybe.Some(result_type.clone()),
+        Derivation.Pos { .. } => Maybe.None,
+        Derivation.PiForm { result_type, .. } => Maybe.Some(result_type.clone()),
+        Derivation.LamIntro { result_type, .. } => Maybe.Some(result_type.clone()),
+        Derivation.AppElim { result_type, .. } => Maybe.Some(result_type.clone()),
+        Derivation.BetaConv { new_type, .. } => Maybe.Some(new_type.clone()),
+        Derivation.EtaConv { new_type, .. } => Maybe.Some(new_type.clone()),
+        Derivation.Sub { new_type, .. } => Maybe.Some(new_type.clone()),
+    }
+}
+
+fn in_context(d: &Derivation, ctx: &Context) -> Bool {
+    match d {
+        Derivation.Var { context, .. } => context.same(ctx),
+        Derivation.Univ { context, .. } => context.same(ctx),
+        Derivation.FwAx { context, .. } => context.same(ctx),
+        Derivation.Pos { context, .. } => context.same(ctx),
+        Derivation.PiForm { context, .. } => context.same(ctx),
+        Derivation.LamIntro { context, .. } => context.same(ctx),
+        Derivation.AppElim { context, .. } => context.same(ctx),
+        Derivation.BetaConv { context, .. } => context.same(ctx),
+        Derivation.EtaConv { context, .. } => context.same(ctx),
+        Derivation.Sub { context, .. } => context.same(ctx),
+    }
+}
+
+fn sort_level(d: &Derivation) -> Maybe<Int> {
+    let ty = type_of(d)?;
+    return universe_level(&ty);
+}
+
+/// Extend a well-formed context with the term of a type derivation in it.
+public fn extend_context(ctx: &Context, domain: &Derivation) -> Maybe<Context> {
+    if ctx.depth() == Int.MAX || !in_context(domain, ctx) || sort_level(domain).is_none() {
+        return Maybe.None;
+    }
+    let ty = term_of(domain)?;
+    return Maybe.Some(ctx.extend(ty));
+}
+
+public fn introduce_univ(ctx: Context, level: Int{>= 0}) -> Maybe<Derivation> {
+    if level < 0 { return Maybe.None; }
+    let successor = level.checked_add(1)?;
+    return Maybe.Some(Derivation.Univ { context: ctx, level, successor });
+}
+
+public fn introduce_var(ctx: Context, i: Int{>= 0}) -> Maybe<Derivation> {
+    let result_type = ctx.lookup_shifted(i)?;
+    return Maybe.Some(Derivation.Var { context: ctx, index: i, result_type });
+}
+
+/// The capability binds its proposition and context to the admitting authority.
+public fn introduce_fwax(ctx: Context, witness: ForwardAxiomWitness) -> Maybe<Derivation> {
+    if !ctx.same(&witness.context) {
+        return Maybe.None;
+    }
+    return Maybe.Some(Derivation.FwAx {
+        context: ctx,
+        axiom_name: witness.name,
+        result_type: witness.proposition,
+    });
+}
+
+public fn introduce_pi_form(
+    ctx: Context, domain_d: Derivation, codomain_d: Derivation, n: Int{>= 0}, m: Int{>= 0},
+) -> Maybe<Derivation> {
+    let nested = extend_context(&ctx, &domain_d)?;
+    let domain_level = sort_level(&domain_d)?;
+    let codomain_level = sort_level(&codomain_d)?;
+    if domain_level != n || codomain_level != m || !in_context(&codomain_d, &nested)
+            || term_of(&codomain_d).is_none() {
+        return Maybe.None;
+    }
+    let max_level = if n >= m { n } else { m };
+    return Maybe.Some(Derivation.PiForm {
+        context: ctx,
+        domain_derivation: Heap.new(domain_d),
+        codomain_derivation: Heap.new(codomain_d),
+        result_type: universe(max_level),
+    });
+}
+
+public fn introduce_lam(
+    ctx: Context, domain_d: Derivation, body_d: Derivation, result_type: CoreTerm,
+) -> Maybe<Derivation> {
+    let nested = extend_context(&ctx, &domain_d)?;
+    if !in_context(&body_d, &nested) || term_of(&body_d).is_none() {
+        return Maybe.None;
+    }
+    let a = term_of(&domain_d)?;
+    let b = type_of(&body_d)?;
+    let expected = product(a, b);
+    if !same_term(&result_type, &expected) {
+        return Maybe.None;
+    }
+    return Maybe.Some(Derivation.LamIntro {
+        context: ctx,
+        domain_well_typed: Heap.new(domain_d),
+        body_derivation: Heap.new(body_d),
+        result_type: expected,
+    });
+}
+
+public fn introduce_app(
+    ctx: Context, fn_d: Derivation, arg_d: Derivation, result_type: CoreTerm,
+) -> Maybe<Derivation> {
+    if !in_context(&fn_d, &ctx) || !in_context(&arg_d, &ctx) || term_of(&fn_d).is_none() {
+        return Maybe.None;
+    }
+    let fn_type = type_of(&fn_d)?;
+    let arg_type = type_of(&arg_d)?;
+    let arg = term_of(&arg_d)?;
+    let expected = application_type(&fn_type, &arg_type, &arg)?;
+    if !same_term(&result_type, &expected) { return Maybe.None; }
+    return Maybe.Some(Derivation.AppElim {
+        context: ctx,
+        function_derivation: Heap.new(fn_d),
+        argument_derivation: Heap.new(arg_d),
+        result_type: expected,
+    });
+}
+
+/// Widen the actual universe established by the premise.
+public fn introduce_sub(
+    ctx: Context, original: Derivation, from_level: Int{>= 0}, to_level: Int{>= 0},
+) -> Maybe<Derivation> {
+    let actual = sort_level(&original)?;
+    if !in_context(&original, &ctx) || actual != from_level || to_level < actual {
+        return Maybe.None;
+    }
+    return Maybe.Some(Derivation.Sub {
+        context: ctx,
+        original: Heap.new(original),
+        from_level,
+        to_level,
+        new_type: universe(to_level),
+    });
+}
+
+/// Equality witnesses describe directed syntactic steps. The conversion
+/// rules replay each step against the type actually carried by the premise.
+public fn reflexivity(term: CoreTerm) -> DefinitionalEquality {
+    DefinitionalEquality.Refl { term }
+}
+
+public fn beta_step(domain: CoreTerm, body: CoreTerm, argument: CoreTerm) -> Maybe<DefinitionalEquality> {
+    if substitute(&body, 0, &argument).is_none() { return Maybe.None; }
+    return Maybe.Some(DefinitionalEquality.Beta { domain, body, argument });
+}
+
+public fn eta_step(domain: CoreTerm, function: CoreTerm) -> Maybe<DefinitionalEquality> {
+    if lifted(&function, 0, 1).is_none() { return Maybe.None; }
+    return Maybe.Some(DefinitionalEquality.Eta { domain, function });
+}
+
+/// Compose two steps only after their common endpoint has been replayed.
+public fn then_step(
+    source: &CoreTerm, first: DefinitionalEquality, second: DefinitionalEquality,
+) -> Maybe<DefinitionalEquality> {
+    let middle = replay_step(&first, source, ConversionRule.Either)?;
+    let _end = replay_step(&second, &middle, ConversionRule.Either)?;
+    return Maybe.Some(DefinitionalEquality.Trans { first: Heap.new(first), second: Heap.new(second) });
+}
+
+type ConversionRule is Beta | Eta | Either;
+
+fn replay_step(step: &DefinitionalEquality, source: &CoreTerm, rule: ConversionRule) -> Maybe<CoreTerm> {
+    match step {
+        DefinitionalEquality.Refl { term: ref term } => {
+            if same_term(term, source) {
+                return Maybe.Some(term.clone());
+            }
+            return Maybe.None;
+        },
+        DefinitionalEquality.Beta { domain: ref domain, body: ref body, argument: ref argument } => {
+            if rule is ConversionRule.Eta { return Maybe.None; }
+            let callee = abstraction(domain.clone(), body.clone());
+            let redex = application(callee, argument.clone());
+            if !same_term(&redex, source) { return Maybe.None; }
+            return substitute(body, 0, argument);
+        },
+        DefinitionalEquality.Eta { domain: ref domain, function: ref function } => {
+            if rule is ConversionRule.Beta { return Maybe.None; }
+            // Lifting the outside function makes the fresh variable absent
+            // from it, including underneath its own binders.
+            let shifted = lifted(function, 0, 1)?;
+            let body = application(shifted, variable(0));
+            let expansion = abstraction(domain.clone(), body);
+            if !same_term(&expansion, source) { return Maybe.None; }
+            return Maybe.Some(function.clone());
+        },
+        DefinitionalEquality.Trans { first, second } => {
+            let middle = replay_step(first.as_ref(), source, rule)?;
+            return replay_step(second.as_ref(), &middle, rule);
+        },
+    }
+}
+
+fn conversion_matches(
+    ctx: &Context, original: &Derivation, witness: &DefinitionalEquality, new_type: &CoreTerm, rule: ConversionRule,
+) -> Bool {
+    if !in_context(original, ctx) { return false; }
+    match type_of(original) {
+        Maybe.Some(ty) => {
+            match replay_step(witness, &ty, rule) {
+                Maybe.Some(target) => same_term(&target, new_type),
+                Maybe.None => false,
+            }
+        },
+        Maybe.None => false,
+    }
+}
+
+public fn introduce_beta(
+    ctx: Context, original: Derivation, equality_witness: DefinitionalEquality, new_type: CoreTerm,
+) -> Maybe<Derivation> {
+    if !conversion_matches(&ctx, &original, &equality_witness, &new_type, ConversionRule.Beta) {
+        return Maybe.None;
+    }
+    return Maybe.Some(Derivation.BetaConv {
+        context: ctx, original: Heap.new(original), equality_witness: Heap.new(equality_witness), new_type,
+    });
+}
+
+public fn introduce_eta(
+    ctx: Context, original: Derivation, equality_witness: DefinitionalEquality, new_type: CoreTerm,
+) -> Maybe<Derivation> {
+    if !conversion_matches(&ctx, &original, &equality_witness, &new_type, ConversionRule.Eta) {
+        return Maybe.None;
+    }
+    return Maybe.Some(Derivation.EtaConv {
+        context: ctx, original: Heap.new(original), equality_witness: Heap.new(equality_witness), new_type,
+    });
+}
+
+public fn introduce_pos(
+    ctx: Context, i_name: Int{>= 0}, constructor_types: List<CoreTerm>,
+) -> Maybe<Derivation> {
+    if i_name < 0 { return Maybe.None; }
+    let mut i = 0;
+    while i < constructor_types.len() {
+        if !is_strictly_positive(&constructor_types[i], i_name) { return Maybe.None; }
+        i = i + 1;
+    }
+    return Maybe.Some(Derivation.Pos {
+        context: ctx, inductive_index: i_name, constructor_types,
+    });
 }

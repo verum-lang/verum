@@ -1,0 +1,15 @@
+// @test: typecheck-fail
+// @level: L2
+// @tags: kernel, visibility
+// @expected-error: E202
+// @description: A caller cannot turn an arbitrary result type into a variable derivation.
+
+mount core.verify.kernel_v0.context.{empty};
+mount core.verify.kernel_v0.core_term.{type_universe};
+mount core.verify.kernel_v0.judgment.{Derivation};
+
+fn forged() -> Derivation {
+    Derivation.Var { context: empty(), index: 0, result_type: type_universe() }
+}
+
+fn main() {}

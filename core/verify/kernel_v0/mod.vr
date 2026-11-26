@@ -50,11 +50,9 @@
 module core.verify.kernel_v0;
 
 mount .core_term.{CoreTerm, type_universe};
-// Context methods (extend / lookup / lookup_shifted / depth) live in the
-// `implement Context` block of `super.context`, accessed via UFCS once
-// `Context` is in scope.  No need to mount the methods separately.
+// The judgment owner validates the type derivation used to extend a context.
 mount .context.{Context, empty as context_empty};
-mount .judgment.{Judgment, Derivation, DefinitionalEquality, term_of, type_of};
+mount .judgment.{Judgment, Derivation, DefinitionalEquality, extend_context, term_of, type_of};
 
 // 10 kernel rules (4 proved + 6 admitted with IOUs).
 mount .rules.k_var.{introduce_var, k_var_sound};

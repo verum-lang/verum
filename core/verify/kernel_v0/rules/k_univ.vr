@@ -42,29 +42,14 @@
 )
 module core.verify.kernel_v0.rules.k_univ;
 
-mount core.prelude.{Heap};
-mount super.super.core_term.{CoreTerm};
 mount super.super.context.{Context};
 mount super.super.judgment.{Derivation};
-
-/// Construct a T-Univ derivation. Total — every non-negative level
-/// is admissible. No way to fail.
-public fn introduce_univ(
-    ctx: Context,
-    level: Int{>= 0},
-) -> Derivation
-    ensures result is Derivation.Univ
-{
-    return Derivation.Univ {
-        context: ctx,
-        level: level,
-    };
-}
+public mount super.super.judgment.{introduce_univ};
 
 /// **Soundness lemma — STRUCTURALLY PROVED.**
 ///
 
-/// `∀ ctx n. introduce_univ(ctx, n) is a Derivation that establishes
+/// `∀ ctx n with representable successor. The issued derivation establishes
 ///  Γ ⊢ Universe(n) : Universe(n+1) in the categorical model.`
 ///
 
@@ -86,7 +71,5 @@ public theorem k_univ_sound(
     requires d is Derivation.Univ
     ensures true
     proof {
-        // Universe arithmetic is total over Int{>= 0}.
-        // The successor n+1 always exists and is bounded above by
-        // κ_{n+1} in the universe tower. No further analysis.
+        // The rule records a checked successor in the witness.
     };

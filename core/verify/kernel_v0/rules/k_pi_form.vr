@@ -64,35 +64,9 @@
 )
 module core.verify.kernel_v0.rules.k_pi_form;
 
-mount core.prelude.{Heap, Maybe};
-mount super.super.core_term.{CoreTerm};
 mount super.super.context.{Context};
-// `extend` is now a method on Context (`ctx.extend(ty)`), accessed via UFCS.
-mount super.super.judgment.{Derivation, type_of};
-
-/// Construct a T-Pi-Form derivation from two sub-derivations.
-///
-
-/// Returns `Maybe.Maybe.Some(d)` when both premises type as universes (the
-/// elaborator presents the universe levels n, m). Returns
-/// `Maybe.Maybe.None` when the premises don't establish universe membership.
-public fn introduce_pi_form(
-    ctx: Context,
-    domain_d: Derivation,
-    codomain_d: Derivation,
-    n: Int{>= 0},
-    m: Int{>= 0},
-) -> Maybe<Derivation>
-    requires domain_d is _ && codomain_d is _
-{
-    let max_level = if n >= m { n } else { m };
-    return Maybe.Some(Derivation.PiForm {
-        context: ctx,
-        domain_derivation:   Heap.new(domain_d),
-        codomain_derivation: Heap.new(codomain_d),
-        result_type:         CoreTerm.Universe { level: max_level },
-    });
-}
+mount super.super.judgment.{Derivation};
+public mount super.super.judgment.{introduce_pi_form};
 
 /// **Soundness lemma — ADMITTED.**
 ///

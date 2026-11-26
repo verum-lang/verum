@@ -51,7 +51,7 @@
 )
 module core.verify.kernel_v0.core_term;
 
-mount core.prelude.{Heap};
+mount core.prelude.{Clone, Heap, Maybe};
 
 /// **Minimal CoC term** — the bootstrap kernel's inductive type.
 ///
@@ -92,11 +92,11 @@ public type CoreTerm is
     | Universe { level: Int{>= 0} }
     | Pi {
         domain: Heap<CoreTerm>,
-        body:   Heap<CoreTerm>,
+        body: Heap<CoreTerm>,
     }
     | Lam {
         domain: Heap<CoreTerm>,
-        body:   Heap<CoreTerm>,
+        body: Heap<CoreTerm>,
     }
     | App {
         function: Heap<CoreTerm>,
@@ -108,24 +108,213 @@ public type CoreTerm is
 /// the term inhabits Universe(0); higher levels are reserved for
 /// universe polymorphism in extension layers.
 public fn type_universe() -> CoreTerm {
-    return CoreTerm.Universe { level: 0 };
+    return universe(0);
 }
 
-/// **Term-level invariants** — every CoreTerm value the bootstrap
-/// kernel reasons about must satisfy these by construction. Phase 3
-/// regenerates the Rust-side checker from this module, so these
-/// invariants become the load-bearing well-formedness gate.
-///
+/// Constructors build object-language syntax. Typing is checked by the rules.
+public fn variable(index: Int{>= 0}) -> CoreTerm {
+    CoreTerm.Var { index }
+}
 
-/// (1) Indices are bounded by the surrounding context's depth — the
-///  elaborator rejects free-variable terms by construction.
-/// (2) Universe levels are non-negative — the refinement type
-///  `Int{>= 0}` enforces it at construction.
-/// (3) Pi and Lam binder structure is correctly nested — the parser
-///  emits balanced bind/unbind so the body's de Bruijn frame is
-///  consistent with the surrounding context.
-///
+public fn universe(level: Int{>= 0}) -> CoreTerm {
+    CoreTerm.Universe { level }
+}
 
-/// These invariants are NOT proved here — they are documented for
-/// completeness. The soundness theorem composes per-rule lemmas
-/// that maintain them inductively.
+public fn product(domain: CoreTerm, body: CoreTerm) -> CoreTerm {
+    CoreTerm.Pi { domain: Heap.new(domain), body: Heap.new(body) }
+}
+
+public fn abstraction(domain: CoreTerm, body: CoreTerm) -> CoreTerm {
+    CoreTerm.Lam { domain: Heap.new(domain), body: Heap.new(body) }
+}
+
+public fn application(function: CoreTerm, argument: CoreTerm) -> CoreTerm {
+    CoreTerm.App { function: Heap.new(function), argument: Heap.new(argument) }
+}
+
+public(in core.verify.kernel_v0) fn universe_level(term: &CoreTerm) -> Maybe<Int> {
+    match term {
+        CoreTerm.Universe { level } => Maybe.Some(level),
+        _ => Maybe.None,
+    }
+}
+
+/// Instantiate a product codomain at an argument of its declared domain.
+public(in core.verify.kernel_v0) fn application_type(
+    function_type: &CoreTerm, argument_type: &CoreTerm, argument: &CoreTerm,
+) -> Maybe<CoreTerm> {
+    match function_type {
+        CoreTerm.Pi { domain, body } => {
+            if !same_term(domain.as_ref(), argument_type) { return Maybe.None; }
+            return substitute(body.as_ref(), 0, argument);
+        },
+        _ => Maybe.None,
+    }
+}
+
+/// Syntactic identity of de Bruijn terms.
+public fn same_term(term: &CoreTerm, other: &CoreTerm) -> Bool {
+    match (term, other) {
+        (CoreTerm.Var { index }, CoreTerm.Var { index: right }) => index == right,
+        (CoreTerm.Universe { level }, CoreTerm.Universe { level: right }) => level == right,
+        (CoreTerm.Pi { domain, body }, CoreTerm.Pi { domain: other_domain, body: other_body }) => {
+            same_term(domain.as_ref(), other_domain.as_ref())
+                && same_term(body.as_ref(), other_body.as_ref())
+        },
+        (CoreTerm.Lam { domain, body }, CoreTerm.Lam { domain: other_domain, body: other_body }) => {
+            same_term(domain.as_ref(), other_domain.as_ref())
+                && same_term(body.as_ref(), other_body.as_ref())
+        },
+        (CoreTerm.App { function, argument }, CoreTerm.App { function: other_function, argument: other_argument }) => {
+            same_term(function.as_ref(), other_function.as_ref())
+                && same_term(argument.as_ref(), other_argument.as_ref())
+        },
+        _ => false,
+    }
+}
+
+/// Lift free indices at or above the cutoff when entering binders.
+/// A transformation that would overflow the index representation fails.
+public(in core.verify.kernel_v0) fn lifted(
+    term: &CoreTerm, cutoff: Int, amount: Int,
+) -> Maybe<CoreTerm> {
+    if cutoff < 0 || amount < 0 { return Maybe.None; }
+    match term {
+        CoreTerm.Var { index } => {
+            if index < cutoff { return Maybe.Some(variable(index)); }
+            let shifted = index.checked_add(amount)?;
+            return Maybe.Some(variable(shifted));
+        },
+        CoreTerm.Universe { level } => Maybe.Some(universe(level)),
+        CoreTerm.Pi { domain, body } => {
+            let next = cutoff.checked_add(1)?;
+            let a = lifted(domain.as_ref(), cutoff, amount)?;
+            let b = lifted(body.as_ref(), next, amount)?;
+            Maybe.Some(product(a, b))
+        },
+        CoreTerm.Lam { domain, body } => {
+            let next = cutoff.checked_add(1)?;
+            let a = lifted(domain.as_ref(), cutoff, amount)?;
+            let b = lifted(body.as_ref(), next, amount)?;
+            Maybe.Some(abstraction(a, b))
+        },
+        CoreTerm.App { function, argument } => {
+            let f = lifted(function.as_ref(), cutoff, amount)?;
+            let x = lifted(argument.as_ref(), cutoff, amount)?;
+            Maybe.Some(application(f, x))
+        },
+    }
+}
+
+/// Instantiate a binder. Under each additional binder the replacement
+/// is lifted once and indices outside the removed binder move down.
+public fn substitute(term: &CoreTerm, index: Int{>= 0}, replacement: &CoreTerm) -> Maybe<CoreTerm> {
+    if index < 0 { return Maybe.None; }
+    return substitute_under(term, index, replacement, 0);
+}
+
+fn substitute_under(term: &CoreTerm, index: Int, replacement: &CoreTerm, depth: Int) -> Maybe<CoreTerm> {
+    match term {
+        CoreTerm.Var { index: slot } => {
+            if slot >= depth && slot - depth == index {
+                return lifted(replacement, 0, depth);
+            }
+            if slot >= depth && slot - depth > index {
+                return Maybe.Some(variable(slot - 1));
+            }
+            return Maybe.Some(variable(slot));
+        },
+        CoreTerm.Universe { level } => Maybe.Some(universe(level)),
+        CoreTerm.Pi { domain, body } => {
+            let next = depth.checked_add(1)?;
+            let a = substitute_under(domain.as_ref(), index, replacement, depth)?;
+            let b = substitute_under(body.as_ref(), index, replacement, next)?;
+            Maybe.Some(product(a, b))
+        },
+        CoreTerm.Lam { domain, body } => {
+            let next = depth.checked_add(1)?;
+            let a = substitute_under(domain.as_ref(), index, replacement, depth)?;
+            let b = substitute_under(body.as_ref(), index, replacement, next)?;
+            Maybe.Some(abstraction(a, b))
+        },
+        CoreTerm.App { function, argument } => {
+            let f = substitute_under(function.as_ref(), index, replacement, depth)?;
+            let x = substitute_under(argument.as_ref(), index, replacement, depth)?;
+            Maybe.Some(application(f, x))
+        },
+    }
+}
+
+implement Clone for CoreTerm {
+    fn clone(&self) -> CoreTerm {
+        match self {
+            CoreTerm.Var { index } => variable(index),
+            CoreTerm.Universe { level } => universe(level),
+            CoreTerm.Pi { domain, body } => product(domain.as_ref().clone(), body.as_ref().clone()),
+            CoreTerm.Lam { domain, body } => abstraction(domain.as_ref().clone(), body.as_ref().clone()),
+            CoreTerm.App { function, argument } => application(function.as_ref().clone(), argument.as_ref().clone()),
+        }
+    }
+}
+
+/// Check strict positivity of the distinguished free variable in a constructor type.
+public fn is_strictly_positive(
+    ty: &CoreTerm,
+    i_name: Int{>= 0},
+) -> Bool {
+    match ty {
+        CoreTerm.Var { .. } => {
+            // Leaf: positivity holds trivially since this is just a
+            // de Bruijn reference, not a recursive use of I.
+            return true;
+        },
+        CoreTerm.Universe { .. } => {
+            return true;
+        },
+        CoreTerm.Pi { domain, body } => {
+            // Domain is contravariant: i_name must NOT appear in it.
+            // Body is covariant: recurse.
+            let domain_clean = !occurs_in(domain.as_ref(), i_name);
+            let body_ok = i_name < Int.MAX && is_strictly_positive(body.as_ref(), i_name + 1);
+            return domain_clean && body_ok;
+        },
+        CoreTerm.Lam { .. } => {
+            // Constructor types must be Π-chains. λ-binders inside a
+            // constructor type signal a malformed declaration.
+            return false;
+        },
+        CoreTerm.App { function, argument } => {
+            // Both halves are positive iff i_name doesn't occur in
+            // either contravariantly. Conservative: forbid recursive
+            // use under any application head other than the trivial
+            // `... → I` shape (handled by the surrounding Pi recursion).
+            return !occurs_in(function.as_ref(), i_name)
+                && !occurs_in(argument.as_ref(), i_name);
+        },
+    };
+}
+
+/// **Free occurrence check** — does the de Bruijn index `target` occur
+/// freely anywhere in `term`? Used by the positivity check to rule
+/// out contravariant occurrences.
+public fn occurs_in(term: &CoreTerm, target: Int{>= 0}) -> Bool {
+    // Tail-expression match — the result IS the function's value.
+    // No trailing `;` so Verum's type-checker treats the match
+    // as Bool-typed instead of Unit-typed.
+    match term {
+        CoreTerm.Var { index } => index == target,
+        CoreTerm.Universe { .. } => false,
+        CoreTerm.Pi { domain, body } => {
+            occurs_in(domain.as_ref(), target)
+                || (target < Int.MAX && occurs_in(body.as_ref(), target + 1))
+        },
+        CoreTerm.Lam { domain, body } => {
+            occurs_in(domain.as_ref(), target)
+                || (target < Int.MAX && occurs_in(body.as_ref(), target + 1))
+        },
+        CoreTerm.App { function, argument } => {
+            occurs_in(function.as_ref(), target)
+                || occurs_in(argument.as_ref(), target)
+        },
+    }
+}

@@ -1,0 +1,100 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L2
+// @tags: kernel, de-bruijn, visibility
+// @description: Typing rules check their premise contexts, sorts, substitutions and conversion endpoints.
+// @expected-stdout: checked kernel rules
+// @expected-exit: 0
+
+mount core.collections.list.{List};
+mount core.verify.kernel_v0.context.{Context, empty};
+mount core.verify.kernel_v0.core_term.{CoreTerm, product, same_term, substitute, universe, variable};
+mount core.verify.kernel_v0.judgment.{Derivation, beta_step, eta_step, extend_context, reflexivity, term_of, then_step, type_of};
+mount core.verify.kernel_v0.rules.k_app_elim.{introduce_app};
+mount core.verify.kernel_v0.rules.k_beta.{introduce_beta};
+mount core.verify.kernel_v0.rules.k_eta.{introduce_eta};
+mount core.verify.kernel_v0.rules.k_lam_intro.{introduce_lam};
+mount core.verify.kernel_v0.rules.k_pos.{introduce_pos};
+mount core.verify.kernel_v0.rules.k_pi_form.{introduce_pi_form};
+mount core.verify.kernel_v0.rules.k_sub.{introduce_sub};
+mount core.verify.kernel_v0.rules.k_univ.{introduce_univ};
+mount core.verify.kernel_v0.rules.k_var.{introduce_var};
+
+fn sort(level: Int) -> Derivation { introduce_univ(empty(), level).unwrap() }
+
+fn with_type(level: Int) -> Context {
+    extend_context(&empty(), &sort(level)).unwrap()
+}
+
+fn identity() -> Derivation {
+    let a = introduce_var(with_type(1), 0).unwrap();
+    let nested = extend_context(&with_type(1), &a).unwrap();
+    let x = introduce_var(nested, 0).unwrap();
+    assert(same_term(&type_of(&x).unwrap(), &variable(1)));
+    let inner = introduce_lam(with_type(1), a, x, product(variable(0), variable(1))).unwrap();
+    introduce_lam(empty(), sort(1), inner, product(universe(1), product(variable(0), variable(1)))).unwrap()
+}
+
+fn beta_context() -> Context {
+    let body = introduce_var(with_type(1), 0).unwrap();
+    let id = introduce_lam(empty(), sort(1), body, product(universe(1), universe(1))).unwrap();
+    let redex = introduce_app(empty(), id, sort(0), universe(1)).unwrap();
+    extend_context(&empty(), &redex).unwrap()
+}
+
+fn main() {
+    assert(introduce_univ(empty(), Int.MAX).is_none());
+    let last = introduce_univ(empty(), Int.MAX - 1).unwrap();
+    assert(same_term(&type_of(&last).unwrap(), &universe(Int.MAX)));
+    let under_binder = product(universe(0), variable(1));
+    assert(substitute(&under_binder, 0, &variable(Int.MAX)).is_none());
+    assert(beta_step(universe(0), under_binder.clone(), variable(Int.MAX)).is_none());
+    assert(eta_step(universe(0), variable(Int.MAX)).is_none());
+    let last_index = substitute(&under_binder, 0, &variable(Int.MAX - 1)).unwrap();
+    assert(same_term(&last_index, &product(universe(0), variable(Int.MAX))));
+    assert(introduce_var(empty(), 0).is_none());
+    assert(same_term(&term_of(&sort(0)).unwrap(), &universe(0)));
+    assert(same_term(&type_of(&sort(0)).unwrap(), &universe(1)));
+
+    let codomain = introduce_var(with_type(1), 0).unwrap();
+    let pi = introduce_pi_form(empty(), sort(1), codomain, 2, 1).unwrap();
+    assert(same_term(&type_of(&pi).unwrap(), &universe(2)));
+    let wrong_binder = introduce_var(with_type(2), 0).unwrap();
+    assert(introduce_pi_form(empty(), sort(1), wrong_binder, 2, 2).is_none());
+    assert(introduce_pi_form(empty(), sort(1), sort(1), 2, 2).is_none());
+
+    let applied = introduce_app(empty(), identity(), sort(0), product(universe(0), universe(0))).unwrap();
+    assert(same_term(&type_of(&applied).unwrap(), &product(universe(0), universe(0))));
+    assert(introduce_app(empty(), identity(), sort(0), universe(0)).is_none());
+    assert(introduce_app(empty(), identity(), sort(1), product(universe(1), universe(1))).is_none());
+
+    assert(introduce_sub(empty(), sort(0), 1, 2).is_some());
+    assert(introduce_sub(empty(), sort(0), 0, 2).is_none());
+    assert(introduce_sub(empty(), sort(0), 1, 0).is_none());
+    assert(introduce_sub(with_type(0), sort(0), 1, 2).is_none());
+
+    assert(introduce_beta(empty(), sort(0), reflexivity(universe(1)), universe(1)).is_some());
+    assert(introduce_beta(empty(), sort(0), reflexivity(universe(0)), universe(0)).is_none());
+    assert(introduce_eta(empty(), sort(0), reflexivity(universe(1)), universe(0)).is_none());
+    assert(then_step(&universe(1), reflexivity(universe(1)), reflexivity(universe(0))).is_none());
+    let joined = then_step(&universe(1), reflexivity(universe(1)), reflexivity(universe(1))).unwrap();
+    assert(introduce_eta(empty(), sort(0), joined, universe(1)).is_some());
+    let wrong_kind = beta_step(universe(0), variable(0), universe(0)).unwrap();
+    assert(introduce_eta(empty(), sort(0), wrong_kind, universe(0)).is_none());
+    let original = introduce_var(beta_context(), 0).unwrap();
+    let step = beta_step(universe(1), variable(0), universe(0)).unwrap();
+    let reduced = introduce_beta(beta_context(), original, step, universe(0)).unwrap();
+    assert(same_term(&type_of(&reduced).unwrap(), &universe(0)));
+    assert(same_term(&term_of(&reduced).unwrap(), &variable(0)));
+
+    let mut constructors: List<CoreTerm> = List.new();
+    constructors.push(variable(0));
+    let positive = introduce_pos(empty(), 0, constructors).unwrap();
+    assert(type_of(&positive).is_none());
+    assert(term_of(&positive).is_none());
+    assert(extend_context(&empty(), &positive).is_none());
+    let mut negative: List<CoreTerm> = List.new();
+    negative.push(product(variable(0), universe(0)));
+    assert(introduce_pos(empty(), 0, negative).is_none());
+    print("checked kernel rules");
+}

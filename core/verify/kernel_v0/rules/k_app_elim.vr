@@ -61,30 +61,9 @@
 )
 module core.verify.kernel_v0.rules.k_app_elim;
 
-mount core.prelude.{Heap, Maybe};
-mount super.super.core_term.{CoreTerm};
 mount super.super.context.{Context};
-mount super.super.judgment.{Derivation, type_of};
-
-/// Construct a T-App-Elim derivation from a function and argument.
-///
-
-/// The `result_type` parameter is the elaborator's record of `B[x/0]`,
-/// computed by performing the substitution on the codomain extracted
-/// from f's type `Pi(A, B)`.
-public fn introduce_app(
-    ctx: Context,
-    fn_d: Derivation,
-    arg_d: Derivation,
-    result_type: CoreTerm,
-) -> Maybe<Derivation> {
-    return Maybe.Some(Derivation.AppElim {
-        context: ctx,
-        function_derivation: Heap.new(fn_d),
-        argument_derivation: Heap.new(arg_d),
-        result_type:         result_type,
-    });
-}
+mount super.super.judgment.{Derivation};
+public mount super.super.judgment.{introduce_app};
 
 /// **Soundness lemma — ADMITTED.**
 ///

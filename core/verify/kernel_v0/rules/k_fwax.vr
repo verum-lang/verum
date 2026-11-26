@@ -71,50 +71,9 @@
 )
 module core.verify.kernel_v0.rules.k_fwax;
 
-mount core.prelude.{Heap, Maybe, Text};
-mount super.super.core_term.{CoreTerm};
 mount super.super.context.{Context};
 mount super.super.judgment.{Derivation};
-
-/// **Forward-axiom witness** — the kernel's record that an axiom name
-/// `A` was presented with declared type `T`.
-///
-
-/// The witness is propositionally indistinguishable from a proof: it
-/// inhabits T by *trust*, not by construction. The audit bundle's
-/// `--signatures` gate enumerates every such witness so reviewers can
-/// see the trust extension in full.
-public type ForwardAxiomWitness is {
-    /// Axiom name as declared by the user (e.g., "ZFC.foundation").
-    name: Text,
-    /// The proposition the axiom asserts. Must be a sort under Γ.
-    proposition: CoreTerm,
-};
-
-/// Construct a T-FwAx derivation.
-///
-
-/// **Total** — the kernel does not evaluate or type-check the
-/// proposition itself; it only records the trust delegation. The
-/// elaborator is responsible for verifying that `proposition` is a
-/// sort in `ctx` BEFORE calling this constructor.
-///
-
-/// **Soundness gate**: by construction, `result_type` equals
-/// `witness.proposition`. No way to fabricate a mismatch — the only
-/// way to introduce a forward axiom is via this function.
-public fn introduce_fwax(
-    ctx: Context,
-    witness: ForwardAxiomWitness,
-) -> Derivation
-    ensures result is Derivation.FwAx
-{
-    return Derivation.FwAx {
-        context: ctx,
-        axiom_name: witness.name,
-        result_type: witness.proposition,
-    };
-}
+public mount super.super.judgment.{ForwardAxiomWitness, introduce_fwax};
 
 /// **Soundness lemma — STRUCTURALLY PROVED.**
 ///

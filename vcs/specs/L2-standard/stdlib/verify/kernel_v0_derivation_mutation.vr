@@ -1,0 +1,18 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L2
+// @tags: kernel, visibility
+// @expected-error: E202
+// @description: A consumer cannot change the inferred type carried by a derivation.
+
+mount core.verify.kernel_v0.judgment.{Derivation};
+mount core.verify.kernel_v0.core_term.{type_universe};
+
+fn overwrite(d: &mut Derivation) {
+    match d {
+        Derivation.Var { result_type: ref mut ty, .. } => { *ty = type_universe(); },
+        _ => {},
+    }
+}
+
+fn main() {}

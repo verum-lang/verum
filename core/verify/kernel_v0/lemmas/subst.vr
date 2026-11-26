@@ -61,6 +61,7 @@ module core.verify.kernel_v0.lemmas.subst;
 
 mount core.prelude.{Heap};
 mount super.super.core_term.{CoreTerm};
+public mount super.super.core_term.{substitute};
 mount super.super.context.{Context};
 
 /// **Substitution preserves typing.**
@@ -92,7 +93,8 @@ public theorem subst_preserves_typing(
     requires typed_in_extended(ctx, a, b)
           && typed_at_universe(ctx, b, m)
           && typed_in(ctx, x, a)
-    ensures  typed_at_universe(ctx, &substitute(b, 0, x), m)
+    ensures  substitute(b, 0, x).is_some()
+          && typed_at_universe(ctx, &substitute(b, 0, x).unwrap(), m)
     proof {
         apply mathlib4.lambda_pi.subst_preserves_typing;
     };
@@ -111,8 +113,4 @@ public fn typed_in_extended(ctx: &Context, binder: &CoreTerm, term: &CoreTerm) -
 
 public fn typed_at_universe(ctx: &Context, term: &CoreTerm, level: Int{>= 0}) -> Bool {
     return false;  // placeholder
-}
-
-public fn substitute(term: &CoreTerm, idx: Int{>= 0}, replacement: &CoreTerm) -> CoreTerm {
-    return term.clone();  // placeholder — real implementation in core_term_ops.
 }

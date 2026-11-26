@@ -69,30 +69,9 @@
 )
 module core.verify.kernel_v0.rules.k_beta;
 
-mount core.prelude.{Heap, Maybe};
-mount super.super.core_term.{CoreTerm};
 mount super.super.context.{Context};
-mount super.super.judgment.{Derivation, DefinitionalEquality};
-
-/// Construct a T-Beta derivation from a base derivation and a
-/// β-equality witness.
-///
-
-/// The `equality_witness` is a `DefinitionalEquality.Beta` (or a
-/// composition via `Trans`) proving `original_type ≡_β new_type`.
-public fn introduce_beta(
-    ctx: Context,
-    original: Derivation,
-    equality_witness: DefinitionalEquality,
-    new_type: CoreTerm,
-) -> Maybe<Derivation> {
-    return Maybe.Some(Derivation.BetaConv {
-        context: ctx,
-        original:         Heap.new(original),
-        equality_witness: Heap.new(equality_witness),
-        new_type:         new_type,
-    });
-}
+mount super.super.judgment.{Derivation};
+public mount super.super.judgment.{introduce_beta};
 
 /// **Soundness lemma — ADMITTED.**
 ///

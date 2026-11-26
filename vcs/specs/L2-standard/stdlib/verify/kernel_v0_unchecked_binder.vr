@@ -1,0 +1,15 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L2
+// @tags: kernel, visibility
+// @expected-error: E400 "no method named `extend`"
+// @description: Context extension requires evidence that the binder is a type.
+
+mount core.verify.kernel_v0.context.{Context, empty};
+mount core.verify.kernel_v0.core_term.{variable};
+
+fn inject() -> Context {
+    empty().extend(variable(9))
+}
+
+fn main() {}

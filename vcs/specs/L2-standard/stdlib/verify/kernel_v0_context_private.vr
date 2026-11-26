@@ -1,0 +1,14 @@
+// @test: typecheck-fail
+// @level: L2
+// @tags: kernel, visibility
+// @expected-error: E202
+// @description: A caller cannot overwrite the binders of a checked context.
+
+mount core.verify.kernel_v0.context.{Context};
+mount core.collections.list.{List};
+
+fn erase(ctx: &mut Context) {
+    ctx.types = List.new();
+}
+
+fn main() {}

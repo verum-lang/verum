@@ -7,7 +7,7 @@
 //
 
 //  ┌──────────────────────────────────────────┐
-//  │ Γ.lookup(i) = T │
+//  │ Γ.lookup_shifted(i) = T │
 //  │ ───────────────────── T-Var │
 //  │ Γ ⊢ Var(i) : T │
 //  └──────────────────────────────────────────┘
@@ -17,7 +17,7 @@
 //
 
 //  Whenever the elaborator constructs a `Derivation.Var { context,
-//  index, result_type }` with `context.lookup(index) = result_type`,
+//  index, result_type }` with `context.lookup_shifted(index) = result_type`,
 //  the term `Var(index)` denotes the value at the corresponding
 //  position in the categorical model's environment.
 //
@@ -49,47 +49,14 @@
 )
 module core.verify.kernel_v0.rules.k_var;
 
-mount core.prelude.{Heap, Maybe};
-mount super.super.core_term.{CoreTerm};
 mount super.super.context.{Context};
 mount super.super.judgment.{Derivation};
-
-/// Construct a T-Var derivation when the context lookup succeeds.
-///
-
-/// Returns `Maybe.Maybe.Some(derivation)` when `Γ.lookup(i)` is `Maybe.Some(T)`,
-/// `Maybe.Maybe.None` when the index is out of bounds (free variable —
-/// the elaborator rejects).
-///
-
-/// **Soundness gate**: by construction, `result_type` equals
-/// `Γ.lookup(i)`'s value. No way to construct a T-Var derivation
-/// with a fabricated type — the only constructor is this function.
-public fn introduce_var(
-    ctx: Context,
-    i: Int{>= 0},
-) -> Maybe<Derivation>
-    requires i < ctx.types.len() || i >= ctx.types.len()
-    ensures (result is Some) == (i < ctx.types.len())
-{
-    match ctx.lookup(i) {
-        Maybe.Some(t) => {
-            return Maybe.Some(Derivation.Var {
-                context: ctx,
-                index: i,
-                result_type: t,
-            });
-        },
-        Maybe.None => {
-            return Maybe.None;
-        },
-    };
-}
+public mount super.super.judgment.{introduce_var};
 
 /// **Soundness lemma — STRUCTURALLY PROVED.**
 ///
 
-/// `∀ ctx i T. ctx.lookup(i) = Maybe.Some(T)
+/// `∀ ctx i T. ctx.lookup_shifted(i) = Maybe.Some(T)
 ///  → introduce_var(ctx, i) = Maybe.Some(d)
 ///  → d denotes a value of type T in the categorical model.`
 ///
