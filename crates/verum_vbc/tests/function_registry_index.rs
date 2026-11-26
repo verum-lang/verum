@@ -35,6 +35,13 @@ fn indexed_constructor_search_tracks_owner_arity_and_ambiguous_aliases() {
     ctx.functions.get_mut("second.Done").unwrap().param_count = 1;
     assert_eq!(ctx.find_variant_parent_type_by_args("Done", 1), None);
     assert_eq!(ctx.find_variant_by_suffix_and_args("Done", 1), None);
+    assert!(ctx.find_variant_with_suffix(".Done", 1).is_none());
+    for key in ["second.Done", "first.Done"] {
+        ctx.functions.get_mut(key).unwrap().variant_payload_types = Some(vec!["Int".into()]);
+    }
+    assert_eq!(ctx.find_variant_with_suffix(".Done", 1).unwrap().id, FunctionId(10));
+    ctx.functions.get_mut("first.Done").unwrap().variant_payload_types = None;
+    assert_eq!(ctx.find_variant_with_suffix(".Done", 1).unwrap().id, FunctionId(11));
     ctx.functions.remove("second.Done");
     assert_eq!(ctx.find_variant_parent_type("Done").as_deref(), Some("First"));
 }

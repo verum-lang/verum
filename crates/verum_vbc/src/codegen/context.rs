@@ -4755,19 +4755,12 @@ impl CodegenContext {
         // layout across bakes. Deterministic rule: lexicographically-
         // smallest matching key wins (mirrors the min-by-key scans at
         // resolve_function_key stage 4 and the field-index scans).
-        let mut best: Option<(&String, &FunctionInfo)> = None;
-        for (name, info) in &self.functions {
-            // Only consider variant constructors (must have variant_tag set)
-            if info.variant_tag.is_some()
-                && name.ends_with(suffix)
+        self.functions.entries_ending_in(suffix)
+            .filter(|(_, info)| info.variant_tag.is_some()
                 && info.param_count == expected_param_count
-                && info.variant_payload_types.is_some()
-                && best.map(|(b, _)| name < b).unwrap_or(true)
-            {
-                best = Some((name, info));
-            }
-        }
-        best.map(|(_, info)| info)
+                && info.variant_payload_types.is_some())
+            .min_by(|(a, _), (b, _)| a.cmp(b))
+            .map(|(_, info)| info)
     }
 
     // ==================== Closure Compilation Context ====================
