@@ -18,7 +18,7 @@ module core.database.sqlite.native.subprograms.registry;
 mount base.{Text, Maybe, Result, Ok, Err, Bool};
 mount collections.List;
 mount core.database.sqlite.native.subprograms.program.{
-    SubProgram, SubProgramId, source_event_name,
+    SubProgram, SubProgramId, assign_id, id_equal,
 };
 
 // -----------------------------------------------------------------------------
@@ -109,17 +109,17 @@ implement SubProgramRegistry {
         }
         let id = self.next_id;
         self.next_id = id + 1;
-        sp.id = SubProgramId { id: id };
+        let assigned = assign_id(&mut sp, id);
         self.programs.push(sp);
-        Result.Ok(SubProgramId { id: id })
+        Result.Ok(assigned)
     }
 
     /// Look up a sub-program by id.
     public fn lookup(&self, id: &SubProgramId) -> Maybe<SubProgram> {
         let mut i: Int = 0;
         while i < self.programs.len() {
-            if self.programs[i].id.id == id.id {
-                return Maybe.Some(clone_sp(&self.programs[i]));
+            if id_equal(&self.programs[i].id, id) {
+                return Maybe.Some(self.programs[i].clone());
             }
             i = i + 1;
         }
@@ -131,7 +131,7 @@ implement SubProgramRegistry {
         let mut i: Int = 0;
         while i < self.programs.len() {
             if self.programs[i].source_name == name {
-                return Maybe.Some(clone_sp(&self.programs[i]));
+                return Maybe.Some(self.programs[i].clone());
             }
             i = i + 1;
         }
@@ -148,7 +148,7 @@ implement SubProgramRegistry {
             if self.programs[i].is_attached_to(table) {
                 dropped = dropped + 1;
             } else {
-                new_list.push(clone_sp(&self.programs[i]));
+                new_list.push(self.programs[i].clone());
             }
             i = i + 1;
         }
@@ -165,7 +165,7 @@ implement SubProgramRegistry {
             if self.programs[i].source_name == name {
                 found = true;
             } else {
-                new_list.push(clone_sp(&self.programs[i]));
+                new_list.push(self.programs[i].clone());
             }
             i = i + 1;
         }
@@ -195,27 +195,5 @@ implement SubProgramRegistry {
             i = i + 1;
         }
         sum
-    }
-}
-
-fn clone_sp(s: &SubProgram) -> SubProgram {
-    let table = match &s.source_table { Maybe.Some(t) => Maybe.Some(t.clone()), Maybe.None => Maybe.None };
-    SubProgram {
-        id: SubProgramId { id: s.id.id },
-        register_window: s.register_window,
-        source_name: s.source_name.clone(),
-        source_event: clone_event(&s.source_event),
-        source_table: table,
-        can_abort: s.can_abort,
-    }
-}
-
-fn clone_event(e: &core.database.sqlite.native.subprograms.program.SourceEvent) -> core.database.sqlite.native.subprograms.program.SourceEvent {
-    let _ = source_event_name;  // silence unused-import warning
-    match e {
-        core.database.sqlite.native.subprograms.program.SeTrigger          => core.database.sqlite.native.subprograms.program.SeTrigger,
-        core.database.sqlite.native.subprograms.program.SeInsteadOfView    => core.database.sqlite.native.subprograms.program.SeInsteadOfView,
-        core.database.sqlite.native.subprograms.program.SeRecursiveCte     => core.database.sqlite.native.subprograms.program.SeRecursiveCte,
-        core.database.sqlite.native.subprograms.program.SeForeignKeyAction => core.database.sqlite.native.subprograms.program.SeForeignKeyAction,
     }
 }

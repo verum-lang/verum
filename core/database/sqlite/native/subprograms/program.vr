@@ -71,12 +71,12 @@ public fn source_event_name(e: &SourceEvent) -> Text {
 // -----------------------------------------------------------------------------
 
 public type SubProgram is {
-    id: SubProgramId,
+    public(in super) id: SubProgramId,
     /// Number of registers this sub-program needs.
-    register_window: Int,
+    public(in super) register_window: Int,
     /// Schema-qualified name of the source object (trigger name,
     /// view name, table name, ...) for EXPLAIN / introspection.
-    source_name: Text,
+    public(in super) source_name: Text,
     /// What kind of event compiled this sub-program.
     source_event: SourceEvent,
     /// Table this sub-program is attached to. When the table is
@@ -104,6 +104,11 @@ public fn subprogram_new(
     }
 }
 
+public(in super) fn assign_id(program: &mut SubProgram, value: Int) -> SubProgramId {
+    program.id = SubProgramId { id: value };
+    program.id
+}
+
 implement SubProgram {
     public fn attach_to_table(&mut self, table: Text) {
         self.source_table = Maybe.Some(table);
@@ -117,6 +122,19 @@ implement SubProgram {
         match &self.source_table {
             Maybe.Some(t) => t == table,
             Maybe.None    => false,
+        }
+    }
+}
+
+implement Clone for SubProgram {
+    fn clone(&self) -> SubProgram {
+        SubProgram {
+            id: self.id,
+            register_window: self.register_window,
+            source_name: self.source_name.clone(),
+            source_event: self.source_event,
+            source_table: self.source_table.clone(),
+            can_abort: self.can_abort,
         }
     }
 }
