@@ -1,0 +1,14 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L2
+// @tags: database, postgres, async, visibility
+// @expected-error: E202
+// @expected-error-count: 1
+
+mount core.async.channel.OneshotSender;
+mount core.database.common.error.DbError;
+mount core.database.postgres.async_connection.{PgRequest, ReqCommitTx};
+
+fn build_raw_request(reply: OneshotSender<Result<(), DbError>>) -> PgRequest {
+    ReqCommitTx { reply: reply }
+}

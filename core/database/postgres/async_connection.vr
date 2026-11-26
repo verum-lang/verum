@@ -87,6 +87,8 @@ mount core.async.task.{spawn_blocking, JoinHandle};
 /// One unit of work the actor will run synchronously on its owned
 /// `PgConnection`. New variants are additive — keep the existing
 /// reply types stable so older async clients keep working.
+/// The transaction and COPY modules build their own messages and transfer
+/// their channel endpoints to this actor within the PostgreSQL adapter.
 public type PgRequest is
       ReqSimpleQuery {
         sql: Text,
@@ -103,43 +105,43 @@ public type PgRequest is
     /// caller-side wrapper computes `opts.render_sql()` before
     /// sending; the actor doesn't know about PgTxOpts).
     | ReqBeginTx {
-        begin_sql: Text,
-        reply: OneshotSender<Result<(), DbError>>,
+        public(in core.database.postgres) begin_sql: Text,
+        public(in core.database.postgres) reply: OneshotSender<Result<(), DbError>>,
     }
     | ReqCommitTx {
-        reply: OneshotSender<Result<(), DbError>>,
+        public(in core.database.postgres) reply: OneshotSender<Result<(), DbError>>,
     }
     | ReqRollbackTx {
-        reply: OneshotSender<Result<(), DbError>>,
+        public(in core.database.postgres) reply: OneshotSender<Result<(), DbError>>,
     }
     | ReqSavepoint {
-        name: Text,
-        reply: OneshotSender<Result<(), DbError>>,
+        public(in core.database.postgres) name: Text,
+        public(in core.database.postgres) reply: OneshotSender<Result<(), DbError>>,
     }
     | ReqReleaseSavepoint {
-        name: Text,
-        reply: OneshotSender<Result<(), DbError>>,
+        public(in core.database.postgres) name: Text,
+        public(in core.database.postgres) reply: OneshotSender<Result<(), DbError>>,
     }
     | ReqRollbackToSavepoint {
-        name: Text,
-        reply: OneshotSender<Result<(), DbError>>,
+        public(in core.database.postgres) name: Text,
+        public(in core.database.postgres) reply: OneshotSender<Result<(), DbError>>,
     }
     /// Open a streaming COPY FROM session. Actor takes over the
     /// wire, acks via `ack`, then drives a sub-loop reading from
     /// `chunk_rx` until Done/Cancel.
     | ReqCopyInOpen {
-        sql: Text,
-        chunk_rx: Receiver<CopyInChunk>,
-        ack: OneshotSender<Result<(), DbError>>,
+        public(in core.database.postgres) sql: Text,
+        public(in core.database.postgres) chunk_rx: Receiver<CopyInChunk>,
+        public(in core.database.postgres) ack: OneshotSender<Result<(), DbError>>,
     }
     /// Open a streaming COPY TO session. Actor acks via `ack`,
     /// then pushes every CopyData payload to `chunk_tx` until
     /// CopyDone, then drains to RFQ and sends a final
     /// `CoeDone(Result<row_count, …>)` event.
     | ReqCopyOutOpen {
-        sql: Text,
-        chunk_tx: Sender<core.database.postgres.async_copy.CopyOutEvent>,
-        ack: OneshotSender<Result<(), DbError>>,
+        public(in core.database.postgres) sql: Text,
+        public(in core.database.postgres) chunk_tx: Sender<core.database.postgres.async_copy.CopyOutEvent>,
+        public(in core.database.postgres) ack: OneshotSender<Result<(), DbError>>,
     }
     /// Prepare a server-side statement. Reply carries the
     /// `PgPreparedStatement` handle (server-allocated name + param
@@ -176,7 +178,10 @@ public type PgRequest is
 public type CopyInChunk is
       CicBytes(List<Byte>)
     | CicDone(OneshotSender<Result<Int, DbError>>)
-    | CicCancel { reason: Text, reply: OneshotSender<Result<(), DbError>> };
+    | CicCancel {
+        public(in core.database.postgres) reason: Text,
+        public(in core.database.postgres) reply: OneshotSender<Result<(), DbError>>,
+    };
 
 // =============================================================================
 // Public handle
@@ -228,14 +233,17 @@ implement AsyncPgConnection {
             join: self.join.clone(),
             cancel_host: self.cancel_host.clone(),
             cancel_port: self.cancel_port,
-            backend_key: self.backend_key.clone(),
+            backend_key: self.backend_key(),
         }
     }
 
     /// Cached BackendKeyData (process_id, secret_key) the server
     /// sent during handshake. Required input to CancelRequest.
     public fn backend_key(&self) -> Maybe<(Int, Int)> {
-        self.backend_key.clone()
+        match &self.backend_key {
+            Maybe.Some(key) => Maybe.Some((key.0, key.1)),
+            Maybe.None => Maybe.None,
+        }
     }
 
     /// Issue a CancelRequest packet to the server asking it to

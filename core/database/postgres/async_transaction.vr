@@ -43,7 +43,7 @@ mount core.database.postgres.transaction.{
     PgDfNone, PgDfDeferrable, PgDfNotDeferrable,
     pg_tx_opts_default,
 };
-mount core.async.channel.oneshot;
+mount core.async.channel.{oneshot, OneshotReceiver};
 
 // =============================================================================
 // Affine handle
@@ -83,14 +83,13 @@ public async fn begin_tx_with_async(
     let mut sql: Text = "BEGIN".clone();
     sql.push_str(&opts.render_sql());
     let (rs, rr) = oneshot<Result<(), DbError>>();
-    let _ = conn.tx_ref().send_async(ReqBeginTx {
+    let request = ReqBeginTx {
         begin_sql: sql,
         reply: rs,
-    }).await;
-    match rr.await {
-        Result.Ok(Result.Ok(()))  => Result.Ok(make_tx(opts)),
-        Result.Ok(Result.Err(e))  => Result.Err(e),
-        Result.Err(_)      => Result.Err(actor_dropped("begin_tx")),
+    };
+    match submit(conn, request, rr, "begin_tx").await {
+        Result.Ok(()) => Result.Ok(make_tx(opts)),
+        Result.Err(e) => Result.Err(e),
     }
 }
 
@@ -122,11 +121,7 @@ public async fn commit_tx_async(
 ) -> Result<(), DbError> {
     let _ = tx;
     let (rs, rr) = oneshot<Result<(), DbError>>();
-    let _ = conn.tx_ref().send_async(ReqCommitTx { reply: rs }).await;
-    match rr.await {
-        Result.Ok(r)  => r,
-        Result.Err(_) => Result.Err(actor_dropped("commit_tx")),
-    }
+    submit(conn, ReqCommitTx { reply: rs }, rr, "commit_tx").await
 }
 
 public async fn rollback_tx_async(
@@ -135,11 +130,7 @@ public async fn rollback_tx_async(
 ) -> Result<(), DbError> {
     let _ = tx;
     let (rs, rr) = oneshot<Result<(), DbError>>();
-    let _ = conn.tx_ref().send_async(ReqRollbackTx { reply: rs }).await;
-    match rr.await {
-        Result.Ok(r)  => r,
-        Result.Err(_) => Result.Err(actor_dropped("rollback_tx")),
-    }
+    submit(conn, ReqRollbackTx { reply: rs }, rr, "rollback_tx").await
 }
 
 // =============================================================================
@@ -151,14 +142,7 @@ public async fn savepoint_async(
     name: &Text,
 ) -> Result<(), DbError> {
     let (rs, rr) = oneshot<Result<(), DbError>>();
-    let _ = conn.tx_ref().send_async(ReqSavepoint {
-        name: name.clone(),
-        reply: rs,
-    }).await;
-    match rr.await {
-        Result.Ok(r)  => r,
-        Result.Err(_) => Result.Err(actor_dropped("savepoint")),
-    }
+    submit(conn, ReqSavepoint { name: name.clone(), reply: rs }, rr, "savepoint").await
 }
 
 public async fn release_savepoint_async(
@@ -166,14 +150,7 @@ public async fn release_savepoint_async(
     name: &Text,
 ) -> Result<(), DbError> {
     let (rs, rr) = oneshot<Result<(), DbError>>();
-    let _ = conn.tx_ref().send_async(ReqReleaseSavepoint {
-        name: name.clone(),
-        reply: rs,
-    }).await;
-    match rr.await {
-        Result.Ok(r)  => r,
-        Result.Err(_) => Result.Err(actor_dropped("release_savepoint")),
-    }
+    submit(conn, ReqReleaseSavepoint { name: name.clone(), reply: rs }, rr, "release_savepoint").await
 }
 
 public async fn rollback_to_savepoint_async(
@@ -181,14 +158,7 @@ public async fn rollback_to_savepoint_async(
     name: &Text,
 ) -> Result<(), DbError> {
     let (rs, rr) = oneshot<Result<(), DbError>>();
-    let _ = conn.tx_ref().send_async(ReqRollbackToSavepoint {
-        name: name.clone(),
-        reply: rs,
-    }).await;
-    match rr.await {
-        Result.Ok(r)  => r,
-        Result.Err(_) => Result.Err(actor_dropped("rollback_to_savepoint")),
-    }
+    submit(conn, ReqRollbackToSavepoint { name: name.clone(), reply: rs }, rr, "rollback_to_savepoint").await
 }
 
 // =============================================================================
@@ -233,6 +203,22 @@ public async fn with_transaction_async<R, F: fn(&AsyncPgConnection) -> Result<R,
 // =============================================================================
 // Helpers
 // =============================================================================
+
+async fn submit(
+    conn: &AsyncPgConnection,
+    request: PgRequest,
+    reply: OneshotReceiver<Result<(), DbError>>,
+    operation: &Text,
+) -> Result<(), DbError> {
+    match conn.tx_ref().send_async(request).await {
+        Result.Ok(()) => {}
+        Result.Err(_) => { return Result.Err(actor_dropped(operation)); }
+    }
+    match reply.await {
+        Result.Ok(result) => result,
+        Result.Err(_) => Result.Err(actor_dropped(operation)),
+    }
+}
 
 fn actor_dropped(what: &Text) -> DbError {
     DbError.Adapter(AdapterSpecific.new(

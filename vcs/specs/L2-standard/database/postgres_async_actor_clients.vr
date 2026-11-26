@@ -1,0 +1,40 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: database, postgres, async, transaction, copy
+
+mount core.database.common.error.DbError;
+mount core.database.postgres.async_connection.AsyncPgConnection;
+mount core.database.postgres.async_copy.{copy_in_async, copy_out_async};
+mount core.database.postgres.async_transaction.{
+    begin_tx_async, commit_tx_async, rollback_tx_async,
+    savepoint_async, release_savepoint_async, rollback_to_savepoint_async,
+};
+
+async fn finish_transaction(conn: &AsyncPgConnection, commit: Bool) -> Result<(), DbError> {
+    let tx = match begin_tx_async(conn).await {
+        Result.Ok(tx) => tx,
+        Result.Err(error) => { return Result.Err(error); }
+    };
+    if commit {
+        commit_tx_async(conn, tx).await
+    } else {
+        rollback_tx_async(conn, tx).await
+    }
+}
+
+async fn use_savepoint(conn: &AsyncPgConnection, name: &Text) -> Result<(), DbError> {
+    savepoint_async(conn, name).await?;
+    rollback_to_savepoint_async(conn, name).await?;
+    release_savepoint_async(conn, name).await
+}
+
+async fn cancel_input(conn: &AsyncPgConnection, sql: &Text, reason: &Text) -> Result<(), DbError> {
+    let writer = copy_in_async(conn, sql, 2).await?;
+    writer.cancel(reason).await
+}
+
+async fn finish_output(conn: &AsyncPgConnection, sql: &Text) -> Result<Int, DbError> {
+    let reader = copy_out_async(conn, sql, 2).await?;
+    reader.finish().await
+}

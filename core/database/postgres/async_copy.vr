@@ -55,6 +55,7 @@ module core.database.postgres.async_copy;
 
 mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
 mount collections.List;
+mount core.database.common.copy_metrics.{CopyMetrics, CopyMetricsSnapshot};
 mount core.database.common.error.{
     DbError, AdapterId, AdPostgres, AdapterSpecific,
 };
@@ -80,7 +81,7 @@ public type affine AsyncCopyInWriter is {
     chunk_tx: Sender<CopyInChunk>,
     /// Per-writer metric counters. Cloneable Shared atomics —
     /// `metrics()` returns a CopyMetricsSnapshot at any time.
-    metrics: core.database.common.copy_metrics.CopyMetrics,
+    metrics: CopyMetrics,
     /// Optional caller-side cancellation. When triggered, the
     /// next `write` call short-circuits and emits a CicCancel
     /// to the actor (best-effort wire-cancel).
@@ -90,7 +91,7 @@ public type affine AsyncCopyInWriter is {
 implement AsyncCopyInWriter {
     /// Snapshot the per-writer atomic counters. Cheap (4 atomic
     /// loads); safe to call from any task.
-    public fn metrics(&self) -> core.database.common.copy_metrics.CopyMetricsSnapshot {
+    public fn metrics(&self) -> CopyMetricsSnapshot {
         self.metrics.snapshot()
     }
 
@@ -154,7 +155,7 @@ public type affine AsyncCopyOutReader is {
     /// Set once the actor signals end-of-stream. Holds the
     /// row count or the wire-level failure.
     completion: Maybe<Result<Int, DbError>>,
-    metrics: core.database.common.copy_metrics.CopyMetrics,
+    metrics: CopyMetrics,
 };
 
 /// Internal — the chunk channel carries either a data frame or
@@ -168,7 +169,7 @@ implement AsyncCopyOutReader {
     /// Snapshot the per-reader counters. chunks_sent reflects the
     /// number of chunks delivered to the caller; bytes_sent is
     /// the cumulative payload bytes received.
-    public fn metrics(&self) -> core.database.common.copy_metrics.CopyMetricsSnapshot {
+    public fn metrics(&self) -> CopyMetricsSnapshot {
         self.metrics.snapshot()
     }
 
@@ -269,7 +270,7 @@ public async fn copy_in_async_with_token(
     }
     Result.Ok(AsyncCopyInWriter {
         chunk_tx: chunk_tx,
-        metrics: core.database.common.copy_metrics.CopyMetrics.new(),
+        metrics: CopyMetrics.new(),
         token: token,
     })
 }
@@ -302,7 +303,7 @@ public async fn copy_out_async(
     Result.Ok(AsyncCopyOutReader {
         chunk_rx: chunk_rx,
         completion: Maybe.None,
-        metrics: core.database.common.copy_metrics.CopyMetrics.new(),
+        metrics: CopyMetrics.new(),
     })
 }
 
