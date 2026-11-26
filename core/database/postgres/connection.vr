@@ -1408,21 +1408,19 @@ implement PgConnection {
     //   conn.pump_pipeline()?;          // writes to wire, reads replies,
     //                                    // routes to per-handle sinks
     //   for handle in handles:
-    //       result = handle.await();    // pulls from this handle's sink
+    //       result = handle.wait();     // pulls from this handle's sink
     //
     // The pump call is synchronous: drains `flush_into` to the
     // wire in one syscall, then reads BackendMessage frames until
     // every submitted entry has terminated. Per-query results
-    // appear via `PipelineHandle.await()`.
+    // appear via `PipelineHandle.wait()`.
 
-    /// Register a pipeline. Calling twice replaces the previous one
-    /// (any in-flight queries on the old pipeline are abandoned —
-    /// their handles will block on `await` until the timeout).
+    /// Register a pipeline. Replacing it closes pending handles on the old pipeline.
     public fn attach_pipeline(&mut self, pipeline: PgPipeline) {
         self.pipeline = Maybe.Some(pipeline);
     }
 
-    /// Drop the pipeline registration.
+    /// Drop the pipeline registration and wake outstanding handles with a closed error.
     public fn detach_pipeline(&mut self) {
         self.pipeline = Maybe.None;
     }
@@ -1620,7 +1618,7 @@ implement PgConnection {
     }
 
     /// Submit a pre-built (Parse?+Bind+Execute) byte triple to the
-    /// pipeline queue. Returns a `PipelineHandle` whose `.await()`
+    /// pipeline queue. Returns a `PipelineHandle` whose `wait()`
     /// yields the per-query `ExtendedQueryResult` once the pump
     /// drains it from the wire.
     ///
@@ -1719,6 +1717,9 @@ implement PgConnection {
                         return Result.Err(e);
                     }
                 };
+                if let BmRowDescription(rd) = &msg {
+                    self.last_formats = rd.formats();
+                }
                 let end_of_sync: Bool = match &self.pipeline {
                     Maybe.Some(p) => p.consume_message(msg),
                     Maybe.None    => true,    // shouldn't happen — pipeline detached mid-pump

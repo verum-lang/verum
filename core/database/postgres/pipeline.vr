@@ -30,9 +30,8 @@
 //      `PipelineHandle` with its own `PipelineResultSink`. The
 //      reader loop demultiplexes the stream of `BackendMessage`
 //      into the head pending entry's sink and rotates to the next
-//      on `CommandComplete` / `EmptyQueryResponse`. Independent
-//      Future-s can therefore complete out of order even though the
-//      wire stream is strictly FIFO.
+//      on `CommandComplete` / `EmptyQueryResponse`. Statements complete
+//      in wire order. Callers can collect those results in any order.
 //
 //   4. **Pipeline abort semantics.** On the first `ErrorResponse`
 //      within a batch, every subsequent pending entry up to the
@@ -67,7 +66,7 @@
 )
 module core.database.postgres.pipeline;
 
-mount core.base.memory.replace;
+mount core.base.memory.{Shared, replace};
 
 mount base.{Result, Ok, Err, Text, Maybe, None, Some};
 mount collections.List;
@@ -215,10 +214,10 @@ public type PipelineResultSink is {
 type PipelineSinkInner is {
     rows: List<List<WireValue>>,
     row_desc: Maybe<RowDescription>,
-    command_tag: Text,
     /// `Some` when terminal (Ok with rows OR Err); reader sets it
     /// once and then notifies.
     completion: Maybe<Result<ExtendedQueryResult, DbError>>,
+    collected: Bool,
 };
 
 implement PipelineResultSink {
@@ -227,8 +226,8 @@ implement PipelineResultSink {
             inner: Mutex.new(PipelineSinkInner {
                 rows: List.new(),
                 row_desc: Maybe.None,
-                command_tag: "".clone(),
                 completion: Maybe.None,
+                collected: false,
             }),
             notify: Condvar.new(),
         }
@@ -243,23 +242,19 @@ implement PipelineResultSink {
             Result.Err(_) => return Result.Err(poisoned_err("sink mutex poisoned".clone())),
         };
         loop {
-            match &guard.completion {
-                Maybe.Some(_) => {
-                    // Pull out the variant via take — destructive
-                    // read so a second await fails cleanly.
-                    let result = guard.completion.take();
-                    return match result {
-                        Maybe.Some(r) => r,
-                        Maybe.None    => Result.Err(poisoned_err("sink completion vanished".clone())),
-                    };
-                }
-                Maybe.None => {
-                    guard = match self.notify.wait(guard) {
-                        Result.Ok(g)  => g,
-                        Result.Err(_) => return Result.Err(poisoned_err("sink wait poisoned".clone())),
-                    };
-                }
+            if let Maybe.Some(result) = guard.completion.take() {
+                guard.collected = true;
+                return result;
             }
+            if guard.collected {
+                return Result.Err(DbError.Adapter(AdapterSpecific.new(
+                    AdPostgres, "PIPELINE_RESULT_CONSUMED", "pipeline result already collected", false,
+                )));
+            }
+            guard = match self.notify.wait(guard) {
+                Result.Ok(g)  => g,
+                Result.Err(_) => return Result.Err(poisoned_err("sink wait poisoned".clone())),
+            };
         }
     }
 
@@ -270,7 +265,9 @@ implement PipelineResultSink {
             Result.Ok(g)  => g,
             Result.Err(_) => return Maybe.None,
         };
-        guard.completion.take()
+        let result = guard.completion.take();
+        if result is Maybe.Some(_) { guard.collected = true; }
+        result
     }
 
     // ---- Reader-loop interface (called by PgPipeline.consume_message) ----
@@ -291,20 +288,8 @@ implement PipelineResultSink {
         guard.rows.push(values);
     }
 
-    fn record_command_complete(&self, tag: Text) {
-        let mut guard = match self.inner.lock() {
-            Result.Ok(g)  => g,
-            Result.Err(_) => return,
-        };
-        if guard.command_tag.len() == 0 {
-            guard.command_tag = tag;
-        }
-    }
-
-    /// Mark the query terminally complete with success. Pulls
-    /// rows / row_desc / command_tag out of the inner state into
-    /// the final `ExtendedQueryResult`. Notifies any awaiter.
-    fn finalise_ok(&self) {
+    /// Publish the complete result while holding the sink lock.
+    fn finalise_ok(&self, tag: Text) {
         {
             let mut guard = match self.inner.lock() {
                 Result.Ok(g)  => g,
@@ -312,7 +297,6 @@ implement PipelineResultSink {
             };
             let rows = replace(&mut guard.rows, List.new());
             let row_desc = guard.row_desc.take();
-            let tag = replace(&mut guard.command_tag, "".clone());
             guard.completion = Maybe.Some(Result.Ok(ExtendedQueryResult.from_parts(tag, row_desc, rows)));
         }
         self.notify.notify_one();
@@ -344,7 +328,7 @@ public type PendingQuery is {
     bind_bytes: List<Byte>,
     execute_bytes: List<Byte>,
     /// Where the reader-loop routes this query's reply.
-    sink: PipelineResultSink,
+    sink: Shared<PipelineResultSink>,
     /// Wall-clock at submission for end-to-end latency metrics.
     submitted_at: Instant,
     /// Whether this query expects rows back. False for INSERT/UPDATE/
@@ -360,9 +344,9 @@ public type PendingQuery is {
 /// What `submit` returns. Holds a reference to the per-query sink so
 /// the caller can park on `await_completion()` without going through
 /// the pipeline lock again.
-public type PipelineHandle is {
+public type affine PipelineHandle is {
     id: Int,
-    sink: Maybe<PipelineResultSink>,
+    sink: Shared<PipelineResultSink>,
 };
 
 implement PipelineHandle {
@@ -371,12 +355,8 @@ implement PipelineHandle {
     /// Block until the pipeline reader-loop terminates this query.
     /// Consumes the handle (single-shot await; calling twice is a
     /// type error).
-    public fn await(self) -> Result<ExtendedQueryResult, DbError> {
-        let s = match self.sink {
-            Maybe.Some(s) => s,
-            Maybe.None    => return Result.Err(poisoned_err("pipeline handle without sink".clone())),
-        };
-        s.await_completion()
+    public fn wait(self) -> Result<ExtendedQueryResult, DbError> {
+        self.sink.get().await_completion()
     }
 }
 
@@ -443,7 +423,7 @@ public type PipelineMetrics is {
     /// "queue full" condvar. High values signal undersized
     /// `max_inflight` or a slow server.
     total_park_full: Int,
-    /// Latest median RTT estimate driving the adaptive sizer (ns).
+    /// Duration of the most recently completed Sync round (ns).
     latest_rtt_ns: Int,
     /// Current adaptive batch size.
     current_batch_size: Int,
@@ -473,6 +453,8 @@ type PipelineInner is {
     /// currently routing. Pop-from-front is `pending.remove(0)`,
     /// O(N); we instead bump `head_idx` and compact periodically.
     head_idx: Int,
+    /// Exclusive end of the entries sent before the current Sync.
+    batch_end: Int,
     state: PipelineState,
     rtt: RttSampler,
     next_id: Int,
@@ -484,7 +466,7 @@ type PipelineInner is {
     metrics: PipelineMetrics,
 };
 
-public type PgPipeline is {
+public type affine PgPipeline is {
     config: PipelineConfig,
     inner: Mutex<PipelineInner>,
     /// Notifies submitters parked on "queue full".
@@ -503,6 +485,7 @@ implement PgPipeline {
             inner: Mutex.new(PipelineInner {
                 pending: List.new(),
                 head_idx: 0,
+                batch_end: 0,
                 state: PsActive,
                 rtt: RttSampler.new(),
                 next_id: 1,
@@ -521,7 +504,7 @@ implement PgPipeline {
 
     /// Append a query to the queue. Blocks if the queue is full
     /// (cap = `config.max_inflight`). Returns a `PipelineHandle`
-    /// the caller awaits via `.await()`.
+    /// the caller consumes through `wait()`.
     ///
     /// `expects_rows = true` for SELECT-class queries (RowDescription
     /// will be routed); `false` for INSERT/UPDATE/DELETE/DDL.
@@ -544,8 +527,8 @@ implement PgPipeline {
             if live < self.config.max_inflight {
                 let id = guard.next_id;
                 guard.next_id = guard.next_id + 1;
-                let sink = PipelineResultSink.new();
-                let sink_clone = sink.clone_handle();
+                let sink = Shared.new(PipelineResultSink.new());
+                let handle = PipelineHandle { id: id, sink: sink.clone() };
                 guard.pending.push(PendingQuery {
                     id: id,
                     parse_bytes: parse_bytes,
@@ -556,7 +539,7 @@ implement PgPipeline {
                     expects_rows: expects_rows,
                 });
                 guard.metrics.total_submitted = guard.metrics.total_submitted + 1;
-                return Result.Ok(PipelineHandle { id: id, sink: Maybe.Some(sink_clone) });
+                return Result.Ok(handle);
             }
             // Queue full — park on the condvar.
             guard.metrics.total_park_full = guard.metrics.total_park_full + 1;
@@ -578,7 +561,7 @@ implement PgPipeline {
             Result.Ok(g)  => g,
             Result.Err(_) => return 0,
         };
-        if guard.state.equals(&PsClosed) {
+        if guard.state.equals(&PsClosed) || guard.last_flush_at.is_some() {
             return 0;
         }
         let live = (guard.pending.len() as Int) - guard.head_idx;
@@ -597,6 +580,7 @@ implement PgPipeline {
         }
         let sync = send_sync();
         append_all(out, sync.as_slice());
+        guard.batch_end = start + written;
         guard.last_flush_at = Maybe.Some(Instant.now());
         written
     }
@@ -613,6 +597,12 @@ implement PgPipeline {
             Result.Ok(g)  => g,
             Result.Err(_) => return false,
         };
+        if guard.state.equals(&PsClosed) || guard.last_flush_at.is_none() {
+            return false;
+        }
+        if guard.state.equals(&PsAborting) && !(msg is BmReadyForQuery(_)) {
+            return false;
+        }
         match msg {
             BmParseComplete | BmBindComplete | BmCloseComplete | BmNoData |
             BmParameterStatus(_) | BmAuth(_) | BmBackendKeyData(_) |
@@ -621,27 +611,27 @@ implement PgPipeline {
                 false
             }
             BmRowDescription(rd) => {
-                if let Maybe.Some(head) = head_entry(&guard) {
-                    head.sink.record_row_desc(rd);
+                if let Maybe.Some(head) = head_entry(&*guard) {
+                    head.sink.get().record_row_desc(rd);
                 }
                 false
             }
             BmDataRow(dr) => {
-                if let Maybe.Some(head) = head_entry(&guard) {
-                    head.sink.record_data_row(dr.into_values());
+                if let Maybe.Some(head) = head_entry(&*guard) {
+                    head.sink.get().record_data_row(dr.into_values());
                 }
                 false
             }
             BmCommandComplete(cc) => {
-                terminate_head(&mut guard, &self.cond_space, TerminationKind.TkCommandComplete(cc.into_tag()));
+                terminate_head(&mut *guard, &self.cond_space, TerminationKind.TkCommandComplete(cc.into_tag()));
                 false
             }
             BmEmptyQueryResponse => {
-                terminate_head(&mut guard, &self.cond_space, TerminationKind.TkCommandComplete("EMPTY".clone()));
+                terminate_head(&mut *guard, &self.cond_space, TerminationKind.TkCommandComplete("EMPTY".clone()));
                 false
             }
             BmPortalSuspend => {
-                terminate_head(&mut guard, &self.cond_space, TerminationKind.TkCommandComplete("PORTAL_SUSPEND".clone()));
+                terminate_head(&mut *guard, &self.cond_space, TerminationKind.TkCommandComplete("PORTAL_SUSPEND".clone()));
                 false
             }
             BmError(d) => {
@@ -649,21 +639,14 @@ implement PgPipeline {
                 // up to the next ReadyForQuery. Mark head with the
                 // error; subsequent entries get PipelineAborted.
                 let translated = dberr_from_pg(d);
-                terminate_head(&mut guard, &self.cond_space, TerminationKind.TkError(translated));
+                terminate_head(&mut *guard, &self.cond_space, TerminationKind.TkError(translated));
                 guard.state = PsAborting;
                 false
             }
             BmReadyForQuery(_) => {
-                // End of Sync round. If we were aborting, drain
-                // any tail entries that never saw a CommandComplete
-                // — they were the casualties of the
-                // PIPELINE_ABORTED rule.
-                if guard.state.equals(&PsAborting) {
-                    drain_remaining_as_aborted(&mut guard, &self.cond_space);
-                    guard.state = PsActive;
-                }
+                finish_batch(&mut *guard, &self.cond_space);
                 // RTT sample.
-                match &guard.last_flush_at {
+                match guard.last_flush_at.take() {
                     Maybe.Some(when) => {
                         let elapsed_ns = when.elapsed().as_nanos();
                         guard.rtt.push(elapsed_ns);
@@ -680,7 +663,6 @@ implement PgPipeline {
                         }
                         guard.current_batch_size = sz;
                         guard.metrics.current_batch_size = sz;
-                        guard.last_flush_at = Maybe.None;
                     }
                     Maybe.None => {}
                 }
@@ -688,7 +670,10 @@ implement PgPipeline {
                 // back-fill, so head_idx drifting toward len()
                 // wastes memory.
                 if guard.head_idx > 64 && guard.head_idx >= (guard.pending.len() as Int) / 2 {
-                    compact_queue(&mut guard);
+                    let head = guard.head_idx;
+                    guard.pending = guard.pending.split_off(head);
+                    guard.head_idx = 0;
+                    guard.batch_end = 0;
                 }
                 true
             }
@@ -705,14 +690,17 @@ implement PgPipeline {
             Result.Ok(g)  => g,
             Result.Err(_) => return,
         };
+        if guard.state.equals(&PsClosed) { return; }
         guard.state = PsClosed;
         let n = guard.pending.len() as Int;
         let mut i = guard.head_idx;
         while i < n {
-            guard.pending[i].sink.finalise_err(clone_err(&reason));
+            guard.pending[i].sink.get().finalise_err(reason.clone());
             i = i + 1;
         }
         guard.head_idx = n;
+        guard.batch_end = n;
+        guard.last_flush_at = Maybe.None;
         // Wake every parked submitter so they bail with ClosedErr.
         let _ = guard;
         self.cond_space.notify_all();
@@ -737,6 +725,12 @@ implement PgPipeline {
     }
 }
 
+implement Drop for PgPipeline {
+    fn drop(&mut self) {
+        self.close(closed_err());
+    }
+}
+
 // -----------------------------------------------------------------------------
 // Internal helpers
 // -----------------------------------------------------------------------------
@@ -746,7 +740,7 @@ type TerminationKind is
     | TkError(DbError);
 
 fn head_entry(guard: &PipelineInner) -> Maybe<&PendingQuery> {
-    if guard.head_idx < (guard.pending.len() as Int) {
+    if guard.head_idx < guard.batch_end {
         Maybe.Some(&guard.pending[guard.head_idx])
     } else {
         Maybe.None
@@ -759,7 +753,7 @@ fn terminate_head(
     kind: TerminationKind,
 ) {
     let head_idx = guard.head_idx;
-    if head_idx >= (guard.pending.len() as Int) {
+    if head_idx >= guard.batch_end {
         return;
     }
     // Drive the sink under an immutable borrow of the entry, then
@@ -771,16 +765,13 @@ fn terminate_head(
     match kind {
         TkCommandComplete(tag) => {
             {
-                let head_sink = &guard.pending[head_idx].sink;
-                head_sink.record_command_complete(tag);
-                head_sink.finalise_ok();
+                guard.pending[head_idx].sink.get().finalise_ok(tag);
             }
             guard.metrics.total_completed = guard.metrics.total_completed + 1;
         }
         TkError(err) => {
             {
-                let head_sink = &guard.pending[head_idx].sink;
-                head_sink.finalise_err(err);
+                guard.pending[head_idx].sink.get().finalise_err(err);
             }
             guard.metrics.total_failed = guard.metrics.total_failed + 1;
         }
@@ -790,36 +781,27 @@ fn terminate_head(
     cond_space.notify_one();
 }
 
-fn drain_remaining_as_aborted(guard: &mut PipelineInner, cond_space: &Condvar) {
-    let n = guard.pending.len() as Int;
+fn finish_batch(guard: &mut PipelineInner, cond_space: &Condvar) {
+    let aborted = guard.state.equals(&PsAborting);
     let mut i = guard.head_idx;
-    while i < n {
-        guard.pending[i].sink.finalise_err(pipeline_aborted_err());
-        guard.metrics.total_aborted = guard.metrics.total_aborted + 1;
+    while i < guard.batch_end {
+        let error = if aborted {
+            guard.metrics.total_aborted = guard.metrics.total_aborted + 1;
+            pipeline_aborted_err()
+        } else {
+            guard.metrics.total_failed = guard.metrics.total_failed + 1;
+            DbError.Adapter(AdapterSpecific.new(
+                AdPostgres, "PIPELINE_INCOMPLETE", "ReadyForQuery arrived before the query completed", false,
+            ))
+        };
+        guard.pending[i].sink.get().finalise_err(error);
         i = i + 1;
     }
     if i > guard.head_idx {
         cond_space.notify_all();      // batch of slots freed
     }
-    guard.head_idx = n;
-}
-
-fn compact_queue(guard: &mut PipelineInner) {
-    let n = guard.pending.len() as Int;
-    let new_len = n - guard.head_idx;
-    let mut fresh: List<PendingQuery> = List.with_capacity(new_len);
-    let mut i = guard.head_idx;
-    while i < n {
-        // Move-by-clone: PendingQuery contains a sink (Mutex'd)
-        // and byte buffers; clone is shallow for the sink (it's
-        // already a heap-shared structure) but copies the byte
-        // lists. Compaction is rare (every ~64 completed queries),
-        // so the cost is amortised.
-        fresh.push(clone_pending(&guard.pending[i]));
-        i = i + 1;
-    }
-    guard.pending = fresh;
-    guard.head_idx = 0;
+    guard.head_idx = guard.batch_end;
+    guard.state = PsActive;
 }
 
 fn append_all(dst: &mut List<Byte>, src: &[Byte]) {
@@ -847,7 +829,7 @@ fn closed_err() -> DbError {
     DbError.Adapter(AdapterSpecific.new(
         AdPostgres,
         "PIPELINE_CLOSED".clone(),
-        "pipeline submitted to after close".clone(),
+        "PostgreSQL pipeline closed".clone(),
         true,
     ))
 }
@@ -859,42 +841,6 @@ fn pipeline_aborted_err() -> DbError {
         "queued query aborted by an earlier ErrorResponse in the same Sync batch".clone(),
         true,
     ))
-}
-
-// -----------------------------------------------------------------------------
-// Sink + PendingQuery cloning — shallow handles
-// -----------------------------------------------------------------------------
-
-implement PipelineResultSink {
-    /// Produce a second handle that shares the same Mutex'd inner
-    /// state. Used by `submit` to retain a sink reference both in
-    /// the pending queue (for the reader to fill) and in the
-    /// returned `PipelineHandle` (for the awaiter to read).
-    fn clone_handle(&self) -> PipelineResultSink {
-        // Mutex + Condvar are reference-typed underneath; cloning
-        // both yields handles that observe each other's state.
-        PipelineResultSink {
-            inner: self.inner.clone(),
-            notify: self.notify.clone(),
-        }
-    }
-}
-
-fn clone_pending(p: &PendingQuery) -> PendingQuery {
-    PendingQuery {
-        id: p.id,
-        parse_bytes: p.parse_bytes.clone(),
-        bind_bytes: p.bind_bytes.clone(),
-        execute_bytes: p.execute_bytes.clone(),
-        sink: p.sink.clone_handle(),
-        submitted_at: p.submitted_at,
-        expects_rows: p.expects_rows,
-    }
-}
-
-fn clone_err(e: &DbError) -> DbError {
-    // DbError is enum of small structs; clone is cheap.
-    e.clone()
 }
 
 // -----------------------------------------------------------------------------

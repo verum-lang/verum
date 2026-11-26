@@ -1,0 +1,114 @@
+// @test: run
+// @level: L2
+// @tier: 0
+// @timeout: 30000
+// @tags: database, postgres, pipeline
+// @expected-exit: 0
+
+mount core.*;
+mount collections.List;
+mount core.database.common.arena.SpindleArena;
+mount core.database.common.error.DbError;
+mount core.database.postgres.extended.decode_typed_result;
+mount core.database.postgres.pipeline.{PgPipeline, PipelineHandle};
+mount core.database.postgres.wire.backend.{BackendMessage, parse_backend};
+mount core.database.postgres.wire.frame.{frame_payload, try_parse_tagged};
+mount core.database.postgres.wire.frontend.{parse, bind, describe_portal, execute};
+mount core.database.postgres.wire.typed.TypedValue;
+
+fn submit(p: &PgPipeline, sql: &Text) -> PipelineHandle {
+    let empty: List<Int> = [];
+    let params: List<Maybe<List<Byte>>> = [];
+    let formats: List<Int> = [1];
+    let mut binding = bind("", "", empty.as_slice(), &params, formats.as_slice());
+    let description = describe_portal("");
+    binding.extend_from_slice(description.as_slice());
+    p.submit(parse("", sql, empty.as_slice()), binding, execute("", 0), true).unwrap()
+}
+
+fn reply(tag: Byte, payload: List<Byte>) -> BackendMessage {
+    let bytes = frame_payload(tag, payload.as_slice());
+    let frame = try_parse_tagged(bytes.as_slice()).unwrap().unwrap().into_frame();
+    let formats: List<Int> = [1];
+    parse_backend(frame, &formats).unwrap()
+}
+
+fn complete_int(p: &PgPipeline, n: Byte) {
+    let desc: List<Byte> = [0, 1, b'n', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 23, 0, 4, 255, 255, 255, 255, 0, 1];
+    assert(!p.consume_message(reply(b'1', [])));
+    assert(!p.consume_message(reply(b'2', [])));
+    assert(!p.consume_message(reply(b'T', desc)));
+    assert(!p.consume_message(reply(b'D', [0, 1, 0, 0, 0, 4, 0, 0, 0, n])));
+    assert(!p.consume_message(reply(b'C', [b'S', b'E', b'L', b'E', b'C', b'T', b' ', b'1', 0])));
+}
+
+fn expect_int(handle: PipelineHandle, expected: Int, arena: &mut SpindleArena) {
+    let result = handle.wait().unwrap();
+    let rows = decode_typed_result(&result, arena).unwrap();
+    assert_eq(rows.len(), 1);
+    assert_eq(rows[0].len(), 1);
+    match rows[0][0] {
+        Maybe.Some(TypedValue.TvInt4(n)) => assert_eq(n, expected),
+        _ => panic("expected a binary int4 result"),
+    }
+}
+
+fn main() {
+    let p = PgPipeline.new();
+    let first = submit(&p, "SELECT 11");
+    let second = submit(&p, "SELECT 22");
+    assert(first.id() < second.id());
+    let mut bytes: List<Byte> = [];
+    assert_eq(p.flush_into(&mut bytes), 2);
+    let sent = bytes.len();
+    assert_eq(p.flush_into(&mut bytes), 0);
+    assert_eq(bytes.len(), sent);
+    complete_int(&p, 11);
+    complete_int(&p, 22);
+    assert(p.consume_message(reply(b'Z', [b'I'])));
+    let mut arena = SpindleArena.new_connection(1);
+    expect_int(second, 22, &mut arena);
+    expect_int(first, 11, &mut arena);
+
+    let failed = submit(&p, "SELECT missing_column");
+    let skipped = submit(&p, "SELECT 33");
+    bytes.clear();
+    assert_eq(p.flush_into(&mut bytes), 2);
+    let later = submit(&p, "SELECT 44");
+    assert(!p.consume_message(reply(b'E', [b'C', b'4', b'2', b'7', b'0', b'3', 0, b'M', b'x', 0, 0])));
+    assert_eq(p.flush_into(&mut bytes), 0);
+    assert(p.consume_message(reply(b'Z', [b'I'])));
+    assert_eq(p.live_count(), 1);
+    match failed.wait() {
+        Result.Err(DbError.QueryFailed { sql_state, .. }) => assert_eq(*sql_state.code(), "42703"),
+        _ => panic("expected the server error"),
+    }
+    match skipped.wait() {
+        Result.Err(DbError.Adapter(error)) => assert_eq(*error.code(), "PIPELINE_ABORTED"),
+        _ => panic("expected the skipped query to abort"),
+    }
+    assert_eq(p.flush_into(&mut bytes), 1);
+    complete_int(&p, 44);
+    assert(p.consume_message(reply(b'Z', [b'I'])));
+    expect_int(later, 44, &mut arena);
+    assert_eq(p.live_count(), 0);
+
+    let incomplete = submit(&p, "SELECT 55");
+    assert_eq(p.flush_into(&mut bytes), 1);
+    assert(p.consume_message(reply(b'Z', [b'I'])));
+    match incomplete.wait() {
+        Result.Err(DbError.Adapter(error)) => {
+            assert_eq(*error.code(), "PIPELINE_INCOMPLETE");
+        }
+        _ => panic("expected a missing terminal reply to fail"),
+    }
+    assert_eq(p.flush_into(&mut bytes), 0);
+    let abandoned = {
+        let temporary = PgPipeline.new();
+        submit(&temporary, "SELECT 66")
+    };
+    match abandoned.wait() {
+        Result.Err(DbError.Adapter(error)) => assert_eq(*error.code(), "PIPELINE_CLOSED"),
+        _ => panic("expected dropping a pipeline to close its outstanding handle"),
+    }
+}

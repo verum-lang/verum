@@ -1,0 +1,15 @@
+// @test: typecheck-fail
+// @level: L2
+// @tier: all
+// @tags: database, postgres, pipeline, affine
+// @expected-error: E310 "value `handle` used after move"
+// @expected-error-count: 1
+
+mount core.database.postgres.pipeline.PipelineHandle;
+
+fn wait_twice(handle: PipelineHandle) {
+    let first = handle.wait();
+    let second = handle.wait();
+}
+
+fn main() {}
