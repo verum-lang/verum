@@ -198,7 +198,7 @@ fn decode_tracestate(bytes: &[Byte]) -> TraceState {
     while i <= bytes.len() && count < MAX_TRACESTATE_ENTRIES {
         if i == bytes.len() || bytes[i] == 0x2C /* ',' */ {
             if i > start {
-                let segment = &bytes[start..i];
+                let segment = bytes[start..i];
                 let trimmed = trim_ows(segment);
                 match split_kv(trimmed) {
                     Maybe.Some((k, v)) => {
@@ -259,14 +259,14 @@ fn trim_ows(bytes: &[Byte]) -> &[Byte] {
     let mut end = bytes.len();
     while start < end && (bytes[start] == 0x20 || bytes[start] == 0x09) { start = start + 1; }
     while end > start && (bytes[end - 1] == 0x20 || bytes[end - 1] == 0x09) { end = end - 1; }
-    &bytes[start..end]
+    bytes[start..end]
 }
 
 fn split_kv(bytes: &[Byte]) -> Maybe<(&[Byte], &[Byte])> {
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == 0x3D /* '=' */ {
-            return Maybe.Some((&bytes[..i], &bytes[i + 1..]));
+            return Maybe.Some((bytes[..i], bytes[i + 1..]));
         }
         i = i + 1;
     }
