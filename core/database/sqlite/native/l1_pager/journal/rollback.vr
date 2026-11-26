@@ -233,7 +233,7 @@ public fn rollback_parse_record(
         i = i + 1;
     }
     let stored_cksum = read_u32_be(buf, start + 4 + page_size);
-    let computed = rollback_record_checksum(nonce, &page_bytes);
+    let computed = rollback_record_checksum(nonce, page_bytes.as_slice());
     if stored_cksum != computed {
         return Result.Err(BadChecksum(page_no, computed, stored_cksum));
     }

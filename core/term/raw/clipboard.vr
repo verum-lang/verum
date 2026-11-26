@@ -86,5 +86,5 @@ fn base64_encode(data: &[Byte]) -> Text {
         result.push('=' as Byte);
     }
 
-    Text.from_utf8_unchecked(&result)
+    Text.from_utf8_unchecked(result.as_slice())
 }

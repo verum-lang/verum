@@ -484,7 +484,7 @@ implement Decimal {
         let mut out: Text = if neg { "-".clone() } else { "".clone() };
 
         if self.scale == 0 {
-            out = out + Text.from_bytes(&digits).unwrap_or("".clone());
+            out = out + Text.from_utf8(digits.as_slice()).unwrap_or("".clone());
             return out;
         }
 
@@ -497,18 +497,17 @@ implement Decimal {
                 out = out + "0";
                 pad = pad - 1;
             }
-            out = out + Text.from_bytes(&digits).unwrap_or("".clone());
+            out = out + Text.from_utf8(digits.as_slice()).unwrap_or("".clone());
             return out;
         }
 
         // Mixed integer + fractional: split `digits` at index
         // `digit_count - scale`.
         let split = digit_count - self.scale;
-        let int_part = bytes_subslice(&digits, 0, split);
-        let frac_part = bytes_subslice(&digits, split, digit_count);
-        out = out + Text.from_bytes(&int_part).unwrap_or("".clone());
+        let bytes = digits.as_slice();
+        out = out + Text.from_utf8(&bytes[..split]).unwrap_or("".clone());
         out = out + ".";
-        out = out + Text.from_bytes(&frac_part).unwrap_or("".clone());
+        out = out + Text.from_utf8(&bytes[split..]).unwrap_or("".clone());
         out
     }
 }
@@ -770,17 +769,6 @@ fn digits_of(n: Int) -> List<Byte> {
     while i >= 0 {
         out.push(buf[i]);
         i = i - 1;
-    }
-    out
-}
-
-/// Borrowed sub-slice [start, end) of a List<Byte>.
-fn bytes_subslice(src: &List<Byte>, start: Int, end: Int) -> List<Byte> {
-    let mut out: List<Byte> = List.with_capacity(end - start);
-    let mut i = start;
-    while i < end && i < (src.len() as Int) {
-        out.push(src[i]);
-        i = i + 1;
     }
     out
 }

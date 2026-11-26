@@ -214,15 +214,7 @@ public fn decode(bytes: &[Byte]) -> Result<JsonbValue, JsonbError> {
     if version != JSONB_VERSION_1 {
         return Result.Err(JbeUnsupportedVersion(version));
     }
-    // Body — slice from offset 1 to end.
-    let body_len = n - 1;
-    let mut body: List<Byte> = List.with_capacity(body_len);
-    let mut i: Int = 1;
-    while i < n {
-        body.push(bytes[i]);
-        i = i + 1;
-    }
-    let text = match Text.from_utf8(body) {
+    let text = match Text.from_utf8(&bytes[1..]) {
         Result.Ok(t)  => t,
         Result.Err(_) => return Result.Err(JbeBadUtf8),
     };
