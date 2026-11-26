@@ -51,8 +51,58 @@ fn has_implicit_call_computation(function: &FunctionDecl) -> bool {
 #[derive(Default)]
 struct SourceCalls {
     unresolved: List<verum_ast::Path>,
-    bindings: verum_common::Set<Text>,
+    bindings: Set<Text>,
+    rebound: Set<Text>,
     nested_item: bool,
+}
+
+impl SourceCalls {
+    fn binding(&mut self, name: &Text) {
+        if !self.bindings.insert(name.clone()) {
+            self.rebound.insert(name.clone());
+        }
+    }
+}
+
+/// A parameter's declared callable type constrains every value accepted at
+/// application. A local shadow must never inherit that parameter's contract.
+fn synchronous_parameters(function: &FunctionDecl) -> Set<Text> {
+    use verum_ast::ty::{GenericParamKind, TypeBound, TypeBoundKind, WherePredicateKind};
+    use verum_ast::{FunctionParamKind, TypeKind};
+
+    fn synchronous(ty: &verum_ast::Type) -> bool {
+        matches!(&ty.kind,
+            TypeKind::Function { is_async: false, contexts, .. }
+            | TypeKind::Rank2Function { is_async: false, contexts, .. } if contexts.is_empty())
+    }
+    fn callable_bound(bounds: &[TypeBound]) -> bool {
+        bounds.iter().any(|bound| matches!(&bound.kind,
+            TypeBoundKind::Callable(ty) if synchronous(ty)))
+    }
+    let mut generics: Set<Text> = function.generics.iter().filter_map(|generic| {
+        match &generic.kind {
+            GenericParamKind::Type { name, bounds, .. } if callable_bound(bounds) => Some(name.name.clone()),
+            _ => None,
+        }
+    }).collect();
+    if let Some(clause) = &function.generic_where_clause {
+        for predicate in &clause.predicates {
+            if let WherePredicateKind::Type { ty, bounds } = &predicate.kind
+                && let TypeKind::Path(path) = &ty.kind
+                && let Some(name) = path.as_ident()
+                && callable_bound(bounds)
+            {
+                generics.insert(name.name.clone());
+            }
+        }
+    }
+    function.params.iter().filter_map(|parameter| {
+        let FunctionParamKind::Regular { pattern, ty, .. } = &parameter.kind else { return None; };
+        let PatternKind::Ident { name, by_ref: false, subpattern: None, .. } = &pattern.kind else { return None; };
+        (synchronous(ty) || matches!(&ty.kind, TypeKind::Path(path)
+            if path.as_ident().is_some_and(|name| generics.contains(&name.name))))
+            .then(|| name.name.clone())
+    }).collect()
 }
 
 // This is a work budget for preliminary evidence, not a semantic call-depth
@@ -139,10 +189,14 @@ fn source_call_path(expression: &Expr) -> Option<verum_ast::Path> {
     Some(path)
 }
 
+#[path = "selected_callable_evidence.rs"]
+mod selected_callable_evidence;
+
 struct Calls<'a> {
     checker: &'a TypeChecker,
     bound: PropertyRequirement,
     source: Option<&'a mut SourceCalls>,
+    obligations: Option<&'a mut List<(Span, crate::type_registry::CallableDeclaration)>>,
 }
 impl Visitor for Calls<'_> {
     fn visit_stmt(&mut self, statement: &verum_ast::Stmt) {
@@ -189,6 +243,17 @@ impl Visitor for Calls<'_> {
                     }
                     _ => PropertyRequirement::Unrestricted,
                 };
+                let requirement = if matches!(target.as_ref(), Some(Type::Function {
+                    properties: None, property_requirement: PropertyRequirement::Unrestricted, ..
+                }))
+                    && let Some(required) = self.obligations.as_deref_mut()
+                    && let Some(selected) = self.checker.type_registry.callable_declaration(expression.span)
+                {
+                    required.push((expression.span, selected.clone()));
+                    PropertyRequirement::source_callable(false)
+                } else {
+                    requirement
+                };
                 if self.source.is_none() && requirement.may_be_async() {
                     tracing::debug!(target: "verum_types::callable_contract", owner = %self.checker.current_module_path,
                         span = ?expression.span, callable = ?target, "call has no synchronous contract");
@@ -200,22 +265,24 @@ impl Visitor for Calls<'_> {
         walk_expr(self, expression);
     }
     fn visit_pattern(&mut self, pattern: &Pattern) {
+        if self.obligations.is_some()
+            && matches!(pattern.kind, PatternKind::View { .. } | PatternKind::Active { .. })
+        {
+            self.bound = PropertyRequirement::Unrestricted;
+        }
         if let Some(source) = self.source.as_deref_mut() {
             match &pattern.kind {
                 PatternKind::Ident { name, .. } => {
-                    source.bindings.insert(name.name.clone());
+                    source.binding(&name.name);
                 }
                 PatternKind::Record { fields, .. }
                 | PatternKind::Variant {
                     data: Some(verum_ast::pattern::VariantPatternData::Record { fields, .. }),
                     ..
                 } => {
-                    source.bindings.extend(
-                        fields
-                            .iter()
-                            .filter(|field| field.pattern.is_none())
-                            .map(|field| field.name.name.clone()),
-                    );
+                    for field in fields.iter().filter(|field| field.pattern.is_none()) {
+                        source.binding(&field.name.name);
+                    }
                 }
                 PatternKind::View { .. } | PatternKind::Active { .. } => {
                     self.bound = PropertyRequirement::Unrestricted
@@ -291,6 +358,7 @@ impl TypeChecker {
             checker: self,
             bound: PropertyRequirement::AtMost(local),
             source: None,
+            obligations: None,
         };
         calls.visit_expr(body);
         calls.bound
@@ -325,6 +393,7 @@ impl TypeChecker {
             checker: self,
             bound: PropertyRequirement::AtMost(local),
             source: None,
+            obligations: None,
         };
         match body {
             verum_ast::FunctionBody::Block(block) => calls.visit_block(block),
@@ -591,6 +660,7 @@ impl TypeChecker {
             checker: self,
             bound: PropertyRequirement::AtMost(local),
             source: Some(&mut source),
+            obligations: None,
         };
         for param in &function.params {
             if let verum_ast::FunctionParamKind::Regular {
@@ -619,13 +689,14 @@ impl TypeChecker {
         if source.unresolved.is_empty() {
             return Some(List::new());
         }
-        if source.nested_item
-            || source
-                .unresolved
-                .iter()
-                .any(|path| matches!(path.segments.first(), Some(verum_ast::ty::PathSegment::Name(name))
-                    if source.bindings.contains(&name.name)))
-        {
+        if source.nested_item {
+            return None;
+        }
+        let synchronous = synchronous_parameters(function);
+        source.unresolved.retain(|path| !path.as_ident().is_some_and(|name|
+            synchronous.contains(&name.name) && !source.rebound.contains(&name.name)));
+        if source.unresolved.iter().any(|path| matches!(path.segments.first(),
+            Some(verum_ast::ty::PathSegment::Name(name)) if source.bindings.contains(&name.name))) {
             return None;
         }
         Some(source.unresolved)
@@ -641,7 +712,26 @@ impl TypeChecker {
             if let Some((target, declaration)) = self.source_function_for_properties(owner, &name.name) {
                 return SourceCall::Declaration(target, declaration);
             }
-            if self.source_receiver_shadowing(owner, &name.name).0 { return SourceCall::Known(false); }
+            let (value_binding, name_binding) = self.source_receiver_shadowing(owner, &name.name);
+            if value_binding { return SourceCall::Known(false); }
+            if !name_binding && self.with_declaring_source_items(owner, |items| {
+                let mut matches = items.iter()
+                    .filter(|item| self.cfg_evaluator.should_include(&item.attributes))
+                    .filter_map(|item| match &item.kind {
+                        ItemKind::Type(declaration) => match &declaration.body {
+                            TypeDeclBody::Variant(variants) | TypeDeclBody::Inductive(variants) => Some(variants),
+                            _ => None,
+                        },
+                        _ => None,
+                    })
+                    .flatten()
+                    .filter(|variant| variant.name.name == name.name
+                        && variant.data.is_some()
+                        && self.cfg_evaluator.should_include(&variant.attributes));
+                matches.next().is_some() && matches.next().is_none()
+            }).unwrap_or(false) {
+                return SourceCall::Known(true);
+            }
             return SourceCall::Known(self.with_source_signature_scope(owner, |checker|
                 checker.declaring_source_type_declaration(&name.name))
                 .is_some_and(|(declaration, _)| matches!(declaration.body, TypeDeclBody::Tuple(_))));

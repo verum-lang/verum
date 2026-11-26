@@ -6,6 +6,8 @@ use verum_modules::ModuleDependencies;
 
 #[derive(Debug, Default)]
 pub(crate) struct SourceTypeRegistration {
+    /// A source evidence query checks its obligations on an iterative worklist.
+    pub(super) checking_callable_evidence: bool,
     /// Lexical source declarations available while preparing one module.
     pub local_declarations: List<(Text, verum_common::Shared<verum_ast::Module>)>,
     /// Exact source methods index their published lookup locations. Body

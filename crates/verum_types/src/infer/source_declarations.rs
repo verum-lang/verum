@@ -170,7 +170,7 @@ impl TypeChecker {
 
     /// Inspect the defining syntax in the active declaration frame, inline module,
     /// or registered file. A newer buffer owns even an empty set of imports.
-    fn with_declaring_source_items<R>(
+    pub(super) fn with_declaring_source_items<R>(
         &self,
         owner: &str,
         inspect: impl FnOnce(&[verum_ast::Item]) -> R,

@@ -74,6 +74,45 @@ fn a_recursive_component_checks_its_exits_and_contracts() {
 }
 
 #[test]
+fn a_declared_callback_bounds_calls_through_its_parameter() {
+    for source in [
+        "fn invoke(callback:fn(Int)->Int)->Int {callback(4)}",
+        "fn invoke<F:fn(Int)->Int>(callback:F)->Int {callback(4)}",
+        "fn invoke<F>(callback:F)->Int where F:fn(Int)->Int {callback(4)}",
+    ] {
+        assert!(!bound(&checker(source), "invoke").may_be_async(), "{source}");
+    }
+    for source in [
+        "fn invoke(callback:async fn(Int)->Int)->Int {callback(4)}",
+        "fn invoke<F:async fn(Int)->Int>(callback:F)->Int {callback(4)}",
+        "fn invoke(callback:fn(Int)->Int, pending:async fn(Int)->Int)->Int {
+             let callback = pending; callback(4)
+         }",
+        "fn invoke(callback:fn(Int)->Int, pending:async fn(Int)->Int)->Int {
+             callback(4) + pending(4)
+         }",
+    ] {
+        assert!(bound(&checker(source), "invoke").may_be_async(), "{source}");
+    }
+}
+
+#[test]
+fn lexical_variant_construction_keeps_the_selected_payload_call() {
+    let source = "type Answer is Good(Int) | Bad(Int);
+        fn mapped<F:fn(Int)->Int>(value:Answer, f:F)->Answer {
+            match value { Good(n) => Good(f(n)), Bad(e) => Bad(e) }
+        }
+        fn pending(value:Answer, f:async fn(Int)->Int)->Answer {
+            match value { Good(n) => Good(f(n)), Bad(e) => Bad(e) }
+        }
+        fn shadow(Good:async fn(Int)->Answer)->Answer { Good(3) }";
+    let prepared = checker(source);
+    assert!(!bound(&prepared, "mapped").may_be_async());
+    assert!(bound(&prepared, "pending").may_be_async());
+    assert!(bound(&prepared, "shadow").may_be_async());
+}
+
+#[test]
 fn async_leaves_and_unknown_callees_remain_unproved() {
     for source in [
         "async fn leaf()->Int {1} fn root()->Int {leaf()}",
@@ -240,4 +279,68 @@ fn shared_diamond_work_is_bounded() {
         Text::from_utf8_lossy(&output.stdout),
         Text::from_utf8_lossy(&output.stderr)
     );
+}
+
+#[test]
+fn typed_method_chains_use_the_implementation_selected_by_the_consumer() {
+    let provider = r#"
+        public type Ready is { public number: Int };
+        implement Ready {
+            public fn leaf(&self)->Int { self.number }
+            public fn middle(&self)->Int { self.leaf() }
+            public fn read(&self)->Int { self.middle() }
+        }
+        public type Open is { public callback: async fn(Int)->Int };
+        implement Open {
+            public fn read(&self)->Int { (self.callback)(1) }
+        }
+        public type Pending is { public number: Int };
+        implement Pending {
+            public async fn leaf(&self)->Int { self.number }
+            public fn middle(&self)->Int { self.leaf() }
+            public fn read(&self)->Int { self.middle() }
+        }
+    "#;
+    for (receiver, accepts) in [("Ready", true), ("Pending", false), ("Open", false)] {
+        let consumer = format!("mount provider.{receiver};
+            fn call(input:{receiver})->Int {{
+                let read:fn({receiver})->Int = |value| value.read();
+                read(input)
+            }}
+            fn infer_first(input:{receiver})->Int {{
+                let inferred = |value:{receiver}| value.read();
+                let read:fn({receiver})->Int = inferred;
+                read(input)
+            }}");
+        let graph = registry(&[("provider", provider), ("consumer", &consumer)]);
+        let module = graph.get_by_path("consumer").unwrap();
+        let mut checked = TypeChecker::with_minimal_context();
+        checked.register_builtins();
+        checked.set_current_module_path("consumer");
+        checked.set_module_registry_direct(graph);
+        checked.register_stdlib_types_for_module(&module.ast);
+        let mut errors = checked.prepare_module_declarations(&module.ast);
+        checked.with_module_declarations(&module.ast, |checked| {
+            for item in &module.ast.items {
+                if let Err(error) = checked.check_item(item) { errors.push(error); }
+            }
+        });
+        errors.extend(checked.take_deferred_errors());
+        let errors: verum_common::List<_> = errors.iter().chain(checked.diagnostic_sources()).collect();
+        if accepts {
+            assert!(errors.is_empty(), "{receiver}: {errors:?}");
+            let site = "value.read()";
+            for (offset, _) in consumer.match_indices(site) {
+                let span = verum_ast::Span::new(offset as u32, (offset + site.len()) as u32, module.file_id);
+                assert!(matches!(checked.type_registry.lookup_call_target(span),
+                    Some(Type::Function { property_requirement, .. }) if !property_requirement.may_be_async()));
+            }
+        } else {
+            assert!(errors.iter().any(|error| matches!(error, verum_types::TypeError::Mismatch {
+                expected, actual, span,
+            } if expected.contains("excludes {Async}") && actual.contains("unrestricted")
+                && &consumer[span.start as usize..span.end as usize] == "|value| value.read()")),
+                "{receiver}: {errors:?}");
+        }
+    }
 }

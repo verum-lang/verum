@@ -43,9 +43,12 @@ use verum_common::{Map, Maybe, Shared, Text};
 
 use crate::ty::Type;
 
+pub(crate) type CallableDeclaration = (Text, Shared<verum_ast::FunctionDecl>);
+
 #[derive(Debug, Clone)]
 struct CallTarget {
     ty: Type,
+    declaration: Option<CallableDeclaration>,
     explicit_inputs: bool,
     declared_receiver: Option<Type>,
     returned_value: Option<Shared<crate::context::ReturnedValue>>,
@@ -116,7 +119,7 @@ impl TypeRegistry {
     }
 
     pub fn register_call_target(&mut self, span: Span, ty: Type) {
-        self.record_call_target(span, ty, false, None, None, None, None);
+        self.record_call_target(span, ty, None, false, None, None, None, None);
     }
 
     pub(crate) fn register_declared_static_target(
@@ -142,7 +145,7 @@ impl TypeRegistry {
                 Type::Function { return_type, .. } => Some(return_type.as_ref().clone()),
                 _ => None,
             });
-        self.record_call_target(span, ty, explicit_inputs, None, scheme.returned_value.clone(), None, constructed_value);
+        self.record_call_target(span, ty, scheme.callable_source.clone(), explicit_inputs, None, scheme.returned_value.clone(), None, constructed_value);
     }
 
     /// A selected source receiver is separate from the explicit argument list.
@@ -168,13 +171,13 @@ impl TypeRegistry {
             };
             Some(Type::Reference { inner: Box::new(receiver), mutable })
         });
-        self.record_call_target(span, ty, false, declared_receiver, scheme.returned_value.clone(), None, None);
+        self.record_call_target(span, ty, scheme.callable_source.clone(), false, declared_receiver, scheme.returned_value.clone(), None, None);
     }
 
     /// The structural operation resolver, rather than a callable property,
     /// certifies that this selected operation reads a declared receiver.
     pub(crate) fn register_structural_call_target(&mut self, span: Span, ty: Type, receiver: Type) {
-        self.record_call_target(span, ty, false, None, None, Some(receiver), None);
+        self.record_call_target(span, ty, None, false, None, None, Some(receiver), None);
     }
 
     pub(crate) fn structural_call_target(&self, span: Span) -> Option<(&Type, &Type)> {
@@ -185,7 +188,7 @@ impl TypeRegistry {
     /// Contextual constructor checking has already selected and checked the
     /// data operation. Its arguments still undergo ordinary loan checking.
     pub(crate) fn register_data_constructor_target(&mut self, span: Span, ty: Type, result: Type) {
-        self.record_call_target(span, ty, false, None, None, None, Some(result));
+        self.record_call_target(span, ty, None, false, None, None, None, Some(result));
     }
 
     pub(crate) fn constructed_value(&self, span: Span) -> Option<&Type> {
@@ -196,6 +199,7 @@ impl TypeRegistry {
         &mut self,
         span: Span,
         ty: Type,
+        declaration: Option<CallableDeclaration>,
         explicit_inputs: bool,
         declared_receiver: Option<Type>,
         returned_value: Option<Shared<crate::context::ReturnedValue>>,
@@ -212,14 +216,33 @@ impl TypeRegistry {
                 && previous.returned_value == returned_value
                 && previous.structural_receiver == structural_receiver
                 && previous.constructed_value == constructed_value);
+        let declaration = declaration.filter(|selected| !span.is_empty()
+            && previous.is_none_or(|target| target.ty == ty && target.declaration.as_ref() == Some(selected)));
         self.call_targets.insert(span, CallTarget {
             ty,
+            declaration,
             explicit_inputs: agreed,
             declared_receiver: same_rule.then_some(declared_receiver).flatten(),
             returned_value: same_rule.then_some(returned_value).flatten(),
             structural_receiver: same_rule.then_some(structural_receiver).flatten(),
             constructed_value: same_rule.then_some(constructed_value).flatten(),
         });
+    }
+
+    pub(crate) fn callable_declaration(&self, span: Span) -> Option<&CallableDeclaration> {
+        self.call_targets.get(&span)?.declaration.as_ref()
+    }
+
+    /// Publish the checked bound back on the selected call. Computations that
+    /// already carry observed properties keep those observations.
+    pub(crate) fn publish_synchronous_call(&mut self, span: Span, declaration: &CallableDeclaration) {
+        if let Some(target) = self.call_targets.get_mut(&span)
+            && target.declaration.as_ref() == Some(declaration)
+            && let Type::Function { property_requirement, properties: None, .. } = &mut target.ty
+            && matches!(property_requirement, crate::computational_properties::PropertyRequirement::Unrestricted)
+        {
+            *property_requirement = crate::computational_properties::PropertyRequirement::source_callable(false);
+        }
     }
 
     pub fn lookup_call_target(&self, span: Span) -> Maybe<&Type> {

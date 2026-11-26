@@ -1549,7 +1549,10 @@ impl TypeChecker {
         body: &Expr,
         is_async: bool,
     ) -> crate::computational_properties::PropertyRequirement {
-        let bound = self.callable_body_bound(body);
+        let mut bound = self.callable_body_bound(body);
+        if !is_async && bound.may_be_async() && self.checked_source_calls_are_synchronous(body) {
+            bound = crate::computational_properties::PropertyRequirement::source_callable(false);
+        }
         Self::callable_bound_with_marker(bound, is_async)
     }
 

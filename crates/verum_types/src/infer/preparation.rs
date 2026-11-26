@@ -77,13 +77,17 @@ impl TypeChecker {
     pub fn with_module_declarations<T>(
         &mut self, module: &Module, prepare: impl FnOnce(&mut Self) -> T,
     ) -> T {
+        self.enter_module_declarations(module);
+        let result = prepare(self);
+        self.source_type_registration.local_declarations.pop();
+        result
+    }
+
+    pub(super) fn enter_module_declarations(&mut self, module: &Module) {
         let mut selected = module.clone();
         selected.items.retain(|item| self.cfg_evaluator.should_include(&item.attributes));
         self.source_type_registration.local_declarations
             .push((self.current_module_path.clone(), Shared::new(selected)));
-        let result = prepare(self);
-        self.source_type_registration.local_declarations.pop();
-        result
     }
 
     fn prepare_module_types_in_source_scope(&mut self, module: &Module) -> List<TypeError> {
