@@ -41,6 +41,47 @@ fn named(name: &str) -> Type {
     }
 }
 
+#[test]
+fn an_exact_impl_does_not_hide_a_conditional_impl_of_another_protocol() {
+    let declarations = r#"
+        type Allowed is protocol {};
+        type Member is {};
+        type Outsider is {};
+        implement Allowed for Member {}
+        type Parcel<T> is { public item: T };
+        type MemberTag is protocol {};
+        type OutsiderTag is protocol {};
+        type Inspect is protocol { fn inspect(&self) -> Int; };
+    "#;
+    let conditional =
+        "implement<T: Allowed> Inspect for Parcel<T> { fn inspect(&self) -> Int { 7 } }";
+    let exact = "implement MemberTag for Parcel<Member> {} implement OutsiderTag for Parcel<Outsider> {}";
+    for implementations in [format!("{exact} {conditional}"), format!("{conditional} {exact}")] {
+        let source = format!("{declarations} {implementations}");
+        let (checker, accepted) = check(&format!(
+            "{source} fn read(p: &Parcel<Member>) -> Int {{ p.inspect() }}"
+        ), &[]);
+        assert!(accepted.is_empty(), "{accepted:?}");
+        let registry = checker.protocol_checker.read();
+        for (marker, inspect_count) in [("MemberTag", 1), ("OutsiderTag", 0)] {
+            let tag = registry.all_implementations().iter()
+                .find(|candidate| candidate.protocol.last_segment_name().rsplit('.').next() == Some(marker))
+                .expect("exact marker implementation");
+            let candidates = registry.get_implementations(&tag.for_type);
+            assert!(candidates.iter().any(|candidate| std::ptr::eq(*candidate, tag)));
+            assert_eq!(
+                candidates.iter().filter(|candidate| candidate.methods.contains_key(&Text::from("inspect"))).count(),
+                inspect_count,
+                "{}", tag.for_type,
+            );
+        }
+        let (_, rejected) = check(&format!(
+            "{source} fn read(p: &Parcel<Outsider>) -> Int {{ p.inspect() }}"
+        ), &[]);
+        assert!(rejected.iter().any(|error| error.contains("inspect")), "{rejected:?}");
+    }
+}
+
 fn check(consumer: &str, modules: &[(&str, &str)]) -> (TypeChecker, List<Text>) {
     let mut checker = TypeChecker::new();
     checker.register_primitives();

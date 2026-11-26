@@ -1823,12 +1823,17 @@ impl ImplOverlapIndex {
         // Different nominal constructors or arities cannot unify. Keep every
         // nonnominal target (including variables) for the existing checker.
         // Arguments inside a constructor remain unconstrained by this index.
-        let mut candidates = self.other.clone();
-        if let Some(nominal) = self.nominal.get(&head) {
-            candidates.extend(nominal.iter().copied());
-        }
+        let mut candidates = List::new();
+        self.extend_nominal_candidates(&head, &mut candidates);
         candidates.sort_unstable();
         candidates
+    }
+
+    fn extend_nominal_candidates(&self, head: &(List<Text>, usize), candidates: &mut List<usize>) {
+        candidates.extend(self.other.iter().copied());
+        if let Some(nominal) = self.nominal.get(head) {
+            candidates.extend(nominal.iter().copied());
+        }
     }
 }
 
@@ -7993,74 +7998,26 @@ impl ProtocolChecker {
             return List::new();
         }
 
-        let type_key = self.make_type_key(ty);
-        let mut impls = List::new();
-
-        // First try exact match. `impl_index` is a HashMap, so iterating it
-        // directly pushes matches in hash order — nondeterministic when a type
-        // has more than one exact impl (e.g. several protocols). Collect the
-        // matches and push them in declaration order (by impl index) so the
-        // returned list is stable across runs (T0368).
-        let mut exact: List<(usize, &ProtocolImpl)> = List::new();
-        for ((tk, _), candidates) in &self.impl_index {
-            if tk == &type_key {
-                for &idx in candidates {
-                    if let Some(impl_) = self.impls.get(idx)
-                        && self.types_structurally_equal(&impl_.for_type, ty)
-                        && self
-                            .instantiate_applicable_implementation_in_environment(impl_, ty, None, environment)
-                            .is_some()
-                    {
-                        exact.push((idx, impl_));
-                    }
-                }
+        let applicable = |implementation: &&ProtocolImpl| {
+            self.instantiate_applicable_implementation_in_environment(implementation, ty, None, environment)
+                .is_some()
+        };
+        // Alias and structural heads need the full candidate set. A nominal
+        // head can exclude other constructors, never implementations of other
+        // protocols for the same constructor.
+        if !self.requires_unfiltered_type_candidates(ty)
+            && let Some(head) = ImplOverlapIndex::nominal_head(ty)
+        {
+            let mut candidates = List::new();
+            for index in self.impls_by_protocol.values() {
+                index.extend_nominal_candidates(&head, &mut candidates);
             }
+            // Each implementation belongs to one protocol. Restore source
+            // order across the indexed groups before checking its premises.
+            candidates.sort_unstable();
+            return candidates.into_iter().map(|id| &self.impls[id]).filter(applicable).collect();
         }
-        exact.sort_by_key(|(idx, _)| *idx);
-        for (_, impl_) in exact {
-            impls.push(impl_);
-        }
-
-        // Candidate heads can be nested (references, tuples, arrays). The
-        // shared matcher rejects disjoint heads and proves exact applicability;
-        // a rendered base-name key cannot decide whether a generic head matches.
-        if impls.is_empty() {
-            for implementation in &self.impls {
-                if self.instantiate_applicable_implementation_in_environment(implementation, ty, None, environment).is_some() {
-                    impls.push(implementation);
-                }
-            }
-        }
-
-        // CRITICAL FIX: Also find blanket implementations
-        // A blanket impl like `implement<S: Stream> StreamExt for S {}` has:
-        // - for_type = S (a type variable or type parameter)
-        // - where_clauses = [S: Stream]
-        // When looking up impls for Iter<I> (which implements Stream),
-        // we should find this blanket impl because Iter<I> satisfies the where clause.
-
-        // Track which impls we've already added (by pointer address to avoid PartialEq requirement)
-        let existing_ptrs: std::collections::HashSet<*const ProtocolImpl> =
-            impls.iter().map(|i| *i as *const ProtocolImpl).collect();
-
-        for impl_ in &self.impls {
-            // Skip if already added
-            let ptr = impl_ as *const ProtocolImpl;
-            if existing_ptrs.contains(&ptr) {
-                continue;
-            }
-
-            if matches!(&impl_.for_type, Type::Var(variable)
-                if impl_.parameters.contains(&crate::context::GenericBinder::Type(*variable)))
-                && self
-                    .instantiate_applicable_implementation_in_environment(impl_, ty, None, environment)
-                    .is_some()
-            {
-                impls.push(impl_);
-            }
-        }
-
-        impls
+        self.impls.iter().filter(applicable).collect()
     }
 
     // NOTE (T0117, register A25): a public `check_structural` "duck typing"
