@@ -104,8 +104,8 @@ fn hferr<T>(_: HuffError) -> Result<T, InstrError> {
 
 public type EncoderInstruction is
       SetCapacity(UInt64)
-    | InsertWithNameRef { is_static: Bool, name_index: UInt64, value: List<Byte> }
-    | InsertWithLiteralName { name: List<Byte>, value: List<Byte> }
+    | InsertWithNameRef { public(in super) is_static: Bool, public(in super) name_index: UInt64, public(in super) value: List<Byte> }
+    | InsertWithLiteralName { public(in super) name: List<Byte>, public(in super) value: List<Byte> }
     | Duplicate(UInt64);
 
 public fn encode_encoder(instr: &EncoderInstruction, out: &mut List<Byte>) {

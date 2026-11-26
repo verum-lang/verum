@@ -55,8 +55,8 @@ mount core.collections.list.{List};
 mount core.net.h3.qpack.static_table.{find as static_find, find_name as static_find_name, STATIC_TABLE_SIZE};
 
 public type DynEntry is {
-    name:  Text,
-    value: Text,
+    public(in super) name: Text,
+    public(in super) value: Text,
     /// Cached byte size per RFC 9204 §3.2.1.
     size:  UInt64,
     /// Number of live field sections that still reference this entry —

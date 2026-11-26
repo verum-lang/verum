@@ -47,6 +47,7 @@
 module core.net.h3.qpack.session;
 
 mount core.collections.list.{List};
+mount core.base.memory.replace;
 mount core.net.h3.qpack.dynamic_table.{DynamicTable, DynEntry, DynamicTableError};
 mount core.net.h3.qpack.instructions.{
     EncoderInstruction, DecoderInstruction, InstrError,
@@ -279,20 +280,20 @@ implement QpackSession {
                 let is_static = (b0 & 0x40_u8) != 0_u8;
                 let (idx, next) = core.net.h3.qpack.integer.decode(buf, cur, 6)
                     .map_err(|_| QpackSessionError.IntegerError)?;
-                let hit = if is_static {
+                let header = if is_static {
                     match stat.get(idx as Int) {
-                        Maybe.Some(e) => e,
+                        Maybe.Some(e) => QpackHeaderField { name: e.name, value: e.value },
                         Maybe.None    => return Result.Err(QpackSessionError.FieldDecode(
                             QpackDecodeError.InvalidIndex(idx))),
                     }
                 } else {
                     match self.decoder_table.get_by_absolute(idx) {
-                        Maybe.Some(e) => stat.QpackStaticEntry { name: e.name, value: e.value },
+                        Maybe.Some(e) => QpackHeaderField { name: e.name, value: e.value },
                         Maybe.None    => return Result.Err(QpackSessionError.FieldDecode(
                             QpackDecodeError.InvalidIndex(idx))),
                     }
                 };
-                headers.push(QpackHeaderField { name: hit.name, value: hit.value });
+                headers.push(header);
                 cur = next;
             } else if (b0 & 0x40_u8) != 0_u8 {
                 // Literal Field Line with Name Reference
@@ -384,19 +385,11 @@ implement QpackSession {
     // ==================== drain ====================
 
     public fn drain_encoder_out(&mut self) -> List<Byte> {
-        // Output is exactly self.encoder_out.len() bytes.
-        let mut out: List<Byte> = List.with_capacity(self.encoder_out.len());
-        out.extend_from_slice(self.encoder_out.as_slice());
-        self.encoder_out = [];
-        out
+        replace(&mut self.encoder_out, List.new())
     }
 
     public fn drain_decoder_out(&mut self) -> List<Byte> {
-        // Output is exactly self.decoder_out.len() bytes.
-        let mut out: List<Byte> = List.with_capacity(self.decoder_out.len());
-        out.extend_from_slice(self.decoder_out.as_slice());
-        self.decoder_out = [];
-        out
+        replace(&mut self.decoder_out, List.new())
     }
 
     public fn peer_insert_count(&self) -> UInt64 { self.peer_insert_count }
