@@ -19181,7 +19181,7 @@ impl VbcCodegen {
         // a different parameter lifecycle.
         let owns_parameters = func.body.is_some()
             && !func_info.is_generator && func_info.intrinsic_name.is_none();
-        for (param, ty) in func.params.iter().zip(parameter_types) {
+        for (index, (param, ty)) in func.params.iter().zip(parameter_types).enumerate() {
             let binding = self.extract_param_name_and_mutable(param)
                 .and_then(|(name, _)| self.ctx.lookup_var(&name).map(|binding| binding.reg));
             if owns_parameters && let Some(reg) = binding {
@@ -19189,6 +19189,15 @@ impl VbcCodegen {
                     verum_ast::FunctionParamKind::Regular { ty, .. } => Some(ty),
                     _ => None,
                 };
+                if ty.is_none() && let Some(carrier) = self.refined_parameter_carrier(&func_info, index) {
+                    let discipline = self.value_resource_discipline(&carrier);
+                    if let Some(fact) = self.ctx.registers.value_uses.active.get_mut(&reg) {
+                        fact.discipline = discipline;
+                        fact.refinement_storage = Some(verum_common::Shared::new(carrier.clone()));
+                    }
+                    self.establish_parameter_owner(reg, &carrier)?;
+                    continue;
+                }
                 let ownership = self.parameter_ownership(ty.as_ref(), written)
                     .map_err(|error| error.at_source(param.span))?;
                 if ownership == value_uses::ParameterOwnership::RawAddress {
@@ -19254,7 +19263,7 @@ impl VbcCodegen {
                 | FunctionParamKind::SelfRefUnsafeMut => {
                     (true, impl_type_name.cloned())
                 }
-                FunctionParamKind::Regular { ty, .. } => match &ty.kind {
+                FunctionParamKind::Regular { ty, .. } => match &Self::parameter_storage_base(ty)?.kind {
                     verum_ast::ty::TypeKind::Reference { inner, .. }
                     | verum_ast::ty::TypeKind::CheckedReference { inner, .. }
                     | verum_ast::ty::TypeKind::UnsafeReference { inner, .. }
@@ -19350,6 +19359,7 @@ impl VbcCodegen {
 
         for ((param_name, _), param) in params_with_mutability.iter().zip(func.params.iter()) {
             if let verum_ast::FunctionParamKind::Regular { ty, .. } = &param.kind {
+                let ty = Self::parameter_storage_base(ty)?;
                 // A parameter declared with a REFERENCE type holds a
                 // reference, not the referent — recorded because the type
                 // NAME loses that (`&NT` and `NT` both infer as "NT"), and

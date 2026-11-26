@@ -29,6 +29,8 @@ pub(super) enum ParameterOwnership {
 pub(super) struct BindingFact {
     pub id: BindingId,
     pub declaration_type: Maybe<TypeRef>,
+    /// Physical access to a refinement's base does not establish its predicate.
+    pub(super) refinement_storage: Maybe<verum_common::Shared<TypeRef>>,
     pub discipline: ResourceDiscipline,
 }
 #[derive(Debug, Clone, Copy, Default)]
@@ -67,6 +69,7 @@ impl ValueUseRecorder {
             BindingFact {
                 id,
                 declaration_type: None,
+                refinement_storage: None,
                 discipline: ResourceDiscipline::Unknown,
             },
         );
@@ -79,6 +82,7 @@ impl ValueUseRecorder {
     pub fn set_type(&mut self, reg: Reg, ty: TypeRef, discipline: ResourceDiscipline) {
         if let Some(fact) = self.active.get_mut(&reg) {
             fact.declaration_type = Some(ty);
+            fact.refinement_storage = None;
             fact.discipline = discipline;
         }
     }
@@ -321,8 +325,8 @@ impl super::VbcCodegen {
     /// that slot so replacing the entire value preserves its allocator data.
     pub(super) fn borrows_handle_binding(&self, expr: &verum_ast::Expr, reg: Reg) -> bool {
         Self::named_place_binding(expr)
-            .and_then(|name| self.named_binding_fact(name, reg))
-            .and_then(|fact| fact.declaration_type.as_ref()?.base_type_id())
+            .and_then(|name| self.named_ownership_carrier(name, reg))
+            .and_then(|(ty, _)| ty.base_type_id())
             .is_some_and(|id| match id.builtin_value_storage() {
                 Some(crate::types::BuiltinValueStorage::Text) => true,
                 Some(crate::types::BuiltinValueStorage::Immediate) => false,
@@ -337,7 +341,7 @@ impl super::VbcCodegen {
         self.generic_named_binding(Self::named_place_binding(expr)?, reg)
     }
     pub(super) fn generic_named_binding(&self, name: &str, reg: Reg) -> Maybe<TypeRef> {
-        let ty = self.named_binding_fact(name, reg)?.declaration_type.as_ref()?;
+        let (ty, _) = self.named_ownership_carrier(name, reg)?;
         ty.is_generic().then(|| ty.clone())
     }
 
@@ -473,7 +477,8 @@ impl super::VbcCodegen {
             return Ok(source);
         }
         let parameter = self.ctx.semantic_fn_params.get(&callable.id)
-            .and_then(|params| params.get(index)).cloned().flatten();
+            .and_then(|params| params.get(index)).cloned().flatten()
+            .or_else(|| self.refined_parameter_carrier(callable, index));
         // The name registry may contain a forward declaration or a flattened
         // overload key. Only the selected callable's retained source signature
         // can establish a raw parameter when no semantic TypeRef exists.
@@ -522,6 +527,13 @@ impl super::VbcCodegen {
     ) -> super::CodegenResult<Reg> {
         if !self.ctx.registers.emits_owned_parameter_calls { return Ok(source); }
         if self.parameter_ownership(parameter, None)? != ParameterOwnership::Value { return Ok(source); }
+        // A refined named place can supply its storage for this copy while
+        // its full semantic domain remains absent from the callable metadata.
+        let storage = actual.is_none().then(|| {
+            let name = Self::named_place_binding(argument)?;
+            self.named_ownership_carrier(name, source).map(|(ty, _)| ty.clone())
+        }).flatten();
+        let actual = actual.or(storage.as_ref());
         if actual.is_some_and(|ty| self.parameter_ownership(Some(ty), None)
             .is_ok_and(|ownership| ownership != ParameterOwnership::Value)) || self.ctx.is_raw_pointer(source) {
             return Ok(source);
@@ -765,7 +777,7 @@ impl super::VbcCodegen {
         Ok(())
     }
 
-    fn named_binding_fact(&self, name: &str, reg: Reg) -> Maybe<&BindingFact> {
+    fn named_ownership_carrier(&self, name: &str, reg: Reg) -> Maybe<(&TypeRef, ResourceDiscipline)> {
         let binding = self.ctx.lookup_var(name)?;
         if binding.reg != reg || binding.is_cell || binding.pattern_alias.is_some()
             || !matches!(binding.kind, super::RegisterKind::Local | super::RegisterKind::Parameter)
@@ -773,14 +785,15 @@ impl super::VbcCodegen {
             return None;
         }
         let fact = self.ctx.registers.value_uses.active.get(&reg)?;
-        (fact.id == binding.binding_id && fact.declaration_type.is_some()
-            && !matches!(fact.declaration_type, Some(TypeRef::Reference { .. }))).then_some(fact)
+        if fact.id != binding.binding_id { return None; }
+        let carrier = fact.declaration_type.as_ref().or(fact.refinement_storage.as_deref())?;
+        (!matches!(carrier, TypeRef::Reference { .. })).then_some((carrier, fact.discipline))
     }
 
     /// Shorthand fields use the same exact binding contract as expression fields.
     pub(super) fn consumes_named_binding(&self, name: &str, reg: Reg) -> bool {
-        self.named_binding_fact(name, reg).is_some_and(|fact| matches!(fact.discipline,
-            ResourceDiscipline::Affine | ResourceDiscipline::Linear))
+        self.named_ownership_carrier(name, reg).is_some_and(|(_, discipline)|
+            matches!(discipline, ResourceDiscipline::Affine | ResourceDiscipline::Linear))
     }
 
     /// A pattern alias has no owned cleanup only when the current binding's

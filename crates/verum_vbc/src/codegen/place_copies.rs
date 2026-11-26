@@ -434,6 +434,27 @@ impl VbcCodegen {
             _ => return None,
         };
         let info = self.ctx.lookup_function_by_id(crate::module::FunctionId(id))?;
+        if info.callable_signature.is_none() {
+            // The emitted call identifies the declaration. An independent
+            // codomain can be exact even when a parameter has a refinement
+            // that cannot be represented as a complete function TypeRef.
+            if !matches!(op, Instruction::Call { .. }) || !type_args.is_empty()
+                || !info.type_param_ids.is_empty() || source_args.len() != usize::from(args.count)
+            { return None; }
+            let descriptor = self.declared_callable_descriptors.get(&info.id)?;
+            let signature = descriptor.source_signature.as_ref()?;
+            if signature.is_async || signature.is_generator || !signature.contexts.is_empty()
+                || !signature.generics.is_empty() || signature.params.len() != source_args.len()
+            { return None; }
+            let params = self.ctx.semantic_fn_params.get(&info.id)?;
+            if params.len() != source_args.len() || params.iter().all(Option::is_some) { return None; }
+            for (slot, (formal, operand)) in params.iter().zip(source_args).enumerate() {
+                let formal = formal.clone().or_else(|| self.refined_parameter_carrier(info, slot))?;
+                let actual = self.source_expression_declaration(operand, Some(&formal), depth + 1)?;
+                if actual != formal { return None; }
+            }
+            return self.retained_formal_type(info, descriptor, signature, signature.return_type.as_ref()?);
+        }
         let TypeRef::Function { params, return_type, .. } = info.callable_signature.as_ref()? else { return None; };
         if params.len() != usize::from(args.count) { return None; }
         let mut substitution = crate::mono::TypeSubstitution::empty();

@@ -249,6 +249,56 @@ impl VbcCodegen {
             .collect()
     }
 
+    /// Top-level predicates constrain a value without introducing a storage layer.
+    pub(super) fn parameter_storage_base(mut ty: &verum_ast::Type) -> super::CodegenResult<&verum_ast::Type> {
+        let mut remaining = crate::types::MAX_TYPE_REF_DEPTH;
+        while let verum_ast::TypeKind::Refined { base, .. } = &ty.kind {
+            remaining = remaining.checked_sub(1).ok_or_else(|| super::CodegenError::unsupported_expr(
+                "refined parameter exceeds the type nesting limit").at_source(ty.span))?;
+            ty = base;
+        }
+        Ok(ty)
+    }
+
+    /// A refinement restricts admissible values without changing how its
+    /// declared base is transferred or destroyed. This witness is used only
+    /// by the ownership boundary, never as the parameter's semantic type.
+    pub(super) fn refined_parameter_carrier(
+        &self,
+        function: &super::FunctionInfo,
+        index: usize,
+    ) -> Option<TypeRef> {
+        use verum_ast::TypeKind;
+        let descriptor = self.declared_callable_descriptors.get(&function.id)?;
+        let signature = descriptor.source_signature.as_ref()?;
+        let FunctionParamKind::Regular { ty, .. } = &signature.params.get(index)?.kind
+            else { return None; };
+        if !matches!(ty.kind, TypeKind::Refined { .. }) { return None; }
+        let carrier = Self::parameter_storage_base(ty).ok()?;
+        self.retained_formal_type(function, descriptor, signature, carrier)
+    }
+
+    pub(super) fn retained_formal_type(
+        &self, function: &super::FunctionInfo, descriptor: &crate::module::FunctionDescriptor,
+        signature: &FunctionDecl, ty: &verum_ast::Type,
+    ) -> Option<TypeRef> {
+        let roster = self.callable_generic_roster(function)?;
+        // Locals follow inherited parameters in the roster and shadow them.
+        let scope = roster.iter().filter_map(|parameter|
+            Some((parameter.name.clone(), parameter.witness_slot?.0))).collect();
+        let owner = match descriptor.origin_module {
+            Some(id) => self.ctx.strings.get(id.0 as usize)?.as_str(),
+            None => self.config.module_name.as_str(),
+        };
+        let receiver = descriptor.source_receiver.as_ref().map(|ty|
+            super::ImplReceiverWitness { ty: ty.clone(), semantic: true });
+        self.semantic_formal_type_in_declaration(ty, &scope,
+            &function.type_param_ids, &Self::source_value_binders(signature),
+            &DeclarationTypeScope {
+                owner, substitution: &Default::default(), receiver: receiver.as_ref(),
+            })
+    }
+
     /// Source type lowering may only use a generic slot, an exact owner key,
     /// an explicit mount, a primitive, or a canonical prelude variant carrier.
     /// A sibling's convenient bare alias

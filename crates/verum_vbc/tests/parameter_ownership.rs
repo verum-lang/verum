@@ -77,6 +77,69 @@ fn generic_temporary_parameter_uses_the_instantiated_drop_witness() {
 }
 
 #[test]
+fn refined_parameter_drops_its_declared_base_without_publishing_an_erased_domain() {
+    let source = r#"
+        fn take(value: Ticket{true}) {}
+        fn probe() -> Int {
+            let mut count = Count { value: 0 };
+            take(Ticket { counter: &mut count });
+            if count.value == 1 { 73 } else { count.value }
+        }
+    "#;
+    let module = compile(source, true).expect("refined resource parameter");
+    let take = module.find_function_by_name("parameter_ownership.take").unwrap();
+    let function = module.get_function(take).unwrap();
+    assert!(function.owned_value_parameters);
+    assert_eq!(function.semantic_parameter_types(), Some([None].as_slice()));
+    let signature = function.source_signature.as_ref().unwrap();
+    assert!(matches!(&signature.params[0].kind,
+        verum_ast::FunctionParamKind::Regular { ty, .. }
+        if matches!(ty.kind, verum_ast::TypeKind::Refined { .. })));
+    run(source);
+}
+
+#[test]
+fn forwarding_a_refined_affine_parameter_transfers_its_single_owner() {
+    run(r#"
+        fn release(value: Ticket) {}
+        fn forward(value: Ticket{true}) { release(value); }
+        fn probe() -> Int {
+            let mut count = Count { value: 0 };
+            forward(Ticket { counter: &mut count });
+            if count.value == 1 { 73 } else { count.value }
+        }
+    "#);
+}
+
+#[test]
+fn forwarding_a_refined_copyable_parameter_keeps_the_original_live() {
+    run(r#"
+        fn release(value: Copyable) {}
+        fn forward(value: Copyable{true}) -> Int {
+            release(value);
+            value.value
+        }
+        fn probe() -> Int {
+            let mut count = Count { value: 0 };
+            let saved = forward(Copyable { counter: &mut count, value: 73 });
+            if count.value == 2 { saved } else { count.value }
+        }
+    "#);
+}
+
+#[test]
+fn a_refined_mutable_reference_updates_the_callers_original_place() {
+    run(r#"
+        fn increment(target: (&mut Count){true}) { target.value = target.value + 1; }
+        fn probe() -> Int {
+            let mut count = Count { value: 72 };
+            increment(&mut count);
+            count.value
+        }
+    "#);
+}
+
+#[test]
 fn a_named_copyable_argument_keeps_its_caller_owner() {
     run(r#"
         fn take(value: Copyable) {}

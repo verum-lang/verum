@@ -138,11 +138,13 @@ impl VbcCodegen {
         }
         // Parameters carry explicit source declarations. Their legacy display
         // hint can erase wrappers and is never a replacement for a missing one.
-        if Self::expr_ident_name(base)
+        if let Some(binding) = Self::expr_ident_name(base)
             .and_then(|name| self.ctx.lookup_var(&name))
-            .is_some_and(|binding| binding.kind == crate::codegen::RegisterKind::Parameter)
+            .filter(|binding| binding.kind == crate::codegen::RegisterKind::Parameter)
         {
-            return None;
+            let fact = self.ctx.registers.value_uses.active.get(&binding.reg)?;
+            if fact.id != binding.binding_id { return None; }
+            return self.expand_declared_alias(fact.refinement_storage.as_deref()?.clone());
         }
         self.extract_expr_type_name(base)
             .and_then(|name| self.semantic_type_in_current_scope(&name))
