@@ -59,9 +59,21 @@ fn source_module(source: &str, high: bool) -> VbcModule {
             None,
         );
     }
-    codegen
-        .collect_all_declarations(&ast)
-        .expect("declarations");
+    let declarations = [
+        (include_str!("../../../core/base/result.vr"), "Result"),
+        (include_str!("../../../core/base/maybe.vr"), "Maybe"),
+    ].map(|(source, name)| {
+        let mut module = Parser::new(source).parse_module().expect("stdlib grammar");
+        module.items.retain(|item| match &item.kind {
+            verum_ast::ItemKind::Module(decl) => decl.items.is_none(),
+            verum_ast::ItemKind::Type(decl) => decl.name.as_str() == name,
+            _ => false,
+        });
+        module
+    });
+    let [result, maybe] = &declarations;
+    codegen.collect_unit_declarations(&[result, maybe, &ast]).expect("declarations");
+    codegen.resolve_pending_imports();
     codegen.compile_module_items(&ast).expect("bodies");
     let module = codegen.finalize_module().expect("finalize");
     let outer = module
@@ -642,6 +654,7 @@ fn projected_source_and_wire(source: &str, expected: i64) {
 }
 
 const PROJECTED_RECORD: &str = r#"
+mount core.base.result.Result;
 type Cell is { padding: Int, value: Int };
 type Outer is { padding: Int, inner: Cell };
 implement Outer {
@@ -688,4 +701,121 @@ fn probe() -> Int {{
     )
     .into();
     projected_source_and_wire(source.as_str(), 3711);
+}
+
+#[test]
+fn a_result_returned_record_keeps_its_shared_projection() {
+    let source: Text = format!(
+        r#"{PROJECTED_RECORD}
+fn make(ok: Bool) -> Result<Outer, Int> {{
+    if !ok {{ return Result.Err(41); }}
+    Result.Ok(Outer {{ padding: 91, inner: Cell {{ padding: 93, value: 7 }} }})
+}}
+fn received() -> Outer {{
+    match make(true) {{ Result.Ok(value) => value, Result.Err(_) => panic("expected record") }}
+}}
+fn probe() -> Int {{
+    let error = match make(false) {{ Result.Err(code) => code, _ => -1 }};
+    let outer = received();
+    let publication = outer.publication();
+    error * 1000000 + outer.padding * 10000 + publication.padding * 100 + publication.value
+}}
+"#
+    )
+    .into();
+    projected_source_and_wire(source.as_str(), 41919307);
+}
+
+const PROJECTED_VARIANT: &str = r#"
+mount core.base.maybe.Maybe;
+type Cell is { padding: Int, value: Int };
+type Options is { version: Int, features: Maybe<Cell>, optional: Maybe<Bool> };
+type Dependency is Requirement(Int) | Detailed(Options);
+type Outer is { padding: Int, inner: Dependency };
+implement Outer {
+    fn dependency(&self) -> Maybe<&Dependency> { Maybe.Some(&self.inner) }
+    fn dependency_mut(&mut self) -> Maybe<&mut Dependency> { Maybe.Some(&mut self.inner) }
+}
+fn sample() -> Outer {
+    Outer { padding: 91, inner: Dependency.Detailed(Options {
+        version: 13, features: Maybe.Some(Cell { padding: 93, value: 7 }),
+        optional: Maybe.Some(false),
+    }) }
+}
+"#;
+
+#[test]
+fn a_direct_borrowed_variant_pattern_keeps_the_record_payload() {
+    let source: Text = format!(
+        r#"{PROJECTED_VARIANT}
+fn probe() -> Int {{
+    let outer = sample();
+    match &outer.inner {{
+        Dependency.Detailed(options) => {{
+            assert(options.optional is Maybe.Some(false));
+            match &options.features {{
+                Maybe.Some(cell) => options.version * 10000 + cell.padding * 100 + cell.value,
+                _ => -2,
+            }}
+        }},
+        _ => -1,
+    }}
+}}
+"#
+    )
+    .into();
+    projected_source_and_wire(source.as_str(), 139307);
+}
+
+#[test]
+fn a_returned_maybe_reference_keeps_nested_variant_record_fields() {
+    let source: Text = format!(
+        r#"{PROJECTED_VARIANT}
+fn probe() -> Int {{
+    let outer = sample();
+    match outer.dependency() {{
+        Maybe.Some(Dependency.Detailed(options)) => {{
+            assert(options.optional is Maybe.Some(false));
+            match &options.features {{
+                Maybe.Some(cell) => options.version * 10000 + cell.padding * 100 + cell.value,
+                _ => -2,
+            }}
+        }},
+        _ => -1,
+    }}
+}}
+"#
+    )
+    .into();
+    projected_source_and_wire(source.as_str(), 139307);
+}
+
+#[test]
+fn a_returned_mutable_variant_projection_updates_its_original_payload() {
+    let source: Text = format!(
+        r#"{PROJECTED_VARIANT}
+fn probe() -> Int {{
+    let mut outer = sample();
+    match outer.dependency_mut() {{
+        Maybe.Some(Dependency.Detailed(options)) => {{
+            options.version = 17;
+            match &mut options.features {{
+                Maybe.Some(cell) => {{ cell.padding = 37; cell.value = 11; }},
+                _ => panic("expected features"),
+            }}
+        }},
+        _ => panic("expected dependency"),
+    }}
+    match &outer.inner {{
+        Dependency.Detailed(options) => match &options.features {{
+            Maybe.Some(cell) => options.version * 10000 + cell.padding * 100 + cell.value,
+            _ => -2,
+        }},
+        _ => -1,
+    }}
+}}
+"#
+    )
+    .into();
+    projected_source_and_wire(source.as_str(), 173711);
 }

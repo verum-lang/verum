@@ -21728,6 +21728,49 @@ impl VbcCodegen {
     ) -> CodegenResult<()> {
         use verum_ast::PatternKind;
 
+        if !matches!(pattern.kind, PatternKind::Variant { .. } | PatternKind::Record { .. } | PatternKind::Tuple(_)) {
+            return self.bind_pattern_contents(pattern, scrutinee, mode, declaration);
+        }
+
+        // A borrowed field is a reference to the slot containing its payload.
+        // Follow each slot once. A write requires permission at every layer.
+        let mut declaration = declaration;
+        let mut register = scrutinee;
+        let mut projected_mode = None;
+        let mut slot = None;
+        while let Some(crate::types::TypeRef::Reference { inner, mutability, tier }) = declaration {
+            use crate::types::Mutability;
+            let enclosing = projected_mode.as_ref().unwrap_or(mode);
+            let access = match enclosing {
+                PatternBindingMode::Borrowed(Mutability::Immutable, _) => Mutability::Immutable,
+                _ => *mutability,
+            };
+            if enclosing.is_borrowed() {
+                let value = *slot.get_or_insert_with(|| self.ctx.alloc_temp());
+                self.ctx.emit(Instruction::Deref { dst: value, ref_reg: register });
+                register = value;
+            }
+            projected_mode = Some(PatternBindingMode::Borrowed(access, *tier));
+            declaration = Some(inner);
+        }
+        let result = self.bind_pattern_contents(
+            pattern, register, projected_mode.as_ref().unwrap_or(mode), declaration,
+        );
+        if let Some(slot) = slot {
+            self.ctx.free_temp(slot);
+        }
+        result
+    }
+
+    fn bind_pattern_contents(
+        &mut self,
+        pattern: &verum_ast::Pattern,
+        scrutinee: Reg,
+        mode: &PatternBindingMode,
+        declaration: Option<&crate::types::TypeRef>,
+    ) -> CodegenResult<()> {
+        use verum_ast::PatternKind;
+
         match &pattern.kind {
             PatternKind::Wildcard => {
                 // Nothing to bind

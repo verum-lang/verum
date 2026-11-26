@@ -79,3 +79,51 @@ fn mutable_binding_cannot_upgrade_an_immutable_payload_reference() {
         .compile_module(&ast).expect_err("immutable payload cannot authorize mutation");
     assert!(error.to_string().contains("no declared mutable projection"), "{error}");
 }
+
+#[test]
+fn nested_variant_patterns_respect_shared_access_at_each_level() {
+    for input in ["Slot<&Entry>", "&Slot<&mut Entry>", "&mut Slot<&Entry>"] {
+        let source = format!(r#"
+            module pattern_reference;
+            type Record is {{ value: Int }};
+            type Entry is Empty | Full(Record);
+            type Slot<T> is Missing | Item(T);
+            fn update(slot: {input}) {{
+                if let Slot.Item(Entry.Full(record)) = slot {{ record.value = 73; }}
+            }}
+        "#);
+        let ast = Parser::new(&source).parse_module().expect("valid pattern syntax");
+        let error = VbcCodegen::with_config(CodegenConfig::new("pattern_reference"))
+            .compile_module(&ast).expect_err(input);
+        assert!(error.to_string().contains("no declared mutable projection"), "{input}: {error}");
+    }
+}
+
+#[test]
+fn nested_mutable_variant_reference_updates_the_original_slot() {
+    let source = r#"
+        module pattern_reference;
+        type Record is { value: Int };
+        type Entry is Empty | Full(Record);
+        type Slot<T> is Missing | Item(T);
+        fn update(slot: &mut Slot<&mut Entry>) {
+            if let Slot.Item(Entry.Full(record)) = slot { record.value = 73; }
+        }
+        fn main() -> Int {
+            let mut entry = Entry.Full(Record { value: 11 });
+            let mut slot = Slot.Item(&mut entry);
+            update(&mut slot);
+            match &entry { Entry.Full(record) => record.value, _ => -1 }
+        }
+    "#;
+    let ast = Parser::new(source).parse_module().expect("valid pattern syntax");
+    let module = VbcCodegen::with_config(CodegenConfig::new("pattern_reference"))
+        .compile_module(&ast).expect("both borrows allow mutation");
+    let wire = verum_vbc::serialize::serialize_module(&module).unwrap();
+    for module in [module, verum_vbc::deserialize::deserialize_module(&wire).unwrap()] {
+        let entry = module.find_function_by_name("pattern_reference.main").unwrap();
+        let result = verum_vbc::interpreter::Interpreter::new(Arc::new(module))
+            .execute_function(entry).expect("execute nested reference");
+        assert_eq!(result.try_as_i64(), Some(73));
+    }
+}
