@@ -407,6 +407,22 @@ fn inherited_associated_method_cannot_replace_parent_assignment() {
         "module core.owned; type Base is protocol {type C;fn get()->Self.C;};type F is protocol extends Base {};type Model is {x:()};implement Base for Model {type C=Bool;fn get()->Bool{true}} implement F for Model {fn get()->Int{1}}",
     );
 }
+
+#[test]
+fn inherited_projection_uses_the_conditional_parent_in_the_childs_scope() {
+    let source = r#"module core.owned;
+        type Ready is protocol {};
+        type Base is protocol { type Item; };
+        type Child is protocol extends Base { fn read(self, value: Self.Item) -> Self.Item; };
+        type Wrapper<T> is { value: T };
+        implement<T: Ready> Base for Wrapper<T> { type Item = T; }
+        implement<X: Ready> Child for Wrapper<X> { fn read(self, value: X) -> X { value } }
+    "#;
+    accepts(source);
+    rejects(&source.replace("value: X) -> X", "value: Bool) -> Bool"));
+    let missing = errors(&source.replace("implement<X: Ready>", "implement<X>"));
+    assert!(missing.iter().any(|e| e.contains("E405") || e.contains("E427")), "{missing:?}");
+}
 #[test]
 fn inherited_projection_does_not_use_child_shadow() {
     rejects(

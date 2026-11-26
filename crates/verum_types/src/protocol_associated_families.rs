@@ -932,6 +932,19 @@ impl ProtocolChecker {
                 &mut Vec::new(),
             )?
             .ok_or_else(|| Text::from("method projection is absent from its declaring protocol"))?;
+        if selected.owner != key {
+            // An inherited member belongs to the instantiated ancestor. Its
+            // conditional implementation must hold under this implementation's
+            // premises, including when the receiver is still generic.
+            let application = self.resolve_family_implementations(
+                self.impls_by_protocol.get_key_value(&selected.owner),
+                &implementation.for_type, name, supplied, assumptions,
+                Some((&selected.arguments, &selected)), None,
+            )?;
+            return application.map(|family| family.result).ok_or_else(|| {
+                Text::from("method projection has no established ancestor implementation")
+            });
+        }
         let candidate_owns_assignment = candidate.is_some_and(|candidate| {
             candidate.owner == selected.owner
                 && candidate.arguments.len() == selected.arguments.len()
@@ -952,29 +965,6 @@ impl ProtocolChecker {
             && let Some(assignment) = implementation.associated_types.get(name)
         {
             return assignment.instantiate(&arguments, &Substitution::new());
-        }
-        if selected.owner != key {
-            // An inherited method uses only an established implementation of its
-            // exact ancestor application. A child may declare a different C.
-            let span = implementation.span;
-            let path = verum_ast::Path::new(
-                selected
-                    .owner
-                    .as_str()
-                    .split('.')
-                    .map(|name| verum_ast::ty::PathSegment::Name(verum_ast::Ident::new(name, span)))
-                    .collect(),
-                span,
-            );
-            if let Some((ancestor, substitution)) = self.find_impl_for_instantiation(
-                &implementation.for_type,
-                &path,
-                &selected.arguments,
-            ) {
-                if let Some(assignment) = ancestor.associated_types.get(name) {
-                    return assignment.instantiate(&arguments, &substitution);
-                }
-            }
         }
         if let Some(default) = &selected.declaration.default {
             default.try_apply_subst(&scope)
