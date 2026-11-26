@@ -420,6 +420,21 @@ fn typed_atomic_store_can_run_in_a_synchronous_callback() {
 }
 
 #[test]
+fn constructing_a_raw_slice_preserves_a_synchronous_callback_contract() {
+    let declarations = r#"
+        @intrinsic("slice_from_raw_parts") unsafe fn borrowed(p:*const Byte,n:USize)->&[Byte];
+        fn accept(callback:fn(*const Byte,USize)) {}
+    "#;
+    let sync = format!("{declarations} fn install() {{ accept(|p,n| {{ unsafe {{ borrowed(p,n); }} }}); }}");
+    let accepted = errors(&sync);
+    assert!(accepted.is_empty(), "{accepted:?}");
+    let suspending = format!("{declarations} async fn later() {{}} fn install() {{
+        accept(|p,n| {{ unsafe {{ borrowed(p,n); }} later(); }}); }}");
+    let rejected = errors(&suspending);
+    assert!(rejected.iter().any(|error| error.contains("Async")), "{rejected:?}");
+}
+
+#[test]
 fn a_source_factory_alias_preserves_the_selected_declarations_contract() {
     let consumer = "mount platform.inspect; static mut HANDLER: fn() = handler;
                     fn handler() { inspect(); }";

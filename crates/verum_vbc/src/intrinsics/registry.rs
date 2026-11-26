@@ -1403,6 +1403,9 @@ impl Intrinsic {
                 | InlineSequenceId::AtomicFetchXor | InlineSequenceId::AtomicExchange, width,
             ) if supports_atomic_storage(u32::from(width) * 8) => IntrinsicCallBound::Synchronous,
             CodegenStrategy::RetainCopy
+            // Constructs a slice descriptor from pointer and length on the
+            // calling stack. This bound establishes only absence of suspension.
+            | CodegenStrategy::InlineSequence(InlineSequenceId::MakeSlice)
             | CodegenStrategy::DirectOpcode(Opcode::Panic | Opcode::AtomicFence) => IntrinsicCallBound::Synchronous,
             _ => IntrinsicCallBound::Unknown,
         }

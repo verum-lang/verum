@@ -71,3 +71,10 @@ fn atomic_contract_depends_on_the_operation_and_supported_width() {
         assert_eq!(intrinsic.call_bound(), IntrinsicCallBound::Unknown);
     }
 }
+#[test]
+fn raw_slice_construction_is_synchronous_for_both_permissions() {
+    for name in ["slice_from_raw_parts", "slice_from_raw_parts_mut"] {
+        let intrinsic = lookup_intrinsic(name).unwrap().intrinsic;
+        assert_eq!(intrinsic.call_bound(), IntrinsicCallBound::Synchronous, "{name}");
+    }
+}
