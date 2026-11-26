@@ -1,0 +1,36 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L2
+// @tags: term, paragraph, visibility
+// @expected-error: E202 "'spans' is Private"
+// @expected-error: E202 "'content' is Private"
+// @expected-error: E202 "'style' is Private"
+// @expected-error: "cannot write through a shared reference"
+// @expected-error: "cannot write through a shared reference"
+// @expected-error-count: 5
+
+mount core.term.widget.paragraph.{Line, TextSpan};
+mount core.term.style.style.Style;
+
+fn replace_runs(line: &mut Line) {
+    line.spans = [TextSpan.raw("replacement")];
+}
+
+fn replace_content(span: &mut TextSpan) {
+    span.content = "replacement";
+}
+
+fn replace_style(span: &mut TextSpan) {
+    span.style = Style.new();
+}
+
+fn replace_run(line: &Line) {
+    let runs: &[TextSpan] = line.spans();
+    runs[0] = TextSpan.raw("replacement");
+}
+
+fn replace_text(span: &TextSpan) {
+    *span.content() = "replacement";
+}
+
+fn main() {}

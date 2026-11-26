@@ -9,7 +9,7 @@
 module core.term.widget.spinner;
 
 mount super.protocol.{StatefulWidget, Styled};
-mount super.paragraph.TextSpan;
+mount super.paragraph.{TextSpan, write_text};
 mount super.super.render.buffer.Buffer;
 mount super.super.layout.rect.Rect;
 mount super.super.style.style.Style;
@@ -198,13 +198,13 @@ implement StatefulWidget for Spinner {
         let frame_text = &self.frames.frames[frame_idx];
 
         // Render spinner character
-        let mut x = buf.set_string(area.x, area.y, frame_text, self.style);
+        let x = buf.set_string(area.x, area.y, frame_text, self.style);
 
         // Render label if present
         match self.label {
             Maybe.Some(ref label) => {
                 if x < area.right() {
-                    x = buf.set_string(x + 1, area.y, &label.content, label.style);
+                    write_text(buf, x + 1, area.y, area.right(), label.content(), label.style());
                 }
             }
             Maybe.None => {}

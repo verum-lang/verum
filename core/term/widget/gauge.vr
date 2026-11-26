@@ -10,7 +10,8 @@ module core.term.widget.gauge;
 
 mount super.protocol.{Widget, Styled};
 mount super.block.Block;
-mount super.paragraph.TextSpan;
+mount super.paragraph.{TextSpan, write_text};
+mount super.input.grapheme_next;
 mount super.super.render.buffer.Buffer;
 mount super.super.layout.rect.Rect;
 mount super.super.style.style.Style;
@@ -79,6 +80,26 @@ implement TermGauge {
     public fn use_unicode(self, enabled: Bool) -> TermGauge {
         TermGauge { use_unicode: enabled, ..self }
     }
+
+    fn render_label(&self, label: &TextSpan, area: Rect, buf: &mut Buffer, filled_width: Int) {
+        let width = label.width();
+        if width > area.width() { return; }
+        let mut x = area.x + (area.width() - width) / 2;
+        let text = label.content();
+        let mut byte = 0;
+        while byte < text.len() {
+            let next = grapheme_next(text, byte);
+            let style = if x - area.x < filled_width {
+                self.gauge_style.reversed()
+            } else {
+                label.style()
+            };
+            let (end, complete) = write_text(buf, x, area.y, area.right(), &text.slice(byte, next), style);
+            if !complete { break; }
+            x = end;
+            byte = next;
+        }
+    }
 }
 
 implement Widget for TermGauge {
@@ -120,40 +141,12 @@ implement Widget for TermGauge {
             }
         }
 
-        // Determine label text
-        let label_text = match self.label {
-            Maybe.Some(ref l) => l.content.clone(),
+        match self.label {
+            Maybe.Some(ref label) => self.render_label(label, gauge_area, buf, filled_width),
             Maybe.None => {
                 let pct = (self.ratio * 100.0) as Int;
-                f"{pct}%"
-            }
-        };
-
-        let label_style = match self.label {
-            Maybe.Some(ref l) => l.style,
-            Maybe.None => self.style,
-        };
-
-        // Center label over the gauge
-        let label_len = label_text.len();
-        if label_len <= gauge_area.width() {
-            let label_x = gauge_area.x + (gauge_area.width() - label_len) / 2;
-            let mut i = 0;
-            let mut x = label_x;
-            while i < label_len && x < gauge_area.right() {
-                let ch = label_text.slice(i, i + 1);
-                let col = x - gauge_area.x;
-                // Invert style where label overlaps the filled portion
-                let char_style = if col < filled_width {
-                    Style.new()
-                        .fg(self.gauge_style.bg.unwrap_or(Color.Reset))
-                        .bg(self.gauge_style.fg.unwrap_or(Color.Reset))
-                } else {
-                    label_style
-                };
-                buf.get_mut(x, y).set_char(&ch, char_style);
-                x = x + 1;
-                i = i + 1;
+                let label = TextSpan.styled(f"{pct}%", self.style);
+                self.render_label(&label, gauge_area, buf, filled_width);
             }
         }
     }

@@ -157,17 +157,11 @@ implement StatefulWidget for SelectableList {
             // Draw item content
             let item = &self.items[item_idx];
             let item_style = if is_selected { self.highlight_style } else { self.style };
-            let mut x = content_x;
-            for span in &item.spans {
-                let combined = item_style.patch(span.style);
-                x = buf.set_string(x, y, &span.content, combined);
-            }
+            let x = item.write(buf, content_x, y, list_area.right(), item_style);
 
             // Fill remaining width with highlight style if selected
-            if is_selected {
-                for fill_x in x..list_area.right() {
-                    buf.get_mut(fill_x, y).style = self.highlight_style;
-                }
+            if is_selected && x < list_area.right() {
+                buf.set_style(Rect.new(x, y, list_area.right() - x, 1), self.highlight_style);
             }
         }
     }

@@ -10,8 +10,9 @@ module core.term.widget.paragraph;
 
 mount super.protocol.{Widget, Styled};
 mount super.block.{Block, Alignment};
+mount super.input.grapheme_next;
 mount super.super.render.buffer.Buffer;
-mount super.super.render.cell.char_display_width;
+mount super.super.render.cell.grapheme_width;
 mount super.super.layout.rect.Rect;
 mount super.super.style.style.Style;
 
@@ -43,6 +44,12 @@ implement TextSpan {
         TextSpan { content: content, style: style }
     }
 
+    /// Borrow the text of this span.
+    public fn content(&self) -> &Text { &self.content }
+
+    /// Return the style applied to this span.
+    public fn style(&self) -> Style { self.style }
+
     /// Chain two spans into a Line: span1.then(span2) -> Line.
     public fn then(self, next: TextSpan) -> Line {
         let mut spans = List.new();
@@ -53,23 +60,14 @@ implement TextSpan {
 
     /// Get the display width of this span.
     public fn width(&self) -> Int {
-        let mut w = 0;
-        let bytes = self.content.as_bytes();
-        let mut i = 0;
-        while i < bytes.len() {
-            if bytes[i] < 0x80 {
-                if bytes[i] >= 0x20 { w = w + 1; }
-                i = i + 1;
-            } else {
-                let char_len = if bytes[i] < 0xE0 { 2 }
-                    else if bytes[i] < 0xF0 { 3 }
-                    else { 4 };
-                let grapheme = self.content.slice(i, (i + char_len).min(bytes.len()));
-                w = w + char_display_width(&grapheme);
-                i = i + char_len;
-            }
+        let mut width = 0;
+        let mut byte = 0;
+        while byte < self.content.len() {
+            let next = grapheme_next(&self.content, byte);
+            width = width + grapheme_width(&self.content.slice(byte, next));
+            byte = next;
         }
-        w
+        width
     }
 }
 
@@ -78,6 +76,9 @@ implement Line {
     public fn from(spans: List<TextSpan>) -> Line {
         Line { spans: spans }
     }
+
+    /// Borrow the spans in display order.
+    public fn spans(&self) -> &[TextSpan] { self.spans.as_slice() }
 
     /// Create a line from raw (unstyled) text.
     public fn raw(text: Text) -> Line {
@@ -101,6 +102,42 @@ implement Line {
         }
         w
     }
+
+    /// Draw the prefix that fits before the exclusive right edge.
+    public(in core.term.widget) fn write(
+        &self, buf: &mut Buffer, x: Int, y: Int, right: Int, base: Style,
+    ) -> Int {
+        let mut col = x;
+        for span in &self.spans {
+            if col >= right { break; }
+            let (end, complete) = write_text(buf, col, y, right, &span.content, base.patch(span.style));
+            col = end;
+            if !complete { break; }
+        }
+        col
+    }
+}
+
+/// Write whole graphemes within the row and report whether the whole run fit.
+public(in core.term.widget) fn write_text(
+    buf: &mut Buffer, x: Int, y: Int, right: Int, text: &Text, style: Style,
+) -> (Int, Bool) {
+    // A UTF-8 run occupies at most one terminal column per byte.
+    if text.len() <= right - x && buf.in_bounds(right - 1, y) {
+        return (buf.set_string(x, y, text, style), true);
+    }
+    let mut byte = 0;
+    let mut col = x;
+    while byte < text.len() && col < right {
+        let next = grapheme_next(text, byte);
+        let width = grapheme_width(&text.slice(byte, next)).max(1);
+        if width > right - col { break; }
+        if col + width > 0 && !buf.in_bounds(col + width - 1, y) { break; }
+        col = col + width;
+        byte = next;
+    }
+    if byte == text.len() { return (buf.set_string(x, y, text, style), true); }
+    (buf.set_string(x, y, &text.slice(0, byte), style), false)
 }
 
 /// Paragraph — displays formatted text with optional wrapping and scrolling.
@@ -192,12 +229,7 @@ implement Widget for Paragraph {
                 Right => text_area.x + (text_area.width() - line_width).max(0),
             };
 
-            let mut x = start_x - h_offset;
-
-            for span in &line.spans {
-                let combined_style = self.style.patch(span.style);
-                x = buf.set_string(x, y, &span.content, combined_style);
-            }
+            line.write(buf, start_x - h_offset, y, text_area.right(), self.style);
 
             y = y + 1;
             line_idx = line_idx + 1;

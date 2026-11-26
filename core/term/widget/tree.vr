@@ -10,7 +10,7 @@ module core.term.widget.tree;
 
 mount super.protocol.{StatefulWidget, Styled};
 mount super.block.Block;
-mount super.paragraph.{Line, TextSpan};
+mount super.paragraph.Line;
 mount super.super.render.buffer.Buffer;
 mount super.super.layout.rect.Rect;
 mount super.super.style.style.Style;
@@ -40,6 +40,10 @@ implement<T> TreeItem<T> {
     /// Whether this node has children.
     public fn has_children(&self) -> Bool {
         self.children.len() > 0
+    }
+
+    fn child(&self, index: Int) -> &TreeItem<T> {
+        &self.children[index]
     }
 }
 
@@ -142,9 +146,10 @@ implement TreeState {
 
     /// Toggle expansion of the currently selected node.
     public fn toggle_selected(&mut self) {
-        match &self.selected {
+        let selected = self.selected.clone();
+        match selected {
             Maybe.Some(path) => {
-                self.toggle(path.clone());
+                self.toggle(path);
             }
             Maybe.None => {}
         }
@@ -164,8 +169,8 @@ fn paths_equal(a: &List<Int>, b: &List<Int>) -> Bool {
 // Flattened visible item — helper for rendering
 // =============================================================================
 
-/// A visible row: (path, depth, line, has_children, is_last_sibling).
-type VisibleRow is (List<Int>, Int, Line, Bool, Bool);
+/// A visible row carries its path and whether its connector ends a sibling group.
+type VisibleRow is (List<Int>, Bool);
 
 /// Flatten tree items into a visible list respecting expanded state.
 fn flatten_visible<T>(
@@ -173,32 +178,44 @@ fn flatten_visible<T>(
     expanded: &List<List<Int>>,
 ) -> List<VisibleRow> {
     let mut result = List.new();
-    flatten_recurse(items, expanded, &mut result, List.new(), 0);
+    if items.is_empty() { return result; }
+    let mut path: List<Int> = [0];
+    let mut sibling_counts: List<Int> = [items.len()];
+    while !path.is_empty() {
+        let level = path.len() - 1;
+        result.push((path.clone(), path[level] + 1 == sibling_counts[level]));
+
+        if is_path_expanded(&path, expanded) {
+            let children = item_at_path(items, &path).children.len();
+            if children > 0 {
+                path.push(0);
+                sibling_counts.push(children);
+                continue;
+            }
+        }
+
+        // Advance to the next sibling, climbing past completed sibling groups.
+        while !path.is_empty() {
+            let level = path.len() - 1;
+            let next = path[level] + 1;
+            if next < sibling_counts[level] {
+                path[level] = next;
+                break;
+            }
+            path.pop();
+            sibling_counts.pop();
+        }
+    }
     result
 }
 
-@allow(unbounded_recursion)
-fn flatten_recurse<T>(
-    items: &List<TreeItem<T>>,
-    expanded: &List<List<Int>>,
-    out: &mut List<VisibleRow>,
-    prefix_path: List<Int>,
-    depth: Int,
-) {
-    let count = items.len();
-    for i in 0..count {
-        let item = &items[i];
-        let mut path = prefix_path.clone();
-        path.push(i);
-        let is_last = i == count - 1;
-
-        out.push((path.clone(), depth, item.text.clone(), item.has_children(), is_last));
-
-        // If this node has children and is expanded, recurse
-        if item.has_children() && is_path_expanded(&path, expanded) {
-            flatten_recurse(&item.children, expanded, out, path, depth + 1);
-        }
+/// Resolve a path emitted by flatten_visible against the same tree.
+fn item_at_path<'a, T>(items: &'a List<TreeItem<T>>, path: &List<Int>) -> &'a TreeItem<T> {
+    let mut item = &items[path[0]];
+    for level in 1..path.len() {
+        item = item.child(path[level]);
     }
+    item
 }
 
 fn is_path_expanded(path: &List<Int>, expanded: &List<List<Int>>) -> Bool {
@@ -304,10 +321,9 @@ implement<T> StatefulWidget for Tree<T> {
 
             let entry = &visible[vis_idx];
             let path = &entry.0;
-            let depth = entry.1;
-            let line = &entry.2;
-            let has_children = entry.3;
-            let is_last = entry.4;
+            let depth = path.len() - 1;
+            let item = item_at_path(&self.items, path);
+            let is_last = entry.1;
 
             let y = tree_area.y + row_i;
 
@@ -342,7 +358,7 @@ implement<T> StatefulWidget for Tree<T> {
             }
 
             // Draw expand/collapse indicator
-            if has_children {
+            if item.has_children() {
                 let indicator = if is_path_expanded(path, &state.expanded) {
                     "▾ "
                 } else {
@@ -356,16 +372,11 @@ implement<T> StatefulWidget for Tree<T> {
 
             // Draw the line content
             let row_style = if is_selected { self.highlight_style } else { self.style };
-            for span in &line.spans {
-                let combined = row_style.patch(span.style);
-                x = buf.set_string(x, y, &span.content, combined);
-            }
+            x = item.text.write(buf, x, y, tree_area.right(), row_style);
 
             // Fill remaining width if selected
-            if is_selected {
-                for fill_x in x..tree_area.right() {
-                    buf.get_mut(fill_x, y).style = self.highlight_style;
-                }
+            if is_selected && x < tree_area.right() {
+                buf.set_style(Rect.new(x, y, tree_area.right() - x, 1), self.highlight_style);
             }
         }
     }

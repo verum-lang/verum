@@ -7,6 +7,7 @@
 /// Layer 5: Widget Library — all 18 widgets with builder APIs.
 
 mount core.term.widget.*;
+mount core.term.widget.paragraph.TextSpan;
 mount core.term.style.{Style, Color};
 mount core.term.layout.{Rect, Margin, Constraint};
 mount core.term.render.Buffer;
@@ -40,16 +41,19 @@ fn test_paragraph() {
 }
 
 fn test_span_and_line() {
-    let s1 = Span.raw("Hello ");
-    let s2 = Span.styled("World", Style.new().fg(Color.Red).bold());
+    let s1 = TextSpan.raw("Hello ");
+    let s2 = TextSpan.styled("World", Style.new().fg(Color.Red).bold());
 
     // Chain spans into a line
     let line = s1.then(s2);
-    assert_eq(line.spans.len(), 2);
+    let spans: &[TextSpan] = line.spans();
+    assert_eq(spans.len(), 2);
+    assert_eq(*spans[0].content(), "Hello ");
+    assert(spans[1].style().has_fg());
 
     // Line from raw text
     let plain = Line.raw("Simple text");
-    assert_eq(plain.spans.len(), 1);
+    assert_eq(plain.spans().len(), 1);
 }
 
 fn test_table() {
@@ -106,7 +110,7 @@ fn test_text_input() {
 fn test_gauge() {
     let gauge = Gauge.new()
         .percent(42)
-        .label(Span.raw("42%"))
+        .label(TextSpan.raw("42%"))
         .gauge_style(Style.new().fg(Color.Green))
         .use_unicode(true);
 }
@@ -136,7 +140,7 @@ fn test_scrollbar() {
 
 fn test_spinner() {
     let spinner = Spinner.new(SpinnerFrames.dots())
-        .label(Span.raw("Loading..."));
+        .label(TextSpan.raw("Loading..."));
 }
 
 fn test_notification() {

@@ -13,7 +13,7 @@ mount super.block.Block;
 mount super.paragraph.{Line, TextSpan};
 mount super.super.render.buffer.Buffer;
 mount super.super.layout.rect.Rect;
-mount super.super.layout.constraint.{LayoutConstraint, Layout, Direction};
+mount super.super.layout.constraint.{LayoutConstraint, TermLayout};
 mount super.super.style.style.Style;
 
 // =============================================================================
@@ -245,8 +245,8 @@ implement StatefulWidget for Table {
         buf.set_style(table_area, self.style);
 
         // 2. Calculate column widths using layout
-        let col_widths = Layout.horizontal()
-            .constraints(self.widths.clone())
+        let col_widths = TermLayout.horizontal()
+            .constraints(self.widths)
             .spacing(self.column_spacing)
             .split(Rect.new(table_area.x, table_area.y, table_area.width(), 1));
 
@@ -310,9 +310,7 @@ implement StatefulWidget for Table {
 
             // Apply highlight style to entire row
             if is_selected {
-                for x in table_area.x..table_area.right() {
-                    buf.get_mut(x, y).style = buf.get_mut(x, y).style.patch(self.highlight_style);
-                }
+                buf.set_style(Rect.new(table_area.x, y, table_area.width(), 1), self.highlight_style);
             }
 
             y = y + row.height + row.bottom_margin;
@@ -338,11 +336,6 @@ fn render_row(buf: &mut Buffer, row: &TableRow, col_areas: &List<Rect>, y: Int, 
     for col in 0..num_cols {
         let cell_area = Rect.new(col_areas[col].x, y, col_areas[col].width(), row.height);
         let cell = &row.cells[col];
-        let line = &cell.content;
-        let mut x = cell_area.x;
-        for span in &line.spans {
-            let combined = cell.style.patch(span.style);
-            x = buf.set_string(x, y, &span.content, combined);
-        }
+        cell.content.write(buf, cell_area.x, y, cell_area.right(), cell.style);
     }
 }

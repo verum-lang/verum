@@ -231,17 +231,12 @@ implement StatefulWidget for Menu {
 
             // Fill row background for selected item
             if is_selected {
-                for x in menu_area.x..menu_area.right() {
-                    buf.get_mut(x, y).style = self.highlight_style;
-                }
+                buf.set_style(Rect.new(menu_area.x, y, menu_area.width(), 1), self.highlight_style);
             }
 
             // Draw label with leading space
-            let mut x = buf.set_string(menu_area.x, y, " ", base_style);
-            for span in &item.label.spans {
-                let combined = base_style.patch(span.style);
-                x = buf.set_string(x, y, &span.content, combined);
-            }
+            let start = buf.set_string(menu_area.x, y, " ", base_style);
+            let x = item.label.write(buf, start, y, menu_area.right(), base_style);
 
             // Draw shortcut right-aligned (if present)
             match item.shortcut {

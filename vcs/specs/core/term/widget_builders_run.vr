@@ -77,13 +77,15 @@
 // inside `Style.patch` before drawing anything (T1271). When that is
 // fixed, the render half belongs in a sibling file that asserts on
 // `Buffer.to_lines()`.
-mount core.term.widget.{Block, Borders, BorderType, Paragraph, Line, TextSpan,
+mount core.term.widget.{Block, Borders, BorderType, Paragraph, Line,
                         Wrap, Alignment, Table, TableRow, TableCell,
                         HighlightSpacing, Menu, MenuItem, Scrollbar, Canvas,
-                        Spinner, Notification, TermGauge, TextInput, TextArea,
+                        Spinner, Notification, TextInput, TextArea,
                         WrapMode, Sparkline, BarChart, BarGroup, Bar, Tabs,
                         SelectableList, Dialog, DialogButton, DialogState};
 mount core.term.widget.canvas.{LineShape, Marker};
+mount core.term.widget.gauge.TermGauge;
+mount core.term.widget.paragraph.TextSpan;
 mount core.term.layout.{Margin, LayoutConstraint};
 mount core.term.style.{Style, Color};
 
@@ -98,7 +100,7 @@ fn main() {
     print(f"paragraph lines={p.text.len()}");
 
     let l = Line.from([TextSpan.raw("xy"), TextSpan.styled("z", Style.new().dim())]);
-    print(f"line spans={l.spans.len()} width={l.width()}");
+    print(f"line spans={l.spans().len()} width={l.width()}");
 
     let t = Table.new([TableRow.new(["a", "b"])],
                       [LayoutConstraint.Length(8), LayoutConstraint.Fill(1)])

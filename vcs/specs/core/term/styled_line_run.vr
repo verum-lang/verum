@@ -1,0 +1,50 @@
+// @test: run
+// @tier: 0
+// @level: L2
+// @tags: term, paragraph, widget, rendering
+// @expected-stdout: styled line ok
+
+mount core.term.widget.paragraph.{Line, Paragraph, TextSpan};
+mount core.term.widget.protocol.Widget;
+mount core.term.widget.tree.{TreeItem, TreeState};
+mount core.term.layout.rect.Rect;
+mount core.term.render.buffer.Buffer;
+mount core.term.style.color.Color;
+mount core.term.style.style.Style;
+
+fn check_tree_navigation() {
+    let first = TreeItem.node(Line.raw("first"), [TreeItem.leaf(Line.raw("child"), 1)], 0);
+    let second = TreeItem.node(Line.raw("second"), [TreeItem.leaf(Line.raw("child"), 3)], 2);
+    let items: List<TreeItem<Int>> = [first, second];
+    let mut state = TreeState.new();
+    state.select_next(&items);
+    state.toggle_selected();
+    assert(state.is_expanded(&[0]));
+    state.select_next(&items);
+    state.select_next(&items);
+    state.toggle_selected();
+    assert(state.is_expanded(&[1]));
+}
+
+fn main() {
+    let line = TextSpan.raw("A").then(TextSpan.styled("界", Style.new().fg(Color.Blue)));
+    let spans: &[TextSpan] = line.spans();
+    assert_eq(spans.len(), 2);
+    assert_eq(*spans[0].content(), "A");
+    assert_eq(*spans[1].content(), "界");
+    assert(!spans[0].style().has_fg());
+    assert(spans[1].style().has_fg());
+    assert_eq(line.width(), 3);
+    assert_eq(Line.from([]).spans().len(), 0);
+    assert_eq(TextSpan.raw("\n").width(), 0);
+
+    let mut buf = Buffer.new(5, 2);
+    let paragraph = Paragraph.new().text([line]);
+    paragraph.render(Rect.new(1, 0, 2, 1), &mut buf);
+    paragraph.render(Rect.new(1, 1, 3, 1), &mut buf);
+    let rows = buf.to_lines();
+    assert_eq(rows[0], " A   ");
+    assert_eq(rows[1], " A界 ");
+    check_tree_navigation();
+    print("styled line ok");
+}

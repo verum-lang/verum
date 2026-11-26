@@ -10,7 +10,7 @@ module core.term.widget.tabs;
 
 mount super.protocol.{Widget, Styled};
 mount super.block.Block;
-mount super.paragraph.{Line, TextSpan};
+mount super.paragraph.{Line, TextSpan, write_text};
 mount super.super.render.buffer.Buffer;
 mount super.super.layout.rect.Rect;
 mount super.super.style.style.Style;
@@ -133,11 +133,7 @@ implement Widget for Tabs {
             }
 
             // Render each span in the title line
-            for span in &self.titles[i].spans {
-                let combined = tab_style.patch(span.style);
-                x = buf.set_string(x, y, &span.content, combined);
-                if x >= tab_area.right() { break; }
-            }
+            x = self.titles[i].write(buf, x, y, tab_area.right(), tab_style);
 
             // Right padding as spaces
             pad = 0;
@@ -149,7 +145,7 @@ implement Widget for Tabs {
 
             // Divider between tabs (not after last)
             if i < self.titles.len() - 1 {
-                x = buf.set_string(x, y, &self.divider.content, self.divider.style);
+                x = write_text(buf, x, y, tab_area.right(), self.divider.content(), self.divider.style()).0;
             }
         }
     }

@@ -10,7 +10,7 @@ module core.term.widget.barchart;
 
 mount super.protocol.{Widget, Styled};
 mount super.block.Block;
-mount super.paragraph.{Line, TextSpan};
+mount super.paragraph.Line;
 mount super.super.render.buffer.Buffer;
 mount super.super.layout.rect.Rect;
 mount super.super.layout.constraint.Direction;
@@ -191,26 +191,21 @@ implement Widget for BarChart {
 
         if chart_area.width() < 1 || chart_area.height() < 1 { return; }
 
-        // Collect all bars and compute max
-        let mut all_bars = List.new();
+        let mut has_bars = false;
+        let mut observed_max = 0.0;
         for group in &self.groups {
             for bar in &group.bars {
-                all_bars.push(bar);
+                has_bars = true;
+                if bar.value > observed_max { observed_max = bar.value; }
             }
         }
-        if all_bars.len() == 0 { return; }
+        if !has_bars { return; }
 
         buf.set_style(chart_area, self.style);
 
         let data_max = match self.max {
             Maybe.Some(m) => m,
-            Maybe.None => {
-                let mut m = 0.0;
-                for bar in &all_bars {
-                    if bar.value > m { m = bar.value; }
-                }
-                m
-            }
+            Maybe.None => observed_max,
         };
 
         if data_max <= 0.0 { return; }
@@ -301,32 +296,8 @@ fn render_vertical(chart: &BarChart, area: Rect, buf: &mut Buffer, data_max: Flo
             // Bar label centered below bar
             match bar.label {
                 Maybe.Some(ref label) => {
-                    let lbl_width = label.width();
-                    let lbl_display = if lbl_width > chart.bar_width {
-                        // Truncate to bar width
-                        let mut truncated = List.new();
-                        let mut w = 0;
-                        for span in &label.spans {
-                            if w >= chart.bar_width { break; }
-                            let remaining_w = chart.bar_width - w;
-                            if span.content.len() <= remaining_w {
-                                truncated.push(span.clone());
-                                w = w + span.content.len();
-                            } else {
-                                truncated.push(TextSpan.styled(span.content.slice(0, remaining_w), span.style));
-                                w = w + remaining_w;
-                            }
-                        }
-                        truncated
-                    } else {
-                        label.spans.clone()
-                    };
-                    let display_width = if lbl_width > chart.bar_width { chart.bar_width } else { lbl_width };
-                    let lbl_x = x + (chart.bar_width - display_width).max(0) / 2;
-                    let mut lx = lbl_x;
-                    for span in &lbl_display {
-                        lx = buf.set_string(lx, label_y, &span.content, span.style);
-                    }
+                    let lbl_x = x + (chart.bar_width - label.width()).max(0) / 2;
+                    label.write(buf, lbl_x, label_y, x + chart.bar_width, Style.DEFAULT);
                 }
                 Maybe.None => {}
             }
@@ -380,10 +351,7 @@ fn render_horizontal(chart: &BarChart, area: Rect, buf: &mut Buffer, data_max: F
                     let lbl_x = area.x + (label_col_width - 1 - lbl_width).max(0);
                     let mid_y = y + chart.bar_width / 2;
                     if mid_y < area.bottom() {
-                        let mut lx = lbl_x;
-                        for span in &label.spans {
-                            lx = buf.set_string(lx, mid_y, &span.content, span.style);
-                        }
+                        label.write(buf, lbl_x, mid_y, area.right(), Style.DEFAULT);
                     }
                 }
                 Maybe.None => {}

@@ -239,12 +239,7 @@ implement StatefulWidget for Dialog {
             // Center each line horizontally
             let line_width = line.width();
             let line_x = inner.x + (inner.width() - line_width).max(0) / 2;
-            let mut x = line_x;
-
-            for span in &line.spans {
-                let combined = self.style.patch(span.style);
-                x = buf.set_string(x, y, &span.content, combined);
-            }
+            line.write(buf, line_x, y, inner.right(), self.style);
 
             y = y + 1;
             line_idx = line_idx + 1;
