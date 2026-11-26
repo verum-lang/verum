@@ -24,8 +24,8 @@ module core.database.sqlite.native.l3_btree.page_writer;
 //     as opaque byte slices, parsed by the existing `parse_cell` when
 //     key-extraction is needed).
 //
-//   * `materialize_page(bytes, hdr_offset)` — parse-then-clone every
-//     cell into a MaterializedPage.  O(N) where N = cell_count.
+//   * `materialize_page(bytes, hdr_offset, budget)` copies each cell's
+//     complete on-page representation using the database's page geometry.
 //
 //   * `serialize_page(mp, page_size)` — rebuild the on-disk byte
 //     layout from a MaterializedPage.  Allocates a fresh buffer of
@@ -52,7 +52,7 @@ mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l3_btree.page_layout.{
     PageKind, TableLeaf, TableInterior, IndexLeaf, IndexInterior,
     PageHeader, parse_page_header, serialize_page_header,
-    parse_cell_pointer_array, parse_cell, CellParts,
+    parse_cell_pointer_array, LocalPayloadBudget,
     page_kind_is_interior, page_kind_header_size,
     PageLayoutError,
 };
@@ -88,12 +88,11 @@ public type MaterializedPage is {
     cells: List<MaterializedCell>,
     /// Right child pointer (interior pages only).  0 for leaves.
     right_ptr: UInt32,
-    /// Database-header offset baked in (100 for page 1, 0 otherwise).
-    /// Every cell-pointer offset stored on disk is RELATIVE to
-    /// page-buffer start (NOT relative to the post-DB-header
-    /// start), so this field exists purely for parse-side
-    /// disambiguation.
+    /// B-tree header offset from the page start, 100 for page one and 0 otherwise.
     db_header_offset: Int,
+    /// Preserved prefix of a materialized page one.
+    database_header: List<Byte>,
+    source_page_size: Int,
 }
 
 public fn materialized_page(
@@ -106,6 +105,8 @@ public fn materialized_page(
         cells: List.new(),
         right_ptr: right_ptr,
         db_header_offset: db_header_offset,
+        database_header: List.new(),
+        source_page_size: 0,
     }
 }
 
@@ -173,7 +174,8 @@ implement MaterializedPage {
     /// Leave the first `at` cells on the left. The original rightmost
     /// child belongs to the new right sibling.
     public(in core.database.sqlite.native.l3_btree) fn split_right(&mut self, at: Int) -> MaterializedPage {
-        let mut right = materialized_page(self.kind, self.right_ptr, self.db_header_offset);
+        let mut right = materialized_page(self.kind, self.right_ptr, 0);
+        right.source_page_size = self.source_page_size;
         right.cells = self.cells.split_off(at);
         self.right_ptr = 0_u32;
         right
@@ -220,18 +222,19 @@ implement MaterializedPage {
 // Materialization — bytes → MaterializedPage
 // -----------------------------------------------------------------------------
 
-/// Parse + clone every cell from a page into a MaterializedPage.
-/// `db_header_offset` is 100 for page 1, 0 for all others.
-///
-/// Algorithm:
-///   1. Parse the page header.
-///   2. Parse the cell-pointer array (N two-byte offsets).
-///   3. For each pointer: parse the cell to find its size, then
-///      copy the cell's bytes into a MaterializedCell.
+/// Copy the complete on-page cells, in pointer order, using the database's
+/// page size and reserved-byte count. Use offset 100 for page one and zero
+/// for other pages. A nonzero reserved-byte count precludes repacking.
 public fn materialize_page(
     bytes: &List<Byte>,
     db_header_offset: Int,
+    budget: &LocalPayloadBudget,
 ) -> Result<MaterializedPage, PageLayoutError> {
+    budget.check_repack_size(bytes.len())?;
+    if db_header_offset != 0 && db_header_offset != 100 { return Result.Err(PageLayoutError.InvalidPageGeometry); }
+    if db_header_offset == 100 && bytes[20] != (0 as Byte) {
+        return Result.Err(PageLayoutError.UnsupportedReservedSpace(bytes[20] as Int));
+    }
     let hdr = match parse_page_header(bytes.as_slice(), db_header_offset) {
         Result.Ok(p)  => p,
         Result.Err(e) => return Result.Err(e),
@@ -242,17 +245,30 @@ public fn materialize_page(
     };
     let mut mp = materialized_page(hdr.kind(), hdr.right_child(), db_header_offset);
 
-    let local_max: Int = 100;     // foundation: assumes small payload threshold
+    mp.source_page_size = bytes.len();
+    let mut prefix: Int = 0;
+    while prefix < db_header_offset {
+        mp.database_header.push(bytes[prefix]);
+        prefix = prefix + 1;
+    }
+
+    let first_cell = hdr.content_start();
+    let pointer_end = db_header_offset + page_kind_header_size(hdr.kind()) + 2 * pointers.len();
+    if first_cell < pointer_end || first_cell > bytes.len() { return Result.Err(PageLayoutError.InvalidCell); }
+    let mut occupied: List<Bool> = List.new();
+    let mut n: Int = first_cell;
+    while n < bytes.len() { occupied.push(false); n = n + 1; }
     let mut i: Int = 0;
     while i < pointers.len() {
         let cell_off = pointers[i];
-        let cell_size = compute_cell_size(bytes.as_slice(), cell_off, hdr.kind(), local_max)?;
-        if cell_off + cell_size > bytes.len() {
-            return Result.Err(PageLayoutError.ShortBuffer);
-        }
+        if cell_off < first_cell { return Result.Err(PageLayoutError.InvalidCell); }
+        let cell_size = budget.cell_size(bytes.as_slice(), cell_off, hdr.kind())?;
         let mut cell_bytes: List<Byte> = List.new();
         let mut k: Int = 0;
         while k < cell_size {
+            let slot = cell_off - first_cell + k;
+            if occupied[slot] { return Result.Err(PageLayoutError.InvalidCell); }
+            occupied[slot] = true;
             cell_bytes.push(bytes[cell_off + k]);
             k = k + 1;
         }
@@ -262,58 +278,20 @@ public fn materialize_page(
     Result.Ok(mp)
 }
 
-/// Compute the on-disk size of a cell starting at `cell_off`.
-/// Uses `parse_cell` to find the local payload end, then accounts
-/// for the optional 4-byte overflow pointer.
-fn compute_cell_size(
-    bytes: &[Byte],
-    cell_off: Int,
-    kind: PageKind,
-    local_max: Int,
-) -> Result<Int, PageLayoutError> {
-    let parts = parse_cell(bytes, cell_off, kind, local_max)?;
-    let size = match parts {
-        TableInteriorCell(_, _) => cell_size_table_interior(bytes, cell_off),
-        TableLeafCell(_, _, local_end, overflow)
-        | IndexLeafCell(_, local_end, overflow)
-        | IndexInteriorCell(_, _, local_end, overflow) => {
-            let base = local_end - cell_off;
-            if overflow != 0_u32 { base + 4 } else { base }
-        }
-    };
-    Result.Ok(size)
-}
-
-/// TableInterior cell size: 4-byte left_child + rowid varint.
-/// Computed by walking the rowid varint after the 4-byte child.
-fn cell_size_table_interior(bytes: &[Byte], cell_off: Int) -> Int {
-    let mut p: Int = cell_off + 4;
-    let mut nbytes: Int = 0;
-    while p < bytes.len() && nbytes < 9 {
-        let b = bytes[p] as Int;
-        nbytes = nbytes + 1;
-        if (b & 0x80) == 0 { break; }
-        p = p + 1;
-    }
-    4 + nbytes
-}
-
 // -----------------------------------------------------------------------------
 // Serialization — MaterializedPage → bytes
 // -----------------------------------------------------------------------------
 
-/// Build a page_size-byte buffer from a MaterializedPage.  Cell
-/// content is packed densely from `page_size` downward; the
-/// cell-pointer array sits right after the page header; the
-/// gap between is zero-filled free space.
-///
-/// Returns the new buffer + the cell_content_start offset (caller
-/// rarely needs it, but it's the single source of truth for
-/// "where did the packed content area begin").
+/// Return the rebuilt page with cell content packed from the end downward.
+/// Preserve the database header on page one and zero unused space between
+/// the cell-pointer array and the packed cells.
 public fn serialize_page(
     mp: &MaterializedPage,
     page_size: Int,
 ) -> Result<List<Byte>, PageLayoutError> {
+    if mp.source_page_size != 0 && page_size != mp.source_page_size {
+        return Result.Err(PageLayoutError.InvalidPageGeometry);
+    }
     let hdr_size = page_kind_header_size(mp.kind);
     let n_cells = mp.cells.len();
     let total_cell_bytes = mp.total_cell_bytes();
@@ -332,6 +310,12 @@ public fn serialize_page(
     while z < page_size {
         out.push(0 as Byte);
         z = z + 1;
+    }
+
+    let mut prefix: Int = 0;
+    while prefix < mp.database_header.len() {
+        out[prefix] = mp.database_header[prefix];
+        prefix = prefix + 1;
     }
 
     // 1. Write the page header at db_header_offset.

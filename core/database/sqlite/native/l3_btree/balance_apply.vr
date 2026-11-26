@@ -150,7 +150,7 @@ fn apply_split(
     // detection is the caller's job — for simplicity at the
     // balance layer, we treat all pages as "non-root"; root
     // splits go through GrowRoot first).
-    let mut left_mp = match materialize_page(&donor_buf.bytes, 0) {
+    let mut left_mp = match materialize_page(&donor_buf.bytes, 0, ctx.payload_budget()) {
         Result.Ok(mp) => mp,
         Result.Err(_) => return Result.Err(InvalidInput("split: donor materialize failed".clone())),
     };
@@ -217,11 +217,11 @@ fn apply_merge(
         Maybe.None    => return Result.Err(InvalidInput("merge: right page missing".clone())),
     };
 
-    let mut left_mp = match materialize_page(&left_buf.bytes, 0) {
+    let mut left_mp = match materialize_page(&left_buf.bytes, 0, ctx.payload_budget()) {
         Result.Ok(mp) => mp,
         Result.Err(_) => return Result.Err(InvalidInput("merge: left materialize failed".clone())),
     };
-    let right_mp = match materialize_page(&right_buf.bytes, 0) {
+    let right_mp = match materialize_page(&right_buf.bytes, 0, ctx.payload_budget()) {
         Result.Ok(mp) => mp,
         Result.Err(_) => return Result.Err(InvalidInput("merge: right materialize failed".clone())),
     };
@@ -274,11 +274,11 @@ fn apply_rotate(
         Maybe.None    => return Result.Err(InvalidInput("rotate: recipient missing".clone())),
     };
 
-    let mut donor_mp = match materialize_page(&donor_buf.bytes, 0) {
+    let mut donor_mp = match materialize_page(&donor_buf.bytes, 0, ctx.payload_budget()) {
         Result.Ok(mp) => mp,
         Result.Err(_) => return Result.Err(InvalidInput("rotate: donor materialize failed".clone())),
     };
-    let mut recipient_mp = match materialize_page(&recipient_buf.bytes, 0) {
+    let mut recipient_mp = match materialize_page(&recipient_buf.bytes, 0, ctx.payload_budget()) {
         Result.Ok(mp) => mp,
         Result.Err(_) => return Result.Err(InvalidInput("rotate: recipient materialize failed".clone())),
     };
@@ -325,7 +325,7 @@ fn apply_grow_root(
         return Result.Err(InvalidInput("grow_root: new_root must be > 0".clone()));
     }
 
-    let old_mp = match materialize_page(&old_buf.bytes, 0) {
+    let old_mp = match materialize_page(&old_buf.bytes, 0, ctx.payload_budget()) {
         Result.Ok(mp) => mp,
         Result.Err(_) => return Result.Err(InvalidInput("grow_root: old materialize failed".clone())),
     };
@@ -387,7 +387,7 @@ fn apply_shrink_root(
     }
     let child_buf = &pages_in[1];
 
-    let child_mp = match materialize_page(&child_buf.bytes, 0) {
+    let child_mp = match materialize_page(&child_buf.bytes, 0, ctx.payload_budget()) {
         Result.Ok(mp) => mp,
         Result.Err(_) => return Result.Err(InvalidInput("shrink_root: child materialize failed".clone())),
     };

@@ -1,15 +1,19 @@
 mount core.base.result.Result;
 mount core.collections.list.List;
-mount core.database.sqlite.native.l3_btree.page_layout.{PageKind, PageLayoutError};
+mount core.database.sqlite.native.l3_btree.page_layout.{
+    PageKind, PageLayoutError, compute_local_payload_budget,
+};
+mount core.encoding.varint.sqlite_encode;
 mount core.database.sqlite.native.l3_btree.page_writer.{
     MaterializedCell, materialized_cell, materialized_page, materialize_page, serialize_page,
 };
 
 fn leaf_cell(rowid: Byte, value: Byte) -> MaterializedCell {
     let mut bytes: List<Byte> = List.new();
-    bytes.push(1 as Byte);
+    bytes.push(2 as Byte);
     bytes.push(rowid);
     bytes.push(value);
+    bytes.push(0x55 as Byte);
     materialized_cell(bytes)
 }
 
@@ -19,18 +23,18 @@ fn test_repacking_preserves_cell_bytes_and_pointer_order() {
     page.append_cell(leaf_cell(2 as Byte, 0xa2 as Byte));
     page.append_cell(leaf_cell(9 as Byte, 0xa9 as Byte));
     let input = serialize_page(&page, 512).unwrap();
-    let restored = materialize_page(&input, 0).unwrap();
+    let restored = materialize_page(&input, 0, &compute_local_payload_budget(512, 0)).unwrap();
     assert_eq(restored.cell_count(), 2);
     let output = serialize_page(&restored, 512).unwrap();
     assert_eq(output, input);
     assert_eq(output[8] as Int, 1);
-    assert_eq(output[9] as Int, 253);
+    assert_eq(output[9] as Int, 252);
     assert_eq(output[10] as Int, 1);
-    assert_eq(output[11] as Int, 250);
-    assert_eq(output[510] as Int, 2);
-    assert_eq(output[511] as Int, 0xa2);
-    assert_eq(output[507] as Int, 9);
-    assert_eq(output[508] as Int, 0xa9);
+    assert_eq(output[11] as Int, 248);
+    assert_eq(output[509] as Int, 2);
+    assert_eq(output[510] as Int, 0xa2);
+    assert_eq(output[505] as Int, 9);
+    assert_eq(output[506] as Int, 0xa9);
 }
 
 @test
@@ -40,9 +44,76 @@ fn test_materialization_rejects_a_truncated_cell_varint() {
     truncated.push(0x80 as Byte);
     page.append_cell(materialized_cell(truncated));
     let input = serialize_page(&page, 512).unwrap();
-    match materialize_page(&input, 0) {
+    match materialize_page(&input, 0, &compute_local_payload_budget(512, 0)) {
         Result.Err(PageLayoutError.ShortBuffer) => {}
         _ => panic("expected a short-buffer error for an incomplete varint"),
+    }
+}
+
+fn payload_page(kind: PageKind, payload: Int, local: Int, overflow_page: Byte) -> List<Byte> {
+    let mut bytes: List<Byte> = List.new();
+    if kind == PageKind.IndexInterior {
+        bytes.push(0 as Byte);
+        bytes.push(0 as Byte);
+        bytes.push(0 as Byte);
+        bytes.push(2 as Byte);
+    }
+    let length = sqlite_encode(payload as Int64);
+    for b in length { bytes.push(b); }
+    if kind == PageKind.TableLeaf { bytes.push(1 as Byte); }
+    let mut i = 0;
+    while i < local {
+        bytes.push(((i * 37 + 13) % 251) as Byte);
+        i = i + 1;
+    }
+    if local < payload {
+        bytes.push(0 as Byte);
+        bytes.push(0 as Byte);
+        bytes.push(0 as Byte);
+        bytes.push(overflow_page);
+    }
+    let mut page = materialized_page(kind, 3_u32, 0);
+    page.append_cell(materialized_cell(bytes));
+    serialize_page(&page, 512).unwrap()
+}
+
+fn assert_page_payload(kind: PageKind, payload: Int, local: Int) {
+    let input = payload_page(kind, payload, local, 7 as Byte);
+    let page = materialize_page(&input, 0, &compute_local_payload_budget(512, 0)).unwrap();
+    let output = serialize_page(&page, 512).unwrap();
+    assert_eq(output, input);
+}
+
+@test
+fn test_payload_limits_and_the_four_byte_overflow_link() {
+    assert_page_payload(PageKind.TableLeaf, 101, 101);
+    assert_page_payload(PageKind.TableLeaf, 233, 233);
+    assert_page_payload(PageKind.TableLeaf, 477, 477);
+    assert_page_payload(PageKind.TableLeaf, 478, 39);
+    assert_page_payload(PageKind.TableLeaf, 600, 92);
+    assert_page_payload(PageKind.IndexLeaf, 101, 101);
+    assert_page_payload(PageKind.IndexLeaf, 102, 102);
+    assert_page_payload(PageKind.IndexLeaf, 103, 39);
+    assert_page_payload(PageKind.IndexLeaf, 600, 92);
+    assert_page_payload(PageKind.IndexInterior, 620, 39);
+}
+
+@test
+fn test_invalid_links_and_reserved_formats_return_errors() {
+    let missing_link = payload_page(PageKind.IndexLeaf, 103, 39, 0 as Byte);
+    match materialize_page(&missing_link, 0, &compute_local_payload_budget(512, 0)) {
+        Result.Err(PageLayoutError.InvalidCell) => {}
+        _ => panic("expected an invalid-cell error for a missing overflow link"),
+    }
+    let ordinary = payload_page(PageKind.TableLeaf, 101, 101, 0 as Byte);
+    match materialize_page(&ordinary, 0, &compute_local_payload_budget(512, 8)) {
+        Result.Err(PageLayoutError.UnsupportedReservedSpace(8)) => {}
+        _ => panic("expected reserved-space repacking to be refused"),
+    }
+    let page = materialize_page(&ordinary, 0, &compute_local_payload_budget(512, 0)).unwrap();
+    match serialize_page(&page, 1024) {
+        Result.Err(PageLayoutError.InvalidPageGeometry) => {}
+        _ => panic("expected a page-size change to be refused"),
     }
 }
 

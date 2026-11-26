@@ -76,6 +76,7 @@ module core.database.sqlite.native.l3_btree.page_layout;
 mount collections.List;
 mount base.{Result, Ok, Err, Text};
 mount core.database.sqlite.native.l2_record.varint;
+mount core.database.sqlite.native.overflow_page_api.layout.{min_local, max_local, inline_payload_bytes};
 
 // -----------------------------------------------------------------------------
 // Constants
@@ -146,6 +147,7 @@ public type PageHeader is {
 implement PageHeader {
     public(in core.database.sqlite.native.l3_btree) fn kind(&self) -> PageKind { self.kind }
     public(in core.database.sqlite.native.l3_btree) fn cell_count(&self) -> Int { self.cell_count as Int }
+    public(in core.database.sqlite.native.l3_btree) fn content_start(&self) -> Int { self.cell_content_start }
     public(in core.database.sqlite.native.l3_btree) fn right_child(&self) -> UInt32 { self.right_ptr }
 
     /// Dense repacking removes the freeblock chain and fragmented bytes.
@@ -166,12 +168,18 @@ implement PageHeader {
 public type PageLayoutError is
       ShortBuffer
     | BadKind(raw: Byte)
-    | BadCellCount(count: UInt16, max_cells: Int);
+    | BadCellCount(count: UInt16, max_cells: Int)
+    | InvalidPageGeometry
+    | UnsupportedReservedSpace(bytes: Int)
+    | InvalidCell;
 
 implement Display for PageLayoutError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
             PageLayoutError.ShortBuffer                => f.write_str("sqlite btree page: short buffer"),
+            InvalidPageGeometry => f.write_str("sqlite btree: invalid page size or header offset"),
+            UnsupportedReservedSpace(n) => f.write_str(f"sqlite btree: repacking with {n} reserved bytes is unsupported".as_str()),
+            InvalidCell => f.write_str("sqlite btree: invalid cell layout"),
             BadKind(raw)               => f.write_str(f"sqlite btree page: bad kind byte {raw}".as_str()),
             BadCellCount(count, max)   => f.write_str(f"sqlite btree page: bad cell count {count} (max {max})".as_str()),
         }
@@ -182,6 +190,9 @@ implement Debug for PageLayoutError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
             PageLayoutError.ShortBuffer                => f.write_str("ShortBuffer"),
+            InvalidPageGeometry => f.write_str("InvalidPageGeometry"),
+            UnsupportedReservedSpace(n) => f.write_str(f"UnsupportedReservedSpace({n})".as_str()),
+            InvalidCell => f.write_str("InvalidCell"),
             BadKind(raw)               => f.write_str(f"BadKind(raw: {raw})".as_str()),
             BadCellCount(count, max)   => f.write_str(f"BadCellCount(count: {count}, max_cells: {max})".as_str()),
         }
@@ -192,6 +203,9 @@ implement PartialEq for PageLayoutError {
     fn eq(&self, other: &PageLayoutError) -> Bool {
         match (self, other) {
             (PageLayoutError.ShortBuffer,            PageLayoutError.ShortBuffer)            => true,
+            (InvalidPageGeometry, InvalidPageGeometry) => true,
+            (InvalidCell, InvalidCell) => true,
+            (UnsupportedReservedSpace(a), UnsupportedReservedSpace(b)) => a == b,
             (BadKind(a),             BadKind(b))             => a == b,
             (BadCellCount(ca, ma),   BadCellCount(cb, mb))   => ca == cb && ma == mb,
             _ => false,
@@ -446,19 +460,9 @@ public fn parse_cell(
 // Local-payload budget (§10.6)
 // -----------------------------------------------------------------------------
 
-/// Compute the `local_payload` budget for a cell given `page_size` and
-/// `reserved_bytes`. Matches SQLite's formula from §10.6:
-///
-
-///  M = ((page_size - reserved) - 12) * 32 / 255 // minimum local
-///  U = page_size - reserved // usable page
-///  X = (U - 12) * 64 / 255 + 23 // table-leaf max
-///  table-interior doesn't spill
-///  Index-leaf / index-interior max = (U - 12) * 64 / 255 - 23
-///
-
-/// Returned values for each of the variable-length cell kinds.
+/// SQLite B-tree payload limits for a database page size and reserved byte count.
 public type LocalPayloadBudget is {
+    page_size: Int,
     min_local: Int,
     table_leaf_max: Int,
     index_max: Int,
@@ -467,24 +471,69 @@ public type LocalPayloadBudget is {
 
 public fn compute_local_payload_budget(page_size: Int, reserved: Int) -> LocalPayloadBudget {
     let usable = page_size - reserved;
-    // **SQLite spec §10.6 derivation** (canonical formula —
-    // matches `overflow_page_api/layout.vr:25-28`).
-    //
-
-    // Pre-fix the `min_local` term was missing the trailing `- 23`;
-    // every loom-written DB file was BYTE-DIFFERENT from the
-    // C-SQLite-written equivalent at the overflow-threshold
-    // decision boundary. Spec §2.1 makes file-format compatibility
-    // ABSOLUTE, so this off-by-23 is a hard correctness bug. The
-    // `index_max` formula already had the `- 23` term — the two
-    // were quietly inconsistent.
-    let min_local = ((usable - 12) * 32) / 255 - 23;
-    let table_leaf_max = usable - 35;
-    let index_max = ((usable - 12) * 64) / 255 - 23;
     LocalPayloadBudget {
-        min_local: min_local,
-        table_leaf_max: table_leaf_max,
-        index_max: index_max,
+        page_size: page_size,
+        min_local: min_local(page_size, reserved),
+        table_leaf_max: usable - 35,
+        index_max: max_local(page_size, reserved),
         usable_size: usable,
+    }
+}
+
+implement LocalPayloadBudget {
+    public(in core.database.sqlite.native.l3_btree) fn check_repack_size(&self, size: Int) -> Result<(), PageLayoutError> {
+        if size != self.page_size || size < 512 || size > 65536 || (size & (size - 1)) != 0 {
+            return Result.Err(InvalidPageGeometry);
+        }
+        let reserved = size - self.usable_size;
+        if reserved < 0 || reserved > 255 || self.usable_size < 480 {
+            return Result.Err(InvalidPageGeometry);
+        }
+        if reserved != 0 { return Result.Err(UnsupportedReservedSpace(reserved)); }
+        Result.Ok(())
+    }
+
+    /// Physical bytes occupied by one cell, including a local overflow link.
+    /// The payload-length varint precedes the rowid on table leaves and follows
+    /// the left child pointer on index interiors.
+    public(in core.database.sqlite.native.l3_btree) fn cell_size(
+        &self, buf: &[Byte], cell_off: Int, kind: PageKind,
+    ) -> Result<Int, PageLayoutError> {
+        if cell_off < 0 || cell_off >= self.usable_size { return Result.Err(PageLayoutError.ShortBuffer); }
+        let mut pos = cell_off;
+        if page_kind_is_interior(kind) {
+            if self.usable_size - pos < 4 { return Result.Err(PageLayoutError.ShortBuffer); }
+            pos = pos + 4;
+        }
+        let (first, width) = match varint.decode(buf, pos) {
+            Result.Ok(v) => v,
+            Result.Err(_) => return Result.Err(PageLayoutError.ShortBuffer),
+        };
+        pos = pos + width;
+        if kind == TableInterior { return Result.Ok(pos - cell_off); }
+        let payload_size = first as Int;
+        if first < 0_i64 || (payload_size as Int64) != first { return Result.Err(InvalidCell); }
+        let maximum = if kind == TableLeaf { self.table_leaf_max } else { self.index_max };
+        let local = inline_payload_bytes(payload_size, self.min_local, maximum, self.usable_size);
+        if kind == TableLeaf {
+            let (_, rowid_bytes) = match varint.decode(buf, pos) {
+                Result.Ok(v) => v,
+                Result.Err(_) => return Result.Err(PageLayoutError.ShortBuffer),
+            };
+            pos = pos + rowid_bytes;
+        }
+        if local > self.usable_size - pos { return Result.Err(PageLayoutError.ShortBuffer); }
+        let end = pos + local;
+        let mut size = end - cell_off;
+        if local < payload_size {
+            if self.usable_size - end < 4 { return Result.Err(PageLayoutError.ShortBuffer); }
+            let link = read_u32_be(buf, end);
+            if link < 2_u32 || link == 0xffffffff_u32 { return Result.Err(InvalidCell); }
+            size = size + 4;
+        }
+        // SQLite reserves at least four bytes per cell, even for an empty key.
+        let stored_size = if size < 4 { 4 } else { size };
+        if stored_size > self.usable_size - cell_off { return Result.Err(PageLayoutError.ShortBuffer); }
+        Result.Ok(stored_size)
     }
 }

@@ -44,12 +44,18 @@ public fn inline_bytes_for_overflow(
     page_size: Int,
     reserved_bytes: Int,
 ) -> Int {
-    let min_l = min_local(page_size, reserved_bytes);
-    let max_l = max_local(page_size, reserved_bytes);
-    let usable = page_size - reserved_bytes;
-    let surplus = usable - 12;
-    // SQLite: local = min_local + (payload_size - min_local) mod (usable - 4)
-    // clipped by max_local.
-    let cand = min_l + ((payload_size - min_l) % (surplus - 4 + 12));
-    if cand > max_l { max_l } else { cand }
+    inline_payload_bytes(
+        payload_size, min_local(page_size, reserved_bytes),
+        max_local(page_size, reserved_bytes), page_size - reserved_bytes,
+    )
+}
+
+// SQLite file format, B-tree Pages. The maximum differs between table leaves
+// and index pages. Both use the same minimum and overflow-page capacity.
+public(in core.database.sqlite.native) fn inline_payload_bytes(
+    payload_size: Int, minimum: Int, maximum: Int, usable_size: Int,
+) -> Int {
+    if payload_size <= maximum { return payload_size; }
+    let candidate = minimum + (payload_size - minimum) % (usable_size - 4);
+    if candidate <= maximum { candidate } else { minimum }
 }
