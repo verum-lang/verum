@@ -1130,7 +1130,12 @@ impl TypeChecker {
                     // value-copy. A callable's environment is separate from
                     // the slot holding the callable value, though: invoking or
                     // passing it does not rewrite that producer binding.
-                    if !is_callee && !matches!(payload, Type::Function { .. })
+                    let callable_value = |ty: &Type| match ty {
+                        Type::Function { .. } => true,
+                        Type::Var(var) => self.unifier.rigid_fn_bound_ref(*var).is_some(),
+                        _ => false,
+                    };
+                    if !is_callee && !callable_value(payload) && !callable_value(actual)
                         && let Some((source, _)) = self.call_input_place(argument)
                     {
                         self.ctx.env.invalidate_payload_origins(&source, argument.span);

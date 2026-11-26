@@ -392,10 +392,11 @@ impl Unifier {
     /// it produces, and inventing the shape is what left the result type
     /// unsolved. See [`RigidVar`] for the measurement.
     pub fn rigid_fn_bound(&self, var: TypeVar) -> Maybe<Type> {
-        self.rigid_vars
-            .get(&var)
-            .map(|entry| entry.fn_bound.clone())
-            .unwrap_or(Maybe::None)
+        self.rigid_fn_bound_ref(var).cloned()
+    }
+
+    pub(crate) fn rigid_fn_bound_ref(&self, var: TypeVar) -> Maybe<&Type> {
+        self.rigid_vars.get(&var)?.fn_bound.as_ref()
     }
 
     /// How a rigid var should read in a diagnostic: the name the author

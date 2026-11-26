@@ -22,6 +22,28 @@ fn diagnostics(body: &str) -> List<Text> {
         .map(|error| error.to_string().into()).collect()
 }
 
+#[test]
+fn forwarding_a_generic_callable_preserves_the_producer_slot() {
+    let errors = diagnostics("
+        fn apply<F: fn(Int)->Int>(value:Int, callback:F)->Int { callback(value) }
+        fn twice<O: fn(Int)->Int>(first:Int, second:Int, callback:O)->Int {
+            let a=apply(first,callback);
+            a+apply(second,callback)
+        }");
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn forwarding_a_generic_callable_retains_loans_in_its_environment() {
+    rejected("
+        fn apply<F: fn()>(callback:F) { callback(); }
+        fn receive(input:&Int)->Payload {
+            let mut value=Payload{ptr:input,marker:0};
+            {let local=3;apply(|| {value.ptr=&local;});}
+            value
+        }");
+}
+
 fn rejected(body: &str) {
     let errors = diagnostics(body);
     assert!(errors.iter().any(|error| error.contains("cannot establish the lifetime")
@@ -62,16 +84,24 @@ fn a_real_borrow_still_cannot_escape_after_a_closed_function_argument() {
 
 #[test]
 fn an_opaque_parameter_cannot_borrow_a_named_functions_provenance() {
-    rejected("fn receive(input:&Int,closed:fn(Int)->Int)->Payload {
-        let kept=Payload{ptr:input,marker:2}; execute(closed);
+    rejected("fn receive(kept:&Payload,closed:fn(Int)->Int)->Payload {
+        execute(closed);
         Payload{ptr:kept.ptr,marker:kept.marker}}");
 }
 
 #[test]
 fn a_local_shadow_cannot_borrow_a_named_functions_provenance() {
-    rejected("fn receive(input:&Int,operation:fn(Int)->Int)->Payload {
+    rejected("fn receive(kept:&Payload,operation:fn(Int)->Int)->Payload {
+        let closed=operation; execute(closed);
+        Payload{ptr:kept.ptr,marker:kept.marker}}");
+}
+
+#[test]
+fn an_unknown_callback_cannot_reach_a_fresh_unpassed_slot() {
+    let errors = diagnostics("fn receive(input:&Int,operation:fn(Int)->Int)->Payload {
         let closed=operation; let kept=Payload{ptr:input,marker:2}; execute(closed);
         Payload{ptr:kept.ptr,marker:kept.marker}}");
+    assert!(errors.is_empty(), "{errors:?}");
 }
 
 #[test]
