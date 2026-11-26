@@ -511,14 +511,6 @@ impl HeadComparison<'_> {
 impl ProtocolChecker {
     /// Head matching does not prove an implementation's callable conditions.
     /// This judgment uses resolved contracts; it never infers a missing owner.
-    pub(super) fn check_implementation_callable_bounds(
-        &self,
-        implementation: &ProtocolImpl,
-        substitution: &Substitution,
-    ) -> Result<(), verum_common::Text> {
-        self.check_implementation_callable_bounds_in_environment(implementation, substitution, &ConstraintEnvironment::new(&[], &Default::default()))
-    }
-
     pub(super) fn check_implementation_callable_bounds_in_environment(
         &self,
         implementation: &ProtocolImpl,

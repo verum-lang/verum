@@ -1,6 +1,6 @@
 //! Family application uses its declared local telescope, never RHS variable order.
 use super::{
-    AssociatedType, ProtocolBound, ProtocolChecker, ProtocolImpl, WhereClause,
+    AssociatedType, ConstraintEnvironment, ProtocolBound, ProtocolChecker, ProtocolImpl, WhereClause,
     implementation_match::CandidateMatch,
 };
 use crate::{
@@ -110,7 +110,8 @@ impl ProtocolChecker {
         )? else { return Err("selected protocol does not declare this associated member".into()); };
         self.resolve_family_implementations(
             self.impls_by_protocol.get_key_value(&key),
-            receiver, name, arguments, assumptions, Some((&owner.args, &declaration)), None,
+            receiver, name, arguments, ConstraintEnvironment::new(assumptions, &Default::default()),
+            Some((&owner.args, &declaration)), None,
         )
     }
 
@@ -367,7 +368,8 @@ impl ProtocolChecker {
             return Ok(Some(application));
         }
         self.resolve_family_implementations(
-            &self.impls_by_protocol, receiver, name, arguments, assumptions, None, header,
+            &self.impls_by_protocol, receiver, name, arguments,
+            ConstraintEnvironment::new(assumptions, &Default::default()), None, header,
         )
     }
 
@@ -376,12 +378,10 @@ impl ProtocolChecker {
     fn resolve_family_implementations<'a>(
         &self,
         indices: impl IntoIterator<Item = (&'a Text, &'a super::ImplOverlapIndex)>,
-        receiver: &Type, name: &Text, arguments: &[Type], assumptions: &[WhereClause],
+        receiver: &Type, name: &Text, arguments: &[Type], environment: ConstraintEnvironment<'_>,
         owner: Option<(&[Type], &DeclarationApplication)>,
         header: Option<AssociatedDeclarationHeader<'_>>,
     ) -> Result<Option<FamilyApplication>, Text> {
-        let callables = Default::default();
-        let environment = super::ConstraintEnvironment::new(assumptions, &callables);
         let mut receiver_scope = None;
         let mut selected: Option<(Text, List<Type>, FamilyApplication)> = None;
         for (key, index) in indices {
@@ -431,7 +431,7 @@ impl ProtocolChecker {
                     &declaration.arguments,
                     arguments,
                     &substitution,
-                    assumptions,
+                    environment,
                 )?;
                 if let Some((prior_protocol, prior_owner, prior)) = &selected {
                     if prior_protocol != &declaration.owner
@@ -459,6 +459,20 @@ impl ProtocolChecker {
         owner_arguments: &[Type],
         supplied: &[Type],
         assumptions: &[WhereClause],
+    ) -> Result<(List<Type>, Substitution), Text> {
+        self.complete_associated_family_arguments_in(
+            declaration, receiver, owner_arguments, supplied,
+            ConstraintEnvironment::new(assumptions, &Default::default()),
+        )
+    }
+
+    fn complete_associated_family_arguments_in(
+        &self,
+        declaration: &AssociatedType,
+        receiver: &Type,
+        owner_arguments: &[Type],
+        supplied: &[Type],
+        environment: ConstraintEnvironment<'_>,
     ) -> Result<(List<Type>, Substitution), Text> {
         if declaration.binders.local.len() != declaration.type_params.len() {
             return Err("associated family lacks its declaration-owned local telescope".into());
@@ -509,7 +523,7 @@ impl ProtocolChecker {
                 .iter()
                 .map(|bound| bound.try_apply_subst(&declaration_scope))
                 .collect::<Result<_, _>>()?;
-            self.check_universal_bounds(argument, &bounds, assumptions)?;
+            self.check_universal_bounds_in(argument, &bounds, environment)?;
         }
         for clause in &declaration.where_clauses {
             let position = declaration
@@ -524,7 +538,7 @@ impl ProtocolChecker {
                 .iter()
                 .map(|bound| bound.try_apply_subst(&declaration_scope))
                 .collect::<Result<_, _>>()?;
-            self.check_universal_bounds(&arguments[position], &bounds, assumptions)?;
+            self.check_universal_bounds_in(&arguments[position], &bounds, environment)?;
         }
         Ok((arguments, declaration_scope))
     }
@@ -538,16 +552,16 @@ impl ProtocolChecker {
         owner_arguments: &[Type],
         supplied: &[Type],
         implementation_scope: &Substitution,
-        assumptions: &[WhereClause],
+        environment: ConstraintEnvironment<'_>,
     ) -> Result<FamilyApplication, Text> {
-        let (arguments, declaration_scope) = self.complete_associated_family_arguments(
+        let (arguments, declaration_scope) = self.complete_associated_family_arguments_in(
             declaration,
             receiver,
             owner_arguments,
             supplied,
-            assumptions,
+            environment,
         )?;
-        self.check_implementation_callable_bounds(implementation, implementation_scope)?;
+        self.check_implementation_callable_bounds_in_environment(implementation, implementation_scope, &environment)?;
         // Head matching is not evidence for conditional implementations. The
         // ordinary inference matcher may defer constraints; this boundary may not.
         for clause in &implementation.where_clauses {
@@ -557,7 +571,7 @@ impl ProtocolChecker {
                 .iter()
                 .map(|bound| bound.try_apply_subst(implementation_scope))
                 .collect::<Result<_, _>>()?;
-            self.check_universal_bounds(&subject, &bounds, assumptions)?;
+            self.check_universal_bounds_in(&subject, &bounds, environment)?;
         }
         let protocol = ProtocolBound::positive(
             implementation.protocol.clone(),
@@ -567,7 +581,7 @@ impl ProtocolChecker {
                 .map(|argument| argument.try_apply_subst(implementation_scope))
                 .collect::<Result<_, _>>()?,
         );
-        self.check_universal_bounds(receiver, &[protocol], assumptions)?;
+        self.check_universal_bounds_in(receiver, &[protocol], environment)?;
         let result = if let Some(body) = implementation.associated_types.get(name) {
             body.instantiate(&arguments, implementation_scope)?
         } else if let Some(body) = &declaration.default {
@@ -580,6 +594,16 @@ impl ProtocolChecker {
         for argument in owner_arguments.iter().chain(&arguments) {
             allowed.extend(argument.free_vars());
             allowed_values.extend(argument.value_ids());
+        }
+        // The exact implementation match also solves declaration parameters
+        // from receiver-owned equations, e.g. S.Element = T for Wrapper<S>.
+        // Only images of its quantified binders can contribute result types.
+        for binder in &implementation.parameters {
+            if let GenericBinder::Type(variable) = binder
+                && let Some(argument) = implementation_scope.get(variable)
+            {
+                allowed.extend(argument.free_vars());
+            }
         }
         if result
             .free_vars()
@@ -596,7 +620,7 @@ impl ProtocolChecker {
             .iter()
             .map(|bound| bound.try_apply_subst(&declaration_scope))
             .collect::<Result<_, _>>()?;
-        self.check_universal_bounds(&result, &bounds, assumptions)?;
+        self.check_universal_bounds_in(&result, &bounds, environment)?;
         Ok(FamilyApplication { arguments, result })
     }
 }
@@ -916,13 +940,6 @@ impl ProtocolChecker {
         assumptions: &[WhereClause],
     ) -> Result<Type, Text> {
         let key = self.extract_protocol_name(&implementation.protocol);
-        let candidate = self.associated_declaration_application(
-            &key,
-            &implementation.protocol_args,
-            &implementation.for_type,
-            name,
-            &mut Vec::new(),
-        )?;
         let selected = self
             .associated_declaration_application(
                 method_owner,
@@ -932,19 +949,27 @@ impl ProtocolChecker {
                 &mut Vec::new(),
             )?
             .ok_or_else(|| Text::from("method projection is absent from its declaring protocol"))?;
+        let environment = ConstraintEnvironment::new(assumptions, &implementation.type_param_fn_bounds);
         if selected.owner != key {
             // An inherited member belongs to the instantiated ancestor. Its
             // conditional implementation must hold under this implementation's
             // premises, including when the receiver is still generic.
             let application = self.resolve_family_implementations(
                 self.impls_by_protocol.get_key_value(&selected.owner),
-                &implementation.for_type, name, supplied, assumptions,
+                &implementation.for_type, name, supplied, environment,
                 Some((&selected.arguments, &selected)), None,
             )?;
             return application.map(|family| family.result).ok_or_else(|| {
                 Text::from("method projection has no established ancestor implementation")
             });
         }
+        let candidate = self.associated_declaration_application(
+            &key,
+            &implementation.protocol_args,
+            &implementation.for_type,
+            name,
+            &mut Vec::new(),
+        )?;
         let candidate_owns_assignment = candidate.is_some_and(|candidate| {
             candidate.owner == selected.owner
                 && candidate.arguments.len() == selected.arguments.len()
@@ -954,12 +979,12 @@ impl ProtocolChecker {
                     .zip(&selected.arguments)
                     .all(|(a, b)| self.types_structurally_equal(a, b))
         });
-        let (arguments, scope) = self.complete_associated_family_arguments(
+        let (arguments, scope) = self.complete_associated_family_arguments_in(
             &selected.declaration,
             &implementation.for_type,
             &selected.arguments,
             supplied,
-            assumptions,
+            environment,
         )?;
         if candidate_owns_assignment
             && let Some(assignment) = implementation.associated_types.get(name)

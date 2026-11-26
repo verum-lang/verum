@@ -423,6 +423,44 @@ fn inherited_projection_uses_the_conditional_parent_in_the_childs_scope() {
     let missing = errors(&source.replace("implement<X: Ready>", "implement<X>"));
     assert!(missing.iter().any(|e| e.contains("E405") || e.contains("E427")), "{missing:?}");
 }
+
+#[test]
+fn inherited_projection_requires_the_callers_exact_callable_witness() {
+    let source = r#"module core.owned;
+        type Base is protocol { type Item; };
+        type Child is protocol extends Base { fn read(self, value: Self.Item) -> Self.Item; };
+        type Wrapper<F> is { callback: F };
+        implement<F: fn(Int) -> Bool> Base for Wrapper<F> { type Item = Bool; }
+        implement<G: fn(Int) -> Bool> Child for Wrapper<G> {
+            fn read(self, value: Bool) -> Bool { value }
+        }
+    "#;
+    accepts(source);
+    for declaration in ["G", "G: fn(Bool) -> Bool", "G: fn(Int) -> Int"] {
+        let rejected = errors(&source.replace("G: fn(Int) -> Bool", declaration));
+        assert!(rejected.iter().any(|e| e.contains("E405") || e.contains("E427")),
+            "admitted {declaration} as the parent callable: {rejected:?}");
+    }
+}
+
+#[test]
+fn an_inherited_associated_equality_can_determine_the_result_parameter() {
+    let source = r#"module core.owned;
+        type Source is protocol { type Element; };
+        type Refined is protocol extends Source {};
+        type Base is protocol { type Item; };
+        type Child is protocol extends Base { fn read(self, value: Self.Item) -> Self.Item; };
+        type Wrapper<S> is { source: S };
+        implement<V, S: Source<Element = V>> Base for Wrapper<S> { type Item = V; }
+        implement<T, R: Refined<Element = T>> Child for Wrapper<R> {
+            fn read(self, value: T) -> T { value }
+        }
+    "#;
+    accepts(source);
+    rejects(&source.replace("value: T) -> T", "value: Bool) -> Bool"));
+    let missing = errors(&source.replace("R: Refined<Element = T>", "R: Refined"));
+    assert!(missing.iter().any(|e| e.contains("E405") || e.contains("E427")), "{missing:?}");
+}
 #[test]
 fn inherited_projection_does_not_use_child_shadow() {
     rejects(
