@@ -14,6 +14,31 @@ fn info(id: u32, arity: usize) -> FunctionInfo {
     }
 }
 
+#[test]
+fn indexed_constructor_search_tracks_owner_arity_and_ambiguous_aliases() {
+    let mut ctx = CodegenContext::new();
+    let variant = |id, arity, tag, parent: &str| FunctionInfo {
+        variant_tag: Some(tag),
+        parent_type_name: Some(parent.into()),
+        ..info(id, arity)
+    };
+    ctx.functions.insert("first.Done".into(), variant(10, 1, 2, "First"));
+    ctx.functions.insert("first.alias.Done".into(), variant(10, 1, 2, "First"));
+    ctx.functions.insert("second.Done".into(), variant(11, 0, 3, "Second"));
+    ctx.functions.insert("ns::Done".into(), variant(12, 0, 4, "Foreign"));
+    ctx.functions.insert("ordinary.Done".into(), info(13, 1));
+    assert_eq!(ctx.find_variant_parent_type("Done"), None);
+    assert_eq!(ctx.find_variant_parent_type("First").as_deref(), Some("First"));
+    assert_eq!(ctx.find_variant_parent_type_by_args("First", 1), None);
+    assert_eq!(ctx.find_variant_parent_type_by_args("Done", 1).as_deref(), Some("First"));
+    assert_eq!(ctx.find_variant_by_suffix_and_args("Done", 0), Some(3));
+    ctx.functions.get_mut("second.Done").unwrap().param_count = 1;
+    assert_eq!(ctx.find_variant_parent_type_by_args("Done", 1), None);
+    assert_eq!(ctx.find_variant_by_suffix_and_args("Done", 1), None);
+    ctx.functions.remove("second.Done");
+    assert_eq!(ctx.find_variant_parent_type("Done").as_deref(), Some("First"));
+}
+
 fn assert_identity_updates(registry: &mut FunctionRegistry, ids: &[u32]) {
     for &id in ids {
         let before: List<_> = registry

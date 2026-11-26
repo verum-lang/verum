@@ -16,7 +16,7 @@ use crate::module::{ConstId, FunctionId};
 use crate::types::{CbgrTier, TypeParamId, TypeRef};
 use std::collections::{HashMap, HashSet};
 use verum_cbgr::tier_types::Tier0Reason;
-use verum_common::{Map, Text};
+use verum_common::{List, Map, Text};
 
 #[path = "function_registry.rs"]
 mod function_registry;
@@ -4569,20 +4569,13 @@ impl CodegenContext {
         // ARCH-P2: keyed + sorted — the first-parent-match loops below
         // inherited hash order (per-bake MakeVariant tag dice when one
         // parent carries duplicate registrations). Canonical: key order.
-        let mut keyed: Vec<(&String, u32, Option<String>)> = Vec::new();
-        for (fn_name, fn_info) in &self.functions {
-            if fn_name.ends_with(&suffix)
-                && fn_info.param_count == arg_count
-                && let Some(tag) = fn_info.variant_tag
-            {
-                keyed.push((fn_name, tag, fn_info.parent_type_name.clone()));
-            }
-        }
-        keyed.sort_by(|a, b| a.0.cmp(b.0));
-        let matches: Vec<(u32, Option<String>)> =
-            keyed.into_iter().map(|(_, t, p)| (t, p)).collect();
+        let mut matches: List<_> = self.functions.entries_ending_in(&suffix)
+            .filter(|(_, info)| info.param_count == arg_count)
+            .filter_map(|(key, info)| Some((key, info.variant_tag?, &info.parent_type_name)))
+            .collect();
+        matches.sort_unstable_by(|a, b| a.0.cmp(b.0));
         if matches.len() == 1 {
-            return Some(matches[0].0);
+            return Some(matches[0].1);
         }
         if matches.len() > 1 {
             // Disambiguate using the enclosing function's declared return type.
@@ -4593,7 +4586,7 @@ impl CodegenContext {
             // both call sites converge on the same disambiguation discipline.
             if let Some(ref ret_type) = self.current_return_type_name {
                 let base = ret_type.split('<').next().unwrap_or(ret_type.as_str());
-                for (tag, parent) in &matches {
+                for (_, tag, parent) in &matches {
                     if parent.as_deref() == Some(base) {
                         return Some(*tag);
                     }
@@ -4608,7 +4601,7 @@ impl CodegenContext {
             if let Some(ref inner) = self.current_return_type_inner {
                 for inner_name in inner {
                     let base = inner_name.split('<').next().unwrap_or(inner_name.as_str());
-                    for (tag, parent) in &matches {
+                    for (_, tag, parent) in &matches {
                         if parent.as_deref() == Some(base) {
                             return Some(*tag);
                         }
@@ -4623,7 +4616,7 @@ impl CodegenContext {
                     .split('<')
                     .next()
                     .unwrap_or(scrutinee_type.as_str());
-                for (tag, parent) in &matches {
+                for (_, tag, parent) in &matches {
                     if parent.as_deref() == Some(base) {
                         return Some(*tag);
                     }
@@ -4632,19 +4625,17 @@ impl CodegenContext {
             // Last: prefer user-defined types over stdlib types — kept as a
             // weak final fallback so user code still wins when both contexts
             // above are absent.
-            let user_matches: Vec<u32> = matches
+            let mut user_matches = matches
                 .iter()
-                .filter(|(_, parent)| {
+                .filter(|(_, _, parent)| {
                     parent
                         .as_ref()
                         .map(|p| self.user_defined_types.contains(p))
                         .unwrap_or(false)
                 })
-                .map(|(tag, _)| *tag)
-                .collect();
-            if user_matches.len() == 1 {
-                return Some(user_matches[0]);
-            }
+                .map(|(_, tag, _)| *tag);
+            let first = user_matches.next()?;
+            return user_matches.next().is_none().then_some(first);
         }
         None // Ambiguous or not found — fall through to hash
     }
@@ -4718,58 +4709,27 @@ impl CodegenContext {
     /// filtered by param_count. Returns the parent_type_name if exactly one match.
     /// Used to resolve variant → parent type when simple name is collided.
     pub fn find_variant_parent_type_by_args(&self, name: &str, arg_count: usize) -> Option<String> {
-        let suffix = format!(".{}", name);
-        let mut parents = Vec::new();
-        for (fn_name, fn_info) in &self.functions {
-            if fn_name.ends_with(&suffix)
-                && fn_info.variant_tag.is_some()
-                && fn_info.param_count == arg_count
-                && let Some(ref parent) = fn_info.parent_type_name
-                && !parents.contains(parent)
-            {
-                parents.push(parent.clone());
-            }
-        }
-        if parents.len() == 1 {
-            parents.into_iter().next()
-        } else {
-            None
-        }
+        self.variant_parent(name, Some(arg_count))
     }
 
-    /// Find the parent type of a variant by looking up "*.variant_name" entries.
-    ///
-    /// Returns the parent_type_name if exactly one qualified variant with this
-    /// name exists. Used to resolve type context when variable_type_names
-    /// stores a variant name instead of the parent type name.
-    pub fn find_variant_parent_type(&self, variant_name: &str) -> Option<String> {
-        let suffix = format!(".{}", variant_name);
-        let mut parents = Vec::new();
-        for (fn_name, fn_info) in &self.functions {
-            if fn_name.ends_with(&suffix)
-                && fn_info.variant_tag.is_some()
-                && let Some(ref parent) = fn_info.parent_type_name
-                && !parents.contains(parent)
-            {
-                parents.push(parent.clone());
-            }
+    /// Infer the owner of a constructor without an arity hint. A spelling
+    /// that is already a registered parent is accepted when no variant matched.
+    pub fn find_variant_parent_type(&self, name: &str) -> Option<String> {
+        self.variant_parent(name, None)
+    }
+
+    fn variant_parent(&self, name: &str, arity: Option<usize>) -> Option<String> {
+        let suffix = format!(".{name}");
+        let mut parents = self.functions.entries_ending_in(&suffix)
+            .map(|(_, info)| info)
+            .filter(|info| info.variant_tag.is_some() && arity.is_none_or(|n| info.param_count == n))
+            .filter_map(|info| info.parent_type_name.as_ref());
+        if let Some(first) = parents.next() {
+            return parents.all(|parent| parent == first).then(|| first.clone());
         }
-        // Also check if variant_name itself is a registered variant
-        if parents.is_empty() {
-            for fn_info in self.functions.values() {
-                if fn_info.variant_tag.is_some()
-                    && let Some(ref parent) = fn_info.parent_type_name
-                    && parent == variant_name
-                {
-                    return Some(variant_name.to_string());
-                }
-            }
-        }
-        if parents.len() == 1 {
-            parents.into_iter().next()
-        } else {
-            None // Ambiguous
-        }
+        (arity.is_none() && self.functions.values().any(|info| {
+            info.variant_tag.is_some() && info.parent_type_name.as_deref() == Some(name)
+        })).then(|| name.to_owned())
     }
 
     /// Check if any registered function has a name starting with the given prefix.
