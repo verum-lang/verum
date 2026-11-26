@@ -1255,10 +1255,7 @@ implement<E, A> Validated<E, A> {
             (Valid(a), Valid(b)) => Valid(f(a, b)),
             (Valid(_), Invalid(errors)) => Invalid(errors),
             (Invalid(errors), Valid(_)) => Invalid(errors),
-            (Invalid(mut e1), Invalid(e2)) => {
-                e1.extend(e2);
-                Invalid(e1)
-            }
+            (Invalid(first), Invalid(second)) => Invalid(first.concat(second)),
         }
     }
 

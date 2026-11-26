@@ -1161,6 +1161,21 @@ fn test_validated_zip_with_both_invalid_accumulates() {
 }
 
 @test
+fn test_validated_zip_with_preserves_error_order() {
+    let first: Validated<Int, Int> = Validated.Invalid([10, 20]);
+    let second: Validated<Int, Int> = Validated.Invalid([30]);
+    let combined: Validated<Int, Int> = first.zip_with(second, |a, b| a + b);
+    match combined {
+        Invalid(errors) => {
+            if errors.len() != 3 || errors[0] != 10 || errors[1] != 20 || errors[2] != 30 {
+                panic("zip_with changed the order or number of errors");
+            }
+        }
+        Valid(_) => panic("two invalid results produced a valid result"),
+    }
+}
+
+@test
 fn test_validated_and_then_valid() {
     let v: Validated<Text, Int> = Validated.valid(42);
     let result: Validated<Text, Int> = v.and_then(|x| {
