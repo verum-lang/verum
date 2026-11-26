@@ -100,12 +100,7 @@ implement WeftTransport for TlsTransport {
     }
 
     async fn write_async(&mut self, buf: &List<Byte>) -> Result<Int, IoError> {
-        // Transport hands us bytes directly — pass through to the
-        // byte-typed TlsStream API with no marshalling.
-        match self.inner.write(buf).await {
-            Result.Ok(n)  => Result.Ok(n),
-            Result.Err(e) => Result.Err(IoError.Other(f"tls write: {e}")),
-        }
+        self.inner.write_async(buf).await
     }
 
     async fn shutdown_write(&mut self) -> Result<(), IoError> {
