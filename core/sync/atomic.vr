@@ -56,6 +56,7 @@ mount core.intrinsics.atomic.{
     atomic_exchange_u8, atomic_cas_u8,
 };
 mount core.intrinsics.platform.{spin_hint};
+mount core.intrinsics.runtime.sync.{futex_wait as wait_on_word, futex_wake as wake_word};
 
 // Memory ordering constants for atomic operations.
 // These match the encoding used in VBC opcodes and LLVM.
@@ -770,6 +771,24 @@ implement AtomicU32 {
     @inline(always)
     public fn new(val: UInt32) -> AtomicU32 {
         AtomicU32 { value: val }
+    }
+
+    // Compare and park on the same 32-bit word used by load and fetch_add.
+    // Zero nanoseconds denotes an indefinite wait. Only -ETIMEDOUT sets the flag.
+    public(in core.sync) fn park_if_equal(&self, expected: UInt32, timeout_ns: UInt64) -> Result<Bool, Int32> {
+        let status = wait_on_word(&self.value as *const UInt32, expected, timeout_ns);
+        if status == 0 || status == -11 || status == -4 {
+            Result.Ok(false)   // Woken, changed value, or interrupted.
+        } else if status == -110 {
+            Result.Ok(true)
+        } else {
+            Result.Err(status)
+        }
+    }
+
+    public(in core.sync) fn wake_waiters(&self, count: UInt32) {
+        let status = wake_word(&self.value as *const UInt32, count);
+        if status < 0 { panic(f"futex wake failed with status {status}"); }
     }
 
     // Load value with ordering.

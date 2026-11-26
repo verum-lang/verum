@@ -28,26 +28,15 @@ module core.intrinsics.runtime.sync;
 // SECTION 1: Futex Operations
 // =============================================================================
 
-/// Wait on a memory address until value changes.
-///
-
-/// Blocks until:
-/// - The value at `addr` differs from `expected`
-/// - The timeout expires (if timeout_ns > 0)
-/// - Another thread calls futex_wake
-///
-
-/// Returns: 0 on success, -1 on timeout
-/// Requires: Operating system
+/// Compare a 32-bit word with `expected` and park while it still matches.
+/// The comparison and waiter registration must be atomic with respect to wake.
+/// A zero timeout has no deadline. Results are 0 for a wake, -11 for an
+/// initial mismatch, and -110 for a timeout. Other negative values report errors.
 @intrinsic("futex_wait")
 public fn futex_wait(addr: *const UInt32, expected: UInt32, timeout_ns: UInt64) -> Int32;
 
-/// Wake threads waiting on a memory address.
-///
-
-/// Wakes up to `count` threads.
-/// Returns: Number of threads woken
-/// Requires: Operating system
+/// Wake up to `count` waiters already registered at this address.
+/// Return the number woken, or a negative status on failure.
 @intrinsic("futex_wake")
 public fn futex_wake(addr: *const UInt32, count: UInt32) -> Int32;
 

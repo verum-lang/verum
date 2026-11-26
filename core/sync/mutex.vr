@@ -193,6 +193,13 @@ public type affine MutexGuard<T> is {
 };
 
 implement<T> MutexGuard<T> {
+    // Consume the guard and retain the original mutex for reacquisition after a wait.
+    public(in core.sync) fn unlock_for_wait(self) -> &Mutex<T> {
+        let mutex = self.mutex;
+        drop(self);
+        mutex
+    }
+
     // Get reference to protected data.
     fn data(&self) -> &T {
         &self.mutex.data
@@ -241,7 +248,7 @@ public type PoisonError<T> is {
 };
 
 implement<T> PoisonError<T> {
-    fn new(guard: T) -> PoisonError<T> {
+    public(in core.sync) fn new(guard: T) -> PoisonError<T> {
         PoisonError { guard: guard }
     }
 
@@ -261,7 +268,7 @@ implement<T> PoisonError<T> {
     }
 }
 
-implement<T: Debug> Debug for PoisonError<T> {
+implement<T> Debug for PoisonError<T> {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         f.write_str("PoisonError { .. }")
     }

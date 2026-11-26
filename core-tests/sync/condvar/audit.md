@@ -1,6 +1,6 @@
 # `sync/condvar` audit
 
-Module: `core/sync/condvar.vr` (353 LOC) — `Condvar` (condition
+Module: `core/sync/condvar.vr` — `Condvar` (condition
 variable backed by a futex-monitored sequence counter),
 `WaitTimeoutResult` (data-only result wrapping a `timed_out: Bool`),
 `CondvarNotifyGuard` (RAII guard that notifies on drop),
@@ -11,16 +11,17 @@ Tests focus on the data-shape and static surface:
 * `Condvar.new()` constructor + `Default` impl.
 * `Condvar.waiter_count()` accessor on a quiescent condvar (== 0).
 * `Condvar.notify_one()` / `notify_all()` on a no-waiter condvar
-  (always increments `seq` + issues `futex_wake`; documented to NOT
-  gate on `waiters > 0` per the missed-wakeup fix at `condvar.vr:217-230`).
+  (increments the sequence and issues a wake independently of the waiter count).
 * `WaitTimeoutResult` data-record construction + `timed_out()` accessor.
 * `CondvarNotifyGuard.notify_one_guard` / `notify_all_guard` constructors.
 * `producer_consumer_pair(initial)` factory returns a 2-tuple of
   `Mutex<T>` + `Condvar`.
 
-Live `wait(MutexGuard<T>)` / `wait_timeout` / `wait_while` semantics
-require a multi-threaded harness — tested at
-`vcs/specs/L2-standard/sync/condvar/`.
+The [public deadline fixture](../../../vcs/specs/L2-standard/async/synchronization/condvar_deadline.vr)
+uses the actual mutex and condition variable. It covers the ready predicate,
+two timed waits separated by a broadcast, and reacquisition of a poisoned
+guard after an immediate timeout. Its source passes ordinary `verum check`.
+The development CLI requires an embedded standard-library archive for execution.
 
 ## 1. Cross-stdlib usage
 
@@ -31,37 +32,59 @@ require a multi-threaded harness — tested at
 | `core.runtime.task_pool`       | Worker-thread sleep-wake on incoming task |
 | `core.io.async_runtime`        | Reactor wake on submitted-task availability |
 
-## 2. Crate-side hardcodes
+## 2. Wait protocol
 
-* `sys.{linux,darwin,windows}.thread.{futex_wait, futex_wake}` —
-  per-platform futex primitives.  `&self.seq.value` (AtomicInt's
-  single `value: Int` field) is passed verbatim to the syscall.
-  Drift in AtomicInt layout breaks every condvar wait/wake.
-* The `seq.fetch_add(1, Release)` in `notify_one` / `notify_all` is
-  unconditional (post-fix at `condvar.vr:217-230`) — it MUST stay
-  unconditional or the missed-wakeup race surfaces in the
-  notify-without-lock pattern.  Documented in the source-side
-  doc-comment.
+`Condvar` snapshots an `AtomicU32` sequence while holding the predicate mutex.
+The consuming `MutexGuard.unlock_for_wait` retains the original mutex reference
+and releases the guard through its destructor. Conditional parking and waking
+use the same 32-bit field as atomic load and fetch-add. Notifications increment
+the sequence regardless of the diagnostic waiter count. `wait_while` rechecks
+the predicate after acquiring the mutex again.
 
-## 3. Language-implementation gaps
+## 3. Execution coverage
 
-### §3.1 Live wait / wait_timeout / wait_while require multi-threaded harness
+### §3.1 Thread handoff
 
-Cannot be tested at the data-shape level.  See
-`vcs/specs/L2-standard/sync/condvar/`.
+The public thread handoff is blocked at callback admission. With
+`mount core.runtime.thread.{ThreadBuilder};` and a static
+`PHASE: Mutex<Int>` and `CHANGED: Condvar`, ordinary `verum check` rejects
+`ThreadBuilder.new().spawn(publish)` for this worker:
 
-### §3.2 Notify-without-lock missed-wakeup fix is doc-only at single-thread level
+```verum
+fn publish() -> Int {
+    let mut guard = PHASE.lock().unwrap();
+    *guard = 1;
+    drop(guard);
+    CHANGED.notify_one();
+    17
+}
+```
 
-The fix at `condvar.vr:201-241` removes the `if waiters > 0` gate
-from `notify_one` / `notify_all`.  The single-threaded interpreter
-cannot exercise the race that the fix closes; we pin the
-architectural rule via:
-* `unit_test.vr` §3 — notify_one / notify_all on a fresh condvar
-  succeed (do NOT panic) even though there are no waiters.
-* `regression_test.vr` — a future re-gating of `notify_*` on
-  `waiters > 0` would silently break the live test (but not this
-  single-threaded surface).  Pinned as a doc-comment-tied
-  invariant.
+The diagnostic is E400. The required callable excludes `Async`, while the
+worker's observed properties are unknown. Assigning a function that returns
+a constant to `fn() -> Int` succeeds. Introducing only `PHASE.lock()` or only
+`CHANGED.notify_one()` into that function reproduces the rejection.
+
+### §3.2 Interpreter wake registration
+
+The interpreter routes the futex operations through
+`crates/verum_vbc/src/interpreter/dispatch_table/handlers/sync_extended.rs`.
+The underlying `futex_park` in `ffi_extended.rs` checks for a wake token before
+parking, while the notification side updates tokens and signals without
+holding the parking mutex. A wake can land between that check and the park.
+
+An independent execution of the actual parking module on an unchanged
+`AtomicI32` initialized to 7 produced the following results. Both waits used
+expected value 7 and a timeout of 2,000,000 ns.
+
+| Operation | Result | Expected |
+|---|---:|---:|
+| First wait | -110 | -110 |
+| Wake with count 2147483647 after the only waiter timed out | 2147483647 | 0 |
+| Second wait | 0 | -110 |
+
+This exercises the Rust parking implementation. The public handoff fixture
+requires the compiler, archive, VBC dispatch and guard cleanup in addition.
 
 ### §3.3 `producer_consumer_pair` returns `(Mutex<T>, Condvar)`
 
@@ -73,25 +96,13 @@ Pin in `unit_test.vr` §5.
 Data-record with single accessor `timed_out() -> Bool`.  Construction
 + accessor pinned in `unit_test.vr` §4.
 
-### §3.6 Tier-0 futex FFI symbol gap
+### §3.6 Native operations
 
-`Condvar.notify_one()` / `notify_all()` issue a `futex_wake` (Linux
-SYS_futex / macOS `__ulock_wake`) regardless of waiter count (per the
-missed-wakeup fix).  The Tier-0 interpreter currently does NOT
-register the `__ulock_wake` / SYS_futex FFI symbols in the per-module
-FFI table — calls trip "FFI symbol not found: FfiSymbolId(61)".
-
-This is a structural FFI-symbol-remap defect: the precompiled stdlib
-registers `__ulock_wake` at one index, but when a test compiles
-against the precompile, the resulting test module's FFI table doesn't
-get the same index propagated.
-
-Tests that exercise the live notify_* path are `@ignore`d here; the
-static-state contracts (Condvar.new, waiter_count == 0 on quiescent,
-WaitTimeoutResult / CondvarNotifyGuard / producer_consumer_pair
-ctors) stay live.  Promote to `@test` when the FFI-symbol
-propagation lands in `crates/verum_vbc/src/ffi/runtime.rs` +
-`crates/verum_vbc/src/linker.rs`.
+The native `emit_futex_ir` implementation in
+`crates/verum_codegen/src/llvm/platform_ir.rs` emits Darwin ulock calls
+without consulting the module's target triple. Native guard destruction
+and target-specific comparison, wake and timeout behavior require
+independent execution.
 
 ### §3.5 `CondvarNotifyGuard` is RAII over notification
 
@@ -119,5 +130,5 @@ Pin construction only.
 
 | Item | Scope | Estimated effort |
 |---|---|---|
-| Live wait + notify race tests | `vcs/specs/L2-standard/sync/condvar/` | 1 day |
+| Live wait + notify race tests | Thread callback admission, a matching archive and the backend boundaries above | Unmeasured |
 | CondvarNotifyGuard drop-notification observability | language-level harness | 30 min |

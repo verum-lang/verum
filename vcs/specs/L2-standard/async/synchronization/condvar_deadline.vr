@@ -1,0 +1,49 @@
+// @test: run
+// @tier: all
+// @level: L2
+// @tags: condvar, mutex, timeout
+// @timeout: 10000
+// @expected-exit: 0
+
+mount core.sync.condvar.{Condvar};
+mount core.sync.mutex.{Mutex, MutexGuard};
+mount core.time.instant.{Instant};
+
+fn wait_for_timeout(changed: &Condvar, mut guard: MutexGuard<Int>) -> MutexGuard<Int> {
+    let started = Instant.now();
+    loop {
+        let (relocked, expired) = changed.wait_timeout(guard, 2_000_000).unwrap();
+        if expired { return relocked; }
+        // Spurious wakes are allowed. An old broadcast cannot keep the waiter awake forever.
+        assert(started.elapsed().as_nanos() < 1_000_000_000);
+        guard = relocked;
+    }
+}
+
+fn main() -> Int {
+    let phase = Mutex.new(2);
+    let changed = Condvar.new();
+    let first = phase.lock().unwrap();
+    changed.notify_one();
+    let ready = changed.wait_while(first, |value| *value < 2).unwrap();
+    let held = wait_for_timeout(&changed, ready);
+    assert_eq(*held, 2);
+
+    // A wake after the timeout has no current waiter and must not be saved.
+    changed.notify_all();
+    let held_again = wait_for_timeout(&changed, held);
+
+    phase.poison();
+    let (mut guarded, immediate) = match changed.wait_timeout(held_again, 0) {
+        Result.Err(poison) => poison.into_inner(),
+        Result.Ok(_) => panic("reacquiring a poisoned mutex must return its guard in the error"),
+    };
+    assert(immediate);
+    *guarded = 3;
+    drop(guarded);
+    phase.clear_poison();
+    let last = phase.lock().unwrap();
+    assert_eq(*last, 3);
+    assert_eq(changed.waiter_count(), 0);
+    0
+}

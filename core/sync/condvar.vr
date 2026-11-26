@@ -6,18 +6,6 @@
 // =============================================================================
 //
 
-// # V-LLSI Migration Status
-//
-
-// This module has been migrated to use native V-LLSI primitives:
-// - Uses spin_hint() intrinsic for spin-wait hint
-// - Uses compiler_fence() intrinsic for memory ordering
-// - No FFI dependencies on verum_runtime
-//
-
-// =============================================================================
-//
-
 // Condition variables allow threads to efficiently wait for a condition to
 // become true. They are always used in conjunction with a Mutex.
 //
@@ -55,32 +43,8 @@
     lifecycle: Lifecycle.Definition
 )
 module core.sync.condvar;
-mount super.atomic.*;
-mount super.mutex.*;
-
-// Cross-platform futex imports — real OS blocking, no spin-wait
-@cfg(target_os = "linux")
-mount sys.linux.thread.{
-    futex_wait as sys_futex_wait,
-    futex_wake as sys_futex_wake,
-};
-
-@cfg(target_os = "macos")
-mount sys.darwin.thread.{
-    futex_wait as sys_futex_wait,
-    futex_wake as sys_futex_wake,
-};
-
-// Mounted rather than inherited: §4ter — the prelude carries only what
-// the LANGUAGE requires, and this is library API.
-mount core.sync.mutex.{Mutex};
-mount core.sync.atomic.{AtomicInt};
-
-@cfg(target_os = "windows")
-mount sys.windows.thread.{
-    futex_wait as sys_futex_wait,
-    futex_wake as sys_futex_wake,
-};
+mount core.sync.atomic.{AtomicInt, AtomicU32, MemoryOrdering};
+mount core.sync.mutex.{LockResult, Mutex, MutexGuard, PoisonError};
 
 // =============================================================================
 // Condvar
@@ -106,7 +70,7 @@ public type Condvar is {
     /// Number of waiting threads (diagnostic)
     waiters: AtomicInt,
     /// Sequence counter — futex waits on this, notify increments + wakes
-    seq: AtomicInt,
+    seq: AtomicU32,
 };
 
 implement Condvar {
@@ -115,7 +79,7 @@ implement Condvar {
     public fn new() -> Condvar {
         Condvar {
             waiters: AtomicInt.new(0),
-            seq: AtomicInt.new(0),
+            seq: AtomicU32.new(0),
         }
     }
 
@@ -134,56 +98,49 @@ implement Condvar {
     /// }
     /// ```
     public fn wait<T>(&self, guard: MutexGuard<T>) -> LockResult<MutexGuard<T>> {
-        let mutex = guard.mutex;
-
-        self.waiters.fetch_add(1, MemoryOrdering.SeqCst);
-
-        // Snapshot sequence counter BEFORE releasing mutex
-        let my_seq = self.seq.load(MemoryOrdering.Acquire);
-
-        // Release the mutex
-        drop(guard);
-
-        // Block until seq changes — real OS-level sleep via futex
-        let _ = sys_futex_wait(&self.seq.value, my_seq, Maybe.None);
-
-        self.waiters.fetch_sub(1, MemoryOrdering.SeqCst);
-
-        // Re-acquire the mutex
-        mutex.lock()
+        let (result, _) = self.wait_inner(guard, Maybe.None);
+        result
     }
 
-    /// Block until notified or timeout expires.
-    ///
-
-    /// Returns `(guard, timed_out)` where `timed_out` is true if the
-    /// timeout elapsed before being notified.
+    /// Limit the wait for notification to timeout_ns, then reacquire the mutex.
+    /// A nonpositive timeout skips parking. A changed sequence or a spurious
+    /// wake returns false in the timeout flag.
     public fn wait_timeout<T>(
         &self,
         guard: MutexGuard<T>,
         timeout_ns: Int
     ) -> LockResult<(MutexGuard<T>, Bool)> {
-        let mutex = guard.mutex;
-
-        self.waiters.fetch_add(1, MemoryOrdering.SeqCst);
-        let my_seq = self.seq.load(MemoryOrdering.Acquire);
-
-        drop(guard);
-
-        // Block with timeout — real OS-level sleep
-        let result = sys_futex_wait(&self.seq.value, my_seq, Maybe.Some(timeout_ns as UInt64));
-
-        let timed_out = match result {
-            Result.Err(_) => true,   // Timeout or error
-            Result.Ok(_) => false,   // Woken normally
-        };
-
-        self.waiters.fetch_sub(1, MemoryOrdering.SeqCst);
-
-        mutex.lock().map(|g| (g, timed_out))
+        let (result, timed_out) = self.wait_inner(guard, Maybe.Some(timeout_ns));
+        match result {
+            Result.Ok(relocked) => Result.Ok((relocked, timed_out)),
+            Result.Err(poison) => Result.Err(PoisonError.new((poison.into_inner(), timed_out))),
+        }
     }
 
-    /// Block until the predicate becomes true.
+    fn wait_inner<T>(
+        &self,
+        guard: MutexGuard<T>,
+        timeout_ns: Maybe<Int>
+    ) -> (LockResult<MutexGuard<T>>, Bool) {
+        self.waiters.fetch_add(1, MemoryOrdering.Relaxed);
+        // Snapshot under the mutex. A notification racing with its release
+        // changes the expected word before the futex can go to sleep.
+        let expected = self.seq.load(MemoryOrdering.Acquire);
+        let mutex = guard.unlock_for_wait();
+        let waited = match timeout_ns {
+            Maybe.None => self.seq.park_if_equal(expected, 0),
+            Maybe.Some(ns) if ns <= 0 => Result.Ok(true),
+            Maybe.Some(ns) => self.seq.park_if_equal(expected, ns as UInt64),
+        };
+        self.waiters.fetch_sub(1, MemoryOrdering.Relaxed);
+        let relocked = mutex.lock();
+        match waited {
+            Result.Ok(timed_out) => (relocked, timed_out),
+            Result.Err(status) => panic(f"futex wait failed with status {status}"),
+        }
+    }
+
+    /// Wait while the predicate is true, rechecking it under the reacquired mutex.
     ///
 
     /// This is a convenience method that handles spurious wakeups:
@@ -202,46 +159,18 @@ implement Condvar {
         Result.Ok(guard)
     }
 
-    /// Notify one waiting thread.
-    ///
-
-    /// Always increments the sequence counter AND issues a futex wake —
-    /// the previous implementation gated both behind
-    /// `if waiters.load(SeqCst) > 0` to skip the wake syscall when
-    /// no waiters were observed. That gating is unsafe in the
-    /// notify-without-lock pattern: producer modifies state under
-    /// mutex, releases the mutex, then calls `notify_one()` without
-    /// re-acquiring it (a common performance pattern that avoids
-    /// the lock-contention wake-storm). Concurrent consumer reads
-    /// the predicate, observes it false, calls `condvar.wait()` —
-    /// the waiter's `waiters.fetch_add(1)` may not be observed by
-    /// notifier's `waiters.load()` because there's no mutex-mediated
-    /// synchronization edge between them. Notifier sees waiters == 0,
-    /// skips the wake; waiter sleeps on futex; missed wakeup —
-    /// waiter sleeps forever.
-    ///
-
-    /// The fix removes the gate. Cost: one extra `futex_wake` syscall
-    /// per notify on truly-uncontended condvars (the kernel returns
-    /// immediately when no tasks are waiting on the futex). The
-    /// `seq.fetch_add` is necessary regardless — it changes the
-    /// futex-watched value so any in-flight waiter who already
-    /// snapshotted the old seq will see the mismatch and exit
-    /// futex_wait with EAGAIN.
+    /// Advance the sequence and wake one waiter. Notifications also advance
+    /// the sequence when the waiter count is zero, so a racing waiter that
+    /// has released the mutex can observe the change before it parks.
     public fn notify_one(&self) {
         self.seq.fetch_add(1, MemoryOrdering.Release);
-        let _ = sys_futex_wake(&self.seq.value, 1);
+        self.seq.wake_waiters(1);
     }
 
-    /// Notify all waiting threads.
-    ///
-
-    /// Same lost-wakeup-fix rationale as `notify_one` — see its
-    /// doc for why the previous `if waiters > 0` gate was unsafe
-    /// for the notify-without-lock pattern.
+    /// Advance the sequence and wake all registered waiters.
     public fn notify_all(&self) {
         self.seq.fetch_add(1, MemoryOrdering.Release);
-        let _ = sys_futex_wake(&self.seq.value, Int.MAX);
+        self.seq.wake_waiters(Int32.MAX as UInt32);
     }
 
     /// Get the number of threads currently waiting.
