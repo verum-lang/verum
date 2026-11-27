@@ -28,7 +28,7 @@ module core.math.rag;
 mount core.math.tensor.{DynTensor, euclidean_distance};
 mount core.collections.heap.{BinaryHeap, Reverse};
 mount core.math.nn.Module;
-mount core.math.agent.{ChatMessage, Role, MessageContent};
+mount core.math.agent.ChatMessage;
 mount core.encoding.value.Value;
 mount core.base.protocols.{Clone, Eq, Ord, PartialEq};
 mount core.base.ordering.Ordering;
@@ -500,22 +500,26 @@ implement VectorStore for HNSWVectorStore {
         for doc in docs {
             if let Maybe.Some(embedding) = &doc.embedding {
                 self.index.add(&doc.id, embedding);
-                self.documents.insert(doc.id.clone(), doc.clone());
+                self.documents.insert(doc.id.clone(), (*doc).clone());
             }
         }
     }
 
     fn search(&self, query_embedding: &DynTensor<Float>, k: USize) -> List<(Document, Float)> {
         let results = self.index.search(query_embedding, k);
-        results.iter().filter_map(|(id, score)| {
-            self.documents.get(id).map(|doc| (doc.clone(), *score))
-        }).collect()
+        let mut matches: List<(Document, Float)> = List.with_capacity(results.len());
+        for (id, score) in results {
+            if let Maybe.Some((_, doc)) = self.documents.get_key_value(&id) {
+                matches.push(((*doc).clone(), score));
+            }
+        }
+        matches
     }
 
     fn delete(&mut self, ids: &[Text]) {
-        for id in ids {
-            self.documents.remove(id);
-            self.index.remove(id);
+        for i in 0..ids.len() {
+            self.documents.remove(ids[i]);
+            self.index.remove(&ids[i]);
         }
     }
 
@@ -699,24 +703,20 @@ where
 
     // Add documents to knowledge base
     public fn add_documents(&mut self, texts: &[Text], metadata: &[Map<Text, Value>]) {
-        let documents: List<Document> = texts.iter()
-            .zip(metadata.iter())
-            .enumerate()
-            .flat_map(|(i, (text, meta))| {
-                let chunks = self.chunker.chunk(text);
-                chunks.iter().enumerate().map(|(j, chunk)| {
-                    let embedding = self.embedder.forward(chunk.clone());
-                    Document {
-                        id: f"doc_{i}_chunk_{j}",
-                        content: chunk.clone(),
-                        metadata: meta.clone(),
-                        embedding: Maybe.Some(embedding),
-                    }
-                }).collect<List<_>>()
-            })
-            .collect();
-
-        self.vector_store.add(&documents);
+        let mut documents: List<Document> = List.new();
+        for i in 0..texts.len().min(metadata.len()) {
+            let chunks = self.chunker.chunk(&texts[i]);
+            for (j, chunk) in chunks.into_iter().enumerate() {
+                let embedding = self.embedder.forward(chunk.clone());
+                documents.push(Document {
+                    id: f"doc_{i}_chunk_{j}",
+                    content: chunk,
+                    metadata: copy_metadata(&metadata[i]),
+                    embedding: Maybe.Some(embedding),
+                });
+            }
+        }
+        self.vector_store.add(documents.as_slice());
     }
 
     // Add single document
@@ -733,24 +733,17 @@ where
         let retrieved = self.vector_store.search(&query_embedding, self.retrieval_k);
 
         // 3. Build context from retrieved documents
-        let context: Text = retrieved.iter()
-            .map(|(doc, score)| f"[Relevance: {score:.2}] {doc.content}")
-            .collect<List<_>>()
-            .join("\n\n");
+        let mut passages: List<Text> = List.with_capacity(retrieved.len());
+        for (doc, score) in retrieved {
+            passages.push(f"[Relevance: {score:.2}] {doc.content}");
+        }
+        let context = passages.join("\n\n");
 
         // 4. Create chat messages
-        let messages = [
-            ChatMessage {
-                role: Role.System,
-                content: MessageContent.TextContent(self.system_prompt.clone()),
-                name: Maybe.None,
-            },
-            ChatMessage {
-                role: Role.User,
-                content: MessageContent.TextContent(f"Context:\n{context}\n\nQuestion: {question}"),
-                name: Maybe.None,
-            },
-        ].to_list();
+        let messages: List<ChatMessage> = [
+            ChatMessage.system(self.system_prompt.clone()),
+            ChatMessage.user(f"Context:\n{context}\n\nQuestion: {question}"),
+        ];
 
         // 5. Generate response
         self.generator.forward(messages)
@@ -761,30 +754,21 @@ where
         let query_embedding = self.embedder.forward(question.clone());
         let retrieved = self.vector_store.search(&query_embedding, self.retrieval_k);
 
-        let sources: List<Document> = retrieved.iter()
-            .map(|(doc, _)| doc.clone())
-            .collect();
+        let mut sources: List<Document> = List.with_capacity(retrieved.len());
+        let mut citations: List<Text> = List.with_capacity(retrieved.len());
+        for (doc, _) in retrieved {
+            let number = sources.len() + 1;
+            citations.push(f"[{number}] {doc.content}");
+            sources.push(doc);
+        }
+        let context = citations.join("\n\n");
 
-        let context: Text = sources.iter()
-            .enumerate()
-            .map(|(i, doc)| f"[{i + 1}] {doc.content}")
-            .collect<List<_>>()
-            .join("\n\n");
-
-        let messages = [
-            ChatMessage {
-                role: Role.System,
-                content: MessageContent.TextContent(
-                    "You are a helpful assistant. Use the numbered sources below to answer questions. Cite sources using [N] notation.".to_text()
-                ),
-                name: Maybe.None,
-            },
-            ChatMessage {
-                role: Role.User,
-                content: MessageContent.TextContent(f"Sources:\n{context}\n\nQuestion: {question}"),
-                name: Maybe.None,
-            },
-        ].to_list();
+        let messages: List<ChatMessage> = [
+            ChatMessage.system(
+                "You are a helpful assistant. Use the numbered sources below to answer questions. Cite sources using [N] notation.".to_text()
+            ),
+            ChatMessage.user(f"Sources:\n{context}\n\nQuestion: {question}"),
+        ];
 
         let response = self.generator.forward(messages);
         (response, sources)
@@ -858,17 +842,21 @@ implement BM25Index {
 
     // Tokenize text into terms
     fn tokenize(&self, text: &Text) -> List<Text> {
-        text.to_lowercase()
-            .split_whitespace()
-            .map(|s| s.chars().filter(|c| c.is_alphanumeric()).collect<Text>())
-            .filter(|s| s.len() > 1)
-            .collect()
+        let mut terms: List<Text> = List.new();
+        for word in text.to_lowercase().split_whitespace() {
+            let mut term = Text.new();
+            for ch in word.chars() {
+                if ch.is_alphanumeric() { term.push(ch); }
+            }
+            if term.len() > 1 { terms.push(term); }
+        }
+        terms
     }
 
     // Calculate IDF for a term
     fn idf(&self, term: &Text) -> Float {
         let n = self.documents.len() as Float;
-        let df = self.inverted_index.get(term).map(|v| v.len()).unwrap_or(0) as Float;
+        let df = self.inverted_index.get(term.clone()).map(|v| v.len()).unwrap_or(0) as Float;
 
         if df == 0.0 {
             return 0.0;
@@ -879,18 +867,23 @@ implement BM25Index {
 
     // Calculate BM25 score for a document
     fn score(&self, doc_id: &Text, query_terms: &[Text]) -> Float {
-        let doc_len = self.doc_lengths.get(doc_id).copied().unwrap_or(0) as Float;
+        let doc_len = self.doc_lengths.get(doc_id.clone()).unwrap_or(0) as Float;
 
         let mut score = 0.0;
 
-        for term in query_terms {
+        for i in 0..query_terms.len() {
+            let term = &query_terms[i];
             let idf = self.idf(term);
 
-            let tf = self.inverted_index.get(term)
-                .and_then(|postings| {
-                    postings.iter().find(|(id, _)| id == doc_id).map(|(_, freq)| *freq)
-                })
-                .unwrap_or(0) as Float;
+            let mut tf = 0.0;
+            if let Maybe.Some((_, postings)) = self.inverted_index.get_key_value(term) {
+                for (id, freq) in postings.iter() {
+                    if id == doc_id {
+                        tf = *freq as Float;
+                        break;
+                    }
+                }
+            }
 
             if tf > 0.0 {
                 let numerator = tf * (self.config.k1 + 1.0);
@@ -912,7 +905,10 @@ implement SparseIndex for BM25Index {
 
         // Update document length tracking
         self.doc_lengths.insert(doc.id.clone(), doc_len);
-        let total_len: USize = self.doc_lengths.values().sum();
+        let mut total_len: USize = 0;
+        for length in self.doc_lengths.values() {
+            total_len += length;
+        }
         self.avg_doc_length = total_len as Float / self.doc_lengths.len() as Float;
 
         // Count term frequencies
@@ -925,11 +921,11 @@ implement SparseIndex for BM25Index {
         for (term, freq) in term_freqs {
             self.inverted_index
                 .entry(term)
-                .or_insert_with(|| List.new())
+                .or_insert(List.new())
                 .push((doc.id.clone(), freq));
         }
 
-        self.documents.insert(doc.id.clone(), doc.clone());
+        self.documents.insert(doc.id.clone(), (*doc).clone());
     }
 
     fn search(&self, query: &Text, k: USize) -> List<(Document, Float)> {
@@ -939,22 +935,20 @@ implement SparseIndex for BM25Index {
             return List.new();
         }
 
-        // Score all documents
-        let mut scores: List<(Text, Float)> = self.documents.keys()
-            .map(|id| (id.clone(), self.score(id, &query_terms)))
-            .filter(|(_, score)| *score > 0.0)
-            .collect();
+        let mut scores: List<(Text, Float)> = List.new();
+        for id in self.documents.keys() {
+            let score = self.score(&id, query_terms.as_slice());
+            if score > 0.0 { scores.push((id, score)); }
+        }
+        scores.sort_by(descending_score);
 
-        // Sort by score descending
-        scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(Ordering.Equal));
-
-        // Return top k
-        scores.into_iter()
-            .take(k)
-            .filter_map(|(id, score)| {
-                self.documents.get(&id).map(|doc| (doc.clone(), score))
-            })
-            .collect()
+        let mut matches: List<(Document, Float)> = List.new();
+        for (id, score) in scores.into_iter().take(k) {
+            if let Maybe.Some((_, doc)) = self.documents.get_key_value(&id) {
+                matches.push(((*doc).clone(), score));
+            }
+        }
+        matches
     }
 
     fn count(&self) -> USize {
@@ -1028,21 +1022,18 @@ implement<D: VectorStore, S: SparseIndex> HybridRetriever<D, S> {
             entry.0 += rrf_score;
         }
 
-        // Sort by combined score
-        let mut results: List<(Document, Float)> = scores.values()
-            .map(|(score, doc)| (doc.clone(), *score))
-            .collect();
-
-        results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(Ordering.Equal));
-
-        results.into_iter().take(k).collect()
+        let mut results: List<(Document, Float)> = List.with_capacity(scores.len());
+        for (_, (score, doc)) in scores { results.push((doc, score)); }
+        results.sort_by(descending_score);
+        results.truncate(k);
+        results
     }
 
     // Add document to both indices
     public fn add(&mut self, doc: &Document) {
         // Add to dense store (requires embedding)
         if doc.embedding.is_some() {
-            self.dense_store.add(&[doc.clone()]);
+            self.dense_store.add(&[(*doc).clone()]);
         }
 
         // Add to sparse index
@@ -1058,6 +1049,12 @@ implement<D: VectorStore, S: SparseIndex> HybridRetriever<D, S> {
 // =============================================================================
 // Helper Functions
 // =============================================================================
+
+fn descending_score<T>(a: &(T, Float), b: &(T, Float)) -> Ordering {
+    if a.1 > b.1 { Ordering.Less }
+    else if a.1 < b.1 { Ordering.Greater }
+    else { Ordering.Equal }
+}
 
 // Generate random float in [0, 1)
 fn random_float() -> Float {
