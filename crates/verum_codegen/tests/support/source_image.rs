@@ -35,7 +35,6 @@ pub fn run_module(
     mut wire: verum_vbc::VbcModule,
     configure: impl FnOnce(&verum_llvm::module::Module<'_>),
 ) {
-    let mut graph = verum_vbc::mono::InstantiationGraph::new();
     for function in &mut wire.functions {
         function.is_generic = !function.type_params.is_empty();
         let start = function.bytecode_offset as usize;
@@ -46,15 +45,7 @@ pub fn run_module(
         verum_vbc::bytecode::jump_offsets_to_instr_indices(&mut instructions);
         function.instructions = Some(instructions);
     }
-    for function in &wire.functions {
-        verum_vbc::mono::discover_call_instantiations(
-            &wire,
-            function.instructions.as_ref().unwrap(),
-            function.func_id_base,
-            &mut graph,
-        )
-        .expect("declared generic witnesses");
-    }
+    let graph = verum_vbc::mono::module_instantiations(&wire).expect("declared generic witnesses");
     let wire = verum_vbc::mono::monomorphize_minimal(wire, &graph)
         .expect("specialize")
         .module;

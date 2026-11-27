@@ -119,6 +119,40 @@ pub(super) fn call_target(module: &VbcModule, raw: u32, base: u32) -> Option<Fun
     module.get_function(id).map(|_| id)
 }
 
+/// Collect the concrete roots for a complete module, including declared
+/// specializations and call-site witnesses in decoded or serialized bodies.
+pub fn module_instantiations(module: &VbcModule) -> Result<InstantiationGraph, MonoPhaseError> {
+    let mut graph = InstantiationGraph::new();
+    let limit = MonoPhaseConfig::default().max_instantiations;
+    for entry in &module.specializations {
+        if let Some(declaration) = module.get_function(entry.generic_fn)
+            && let Some(args) = canonical_type_args(declaration, &entry.type_args)
+        {
+            record_concrete_instantiation(&mut graph, entry.generic_fn, args, limit)?;
+        }
+    }
+    for function in &module.functions {
+        let decoded;
+        let body = if let Some(instructions) = &function.instructions {
+            instructions
+        } else {
+            let start = function.bytecode_offset as usize;
+            let invalid = |message| super::SpecializationError::InvalidBytecode {
+                offset: start,
+                message,
+            };
+            let bytes = module.bytecode.get(start..)
+                .and_then(|tail| tail.get(..function.bytecode_length as usize))
+                .ok_or_else(|| invalid(format!("body of {:?} exceeds module bytecode", function.id)))?;
+            decoded = crate::bytecode::decode_instructions(bytes)
+                .map_err(|error| invalid(format!("cannot decode body of {:?}: {error}", function.id)))?;
+            &decoded
+        };
+        discover_with_limit(module, body, function.func_id_base, &mut graph, limit)?;
+    }
+    Ok(graph)
+}
+
 /// Discover calls and closure creations carrying an exact body ID and complete args.
 /// Bare CallM names are deliberately not candidates for this graph.
 pub fn discover_call_instantiations(

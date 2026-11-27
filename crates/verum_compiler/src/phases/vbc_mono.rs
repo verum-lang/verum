@@ -76,7 +76,7 @@ use super::{CompilationPhase, PhaseData, PhaseInput, PhaseMetrics, PhaseOutput, 
 use verum_common::{List, Text};
 use verum_diagnostics::Diagnostic;
 use verum_vbc::module::VbcModule;
-use verum_vbc::mono::{InstantiationGraph, MonoPhaseConfig, MonomorphizationPhase as VbcMonoPhase};
+use verum_vbc::mono::{module_instantiations, MonoPhaseConfig, MonomorphizationPhase as VbcMonoPhase};
 
 // ============================================================================
 // Monomorphization Phase
@@ -282,7 +282,7 @@ impl VbcMonomorphizationPhase {
         // sites that carry a `ConstValue` type argument (see
         // `analyze_function_bytecode`) — through the specializer.  The scan is
         // O(total bytecode) and small next to LLVM lowering.
-        let graph = self.build_instantiation_graph(module).map_err(|error| {
+        let graph = module_instantiations(module).map_err(|error| {
             let mut diagnostics = List::new();
             diagnostics.push(
                 verum_diagnostics::DiagnosticBuilder::error()
@@ -368,56 +368,6 @@ impl VbcMonomorphizationPhase {
                 })
             }
         }
-    }
-
-    /// Builds the instantiation graph by analyzing bytecode.
-    fn build_instantiation_graph(
-        &self,
-        module: &VbcModule,
-    ) -> Result<InstantiationGraph, verum_vbc::mono::MonoPhaseError> {
-        let mut graph = InstantiationGraph::new();
-
-        // Add instantiations from existing specialization entries
-        for spec in &module.specializations {
-            if let Some(func) = module.get_function(spec.generic_fn)
-                && let Some(args) = verum_vbc::mono::canonical_type_args(func, &spec.type_args)
-            {
-                verum_vbc::mono::record_concrete_instantiation(
-                    &mut graph,
-                    spec.generic_fn,
-                    args,
-                    MonoPhaseConfig::default().max_instantiations,
-                )?;
-            }
-        }
-
-        // Analyze bytecode for CALL_G instructions
-        for func in &module.functions {
-            if let Some(instructions) = &func.instructions {
-                verum_vbc::mono::discover_call_instantiations(
-                    module,
-                    instructions,
-                    func.func_id_base,
-                    &mut graph,
-                )?;
-                continue;
-            }
-            let start = func.bytecode_offset as usize;
-            let end = start + func.bytecode_length as usize;
-
-            if let Some(bytecode) = module.bytecode.get(start..end) {
-                if let Ok(instructions) = verum_vbc::bytecode::decode_instructions(bytecode) {
-                    verum_vbc::mono::discover_call_instantiations(
-                        module,
-                        &instructions,
-                        func.func_id_base,
-                        &mut graph,
-                    )?;
-                }
-            }
-        }
-
-        Ok(graph)
     }
 }
 

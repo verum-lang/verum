@@ -13,6 +13,7 @@ use verum_vbc::types::{
 fn generic(id: u16) -> T {
     T::Generic(TypeParamId(id))
 }
+
 fn concrete(id: TypeId) -> T {
     T::Concrete(id)
 }
@@ -656,4 +657,25 @@ fn legacy_const_surplus_keeps_identity_and_substitutes_undeclared_slots() {
         .collect::<Vec<_>>();
     constants.sort();
     assert_eq!(constants, vec![7, 9]);
+}
+
+#[test]
+fn module_discovery_rejects_an_unreadable_function_extent_and_truncated_operands() {
+    use verum_vbc::mono::{module_instantiations, SpecializationError};
+    let mut module = VbcModule::new("broken_body".into());
+    let mut body = FunctionDescriptor::new(StringId::EMPTY);
+    body.id = FunctionId(0);
+    body.bytecode_length = 1;
+    module.add_function(body);
+    for truncated in [false, true] {
+        if truncated {
+            let mut encoded = Vec::new();
+            verum_vbc::bytecode::encode_instruction(&I::LoadI { dst: Reg(2), value: 37 }, &mut encoded);
+            module.bytecode.push(encoded[0]);
+        }
+        assert!(matches!(
+            module_instantiations(&module),
+            Err(MonoPhaseError::Specialization(SpecializationError::InvalidBytecode { offset: 0, .. }))
+        ));
+    }
 }

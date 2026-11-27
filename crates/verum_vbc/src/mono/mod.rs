@@ -54,7 +54,7 @@ mod substitution;
 pub use cache::MonomorphizationCache;
 pub(crate) use discovery::{closed_signature, concrete as is_concrete_type, concrete_for};
 pub(crate) use graph::MAX_TYPE_REF_DEPTH;
-pub use discovery::{canonical_type_args, discover_call_instantiations, record_concrete_instantiation};
+pub use discovery::{canonical_type_args, discover_call_instantiations, module_instantiations, record_concrete_instantiation};
 pub use graph::{
     CallSite, InstantiationGraph, InstantiationKey, InstantiationRequest, SourceLocation,
 };

@@ -133,6 +133,10 @@ fn native_with_ir(
     let mut failures = List::<Text>::new();
     for (route, module) in [("source", module), ("wire", &wire)] {
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let graph = verum_vbc::mono::module_instantiations(module).expect("exact instantiations");
+            let specialized = verum_vbc::mono::monomorphize_minimal(module.clone(), &graph)
+                .expect("specialize declared calls");
+            let module = &specialized.module;
             Target::initialize_native(&InitializationConfig::default()).expect("native target");
             let context = Context::create();
             let mut lowering = VbcToLlvmLowering::new(
