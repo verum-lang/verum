@@ -61,6 +61,7 @@ module core.math.elementary;
 mount core.collections.slice.*;
 
 mount super.constants.*;
+mount super.libm.ipow;
 mount super.ieee754.{is_nan, is_infinite, is_finite, copysign, frexp, ldexp, trunc};
 // Mounted rather than inherited: the prelude used to publish math's
 // 28 names into every file, which §4ter forbids — the language does
@@ -544,29 +545,9 @@ public fn pow(x: Float, y: Float) -> Float {
     }
 }
 
-// Integer power using binary exponentiation
-// O(log n) multiplications
+/// Integer power by repeated squaring.
 public fn powi(x: Float, n: Int64) -> Float {
-    if n == 0 { return 1.0; }
-
-    let negative = n < 0;
-    // Int64.MIN-safe magnitude: `-n` overflows when n == Int64.MIN
-    // (two's-complement -Int64.MIN == Int64.MIN). Bit-flip-plus-one
-    // produces 2^63 cleanly without a checked-arithmetic panic.
-    let mut exp: UInt64 = if negative { ((!n) as UInt64) + 1_u64 } else { n as UInt64 };
-
-    let mut result = 1.0;
-    let mut base = x;
-
-    while exp > 0 {
-        if exp & 1 == 1 {
-            result *= base;
-        }
-        base *= base;
-        exp >>= 1;
-    }
-
-    if negative { 1.0 / result } else { result }
+    ipow(x, n as Int)
 }
 
 // Square root
