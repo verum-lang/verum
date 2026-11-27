@@ -1502,8 +1502,21 @@ implement Float {
     public fn to_precision(self, n: Int) -> Text {
         let mut buf = [0_u8; 64];
         let len = float_to_string(self, &mut buf, n);
-        unsafe { Text.from_utf8_unchecked(&buf[..len]) }
+        if len < buf.len() { return unsafe { Text.from_utf8_unchecked(&buf[..len]) }; }
+        float_precision_extended(self, n)
     }
+}
+
+// A finite binary64 has at most 309 integral and 1074 exact fractional
+// digits. Additional requested places are zeros after the exact value.
+fn float_precision_extended(value: Float, places: Int) -> Text {
+    let exact = if places > 1074 { 1074 } else { places };
+    let mut bytes = [0_u8; 1385];
+    let len = float_to_string(value, &mut bytes, exact);
+    let mut out = unsafe { Text.from_utf8_unchecked(&bytes[..len]) };
+    let mut i = exact;
+    while i < places { out.push_byte(48_u8); i = i + 1; }
+    out
 }
 
 implement Zero for Float {

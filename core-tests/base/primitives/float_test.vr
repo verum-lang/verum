@@ -1052,3 +1052,25 @@ fn test_precision_across_float_widths() {
     assert_eq(wide.to_precision(2), "-2.25");
     assert_eq(narrow.to_precision(2), "3.50");
 }
+
+@test
+fn test_precision_rounds_the_binary_value() {
+    // Adjacent binary64 values straddle the decimal half at 0.125.
+    assert_eq(Float.from_bits(0x3fbf_ffff_ffff_ffff).to_precision(2), "0.12");
+    assert_eq((0.125).to_precision(2), "0.13");
+    assert_eq((-2.5).to_precision(0), "-3");
+    assert_eq((9.96).to_precision(1), "10.0");
+    assert_eq((2460370.4479166665).to_precision(9), "2460370.447916667");
+    assert_eq((-0.0).to_precision(2), "-0.00");
+}
+
+@test
+fn test_precision_exceeds_short_buffer() {
+    let tiny = Float.from_bits(1).to_precision(324);
+    assert_eq(tiny.len(), 326);
+    assert_eq(tiny.slice(324, 326), "05");
+    let wide = (1.25).to_precision(1080);
+    assert_eq(wide.len(), 1082);
+    assert_eq(wide.slice(0, 6), "1.2500");
+    assert_eq(wide.slice(1078, 1082), "0000");
+}

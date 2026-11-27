@@ -13,6 +13,7 @@
     lifecycle: Lifecycle.Definition
 )
 module core.base.protocols;
+mount core.intrinsics.conversion.f64_to_bits;
 mount core.base.ordering.{Ordering, Less, Equal, Greater};
 mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
@@ -674,97 +675,106 @@ public fn int_to_string(value: Int, buf: &mut [Byte]) -> Int {
 }
 
 
-/// Convert a float to string representation.
-/// Returns the number of bytes written to the buffer.
+/// Write the fixed-point decimal prefix that fits in `buf`. Midpoints
+/// round away from zero. Binary64 values are exact integers times powers
+/// of two, including subnormals; no floating-point rounding is needed.
 public fn float_to_string(value: Float, buf: &mut [Byte], precision: Int) -> Int {
-    if buf.len() < 2 {
-        return 0;
+    let bits = f64_to_bits(value);
+    let exponent = ((bits >> 52) & 0x7ff_u64) as Int;
+    let mut significand = bits & 0x000f_ffff_ffff_ffff_u64;
+    let negative = (bits >> 63) != 0_u64;
+    if exponent == 2047 {
+        let word = if significand != 0_u64 { "NaN" } else if negative { "-inf" } else { "inf" };
+        let bytes = word.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() && i < buf.len() { buf[i] = bytes[i]; i = i + 1; }
+        return i;
     }
 
+    let mut shift = -1074;
+    if exponent != 0 {
+        significand = significand | (1_u64 << 52);
+        shift = exponent - 1075;
+    }
+    if significand == 0_u64 { shift = 0; }
+    while shift < 0 && (significand & 1_u64) == 0_u64 {
+        significand = significand >> 1;
+        shift = shift + 1;
+    }
+
+    // M * 2^-k = (M * 5^k) * 10^-k. The largest possible numerator
+    // has 767 decimal digits (53 significand bits and at most 1074
+    // factors of five), so 86 base-10^9 limbs cover every binary64.
+    let mut limbs = [0_u32; 86];
+    let mut used = 1;
+    limbs[0] = (significand % 1_000_000_000_u64) as UInt32;
+    if significand >= 1_000_000_000_u64 {
+        limbs[1] = (significand / 1_000_000_000_u64) as UInt32;
+        used = 2;
+    }
+    let scale = if shift < 0 { -shift } else { 0 };
+    let mut steps = if shift < 0 { -shift } else { shift };
+    let base = if shift < 0 { 5_u64 } else { 2_u64 };
+    let chunk = if shift < 0 { 13 } else { 29 };
+    while steps > 0 {
+        let count = if steps < chunk { steps } else { chunk };
+        let mut factor = 1_u64;
+        let mut k = 0;
+        while k < count { factor = factor * base; k = k + 1; }
+        let mut carry = 0_u64;
+        let mut i = 0;
+        while i < used {
+            let product = (limbs[i] as UInt64) * factor + carry;
+            limbs[i] = (product % 1_000_000_000_u64) as UInt32;
+            carry = product / 1_000_000_000_u64;
+            i = i + 1;
+        }
+        while carry > 0_u64 {
+            limbs[used] = (carry % 1_000_000_000_u64) as UInt32;
+            used = used + 1;
+            carry = carry / 1_000_000_000_u64;
+        }
+        steps = steps - count;
+    }
+
+    let decimal = [1_u32, 10_u32, 100_u32, 1000_u32, 10_000_u32,
+                   100_000_u32, 1_000_000_u32, 10_000_000_u32, 100_000_000_u32];
+    let places = if precision < 0 { 0 } else { precision };
+    let last = scale - places;
+    if last > 0 && (last - 1) / 9 < used {
+        let omitted = last - 1;
+        if (limbs[omitted / 9] / decimal[omitted % 9]) % 10_u32 >= 5_u32 {
+            let mut i = last / 9;
+            let mut carry = decimal[last % 9];
+            while carry != 0_u32 {
+                if i == used { used = used + 1; }
+                let sum = limbs[i] + carry;
+                limbs[i] = sum % 1_000_000_000_u32;
+                carry = sum / 1_000_000_000_u32;
+                i = i + 1;
+            }
+        }
+    }
+
+    let mut first = (used - 1) * 9;
+    let mut leading = limbs[used - 1];
+    while leading >= 10_u32 { leading = leading / 10_u32; first = first + 1; }
+    let mut place = if first > scale { first } else { scale };
     let mut pos = 0;
-
-    // Handle special cases
-    if value.is_nan() {
-        if buf.len() >= 3 {
-            buf[0] = 'N' as Byte;
-            buf[1] = 'a' as Byte;
-            buf[2] = 'N' as Byte;
-            return 3;
-        }
-        return 0;
-    }
-
-    if value.is_infinite() {
-        let negative = value < 0.0;
-        if negative {
-            if buf.len() >= 4 {
-                buf[0] = '-' as Byte;
-                buf[1] = 'i' as Byte;
-                buf[2] = 'n' as Byte;
-                buf[3] = 'f' as Byte;
-                return 4;
-            }
-        } else {
-            if buf.len() >= 3 {
-                buf[0] = 'i' as Byte;
-                buf[1] = 'n' as Byte;
-                buf[2] = 'f' as Byte;
-                return 3;
-            }
-        }
-        return 0;
-    }
-
-    // Handle negative numbers
-    let negative = value < 0.0;
-    let val_abs = if negative { -value } else { value };
-
-    // T0609: round-half-up at the precision cutoff. The per-digit loop
-    // below truncates (floor of each scaled digit), so without this
-    // `3.9:.0` -> "3" and `3.14159:.4` -> "3.1415". Add half a
-    // unit-in-the-last-place before extraction; the add-then-truncate
-    // also propagates the carry (e.g. `9.96:.1` -> "10.0") for free.
-    // `precision` is always >= 0 here (explicit `.N` or the unwrap_or(6)
-    // default), so the loop always terminates with a positive half-ULP.
-    let mut half_ulp = 0.5;
-    let mut round_i = 0;
-    while round_i < precision {
-        half_ulp = half_ulp / 10.0;
-        round_i = round_i + 1;
-    }
-    let val = val_abs + half_ulp;
-
-    if negative {
-        buf[pos] = '-' as Byte;
-        pos = pos + 1;
-    }
-
-    // Extract integer part
-    let int_part = val.floor() as Int;
-
-    // Write integer part
-    let int_len = int_to_string(int_part, &mut buf[pos..]);
-    pos = pos + int_len;
-
-    // Write decimal point and fractional part
-    if precision > 0 && pos < buf.len() {
-        buf[pos] = '.' as Byte;
-        pos = pos + 1;
-
-        // Extract fractional part
-        let mut frac = val - (int_part as Float);
-        let mut digits_written = 0;
-
-        while digits_written < precision && pos < buf.len() {
-            frac = frac * 10.0;
-            let digit = frac.floor() as Int;
-            buf[pos] = ('0' as Byte) + (digit as Byte);
-            frac = frac - (digit as Float);
+    if negative && pos < buf.len() { buf[pos] = 45_u8; pos = pos + 1; }
+    while place >= last && pos < buf.len() {
+        if place == scale - 1 {
+            buf[pos] = 46_u8;
             pos = pos + 1;
-            digits_written = digits_written + 1;
+            if pos == buf.len() { break; }
         }
+        let digit = if place >= 0 && place / 9 < used {
+            (limbs[place / 9] / decimal[place % 9]) % 10_u32
+        } else { 0_u32 };
+        buf[pos] = 48_u8 + (digit as Byte);
+        pos = pos + 1;
+        place = place - 1;
     }
-
     pos
 }
 
@@ -995,12 +1005,7 @@ implement Formatter {
         let ty = self.spec.format_type.unwrap_or('g');
         let precision = self.spec.precision.unwrap_or(6);
 
-        let mut buf = [0_u8; 64];
-        let len = float_to_string(f, &mut buf, precision);
-
-        let s = unsafe {
-            Text.from_utf8_unchecked(&buf[..len])
-        };
+        let s = f.to_precision(precision);
 
         // Handle sign for positive numbers
         let (sign, value) = if f < 0.0 || f.is_sign_negative() {
