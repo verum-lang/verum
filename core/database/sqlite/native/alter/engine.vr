@@ -23,7 +23,7 @@ module core.database.sqlite.native.alter.engine;
 
 mount base.{Text, Bool, Maybe};
 mount core.database.sqlite.native.alter.op.{
-    AlterOp, op_name, op_target_table,
+    AlterOp, op_target_table, append_identifier,
     AoRenameTable, AoRenameColumn, AoAddColumn, AoDropColumn, AoAlterColumnDefault,
 };
 mount core.database.sqlite.native.alter.validator.{
@@ -98,35 +98,21 @@ implement AlterEngine {
         snap: &AlterSchemaSnapshot,
         sql_runner: fn(&Text) -> Maybe<Text>,
     ) {
-        match &self.phase {
-            EpInit => { self.phase = EpValidating; }
-            EpValidating => {
-                match validate(&self.op, snap) {
-                    Result.Ok(_)  => { self.phase = EpGeneratingSql; }
-                    Result.Err(e) => { self.phase = EpFailed(AefValidation(e)); }
-                }
-            }
-            EpGeneratingSql => {
-                let sql = generate_sql(&self.op);
-                self.phase = EpExecuting(sql);
-            }
-            EpExecuting(sql) => {
-                match (sql_runner)(sql) {
-                    Maybe.None        => {
-                        let d = delta_from(&self.op);
-                        self.phase = EpApplyingDelta(d);
-                    }
-                    Maybe.Some(err)   => {
-                        self.phase = EpFailed(AefExecution(err));
-                    }
-                }
-            }
-            EpApplyingDelta(d) => {
-                self.phase = EpDone(clone_delta(d));
-            }
-            EpDone(_)   => {}
-            EpFailed(_) => {}
-        }
+        let next: AlterEnginePhase = match &self.phase {
+            EpInit => EpValidating,
+            EpValidating => match validate(&self.op, snap) {
+                Result.Ok(_) => EpGeneratingSql,
+                Result.Err(e) => EpFailed(AefValidation(e)),
+            },
+            EpGeneratingSql => EpExecuting(generate_sql(&self.op)),
+            EpExecuting(sql) => match sql_runner(sql) {
+                Maybe.None => EpApplyingDelta(delta_from(&self.op)),
+                Maybe.Some(err) => EpFailed(AefExecution(err)),
+            },
+            EpApplyingDelta(d) => EpDone(clone_delta(d)),
+            EpDone(_) | EpFailed(_) => return,
+        };
+        self.phase = next;
     }
 
     public fn delta(&self) -> Maybe<SchemaDelta> {
@@ -144,59 +130,36 @@ implement AlterEngine {
 
 public fn generate_sql(op: &AlterOp) -> Text {
     let mut out = "ALTER TABLE ".clone();
-    let target = op_target_table(op);
-    push(&mut out, &target);
+    append_identifier(&mut out, &op_target_table(op));
     match op {
         AoRenameTable(_, new) => {
-            push(&mut out, &" RENAME TO ".clone());
-            push(&mut out, new);
+            out.push_str(&" RENAME TO ");
+            append_identifier(&mut out, new);
         }
         AoRenameColumn(_, old, new) => {
-            push(&mut out, &" RENAME COLUMN ".clone());
-            push(&mut out, old);
-            push(&mut out, &" TO ".clone());
-            push(&mut out, new);
+            out.push_str(&" RENAME COLUMN ");
+            append_identifier(&mut out, old);
+            out.push_str(&" TO ");
+            append_identifier(&mut out, new);
         }
         AoAddColumn(_, def) => {
-            push(&mut out, &" ADD COLUMN ".clone());
-            push(&mut out, &def.name);
-            out.push_byte(32 as Byte);
-            push(&mut out, &def.type_affinity);
-            if def.not_null { push(&mut out, &" NOT NULL".clone()); }
-            match &def.default_expr {
-                Maybe.Some(e) => {
-                    push(&mut out, &" DEFAULT ".clone());
-                    push(&mut out, e);
-                }
-                Maybe.None => {}
-            }
-            if def.is_unique { push(&mut out, &" UNIQUE".clone()); }
+            out.push_str(&" ADD COLUMN ");
+            def.append_definition(&mut out);
         }
         AoDropColumn(_, col) => {
-            push(&mut out, &" DROP COLUMN ".clone());
-            push(&mut out, col);
+            out.push_str(&" DROP COLUMN ");
+            append_identifier(&mut out, col);
         }
         AoAlterColumnDefault(_, col, exp) => {
-            push(&mut out, &" ALTER COLUMN ".clone());
-            push(&mut out, col);
+            out.push_str(&" ALTER COLUMN ");
+            append_identifier(&mut out, col);
             match exp {
-                Maybe.Some(e) => {
-                    push(&mut out, &" SET DEFAULT ".clone());
-                    push(&mut out, e);
-                }
-                Maybe.None => {
-                    push(&mut out, &" DROP DEFAULT".clone());
-                }
+                Maybe.Some(e) => { out.push_str(&" SET DEFAULT "); out.push_str(e); },
+                Maybe.None => { out.push_str(&" DROP DEFAULT"); },
             }
         }
     }
     out
-}
-
-fn push(dst: &mut Text, s: &Text) {
-    let bs = s.as_bytes();
-    let mut i: Int = 0;
-    while i < bs.len() { dst.push_byte(bs[i]); i = i + 1; }
 }
 
 fn clone_phase(p: &AlterEnginePhase) -> AlterEnginePhase {
@@ -231,33 +194,33 @@ fn clone_failure(f: &AlterEngineFailure) -> AlterEngineFailure {
 // AlterValidationError at all.
 fn clone_validation_error(e: &AlterValidationError) -> AlterValidationError {
     match e {
-        core.database.sqlite.native.alter.validator.VeNoSuchTable(t) =>
-            core.database.sqlite.native.alter.validator.VeNoSuchTable(t.clone()),
-        core.database.sqlite.native.alter.validator.VeNoSuchColumn(t, c) =>
-            core.database.sqlite.native.alter.validator.VeNoSuchColumn(t.clone(), c.clone()),
-        core.database.sqlite.native.alter.validator.VeDuplicateName(n) =>
-            core.database.sqlite.native.alter.validator.VeDuplicateName(n.clone()),
-        core.database.sqlite.native.alter.validator.VeNotNullWithoutDefault(t, c) =>
-            core.database.sqlite.native.alter.validator.VeNotNullWithoutDefault(t.clone(), c.clone()),
-        core.database.sqlite.native.alter.validator.VePrimaryKey(t, c) =>
-            core.database.sqlite.native.alter.validator.VePrimaryKey(t.clone(), c.clone()),
-        core.database.sqlite.native.alter.validator.VeForeignKey(t, c) =>
-            core.database.sqlite.native.alter.validator.VeForeignKey(t.clone(), c.clone()),
+        AlterValidationError.VeNoSuchTable(t) =>
+            AlterValidationError.VeNoSuchTable(t.clone()),
+        AlterValidationError.VeNoSuchColumn(t, c) =>
+            AlterValidationError.VeNoSuchColumn(t.clone(), c.clone()),
+        AlterValidationError.VeDuplicateName(n) =>
+            AlterValidationError.VeDuplicateName(n.clone()),
+        AlterValidationError.VeNotNullWithoutDefault(t, c) =>
+            AlterValidationError.VeNotNullWithoutDefault(t.clone(), c.clone()),
+        AlterValidationError.VePrimaryKey(t, c) =>
+            AlterValidationError.VePrimaryKey(t.clone(), c.clone()),
+        AlterValidationError.VeForeignKey(t, c) =>
+            AlterValidationError.VeForeignKey(t.clone(), c.clone()),
     }
 }
 
 fn clone_delta(d: &SchemaDelta) -> SchemaDelta {
     match d {
-        core.database.sqlite.native.alter.delta.SdTableRenamed(a, b) =>
-            core.database.sqlite.native.alter.delta.SdTableRenamed(a.clone(), b.clone()),
-        core.database.sqlite.native.alter.delta.SdColumnRenamed(t, a, b) =>
-            core.database.sqlite.native.alter.delta.SdColumnRenamed(t.clone(), a.clone(), b.clone()),
-        core.database.sqlite.native.alter.delta.SdColumnAdded(t, c) =>
-            core.database.sqlite.native.alter.delta.SdColumnAdded(t.clone(), c.clone()),
-        core.database.sqlite.native.alter.delta.SdColumnDropped(t, c) =>
-            core.database.sqlite.native.alter.delta.SdColumnDropped(t.clone(), c.clone()),
-        core.database.sqlite.native.alter.delta.SdColumnDefaultChanged(t, c, e) =>
-            core.database.sqlite.native.alter.delta.SdColumnDefaultChanged(
+        SchemaDelta.SdTableRenamed(a, b) =>
+            SchemaDelta.SdTableRenamed(a.clone(), b.clone()),
+        SchemaDelta.SdColumnRenamed(t, a, b) =>
+            SchemaDelta.SdColumnRenamed(t.clone(), a.clone(), b.clone()),
+        SchemaDelta.SdColumnAdded(t, c) =>
+            SchemaDelta.SdColumnAdded(t.clone(), c.clone()),
+        SchemaDelta.SdColumnDropped(t, c) =>
+            SchemaDelta.SdColumnDropped(t.clone(), c.clone()),
+        SchemaDelta.SdColumnDefaultChanged(t, c, e) =>
+            SchemaDelta.SdColumnDefaultChanged(
                 t.clone(),
                 c.clone(),
                 match e { Maybe.Some(s) => Maybe.Some(s.clone()), Maybe.None => Maybe.None },

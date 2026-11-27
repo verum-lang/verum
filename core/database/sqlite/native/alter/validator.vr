@@ -28,7 +28,7 @@
 )
 module core.database.sqlite.native.alter.validator;
 
-mount base.{Text, Bool, Maybe, Result, Ok, Err};
+mount base.{Text, Bool, Maybe, Result};
 mount collections.List;
 mount core.database.sqlite.native.alter.op.{
     AlterOp,
@@ -107,6 +107,10 @@ public fn error_kind(e: &AlterValidationError) -> Text {
 public type ColumnShape is {
     name: Text,
     is_pk: Bool,
+}
+
+public fn column_shape(name: Text, is_pk: Bool) -> ColumnShape {
+    ColumnShape { name: name, is_pk: is_pk }
 }
 
 public type TableShape is {
@@ -229,10 +233,9 @@ public fn validate(op: &AlterOp, snap: &AlterSchemaSnapshot) -> Result<(), Alter
                 Maybe.Some(x) => x,
                 Maybe.None    => { return Result.Err(VeNoSuchTable(table.clone())); }
             };
-            if t.column(&def.name).is_some() { return Result.Err(VeDuplicateName(def.name.clone())); }
-            if t.has_rows && def.not_null {
-                let no_default = match &def.default_expr { Maybe.Some(_) => false, Maybe.None => true };
-                if no_default { return Result.Err(VeNotNullWithoutDefault(table.clone(), def.name.clone())); }
+            if t.column(def.column_name()).is_some() { return Result.Err(VeDuplicateName(def.column_name().clone())); }
+            if t.has_rows && def.needs_default_for_existing_rows() {
+                return Result.Err(VeNotNullWithoutDefault(table.clone(), def.column_name().clone()));
             }
             Result.Ok(())
         }

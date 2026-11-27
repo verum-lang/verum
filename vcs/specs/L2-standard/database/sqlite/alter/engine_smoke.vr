@@ -1,13 +1,13 @@
-// @test: typecheck-pass
+// @test: run-interpreter
 // @tier: 0
 // @level: L2
 // @tags: sqlite, alter, schema, validation
-// @timeout: 5000
+// @timeout: 120000
 // @expected-exit: 0
 //
 // ALTER engine + validator + delta:
 //   * AlterOp builders + name + target_table
-//   * SchemaSnapshot lookup + table.column lookup
+//   * AlterSchemaSnapshot lookup + table.column lookup
 //   * validate detects: NoSuchTable / NoSuchColumn / DuplicateName
 //     / NotNullWithoutDefault / PrimaryKey / ForeignKey
 //   * generate_sql produces upstream-compatible SQL
@@ -15,24 +15,23 @@
 //   * AlterEngine state machine drives Init→Validating→Done
 
 mount core.database.sqlite.native.alter.op.{
-    AlterOp, ColumnDef,
+    AlterOp,
     AoRenameTable, AoRenameColumn, AoAddColumn, AoDropColumn, AoAlterColumnDefault,
     op_name, op_target_table,
     column_def, rename_table, rename_column, add_column, drop_column, alter_default,
 };
 mount core.database.sqlite.native.alter.validator.{
-    ValidationError,
     VeNoSuchTable, VeNoSuchColumn, VeDuplicateName,
     VeNotNullWithoutDefault, VePrimaryKey, VeForeignKey,
-    ColumnShape, TableShape, table_shape,
-    SchemaSnapshot, snapshot_new,
+    ColumnShape, column_shape, TableShape, table_shape,
+    AlterSchemaSnapshot, snapshot_new,
     validate, error_kind,
 };
 mount core.database.sqlite.native.alter.delta.{
     SchemaDelta,
     SdTableRenamed, SdColumnRenamed, SdColumnAdded, SdColumnDropped, SdColumnDefaultChanged,
     delta_from,
-    DependentObject, DependentObjectKind,
+    DependentObject, dependent_object, DependentObjectKind,
     DkTrigger, DkView, DkIndex, DkForeignKey,
     dep_kind_name,
     ImpactReport, report_for,
@@ -45,7 +44,7 @@ mount core.database.sqlite.native.alter.engine.{
     phase_name as engine_phase_name,
     generate_sql,
 };
-mount base.{Ok, Err, Some, None, Maybe, Result, Bool};
+mount base.{Maybe, Result, Bool};
 
 // -----------------------------------------------------------------------------
 // op
@@ -66,9 +65,8 @@ fn test_column_def_builder() {
         .require_not_null()
         .with_default("''".clone())
         .unique();
-    assert(c.not_null);
-    assert(c.is_unique);
-    match &c.default_expr { Some(_) => {}, None => panic("default present") };
+    let sql = generate_sql(&add_column("users".clone(), c));
+    assert(sql == "ALTER TABLE \"users\" ADD COLUMN \"email\" TEXT NOT NULL DEFAULT '' UNIQUE");
 }
 
 // -----------------------------------------------------------------------------
@@ -76,14 +74,14 @@ fn test_column_def_builder() {
 // -----------------------------------------------------------------------------
 
 fn pk_col(name: Text) -> ColumnShape {
-    ColumnShape { name: name, is_pk: true }
+    column_shape(name, true)
 }
 
 fn ord_col(name: Text) -> ColumnShape {
-    ColumnShape { name: name, is_pk: false }
+    column_shape(name, false)
 }
 
-fn make_users_snapshot() -> SchemaSnapshot {
+fn make_users_snapshot() -> AlterSchemaSnapshot {
     let mut snap = snapshot_new();
     let mut cols: List<ColumnShape> = List.new();
     cols.push(pk_col("id".clone()));
@@ -97,7 +95,7 @@ fn test_validate_rename_table_no_such_table() {
     let snap = snapshot_new();
     let op = rename_table("missing".clone(), "x".clone());
     match validate(&op, &snap) {
-        Err(VeNoSuchTable(_)) => {},
+        Result.Err(VeNoSuchTable(_)) => {},
         _ => panic("missing table error"),
     }
 }
@@ -109,7 +107,7 @@ fn test_validate_rename_to_existing_name() {
     snap.add_table(table_shape("audit".clone(), cols));
     let op = rename_table("users".clone(), "audit".clone());
     match validate(&op, &snap) {
-        Err(VeDuplicateName(_)) => {},
+        Result.Err(VeDuplicateName(_)) => {},
         _ => panic("duplicate name"),
     }
 }
@@ -118,7 +116,7 @@ fn test_validate_drop_pk_column_fails() {
     let snap = make_users_snapshot();
     let op = drop_column("users".clone(), "id".clone());
     match validate(&op, &snap) {
-        Err(VePrimaryKey(_, _)) => {},
+        Result.Err(VePrimaryKey(_, _)) => {},
         _ => panic("PK protection"),
     }
 }
@@ -133,7 +131,7 @@ fn test_validate_drop_column_with_inbound_fk() {
     snap.add_table(t);
     let op = drop_column("users".clone(), "email".clone());
     match validate(&op, &snap) {
-        Err(VeForeignKey(_, _)) => {},
+        Result.Err(VeForeignKey(_, _)) => {},
         _ => panic("FK protection"),
     }
 }
@@ -148,7 +146,7 @@ fn test_validate_add_not_null_without_default_on_non_empty() {
     let bad = column_def("status".clone(), "TEXT".clone()).require_not_null();
     let op = add_column("users".clone(), bad);
     match validate(&op, &snap) {
-        Err(VeNotNullWithoutDefault(_, _)) => {},
+        Result.Err(VeNotNullWithoutDefault(_, _)) => {},
         _ => panic("NOT NULL needs DEFAULT"),
     }
 }
@@ -158,8 +156,8 @@ fn test_validate_add_column_clean() {
     let def = column_def("created_at".clone(), "INTEGER".clone());
     let op = add_column("users".clone(), def);
     match validate(&op, &snap) {
-        Ok(_) => {},
-        Err(_) => panic("clean ADD COLUMN"),
+        Result.Ok(_) => {},
+        Result.Err(_) => panic("clean ADD COLUMN"),
     }
 }
 
@@ -186,21 +184,13 @@ fn test_delta_add_column() {
 fn test_impact_report_dep_classification() {
     let delta = SdColumnRenamed("users".clone(), "name".clone(), "full_name".clone());
     let mut deps: List<DependentObject> = List.new();
-    deps.push(DependentObject {
-        kind: DkTrigger,
-        name: "audit_users".clone(),
-        original_sql: "CREATE TRIGGER ...".clone(),
-    });
-    deps.push(DependentObject {
-        kind: DkView,
-        name: "active_users".clone(),
-        original_sql: "CREATE VIEW ...".clone(),
-    });
+    deps.push(dependent_object(DkTrigger, "audit_users".clone(), "CREATE TRIGGER ...".clone()));
+    deps.push(dependent_object(DkView, "active_users".clone(), "CREATE VIEW ...".clone()));
     let mut r = report_for(delta, deps);
     r.add_hint("OLD.name".clone(), "OLD.full_name".clone());
     assert_eq(r.affected_count(), 2);
     assert_eq(r.affects_kind(&"trigger".clone()), 1);
-    assert_eq(r.rewrite_hints.len(), 1);
+    assert_eq(r.rewrite_hint_count(), 1);
 }
 
 // -----------------------------------------------------------------------------
@@ -209,31 +199,36 @@ fn test_impact_report_dep_classification() {
 
 fn test_generate_sql_rename_table() {
     let sql = generate_sql(&rename_table("a".clone(), "b".clone()));
-    assert(sql == "ALTER TABLE a RENAME TO b".clone());
+    assert(sql == "ALTER TABLE \"a\" RENAME TO \"b\"".clone());
+}
+
+fn test_generate_sql_quotes_identifier_contents() {
+    let sql = generate_sql(&rename_column("café orders".clone(), "old\"name".clone(), "select".clone()));
+    assert(sql == "ALTER TABLE \"café orders\" RENAME COLUMN \"old\"\"name\" TO \"select\"");
 }
 
 fn test_generate_sql_add_column() {
     let sql = generate_sql(&add_column("t".clone(),
         column_def("x".clone(), "INTEGER".clone()).require_not_null().with_default("0".clone())));
-    assert(sql == "ALTER TABLE t ADD COLUMN x INTEGER NOT NULL DEFAULT 0".clone());
+    assert(sql == "ALTER TABLE \"t\" ADD COLUMN \"x\" INTEGER NOT NULL DEFAULT 0".clone());
 }
 
 fn test_generate_sql_drop_column() {
     let sql = generate_sql(&drop_column("t".clone(), "c".clone()));
-    assert(sql == "ALTER TABLE t DROP COLUMN c".clone());
+    assert(sql == "ALTER TABLE \"t\" DROP COLUMN \"c\"".clone());
 }
 
 fn test_generate_sql_alter_default_drop() {
-    let sql = generate_sql(&alter_default("t".clone(), "c".clone(), None));
-    assert(sql == "ALTER TABLE t ALTER COLUMN c DROP DEFAULT".clone());
+    let sql = generate_sql(&alter_default("t".clone(), "c".clone(), Maybe.None));
+    assert(sql == "ALTER TABLE \"t\" ALTER COLUMN \"c\" DROP DEFAULT".clone());
 }
 
 // -----------------------------------------------------------------------------
 // engine
 // -----------------------------------------------------------------------------
 
-fn no_op_runner(_sql: &Text) -> Maybe<Text> { None }
-fn always_fail_runner(_sql: &Text) -> Maybe<Text> { Some("simulated".clone()) }
+pure fn no_op_runner(_sql: &Text) -> Maybe<Text> { Maybe.None }
+pure fn always_fail_runner(_sql: &Text) -> Maybe<Text> { Maybe.Some("simulated") }
 
 fn test_engine_walks_to_done() {
     let snap = make_users_snapshot();
@@ -245,8 +240,11 @@ fn test_engine_walks_to_done() {
         steps = steps + 1;
     }
     assert(e.is_terminal());
+    e.step(&snap, always_fail_runner);
     match e.current_phase() {
-        EpDone(_) => {},
+        EpDone(SdColumnAdded(table, col)) => {
+            assert(table == "users" && col == "created_at");
+        },
         _         => panic("expected EpDone"),
     }
 }
@@ -260,8 +258,9 @@ fn test_engine_validation_failure_terminal() {
         e.step(&snap, no_op_runner);
         steps = steps + 1;
     }
+    e.step(&snap, always_fail_runner);
     match e.current_phase() {
-        EpFailed(_) => {},
+        EpFailed(AefValidation(VeNoSuchTable(name))) => assert(name == "missing"),
         _ => panic("validation failure terminal"),
     }
 }
@@ -275,10 +274,12 @@ fn test_engine_execution_failure_terminal() {
         e.step(&snap, always_fail_runner);
         steps = steps + 1;
     }
+    e.step(&snap, no_op_runner);
     match e.current_phase() {
-        EpFailed(_) => {},
+        EpFailed(AefExecution(message)) => assert(message == "simulated"),
         _ => panic("execution failure terminal"),
     }
+    assert(e.delta().is_none());
 }
 
 fn main() {
@@ -296,6 +297,7 @@ fn main() {
     test_impact_report_dep_classification();
     test_generate_sql_rename_table();
     test_generate_sql_add_column();
+    test_generate_sql_quotes_identifier_contents();
     test_generate_sql_drop_column();
     test_generate_sql_alter_default_drop();
     test_engine_walks_to_done();

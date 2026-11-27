@@ -43,7 +43,7 @@ public fn delta_from(op: &AlterOp) -> SchemaDelta {
     match op {
         AoRenameTable(old, new)         => SdTableRenamed(old.clone(), new.clone()),
         AoRenameColumn(t, old, new)     => SdColumnRenamed(t.clone(), old.clone(), new.clone()),
-        AoAddColumn(t, def)             => SdColumnAdded(t.clone(), def.name.clone()),
+        AoAddColumn(t, def)             => SdColumnAdded(t.clone(), def.column_name().clone()),
         AoDropColumn(t, c)              => SdColumnDropped(t.clone(), c.clone()),
         AoAlterColumnDefault(t, c, exp) => SdColumnDefaultChanged(t.clone(), c.clone(), clone_default(exp)),
     }
@@ -78,6 +78,10 @@ public type DependentObject is {
     original_sql: Text,
 }
 
+public fn dependent_object(kind: DependentObjectKind, name: Text, original_sql: Text) -> DependentObject {
+    DependentObject { kind: kind, name: name, original_sql: original_sql }
+}
+
 public type ImpactReport is {
     delta: SchemaDelta,
     affected: List<DependentObject>,
@@ -98,6 +102,8 @@ implement ImpactReport {
     public fn add_hint(&mut self, original: Text, suggested: Text) {
         self.rewrite_hints.push((original, suggested));
     }
+
+    public fn rewrite_hint_count(&self) -> Int { self.rewrite_hints.len() }
 
     public fn affected_count(&self) -> Int { self.affected.len() }
 

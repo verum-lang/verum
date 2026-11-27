@@ -23,7 +23,7 @@
 module core.database.sqlite.native.alter.op;
 
 mount base.{Text, Maybe, Bool};
-mount collections.List;
+mount core.database.sqlite.native.printf_api.engine.escape_sql_identifier;
 
 // -----------------------------------------------------------------------------
 // AlterColumnDef — minimal subset needed for ADD COLUMN
@@ -48,6 +48,26 @@ public fn column_def(name: Text, type_affinity: Text) -> AlterColumnDef {
 }
 
 implement AlterColumnDef {
+    pub(in core.database.sqlite.native.alter) fn column_name(&self) -> &Text { &self.name }
+
+    pub(in core.database.sqlite.native.alter) fn needs_default_for_existing_rows(&self) -> Bool {
+        self.not_null && self.default_expr.is_none()
+    }
+
+    pub(in core.database.sqlite.native.alter) fn append_definition(&self, sql: &mut Text) {
+        append_identifier(sql, &self.name);
+        if !self.type_affinity.is_empty() {
+            sql.push_str(&" ");
+            sql.push_str(&self.type_affinity);
+        }
+        if self.not_null { sql.push_str(&" NOT NULL"); }
+        match &self.default_expr {
+            Maybe.Some(expr) => { sql.push_str(&" DEFAULT "); sql.push_str(expr); },
+            Maybe.None => {},
+        }
+        if self.is_unique { sql.push_str(&" UNIQUE"); }
+    }
+
     public fn require_not_null(mut self) -> AlterColumnDef { self.not_null = true; self }
     public fn with_default(mut self, expr: Text) -> AlterColumnDef { self.default_expr = Maybe.Some(expr); self }
     public fn unique(mut self) -> AlterColumnDef { self.is_unique = true; self }
@@ -56,6 +76,13 @@ implement AlterColumnDef {
 // -----------------------------------------------------------------------------
 // AlterOp
 // -----------------------------------------------------------------------------
+
+/// SQLite quotes identifiers with double quotes and doubles an embedded quote.
+pub(in core.database.sqlite.native.alter) fn append_identifier(sql: &mut Text, name: &Text) {
+    sql.push_str(&"\"");
+    sql.push_str(&escape_sql_identifier(name));
+    sql.push_str(&"\"");
+}
 
 public type AlterOp is
       AoRenameTable(Text, Text)            // (old_name, new_name)
