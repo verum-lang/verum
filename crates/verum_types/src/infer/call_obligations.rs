@@ -82,6 +82,22 @@ impl TypeChecker {
         caller.into()
     }
 
+    /// Both method selection and inspection of a selected implementation must
+    /// use the caller's instantiated premises, including rigid callable bounds.
+    pub(super) fn method_dispatch_premises(
+        &self, span: Span,
+    ) -> Result<(List<WhereClause>, Map<TypeVar, Type>)> {
+        let substitution = self.unifier.save_substitution();
+        let bind_error = |message| TypeError::UniverseBinding { message, span };
+        let protocols = self.caller_protocol_premises().iter()
+            .map(|clause| clause.try_apply_subst(&substitution).map_err(bind_error))
+            .collect::<Result<_>>()?;
+        let callables = self.unifier.rigid_callable_bounds()
+            .map(|(variable, contract)| Ok((variable, contract.try_apply_subst(&substitution).map_err(bind_error)?)))
+            .collect::<Result<_>>()?;
+        Ok((protocols, callables))
+    }
+
     pub(super) fn check_callable_contexts(
         &self, contexts: &crate::di::requirement::ContextExpr, span: Span,
     ) -> Result<()> {

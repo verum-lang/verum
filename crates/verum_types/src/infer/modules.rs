@@ -19574,16 +19574,7 @@ impl TypeChecker {
 
         // Scope the read guard tightly to avoid borrow conflicts later
         {
-            let substitution = self.unifier.save_substitution();
-            let premises: List<_> = self.caller_protocol_premises().iter()
-                .map(|clause| clause.try_apply_subst(&substitution)
-                    .map_err(|message| TypeError::UniverseBinding { message, span }))
-                .collect::<Result<_>>()?;
-            let callables: Map<_, _> = self.unifier.rigid_callable_bounds()
-                .map(|(variable, contract)| contract.try_apply_subst(&substitution)
-                    .map(|contract| (variable, contract))
-                    .map_err(|message| TypeError::UniverseBinding { message, span }))
-                .collect::<Result<_>>()?;
+            let (premises, callables) = self.method_dispatch_premises(span)?;
             let environment = self.source_type_registration.proof_environment(&premises, &callables);
             let protocol_checker_guard = self.protocol_checker.read();
             let impls = protocol_checker_guard.get_implementations_in_environment(&resolved_ty, environment);

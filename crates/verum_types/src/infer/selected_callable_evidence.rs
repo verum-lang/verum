@@ -2,7 +2,6 @@
 //! ordinary expression inference. Check every reachable operation before using
 //! the result. An unresolved or dynamic call keeps the callback unrestricted.
 use super::*;
-use crate::type_registry::CallableDeclaration;
 
 impl TypeChecker {
     pub(in crate::infer) fn checked_source_calls_are_synchronous(
@@ -25,26 +24,24 @@ impl TypeChecker {
             return false;
         }
 
-        let selected_sites = pending.clone();
+        let selected_sites: List<_> = pending.iter().map(|call| (call.span, call.target.clone())).collect();
         let graph = Shared::new(parking_lot::RwLock::new(
             self.module_registry.read().clone(),
         ));
         let mut prepared: Map<Text, TypeChecker> = Map::new();
-        let mut visited = Set::new();
+        let mut visited = Map::new();
+        let mut checked_implementations = Set::new();
         let mut remaining = MAX_SOURCE_CALL_STEPS;
-        while let Some((_, (owner, declaration))) = pending.pop() {
+        while let Some(CallObligation { target: (owner, declaration), source: selected, .. }) = pending.pop() {
             let Some(next) = remaining.checked_sub(1) else {
                 return false;
             };
             remaining = next;
-            let Some(selected) = self.selected_callable_source(&owner, &declaration) else {
-                return false;
-            };
-            if !visited.insert((owner.clone(), selected.item, selected.member)) {
+            let key = (owner.clone(), selected.identity());
+            if visited.contains_key(&key) {
                 continue;
             }
             if has_implicit_call_computation(&declaration)
-                || declaration.is_unsafe
                 || declaration.body.is_none()
             {
                 return false;
@@ -61,30 +58,44 @@ impl TypeChecker {
                 prepared.insert(owner.clone(), context);
             }
             let checker = prepared.get_mut(&owner).expect("prepared callable owner");
-            let mut item = selected.source.module().items[selected.item].clone();
-            if let Some(member) = selected.member
-                && let ItemKind::Impl(implementation) = &mut item.kind
-            {
-                implementation.items = List::from_single(implementation.items[member].clone());
-            }
-            let result = checker.check_item(&item);
-            if result.is_err()
-                || !checker.take_deferred_errors().is_empty()
+            let item = &selected.source.module().items[selected.item];
+            let checked = match (&item.kind, selected.member) {
+                (ItemKind::Impl(implementation), Some(member)) if matches!(implementation.kind, verum_ast::decl::ImplKind::Inherent(_)) => {
+                    let only_member = implementation.items[member].clone();
+                    let mut item = item.clone();
+                    if let ItemKind::Impl(block) = &mut item.kind {
+                        block.items = List::from_single(only_member);
+                    }
+                    checker.check_item(&item)
+                }
+                (ItemKind::Impl(implementation), _) => {
+                    // Protocol conformance and its published identity belong to the
+                    // complete implementation, including its associated types.
+                    if checked_implementations.insert((owner.clone(), selected.item)) {
+                        let Some(next) = remaining.checked_sub(implementation.items.len()) else {
+                            return false;
+                        };
+                        remaining = next;
+                        checker.check_item(item)
+                    } else {
+                        Ok(())
+                    }
+                }
+                _ => checker.check_item(item),
+            };
+            if checked.is_err() || !checker.take_deferred_errors().is_empty()
                 || !checker.diagnostic_sources().is_empty()
-                || checker
-                    .diagnostics()
-                    .iter()
-                    .any(|diagnostic| diagnostic.is_error())
-            {
+                || checker.diagnostics().iter().any(|diagnostic| diagnostic.is_error()) {
                 return false;
             }
             if !checker.collect_callable_evidence(&declaration, &mut pending) {
                 return false;
             }
+            visited.insert(key, selected);
         }
-        for (span, declaration) in selected_sites {
+        for (span, target) in selected_sites {
             self.type_registry
-                .publish_synchronous_call(span, &declaration);
+                .publish_synchronous_call(span, &target);
         }
         true
     }
@@ -92,7 +103,7 @@ impl TypeChecker {
     fn collect_callable_evidence(
         &mut self,
         function: &FunctionDecl,
-        pending: &mut List<(Span, CallableDeclaration)>,
+        pending: &mut List<CallObligation>,
     ) -> bool {
         let Some(body) = &function.body else {
             return false;
@@ -164,11 +175,11 @@ impl TypeChecker {
         Some(checker)
     }
 
-    /// A selected free function or inherent method has a concrete body. A
-    /// protocol declaration can still dispatch to another implementation.
-    /// Look up the entire declaration because generated nodes can share spans.
-    fn selected_callable_source(
+    /// Resolve in the checker's call-site environment before traversing a
+    /// provider's body. Generated declarations can share names and spans.
+    pub(super) fn selected_callable_source(
         &self,
+        span: Span,
         owner: &Text,
         selected: &FunctionDecl,
     ) -> Option<SourceFunction> {
@@ -204,15 +215,18 @@ impl TypeChecker {
                         member: None,
                     });
                 }
-                ItemKind::Impl(implementation)
-                    if matches!(implementation.kind, ImplKind::Inherent(_)) =>
-                {
+                ItemKind::Impl(implementation) => {
                     for (index, entry) in implementation.items.iter().enumerate() {
                         if let ImplItemKind::Function(function) = &entry.kind
                             && function.span == selected.span
                             && function == selected
                             && self.cfg_evaluator.should_include(&entry.attributes)
                         {
+                            if !matches!(implementation.kind, ImplKind::Inherent(_))
+                                && !self.selected_protocol_implementation(span, owner, implementation, &function.name.name)
+                            {
+                                return None;
+                            }
                             if found.is_some() {
                                 return None;
                             }
@@ -228,5 +242,28 @@ impl TypeChecker {
             }
         }
         found
+    }
+
+    fn selected_protocol_implementation(
+        &self,
+        span: Span,
+        owner: &Text,
+        source: &verum_ast::decl::ImplDecl,
+        method: &Text,
+    ) -> bool {
+        let Some(Type::Reference { inner, .. }) = self.type_registry.declared_receiver(span) else {
+            return false;
+        };
+        let receiver = self.unifier.normalize_aliases(&self.unifier.apply(inner));
+        let protocols = self.protocol_checker.read();
+        let Ok(Some(selected)) = protocols.source_impl(owner, source) else { return false };
+        if !selected.parameters.is_empty() || self.unifier.normalize_aliases(&selected.for_type) != receiver {
+            return false;
+        }
+        let Ok((premises, callables)) = self.method_dispatch_premises(span) else { return false };
+        let environment = self.source_type_registration.proof_environment(&premises, &callables);
+        let candidates = protocols.get_implementations_in_environment(&receiver, environment);
+        let mut declaring = candidates.into_iter().filter(|implementation| implementation.methods.contains_key(method));
+        declaring.next().is_some_and(|candidate| std::ptr::eq(candidate, selected)) && declaring.next().is_none()
     }
 }

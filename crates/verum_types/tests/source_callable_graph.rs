@@ -302,8 +302,45 @@ fn typed_method_chains_use_the_implementation_selected_by_the_consumer() {
             public fn middle(&self)->Int { self.leaf() }
             public fn read(&self)->Int { self.middle() }
         }
+        public type Measure is protocol {
+            fn read(&self)->Int;
+            fn unit(&self)->Int;
+        };
+        public type Measured is { public ready: Ready };
+        implement Measure for Measured {
+            fn read(&self)->Int { self.ready.read() }
+            fn unit(&self)->Int { 1 }
+        }
+        public type Deferred is { public open: Open };
+        implement Measure for Deferred {
+            fn read(&self)->Int { self.open.read() }
+            fn unit(&self)->Int { 1 }
+        }
+        public type Alternative is protocol { fn read(&self)->Int; };
+        public type Ambiguous is { public ready: Ready, public open: Open };
+        implement Measure for Ambiguous {
+            fn read(&self)->Int { self.ready.read() }
+            fn unit(&self)->Int { 1 }
+        }
+        implement Alternative for Ambiguous {
+            fn read(&self)->Int { self.open.read() }
+        }
+        public type Guarded is { public ready: Ready };
+        implement Guarded {
+            public unsafe fn leaf(&self)->Int { self.ready.read() }
+            public fn read(&self)->Int { unsafe { self.leaf() } }
+        }
+        public type Indirect is { public open: Open };
+        implement Indirect {
+            public unsafe fn leaf(&self)->Int { self.open.read() }
+            public fn read(&self)->Int { unsafe { self.leaf() } }
+        }
     "#;
-    for (receiver, accepts) in [("Ready", true), ("Pending", false), ("Open", false)] {
+    for (receiver, accepts) in [
+        ("Ready", true), ("Pending", false), ("Open", false),
+        ("Measured", true), ("Deferred", false), ("Measure", false),
+        ("Guarded", true), ("Indirect", false), ("Ambiguous", false),
+    ] {
         let consumer = format!("mount provider.{receiver};
             fn call(input:{receiver})->Int {{
                 let read:fn({receiver})->Int = |value| value.read();
@@ -338,11 +375,12 @@ fn typed_method_chains_use_the_implementation_selected_by_the_consumer() {
                     Some(Type::Function { property_requirement, .. }) if !property_requirement.may_be_async()));
             }
         } else {
-            assert!(errors.iter().any(|error| matches!(error, verum_types::TypeError::Mismatch {
+            let unresolved = errors.iter().any(|error| matches!(error, verum_types::TypeError::Mismatch {
                 expected, actual, span,
             } if expected.contains("excludes {Async}") && actual.contains("unrestricted")
-                && &consumer[span.start as usize..span.end as usize] == "|value| value.read()")),
-                "{receiver}: {errors:?}");
+                && &consumer[span.start as usize..span.end as usize] == "|value| value.read()"));
+            assert!(unresolved || (receiver == "Ambiguous" && errors.iter().any(|error|
+                matches!(error, verum_types::TypeError::AmbiguousMethod { .. }))), "{receiver}: {errors:?}");
         }
     }
 }

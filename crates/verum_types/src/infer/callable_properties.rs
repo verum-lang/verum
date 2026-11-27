@@ -201,7 +201,14 @@ struct Calls<'a> {
     checker: &'a TypeChecker,
     bound: PropertyRequirement,
     source: Option<&'a mut SourceCalls>,
-    obligations: Option<&'a mut List<(Span, crate::type_registry::CallableDeclaration)>>,
+    obligations: Option<&'a mut List<CallObligation>>,
+}
+
+#[derive(Clone)]
+struct CallObligation {
+    span: Span,
+    target: crate::type_registry::CallableDeclaration,
+    source: SourceFunction,
 }
 impl Visitor for Calls<'_> {
     fn visit_stmt(&mut self, statement: &verum_ast::Stmt) {
@@ -213,6 +220,12 @@ impl Visitor for Calls<'_> {
     fn visit_expr(&mut self, expression: &Expr) {
         match &expression.kind {
             ExprKind::Closure { .. } => return,
+            ExprKind::InlineAsm { .. } => self.bound = PropertyRequirement::Unrestricted,
+            ExprKind::ForAwait { .. } => {
+                self.bound = self.bound.join(&PropertyRequirement::AtMost(
+                    PropertySet::single(ComputationalProperty::Async),
+                ));
+            }
             ExprKind::MetaFunction { name, args, .. }
                 if matches!(name.name.as_str(), "intrinsic" | "vbc") => {
                 let requirement = intrinsic_operation_name(name.name.as_str(), args)
@@ -252,16 +265,21 @@ impl Visitor for Calls<'_> {
                     properties: None, property_requirement: PropertyRequirement::Unrestricted, ..
                 }))
                     && let Some(required) = self.obligations.as_deref_mut()
+                    && required.len() < MAX_SOURCE_CALL_STEPS
                     && let Some(selected) = self.checker.type_registry.callable_declaration(expression.span)
+                    && let Some(source) = self.checker.selected_callable_source(expression.span, &selected.0, &selected.1)
                 {
-                    required.push((expression.span, selected.clone()));
+                    required.push(CallObligation { span: expression.span, target: selected.clone(), source });
                     PropertyRequirement::source_callable(false)
                 } else {
                     requirement
                 };
                 if self.source.is_none() && requirement.may_be_async() {
                     tracing::debug!(target: "verum_types::callable_contract", owner = %self.checker.current_module_path,
-                        span = ?expression.span, callable = ?target, "call has no synchronous contract");
+                        span = ?expression.span, callable = ?target,
+                        selected = ?self.checker.type_registry.callable_declaration(expression.span)
+                            .map(|(path, declaration)| (path.as_str(), declaration.name.name.as_str())),
+                        "call has no synchronous contract");
                 }
                 self.bound = self.bound.join(&requirement);
             }
