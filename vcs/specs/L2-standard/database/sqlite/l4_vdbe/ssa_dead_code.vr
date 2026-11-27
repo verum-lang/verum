@@ -1,0 +1,115 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L2
+// @tags: sqlite, vdbe, ssa, optimizer
+// @timeout: 15000
+// @expected-exit: 0
+
+module core.database.sqlite.native.l4_vdbe.ssa.tests.dead_code;
+
+mount collections.List;
+mount core.database.sqlite.native.l4_vdbe.ssa.value.{SsaValue, SValueKind, ssa_value, value_id_raw};
+mount core.database.sqlite.native.l4_vdbe.ssa.inst.{SsaInst, PhiOperand};
+mount core.database.sqlite.native.l4_vdbe.ssa.block.block_id;
+mount core.database.sqlite.native.l4_vdbe.ssa.program.{SsaProgram, ssa_program_new};
+mount core.database.sqlite.native.l4_vdbe.ssa.dce.run_dce;
+mount core.database.sqlite.native.l4_vdbe.ssa.optimizer.optimize_ssa;
+
+fn fresh(prog: &mut SsaProgram) -> SsaValue {
+    ssa_value(prog.fresh_value_id(), SValueKind.SkInt)
+}
+
+fn append(prog: &mut SsaProgram, block: Int, inst: SsaInst) {
+    prog.graph_mut().get_mut(&block_id(block)).push_inst(inst);
+}
+
+fn long_return_chain_and_observable_calls() {
+    let mut prog = ssa_program_new("transitive liveness");
+    let one = fresh(&mut prog);
+    append(&mut prog, 0, SsaInst.IIntImm(one, 1_i64));
+    let mut previous = one;
+    let mut i = 0;
+    while i < 40 {
+        let next = fresh(&mut prog);
+        append(&mut prog, 0, SsaInst.IAdd(next, previous, one));
+        previous = next;
+        i = i + 1;
+    }
+    let unused = fresh(&mut prog);
+    append(&mut prog, 0, SsaInst.IAdd(unused, one, one));
+    let argument = fresh(&mut prog);
+    append(&mut prog, 0, SsaInst.IIntImm(argument, 7_i64));
+    let mut args: List<SsaValue> = List.new();
+    args.push(argument);
+    let call_result = fresh(&mut prog);
+    append(&mut prog, 0, SsaInst.ICallFn(call_result, "observe", args));
+    let aggregate_result = fresh(&mut prog);
+    append(&mut prog, 0, SsaInst.IAggFinal(aggregate_result, 1));
+    prog.graph_mut().get_mut(&block_id(0)).set_terminator(SsaInst.IReturn(previous.id()));
+
+    let _ = optimize_ssa(&mut prog);
+    assert_eq(run_dce(&mut prog).removed + 0, 0);
+    let body = prog.graph().get(&block_id(0)).instructions();
+    assert_eq(body.len(), 44);
+    let mut idx = 1;
+    while idx <= 40 {
+        match &body[idx] {
+            SsaInst.IAdd(dst, left, right) => {
+                assert_eq(value_id_raw(&dst.id()), idx + 1);
+                assert_eq(value_id_raw(&left.id()), idx);
+                assert_eq(value_id_raw(&right.id()), value_id_raw(&one.id()));
+            }
+            _ => panic("a live producer was lost"),
+        }
+        idx = idx + 1;
+    }
+    assert(body[41] is SsaInst.IIntImm(_, 7_i64));
+    assert(body[42] is SsaInst.ICallFn(_, _, _));
+    assert(body[43] is SsaInst.IAggFinal(_, _));
+}
+
+fn live_and_unused_phis() {
+    let mut prog = ssa_program_new("phi inputs");
+    let seed = fresh(&mut prog);
+    append(&mut prog, 0, SsaInst.IIntImm(seed, 1_i64));
+    let joined = fresh(&mut prog);
+    let dead_phi = fresh(&mut prog);
+    let dead_input = fresh(&mut prog);
+    let cfg = prog.graph_mut();
+    let entry = block_id(0);
+    let header = cfg.new_block();
+    let latch = cfg.new_block();
+    cfg.get_mut(&entry).set_terminator(SsaInst.IJump(header));
+    cfg.get_mut(&latch).set_terminator(SsaInst.IJump(header));
+    cfg.get_mut(&latch).push_inst(SsaInst.IIntImm(dead_input, 77_i64));
+    let mut live_inputs: List<PhiOperand> = List.new();
+    live_inputs.push(PhiOperand { pred: entry, value: seed });
+    live_inputs.push(PhiOperand { pred: latch, value: joined });
+    cfg.get_mut(&header).push_phi(SsaInst.IPhi(joined, live_inputs));
+    let mut dead_inputs: List<PhiOperand> = List.new();
+    dead_inputs.push(PhiOperand { pred: entry, value: seed });
+    dead_inputs.push(PhiOperand { pred: latch, value: dead_input });
+    cfg.get_mut(&header).push_phi(SsaInst.IPhi(dead_phi, dead_inputs));
+    let mut row: List<SsaValue> = List.new();
+    row.push(joined);
+    cfg.get_mut(&header).push_inst(SsaInst.IResultRow(row));
+    cfg.get_mut(&header).set_terminator(SsaInst.IJump(latch));
+
+    assert_eq(run_dce(&mut prog).removed + 0, 2);
+    let phis = prog.graph().get(&header).phis();
+    assert_eq(phis.len(), 1);
+    match &phis[0] {
+        SsaInst.IPhi(dst, inputs) => {
+            assert_eq(value_id_raw(&dst.id()), value_id_raw(&joined.id()));
+            assert_eq(inputs.len(), 2);
+        }
+        _ => panic("the live loop phi was lost"),
+    }
+    assert_eq(prog.graph().get(&latch).instructions().len(), 0);
+    assert_eq(prog.graph().get(&entry).instructions().len(), 1);
+}
+
+fn main() {
+    long_return_chain_and_observable_calls();
+    live_and_unused_phis();
+}

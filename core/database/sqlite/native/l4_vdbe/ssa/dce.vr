@@ -5,91 +5,16 @@
 )
 module core.database.sqlite.native.l4_vdbe.ssa.dce;
 
-// =============================================================================
-// l4_vdbe/ssa/dce.vr — SSA-level dead code elimination
-// =============================================================================
-// Layer: 4
-// Spec: sqlite-native.md §4.4 ("SSA-форма разрешает … dead-code
-//       elimination на уровне VDBE до emission")
-//
-// Standard mark-sweep DCE on SSA:
-//
-//   1. SEED the live set with values consumed by terminators
-//      (IBranch cond, IReturn) and by side-effecting instructions
-//      (IResultRow, IAggStep, ICursorInsert, ICursorDelete, etc.).
-//   2. PROPAGATE: for every live instruction, mark every operand
-//      (transitively) live.
-//   3. SWEEP: drop instructions whose dst is dead AND have no
-//      side effects.
-//
-// Phi nodes are treated as live iff their dst is live; live phi
-// inputs propagate liveness.  This is the textbook algorithm from
-// Cytron et al. + Briggs/Cooper "Effective Tree-Based DCE".
-// =============================================================================
+// Follow SSA definitions from observable instructions and terminators, then
+// remove unreferenced definitions in their original block order.
 
-mount collections.{List, Map};
-mount base.{Result, Ok, Err, Text, Maybe};
-mount core.database.sqlite.native.l4_vdbe.ssa.value.{
-    SsaValue, ValueId, value_id_raw, value_id_eq,
-};
-mount core.database.sqlite.native.l4_vdbe.ssa.inst.{
-    SsaInst, PhiOperand,
-    IConst, INull, IIntImm,
-    IAdd, ISub, IMul, IDiv, IRem,
-    IBitAnd, IBitOr, IShiftLeft, IShiftRight, IBitNot,
-    ICmp, ICast,
-    ICursorOpen, ICursorClose, ICursorRewind, ICursorNext,
-    ICursorPrev, ICursorLast, IColumn, IRowId, IMakeRecord,
-    ICursorInsert, ICursorDelete, INewRowId,
-    ICallFn, IAggStep, IAggFinal, IPhi, IResultRow,
-    ITransactionBegin, ITransactionCommit, ITransactionRollback,
-    IBranch, IJump, IHalt, IReturn, IYield,
-    inst_dst, inst_operands,
-};
-mount core.database.sqlite.native.l4_vdbe.ssa.block.{BasicBlock, BlockId, block_id_raw};
-mount core.database.sqlite.native.l4_vdbe.ssa.cfg.Cfg;
+mount collections.List;
+mount base.Maybe;
+mount core.database.sqlite.native.l4_vdbe.ssa.value.{SsaValue, value_id_raw};
+mount core.database.sqlite.native.l4_vdbe.ssa.inst.{SsaInst, inst_dst, inst_operands};
+mount core.database.sqlite.native.l4_vdbe.ssa.block.block_id;
 mount core.database.sqlite.native.l4_vdbe.ssa.program.SsaProgram;
 
-// -----------------------------------------------------------------------------
-// LiveSet — bitmap indexed by raw ValueId
-// -----------------------------------------------------------------------------
-
-type LiveSet is {
-    bits: List<Bool>,
-};
-
-fn live_set_new(value_count: Int) -> LiveSet {
-    let mut bits: List<Bool> = List.new();
-    let mut i: Int = 0;
-    while i < value_count {
-        bits.push(false);
-        i = i + 1;
-    }
-    LiveSet { bits: bits }
-}
-
-fn live_set_mark(s: &mut LiveSet, v: &ValueId) -> Bool {
-    let raw = value_id_raw(v);
-    if raw < 0 || raw >= s.bits.len() { return false; }
-    if s.bits[raw] { return false; }
-    s.bits[raw] = true;
-    true
-}
-
-fn live_set_is_live(s: &LiveSet, v: &ValueId) -> Bool {
-    let raw = value_id_raw(v);
-    if raw < 0 || raw >= s.bits.len() { return false; }
-    s.bits[raw]
-}
-
-// -----------------------------------------------------------------------------
-// has_side_effect — instructions kept regardless of dst liveness
-// -----------------------------------------------------------------------------
-
-/// Side-effecting instructions (execution observably matters even
-/// when no SSA value is consumed).  Terminators are always kept;
-/// stateful ops (ResultRow, AggStep, cursor mutations, transaction
-/// control) are kept too.
 public fn has_side_effect(inst: &SsaInst) -> Bool {
     match inst {
         IBranch(_, _, _)        => true,
@@ -111,240 +36,102 @@ public fn has_side_effect(inst: &SsaInst) -> Bool {
         ITransactionCommit      => true,
         ITransactionRollback(_) => true,
         ICallFn(_, _, _)        => true,   // conservative — fn may have effects
+        IAggFinal(_, _)          => true,   // finalization can invoke user code
         _                       => false,
     }
 }
 
-// -----------------------------------------------------------------------------
-// Public entry point
-// -----------------------------------------------------------------------------
-
 public type DceReport is {
     instructions_before: Int,
     instructions_after: Int,
-    removed: Int,
+    public(in core.database.sqlite.native.l4_vdbe.ssa) removed: Int,
     iterations: Int,
+};
+
+type LiveValues is {
+    marked: List<Bool>,
+    pending: List<Int>,
+};
+
+fn mark_operands(live: &mut LiveValues, operands: &List<SsaValue>) {
+    for operand in operands {
+        let id = value_id_raw(&operand.id());
+        assert(id > 0 && id < live.marked.len(), "invalid SQLite SSA operand ID");
+        if !live.marked[id] {
+            live.marked[id] = true;
+            live.pending.push(id);
+        }
+    }
 }
 
-/// Run mark-sweep DCE on `prog`.  Mutates the program in place;
-/// returns a report for diagnostics.
+fn record_instruction(inst: &SsaInst, defs: &mut List<Maybe<List<SsaValue>>>, live: &mut LiveValues) {
+    let operands = inst_operands(inst);
+    if has_side_effect(inst) { mark_operands(live, &operands); }
+    match inst_dst(inst) {
+        Maybe.Some(dst) => {
+            let id = value_id_raw(&dst.id());
+            assert(id > 0 && id < defs.len(), "invalid SQLite SSA definition ID");
+            assert(defs[id] is Maybe.None, "duplicate SQLite SSA definition");
+            defs[id] = Maybe.Some(operands);
+        }
+        Maybe.None => {}
+    }
+}
+
+fn propagate(defs: &List<Maybe<List<SsaValue>>>, live: &mut LiveValues) -> Int {
+    let mut next = 0;
+    let mut rounds = 0;
+    while next < live.pending.len() {
+        let end = live.pending.len();
+        rounds = rounds + 1;
+        while next < end {
+            let id = live.pending[next];
+            match &defs[id] {
+                Maybe.Some(inputs) => mark_operands(live, inputs),
+                Maybe.None => {}
+            }
+            next = next + 1;
+        }
+    }
+    rounds
+}
+
+fn keep_instruction(marked: &List<Bool>, inst: &SsaInst) -> Bool {
+    if has_side_effect(inst) { return true; }
+    match inst_dst(inst) {
+        Maybe.Some(dst) => marked[value_id_raw(&dst.id())],
+        Maybe.None => true,
+    }
+}
+
 public fn run_dce(prog: &mut SsaProgram) -> DceReport {
     let before = prog.total_instr_count();
-
-    // Phase 1: mark — seed + propagate.
-    let mut live = live_set_new(prog.value_count);
-    seed_live_set(prog, &mut live);
-    let iterations = propagate_liveness(prog, &mut live);
-
-    // Phase 2: sweep — drop dead instructions per block.
-    sweep_dead_instructions(prog, &live);
-
+    let mut defs: List<Maybe<List<SsaValue>>> = List.new();
+    let mut live = LiveValues { marked: List.new(), pending: List.new() };
+    while defs.len() < prog.value_count() {
+        defs.push(Maybe.None);
+        live.marked.push(false);
+    }
+    let mut b = 0;
+    while b < prog.block_count() {
+        let block = prog.graph().get(&block_id(b));
+        for phi in block.phis() { record_instruction(phi, &mut defs, &mut live); }
+        for inst in block.instructions() { record_instruction(inst, &mut defs, &mut live); }
+        record_instruction(block.terminator(), &mut defs, &mut live);
+        b = b + 1;
+    }
+    let iterations = propagate(&defs, &mut live);
+    let marked = &live.marked;
+    b = 0;
+    while b < prog.block_count() {
+        prog.graph_mut().get_mut(&block_id(b)).retain_instructions(|inst| keep_instruction(marked, inst));
+        b = b + 1;
+    }
     let after = prog.total_instr_count();
     DceReport {
         instructions_before: before,
         instructions_after: after,
         removed: before - after,
         iterations: iterations,
-    }
-}
-
-// -----------------------------------------------------------------------------
-// Phase 1a: SEED
-// -----------------------------------------------------------------------------
-
-fn seed_live_set(prog: &SsaProgram, live: &mut LiveSet) {
-    let mut b: Int = 0;
-    while b < prog.cfg.blocks.len() {
-        let blk = &prog.cfg.blocks[b];
-
-        // Operands of side-effecting straight-line insts.
-        let mut i: Int = 0;
-        while i < blk.insts.len() {
-            if has_side_effect(&blk.insts[i]) {
-                seed_from_operands(&blk.insts[i], live);
-            }
-            i = i + 1;
-        }
-
-        // Terminator operands.
-        seed_from_operands(&blk.terminator, live);
-
-        b = b + 1;
-    }
-}
-
-fn seed_from_operands(inst: &SsaInst, live: &mut LiveSet) {
-    let ops = inst_operands(inst);
-    let mut k: Int = 0;
-    while k < ops.len() {
-        let _ = live_set_mark(live, &ops[k].id);
-        k = k + 1;
-    }
-}
-
-// -----------------------------------------------------------------------------
-// Phase 1b: PROPAGATE
-// -----------------------------------------------------------------------------
-
-/// Iterate until the live set stabilises.  Each pass: for every
-/// instruction whose dst is live, mark its operands live.  Returns
-/// the iteration count for diagnostics.
-fn propagate_liveness(prog: &SsaProgram, live: &mut LiveSet) -> Int {
-    let mut iter: Int = 0;
-    let max_iter: Int = 16;
-    while iter < max_iter {
-        let mut grew = false;
-        let mut b: Int = 0;
-        while b < prog.cfg.blocks.len() {
-            let blk = &prog.cfg.blocks[b];
-
-            // Phi nodes: if phi dst is live, every incoming value is live.
-            let mut p: Int = 0;
-            while p < blk.phi_nodes.len() {
-                if phi_dst_is_live(&blk.phi_nodes[p], live) {
-                    if mark_phi_inputs(&blk.phi_nodes[p], live) {
-                        grew = true;
-                    }
-                }
-                p = p + 1;
-            }
-
-            // Straight-line: if dst is live OR has side effect, propagate.
-            let mut i: Int = 0;
-            while i < blk.insts.len() {
-                let dst_live = match inst_dst(&blk.insts[i]) {
-                    Maybe.Some(d) => live_set_is_live(live, &d.id),
-                    Maybe.None    => false,
-                };
-                if dst_live || has_side_effect(&blk.insts[i]) {
-                    let ops = inst_operands(&blk.insts[i]);
-                    let mut q: Int = 0;
-                    while q < ops.len() {
-                        if live_set_mark(live, &ops[q].id) { grew = true; }
-                        q = q + 1;
-                    }
-                }
-                i = i + 1;
-            }
-
-            b = b + 1;
-        }
-        iter = iter + 1;
-        if !grew { break; }
-    }
-    iter
-}
-
-fn phi_dst_is_live(phi: &SsaInst, live: &LiveSet) -> Bool {
-    match inst_dst(phi) {
-        Maybe.Some(d) => live_set_is_live(live, &d.id),
-        Maybe.None    => false,
-    }
-}
-
-fn mark_phi_inputs(phi: &SsaInst, live: &mut LiveSet) -> Bool {
-    let mut grew = false;
-    match phi {
-        IPhi(_, ops) => {
-            let mut k: Int = 0;
-            while k < ops.len() {
-                if live_set_mark(live, &ops[k].value.id) {
-                    grew = true;
-                }
-                k = k + 1;
-            }
-        }
-        _ => {}
-    }
-    grew
-}
-
-// -----------------------------------------------------------------------------
-// Phase 2: SWEEP
-// -----------------------------------------------------------------------------
-
-fn sweep_dead_instructions(prog: &mut SsaProgram, live: &LiveSet) {
-    let mut b: Int = 0;
-    while b < prog.cfg.blocks.len() {
-        // Filter phi_nodes — drop those whose dst is dead.
-        let mut new_phis: List<SsaInst> = List.new();
-        let mut p: Int = 0;
-        while p < prog.cfg.blocks[b].phi_nodes.len() {
-            if phi_dst_is_live(&prog.cfg.blocks[b].phi_nodes[p], live) {
-                new_phis.push(clone_inst(&prog.cfg.blocks[b].phi_nodes[p]));
-            }
-            p = p + 1;
-        }
-        prog.cfg.blocks[b].phi_nodes = new_phis;
-
-        // Filter straight-line insts.
-        let mut new_insts: List<SsaInst> = List.new();
-        let mut i: Int = 0;
-        while i < prog.cfg.blocks[b].insts.len() {
-            let keep = has_side_effect(&prog.cfg.blocks[b].insts[i])
-                || (match inst_dst(&prog.cfg.blocks[b].insts[i]) {
-                    Maybe.Some(d) => live_set_is_live(live, &d.id),
-                    Maybe.None    => true,        // no dst, no SSA semantics — keep
-                });
-            if keep {
-                new_insts.push(clone_inst(&prog.cfg.blocks[b].insts[i]));
-            }
-            i = i + 1;
-        }
-        prog.cfg.blocks[b].insts = new_insts;
-
-        b = b + 1;
-    }
-}
-
-// -----------------------------------------------------------------------------
-// Inst clone — preserves variant + payload; needed to rebuild the
-// per-block instruction list during sweep.
-// -----------------------------------------------------------------------------
-
-fn clone_inst(inst: &SsaInst) -> SsaInst {
-    // Verum's structural copy on variants is sufficient — payload
-    // values (SsaValue, BlockId, lists) are themselves cloneable.
-    match inst {
-        IConst(d, idx)             => IConst(d.clone(), idx),
-        INull(d)                   => INull(d.clone()),
-        IIntImm(d, v)              => IIntImm(d.clone(), v),
-        IAdd(d, a, b)              => IAdd(d.clone(), a.clone(), b.clone()),
-        ISub(d, a, b)              => ISub(d.clone(), a.clone(), b.clone()),
-        IMul(d, a, b)              => IMul(d.clone(), a.clone(), b.clone()),
-        IDiv(d, a, b)              => IDiv(d.clone(), a.clone(), b.clone()),
-        IRem(d, a, b)              => IRem(d.clone(), a.clone(), b.clone()),
-        IBitAnd(d, a, b)           => IBitAnd(d.clone(), a.clone(), b.clone()),
-        IBitOr(d, a, b)            => IBitOr(d.clone(), a.clone(), b.clone()),
-        IShiftLeft(d, a, b)        => IShiftLeft(d.clone(), a.clone(), b.clone()),
-        IShiftRight(d, a, b)       => IShiftRight(d.clone(), a.clone(), b.clone()),
-        IBitNot(d, s)              => IBitNot(d.clone(), s.clone()),
-        ICmp(d, k, a, b)           => ICmp(d.clone(), k.clone(), a.clone(), b.clone()),
-        ICast(d, s)                => ICast(d.clone(), s.clone()),
-        ICursorOpen(c, k, r, n)    => ICursorOpen(c, k.clone(), r, n),
-        ICursorClose(c)            => ICursorClose(c),
-        ICursorRewind(c, t)        => ICursorRewind(c, t.clone()),
-        ICursorNext(c, t)          => ICursorNext(c, t.clone()),
-        ICursorPrev(c, t)          => ICursorPrev(c, t.clone()),
-        ICursorLast(c, t)          => ICursorLast(c, t.clone()),
-        IColumn(d, c, i)           => IColumn(d.clone(), c, i),
-        IRowId(d, c)               => IRowId(d.clone(), c),
-        IMakeRecord(d, vs, a)      => IMakeRecord(d.clone(), vs.clone(), a.clone()),
-        ICursorInsert(c, r, k, f)  => ICursorInsert(c, r.clone(), k.clone(), f),
-        ICursorDelete(c)           => ICursorDelete(c),
-        INewRowId(d, c)            => INewRowId(d.clone(), c),
-        ICallFn(d, n, a)           => ICallFn(d.clone(), n.clone(), a.clone()),
-        IAggStep(n, a, c)          => IAggStep(n.clone(), a.clone(), c),
-        IAggFinal(d, c)            => IAggFinal(d.clone(), c),
-        IPhi(d, ops)               => IPhi(d.clone(), ops.clone()),
-        IResultRow(vs)             => IResultRow(vs.clone()),
-        ITransactionBegin(m)       => ITransactionBegin(m),
-        ITransactionCommit         => ITransactionCommit,
-        ITransactionRollback(s)    => ITransactionRollback(s),
-        IBranch(c, t, e)           => IBranch(c.clone(), t.clone(), e.clone()),
-        IJump(t)                   => IJump(t.clone()),
-        IHalt(c, m)                => IHalt(c, m.clone()),
-        IReturn(r)                 => IReturn(r.clone()),
-        IYield(t)                  => IYield(t.clone()),
     }
 }

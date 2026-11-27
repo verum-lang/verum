@@ -23,7 +23,7 @@ module core.database.sqlite.native.l4_vdbe.ssa.inst;
 
 mount collections.List;
 mount base.{Text, Maybe};
-mount core.database.sqlite.native.l4_vdbe.ssa.value.{SsaValue, ValueId};
+mount core.database.sqlite.native.l4_vdbe.ssa.value.{SsaValue, ValueId, SValueKind, ssa_value, value_id, value_id_raw};
 mount core.database.sqlite.native.l4_vdbe.ssa.block.{BlockId, block_id_eq};
 
 // -----------------------------------------------------------------------------
@@ -334,6 +334,7 @@ public fn inst_operands(inst: &SsaInst) -> List<SsaValue> {
             }
         }
         IBranch(c, _, _)         => { out.push(c.clone()); }
+        IReturn(id)              => { out.push(ssa_value(value_id(value_id_raw(id)), SValueKind.SkInt)); }
         // ---- no SSA operands ----
         ICursorOpen(_, _, _, _)  => {}
         ICursorClose(_)          => {}
@@ -347,7 +348,6 @@ public fn inst_operands(inst: &SsaInst) -> List<SsaValue> {
         ITransactionRollback(_)  => {}
         IJump(_)                 => {}
         IHalt(_, _)              => {}
-        IReturn(_)               => {}
         IYield(_)                => {}
     }
     out

@@ -101,6 +101,12 @@ implement BasicBlock {
 
     public(in core.database.sqlite.native.l4_vdbe.ssa) fn terminator(&self) -> &SsaInst { &self.terminator }
 
+    /// Filter definitions in place, preserving the order and the terminator.
+    public(in core.database.sqlite.native.l4_vdbe.ssa) fn retain_instructions<F: fn(&SsaInst) -> Bool>(&mut self, keep: F) {
+        self.phi_nodes.retain(keep);
+        self.insts.retain(keep);
+    }
+
     /// Append an ordinary instruction to the block body.
     public fn push_inst(&mut self, inst: SsaInst) {
         assert(!inst_is_terminator(&inst) && !(inst is SsaInst.IPhi(_, _)), "invalid SSA block body instruction");
