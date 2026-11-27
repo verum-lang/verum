@@ -128,14 +128,14 @@ public type HttpParseError is
     | InvalidStatusCode(Int)
     | InvalidHeaderName(Text)
     | InvalidHeaderValue(Text)
-    | HeaderTooLong { limit: Int }
-    | TooManyHeaders { limit: Int }
-    | RequestLineTooLong { limit: Int }
+    | HeaderTooLong { public limit: Int }
+    | TooManyHeaders { public limit: Int }
+    | RequestLineTooLong { public limit: Int }
     | BadRequestLine(Text)
     | InvalidChunkSize(Text)
     | InvalidTrailer(Text)
     | InvalidContentLength(Text)
-    | ContentLengthTooLarge { length: Int, limit: Int }
+    | ContentLengthTooLarge { public length: Int, public limit: Int }
     | ConflictingContentLength
     | IncompleteFrame;
 
@@ -228,9 +228,9 @@ public type ParseProgress is
     /// `body_len` identifies body-framing mode: Maybe.Some(n) = Content-Length;
     /// Maybe.None = Transfer-Encoding: chunked.
     | Done {
-        consumed: Int,
-        body_len: Maybe<Int>,
-        body_start: Int,
+        public consumed: Int,
+        public body_len: Maybe<Int>,
+        public body_start: Int,
     }
     /// Fatal error — caller must close the connection.
     | Error(HttpParseError);
@@ -432,7 +432,7 @@ implement HttpParser {
             }
         };
         if lf_pos == 0 || buf[lf_pos - 1] != CR {
-            return Result.Err(HttpParseError.BadRequestLine("missing CR before LF".into()));
+            return Result.Err(HttpParseError.BadRequestLine("missing CR before LF"));
         }
         let line_end = lf_pos - 1;
         let line = &buf[..line_end];
@@ -447,10 +447,10 @@ implement HttpParser {
 
     fn parse_request_line(&mut self, line: &[Byte]) -> Result<(), HttpParseError> {
         // method SP path SP HTTP/x.y
-        let sp1 = find_byte(line, SP).ok_or(HttpParseError.BadRequestLine("missing first SP".into()))?;
+        let sp1 = find_byte(line, SP).ok_or(HttpParseError.BadRequestLine("missing first SP"))?;
         let method_slice = &line[..sp1];
         let rest = &line[sp1 + 1..];
-        let sp2 = find_byte(rest, SP).ok_or(HttpParseError.BadRequestLine("missing second SP".into()))?;
+        let sp2 = find_byte(rest, SP).ok_or(HttpParseError.BadRequestLine("missing second SP"))?;
         let path_slice = &rest[..sp2];
         let version_slice = &rest[sp2 + 1..];
 
@@ -467,10 +467,10 @@ implement HttpParser {
 
     fn parse_status_line(&mut self, line: &[Byte]) -> Result<(), HttpParseError> {
         // HTTP/x.y SP code SP reason
-        let sp1 = find_byte(line, SP).ok_or(HttpParseError.BadRequestLine("status SP1".into()))?;
+        let sp1 = find_byte(line, SP).ok_or(HttpParseError.BadRequestLine("status SP1"))?;
         let version_slice = &line[..sp1];
         let rest = &line[sp1 + 1..];
-        let sp2 = find_byte(rest, SP).ok_or(HttpParseError.BadRequestLine("status SP2".into()))?;
+        let sp2 = find_byte(rest, SP).ok_or(HttpParseError.BadRequestLine("status SP2"))?;
         let code_slice = &rest[..sp2];
         let reason_slice = &rest[sp2 + 1..];
 
@@ -518,16 +518,16 @@ implement HttpParser {
             }
         };
         if lf_pos == 0 || buf[lf_pos - 1] != CR {
-            return Result.Err(HttpParseError.InvalidHeaderValue("missing CR before LF".into()));
+            return Result.Err(HttpParseError.InvalidHeaderValue("missing CR before LF"));
         }
         let line_len = lf_pos + 1;   // includes LF
         let line = &buf[..lf_pos - 1];
 
         // Split at first colon.
         let colon = find_byte(line, COLON)
-            .ok_or(HttpParseError.InvalidHeaderName("no colon".into()))?;
+            .ok_or(HttpParseError.InvalidHeaderName("no colon"))?;
         if colon == 0 {
-            return Result.Err(HttpParseError.InvalidHeaderName("empty name".into()));
+            return Result.Err(HttpParseError.InvalidHeaderName("empty name"));
         }
         // Key must be token chars per RFC 7230 §3.2.6. Skip strict
         // validation here for hot-path speed; call sites that care invoke
@@ -802,8 +802,8 @@ type ChunkState is
 
 public type ChunkProgress is
     | ChunkNeedMore
-    | ChunkOutput { consumed: Int, data_start: Int, data_len: Int }
-    | ChunkEnd { consumed: Int }
+    | ChunkOutput { public consumed: Int, public data_start: Int, public data_len: Int }
+    | ChunkEnd { public consumed: Int }
     | ChunkErr(HttpParseError);
 
 implement ChunkedDecoder {
@@ -830,7 +830,7 @@ implement ChunkedDecoder {
                     };
                     if lf == 0 || remaining[lf - 1] != CR {
                         return ChunkProgress.ChunkErr(
-                            HttpParseError.InvalidChunkSize("missing CR".into())
+                            HttpParseError.InvalidChunkSize("missing CR")
                         );
                     }
                     let line = &remaining[..lf - 1];
@@ -873,7 +873,7 @@ implement ChunkedDecoder {
                     if remaining.len() < 2 { return ChunkProgress.ChunkNeedMore; }
                     if remaining[0] != CR || remaining[1] != LF {
                         return ChunkProgress.ChunkErr(
-                            HttpParseError.InvalidChunkSize("CRLF expected after chunk-data".into())
+                            HttpParseError.InvalidChunkSize("CRLF expected after chunk-data")
                         );
                     }
                     self.pos = self.pos + 2;
@@ -894,7 +894,7 @@ implement ChunkedDecoder {
                     };
                     if lf == 0 || remaining[lf - 1] != CR {
                         return ChunkProgress.ChunkErr(
-                            HttpParseError.InvalidTrailer("no CR before LF".into())
+                            HttpParseError.InvalidTrailer("no CR before LF")
                         );
                     }
                     self.pos = self.pos + lf + 1;

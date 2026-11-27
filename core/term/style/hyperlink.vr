@@ -28,8 +28,7 @@
 )
 module core.term.style.hyperlink;
 
-mount core.io.IoResult;
-mount core.io.{IoError, IoErrorKind};
+mount core.io.protocols.{IoResult, IoErrorKind, StreamError};
 mount super.super.raw.escape.EscapeWriter;
 mount core.term.widget.paragraph.TextSpan;
 
@@ -102,7 +101,7 @@ public fn is_safe_uri_for_osc(uri: &Text) -> Bool {
 /// then closes with OSC 8 ;; ST.
 ///
 
-/// Returns `Result.Err(IoError.with_message(IoErrorKind.InvalidInput, ...))`
+/// Returns a stream error with kind `IoErrorKind.InvalidInput`
 /// if `uri` contains a control character that would close the OSC
 /// sequence early — see
 /// `is_safe_uri_for_osc` for the threat model. Without this check a
@@ -115,12 +114,12 @@ public fn write_hyperlink(
     text: &Text,
 ) -> IoResult<()> {
     if !is_safe_uri_for_osc(uri) {
-        return Result.Err(IoError.with_message(
+        return Result.Err(StreamError.with_message(
             IoErrorKind.InvalidInput,
-            "hyperlink URI contains control character; refusing to emit OSC 8 escape (would let URI close the sequence early and inject terminal commands)".into(),
+            "hyperlink URI contains control character; refusing to emit OSC 8 escape (would let URI close the sequence early and inject terminal commands)",
         ));
     }
-    writer.write_osc(8, &f";{uri}").map_err(|e| IoError.Other(e.to_string()))?;
-    let _ = writer.write(text.as_bytes()).map_err(|e| IoError.Other(e.to_string()))?;
-    writer.write_osc(8, ";").map_err(|e| IoError.Other(e.to_string()))
+    writer.write_osc(8, &f";{uri}")?;
+    writer.write_all(text.as_bytes())?;
+    writer.write_osc(8, ";")
 }

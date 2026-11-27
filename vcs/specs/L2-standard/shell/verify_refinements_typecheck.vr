@@ -17,21 +17,21 @@ fn exercise_non_empty() {
 }
 
 fn exercise_bounded_text() {
-    let _: Result<BoundedText, ShellError> = BoundedText.parse("hello".into(), 1, 100);
-    let _: Result<BoundedText, ShellError> = BoundedText.parse("".into(), 1, 100);
+    let _: Result<BoundedText, ShellError> = BoundedText.parse("hello", 1, 100);
+    let _: Result<BoundedText, ShellError> = BoundedText.parse("", 1, 100);
 }
 
 fn exercise_env_atoms() {
-    let _: Result<EnvName, ShellError> = EnvName.parse("PATH".into());
-    let _: Result<EnvName, ShellError> = EnvName.parse("123BAD".into());
-    let _: Result<EnvValue, ShellError> = EnvValue.parse("hello\0world".into());
-    let _: Result<EnvValue, ShellError> = EnvValue.parse("hello".into());
+    let _: Result<EnvName, ShellError> = EnvName.parse("PATH");
+    let _: Result<EnvName, ShellError> = EnvName.parse("123BAD");
+    let _: Result<EnvValue, ShellError> = EnvValue.parse("hello\0world");
+    let _: Result<EnvValue, ShellError> = EnvValue.parse("hello");
 }
 
 fn exercise_semver() {
-    let _: Result<SemVerRef, ShellError> = SemVerRef.parse("1.2.3".into());
-    let _: Result<SemVerRef, ShellError> = SemVerRef.parse("1.2.3-alpha+build".into());
-    let _: Result<SemVerRef, ShellError> = SemVerRef.parse("not-a-version".into());
+    let _: Result<SemVerRef, ShellError> = SemVerRef.parse("1.2.3");
+    let _: Result<SemVerRef, ShellError> = SemVerRef.parse("1.2.3-alpha+build");
+    let _: Result<SemVerRef, ShellError> = SemVerRef.parse("not-a-version");
 }
 
 fn exercise_port() {
@@ -41,31 +41,31 @@ fn exercise_port() {
 }
 
 fn exercise_hostname() {
-    let _: Result<HostName, ShellError> = HostName.parse("example.com".into());
-    let _: Result<HostName, ShellError> = HostName.parse("api.v2.example.com".into());
-    let _: Result<HostName, ShellError> = HostName.parse(".bad".into());
+    let _: Result<HostName, ShellError> = HostName.parse("example.com");
+    let _: Result<HostName, ShellError> = HostName.parse("api.v2.example.com");
+    let _: Result<HostName, ShellError> = HostName.parse(".bad");
 }
 
 fn exercise_deploy_config() {
     let _: Result<DeployConfig, ShellError> = DeployConfig.parse(
-        "myservice".into(),
-        "1.2.3".into(),
-        "production".into(),
-        "manifest.yaml".into(),
+        "myservice",
+        "1.2.3",
+        "production",
+        "manifest.yaml",
         300,
     );
     let _: Result<DeployConfig, ShellError> = DeployConfig.parse(
-        "myservice".into(),
-        "bad-version".into(),  // refinement violated
-        "production".into(),
-        "manifest.txt".into(),
+        "myservice",
+        "bad-version",  // refinement violated
+        "production",
+        "manifest.txt",
         300,
     );
 }
 
 fn exercise_s3_bucket() {
-    let _: Result<S3Bucket, ShellError> = S3Bucket.parse("my-bucket".into());
-    let _: Result<S3Bucket, ShellError> = S3Bucket.parse("a..b".into());  // double dot — invalid
+    let _: Result<S3Bucket, ShellError> = S3Bucket.parse("my-bucket");
+    let _: Result<S3Bucket, ShellError> = S3Bucket.parse("a..b");  // double dot — invalid
 }
 
 fn main() {

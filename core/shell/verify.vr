@@ -37,34 +37,28 @@ mount core.shell.result.{ShellError};
 // =============================================================================
 
 public type NonEmpty<T> is {
-    head: T,
-    rest: List<T>,
+    values: List<T>,
 }
 
 implement<T> NonEmpty<T> {
     public fn new(head: T) -> NonEmpty<T> {
-        NonEmpty { head, rest: [] }
+        NonEmpty { values: [head] }
     }
 
     public fn from_list(xs: List<T>) -> Result<NonEmpty<T>, ShellError> {
         if xs.is_empty() {
             return Result.Err(ShellError.SpawnFailed {
-                command: "<NonEmpty.from_list>".into(),
-                reason:  "list is empty".into(),
+                command: "<NonEmpty.from_list>",
+                reason:  "list is empty",
             });
         }
-        let mut iter = xs.into_iter();
-        let head = iter.next().unwrap();
-        let rest: List<T> = iter.collect();
-        Result.Ok(NonEmpty { head, rest })
+        Result.Ok(NonEmpty { values: xs })
     }
 
-    public fn len(&self) -> Int { 1 + self.rest.len() as Int }
-    public fn first(&self) -> &T { &self.head }
+    public fn len(&self) -> Int { self.values.len() }
+    public fn first(&self) -> &T { &self.values[0] }
     public fn into_list(self) -> List<T> {
-        let mut xs: List<T> = [self.head];
-        for x in self.rest.into_iter() { xs.push(x); }
-        xs
+        self.values
     }
 }
 
@@ -87,7 +81,7 @@ implement BoundedText {
         let n = value.len() as Int;
         if n < min || n > max {
             return Result.Err(ShellError.SpawnFailed {
-                command: "<BoundedText.parse>".into(),
+                command: "<BoundedText.parse>",
                 reason:  f"length {n} out of [{min}, {max}]",
             });
         }
@@ -114,7 +108,7 @@ implement EnvName {
         let r = Regex.new("""^[A-Za-z_][A-Za-z0-9_]*$""").unwrap();
         if r.is_match(&s) { Result.Ok(EnvName(s)) }
         else { Result.Err(ShellError.SpawnFailed {
-            command: "<EnvName.parse>".into(),
+            command: "<EnvName.parse>",
             reason:  f"invalid env var name: {s}",
         }) }
     }
@@ -131,8 +125,8 @@ implement EnvValue {
         for ch in s.chars() {
             if ch == '\0' {
                 return Result.Err(ShellError.SpawnFailed {
-                    command: "<EnvValue.parse>".into(),
-                    reason:  "env value contains NUL byte".into(),
+                    command: "<EnvValue.parse>",
+                    reason:  "env value contains NUL byte",
                 });
             }
         }
@@ -157,7 +151,7 @@ implement SemVerRef {
         let r = Regex.new("""^\\d+\\.\\d+\\.\\d+(-[a-zA-Z0-9.\\-]+)?(\\+[a-zA-Z0-9.\\-]+)?$""").unwrap();
         if r.is_match(&s) { Result.Ok(SemVerRef(s)) }
         else { Result.Err(ShellError.SpawnFailed {
-            command: "<SemVerRef.parse>".into(),
+            command: "<SemVerRef.parse>",
             reason:  f"invalid semver: {s}",
         }) }
     }
@@ -176,7 +170,7 @@ implement PortNumber {
     public fn parse(n: Int) -> Result<PortNumber, ShellError> {
         if n < 1 || n > 65535 {
             return Result.Err(ShellError.SpawnFailed {
-                command: "<PortNumber.parse>".into(),
+                command: "<PortNumber.parse>",
                 reason:  f"port {n} out of [1, 65535]",
             });
         }
@@ -195,14 +189,14 @@ implement HostName {
     public fn parse(s: Text) -> Result<HostName, ShellError> {
         if s.len() > 253 {
             return Result.Err(ShellError.SpawnFailed {
-                command: "<HostName.parse>".into(),
+                command: "<HostName.parse>",
                 reason:  f"hostname too long: {s.len()}",
             });
         }
         let r = Regex.new("""^([a-zA-Z0-9]([a-zA-Z0-9\\-]{0,61}[a-zA-Z0-9])?)(\\.[a-zA-Z0-9]([a-zA-Z0-9\\-]{0,61}[a-zA-Z0-9])?)*$""").unwrap();
         if r.is_match(&s) { Result.Ok(HostName(s)) }
         else { Result.Err(ShellError.SpawnFailed {
-            command: "<HostName.parse>".into(),
+            command: "<HostName.parse>",
             reason:  f"invalid hostname: {s}",
         }) }
     }
@@ -246,8 +240,8 @@ implement DeployConfig {
         let to  = PortNumber.parse(timeout_sec)?;
         if !mp.to_text().ends_with(".yaml") && !mp.to_text().ends_with(".yml") {
             return Result.Err(ShellError.SpawnFailed {
-                command: "<DeployConfig.parse>".into(),
-                reason:  "manifest path must end with .yaml or .yml".into(),
+                command: "<DeployConfig.parse>",
+                reason:  "manifest path must end with .yaml or .yml",
             });
         }
         Result.Ok(DeployConfig {
@@ -270,21 +264,21 @@ implement S3Bucket {
         let n = s.len() as Int;
         if n < 3 || n > 63 {
             return Result.Err(ShellError.SpawnFailed {
-                command: "<S3Bucket.parse>".into(),
+                command: "<S3Bucket.parse>",
                 reason:  f"length {n} out of [3, 63]",
             });
         }
         let r = Regex.new("""^[a-z0-9][a-z0-9.\\-]+[a-z0-9]$""").unwrap();
         if !r.is_match(&s) {
             return Result.Err(ShellError.SpawnFailed {
-                command: "<S3Bucket.parse>".into(),
+                command: "<S3Bucket.parse>",
                 reason:  f"invalid bucket name: {s}",
             });
         }
         if s.contains("..") {
             return Result.Err(ShellError.SpawnFailed {
-                command: "<S3Bucket.parse>".into(),
-                reason:  "bucket name contains consecutive dots".into(),
+                command: "<S3Bucket.parse>",
+                reason:  "bucket name contains consecutive dots",
             });
         }
         Result.Ok(S3Bucket(s))

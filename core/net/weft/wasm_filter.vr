@@ -75,7 +75,7 @@ mount core.sync.atomic.{AtomicInt, MemoryOrdering};
 mount core.net.http.{Response};
 mount core.net.weft.service.{Layer};
 mount core.net.weft.handler.{WeftRequest, Handler};
-mount core.net.weft.error.{WeftError};
+mount core.net.weft.error.IntoResponse;
 
 // =============================================================================
 // Config
@@ -252,10 +252,10 @@ implement WasmFilter {
     {
         // Surface-level sanity check: Wasm magic \0asm + version 1.
         if bytes.len() < 8 {
-            return Result.Err(WasmFilterError.ModuleInvalid("too short".into()));
+            return Result.Err(WasmFilterError.ModuleInvalid("too short"));
         }
         if bytes[0] != 0x00 || bytes[1] != 0x61 || bytes[2] != 0x73 || bytes[3] != 0x6D {
-            return Result.Err(WasmFilterError.ModuleInvalid("not wasm magic".into()));
+            return Result.Err(WasmFilterError.ModuleInvalid("not wasm magic"));
         }
         // Runtime-side load happens via `verum.wasm.load` intrinsic.
         // Phase-6 skeleton: returns a zero handle so invocation will
@@ -270,15 +270,15 @@ implement WasmFilter {
     }
 
     public fn invocations(&self) -> Int {
-        self.invocations.load(MemoryOrdering.Acquire)
+        self.invocations.get().load(MemoryOrdering.Acquire)
     }
 
     public fn caps_exceeded(&self) -> Int {
-        self.caps_exceeded.load(MemoryOrdering.Acquire)
+        self.caps_exceeded.get().load(MemoryOrdering.Acquire)
     }
 
     public fn skipped_no_runtime(&self) -> Int {
-        self.skipped_no_runtime.load(MemoryOrdering.Acquire)
+        self.skipped_no_runtime.get().load(MemoryOrdering.Acquire)
     }
 }
 
@@ -323,14 +323,18 @@ public type WasmFilterHandler<H> is {
     filter: WasmFilter,
 };
 
-implement<H: Handler> Handler for WasmFilterHandler<H> {
-    async fn handle(&self, req: WeftRequest) -> Result<Response, WeftError> {
-        self.filter.invocations.fetch_add(1, MemoryOrdering.AcqRel);
+implement<H: Handler> Handler for WasmFilterHandler<H>
+where H.Error: IntoResponse
+{
+    type Error = H.Error;
+
+    async fn handle(&self, req: WeftRequest) -> Result<Response, H.Error> {
+        self.filter.invocations.get().fetch_add(1, MemoryOrdering.AcqRel);
 
         if self.filter.handle == 0 {
             // Runtime not yet hosting WASM — pass through and count
             // the miss so deployments notice.
-            self.filter.skipped_no_runtime.fetch_add(1, MemoryOrdering.AcqRel);
+            self.filter.skipped_no_runtime.get().fetch_add(1, MemoryOrdering.AcqRel);
             return self.inner.handle(req).await;
         }
 
@@ -338,7 +342,7 @@ implement<H: Handler> Handler for WasmFilterHandler<H> {
         // with the bounded resource limits; on AbortedByLimit
         // increment `caps_exceeded` and treat as a filter-deny
         // (return 403). For now mirror the skel path.
-        self.filter.skipped_no_runtime.fetch_add(1, MemoryOrdering.AcqRel);
+        self.filter.skipped_no_runtime.get().fetch_add(1, MemoryOrdering.AcqRel);
         self.inner.handle(req).await
     }
 }

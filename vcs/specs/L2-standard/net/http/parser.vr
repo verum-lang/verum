@@ -65,7 +65,7 @@ fn typecheck_response_reason<'a>(parser: &HttpParser, buf: &'a [Byte]) -> &'a [B
 fn typecheck_streaming_shape(parser: &mut HttpParser, chunks: &List<List<Byte>>) -> Bool {
     let mut i = 0;
     while i < chunks.len() {
-        match parser.feed(&chunks[i]) {
+        match parser.feed(chunks[i].as_slice()) {
             ParseProgress.NeedMore => { i = i + 1; continue; }
             ParseProgress.Done { .. } => return true,
             ParseProgress.Error(_) => return false,
@@ -77,18 +77,18 @@ fn typecheck_streaming_shape(parser: &mut HttpParser, chunks: &List<List<Byte>>)
 // HttpParseError variants — spot check the public API surface.
 fn typecheck_parse_error_variants() -> List<HttpParseError> {
     let mut errs: List<HttpParseError> = List.new();
-    errs.push(HttpParseError.InvalidMethod("FOO".into()));
-    errs.push(HttpParseError.InvalidVersion("HTTP/9".into()));
+    errs.push(HttpParseError.InvalidMethod("FOO"));
+    errs.push(HttpParseError.InvalidVersion("HTTP/9"));
     errs.push(HttpParseError.InvalidStatusCode(0));
-    errs.push(HttpParseError.InvalidHeaderName("bad".into()));
-    errs.push(HttpParseError.InvalidHeaderValue("bad".into()));
+    errs.push(HttpParseError.InvalidHeaderName("bad"));
+    errs.push(HttpParseError.InvalidHeaderValue("bad"));
     errs.push(HttpParseError.HeaderTooLong { limit: 16384 });
     errs.push(HttpParseError.TooManyHeaders { limit: 128 });
     errs.push(HttpParseError.RequestLineTooLong { limit: 8192 });
-    errs.push(HttpParseError.BadRequestLine("bad".into()));
-    errs.push(HttpParseError.InvalidChunkSize("xx".into()));
-    errs.push(HttpParseError.InvalidTrailer("t".into()));
-    errs.push(HttpParseError.InvalidContentLength("-1".into()));
+    errs.push(HttpParseError.BadRequestLine("bad"));
+    errs.push(HttpParseError.InvalidChunkSize("xx"));
+    errs.push(HttpParseError.InvalidTrailer("t"));
+    errs.push(HttpParseError.InvalidContentLength("-1"));
     errs.push(HttpParseError.ConflictingContentLength);
     errs.push(HttpParseError.IncompleteFrame);
     errs

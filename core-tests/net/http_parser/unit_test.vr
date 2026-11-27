@@ -8,9 +8,7 @@
 //
 // Tests cover the algebraic types — HttpParseError 15-variant
 // disjointness + Eq, ParseProgress 3-variant, HeaderView 4-field
-// record, ChunkProgress 4-variant. HttpParser construction +
-// ChunkedDecoder construction work; feed() functional paths are
-// pinned behind HTTPPARSE-1 (precompile-cascade SIGSEGV class).
+// record, ChunkProgress 4-variant, parser construction and chunk framing.
 // =============================================================================
 
 mount core.net.http_parser.{
@@ -312,4 +310,23 @@ fn test_chunk_progress_err() {
 fn test_chunked_decoder_new() {
     let d = ChunkedDecoder.new();
     assert_eq(d.trailers().len(), 0);
+}
+
+@test
+fn test_chunked_decoder_empty_body() {
+    let mut decoder = ChunkedDecoder.new();
+    match decoder.feed("0\r\n\r\n".as_bytes()) {
+        ChunkProgress.ChunkEnd { consumed } => assert_eq(consumed, 5),
+        _ => assert(false),
+    }
+}
+
+@test
+fn test_chunked_decoder_reports_the_missing_cr() {
+    let mut decoder = ChunkedDecoder.new();
+    match decoder.feed("0\n".as_bytes()) {
+        ChunkProgress.ChunkErr(HttpParseError.InvalidChunkSize(message)) =>
+            assert_eq(message, "missing CR"),
+        _ => assert(false),
+    }
 }
