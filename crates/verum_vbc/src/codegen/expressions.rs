@@ -1351,7 +1351,20 @@ impl VbcCodegen {
         } else {
             None
         };
+        // The callee's result constrains a constructor on an actual return
+        // edge, including a selected match arm. Nested operands have their own scope.
+        let return_expectation = if demand.is_callable_return()
+            && self.ctx.selected_call_result_span.is_some()
+            && self.ctx.expected_value_span != Some(expr.span)
+            && let Some(declared) = self.ctx.function_return_declaration.clone()
+        {
+            Some((self.ctx.expected_value_type.replace(declared), self.ctx.expected_value_span.replace(expr.span)))
+        } else { None };
         let result = self.compile_expr_in_result_scope(expr, demand);
+        if let Some((previous, span)) = return_expectation {
+            self.ctx.expected_value_type = previous;
+            self.ctx.expected_value_span = span;
+        }
         if let Some(expected) = outer_expected {
             self.ctx.expected_value_type = Some(expected);
         }
@@ -4111,16 +4124,9 @@ impl VbcCodegen {
         // declaration. Reuse ordinary dereference lowering, including its
         // narrow-scalar and reference-tier handling, and evaluate the RHS once.
         let destination_declaration = self.projection_operand_declaration(target);
-        let copied_pointee = match (
-            destination_declaration.as_ref(),
-            self.projection_operand_declaration(value),
-        ) {
-            (Some(destination), Some(crate::types::TypeRef::Reference { inner, .. }))
-                if inner.as_ref() == destination
-                    && !destination.is_generic()
-                    && self.value_resource_discipline(destination) != verum_common::ResourceDiscipline::Unknown => Some(destination.clone()),
-            _ => None,
-        };
+        let copied_pointee = self.stored_pointee(destination_declaration.as_ref(), value)
+            .filter(|ty| !ty.is_generic()
+                && self.value_resource_discipline(ty) != verum_common::ResourceDiscipline::Unknown);
         let copy_start = self.ctx.instructions.len();
         let value_reg = if copied_pointee.is_some() {
             self.compile_unary(UnOp::Deref, value)?
@@ -7711,12 +7717,7 @@ impl VbcCodegen {
             self.emit_make_variant(result, final_tag, args.len() as u32, parent.as_deref());
             self.retain_variant_result_declaration(result, args);
             for (i, arg) in args.iter().enumerate() {
-                let copy_start = self.ctx.instructions.len();
-                let arg_val = self.compile_expr(arg)?.ok_or_else(|| {
-                    CodegenError::internal("variant constructor arg has no value")
-                })?;
-                self.emit_variant_argument(result, i as u32, arg, arg_val, copy_start, parent.as_deref(), final_tag)?;
-                self.ctx.free_temp(arg_val);
+                self.compile_variant_argument(result, i as u32, arg, parent.as_deref(), final_tag)?;
             }
             return Ok(Some(result));
         }
@@ -10981,23 +10982,65 @@ impl VbcCodegen {
         Ok(Some(result))
     }
 
+    /// A reference can supply a value when its retained pointee is exactly the
+    /// selected destination. An unconstrained type parameter can itself hold a reference.
+    fn stored_pointee(
+        &self, destination: Option<&crate::types::TypeRef>, value: &Expr,
+    ) -> Option<crate::types::TypeRef> {
+        let destination = destination?;
+        let crate::types::TypeRef::Reference { inner, .. } = self.projection_operand_declaration(value)? else {
+            return None;
+        };
+        (inner.as_ref() == destination).then(|| destination.clone())
+    }
+
     /// All source constructor routes share the same payload ownership boundary.
-    fn emit_variant_argument(
-        &mut self,
-        variant: Reg,
-        field: u32,
-        expr: &Expr,
-        value: Reg,
-        copy_start: usize,
-        parent: Option<&str>,
-        tag: u32,
+    fn compile_variant_argument(
+        &mut self, variant: Reg, field: u32, expr: &Expr, parent: Option<&str>, tag: u32,
     ) -> CodegenResult<()> {
+        let destination = parent.and_then(|name| self.declared_sum_descriptor(name)).and_then(|sum| {
+            let concrete = crate::types::TypeRef::Concrete(sum.id);
+            let span = self.ctx.selected_call_result_span;
+            let application = span.and_then(|span| {
+                self.ctx.expected_value_type.as_ref()
+                    .filter(|ty| self.ctx.expected_value_span == Some(span) && ty.base_type_id() == Some(sum.id))
+                    .or_else(|| self.ctx.declared_result_types.get(&span)?.as_ref()
+                        .filter(|ty| ty.base_type_id() == Some(sum.id)))
+            }).unwrap_or(&concrete);
+            self.projected_variant_field(application, tag, field)
+        });
+        self.compile_variant_field(variant, field, expr, parent, tag, destination.as_ref())
+    }
+
+    fn compile_variant_field(
+        &mut self, variant: Reg, field: u32, expr: &Expr, parent: Option<&str>, tag: u32,
+        destination: Option<&crate::types::TypeRef>,
+    ) -> CodegenResult<()> {
+        let copied_pointee = self.stored_pointee(destination, expr);
+        let start = self.ctx.instructions.len();
+        let value = if copied_pointee.is_some() {
+            self.compile_unary(UnOp::Deref, expr)?
+        } else {
+            self.compile_expr(expr)?
+        }.or_internal("variant constructor argument has no value")?;
         if let Some(parent) = parent {
             self.emit_variant_refinement_assert(value, parent, tag, field)?;
         }
-        let copy_type = self.copy_source_type(expr, value, copy_start, self.ctx.instructions.len());
-        self.emit_declared_value_store(expr, value, copy_type.as_ref(), |value|
-            Instruction::SetVariantData { variant, field, value })
+        let store = |value| Instruction::SetVariantData { variant, field, value };
+        if let Some(pointee) = copied_pointee {
+            if self.borrowed_value_needs_copy(&pointee, expr.span)? {
+                let owned = self.copy_place_storage(value, Some(&pointee), None, expr.span)?;
+                self.ctx.emit(store(owned));
+                self.ctx.free_temp(owned);
+            } else {
+                self.ctx.emit(store(value));
+            }
+        } else {
+            let declared = self.copy_source_type(expr, value, start, self.ctx.instructions.len());
+            self.emit_declared_value_store(expr, value, declared.as_ref(), store)?;
+        }
+        self.ctx.free_temp(value);
+        Ok(())
     }
 
     fn emit_variant_refinement_assert(
@@ -11657,21 +11700,8 @@ impl VbcCodegen {
         });
         self.emit_make_variant(result, tag, args.len() as u32, parent.as_deref());
         self.retain_variant_result_declaration(result, args);
-        if !args.is_empty() {
-            let copy_start = self.ctx.instructions.len();
-            let data_val = self
-                .compile_expr(&args[0])?
-                .or_internal("variant constructor arg has no value")?;
-            self.emit_variant_argument(result, 0, &args[0], data_val, copy_start, parent.as_deref(), tag)?;
-            self.ctx.free_temp(data_val);
-            for i in 1..args.len() {
-                let copy_start = self.ctx.instructions.len();
-                let next_val = self.compile_expr(&args[i])?.ok_or_else(|| {
-                    CodegenError::internal("variant constructor arg has no value")
-                })?;
-                self.emit_variant_argument(result, i as u32, &args[i], next_val, copy_start, parent.as_deref(), tag)?;
-                self.ctx.free_temp(next_val);
-            }
+        for (index, argument) in args.iter().enumerate() {
+            self.compile_variant_argument(result, index as u32, argument, parent.as_deref(), tag)?;
         }
         Ok(Some(result))
     }
@@ -12096,54 +12126,18 @@ impl VbcCodegen {
                 }
             };
 
-            // Compile the first argument (most variants have 0 or 1 args)
-            let saved_first = if let Some(ref pts) = payload_types
-                && let Some(payload_ty) = pts.first()
-                && !payload_ty.is_empty()
-            {
-                let substituted = substitute_payload(self, payload_ty);
-                let prev = self.ctx.current_return_type_name.take();
-                self.ctx.current_return_type_name = Some(substituted);
-                Some(prev)
-            } else {
-                None
-            };
-            let copy_start = self.ctx.instructions.len();
-            let data_val = self
-                .compile_expr(&args[0])?
-                .or_internal("variant constructor arg has no value")?;
-            if let Some(prev) = saved_first {
-                self.ctx.current_return_type_name = prev;
-            }
-
-            self.emit_variant_argument(result, 0, &args[0], data_val, copy_start, context_type.as_deref(), tag)?;
-
-            self.ctx.free_temp(data_val);
-
-            // Handle additional arguments for record variants
-            for (i, arg) in args.iter().skip(1).enumerate() {
-                let saved_n = if let Some(ref pts) = payload_types
-                    && let Some(payload_ty) = pts.get(i + 1)
-                    && !payload_ty.is_empty()
-                {
-                    let substituted = substitute_payload(self, payload_ty);
-                    let prev = self.ctx.current_return_type_name.take();
-                    self.ctx.current_return_type_name = Some(substituted);
-                    Some(prev)
-                } else {
-                    None
-                };
-                let copy_start = self.ctx.instructions.len();
-                let arg_val = self.compile_expr(arg)?.ok_or_else(|| {
-                    CodegenError::internal("variant constructor arg has no value")
-                })?;
-                if let Some(prev) = saved_n {
-                    self.ctx.current_return_type_name = prev;
-                }
-
-                self.emit_variant_argument(result, (i + 1) as u32, arg, arg_val, copy_start, context_type.as_deref(), tag)?;
-
-                self.ctx.free_temp(arg_val);
+            for (index, argument) in args.iter().enumerate() {
+                let payload_type = payload_types.as_ref().and_then(|fields| fields.get(index))
+                    .filter(|name| !name.is_empty());
+                let saved = payload_type.map(|name| {
+                    let substituted = substitute_payload(self, name);
+                    self.ctx.current_return_type_name.replace(substituted)
+                });
+                let compiled = self.compile_variant_argument(
+                    result, index as u32, argument, context_type.as_deref(), tag,
+                );
+                if let Some(previous) = saved { self.ctx.current_return_type_name = previous; }
+                compiled?;
             }
         }
 
@@ -18021,12 +18015,7 @@ impl VbcCodegen {
             );
             self.retain_variant_result_declaration(result, args);
             for (i, arg) in args.iter().enumerate() {
-                let copy_start = self.ctx.instructions.len();
-                let arg_val = self.compile_expr(arg)?.ok_or_else(|| {
-                    CodegenError::internal("variant constructor arg has no value")
-                })?;
-                self.emit_variant_argument(result, i as u32, arg, arg_val, copy_start, func_info.parent_type_name.as_deref(), tag)?;
-                self.ctx.free_temp(arg_val);
+                self.compile_variant_argument(result, i as u32, arg, func_info.parent_type_name.as_deref(), tag)?;
             }
             return Ok(Some(result));
         }
@@ -25836,8 +25825,8 @@ impl VbcCodegen {
                 .as_ref()
                 .map(|(p, _)| p.clone())
                 .or_else(|| self.parent_type_from_qualified_name(&dot_name));
-            if let Some(parent) = path_parent {
-                self.emit_make_variant(result, tag, fields.len() as u32, Some(&parent));
+            if let Some(parent) = path_parent.as_deref() {
+                self.emit_make_variant(result, tag, fields.len() as u32, Some(parent));
             } else {
                 self.emit_make_variant_for_function(
                     result,
@@ -25847,6 +25836,14 @@ impl VbcCodegen {
                     Some(&dot_name),
                 );
             }
+            let selected_owner = match self.ctx.instructions.last() {
+                Some(Instruction::MakeVariantTyped { type_id, .. }) => {
+                    let id = crate::types::TypeId(*type_id);
+                    Some(expected.filter(|ty| ty.base_type_id() == Some(id))
+                        .cloned().unwrap_or(crate::types::TypeRef::Concrete(id)))
+                }
+                _ => None,
+            };
             // For variant records, disambiguation uses the variant's own payload
             // types; the per-field logic mirrors the plain-record path below.
             let variant_type_name = variant_name.clone();
@@ -25910,64 +25907,29 @@ impl VbcCodegen {
                 let saved_field_type =
                     self.push_field_type_context(&variant_type_name, &field.name.name);
 
-                let copy_start = self.ctx.instructions.len();
-                let value_reg = if let Some(ref v) = field.value {
-                    if matches!(v.kind, ExprKind::Closure { .. } | ExprKind::Paren(_))
+                let shorthand;
+                let argument = if let Some(value) = &field.value {
+                    if matches!(value.kind, ExprKind::Closure { .. } | ExprKind::Paren(_))
                         && let Some(hint) = self.field_type_name(&variant_type_name, &field.name.name)
-                        .map(verum_common::Text::from)
+                            .map(verum_common::Text::from)
                     {
-                        self.set_closure_return_hint_from_name(v, hint.as_str());
+                        self.set_closure_return_hint_from_name(value, hint.as_str());
                     }
-                    self.compile_expr(v)?
-                        .or_internal("field value has no value")?
+                    value
                 } else {
-                    self.ctx.get_var_reg(&field.name.name)?
+                    shorthand = Expr::ident(field.name.clone());
+                    &shorthand
                 };
-
-                let copy_type = match &field.value {
-                    Some(expr) => self.copy_source_type(expr, value_reg, copy_start, self.ctx.instructions.len()),
-                    None => self.declared_named_binding_type(field.name.name.as_str(), value_reg),
-                };
+                let position = declared_order.as_ref()
+                    .and_then(|order| order.iter().position(|name| name == field.name.name.as_str()))
+                    .unwrap_or(literal_idx) as u32;
+                let destination = selected_owner.as_ref().and_then(|owner|
+                    self.projected_variant_field(owner, tag, position));
+                let compiled = self.compile_variant_field(
+                    result, position, argument, path_parent.as_deref(), tag, destination.as_ref(),
+                );
                 self.pop_field_type_context(saved_field_type);
-
-                let transfer = match &field.value {
-                    Some(expr) => self.consumes_named_place(expr, value_reg),
-                    None => self.consumes_named_binding(field.name.name.as_str(), value_reg),
-                };
-                let generic = match &field.value {
-                    Some(expr) => self.generic_named_place(expr, value_reg),
-                    None => self.generic_named_binding(field.name.name.as_str(), value_reg),
-                };
-                let is_place = !transfer && generic.is_none() && match &field.value {
-                    Some(expr) => self.binds_a_copy_of_a_place(expr, value_reg, copy_type.as_ref())?,
-                    None => self.copies_from_named_place(field.name.name.as_str(), value_reg),
-                };
-                let cloned_reg = if let Some(ty) = generic {
-                    self.emit_generic_value_handoff(value_reg, ty, true)
-                } else if is_place {
-                    let name = field.value.as_ref().map_or(Some(field.name.name.as_str()), Self::named_place_binding);
-                    self.copy_place_storage(value_reg, copy_type.as_ref(), name, field.span)?
-                } else { value_reg };
-
-                let field_name_str: &str = field.name.name.as_str();
-                let positional_idx = declared_order
-                    .as_ref()
-                    .and_then(|order| order.iter().position(|n| n.as_str() == field_name_str))
-                    .map(|p| p as u32)
-                    .unwrap_or(literal_idx as u32);
-
-                let store = Instruction::SetVariantData {
-                    variant: result,
-                    field: positional_idx,
-                    value: cloned_reg,
-                };
-                if transfer { self.ctx.emit_transferring_store(store, value_reg); }
-                else { self.ctx.emit(store); }
-
-                if cloned_reg != value_reg { self.ctx.free_temp(cloned_reg); }
-                if field.value.is_some() {
-                    self.ctx.free_temp(value_reg);
-                }
+                compiled?;
             }
         } else {
             // Plain record/struct

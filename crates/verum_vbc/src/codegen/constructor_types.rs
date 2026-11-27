@@ -360,7 +360,13 @@ impl VbcCodegen {
                 eprintln!("[constructor-field] owner={owner:?} formal={field:?} actual={actual:?} bindings={bound:?}");
             }
             let actual = actual?;
-            if !self.bind_source_declaration(field, &actual, &mut bindings) {
+            // A declared payload can receive the value in a reference. With no
+            // contextual binding a generic field may instead hold the reference itself.
+            let actual = match &actual {
+                TypeRef::Reference { inner, .. } if known && inner.as_ref() == &contextual => inner.as_ref(),
+                _ => &actual,
+            };
+            if !self.bind_source_declaration(field, actual, &mut bindings) {
                 return None;
             }
         }

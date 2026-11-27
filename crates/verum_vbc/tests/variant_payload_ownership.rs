@@ -38,6 +38,74 @@ fn run(source: &str) {
 }
 
 #[test]
+fn a_borrowed_field_supplies_the_value_declared_by_the_new_variant() {
+    run(r#"
+        type Number is Absent | Value(Int);
+        fn rebuild(input: &Number) -> Number {
+            match input { Number.Value(n) => Number.Value(n), Number.Absent => Number.Absent }
+        }
+        fn probe() -> Int {
+            let mut original = Number.Value(73);
+            let copy = rebuild(&original);
+            match &mut original { Number.Value(ref mut n) => *n = 19, Number.Absent => {} }
+            match copy { Number.Value(n) => n, Number.Absent => 0 }
+        }
+    "#);
+}
+
+#[test]
+fn generic_and_named_payloads_select_their_declared_value_slots() {
+    run(r#"
+        type Sample<T> is Absent | Value(T);
+        type Row is Empty | Named { value: Int };
+        fn copy_sample<T>(input: &Sample<T>) -> Sample<T> {
+            match input { Sample.Value(n) => Sample.Value(n), Sample.Absent => Sample.Absent }
+        }
+        fn copy_row(input: &Row) -> Row {
+            match input { Row.Named { value } => Row.Named { value }, Row.Empty => Row.Empty }
+        }
+        fn probe() -> Int {
+            let mut original = Sample.Value(30);
+            let a = copy_sample<Int>(&original);
+            match &mut original { Sample.Value(ref mut n) => *n = 0, Sample.Absent => {} }
+            let mut row = Row.Named { value: 43 };
+            let b = copy_row(&row);
+            match &mut row { Row.Named {value: ref mut n} => *n = 0, Row.Empty => {} }
+            let x = match a { Sample.Value(n) => n, Sample.Absent => 0 };
+            x + match b { Row.Named {value} => value, Row.Empty => 0 }
+        }
+    "#);
+}
+
+#[test]
+fn a_reference_variant_field_keeps_the_selected_referent() {
+    run(r#"
+        type Incoming is Empty | Value(Int);
+        type Observation is Empty | Loan(&Int);
+        fn select(input: &Incoming) -> Observation {
+            match input { Incoming.Value(n) => Observation.Loan(n), Incoming.Empty => Observation.Empty }
+        }
+        fn probe() -> Int {
+            let original = Incoming.Value(73);
+            match select(&original) { Observation.Loan(reference) => *reference, Observation.Empty => 0 }
+        }
+    "#);
+}
+
+#[test]
+fn a_concrete_affine_field_cannot_receive_its_borrowed_owner() {
+    let source = r#"
+        type affine Ticket is { number: Int };
+        type Boxed is Empty | Item(Ticket);
+        fn duplicate(input: &Ticket) -> Boxed { Boxed.Item(input) }
+    "#;
+    for unit in [false, true] {
+        let error = compile(source, unit).expect_err("copying an exclusive owner");
+        assert!(error.to_string().contains("exclusive borrowed owner"), "{error}");
+    }
+}
+
+#[test]
 fn named_payload_copies_the_place_before_later_mutation() {
     run(r#"
         type Cell is { value: Int };
