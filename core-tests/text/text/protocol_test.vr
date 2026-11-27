@@ -726,6 +726,18 @@ fn truncate_shortens_buffer() {
 }
 
 @test
+fn shrinking_text_preserves_complete_utf8_scalars() {
+    let mut text: Text = "a¢€🙂";
+    text.truncate(9);
+    assert_eq(text, "a¢€");
+    assert_eq(text.pop(), Maybe.Some('€'));
+    assert_eq(text.pop(), Maybe.Some('¢'));
+    assert_eq(text.pop(), Maybe.Some('a'));
+    assert_eq(text.pop(), Maybe.None);
+    assert_eq("a🙂  ".trim_end(), "a🙂");
+}
+
+@test
 fn truncate_no_op_when_larger_than_len() {
     let mut t: Text = "ab";
     t.truncate(99);

@@ -1225,11 +1225,7 @@ implement Text {
         // Walk backwards through bytes, finding last non-whitespace character
         let mut i = bytes.len();
         while i > 0 {
-            // Find the start of the previous character
-            i = i - 1;
-            while i > 0 && !is_utf8_char_boundary(bytes[i]) {
-                i = i - 1;
-            }
+            i = utf8_scalar_start(bytes, i - 1);
             // Now i is at a character boundary - decode the character
             match self.char_at(i) {
                 Maybe.Some(ch) => {
@@ -2744,12 +2740,7 @@ implement Text {
         if new_len >= self.len {
             return;
         }
-        // Find the nearest character boundary at or before new_len
-        let mut boundary = new_len;
-        let bytes = self.as_bytes();
-        while boundary > 0 && !is_utf8_char_boundary(bytes[boundary]) {
-            boundary = boundary - 1;
-        }
+        let boundary = utf8_scalar_start(self.as_bytes(), new_len);
         if self.cap == 0 {
             // Frozen bytes can be shared by other values or the module pool.
             // Reuse the owned slicing path before changing bytes or metadata.
@@ -2775,12 +2766,7 @@ implement Text {
         if self.is_empty() {
             return Maybe.None;
         }
-        let bytes = self.as_bytes();
-        // Find the start of the last character by walking backwards
-        let mut last_start = bytes.len() - 1;
-        while last_start > 0 && !is_utf8_char_boundary(bytes[last_start]) {
-            last_start = last_start - 1;
-        }
+        let last_start = utf8_scalar_start(self.as_bytes(), self.len() - 1);
         let ch = self.char_at(last_start);
         self.truncate(last_start);
         ch
@@ -4270,4 +4256,12 @@ implement Eq for Utf16Error {}
 fn is_utf8_char_boundary(byte: Byte) -> Bool {
     // UTF-8 continuation bytes are 10xxxxxx
     (byte as Int) & 0xC0 != 0x80
+}
+
+/// First byte of the scalar containing `index`, an existing byte of valid UTF-8.
+fn utf8_scalar_start(bytes: &[Byte], mut index: Int) -> Int {
+    while index > 0 && !is_utf8_char_boundary(bytes[index]) {
+        index = index - 1;
+    }
+    index
 }
