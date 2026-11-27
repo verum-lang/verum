@@ -769,6 +769,26 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                     use_input(*obj, 1, &state);
                     write = Some((*dst, R::Unknown));
                 }
+                I::GetE { dst, arr, idx } => {
+                    // The selected indexed access reads only the container and index.
+                    // Its element may itself be a reference with an unknown carrier.
+                    use_input(*arr, 8, &state);
+                    use_input(*idx, 8, &state);
+                    write = Some((*dst, R::Unknown));
+                }
+                I::Ref { dst, src } | I::RefMut { dst, src } => {
+                    // These legacy producers do not specify the result convention.
+                    // Only the borrowed register can acquire that uncertainty.
+                    use_input(*src, 8, &state);
+                    write = Some((*dst, R::Unknown));
+                }
+                I::CmpG { dst, a, b, .. } => {
+                    use_input(*a, 8, &state);
+                    use_input(*b, 8, &state);
+                    may_write = true;
+                    state.invalidate_storage();
+                    write = Some((*dst, R::Value));
+                }
                 I::Deref { dst, ref_reg } => {
                     let identity = sites.get(&pc).is_some_and(|sites| {
                         sites.contains(&ReferenceSiteKind::ValueInput(ref_reg.0))

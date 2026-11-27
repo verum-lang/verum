@@ -576,3 +576,31 @@ fn a_value_slot_borrow_preserves_the_address_for_scalar_dereference() {
     let (value, _) = execute(source, &scalar as *const i64 as i64, 0, false);
     assert_eq!(value, 37);
 }
+
+#[cfg(target_os = "macos")]
+#[path = "support/source_image.rs"]
+mod source_image;
+
+#[cfg(target_os = "macos")]
+#[test]
+fn indexing_and_comparing_fields_preserve_the_containing_records_argument_convention() {
+    source_image::run(r#"
+        type Holder<T> is { address: &unsafe mut T };
+        implement<T> Holder<T> {
+            fn borrow(&self) -> &T { unsafe { &*self.address } }
+        }
+        type Entry is Message(Text) | Empty;
+        type Document is { entries: List<(Int, Entry)> };
+        fn inspect_document(record: &Document) -> Int {
+            match &record.entries[0].1 {
+                Entry.Message(value) => if record.entries[0].0 == 8 && *value == "ok" { 73 } else { 0 },
+                _ => 0,
+            }
+        }
+        fn main() -> Int {
+            let mut record = Document { entries: [(8, Entry.Message("ok"))] };
+            let holder: Holder<Document> = Holder { address: &mut record as &unsafe mut Document };
+            inspect_document(holder.borrow())
+        }
+    "#);
+}
