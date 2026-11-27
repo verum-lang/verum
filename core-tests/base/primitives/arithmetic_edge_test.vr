@@ -159,3 +159,13 @@ fn test_float_inf_arithmetic() {
 }
 
 fn main() {}
+
+
+@test
+fn signed_magnitude_includes_the_full_unsigned_half_range() {
+    assert_eq(Int.MIN.unsigned_abs(), 9223372036854775808_u64);
+    assert_eq(Int.MAX.unsigned_abs(), 9223372036854775807_u64);
+    assert_eq((-1).unsigned_abs(), 1_u64);
+    assert_eq(0.unsigned_abs(), 0_u64);
+    assert_eq(1.unsigned_abs(), 1_u64);
+}

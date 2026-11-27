@@ -783,11 +783,7 @@ public fn int_to_text_radix(n: Int, radix: Int) -> Text {
 
     let digits = "0123456789abcdefghijklmnopqrstuvwxyz";
     let negative = n < 0;
-    let mut mag: UInt64 = if negative {
-        (((!n) as UInt64) + 1_u64)
-    } else {
-        n as UInt64
-    };
+    let mut mag = n.unsigned_abs();
     let radix_u: UInt64 = radix as UInt64;
 
     // Worst case: radix 2 over 64-bit unsigned ⇒ 64 digits.

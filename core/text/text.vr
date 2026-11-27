@@ -39,6 +39,7 @@ module core.text.text;
 // rationale on the explicit mount.
 mount core.base.memory.{try_alloc, try_realloc};
 mount core.base.iterator.{FromIterator, Extend};
+mount core.base.protocols.int_to_string;
 mount core.collections.slice.*;
 mount core.text.char.*;
 mount core.mem.allocator.AllocError;
@@ -2078,47 +2079,21 @@ implement Text {
     // Conversion
     // =========================================================================
 
-    /// Convert Int to Text (pure Verum, no C runtime).
-    ///
-
-    /// Int.MIN-safe: the historical `0 - n` for the negative branch
-    /// wrapped back to Int.MIN for `n == Int.MIN`, leaving `val < 0`,
-    /// the `while val > 0` digit loop never entered, and the result
-    /// rendered as "-" with no magnitude. Accumulate magnitude in
-    /// UInt64 so every Int including Int.MIN round-trips exactly.
+    /// Format a signed integer in decimal.
     public fn from_int(n: Int) -> Text {
-        if n == 0 {
-            return "0";
-        }
-        let negative = n < 0;
-        let mut mag: UInt64 = if negative {
-            (((!n) as UInt64) + 1_u64)
-        } else {
-            n as UInt64
-        };
+        int_to_text(n)
+    }
 
-        // Push digits in reverse order (least significant first)
-        let mut buf = Text.new();
-        while mag > 0_u64 {
-            let digit = (mag % 10_u64) as Byte;
-            buf.push_byte(digit + 48);  // '0' = 48
-            mag = mag / 10_u64;
+    /// Append the signed decimal representation to this buffer.
+    public fn push_int(&mut self, n: Int) {
+        let mut digits: [Byte; 20] = [0; 20];
+        let count = int_to_string(n, &mut digits[..]);
+        self.reserve(count);
+        let mut pos = 0;
+        while pos < count {
+            self.push_byte(digits[pos]);
+            pos = pos + 1;
         }
-        if negative {
-            buf.push_byte(45);  // '-' = 45
-        }
-
-        // Reverse to get correct order
-        let bytes = buf.as_bytes();
-        let blen = bytes.len();
-        let mut result = Text.with_capacity(blen);
-        let mut i = blen - 1;
-        while i >= 0 {
-            result.push_byte(bytes[i]);
-            if i == 0 { break; }
-            i = i - 1;
-        }
-        result
     }
 
     /// Convert Float to Text (pure Verum, no C runtime dependency).

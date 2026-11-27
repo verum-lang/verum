@@ -199,6 +199,12 @@ implement Int {
         abs_signed(self)
     }
 
+    /// Absolute magnitude, including 2^63 for Int.MIN.
+    @inline(always)
+    public fn unsigned_abs(self) -> UInt64 {
+        if self < 0 { ((~self) as UInt64) + 1_u64 } else { self as UInt64 }
+    }
+
     /// Signum: -1, 0, or 1.
     @inline(always)
     public fn signum(self) -> Int {
@@ -755,14 +761,7 @@ fn format_radix_signed(n: Int, radix: Int) -> Text {
 
     let hex_chars = "0123456789abcdefghijklmnopqrstuvwxyz";
 
-    let mut mag: UInt64 = if n < 0 {
-        // Two's-complement magnitude: exact for every Int (including
-        // Int.MIN whose magnitude `2^63` is unrepresentable as a
-        // positive Int but fits cleanly in UInt64).
-        (((!n) as UInt64) + 1_u64)
-    } else {
-        n as UInt64
-    };
+    let mut mag = n.unsigned_abs();
     let radix_u: UInt64 = radix as UInt64;
 
     // Collect digits low-to-high in a List<Char>, then iterate

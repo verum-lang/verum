@@ -108,17 +108,8 @@ fn write_int_stderr(n: Int) {
         return;
     }
 
-    let mut mag: UInt64 = if n < 0 {
-        write_stderr("-");
-        // Cast through bit-pattern: for negative `n`, the two's-
-        // complement magnitude is `(~n as UInt64) + 1`. This
-        // representation is exact for every Int including Int.MIN
-        // (whose magnitude 2^63 doesn't fit in Int but does in
-        // UInt64).
-        (((!n) as UInt64) + 1_u64)
-    } else {
-        n as UInt64
-    };
+    if n < 0 { write_stderr("-"); }
+    let mut mag = n.unsigned_abs();
 
     // Convert to digits (max 20 digits for 64-bit unsigned).
     let mut buf: [Byte; 20] = [0; 20];

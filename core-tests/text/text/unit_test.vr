@@ -1224,6 +1224,17 @@ fn test_from_int_negative() { assert_eq(Text.from_int(-7), "-7"); }
 fn test_from_int_zero() { assert_eq(Text.from_int(0), "0"); }
 
 @test
+fn signed_decimal_format_preserves_the_prefix_and_both_extrema() {
+    let mut output = Text.from("λ=");
+    output.push_int(Int.MIN);
+    output.push_byte(44);
+    output.push_int(Int.MAX);
+    assert_eq(output, "λ=-9223372036854775808,9223372036854775807");
+    assert_eq(Text.from_int(Int.MIN), "-9223372036854775808");
+    assert_eq(Text.from_int(Int.MAX), "9223372036854775807");
+}
+
+@test
 fn test_from_bool_true() { assert_eq(Text.from_bool(true), "true"); }
 
 @test
