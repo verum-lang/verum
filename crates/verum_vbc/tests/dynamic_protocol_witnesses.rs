@@ -261,20 +261,17 @@ fn source_defaults_and_explicit_self_share_the_existential_subject() {
         fn implicit(value:&dyn Policy)->Int {73}
         fn explicit(value:&dyn Policy<Self>)->Int {73}",
     );
-    let declared = |name| {
-        module
-            .functions
-            .iter()
-            .find(|function| module.get_string(function.name) == Some(name))
-            .unwrap()
-            .semantic_parameter_types()
-            .unwrap()[0]
-            .clone()
-            .unwrap()
-    };
-    assert_eq!(declared("implicit"), declared("explicit"));
-    assert!(!declared("implicit").is_generic());
-    validate_module(&module).unwrap();
+    let decoded = deserialize_module(&serialize_module(&module).unwrap()).unwrap();
+    for module in [&module, &decoded] {
+        let declared = |name| {
+            module.functions.iter()
+                .find(|function| module.get_string(function.name) == Some(name))
+                .unwrap().semantic_parameter_types().unwrap()[0].clone().unwrap()
+        };
+        assert_eq!(declared("implicit"), declared("explicit"));
+        assert!(!declared("implicit").is_generic());
+        validate_module(module).unwrap();
+    }
 }
 
 #[test]

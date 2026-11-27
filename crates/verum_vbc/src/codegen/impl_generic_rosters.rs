@@ -162,9 +162,17 @@ impl VbcCodegen {
         }
         let mut nested_defaults = active_defaults.to_vec();
         nested_defaults.push(nominal);
-        let owner = identity.as_ref()
-            .and_then(|name| name.rsplit_once('.').map(|(owner, _)| owner.to_owned()))
-            .ok_or_else(|| invalid("nominal defaults lack their declaration owner".into()))?;
+        // A claimed source identity without a parent is a declaration at the
+        // anonymous root. An imported descriptor must supply its own origin.
+        let owner: verum_common::Text = if let Some(header) = self.source_generic_rosters.get(&nominal) {
+            header.identity.rsplit_once('.').map_or("", |(scope, _)| scope).into()
+        } else {
+            let descriptor = self.type_by_id(nominal)
+                .ok_or_else(|| invalid("nominal defaults lack their declaration owner".into()))?;
+            crate::module::nominal_declaration_scope(descriptor, &self.config.module_name,
+                |id| self.ctx.strings.get(id.0 as usize).map(String::as_str))
+                .map_err(|message| invalid(message.to_string()))?
+        };
         let mut substitution = super::source_substitution::SourceTypeSubstitution::default();
         for (index, parameter) in roster.iter().enumerate() {
             if index == arguments.len() {
