@@ -161,7 +161,7 @@ implement PgStmtCache {
             if self.entries[i].fingerprint == fingerprint {
                 self.entries[i].last_seen = self.clock;
                 self.total_hits = self.total_hits + 1;
-                return Maybe.Some(clone_stmt(&self.entries[i].stmt));
+                return Maybe.Some(self.entries[i].stmt.clone());
             }
             i = i + 1;
         }
@@ -223,7 +223,7 @@ implement PgStmtCache {
         let mut out: List<PgPreparedStatement> = List.new();
         let mut i: Int = 0;
         while i < self.entries.len() as Int {
-            out.push(clone_stmt(&self.entries[i].stmt));
+            out.push(self.entries[i].stmt.clone());
             i = i + 1;
         }
         self.entries = List.new();
@@ -268,14 +268,14 @@ implement PgStmtCache {
         if idx < 0 || idx >= n {
             return Maybe.None;
         }
-        let evicted = clone_stmt(&self.entries[idx].stmt);
+        let evicted = self.entries[idx].stmt.clone();
         let mut new_entries: List<PgCacheEntry> = List.with_capacity(n - 1);
         let mut k: Int = 0;
         while k < n {
             if k != idx {
                 new_entries.push(PgCacheEntry {
                     fingerprint: self.entries[k].fingerprint,
-                    stmt: clone_stmt(&self.entries[k].stmt),
+                    stmt: self.entries[k].stmt.clone(),
                     last_seen: self.entries[k].last_seen,
                 });
             }
@@ -283,19 +283,6 @@ implement PgStmtCache {
         }
         self.entries = new_entries;
         Maybe.Some(evicted)
-    }
-}
-
-// =============================================================================
-// Helpers — PgPreparedStatement clone
-// =============================================================================
-
-fn clone_stmt(s: &PgPreparedStatement) -> PgPreparedStatement {
-    PgPreparedStatement {
-        name: s.name.clone(),
-        sql: s.sql.clone(),
-        param_oids: s.param_oids.clone(),
-        row_description: s.row_description.clone(),
     }
 }
 

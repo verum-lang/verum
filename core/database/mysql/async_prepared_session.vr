@@ -95,13 +95,13 @@ implement AsyncMysqlPreparedSession {
     ) -> Result<AsyncMysqlPreparedStatement, DbError> {
         let fp = compute_fingerprint(sql);
         match self.cache.lookup(fp) {
-            Maybe.Some(stmt) => Result.Ok(AsyncMysqlPreparedStatement { inner: stmt }),
+            Maybe.Some(stmt) => Result.Ok(AsyncMysqlPreparedStatement.from_statement(stmt)),
             Maybe.None => {
                 let astmt = conn.prepare(sql).await?;
-                let evicted = self.cache.insert(fp, clone_stmt(astmt.inner()));
+                let evicted = self.cache.insert(fp, astmt.inner().clone());
                 match evicted {
                     Maybe.Some(old) => {
-                        let evicted_handle = AsyncMysqlPreparedStatement { inner: old };
+                        let evicted_handle = AsyncMysqlPreparedStatement.from_statement(old);
                         let _ = conn.close_prepared(evicted_handle).await;
                     }
                     Maybe.None => {}
@@ -157,27 +157,12 @@ implement AsyncMysqlPreparedSession {
         let mut closed: Int = 0;
         let mut i: Int = 0;
         while i < (drained.len() as Int) {
-            let h = AsyncMysqlPreparedStatement { inner: drained[i].clone() };
+            let h = AsyncMysqlPreparedStatement.from_statement(drained[i].clone());
             let _ = conn.close_prepared(h).await;
             closed = closed + 1;
             i = i + 1;
         }
         closed
-    }
-}
-
-// =============================================================================
-// Helpers
-// =============================================================================
-
-fn clone_stmt(s: &MysqlPreparedStatement) -> MysqlPreparedStatement {
-    MysqlPreparedStatement {
-        statement_id: s.statement_id,
-        num_params: s.num_params,
-        num_columns: s.num_columns,
-        param_types: s.param_types.clone(),
-        column_types: s.column_types.clone(),
-        sql: s.sql.clone(),
     }
 }
 

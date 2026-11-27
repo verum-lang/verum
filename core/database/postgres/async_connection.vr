@@ -220,6 +220,10 @@ public type AsyncPgPreparedStatement is {
 };
 
 implement AsyncPgPreparedStatement {
+    public(in core.database.postgres) fn from_statement(stmt: PgPreparedStatement) -> AsyncPgPreparedStatement {
+        AsyncPgPreparedStatement { inner: stmt }
+    }
+
     public fn inner(&self) -> &PgPreparedStatement { &self.inner }
     public fn name(&self) -> &Text { self.inner.name() }
     public fn sql(&self) -> &Text { self.inner.sql() }
@@ -395,9 +399,7 @@ implement AsyncPgConnection {
             Result.Err(_) => { return Result.Err(actor_dropped("prepare")); }
         }
         match rr.await {
-            Result.Ok(Result.Ok(stmt)) => Result.Ok(AsyncPgPreparedStatement {
-                inner: stmt,
-            }),
+            Result.Ok(Result.Ok(stmt)) => Result.Ok(AsyncPgPreparedStatement.from_statement(stmt)),
             Result.Ok(Result.Err(e))   => Result.Err(e),
             Result.Err(_)       => Result.Err(actor_dropped("prepare reply")),
         }

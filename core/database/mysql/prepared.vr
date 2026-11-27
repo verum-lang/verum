@@ -139,7 +139,7 @@ implement PreparedSession {
             Maybe.Some(stmt) => Result.Ok(stmt),
             Maybe.None => {
                 let stmt = conn.prepare(sql)?;
-                let evicted = self.cache.insert(fp, clone_stmt(&stmt));
+                let evicted = self.cache.insert(fp, stmt.clone());
                 match evicted {
                     Maybe.Some(victim) => {
                         // Best-effort close — failure is logged via
@@ -321,21 +321,6 @@ fn text_contains_errno(t: &Text, code: Int) -> Bool {
 /// errors that MUST NOT trigger silent retry.
 fn sql_state_is_42000(s: &core.database.common.error.SqlState) -> Bool {
     *s.code() == "42000"
-}
-
-// -----------------------------------------------------------------------------
-// Helpers — clone MysqlPreparedStatement
-// -----------------------------------------------------------------------------
-
-fn clone_stmt(s: &MysqlPreparedStatement) -> MysqlPreparedStatement {
-    MysqlPreparedStatement {
-        statement_id: s.statement_id,
-        num_params: s.num_params,
-        num_columns: s.num_columns,
-        param_types: s.param_types.clone(),
-        column_types: s.column_types.clone(),
-        sql: s.sql.clone(),
-    }
 }
 
 // -----------------------------------------------------------------------------

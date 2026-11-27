@@ -40,8 +40,10 @@
 )
 module core.database.mysql.connection;
 
-mount base.{Result, Ok, Err, Text, Maybe, None, Some};
-mount collections.List;
+mount core.base.result.{Result, Ok, Err};
+mount core.base.maybe.{Maybe, None, Some};
+mount core.text.text.Text;
+mount core.collections.list.List;
 mount core.net.tcp.TcpStream;
 mount core.database.common.error.{DbError, AdapterId, AdapterSpecific};
 mount core.database.mysql.config.{
@@ -141,6 +143,19 @@ public type MysqlPreparedStatement is {
     /// Original SQL — stored for tracing / EXPLAIN replay.
     sql: Text,
 };
+
+implement Clone for MysqlPreparedStatement {
+    public fn clone(&self) -> MysqlPreparedStatement {
+        MysqlPreparedStatement {
+            statement_id: self.statement_id,
+            num_params: self.num_params,
+            num_columns: self.num_columns,
+            param_types: self.param_types.clone(),
+            column_types: self.column_types.clone(),
+            sql: self.sql.clone(),
+        }
+    }
+}
 
 /// Result of executing a prepared statement. For non-SELECT shapes
 /// `rows` is empty and `affected_rows` / `last_insert_id` are

@@ -369,7 +369,7 @@ implement AsyncMysqlConnection {
             Result.Err(_) => { return Result.Err(actor_dropped("prepare")); }
         }
         match rr.await {
-            Result.Ok(Result.Ok(stmt)) => Result.Ok(AsyncMysqlPreparedStatement { inner: stmt }),
+            Result.Ok(Result.Ok(stmt)) => Result.Ok(AsyncMysqlPreparedStatement.from_statement(stmt)),
             Result.Ok(Result.Err(e))   => Result.Err(e),
             Result.Err(_)       => Result.Err(actor_dropped("prepare reply")),
         }
@@ -429,6 +429,10 @@ public type AsyncMysqlPreparedStatement is {
 };
 
 implement AsyncMysqlPreparedStatement {
+    public(in core.database.mysql) fn from_statement(stmt: MysqlPreparedStatement) -> AsyncMysqlPreparedStatement {
+        AsyncMysqlPreparedStatement { inner: stmt }
+    }
+
     public fn inner(&self) -> &MysqlPreparedStatement { &self.inner }
     public fn statement_id(&self) -> Int { self.inner.statement_id }
     public fn num_params(&self) -> Int { self.inner.num_params }

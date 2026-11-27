@@ -104,7 +104,7 @@ implement PgPreparedSession {
             Maybe.Some(stmt) => Result.Ok(stmt),
             Maybe.None => {
                 let stmt = conn.prepare(sql)?;
-                let evicted = self.cache.insert(fp, clone_stmt(&stmt));
+                let evicted = self.cache.insert(fp, stmt.clone());
                 match evicted {
                     Maybe.Some(old) => { let _ = conn.close_prepared(&old); }
                     Maybe.None      => {}
@@ -240,13 +240,13 @@ implement AsyncPgPreparedSession {
     ) -> Result<AsyncPgPreparedStatement, DbError> {
         let fp = compute_fingerprint(sql);
         match self.cache.lookup(fp) {
-            Maybe.Some(stmt) => Result.Ok(AsyncPgPreparedStatement { inner: stmt }),
+            Maybe.Some(stmt) => Result.Ok(AsyncPgPreparedStatement.from_statement(stmt)),
             Maybe.None => {
                 let astmt = conn.prepare(sql).await?;
-                let evicted = self.cache.insert(fp, clone_stmt(astmt.inner()));
+                let evicted = self.cache.insert(fp, astmt.inner().clone());
                 match evicted {
                     Maybe.Some(old) => {
-                        let evicted_handle = AsyncPgPreparedStatement { inner: old };
+                        let evicted_handle = AsyncPgPreparedStatement.from_statement(old);
                         let _ = conn.close_prepared(evicted_handle).await;
                     }
                     Maybe.None => {}
@@ -292,25 +292,12 @@ implement AsyncPgPreparedSession {
         let mut closed: Int = 0;
         let mut i: Int = 0;
         while i < (drained.len() as Int) {
-            let h = AsyncPgPreparedStatement { inner: drained[i].clone() };
+            let h = AsyncPgPreparedStatement.from_statement(drained[i].clone());
             let _ = conn.close_prepared(h).await;
             closed = closed + 1;
             i = i + 1;
         }
         closed
-    }
-}
-
-// =============================================================================
-// Helpers
-// =============================================================================
-
-fn clone_stmt(s: &PgPreparedStatement) -> PgPreparedStatement {
-    PgPreparedStatement {
-        name: s.name.clone(),
-        sql: s.sql.clone(),
-        param_oids: s.param_oids.clone(),
-        row_description: s.row_description.clone(),
     }
 }
 

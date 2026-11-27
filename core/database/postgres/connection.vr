@@ -39,9 +39,11 @@
 )
 module core.database.postgres.connection;
 
-mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount core.base.result.{Result, Ok, Err};
+mount core.base.maybe.{Maybe, None, Some};
+mount core.text.text.Text;
 mount base.memory.{Shared, replace};
-mount collections.List;
+mount core.collections.list.List;
 mount core.net.tcp.TcpStream;
 mount core.net.addr.{SocketAddr};
 mount core.net.resolve.{ToSocketAddrs};
@@ -2019,6 +2021,17 @@ public type PgPreparedStatement is {
     param_oids: List<Int>,
     row_description: Maybe<RowDescription>,
 };
+
+implement Clone for PgPreparedStatement {
+    public fn clone(&self) -> PgPreparedStatement {
+        PgPreparedStatement {
+            name: self.name.clone(),
+            sql: self.sql.clone(),
+            param_oids: self.param_oids.clone(),
+            row_description: self.row_description.clone(),
+        }
+    }
+}
 
 implement PgPreparedStatement {
     public fn name(&self) -> &Text { &self.name }
