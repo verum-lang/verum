@@ -1,0 +1,64 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L2
+// @tags: sqlite, builtins, integers, datetime
+// @expected-exit: 0
+
+mount core.collections.list.List;
+mount core.database.sqlite.native.l4_vdbe.register.Register;
+mount core.database.sqlite.native.builtins.datetime_fns.{clock_unix_epoch, date_fn, strftime, timediff, unixepoch};
+mount core.database.sqlite.native.builtins.string_fns.{concat, length, sql_quote};
+
+fn require_text(value: Register, expected: &Text) {
+    match value {
+        Register.RText(s) => assert_eq(s, *expected),
+        _ => panic("expected SQL text"),
+    }
+}
+
+fn require_integer(value: Register, expected: Int64) {
+    match value {
+        Register.RInt(n) => assert_eq(n, expected),
+        _ => panic("expected SQL integer"),
+    }
+}
+
+fn test_integer_strings() {
+    let lo = Register.RInt(Int.MIN as Int64);
+    require_text(sql_quote(&lo), "-9223372036854775808");
+    require_integer(length(&lo), 20_i64);
+    let mut args: List<Register> = List.new();
+    args.push(Register.RText("row=".clone()));
+    args.push(Register.RRowId(-12_i64));
+    args.push(lo);
+    require_text(concat(&args), "row=-12-9223372036854775808");
+}
+
+fn test_negative_year() {
+    let clock = clock_unix_epoch();
+    let mut args: List<Register> = List.new();
+    args.push(Register.RText("%Y|%s".clone()));
+    args.push(Register.RText("-0001-01-01".clone()));
+    require_text(strftime(&args, &clock), "-001|-62198755200");
+    let mut date_args: List<Register> = List.new();
+    date_args.push(Register.RText("-0001-01-01".clone()));
+    require_text(date_fn(&date_args, &clock), "-0001-01-01");
+}
+
+fn test_epoch_boundary() {
+    let clock = clock_unix_epoch();
+    let mut args: List<Register> = List.new();
+    args.push(Register.RText("1969-12-31 23:59:59.750".clone()));
+    require_integer(unixepoch(&args, &clock), -1_i64);
+    let mut fmt: List<Register> = List.new();
+    fmt.push(Register.RText("%s".clone()));
+    fmt.push(Register.RText("1969-12-31 23:59:59".clone()));
+    require_text(strftime(&fmt, &clock), "-1");
+    require_text(timediff(&Register.RText("1969-12-31".clone()), &Register.RText("1970-01-01".clone()), &clock), "-24:00:00");
+}
+
+fn main() {
+    test_integer_strings();
+    test_negative_year();
+    test_epoch_boundary();
+}

@@ -41,6 +41,7 @@ module core.database.sqlite.native.builtins.datetime_fns;
 
 mount base.{Text, Maybe};
 mount collections.List;
+mount core.base.protocols.int_to_string;
 mount core.database.sqlite.native.l4_vdbe.register.{Register, RNull, RInt, RReal, RText, RBlob, RRowId};
 
 // -----------------------------------------------------------------------------
@@ -135,26 +136,27 @@ fn parse_uint(bs: &[Byte], start: Int, len: Int) -> Maybe<Int> {
 public fn parse_iso(s: &Text) -> Maybe<Calendar> {
     let bs = s.as_bytes();
     if bs.len() < 10 { return Maybe.None; }
-    let y = parse_uint(bs, 0, 4);
-    let m = parse_uint(bs, 5, 2);
-    let d = parse_uint(bs, 8, 2);
+    let year_offset = if bs[0] == ('-' as Byte) { 1 } else { 0 };
+    let y = parse_uint(bs, year_offset, 4);
+    let m = parse_uint(bs, year_offset + 5, 2);
+    let d = parse_uint(bs, year_offset + 8, 2);
     let mut hh: Int = 0;
     let mut mm: Int = 0;
     let mut ss: Int = 0;
     let mut ms: Int = 0;
-    if bs.len() >= 16 {
-        match parse_uint(bs, 11, 2) { Maybe.Some(v) => { hh = v; }, Maybe.None => {} }
-        match parse_uint(bs, 14, 2) { Maybe.Some(v) => { mm = v; }, Maybe.None => {} }
+    if bs.len() >= year_offset + 16 {
+        match parse_uint(bs, year_offset + 11, 2) { Maybe.Some(v) => { hh = v; }, Maybe.None => {} }
+        match parse_uint(bs, year_offset + 14, 2) { Maybe.Some(v) => { mm = v; }, Maybe.None => {} }
     }
-    if bs.len() >= 19 {
-        match parse_uint(bs, 17, 2) { Maybe.Some(v) => { ss = v; }, Maybe.None => {} }
+    if bs.len() >= year_offset + 19 {
+        match parse_uint(bs, year_offset + 17, 2) { Maybe.Some(v) => { ss = v; }, Maybe.None => {} }
     }
-    if bs.len() >= 23 {
-        match parse_uint(bs, 20, 3) { Maybe.Some(v) => { ms = v; }, Maybe.None => {} }
+    if bs.len() >= year_offset + 23 {
+        match parse_uint(bs, year_offset + 20, 3) { Maybe.Some(v) => { ms = v; }, Maybe.None => {} }
     }
     match y { Maybe.Some(yv) => match m { Maybe.Some(mv) => match d { Maybe.Some(dv) => {
         return Maybe.Some(Calendar {
-            year: yv, month: mv, day: dv,
+            year: if year_offset == 1 { -yv } else { yv }, month: mv, day: dv,
             hour: hh, minute: mm, second: ss, millis: ms,
         });
     }, Maybe.None => {} }, Maybe.None => {} }, Maybe.None => {} }
@@ -187,9 +189,16 @@ public fn julianday(args: &List<Register>, clock: &DateTimeClock) -> Register {
     }
 }
 
+// SQLite dates use integral Julian milliseconds. Round before discarding the
+// fractional second so the last second before 1970 remains negative.
+fn unix_seconds(jd: Float64) -> Int64 {
+    let millis = (jd * 86400000.0 + 0.5) as Int64;
+    millis / 1000_i64 - 210866760000_i64
+}
+
 public fn unixepoch(args: &List<Register>, clock: &DateTimeClock) -> Register {
     match resolve_julian(args, clock) {
-        Maybe.Some(j) => RInt(((j - 2440587.5) * 86400.0) as Int64),
+        Maybe.Some(j) => RInt(unix_seconds(j)),
         Maybe.None    => RNull,
     }
 }
@@ -242,13 +251,12 @@ public fn timediff(a: &Register, b: &Register, clock: &DateTimeClock) -> Registe
         match resolve_julian(&sb, clock) { Maybe.Some(jb) => {
             let diff_days: Float64 = ja - jb;
             let total_secs: Int64 = (diff_days * 86400.0) as Int64;
-            // Format as ±HH:MM:SS.SSS — minimal version.
-            let mut neg: Bool = false;
-            let mut s = total_secs;
-            if s < 0_i64 { neg = true; s = -s; }
-            let hours = (s / 3600_i64) as Int;
-            let mins = (((s % 3600_i64) / 60_i64)) as Int;
-            let secs = ((s % 60_i64)) as Int;
+            // Format as the supported ±HH:MM:SS duration.
+            let neg = total_secs < 0_i64;
+            let magnitude = (total_secs as Int).unsigned_abs();
+            let hours = (magnitude / 3600_u64) as Int;
+            let mins = ((magnitude % 3600_u64) / 60_u64) as Int;
+            let secs = (magnitude % 60_u64) as Int;
             let mut out = Text.new();
             if neg { out.push_byte(45 as Byte); } else { out.push_byte(43 as Byte); }
             push_pad(&mut out, hours, 2);
@@ -390,32 +398,17 @@ fn apply_modifier(jd: Float64, m: &Text) -> Maybe<Float64> {
 // -----------------------------------------------------------------------------
 
 fn push_pad(out: &mut Text, n: Int, width: Int) {
-    let mut digits: List<Byte> = List.new();
-    // Two's-complement magnitude via UInt64 — `-Int.MIN` would
-    // overflow back to Int.MIN with the naïve negate; while
-    // calendar fields (year/month/day) realistically never hit
-    // Int.MIN, the helper is generic enough that defensive
-    // handling is cheap insurance against future callers.
-    // Same family as panic.vr / Formatter.write_int /
-    // sqlite/string_fns.int_to_text fixes.
-    let mut mag: UInt64 = if n < 0 {
-        (((!n) as UInt64) + 1_u64)
-    } else {
-        n as UInt64
-    };
-    if mag == 0_u64 { digits.push(48 as Byte); }
-    while mag > 0_u64 {
-        digits.push(((mag % 10_u64) + 48_u64) as Byte);
-        mag = mag / 10_u64;
-    }
-    let mut i: Int = digits.len();
-    while i < width { out.push_byte(48 as Byte); i = i + 1; }
-    let mut j: Int = digits.len() - 1;
-    while j >= 0 { out.push_byte(digits[j]); j = j - 1; }
+    let mut digits: [Byte; 20] = [0; 20];
+    let count = int_to_string(n, &mut digits[..]);
+    let mut pos = if n < 0 { 1 } else { 0 };
+    let mut pad = width - (count - pos);
+    while pad > 0 { out.push_byte('0' as Byte); pad = pad - 1; }
+    while pos < count { out.push_byte(digits[pos]); pos = pos + 1; }
 }
 
 public fn format_date(c: &Calendar) -> Text {
     let mut out = Text.new();
+    if c.year < 0 { out.push_byte('-' as Byte); }
     push_pad(&mut out, c.year, 4);
     out.push_byte(45 as Byte);
     push_pad(&mut out, c.month, 2);
@@ -449,18 +442,24 @@ fn apply_strftime(fmt: &Text, c: &Calendar, jd: Float64) -> Text {
         let b = bs[i];
         if b == (37 as Byte) && i + 1 < bs.len() {
             let nx = bs[i + 1];
-            if      nx == (89 as Byte) { push_pad(&mut out, c.year, 4); }       // %Y
+            if nx == ('Y' as Byte) {
+                if c.year < 0 {
+                    out.push_byte('-' as Byte);
+                    push_pad(&mut out, c.year, 3);
+                } else {
+                    push_pad(&mut out, c.year, 4);
+                }
+            }
             else if nx == (109 as Byte) { push_pad(&mut out, c.month, 2); }      // %m
             else if nx == (100 as Byte) { push_pad(&mut out, c.day, 2); }        // %d
             else if nx == (72 as Byte) { push_pad(&mut out, c.hour, 2); }        // %H
             else if nx == (77 as Byte) { push_pad(&mut out, c.minute, 2); }      // %M
             else if nx == (83 as Byte) { push_pad(&mut out, c.second, 2); }      // %S
             else if nx == (74 as Byte) {                                        // %J
-                push_pad(&mut out, jd as Int, 1);
+                out.push_int(jd as Int);
             }
             else if nx == (115 as Byte) {                                       // %s — unix seconds
-                let secs: Int = ((jd - 2440587.5) * 86400.0) as Int;
-                push_pad(&mut out, secs, 1);
+                out.push_int(unix_seconds(jd) as Int);
             }
             else if nx == (37 as Byte) { out.push_byte(37 as Byte); }            // %%
             else { out.push_byte(b); out.push_byte(nx); }

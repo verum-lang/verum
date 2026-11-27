@@ -55,16 +55,8 @@ public fn length(v: &Register) -> Register {
 }
 
 fn int_text_len(x: Int64) -> Int {
-    // Int.MIN-safe digit count. The naive `-x` for `x == Int.MIN`
-    // wraps back to Int.MIN; `n > 0` never enters; the function
-    // returned 1 (just the sign char) instead of 20 (full
-    // `-9223372036854775808` width). Same fix as the formatters.
     if x == 0_i64 { return 1; }
-    let mut n: UInt64 = if x < 0_i64 {
-        (((!x) as UInt64) + 1_u64)
-    } else {
-        x as UInt64
-    };
+    let mut n = (x as Int).unsigned_abs();
     let mut count: Int = if x < 0_i64 { 1 } else { 0 };
     while n > 0_u64 {
         count = count + 1;
@@ -454,10 +446,10 @@ public fn concat(args: &List<Register>) -> Register {
     while i < args.len() {
         match &args[i] {
             RText(s) => append_text(&mut out, s),
-            RInt(x)  => append_text(&mut out, &int_to_text(x)),
+            RInt(x)  => out.push_int(x as Int),
             RReal(_) => append_text(&mut out, &"<real>".clone()),
             RBlob(_) => append_text(&mut out, &"<blob>".clone()),
-            RRowId(x)=> append_text(&mut out, &int_to_text(x)),
+            RRowId(x)=> out.push_int(x as Int),
             RNull    => {}  // SQLite v3.44+: NULL skipped, not propagated, in CONCAT
         }
         i = i + 1;
@@ -483,8 +475,8 @@ public fn concat_ws(sep: &Register, args: &List<Register>) -> Register {
                         if emitted { append_text(&mut out, &sep_t); }
                         match other {
                             RText(s) => append_text(&mut out, s),
-                            RInt(x)  => append_text(&mut out, &int_to_text(x)),
-                            RRowId(x)=> append_text(&mut out, &int_to_text(x)),
+                            RInt(x)  => out.push_int(x as Int),
+                            RRowId(x)=> out.push_int(x as Int),
                             _ => {}
                         }
                         emitted = true;
@@ -499,38 +491,6 @@ public fn concat_ws(sep: &Register, args: &List<Register>) -> Register {
 
 fn append_text(dst: &mut Text, s: &Text) {
     dst.push_str(s);
-}
-
-fn int_to_text(x: Int64) -> Text {
-    if x == 0_i64 { return "0".clone(); }
-    // Two's-complement negate of `Int64.MIN` overflows back to
-    // `Int64.MIN`, so the naïve `if n < 0 { n = -n }` followed by
-    // `while n > 0` would silently produce "-" with no digits for
-    // `Int64.MIN` (= -9223372036854775808). Same family as the
-    // panic.vr / Formatter.write_int Int.MIN bugs (b274ab8b /
-    // 985336e3). Work in unsigned magnitude (`UInt64`) so every
-    // `Int64`'s absolute value is exactly representable.
-    let mut neg: Bool = false;
-    let mut mag: UInt64 = if x < 0_i64 {
-        neg = true;
-        // `(~x as UInt64) + 1` is the two's-complement magnitude;
-        // exact for every Int64 including Int64.MIN (whose
-        // magnitude 2^63 fits in UInt64).
-        (((!x) as UInt64) + 1_u64)
-    } else {
-        x as UInt64
-    };
-    let mut digits: List<Byte> = List.new();
-    while mag > 0_u64 {
-        let d: Byte = (mag % 10_u64) as Byte;
-        digits.push(d + (48 as Byte));
-        mag = mag / 10_u64;
-    }
-    let mut out = Text.new();
-    if neg { out.push_byte(45 as Byte); }
-    let mut i: Int = digits.len() - 1;
-    while i >= 0 { out.push_byte(digits[i]); i = i - 1; }
-    out
 }
 
 // -----------------------------------------------------------------------------
@@ -548,8 +508,8 @@ fn int_to_text(x: Int64) -> Text {
 public fn sql_quote(v: &Register) -> Register {
     match v {
         RNull => RText("NULL".clone()),
-        RInt(x) => RText(int_to_text(x)),
-        RRowId(x) => RText(int_to_text(x)),
+        RInt(x) => RText(Text.from_int(x as Int)),
+        RRowId(x) => RText(Text.from_int(x as Int)),
         RReal(x) => RText(real_to_text(x)),
         RText(s) => {
             let mut out = Text.new();
