@@ -26536,16 +26536,7 @@ impl VbcCodegen {
             }
         } else {
             // Plain record/struct
-            if let Some(base_expr) = base {
-                let base_reg = self
-                    .compile_expr(base_expr)?
-                    .or_internal("record base has no value")?;
-                self.ctx.emit(Instruction::Clone {
-                    dst: result,
-                    src: base_reg,
-                });
-                self.ctx.free_temp(base_reg);
-            } else {
+            if base.is_none() {
                 // Look up TypeId for proper Drop dispatch.
                 // Use the §F-resolved concrete name when the literal
                 // path was `Self`; otherwise the raw path string —
@@ -26709,11 +26700,20 @@ impl VbcCodegen {
             // real layout instead of the global intern fallback.
             // META-GROUP-XMODULE-1: `record_key` carries the module-
             // qualified re-key when the simple name collided.
+            let base_value = if let Some(expr) = base {
+                let start = self.ctx.instructions.len();
+                let value = self.compile_expr(expr)?.or_internal("record base has no value")?;
+                let declared = self.copy_source_type(expr, value, start, self.ctx.instructions.len());
+                Some((expr, value, declared))
+            } else {
+                None
+            };
             let type_name = record_key.clone();
             // Only the selected record's own application can instantiate its
             // field types. A same-spelled formal of the caller has no authority.
             let applied_owner = self.nominal_type_id(&type_name).and_then(|owner| {
                 expected
+                    .or_else(|| base_value.as_ref().and_then(|(_, _, ty)| ty.as_ref()))
                     .filter(|ty| ty.base_type_id() == Some(owner))
                     .cloned()
                     .or_else(|| {
@@ -26726,6 +26726,18 @@ impl VbcCodegen {
             let applied_owner = applied_owner.ok_or_else(|| CodegenError::new(
                 CodegenErrorKind::InvalidSourceSignature(
                     "record construction requires its complete declared owner application".into())))?;
+
+            if let Some((expr, value, declared)) = base_value {
+                if declared.as_ref().is_some_and(|ty| ty != &applied_owner) {
+                    return Err(CodegenError::with_span(CodegenErrorKind::InvalidSourceSignature(
+                        "record update base has a different declared owner".into()), expr.span));
+                }
+                // The base becomes the initialized destination before any field
+                // expression runs. A local place copies, an owned temporary moves.
+                self.emit_declared_value_store(expr, value, Some(&applied_owner),
+                    |src| Instruction::Mov { dst: result, src })?;
+                self.ctx.free_temp(value);
+            }
 
             for field in fields.iter() {
                 // Root fix for Issue #1 (silent impl-method SKIP with
@@ -26892,13 +26904,25 @@ impl VbcCodegen {
                     value_reg
                 };
 
-                let store = Instruction::SetF {
-                    obj: result,
-                    field_idx,
-                    value: stored,
-                };
-                if transfer { self.ctx.emit_transferring_store(store, value_reg); }
-                else { self.ctx.emit(store); }
+                if base.is_some() {
+                    let field_type = self.projected_field_declaration(
+                        applied_owner.clone(), &field.name.name);
+                    let replacement = if transfer {
+                        let owned = self.ctx.alloc_temp();
+                        self.ctx.emit_transferring_value(owned, value_reg);
+                        owned
+                    } else {
+                        stored
+                    };
+                    self.emit_declared_replacement(replacement, field_type.as_ref(),
+                        |dst| Instruction::GetF { dst, obj: result, field_idx },
+                        |value| Instruction::SetF { obj: result, field_idx, value })?;
+                    if replacement != stored { self.ctx.free_temp(replacement); }
+                } else {
+                    let store = Instruction::SetF { obj: result, field_idx, value: stored };
+                    if transfer { self.ctx.emit_transferring_store(store, value_reg); }
+                    else { self.ctx.emit(store); }
+                }
                 if stored != value_reg {
                     self.ctx.free_temp(stored);
                 }
