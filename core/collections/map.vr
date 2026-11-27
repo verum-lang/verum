@@ -37,11 +37,13 @@ module core.collections.map;
 
 mount core.mem.allocator.AllocError;
 mount core.base.iterator.{FromIterator, Extend};
+mount core.base.maybe.Maybe;
+mount core.base.protocols.Default;
 // Allocator primitives for typed-OOM (#65, #68). See list.vr for
 // rationale — `mount core.*` doesn't surface these via the re-export
 // chain in `core/base/mod.vr` for unqualified function references.
-mount core.base.memory.{alloc, try_alloc, dealloc};
-mount core.intrinsics.memory.{drop_in_place, ptr_read, ptr_write};
+mount core.base.memory.{alloc, try_alloc, dealloc, replace, swap, take};
+mount core.intrinsics.memory.{ptr_read, ptr_write};
 
 // =============================================================================
 // Constants
@@ -87,6 +89,18 @@ implement<K, V> Slot<K, V> {
     }
 }
 
+// An occupied raw bucket owns its key and value. Move the whole declared
+// record out, then retire its control fields before the caller uses the pair.
+unsafe fn take_slot<K, V>(entries: &unsafe Slot<K, V>, index: Int, next_hash: Int) -> (K, V) {
+    let address = unsafe { entries.offset(index) as *mut Slot<K, V> };
+    let Slot { key, value, .. } = unsafe { ptr_read<Slot<K, V>>(address as *const Slot<K, V>) };
+    unsafe {
+        (*address).hash = next_hash;
+        (*address).psl = 0;
+    };
+    (key, value)
+}
+
 // =============================================================================
 // Entry API (Public)
 // =============================================================================
@@ -113,8 +127,6 @@ public type OccupiedEntry<K: Hash + Eq, V> is {
     map: &mut Map<K, V>,
     /// Index in the hash table
     idx: Int,
-    /// Cached key reference
-    key: K,
 };
 
 /// A vacant entry in a map.
@@ -123,8 +135,8 @@ public type VacantEntry<K: Hash + Eq, V> is {
     map: &mut Map<K, V>,
     /// Cached hash
     hash: Int,
-    /// The key to be inserted
-    key: K,
+    /// The pending key is taken when ownership passes to the table.
+    key: Maybe<K>,
 };
 
 implement<K: Hash + Eq, V> MapEntry<K, V> {
@@ -132,8 +144,8 @@ implement<K: Hash + Eq, V> MapEntry<K, V> {
     @inline(always)
     public fn key(&self) -> &K {
         match self {
-            Occupied(entry) => &entry.key,
-            Vacant(entry) => &entry.key,
+            Occupied(entry) => entry.key(),
+            Vacant(entry) => entry.key(),
         }
     }
 
@@ -147,8 +159,11 @@ implement<K: Hash + Eq, V> MapEntry<K, V> {
     /// ```
     public fn or_insert(self, default: V) -> &mut V {
         match self {
-            Occupied(entry) => entry.get_mut(),
-            Vacant(entry) => entry.insert(default),
+            Occupied(entry) => entry.into_mut(),
+            Vacant(mut entry) => {
+                let map: &mut Map<K, V> = entry.map;
+                map.insert_vacant_value(entry.take_key(), default, entry.hash)
+            }
         }
     }
 
@@ -158,8 +173,11 @@ implement<K: Hash + Eq, V> MapEntry<K, V> {
     /// The closure is only called if the entry is vacant.
     public fn or_insert_with<F: fn() -> V>(self, default: F) -> &mut V {
         match self {
-            Occupied(entry) => entry.get_mut(),
-            Vacant(entry) => entry.insert(default()),
+            Occupied(entry) => entry.into_mut(),
+            Vacant(mut entry) => {
+                let map: &mut Map<K, V> = entry.map;
+                map.insert_vacant_value(entry.take_key(), default(), entry.hash)
+            }
         }
     }
 
@@ -169,26 +187,10 @@ implement<K: Hash + Eq, V> MapEntry<K, V> {
     /// Note: Uses internal restructuring to avoid borrow checker conflicts.
     public fn or_insert_with_key<F: fn(&K) -> V>(self, default: F) -> &mut V {
         match self {
-            Occupied(entry) => entry.get_mut(),
-            Vacant(entry) => {
-                // Destructure entry to get components separately
-                let VacantEntry { map, hash, key } = entry;
-                // Compute value from key reference
-                let value = default(&key);
-                // Insert manually to avoid borrow conflict
-                map.insert_internal(key, value, hash);
-
-                // Find the inserted entry and return reference directly
-                let mask = map.cap - 1;
-                let mut idx = (hash as Int) & mask;
-
-                loop {
-                    if unsafe { (*map.entries.offset(idx)).hash > 0 } &&
-                       unsafe { (*map.entries.offset(idx)).hash } == hash {
-                        return unsafe { &mut (*map.entries.offset(idx)).value };
-                    }
-                    idx = (idx + 1) & mask;
-                }
+            Occupied(entry) => entry.into_mut(),
+            Vacant(mut entry) => {
+                let map: &mut Map<K, V> = entry.map;
+                map.insert_vacant_with_key(entry.take_key(), entry.hash, default)
             }
         }
     }
@@ -202,8 +204,8 @@ implement<K: Hash + Eq, V> MapEntry<K, V> {
     /// ```
     public fn and_modify<F: fn(&mut V)>(self, f: F) -> MapEntry<K, V> {
         match self {
-            Occupied(mut entry) => {
-                f(entry.get_mut());
+            Occupied(entry) => {
+                f(entry.map.value_mut_at(entry.idx));
                 Occupied(entry)
             }
             Vacant(entry) => Vacant(entry),
@@ -214,7 +216,13 @@ implement<K: Hash + Eq, V> MapEntry<K, V> {
     public fn or_default(self) -> &mut V
     where V: Default
     {
-        self.or_insert_with(|| V.default())
+        match self {
+            Occupied(entry) => entry.into_mut(),
+            Vacant(mut entry) => {
+                let map: &mut Map<K, V> = entry.map;
+                map.insert_vacant_value(entry.take_key(), V.default(), entry.hash)
+            }
+        }
     }
 }
 
@@ -222,7 +230,7 @@ implement<K: Hash + Eq, V> OccupiedEntry<K, V> {
     /// Get the key for this entry.
     @inline(always)
     public fn key(&self) -> &K {
-        &self.key
+        unsafe { &(*self.map.entries.offset(self.idx)).key }
     }
 
     /// Get a reference to the value.
@@ -236,7 +244,7 @@ implement<K: Hash + Eq, V> OccupiedEntry<K, V> {
     /// Returns a mutable reference with lifetime tied to the underlying map entry.
     @inline(always)
     public fn get_mut(&mut self) -> &mut V {
-        unsafe { &mut (*self.map.entries.offset(self.idx)).value }
+        self.map.value_mut_at(self.idx)
     }
 
     /// Take ownership of the value, removing it from the map.
@@ -246,32 +254,18 @@ implement<K: Hash + Eq, V> OccupiedEntry<K, V> {
 
     /// Take ownership of both key && value.
     public fn remove_entry(self) -> (K, V) {
-        let slot = unsafe { &mut *self.map.entries.offset(self.idx) };
-        let key = slot.key;
-        let value = slot.value;
-        slot.hash = TOMBSTONE;
-        self.map.len = self.map.len - 1;
-        self.map.tombstones = self.map.tombstones + 1;
-
-        if self.map.tombstones > self.map.cap / 4 {
-            self.map.compact();
-        }
-
-        (key, value)
+        self.map.remove_slot(self.idx)
     }
 
     /// Replace the value, returning the old value.
     public fn insert(&mut self, value: V) -> V {
-        let slot = unsafe { &mut *self.map.entries.offset(self.idx) };
-        let old = slot.value;
-        slot.value = value;
-        old
+        replace(self.map.value_mut_at(self.idx), value)
     }
 
     /// Convert to mutable reference to value.
     @inline(always)
     public fn into_mut(self) -> &mut V {
-        unsafe { &mut (*self.map.entries.offset(self.idx)).value }
+        self.map.value_mut_at(self.idx)
     }
 }
 
@@ -279,32 +273,29 @@ implement<K: Hash + Eq, V> VacantEntry<K, V> {
     /// Get the key that would be used when inserting.
     @inline(always)
     public fn key(&self) -> &K {
-        &self.key
+        match &self.key {
+            Maybe.Some(key) => key,
+            Maybe.None => unreachable(),
+        }
     }
 
     /// Take ownership of the key.
     @inline(always)
-    public fn into_key(self) -> K {
-        self.key
+    public fn into_key(mut self) -> K {
+        self.take_key()
+    }
+
+    fn take_key(&mut self) -> K {
+        match take(&mut self.key) {
+            Maybe.Some(key) => key,
+            Maybe.None => unreachable(),
+        }
     }
 
     /// Insert a value, returning mutable reference to it.
-    public fn insert(self, value: V) -> &mut V {
-        let key = self.key;
-        let hash = self.hash;
-        self.map.insert_internal(key, value, hash);
-
-        // Find the inserted entry and return reference directly
-        let mask = self.map.cap - 1;
-        let mut idx = (hash as Int) & mask;
-
-        loop {
-            if unsafe { (*self.map.entries.offset(idx)).hash > 0 } &&
-               unsafe { (*self.map.entries.offset(idx)).hash } == hash {
-                return unsafe { &mut (*self.map.entries.offset(idx)).value };
-            }
-            idx = (idx + 1) & mask;
-        }
+    public fn insert(mut self, value: V) -> &mut V {
+        let map: &mut Map<K, V> = self.map;
+        map.insert_vacant_value(self.take_key(), value, self.hash)
     }
 }
 
@@ -371,15 +362,12 @@ implement<K: Hash + Eq, V> Map<K, V> {
     /// assert_eq(m.len(), 2);
     /// ```
     public fn from(pairs: [(K, V); _]) -> Map<K, V> {
-        let mut m = Map.new();
-        if pairs.len() > 0 {
-            let cap = pairs.len().next_power_of_two().max(INITIAL_CAPACITY);
-            m.resize(cap);
-            for pair in pairs {
-                m.insert(pair.0, pair.1);
-            }
+        if pairs.len() == 0 { return Map.new(); }
+        let mut map: Map<K, V> = Map.with_capacity(pairs.len());
+        for (key, value) in pairs {
+            map.insert(key, value);
         }
-        m
+        map
     }
 
     // Create with preallocated capacity.
@@ -388,10 +376,10 @@ implement<K: Hash + Eq, V> Map<K, V> {
     // Panics on allocation failure. For a fallible counterpart see
     // `try_with_capacity`.
     public fn with_capacity(capacity: Int) -> Map<K, V> {
-        let cap = capacity.next_power_of_two().max(INITIAL_CAPACITY);
-        let mut map = Map.new();
-        map.resize(cap);
-        map
+        match Map.try_with_capacity(capacity) {
+            Result.Ok(map) => map,
+            Result.Err(error) => panic(error.message()),
+        }
     }
 
     /// Fallible counterpart to `with_capacity`.
@@ -402,9 +390,16 @@ implement<K: Hash + Eq, V> Map<K, V> {
     /// boundaries (FFI, untrusted-size config, large allocations
     /// where OOM is recoverable).
     public fn try_with_capacity(capacity: Int) -> Result<Map<K, V>, AllocError> {
-        let cap = capacity.next_power_of_two().max(INITIAL_CAPACITY);
-        let mut map = Map.new();
-        match map.try_resize(cap) {
+        let max_buckets = Int.MAX / Slot<K, V>.stride;
+        let mut buckets = INITIAL_CAPACITY;
+        while buckets < capacity {
+            if buckets > max_buckets / 2 {
+                return Result.Err(AllocError.CapacityOverflow { requested: capacity });
+            }
+            buckets = buckets * 2;
+        }
+        let mut map: Map<K, V> = Map.new();
+        match map.try_resize(buckets) {
             Result.Ok(()) => Result.Ok(map),
             Result.Err(e) => Result.Err(e),
         }
@@ -464,11 +459,8 @@ implement<K: Hash + Eq, V> Map<K, V> {
     /// `m.get(k).unwrap_or(default)` — the fallback is visible at the
     /// call site, no implicit V.default().
     ///
-    /// Takes key by value because `&K` deref through the Tier-0 VBC
-    /// interpreter currently lowers to a silent always-false probe at
-    /// the call site. Pass `key.clone()` from `&K` call sites until
-    /// the by-reference API surface (`get_ref`, `contains_key_ref`,
-    /// `remove_ref`) lands.
+    /// The returned value is an owned copy. Use `get_key_value(&key)`
+    /// to borrow the stored key and value together.
     ///
     /// # Example
     /// ```verum
@@ -478,32 +470,13 @@ implement<K: Hash + Eq, V> Map<K, V> {
     /// assert_eq(m.get(99).unwrap_or(0), 0);   // explicit fallback
     /// ```
     public fn get(&self, key: K) -> Maybe<V> {
-        if self.cap == 0 {
-            return Maybe.None;
-        }
-
-        let hash = self.make_hash_val(key);
-        let mask = self.cap - 1;
-        let mut idx = (hash as Int) & mask;
-        let mut psl = 0;
-
-        loop {
-            let entry = unsafe { &*self.entries.offset(idx) };
-
-            if entry.hash == 0 {
-                return Maybe.None;
+        let hash = self.make_hash_val(&key);
+        match self.find_index(&key, hash) {
+            Maybe.Some(index) => {
+                let slot = unsafe { &*self.entries.offset(index) };
+                Maybe.Some(slot.value)
             }
-
-            if entry.hash > 0 && entry.hash == hash && entry.key == key {
-                return Maybe.Some(entry.value);
-            }
-
-            if entry.hash > 0 && psl > entry.psl {
-                return Maybe.None;
-            }
-
-            idx = (idx + 1) & mask;
-            psl = psl + 1;
+            Maybe.None => Maybe.None,
         }
     }
 
@@ -519,36 +492,10 @@ implement<K: Hash + Eq, V> Map<K, V> {
     public fn get_mut(&mut self, key: &K) -> Maybe<&mut V>
     where K: Clone
     {
-        if self.cap == 0 {
-            return Maybe.None;
-        }
-
-        let key_owned = (*key).clone();
-        let hash = self.make_hash_val(key_owned);
-        let mask = self.cap - 1;
-        let mut idx = (hash as Int) & mask;
-        let mut psl = 0;
-
-        loop {
-            // SAFETY: `idx` is bounded by `mask = cap - 1`, so the
-            // offset stays within the entries array.  `cap > 0` is
-            // guarded above.
-            let entry = unsafe { &mut *self.entries.offset(idx) };
-
-            if entry.hash == 0 {
-                return Maybe.None;
-            }
-
-            if entry.hash > 0 && entry.hash == hash && entry.key == *key {
-                return Maybe.Some(unsafe { &mut (*self.entries.offset(idx)).value });
-            }
-
-            if entry.hash > 0 && psl > entry.psl {
-                return Maybe.None;
-            }
-
-            idx = (idx + 1) & mask;
-            psl = psl + 1;
+        let hash = self.make_hash_val(key);
+        match self.find_index(key, hash) {
+            Maybe.Some(index) => Maybe.Some(self.value_mut_at(index)),
+            Maybe.None => Maybe.None,
         }
     }
 
@@ -592,72 +539,17 @@ implement<K: Hash + Eq, V> Map<K, V> {
     /// }
     /// ```
     public fn get_key_value(&self, key: &K) -> Maybe<(&K, &V)> {
-        if self.cap == 0 {
-            return Maybe.None;
-        }
-
-        let hash = self.make_hash_val(*key);
-        let mask = self.cap - 1;
-        let mut idx = (hash as Int) & mask;
-        let mut psl = 0;
-
-        loop {
-            let entry = unsafe { &*self.entries.offset(idx) };
-
-            if entry.hash == 0 {
-                return Maybe.None;
-            }
-
-            if entry.hash > 0 && entry.hash == hash && entry.key == *key {
-                return Maybe.Some((&entry.key, &entry.value));
-            }
-
-            if entry.hash > 0 && psl > entry.psl {
-                return Maybe.None;
-            }
-
-            psl = psl + 1;
-            idx = (idx + 1) & mask;
-
-            if psl > self.cap {
-                return Maybe.None;
-            }
+        let hash = self.make_hash_val(key);
+        match self.find_index(key, hash) {
+            Maybe.Some(index) => self.occupied_pair_at(index),
+            Maybe.None => Maybe.None,
         }
     }
 
     // Check if key exists.
     public fn contains_key(&self, key: K) -> Bool {
-        if self.cap == 0 {
-            return false;
-        }
-
-        let hash = self.make_hash_val(key);
-        let mask = self.cap - 1;
-        let mut idx = (hash as Int) & mask;
-        let mut psl = 0;
-
-        loop {
-            let entry = unsafe { &*self.entries.offset(idx) };
-
-            if (entry.hash == 0) {
-                return false;
-            }
-
-            if (entry.hash > 0) && entry.hash == hash && entry.key == key {
-                return true;
-            }
-
-            if (entry.hash > 0) && psl > entry.psl {
-                return false;
-            }
-
-            psl = psl + 1;
-            idx = (idx + 1) & mask;
-
-            if psl > self.cap {
-                return false;
-            }
-        }
+        let hash = self.make_hash_val(&key);
+        self.find_index(&key, hash) is Maybe.Some(_)
     }
 
     // =========================================================================
@@ -672,7 +564,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
     // fallible counterpart see `try_insert`.
     public fn insert(&mut self, key: K, value: V) -> Maybe<V> {
         self.ensure_capacity();
-        let hash = self.make_hash_val(key);
+        let hash = self.make_hash_val(&key);
         self.insert_internal(key, value, hash)
     }
 
@@ -684,7 +576,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
     /// inner `Maybe<V>` is the previous value for `key` (if any).
     public fn try_insert(&mut self, key: K, value: V) -> Result<Maybe<V>, AllocError> {
         self.try_ensure_capacity()?;
-        let hash = self.make_hash_val(key);
+        let hash = self.make_hash_val(&key);
         Result.Ok(self.insert_internal(key, value, hash))
     }
 
@@ -703,53 +595,10 @@ implement<K: Hash + Eq, V> Map<K, V> {
     /// ```
     public fn entry(&mut self, key: K) -> MapEntry<K, V> {
         self.ensure_capacity();
-
-        let hash = self.make_hash_val(key);
-        let mask = self.cap - 1;
-        let mut idx = (hash as Int) & mask;
-        let mut psl = 0;
-
-        loop {
-            let slot = unsafe { &*self.entries.offset(idx) };
-
-            if (slot.hash == 0) || (slot.hash == TOMBSTONE) {
-                // Found empty slot - key is not present
-                return Vacant(VacantEntry {
-                    map: self,
-                    hash: hash,
-                    key: key,
-                });
-            }
-
-            if (slot.hash > 0) && slot.hash == hash && slot.key == key {
-                // Found existing key
-                return Occupied(OccupiedEntry {
-                    map: self,
-                    idx: idx,
-                    key: key,
-                });
-            }
-
-            // Robin Hood: if current PSL > stored PSL, key not present
-            if (slot.hash > 0) && psl > slot.psl {
-                return Vacant(VacantEntry {
-                    map: self,
-                    hash: hash,
-                    key: key,
-                });
-            }
-
-            psl = psl + 1;
-            idx = (idx + 1) & mask;
-
-            // Safety: prevent infinite loop
-            if psl > self.cap {
-                return Vacant(VacantEntry {
-                    map: self,
-                    hash: hash,
-                    key: key,
-                });
-            }
+        let hash = self.make_hash_val(&key);
+        match self.find_index(&key, hash) {
+            Maybe.Some(index) => Occupied(OccupiedEntry { map: self, idx: index }),
+            Maybe.None => Vacant(VacantEntry { map: self, hash: hash, key: Maybe.Some(key) }),
         }
     }
 
@@ -760,96 +609,25 @@ implement<K: Hash + Eq, V> Map<K, V> {
     /// Industry-standard semantics matching Rust `HashMap.remove`,
     /// Java `Map.remove` (returns the prior value).
     ///
-    /// Takes key by value for the same reason as `get` — see that
-    /// method's docstring for the by-reference-call-site idiom.
+    /// The map transfers the removed value to the caller.
     public fn remove(&mut self, key: K) -> Maybe<V> {
-        if self.cap == 0 {
-            return Maybe.None;
-        }
-
-        let hash = self.make_hash_val(key);
-        let mask = self.cap - 1;
-        let mut idx = (hash as Int) & mask;
-        let mut psl = 0;
-
-        loop {
-            let entry = unsafe { &mut *self.entries.offset(idx) };
-
-            if (entry.hash == 0) {
-                return Maybe.None;
+        let hash = self.make_hash_val(&key);
+        match self.find_index(&key, hash) {
+            Maybe.Some(index) => {
+                let (_key, value) = self.remove_slot(index);
+                Maybe.Some(value)
             }
-
-            if (entry.hash > 0) && entry.hash == hash && entry.key == key {
-                let value = entry.value;
-                entry.hash = TOMBSTONE;
-                self.len = self.len - 1;
-                self.tombstones = self.tombstones + 1;
-
-                if self.tombstones > self.cap / 4 {
-                    self.compact();
-                }
-
-                return Maybe.Some(value);
-            }
-
-            if (entry.hash > 0) && psl > entry.psl {
-                return Maybe.None;
-            }
-
-            psl = psl + 1;
-            idx = (idx + 1) & mask;
-
-            if psl > self.cap {
-                return Maybe.None;
-            }
+            Maybe.None => Maybe.None,
         }
     }
 
     // Remove by key and return both key and value.
     // Returns removed (key, value) pair if present.
     public fn remove_entry(&mut self, key: K) -> Maybe<(K, V)> {
-        if self.cap == 0 {
-            return Maybe.None;
-        }
-
-        let hash = self.make_hash_val(key);
-        let mask = self.cap - 1;
-        let mut idx = (hash as Int) & mask;
-        let mut psl = 0;
-
-        loop {
-            let entry = unsafe { &mut *self.entries.offset(idx) };
-
-            if (entry.hash == 0) {
-                return Maybe.None;
-            }
-
-            if (entry.hash > 0) && entry.hash == hash && entry.key == key {
-                // Found - mark as tombstone
-                let k = entry.key;
-                let v = entry.value;
-                entry.hash = TOMBSTONE;
-                self.len = self.len - 1;
-                self.tombstones = self.tombstones + 1;
-
-                // Compact if too many tombstones
-                if self.tombstones > self.cap / 4 {
-                    self.compact();
-                }
-
-                return Maybe.Some((k, v));
-            }
-
-            if (entry.hash > 0) && psl > entry.psl {
-                return Maybe.None;
-            }
-
-            psl = psl + 1;
-            idx = (idx + 1) & mask;
-
-            if psl > self.cap {
-                return Maybe.None;
-            }
+        let hash = self.make_hash_val(&key);
+        match self.find_index(&key, hash) {
+            Maybe.Some(index) => Maybe.Some(self.remove_slot(index)),
+            Maybe.None => Maybe.None,
         }
     }
 
@@ -863,10 +641,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
         for i in range(0, self.cap) {
             let entry = unsafe { &mut *self.entries.offset(i) };
             if (entry.hash > 0) {
-                unsafe {
-                    drop_in_place(&mut entry.key);
-                    drop_in_place(&mut entry.value);
-                }
+                let _removed = unsafe { take_slot(self.entries, i, EMPTY) };
             }
             entry.hash = EMPTY;
             entry.psl = 0;
@@ -1094,13 +869,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
 
             if should_remove {
                 // Separate borrow scope for removal
-                let entry = unsafe { &mut *self.entries.offset(i) };
-                unsafe {
-                    drop_in_place(&mut entry.key);
-                    drop_in_place(&mut entry.value);
-                }
-                entry.hash = TOMBSTONE;
-                entry.psl = 0;
+                let _removed = unsafe { take_slot(self.entries, i, TOMBSTONE) };
                 self.len = self.len - 1;
                 self.tombstones = self.tombstones + 1;
             }
@@ -1240,12 +1009,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
             };
 
             if should_extract {
-                let entry = unsafe { &mut *self.entries.offset(i) };
-                let key = entry.key;
-                let value = entry.value;
-                extracted.push((key, value));
-                entry.hash = TOMBSTONE;
-                entry.psl = 0;
+                extracted.push(unsafe { take_slot(self.entries, i, TOMBSTONE) });
                 self.len = self.len - 1;
                 self.tombstones = self.tombstones + 1;
             }
@@ -1282,10 +1046,12 @@ implement<K: Hash + Eq, V> Map<K, V> {
     /// ```
     public fn merge<F: fn(V, V) -> V>(&mut self, mut other: Map<K, V>, resolve: F) {
         for (k, v) in other.drain() {
-            match self.get_mut(&k) {
-                Maybe.Some(existing) => {
-                    let old = unsafe { ptr_read(existing as &unsafe V) };
-                    unsafe { ptr_write(existing as &unsafe V, resolve(old, v)); }
+            let hash = self.make_hash_val(&k);
+            match self.find_index(&k, hash) {
+                Maybe.Some(index) => {
+                    let (stored_key, old) = self.remove_slot(index);
+                    let merged: V = resolve(old, v);
+                    self.insert(stored_key, merged);
                 }
                 Maybe.None => {
                     self.insert(k, v);
@@ -1480,28 +1246,14 @@ implement<K: Hash + Eq, V> Map<K, V> {
     /// assert_eq(m.len(), 1);
     /// ```
     public fn pop_entry(&mut self) -> Maybe<(K, V)> {
-        if self.len == 0 {
-            Maybe.None
-        } else {
-            // Find first occupied slot
-            let mut result: Maybe<(K, V)> = Maybe.None;
-            let mut i = 0;
-            while i < self.cap {
-                let entry: &Slot<K, V> = unsafe { &*self.entries.offset(i) };
-                if (entry.hash > 0) && result is None {
-                    let key = entry.key;
-                    let value = entry.value;
-                    let slot: &mut Slot<K, V> = unsafe { &mut *self.entries.offset(i) };
-                    slot.hash = -1;  // Mark as tombstone
-                    self.len = self.len - 1;
-                    result = Maybe.Some((key, value));
-                    i = self.cap;  // break
-                } else {
-                    i = i + 1;
-                }
+        let mut index = 0;
+        while index < self.cap {
+            if unsafe { (*self.entries.offset(index)).hash } > 0 {
+                return Maybe.Some(self.remove_slot(index));
             }
-            result
+            index = index + 1;
         }
+        Maybe.None
     }
 
     // =========================================================================
@@ -1818,11 +1570,9 @@ implement<K: Hash + Eq, V> Map<K, V> {
     // =========================================================================
 
     // Compute hash (ensure non-zero, non-tombstone).
-    fn make_hash_val(&self, key: K) -> Int {
-        let h = key.hash_value();
-        // Ensure hash is positive && not 0 or -1 (our special markers)
-        let h = (h as Int).abs();
-        if h <= 1 { h + 2 } else { h }
+    fn make_hash_val(&self, key: &K) -> Int {
+        let hash: Int = key.hash_value() & Int.MAX;
+        if hash == EMPTY { 1 } else { hash }
     }
 
     // Ensure capacity for insertion.
@@ -1868,55 +1618,87 @@ implement<K: Hash + Eq, V> Map<K, V> {
         Result.Ok(())
     }
 
-    // Insert with known hash.
-    fn insert_internal(&mut self, mut key: K, mut value: V, mut hash: Int) -> Maybe<V> {
+    // A tombstone does not end a collision chain. Reusing one can also
+    // shorten a live entry's probe distance, so only an empty slot ends lookup.
+    fn find_index(&self, key: &K, hash: Int) -> Maybe<Int> {
         let mask = self.cap - 1;
-        let mut idx = (hash as Int) & mask;
+        let mut index = hash & mask;
+        let mut probed = 0;
+        while probed < self.cap {
+            let slot = unsafe { &*self.entries.offset(index) };
+            if slot.hash == EMPTY { return Maybe.None; }
+            if slot.hash == hash && slot.key.eq(key) { return Maybe.Some(index); }
+            index = (index + 1) & mask;
+            probed = probed + 1;
+        }
+        Maybe.None
+    }
+
+    fn remove_slot(&mut self, index: Int) -> (K, V) {
+        let removed = unsafe { take_slot(self.entries, index, TOMBSTONE) };
+        self.len = self.len - 1;
+        self.tombstones = self.tombstones + 1;
+        if self.tombstones > self.cap / 4 { self.compact(); }
+        removed
+    }
+
+    fn value_mut_at(&mut self, index: Int) -> &mut V {
+        let address = unsafe { self.entries.offset(index) as *mut Slot<K, V> };
+        unsafe { &mut (*address).value }
+    }
+
+    fn insert_vacant_value(&mut self, key: K, value: V, hash: Int) -> &mut V {
+        let index = self.insert_vacant(key, value, hash);
+        self.value_mut_at(index)
+    }
+
+    fn insert_vacant_with_key<F: fn(&K) -> V>(&mut self, key: K, hash: Int, default: F) -> &mut V {
+        let value = default(&key);
+        self.insert_vacant_value(key, value, hash)
+    }
+
+    fn insert_internal(&mut self, key: K, value: V, hash: Int) -> Maybe<V> {
+        match self.find_index(&key, hash) {
+            Maybe.Some(index) => {
+                let slot = unsafe { &mut *self.entries.offset(index) };
+                Maybe.Some(replace(&mut slot.value, value))
+            }
+            Maybe.None => {
+                self.insert_vacant(key, value, hash);
+                Maybe.None
+            }
+        }
+    }
+
+    // The caller established absence and reserved a vacant bucket. Keep the
+    // first placement of the incoming key across later Robin Hood displacements.
+    fn insert_vacant(&mut self, mut key: K, mut value: V, mut hash: Int) -> Int {
+        let mask = self.cap - 1;
+        let mut index = hash & mask;
         let mut psl = 0;
-
+        let mut inserted_index = -1;
         loop {
-            let entry = unsafe { &mut *self.entries.offset(idx) };
-
-            if (entry.hash == 0) || (entry.hash == TOMBSTONE) {
-                // Found empty slot
-                if (entry.hash == TOMBSTONE) {
-                    self.tombstones = self.tombstones - 1;
+            let slot = unsafe { &mut *self.entries.offset(index) };
+            if slot.hash == EMPTY || slot.hash == TOMBSTONE {
+                if slot.hash == TOMBSTONE { self.tombstones = self.tombstones - 1; }
+                // No key or value is live in this bucket.
+                unsafe {
+                    ptr_write(self.entries.offset(index) as *mut Slot<K, V>, Slot {
+                        key: key, value: value, hash: hash, psl: psl,
+                    });
                 }
-                entry.key = key;
-                entry.value = value;
-                entry.hash = hash;
-                entry.psl = psl;
                 self.len = self.len + 1;
-                return Maybe.None;
+                return if inserted_index < 0 { index } else { inserted_index };
             }
-
-            if entry.hash == hash && entry.key == key {
-                // Key exists - replace value
-                let old = entry.value;
-                entry.value = value;
-                return Maybe.Some(old);
+            if psl > slot.psl {
+                if inserted_index < 0 { inserted_index = index; }
+                swap(&mut slot.key, &mut key);
+                swap(&mut slot.value, &mut value);
+                swap(&mut slot.hash, &mut hash);
+                swap(&mut slot.psl, &mut psl);
             }
-
-            // Robin Hood: swap if our PSL is greater
-            if psl > entry.psl {
-                // Swap via direct field access (ptr_read/ptr_write don't work
-                // on inline struct fields since &entry.field creates a stack ref)
-                let tmp_key = entry.key;
-                let tmp_value = entry.value;
-                let tmp_hash = entry.hash;
-                let tmp_psl = entry.psl;
-                entry.key = key;
-                entry.value = value;
-                entry.hash = hash;
-                entry.psl = psl;
-                key = tmp_key;
-                value = tmp_value;
-                hash = tmp_hash;
-                psl = tmp_psl;
-            }
-
             psl = psl + 1;
-            idx = (idx + 1) & mask;
+            index = (index + 1) & mask;
         }
     }
 
@@ -1976,11 +1758,11 @@ implement<K: Hash + Eq, V> Map<K, V> {
 
         if old_cap > 0 {
             for i in range(0, old_cap) {
-                let entry = unsafe { &*old_entries.offset(i) };
+                let entry = unsafe { &mut *old_entries.offset(i) };
                 if (entry.hash > 0) {
-                    let key = entry.key;
-                    let value = entry.value;
-                    self.insert_internal(key, value, entry.hash);
+                    let hash = entry.hash;
+                    let (key, value) = unsafe { take_slot(old_entries, i, EMPTY) };
+                    self.insert_vacant(key, value, hash);
                 }
             }
 
@@ -2011,10 +1793,7 @@ implement<K: Hash + Eq, V> Drop for Map<K, V> {
             for i in range(0, self.cap) {
                 let entry = unsafe { &mut *self.entries.offset(i) };
                 if (entry.hash > 0) {
-                    unsafe {
-                        drop_in_place(&mut entry.key);
-                        drop_in_place(&mut entry.value);
-                    }
+                    let _removed = unsafe { take_slot(self.entries, i, EMPTY) };
                 }
             }
 
@@ -2072,52 +1851,27 @@ implement<K: Hash + Eq, V> Index<K> for Map<K, V> {
 
 implement<K: Hash + Eq + Debug, V: Eq + Debug> PartialEq for Map<K, V> {
     fn eq(&self, other: &Map<K, V>) -> Bool {
-        if self.len != other.len {
-            return false;
-        }
-
-        // Direct iteration over entries to avoid associated type resolution issues
-        for i in range(0, self.cap) {
-            let entry: &Slot<K, V> = unsafe { &*self.entries.offset(i) };
-            if (entry.hash > 0) {
-                let key: &K = &entry.key;
-                let value: &V = &entry.value;
-                match other.get(key) {
-                    Maybe.Some(other_v) => {
-                        // Use == operator which resolves to Eq.eq
-                        if !(*value == *other_v) {
-                            return false;
+        if self.len() != other.len() { return false; }
+        let mut index = 0;
+        while index < self.capacity() {
+            match self.occupied_pair_at(index) {
+                Maybe.Some((key, value)) => {
+                    match other.get_key_value(key) {
+                        Maybe.Some((_, found)) => {
+                            if !value.eq(found) { return false; }
                         }
+                        Maybe.None => return false,
                     }
-                    Maybe.None => return false,
                 }
+                Maybe.None => {}
             }
+            index = index + 1;
         }
-
         true
     }
 
-    // Task #39 workaround — explicit `ne` (see Heap.ne doc).
     fn ne(&self, other: &Map<K, V>) -> Bool {
-        if self.len != other.len {
-            return true;
-        }
-        for i in range(0, self.cap) {
-            let entry: &Slot<K, V> = unsafe { &*self.entries.offset(i) };
-            if (entry.hash > 0) {
-                let key: &K = &entry.key;
-                let value: &V = &entry.value;
-                match other.get(key) {
-                    Maybe.Some(other_v) => {
-                        if !(*value == *other_v) {
-                            return true;
-                        }
-                    }
-                    Maybe.None => return true,
-                }
-            }
-        }
-        false
+        !self.eq(other)
     }
 }
 
@@ -2475,13 +2229,9 @@ implement<K: Hash + Eq, V> Iterator for MapDrain<K, V> {
             self.idx = self.idx + 1;
 
             if (entry.hash > 0) {
-                // Take ownership of key and value
-                let key = entry.key;
-                let value = entry.value;
-                entry.hash = EMPTY;
-                entry.psl = 0;
+                let removed = unsafe { take_slot(self.map.entries, self.idx - 1, EMPTY) };
                 self.map.len = self.map.len - 1;
-                return Maybe.Some((key, value));
+                return Maybe.Some(removed);
             }
         }
         Maybe.None
@@ -2503,10 +2253,7 @@ implement<K: Hash + Eq, V> IntoIterator for MapDrain<K, V> {
 
 implement<K: Hash + Eq, V> Drop for MapDrain<K, V> {
     fn drop(&mut self) {
-        // Consume any remaining entries to ensure proper cleanup
-        while self.next().is_some() {}
-        // Reset tombstone count since we've cleaned everything
-        self.map.tombstones = 0;
+        self.map.clear();
     }
 }
 
@@ -2541,10 +2288,9 @@ implement<K: Hash + Eq, V> Iterator for MapIntoIter<K, V> {
             self.idx = self.idx + 1;
 
             if (entry.hash > 0) {
+                let removed = unsafe { take_slot(self.map.entries, self.idx - 1, EMPTY) };
                 self.map.len = self.map.len - 1;
-                let key = entry.key;
-                let value = entry.value;
-                return Maybe.Some((key, value));
+                return Maybe.Some(removed);
             }
         }
         Maybe.None
@@ -2552,15 +2298,6 @@ implement<K: Hash + Eq, V> Iterator for MapIntoIter<K, V> {
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
         (self.map.len, Maybe.Some(self.map.len))
-    }
-}
-
-implement<K: Hash + Eq, V> Drop for MapIntoIter<K, V> {
-    fn drop(&mut self) {
-        // Drop remaining entries
-        while self.next().is_some() {}
-        // Map's drop will free memory but we've already consumed entries
-        self.map.len = 0;
     }
 }
 
@@ -2619,7 +2356,7 @@ implement<K: Hash + Eq, V> Length for Map<K, V> {
 
 // Create map from pairs.
 public fn map<K: Hash + Eq, V>(pairs: [(K, V); _]) -> Map<K, V> {
-    let mut m = Map.with_capacity(pairs.len());
+    let mut m: Map<K, V> = Map.with_capacity(pairs.len());
     for i in range(0, pairs.len()) {
         let pair = pairs[i];
         let k: K = pair.0;
@@ -2652,12 +2389,18 @@ public fn count_by<T, K: Hash + Eq, I: Iterator<Item = T>>(iter: I, key_fn: fn(&
 }
 
 /// Group elements by a key function.
-public fn group_by<T, K: Hash + Eq, I: Iterator<Item = T>>(iter: I, key_fn: fn(&T) -> K) -> Map<K, List<T>> {
+public fn group_by<T, K: Hash + Eq, I: Iterator<Item = T>>(mut iter: I, key_fn: fn(&T) -> K) -> Map<K, List<T>> {
     let mut groups: Map<K, List<T>> = Map.new();
-    for item in iter {
-        let k = key_fn(&item);
-        let group = groups.get_or_insert_with(k, || List.new());
-        group.push(item);
+    loop {
+        let next: Maybe<T> = iter.next();
+        match next {
+            Maybe.Some(item) => {
+                let k = key_fn(&item);
+                let group = groups.get_or_insert_with(k, || List.new());
+                group.push(item);
+            }
+            Maybe.None => break,
+        }
     }
     groups
 }

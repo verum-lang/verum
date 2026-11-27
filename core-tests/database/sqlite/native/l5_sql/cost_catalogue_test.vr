@@ -1,0 +1,27 @@
+module core.database.sqlite.native.l5_sql.tests.cost_catalogue;
+mount core.database.sqlite.native.planner_cost.stats.table_stats_default;
+mount core.database.sqlite.native.planner_cost.cost.{AccessMethod, estimate_access, cost_total};
+mount core.database.sqlite.native.planner_cost.selectivity.{estimate, PredicateKind};
+mount core.database.sqlite.native.l5_sql.cost_annotated.stats_catalogue_new;
+
+@test
+fn test_table_lookup_returns_an_independent_snapshot() {
+    let mut catalogue = stats_catalogue_new();
+    let key: Text = "orders";
+    let missing_table = catalogue.table_stats_for(&key);
+    assert(cost_total(&estimate_access(&AccessMethod.AmFullScan, &missing_table, 1.0)) == 1.0);
+    let mut stats = table_stats_default(key.clone(), 100_i64);
+    assert(stats.record_column_distribution("k", 4_i64, 25_i64));
+    catalogue.record_table(stats);
+    let mut snapshot = catalogue.table_stats_for(&key);
+    assert(estimate(&PredicateKind.PkColEqLiteral("k"), &snapshot) == 0.25);
+    assert(snapshot.record_column_distribution("k", 2_i64, 50_i64));
+    let original = catalogue.table_stats_for(&key);
+    assert(estimate(&PredicateKind.PkColIsNull("k"), &original) == 0.25);
+    catalogue.record_table(snapshot);
+    let updated = catalogue.table_stats_for(&key);
+    assert(estimate(&PredicateKind.PkColIsNull("k"), &updated) == 0.5);
+    assert(estimate(&PredicateKind.PkColEqLiteral("k"), &updated) == 0.5);
+}
+
+fn main() {}

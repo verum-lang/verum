@@ -1,0 +1,251 @@
+module core.collections.tests.map_owned_slots;
+mount core.collections.map.{Map, MapEntry};
+mount core.base.protocols.{Drop, Eq, Hash, Hasher, PartialEq};
+
+static mut VALUE_DROPS: Int = 0;
+static mut KEY_DROPS: Int = 0;
+type affine Guard is { weight: Int };
+static BORROWED: Guard = Guard { weight: 64 };
+implement Drop for Guard {
+    fn drop(&mut self) { unsafe { VALUE_DROPS = VALUE_DROPS + self.weight; } }
+}
+
+fn check_owned_values() {
+    let mut values: Map<Text, Guard> = Map.new();
+    assert(values.insert("key", Guard { weight: 1 }) is Maybe.None);
+    assert(unsafe { VALUE_DROPS } == 0);
+    {
+        let old = values.insert("key", Guard { weight: 2 });
+        match &old {
+            Maybe.Some(value) => assert(value.weight == 1),
+            Maybe.None => panic("replacement lost its old value"),
+        }
+        assert(unsafe { VALUE_DROPS } == 0);
+    }
+    assert(unsafe { VALUE_DROPS } == 1);
+    {
+        let removed = values.remove("key");
+        match &removed {
+            Maybe.Some(value) => assert(value.weight == 2),
+            Maybe.None => panic("removal lost its value"),
+        }
+        assert(unsafe { VALUE_DROPS } == 1);
+    }
+    assert(unsafe { VALUE_DROPS } == 3);
+    assert(values.remove("key") is Maybe.None);
+    assert(values.insert("key", Guard { weight: 4 }) is Maybe.None);
+    assert(unsafe { VALUE_DROPS } == 3);
+    values.clear();
+    assert(unsafe { VALUE_DROPS } == 7);
+    values.clear();
+    assert(unsafe { VALUE_DROPS } == 7);
+    assert(values.insert("key", Guard { weight: 8 }) is Maybe.None);
+}
+
+fn keep_borrowed_value() {
+    let mut values: Map<Int, &'static Guard> = Map.new();
+    let borrowed: &'static Guard = &BORROWED;
+    assert(values.insert(7, borrowed) is Maybe.None);
+    assert(values.remove(7) is Maybe.Some(_));
+    assert(values.insert(9, borrowed) is Maybe.None);
+    values.clear();
+}
+
+@test
+fn test_owned_and_borrowed_values_across_slot_lifetimes() {
+    unsafe { VALUE_DROPS = 0; }
+    keep_borrowed_value();
+    assert(unsafe { VALUE_DROPS } == 0);
+    check_owned_values();
+    assert(unsafe { VALUE_DROPS } == 15);
+}
+
+type affine OwnedKey is { id: Int, weight: Int };
+implement PartialEq for OwnedKey {
+    fn eq(&self, rhs: &OwnedKey) -> Bool { self.id == rhs.id }
+}
+implement Eq for OwnedKey {}
+implement Hash for OwnedKey {
+    // Deliberately put every key in the same collision chain.
+    fn hash(&self, hasher: &mut Hasher) {}
+}
+implement Drop for OwnedKey {
+    fn drop(&mut self) { unsafe { KEY_DROPS = KEY_DROPS + self.weight; } }
+}
+
+fn use_owned_keys() {
+    let mut values: Map<OwnedKey, Int> = Map.new();
+    assert(values.insert(OwnedKey { id: 7, weight: 1 }, 10) is Maybe.None);
+    assert(unsafe { KEY_DROPS } == 0);
+    assert(values.insert(OwnedKey { id: 7, weight: 2 }, 11) is Maybe.Some(10));
+    assert(unsafe { KEY_DROPS } == 2);
+    assert(values.remove(OwnedKey { id: 7, weight: 4 }) is Maybe.Some(11));
+    assert(unsafe { KEY_DROPS } == 7);
+    assert(values.insert(OwnedKey { id: 7, weight: 8 }, 12) is Maybe.None);
+}
+
+@test
+fn test_owned_key_is_released_by_its_owner() {
+    unsafe { KEY_DROPS = 0; }
+    use_owned_keys();
+    assert(unsafe { KEY_DROPS } == 15);
+}
+
+@test
+fn test_replacement_past_a_tombstone_keeps_the_original_key() {
+    unsafe { KEY_DROPS = 0; }
+    {
+        let mut values: Map<OwnedKey, Int> = Map.new();
+        assert(values.insert(OwnedKey { id: 1, weight: 1 }, 10) is Maybe.None);
+        assert(values.insert(OwnedKey { id: 2, weight: 2 }, 20) is Maybe.None);
+        assert(values.remove(OwnedKey { id: 1, weight: 4 }) is Maybe.Some(10));
+        assert(unsafe { KEY_DROPS } == 5);
+        assert(values.insert(OwnedKey { id: 2, weight: 8 }, 30) is Maybe.Some(20));
+        assert(values.len() == 1);
+        assert(unsafe { KEY_DROPS } == 13);
+        assert(values.insert(OwnedKey { id: 3, weight: 16 }, 40) is Maybe.None);
+        assert(values.len() == 2);
+    }
+    assert(unsafe { KEY_DROPS } == 31);
+}
+
+@test
+fn test_growth_and_displacement_preserve_owned_values() {
+    unsafe { VALUE_DROPS = 0; }
+    let mut values: Map<Int, Guard> = Map.new();
+    let mut n = 1;
+    while n <= 40 {
+        assert(values.insert(n * n, Guard { weight: n }) is Maybe.None);
+        n = n + 1;
+    }
+    assert(values.len() == 40);
+    assert(unsafe { VALUE_DROPS } == 0);
+    n = 1;
+    while n <= 40 {
+        let removed = values.remove(n * n);
+        match &removed {
+            Maybe.Some(value) => assert(value.weight == n),
+            Maybe.None => panic("lost a displaced entry"),
+        }
+        n = n + 1;
+    }
+    assert(values.len() == 0);
+    assert(unsafe { VALUE_DROPS } == 820);
+}
+
+fn twice(key: &Int) -> Int { *key * 2 }
+fn increment(value: &mut Int) { *value = *value + 1; }
+
+@test
+fn test_entry_mutation_reaches_the_stored_value() {
+    let mut values: Map<Int, Int> = Map.new();
+    {
+        let value = values.entry(5).or_insert(21);
+        *value = *value + 2;
+    }
+    {
+        let value = values.entry(5).or_insert(35);
+        *value = *value + 4;
+    }
+    {
+        let value = values.entry(7).or_insert_with_key(twice);
+        *value = *value + 1;
+    }
+    values.entry(7).and_modify(increment);
+    assert(values.get(5) is Maybe.Some(27));
+    assert(values.get(7) is Maybe.Some(16));
+}
+
+@test
+fn test_entry_consumes_the_vacant_key_and_releases_unused_inputs() {
+    unsafe { KEY_DROPS = 0; VALUE_DROPS = 0; }
+    {
+        let mut values: Map<OwnedKey, Guard> = Map.new();
+        {
+            let value = values.entry(OwnedKey { id: 1, weight: 1 })
+                .or_insert(Guard { weight: 2 });
+            assert(value.weight == 2);
+        }
+        assert(unsafe { KEY_DROPS } == 0 && unsafe { VALUE_DROPS } == 0);
+        {
+            let value = values.entry(OwnedKey { id: 1, weight: 4 })
+                .or_insert(Guard { weight: 8 });
+            assert(value.weight == 2);
+        }
+        assert(unsafe { KEY_DROPS } == 4 && unsafe { VALUE_DROPS } == 8);
+    }
+    assert(unsafe { KEY_DROPS } == 5 && unsafe { VALUE_DROPS } == 10);
+}
+
+@test
+fn test_dropping_a_partial_drain_releases_only_the_remaining_entries() {
+    unsafe { VALUE_DROPS = 0; }
+    let mut values: Map<Int, Guard> = Map.new();
+    values.insert(7, Guard { weight: 3 });
+    values.insert(9, Guard { weight: 5 });
+    {
+        let mut draining = values.drain();
+        let first = draining.next();
+        assert(first is Maybe.Some(_));
+        assert(unsafe { VALUE_DROPS } == 0);
+    }
+    assert(unsafe { VALUE_DROPS } == 8);
+    assert(values.len() == 0);
+}
+
+fn new_guard() -> Guard { Guard { weight: 16 } }
+
+@test
+fn test_occupied_entry_borrows_the_stored_key_and_skips_the_factory() {
+    unsafe { VALUE_DROPS = 0; KEY_DROPS = 0; }
+    {
+        let mut values: Map<OwnedKey, Guard> = Map.new();
+        {
+            let value = values.entry(OwnedKey { id: 1, weight: 1 }).or_insert_with(new_guard);
+            assert(value.weight == 16);
+        }
+        assert(unsafe { KEY_DROPS } == 0 && unsafe { VALUE_DROPS } == 0);
+        {
+            let entry = values.entry(OwnedKey { id: 1, weight: 2 });
+            assert(entry.key().weight == 1);
+            let value = entry.or_insert_with(new_guard);
+            assert(value.weight == 16);
+        }
+        assert(unsafe { KEY_DROPS } == 2 && unsafe { VALUE_DROPS } == 0);
+    }
+    assert(unsafe { KEY_DROPS } == 3 && unsafe { VALUE_DROPS } == 16);
+}
+
+@test
+fn test_partial_owning_iterator_releases_its_remaining_map() {
+    unsafe { VALUE_DROPS = 0; }
+    {
+        let mut values: Map<Int, Guard> = Map.new();
+        values.insert(7, Guard { weight: 3 });
+        values.insert(9, Guard { weight: 5 });
+        let mut entries = values.into_iter();
+        let first = entries.next();
+        assert(first is Maybe.Some(_));
+        assert(unsafe { VALUE_DROPS } == 0);
+    }
+    assert(unsafe { VALUE_DROPS } == 8);
+}
+
+@test
+fn test_vacant_entry_returns_ownership_of_the_key() {
+    unsafe { KEY_DROPS = 0; }
+    let mut values: Map<OwnedKey, Int> = Map.new();
+    {
+        let vacancy = match values.entry(OwnedKey { id: 31, weight: 7 }) {
+            MapEntry.Vacant(entry) => entry,
+            MapEntry.Occupied(_) => panic("expected a vacant entry"),
+        };
+        let key = vacancy.into_key();
+        assert(key.id == 31 && key.weight == 7);
+        assert(unsafe { KEY_DROPS } == 0);
+    }
+    assert(unsafe { KEY_DROPS } == 7);
+    assert(values.len() == 0);
+}
+
+fn main() {}
