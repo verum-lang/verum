@@ -1,0 +1,14 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L2
+// @tags: stdlib, math, computational-properties
+// @expected-error: E400
+// @expected-error-count: 1
+
+mount core.math.cohesive.{AdjunctionWitness, make_adjunction};
+
+async fn suspending_component(x: &Int) -> Int { *x }
+
+fn async_operator() -> AdjunctionWitness {
+    make_adjunction(suspending_component, |x| *x, |x| *x, |x| *x)
+}

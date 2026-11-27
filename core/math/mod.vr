@@ -1217,7 +1217,7 @@ public mount .epistemic.{
 public mount .cohesive.{
 
     CohesiveStructure, DifferentiallyCohesive,
-    theory_cohesive_structure, theory_differentially_cohesive,
+    cohesive_topos_data, differentially_cohesive_data,
 
 };
 

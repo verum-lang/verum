@@ -1,0 +1,12 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L2
+// @tags: stdlib, math, protocols
+// @expected-error: E405
+// @expected-error-count: 1
+
+mount core.math.cohesive.{CohesiveToposData, cohesive_topos_data};
+
+fn from_handle<H: core.math.infinity_topos.InfinityTopos>(site: &Int) -> CohesiveToposData<H> {
+    cohesive_topos_data<H, Int>(site)
+}

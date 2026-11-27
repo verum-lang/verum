@@ -500,146 +500,39 @@ public fn make_adjunction(
 }
 
 // =============================================================================
-// 7. theory_cohesive_structure — concrete construction for the theory ∞-topos
+// 7. Collect operator data from a cohesive model
 // =============================================================================
-//
 
-// The theory ∞-topos is the ∞-category of ∞-sheaves on the
-// locally contractible "theory site" — the site whose objects
-// are formally-represented theories and whose coverings are
-// collections of consistent sub-theories whose union
-// (colimit) recovers the original.
-//
-
-// * Π (shape) arises from the geometric morphism to ∞Grpd induced by
-//  local contractibility of the site.
-// * Disc / Γ are the standard discrete-global-sections pair.
-// * coDisc is the codiscrete extension (right adjoint to Γ).
-//
-
-// Infinitesimal modalities:
-// * Im — infinitesimal shape from the reduced sub-site (theories modulo
-//  infinitesimal / formal equivalences).
-// * & — infinitesimal flat (crystal structure of formal thickenings).
-// * Rh — reduction (kills nilpotent / redundant formal data).
-
-/// Construct the cohesive structure for the theory ∞-topos.
-/// Returns a fully assembled CohesiveToposData.
-public fn theory_cohesive_structure<H: InfinityTopos>(
-    theory_site: &Int,
+/// Collect the functors, modalities and adjunction witnesses of a cohesive model.
+public fn cohesive_topos_data<H: InfinityTopos, M: CohesiveStructure<H>>(
+    model: &M,
 ) -> CohesiveToposData<H> {
-    // -- Core functors derived from the locally contractible site ----------
-
-    // Π : send a sheaf to its "shape" (homotopy type of the underlying site).
-    let pi_fn:     fn(&Int) -> Int = |x| locally_contractible_shape(x, theory_site);
-    // Disc : embed a discrete space (∞-groupoid) as a constant sheaf.
-    let disc_fn:   fn(&Int) -> Int = |s| constant_sheaf(s, theory_site);
-    // Γ : evaluate a sheaf at the terminal object (global sections).
-    let gamma_fn:  fn(&Int) -> Int = |x| global_sections(x, theory_site);
-    // coDisc : embed a set as a codiscrete sheaf (right adjoint to Γ).
-    let codisc_fn: fn(&Int) -> Int = |s| codiscrete_sheaf(s, theory_site);
-
-    // -- Modality units / counits ------------------------------------------
-
-    // Unit η : x → ʃ(x) = Disc(Π(x)): localisation map.
-    let shape_unit:  fn(&Int) -> Int = |x| shape_unit_map(x);
-    // Unit η : x → ♭(x) = Disc(Γ(x)): flat localisation map.
-    let flat_unit:   fn(&Int) -> Int = |x| flat_unit_map(x);
-    // Unit η : x → ♯(x) = coDisc(Γ(x)): sharp localisation map.
-    let sharp_unit:  fn(&Int) -> Int = |x| sharp_unit_map(x);
-
-    // -- Adjunction witnesses -----------------------------------------------
-
-    let pi_disc_adj = make_adjunction(
-        pi_fn,
-        disc_fn,
-        |s| pi_disc_unit(s),
-        |x| pi_disc_counit(x),
-    );
-    let disc_gamma_adj = make_adjunction(
-        disc_fn,
-        gamma_fn,
-        |x| disc_gamma_unit(x),
-        |s| disc_gamma_counit(s),
-    );
-    let gamma_codisc_adj = make_adjunction(
-        gamma_fn,
-        codisc_fn,
-        |s| gamma_codisc_unit(s),
-        |x| gamma_codisc_counit(x),
-    );
-
     CohesiveToposData {
-        base_topos:       infinity_groupoid_topos(),
-        pi:               pi_fn,
-        disc:             disc_fn,
-        gamma:            gamma_fn,
-        codisc:           codisc_fn,
-        shape_mod:        make_shape_modality(disc_fn, pi_fn, shape_unit),
-        flat_mod:         make_flat_modality(disc_fn, gamma_fn, flat_unit),
-        sharp_mod:        make_sharp_modality(codisc_fn, gamma_fn, sharp_unit),
-        pi_disc_adj:      pi_disc_adj,
-        disc_gamma_adj:   disc_gamma_adj,
-        gamma_codisc_adj: gamma_codisc_adj,
+        base_topos: model.base_topos(),
+        pi: model.pi_shape(),
+        disc: model.disc(),
+        gamma: model.gamma(),
+        codisc: model.codisc(),
+        shape_mod: model.shape_modality(),
+        flat_mod: model.flat_modality(),
+        sharp_mod: model.sharp_modality(),
+        pi_disc_adj: model.pi_disc_adjunction(),
+        disc_gamma_adj: model.disc_gamma_adjunction(),
+        gamma_codisc_adj: model.gamma_codisc_adjunction(),
     }
 }
 
-/// Extend the theory-∞-topos cohesive structure with
-/// infinitesimal modalities,
-/// yielding a full DifferentiallyCohesiveData.
-public fn theory_differentially_cohesive<H: InfinityTopos>(
-    theory_site:   &Int,
-    reduced_site:  &Int,
+/// Collect the cohesive and infinitesimal operators of one differential model.
+public fn differentially_cohesive_data<H: InfinityTopos, M: DifferentiallyCohesive<H>>(
+    model: &M,
 ) -> DifferentiallyCohesiveData<H> {
-    let cohesive = theory_cohesive_structure(theory_site);
-
-    // Infinitesimal shape Im: quotient by formal/nilpotent thickenings
-    // on the reduced sub-site.
-    let im_fn:  fn(&Int) -> Int = |x| infinitesimal_shape(x, reduced_site);
-    // Infinitesimal flat &: crystal structure (formally étale discretisation).
-    let amp_fn: fn(&Int) -> Int = |x| infinitesimal_flat(x, reduced_site);
-    // Reduction Rh: project to the reduced sub-site.
-    let rh_fn:  fn(&Int) -> Int = |x| de_rham_reduction(x, reduced_site);
-
-    let im_unit_fn:  fn(&Int) -> Int = |x| im_unit_map(x);
-    let amp_unit_fn: fn(&Int) -> Int = |x| amp_unit_map(x);
-    let rh_unit_fn:  fn(&Int) -> Int = |x| rh_unit_map(x);
-
-    let im_amp_adj = make_adjunction(
-        im_fn,
-        amp_fn,
-        |x| im_amp_unit(x),
-        |x| im_amp_counit(x),
-    );
-    let amp_rh_adj = make_adjunction(
-        amp_fn,
-        rh_fn,
-        |x| amp_rh_unit(x),
-        |x| amp_rh_counit(x),
-    );
-
     DifferentiallyCohesiveData {
-        cohesive:   cohesive,
-        im_mod:     ComposedModality {
-            outer_apply: im_fn,
-            inner_apply: im_fn,
-            unit_fn:     im_unit_fn,
-            monad:       false,
-        },
-        amp_mod:    ComposedModality {
-            outer_apply: amp_fn,
-            inner_apply: amp_fn,
-            unit_fn:     amp_unit_fn,
-            monad:       true,
-        },
-        rh_mod:     ComposedModality {
-            outer_apply: rh_fn,
-            inner_apply: rh_fn,
-            unit_fn:     rh_unit_fn,
-            monad:       true,
-        },
-        im_amp_adj: im_amp_adj,
-        amp_rh_adj: amp_rh_adj,
+        cohesive: cohesive_topos_data<H, M>(model),
+        im_mod: model.im_modality(),
+        amp_mod: model.amp_modality(),
+        rh_mod: model.rh_modality(),
+        im_amp_adj: model.im_amp_adjunction(),
+        amp_rh_adj: model.amp_rh_adjunction(),
     }
 }
 
@@ -792,61 +685,6 @@ public fn verify_cohesive_axioms<H: InfinityTopos>(
 
     all_pass
 }
-
-// =============================================================================
-// 10. Primitive declarations (intrinsic / FFI boundary)
-// =============================================================================
-//
-
-// These are the "implementation atoms" — declared here so the construction
-// functions above type-check. Concrete implementations are supplied by the
-// runtime or by downstream crates (verum_vbc intrinsics / verum_codegen).
-
-@extern
-fn infinity_groupoid_topos() -> Int;
-
-@extern
-fn locally_contractible_shape(x: &Int, site: &Int) -> Int;
-
-@extern
-fn constant_sheaf(s: &Int, site: &Int) -> Int;
-
-@extern
-fn global_sections(x: &Int, site: &Int) -> Int;
-
-@extern
-fn codiscrete_sheaf(s: &Int, site: &Int) -> Int;
-
-@extern
-fn infinitesimal_shape(x: &Int, reduced_site: &Int) -> Int;
-
-@extern
-fn infinitesimal_flat(x: &Int, reduced_site: &Int) -> Int;
-
-@extern
-fn de_rham_reduction(x: &Int, reduced_site: &Int) -> Int;
-
-// -- Unit / counit maps -------------------------------------------------------
-
-@extern fn shape_unit_map(x: &Int) -> Int;
-@extern fn flat_unit_map(x: &Int) -> Int;
-@extern fn sharp_unit_map(x: &Int) -> Int;
-@extern fn im_unit_map(x: &Int) -> Int;
-@extern fn amp_unit_map(x: &Int) -> Int;
-@extern fn rh_unit_map(x: &Int) -> Int;
-
-// -- Adjunction component maps -----------------------------------------------
-
-@extern fn pi_disc_unit(s: &Int) -> Int;
-@extern fn pi_disc_counit(x: &Int) -> Int;
-@extern fn disc_gamma_unit(x: &Int) -> Int;
-@extern fn disc_gamma_counit(s: &Int) -> Int;
-@extern fn gamma_codisc_unit(s: &Int) -> Int;
-@extern fn gamma_codisc_counit(x: &Int) -> Int;
-@extern fn im_amp_unit(x: &Int) -> Int;
-@extern fn im_amp_counit(x: &Int) -> Int;
-@extern fn amp_rh_unit(x: &Int) -> Int;
-@extern fn amp_rh_counit(x: &Int) -> Int;
 
 // =============================================================================
 // 11. Formal theorems

@@ -1,0 +1,21 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: stdlib, math, protocols
+
+mount core.math.cohesive.{
+    CohesiveStructure, DifferentiallyCohesive, CohesiveToposData, DifferentiallyCohesiveData,
+    cohesive_topos_data, differentially_cohesive_data,
+};
+
+fn collect<H: core.math.infinity_topos.InfinityTopos, M: CohesiveStructure<H>>(
+    model: &M,
+) -> CohesiveToposData<H> {
+    cohesive_topos_data<H, M>(model)
+}
+
+fn collect_differential<H: core.math.infinity_topos.InfinityTopos, M: DifferentiallyCohesive<H>>(
+    model: &M,
+) -> DifferentiallyCohesiveData<H> {
+    differentially_cohesive_data<H, M>(model)
+}
