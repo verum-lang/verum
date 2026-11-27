@@ -480,6 +480,8 @@ public(in super) fn clone_opcode(op: &Opcode) -> Opcode {
         AggFinal(f, c)       => AggFinal(f, c),
         AggStepAvg(n, a, s, c) => AggStepAvg(n, a, s, c),
         AggFinalAvg(s, c, d)   => AggFinalAvg(s, c, d),
+        Variable(d, index) => Variable(d, index),
+        VariableNamed(d, name) => VariableNamed(d, name),
         ResultRow(s, n) => ResultRow(s, n),
     }
 }

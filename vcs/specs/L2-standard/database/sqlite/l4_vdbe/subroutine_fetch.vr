@@ -1,0 +1,40 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L2
+// @tags: sqlite, vdbe, interpreter, control-flow
+// @timeout: 15000
+// @expected-exit: 0
+
+module core.database.sqlite.native.l4_vdbe.tests.subroutine_fetch;
+
+mount base.Maybe;
+mount core.database.sqlite.native.l4_vdbe.opcode.Opcode;
+mount core.database.sqlite.native.l4_vdbe.program.program_new;
+mount core.database.sqlite.native.l4_vdbe.interpreter.{StepResult, run_until_row, vdbe_state_new};
+
+fn main() {
+    let mut program = program_new("nested calls", 2);
+    let _ = program.emit(Opcode.Gosub(0, 3));
+    let _ = program.emit(Opcode.ResultRow(0, 2));
+    let _ = program.emit(Opcode.Halt(0, 0));
+    let _ = program.emit(Opcode.Gosub(1, 5));
+    let _ = program.emit(Opcode.Return(0));
+    let _ = program.emit(Opcode.Return(1));
+    let positional = program.emit(Opcode.Variable(7, 11));
+    let named = program.emit(Opcode.VariableNamed(5, 19));
+    assert(program.get_opcode(positional) is Maybe.Some(Opcode.Variable(7, 11)), "positional binding fetch");
+    assert(program.get_opcode(named) is Maybe.Some(Opcode.VariableNamed(5, 19)), "named binding fetch");
+    let mut state = vdbe_state_new(&program);
+    assert(run_until_row(&mut state, &program, 10) is StepResult.Row(0, 2), "resume at caller row");
+    assert(run_until_row(&mut state, &program, 10) is StepResult.Done, "halt at caller");
+    let mut empty = program_new("orphan return", 1);
+    let _ = empty.emit(Opcode.Return(0));
+    let mut orphan = vdbe_state_new(&empty);
+    match run_until_row(&mut orphan, &empty, 10) {
+        StepResult.ExecError(code, msg) => {
+            assert(code == 1 && msg == "Return with empty stack", "missing caller diagnostic");
+            assert(orphan.is_halted(), "orphan return halts execution");
+        }
+        _ => panic("orphan return must fail"),
+    }
+}

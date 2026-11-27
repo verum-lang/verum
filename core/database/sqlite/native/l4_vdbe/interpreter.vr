@@ -367,18 +367,13 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
             Yield
         }
 
-        Return(r) => {
-            let v = state.regs.get(r);
-            let _ = v;
-            if state.return_stack.len() > 0 {
-                let ret = state.return_stack.pop();
-                state.pc = ret;
-            } else {
+        Return(_) => match state.return_stack.pop() {
+            Maybe.Some(pc) => { state.pc = pc; Yield }
+            Maybe.None => {
                 state.halted = true;
-                return ExecError(1, "Return with empty stack".clone());
+                ExecError(1, "Return with empty stack".clone())
             }
-            Yield
-        }
+        },
 
         Once(jump_if_done) => {
             let fired = state.once_fired;
