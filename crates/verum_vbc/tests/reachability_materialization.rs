@@ -50,7 +50,7 @@ fn fixture() -> VbcModule {
 }
 
 fn assert_callm_closure(module: &VbcModule) {
-    let reached = reachability::analyze(module);
+    let reached = reachability::analyze(module).unwrap();
     assert!(reached.reachable_ids.contains(&1), "record method must remain a CallM candidate");
     assert!(reached.reachable_ids.contains(&3), "candidate body dependencies must be followed");
     assert!(!reached.reachable_ids.contains(&4), "a method with an uncalled name is not a root");
@@ -75,5 +75,5 @@ fn a_declared_record_return_does_not_require_local_construction() {
     producer.semantic_return = Some(TypeRef::Concrete(RECORD));
     module.functions[0].instructions.as_mut().unwrap().insert(0, call(2));
     assert_callm_closure(&module);
-    assert!(reachability::analyze(&module).reachable_ids.contains(&2));
+    assert!(reachability::analyze(&module).unwrap().reachable_ids.contains(&2));
 }

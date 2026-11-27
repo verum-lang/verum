@@ -302,6 +302,36 @@ fn destruction_discovers_generic_glue_after_enclosing_function_specialization() 
 }
 
 #[test]
+fn reachable_destruction_selects_only_its_exact_specialization_after_reload() {
+    let module = generic_destructor_module();
+    let mut graph = InstantiationGraph::new();
+    let int = [TypeRef::Concrete(TypeId::INT)];
+    let boolean = [TypeRef::Concrete(TypeId::BOOL)];
+    for arguments in [&int, &boolean] {
+        graph.record_instantiation(FunctionId(0), arguments.to_vec(), SourceLocation::default());
+    }
+    let specialized = monomorphize_minimal(module, &graph).unwrap().module;
+    let root = specialized.specialized_function_id(FunctionId(0), &int).unwrap();
+    let expected = specialized.specialized_function_id(FunctionId(1), &int).unwrap();
+    let other = specialized.specialized_function_id(FunctionId(1), &boolean).unwrap();
+    let bytes = verum_vbc::serialize::serialize_module(&specialized).unwrap();
+    let wire = verum_vbc::deserialize::deserialize_module(&bytes).unwrap();
+    for module in [&specialized, &wire] {
+        let reached = verum_vbc::reachability::analyze_with_roots(module, &[root.0]).unwrap();
+        assert!(reached.reachable_ids.contains(&expected.0));
+        assert!(!reached.reachable_ids.contains(&other.0));
+    }
+}
+
+#[test]
+fn invalid_reachable_wire_body_cannot_produce_a_partial_call_graph() {
+    let mut module = module(&[Instruction::RetV], 1);
+    module.functions[0].bytecode_length = u32::MAX;
+    assert!(matches!(verum_vbc::reachability::analyze_with_roots(&module, &[0]),
+        Err(verum_vbc::error::VbcError::InvalidBytecodeOffset { .. })));
+}
+
+#[test]
 fn destruction_is_a_mutating_optimizer_boundary_and_call_like_escape() {
     let instructions = [
         Instruction::LoadI {

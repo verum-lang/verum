@@ -84,29 +84,28 @@ impl DropPlan {
     /// Generic destructor bodies required by this concrete plan.
     pub fn generic_calls(&self) -> List<(FunctionId, List<TypeRef>)> {
         let mut calls = List::new();
-        self.collect_calls(&mut calls);
+        self.visit_glue(|function, args| {
+            if !args.is_empty() {
+                calls.push((function, args.iter().cloned().collect()));
+            }
+        });
         calls
     }
-    fn collect_calls(&self, calls: &mut List<(FunctionId, List<TypeRef>)>) {
-        match self {
-            Self::Glue {
-                function,
-                type_args,
-                ..
-            } if !type_args.is_empty() => calls.push((*function, type_args.clone())),
-            Self::Record { fields, .. } => {
-                for field in fields {
-                    field.collect_calls(calls);
-                }
+
+    /// Every destructor that can execute, including those of nested fields
+    /// and payloads. The call uses the witnesses selected by the declaration.
+    pub(crate) fn visit_glue(&self, mut visit: impl FnMut(FunctionId, &[TypeRef])) {
+        let mut pending = List::new();
+        pending.push(self);
+        while let Some(plan) = pending.pop() {
+            match plan {
+                Self::Glue { function, type_args, .. } => visit(*function, type_args),
+                Self::Record { fields, .. } => pending.extend(fields.iter().rev()),
+                Self::Sum { variants, .. } => pending.extend(
+                    variants.iter().rev().flat_map(|(_, fields)| fields.iter().rev()),
+                ),
+                Self::Ignore | Self::Text | Self::Callable { .. } => {}
             }
-            Self::Sum { variants, .. } => {
-                for (_, fields) in variants {
-                    for field in fields {
-                        field.collect_calls(calls);
-                    }
-                }
-            }
-            _ => {}
         }
     }
 }

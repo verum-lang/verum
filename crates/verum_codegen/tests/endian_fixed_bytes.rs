@@ -748,7 +748,7 @@ fn native_array_refusal_is_scoped_to_reachable_program_helpers() {
         let wire = decoded_wire(&module);
         for (route, module) in [("source", &module), ("wire", &wire)] {
             let helper = module.find_function_by_name("array_read").expect("helper");
-            let reachability = verum_vbc::reachability::analyze(module);
+            let reachability = verum_vbc::reachability::analyze(module).unwrap();
             assert_eq!(
                 reachability.reachable_ids.contains(&helper.0),
                 called,

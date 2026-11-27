@@ -266,7 +266,7 @@ fn queries_do_not_hide_later_calls_from_mono_or_reachability() {
             .unwrap(),
         );
     }
-    let roots = verum_vbc::reachability::analyze_with_roots(&module, &[probe.0]);
+    let roots = verum_vbc::reachability::analyze_with_roots(&module, &[probe.0]).unwrap();
     for name in ["inner", "outer", "probe"] {
         assert!(
             roots

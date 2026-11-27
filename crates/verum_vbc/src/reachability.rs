@@ -33,6 +33,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::instruction::{Instruction, SystemSubOpcode};
 use crate::module::{Constant, VbcModule};
+use crate::error::{VbcError, VbcResult};
 
 /// Result of a reachability walk.
 #[derive(Debug, Default)]
@@ -60,7 +61,7 @@ pub struct Reachability {
 /// ctors/dtors, every `Constant::Function` in the constant pool, and
 /// mount-alias targets. Callers with additional roots (e.g. exported
 /// functions in library builds) extend via `analyze_with_roots`.
-pub fn analyze(module: &VbcModule) -> Reachability {
+pub fn analyze(module: &VbcModule) -> VbcResult<Reachability> {
     let mut roots: Vec<u32> = Vec::new();
     if let Some(main_id) = module.find_function_by_name("main") {
         roots.push(main_id.0);
@@ -71,7 +72,7 @@ pub fn analyze(module: &VbcModule) -> Reachability {
 /// Compute the conservative reachable set starting from `extra_roots`
 /// plus the implicit roots (ctors, dtors, constant-pool function refs,
 /// mount aliases).
-pub fn analyze_with_roots(module: &VbcModule, extra_roots: &[u32]) -> Reachability {
+pub fn analyze_with_roots(module: &VbcModule, extra_roots: &[u32]) -> VbcResult<Reachability> {
     // Pre-index: id → descriptor position, name → ids, bare method
     // name (last dotted segment) → ids.
     let mut by_id: HashMap<u32, usize> = HashMap::with_capacity(module.functions.len());
@@ -149,17 +150,41 @@ pub fn analyze_with_roots(module: &VbcModule, extra_roots: &[u32]) -> Reachabili
     };
 
     // Worklist pass 1: direct edges + method-name collection.
-    let visit = |id: u32, out: &mut Reachability, queue: &mut VecDeque<u32>| {
-        let Some(&pos) = by_id.get(&id) else { return };
+    let mut scanned_drops = HashSet::new();
+    let mut visit = |id: u32, out: &mut Reachability, queue: &mut VecDeque<u32>| -> VbcResult<()> {
+        let Some(&pos) = by_id.get(&id) else { return Ok(()) };
         let f = &module.functions[pos];
         if let Some(name) = module.strings.get(f.name) {
             out.reachable_names.insert(name.to_string());
         }
-        let Some(instrs) = f.instructions.as_ref() else {
-            return;
+        let decoded;
+        let instrs = if let Some(body) = f.instructions.as_deref() {
+            body
+        } else {
+            let end = f.bytecode_offset.checked_add(f.bytecode_length);
+            let bytes = end.and_then(|end| module.bytecode.get(f.bytecode_offset as usize..end as usize))
+                .ok_or(VbcError::InvalidBytecodeOffset {
+                    func: f.id,
+                    offset: end.unwrap_or(u32::MAX),
+                    size: u32::try_from(module.bytecode.len()).unwrap_or(u32::MAX),
+                })?;
+            decoded = crate::bytecode::decode_instructions(bytes)?;
+            decoded.as_slice()
         };
         for instr in instrs {
             match instr {
+                Instruction::DropTyped { type_ref, .. } => {
+                    if !scanned_drops.contains(type_ref) {
+                        scanned_drops.insert(type_ref.clone());
+                        if let Ok(plan) = crate::drop_plan::build(module, type_ref) {
+                            plan.visit_glue(|function, args| {
+                                if let Some(target) = crate::drop_plan::native_glue(module, function, args) {
+                                    push(target.0, out, queue);
+                                }
+                            });
+                        }
+                    }
+                }
                 Instruction::Call { func_id, .. }
                 | Instruction::TailCall { func_id, .. }
                 | Instruction::NewClosure { func_id, .. }
@@ -227,10 +252,11 @@ pub fn analyze_with_roots(module: &VbcModule, extra_roots: &[u32]) -> Reachabili
                 _ => {}
             }
         }
+        Ok(())
     };
 
     while let Some(id) = queue.pop_front() {
-        visit(id, &mut out, &mut queue);
+        visit(id, &mut out, &mut queue)?;
     }
 
     // Pass 2: by-name candidate closure for CallM dispatch. Any
@@ -349,11 +375,11 @@ pub fn analyze_with_roots(module: &VbcModule, extra_roots: &[u32]) -> Reachabili
             }
         }
         while let Some(id) = queue.pop_front() {
-            visit(id, &mut out, &mut queue);
+            visit(id, &mut out, &mut queue)?;
         }
     }
 
-    out
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -394,7 +420,7 @@ mod tests {
             ("leaf", vec![]),
             ("dead", vec![call(2)]),
         ]);
-        let r = analyze(&m);
+        let r = analyze(&m).unwrap();
         assert!(r.reachable_ids.contains(&0));
         assert!(r.reachable_ids.contains(&1));
         assert!(r.reachable_ids.contains(&2));
@@ -425,7 +451,7 @@ mod tests {
                 },
             });
         }
-        let r = analyze(&m);
+        let r = analyze(&m).unwrap();
         assert!(r.reachable_ids.contains(&1), "candidate A kept");
         assert!(r.reachable_ids.contains(&2), "candidate B kept");
         assert!(
@@ -470,12 +496,12 @@ mod tests {
             });
             m
         };
-        let without = analyze(&build(false));
+        let without = analyze(&build(false)).unwrap();
         assert!(
             without.reachable_ids.contains(&1),
             "unknown receiver keeps the record method without local construction"
         );
-        let with = analyze(&build(true));
+        let with = analyze(&build(true)).unwrap();
         assert!(
             with.reachable_ids.contains(&1),
             "record method included once New{{Gadget}} is reachable"
@@ -503,7 +529,7 @@ mod tests {
         td.kind = TypeKind::Record;
         td.drop_fn = Some(1);
         m.types.push(td);
-        let r = analyze(&m);
+        let r = analyze(&m).unwrap();
         assert!(
             r.reachable_ids.contains(&1),
             "drop glue of a constructed type is an implicit edge"
@@ -515,7 +541,7 @@ mod tests {
     fn constant_function_refs_are_roots() {
         let mut m = module_with(vec![("main", vec![]), ("via_ref", vec![])]);
         m.constants.push(Constant::Function(FunctionId(1)));
-        let r = analyze(&m);
+        let r = analyze(&m).unwrap();
         assert!(r.reachable_ids.contains(&1));
     }
 
@@ -531,7 +557,7 @@ mod tests {
         let sid: StringId = m.intern_string("Mutex.new");
         m.external_function_names
             .push((FunctionId(crate::module::XMOD_CALL_ID_BAND_BASE), sid));
-        let r = analyze(&m);
+        let r = analyze(&m).unwrap();
         assert!(
             r.reachable_ids.contains(&1),
             "short-spelled band name chases to the qualified body"
@@ -547,7 +573,7 @@ mod tests {
         let sid: StringId = m.intern_string("core.time.Instant.now");
         m.external_function_names
             .push((FunctionId(crate::module::XMOD_CALL_ID_BAND_BASE), sid));
-        let r = analyze(&m);
+        let r = analyze(&m).unwrap();
         assert!(
             r.reachable_ids.contains(&1),
             "band id chases to the named body"
