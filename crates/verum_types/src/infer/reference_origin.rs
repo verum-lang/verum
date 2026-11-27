@@ -792,10 +792,31 @@ impl TypeChecker {
         Some(origins)
     }
 
+    /// The success payload of a core sum is moved out of the evaluated
+    /// operand. A user-defined Try implementation can compute another value,
+    /// so its input loans are candidates, never an exhaustive receipt.
+    pub(super) fn observe_try_output(
+        &mut self, operand: &Expr, carrier: &Type, output: &Type, span: verum_ast::Span,
+    ) {
+        if !self.carries_stored_loan(output) { return; }
+        use verum_common::well_known_types::WellKnownType;
+        let projection = self.conversion_nominal_head(carrier).is_some_and(|(name, args)| {
+            let Some((module, leaf)) = name.rsplit_once('.') else { return false };
+            let first = match (WellKnownType::from_declaration(leaf, module), args) {
+                (Some(WellKnownType::Result), [first, _]) | (Some(WellKnownType::Maybe), [first]) => first,
+                _ => return false,
+            };
+            self.types_equivalent(first, output)
+        });
+        let origins = self.aggregate_origins(operand, carrier);
+        let complete = projection && self.complete_slot_value_origins(operand);
+        self.record_owned_value_origins(span, Some(origins), complete);
+    }
+
     fn evaluated_result_origins(&self, value: &Expr) -> Option<&List<RecordReceiver>> {
         match &unparen(value).kind {
             ExprKind::Call { .. } | ExprKind::MethodCall { .. } | ExprKind::MetaFunction { .. } | ExprKind::Closure { .. }
-            | ExprKind::Tuple(_) | ExprKind::Array(_) | ExprKind::Record { .. } =>
+            | ExprKind::Tuple(_) | ExprKind::Array(_) | ExprKind::Record { .. } | ExprKind::Try(_) =>
                 self.evaluated_value_origins.get(&value.span)?.origins.as_ref(),
             _ => None,
         }

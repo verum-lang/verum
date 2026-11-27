@@ -4,6 +4,38 @@
 use super::*;
 
 #[test]
+fn propagated_success_preserves_the_ownership_of_its_payload() {
+    let session = crate::Session::new(crate::options::CompilerOptions::default());
+    let (registry, phase) = release_stdlib_graph(&session);
+    let check = |body: &str| {
+        let source = format!("module loan_probe; mount core.{{Maybe, Result, List}}; {body}");
+        let module = Parser::new(&source).parse_module().unwrap();
+        check_source_module(&mut phase.configured_checker(), "loan_probe", &module, &registry)
+    };
+    for legal in [
+        "fn keep(r: Result<&Int, Int>) -> Result<&Int, Int> { Result.Ok(r?) }",
+        "fn consume() -> Result<Int, Int> { let local = 7;
+            let r: Result<&Int, Int> = Result.Ok(&local); Result.Ok(*(r?)) }",
+        "fn collect<T>(r: Result<T, Int>) -> Result<List<T>, Int> {
+            let mut out: List<T> = List.new(); out.push(r?); Result.Ok(out) }",
+        "fn collect<T>(r: Maybe<T>) -> Maybe<List<T>> {
+            let mut out: List<T> = List.new(); out.push(r?); Maybe.Some(out) }",
+    ] {
+        check(legal).unwrap_or_else(|errors| panic!("{legal}: {errors:#?}"));
+    }
+    for escaping in [
+        "fn leak() -> Result<&Int, Int> { let local = 7;
+            let r: Result<&Int, Int> = Result.Ok(&local); Result.Ok(r?) }",
+        "fn leak() -> Maybe<Maybe<&Int>> { let local = 7;
+            let r: Maybe<Maybe<&Int>> = Maybe.Some(Maybe.Some(&local)); Maybe.Some(r?) }",
+    ] {
+        let errors = check(escaping).expect_err("a reference to expired storage escaped through ?");
+        assert!(errors.iter().any(|error| error.code() == Some("E312")
+            && error.message().contains("local")), "{escaping}: {errors:#?}");
+    }
+}
+
+#[test]
 fn actual_stdlib_value_and_callable_origins_preserve_source_admission() {
     let session = crate::Session::new(crate::options::CompilerOptions::default());
     let (registry, phase) = release_stdlib_graph(&session);

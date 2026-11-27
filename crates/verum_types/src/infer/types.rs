@@ -2038,6 +2038,8 @@ fn substitute_refinement_binder(
             }
         };
 
+        self.observe_try_output(inner_expr, &inner_ty, &inner_try.output, try_span);
+
         // Step 3: Get the function's return type
         // If the function has a throws clause, treat the return type as Result<T, E>
         let function_return_type = match &self.current_function_return_type {
