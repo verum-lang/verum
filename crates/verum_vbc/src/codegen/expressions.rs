@@ -13567,7 +13567,8 @@ impl VbcCodegen {
         // Static calls on declaration-owned type parameters and associated
         // projections use the same witness as a type annotation in this frame.
         if let Some(type_ref) = self.type_parameter_static_receiver(receiver)? {
-            let selector = match self.bounded_static_method(&type_ref, method.as_str(), args.len()).transpose()? {
+            let member = self.bounded_static_method(&type_ref, method.as_str(), args.len()).transpose()?;
+            let selector = match &member {
                 Some(member) => {
                     let owner = self.type_by_id(member.owner).and_then(|ty| self.type_declaration_identity(ty))
                         .or_internal("bounded static member has no protocol declaration identity")?;
@@ -13583,11 +13584,14 @@ impl VbcCodegen {
             crate::codegen::bare_method::record("<witness>", method.name.as_str());
             // Arguments go in a contiguous block, as every CallM expects.
             let mut arg_regs: Vec<Reg> = Vec::with_capacity(args.len());
-            for a in args.iter() {
-                let r = self
-                    .compile_expr(a)?
+            for (index, arg) in args.iter().enumerate() {
+                let parameter = member.as_ref().and_then(|m| m.inputs.get(index));
+                let start = self.ctx.instructions.len();
+                let source = self
+                    .compile_call_operand(arg, parameter)?
                     .or_internal("type-param method call: arg has no value")?;
-                arg_regs.push(r);
+                let actual = self.copy_source_type(arg, source, start, self.ctx.instructions.len());
+                arg_regs.push(self.emit_declared_call_argument(parameter, arg, source, actual.as_ref())?);
             }
             let args_start = if arg_regs.is_empty() {
                 Reg(0)

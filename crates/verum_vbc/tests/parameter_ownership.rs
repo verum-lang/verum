@@ -77,6 +77,31 @@ fn generic_temporary_parameter_uses_the_instantiated_drop_witness() {
 }
 
 #[test]
+fn static_protocol_calls_borrow_then_transfer_the_owned_argument() {
+    run(r#"
+        type Consumer is protocol {
+            fn inspect(ticket: &Ticket) -> Int;
+            fn consume(ticket: Ticket);
+        };
+        type Sink is ();
+        implement Consumer for Sink {
+            fn inspect(ticket: &Ticket) -> Int { ticket.counter.value }
+            fn consume(ticket: Ticket) {}
+        }
+        fn dispatch<S: Consumer>(ticket: Ticket) -> Int {
+            let initial = S.inspect(&ticket);
+            S.consume(ticket);
+            initial
+        }
+        fn probe() -> Int {
+            let mut count = Count { value: 0 };
+            let initial = dispatch<Sink>(Ticket { counter: &mut count });
+            if initial == 0 && count.value == 1 { 73 } else { 0 }
+        }
+    "#);
+}
+
+#[test]
 fn refined_parameter_drops_its_declared_base_without_publishing_an_erased_domain() {
     let source = r#"
         fn take(value: Ticket{true}) {}
