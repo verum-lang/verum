@@ -316,6 +316,18 @@ fn typed_method_chains_use_the_implementation_selected_by_the_consumer() {
             fn read(&self)->Int { self.open.read() }
             fn unit(&self)->Int { 1 }
         }
+        public type MeasuredOf<T> is { public ready: Ready, public tag: T };
+        public type ScalarTag is protocol { fn code(&self)->Int; };
+        implement ScalarTag for Int { fn code(&self)->Int { *self } }
+        implement<T: ScalarTag> Measure for MeasuredOf<T> {
+            fn read(&self)->Int { self.ready.read() }
+            fn unit(&self)->Int { 1 }
+        }
+        public type DeferredOf<T> is { public open: Open, public tag: T };
+        implement<T> Measure for DeferredOf<T> {
+            fn read(&self)->Int { self.open.read() }
+            fn unit(&self)->Int { 1 }
+        }
         public type Alternative is protocol { fn read(&self)->Int; };
         public type Ambiguous is { public ready: Ready, public open: Open };
         implement Measure for Ambiguous {
@@ -339,9 +351,11 @@ fn typed_method_chains_use_the_implementation_selected_by_the_consumer() {
     for (receiver, accepts) in [
         ("Ready", true), ("Pending", false), ("Open", false),
         ("Measured", true), ("Deferred", false), ("Measure", false),
+        ("MeasuredOf<Int>", true), ("MeasuredOf<Bool>", false), ("DeferredOf<Int>", false),
         ("Guarded", true), ("Indirect", false), ("Ambiguous", false),
     ] {
-        let consumer = format!("mount provider.{receiver};
+        let mounted = receiver.split('<').next().unwrap();
+        let consumer = format!("mount provider.{mounted};
             fn call(input:{receiver})->Int {{
                 let read:fn({receiver})->Int = |value| value.read();
                 read(input)
@@ -379,8 +393,12 @@ fn typed_method_chains_use_the_implementation_selected_by_the_consumer() {
                 expected, actual, span,
             } if expected.contains("excludes {Async}") && actual.contains("unrestricted")
                 && &consumer[span.start as usize..span.end as usize] == "|value| value.read()"));
-            assert!(unresolved || (receiver == "Ambiguous" && errors.iter().any(|error|
-                matches!(error, verum_types::TypeError::AmbiguousMethod { .. }))), "{receiver}: {errors:?}");
+            let refused_dispatch = errors.iter().any(|error| match error {
+                verum_types::TypeError::AmbiguousMethod { .. } => receiver == "Ambiguous",
+                verum_types::TypeError::MethodNotFound { .. } => receiver == "MeasuredOf<Bool>",
+                _ => false,
+            });
+            assert!(unresolved || refused_dispatch, "{receiver}: {errors:?}");
         }
     }
 }

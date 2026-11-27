@@ -257,7 +257,13 @@ impl TypeChecker {
         let receiver = self.unifier.normalize_aliases(&self.unifier.apply(inner));
         let protocols = self.protocol_checker.read();
         let Ok(Some(selected)) = protocols.source_impl(owner, source) else { return false };
-        if !selected.parameters.is_empty() || self.unifier.normalize_aliases(&selected.for_type) != receiver {
+        // An open receiver can acquire further applicable implementations after
+        // substitution. For a closed receiver, use ordinary dispatch below: it
+        // instantiates the implementation and proves its where clauses.
+        if receiver.contains_type(|part| matches!(part,
+            Type::Var(_) | Type::RecordField { .. } | Type::Array { size: None, .. }
+            | Type::Meta { value: crate::ty::ValueTerm::Parameter(_) | crate::ty::ValueTerm::Inference(_), .. }
+        )) || self.contains_unresolved_projection(&receiver) {
             return false;
         }
         let Ok((premises, callables)) = self.method_dispatch_premises(span) else { return false };
