@@ -11939,13 +11939,18 @@ with .to_float() or .to_int() (at {:?})",
             // Assignment
             Assign => {
                 // =====================================================================
-                // DEFINITE ASSIGNMENT: Track assignment BEFORE checking LHS
-                // This allows us to skip init checking for assignment targets.
-                // Spec: L0-critical/memory-safety/uninitialized
-                // =====================================================================
+                // An enclosing recovery can resume the loop before the store.
+                let destination = self.extract_simple_var_name(left);
+                let pending = self.try_recover_depth == 0
+                    && destination.as_ref().is_some_and(|name| self.affine_tracker.begin_replacement(name));
+                let right_result = self.synth_expr(right);
+                if pending {
+                    self.affine_tracker.end_replacement();
+                }
+                let right_result = right_result?;
+                let initialized = destination.as_ref()
+                    .is_some_and(|name| self.init_tracker.is_fully_initialized(name));
                 self.handle_assignment(left, _span);
-
-                let right_result = self.synth_expr(right)?;
                 let stored_type = self.with_place_types(left, |tc| {
                     let target = tc.assignment_target_type(left)?;
                     tc.check_synthesized_value(right, &target.ty, right_result.clone())?;
@@ -11968,6 +11973,9 @@ with .to_float() or .to_int() (at {:?})",
                     }
                 }
                 self.retain_assignment_origins(left, &origins)?;
+                if let Some(name) = destination {
+                    self.affine_tracker.reinitialize_value(&name, initialized, _span)?;
+                }
 
                 Ok(InferResult::new(Type::unit()))
             }

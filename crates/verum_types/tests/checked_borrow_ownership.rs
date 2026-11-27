@@ -30,6 +30,66 @@ const DECLARATIONS: &str = "type affine Token is {value:Int};
     fn take(value:Token)->Int {value.value}";
 
 #[test]
+fn an_affine_accumulator_is_restored_only_by_a_completed_store() {
+    let check = |body: &str| {
+        errors(&format!(
+            "{DECLARATIONS}
+        type Result<T,E> is Ok(T) | Err(E);
+        fn advance(token:Token, by:Int)->Token {{Token {{value:token.value+by}}}}
+        fn choose(a:Token, b:Token)->Token {{a}}
+        fn probe(flag:Bool, initial:Token)->Int {{
+            let mut acc=initial; {body} acc.value
+        }}"
+        ))
+    };
+    for body in [
+        "while flag {acc=advance(acc,1);}",
+        "while flag {acc=if flag {advance(acc,1)} else {advance(acc,2)};}",
+        "while flag {acc=advance(acc,1); if flag {continue;}}",
+        "while flag {acc=if flag {continue} else {advance(acc,2)};}",
+        "while flag {acc={let next=acc; while flag {break;} next};}",
+        "let prior=acc; acc=advance(prior,1);",
+    ] {
+        let found = check(body);
+        assert!(found.is_empty(), "{body}: {found:?}");
+    }
+    for (body, diagnostic) in [
+        ("while flag {let moved=acc;}", "AffineValueInLoop"),
+        ("while flag {acc=choose(acc,acc);}", "MovedValueUsed"),
+        (
+            "while flag {acc={let next=acc; if flag {continue;} next};}",
+            "AffineValueInLoop",
+        ),
+        (
+            "while flag {acc={let next=acc; if flag {break;} next};}",
+            "AffineValueInLoop",
+        ),
+        (
+            "while flag {let local=Token{value:3}; while flag {let moved=local;}}",
+            "AffineValueInLoop",
+        ),
+        (
+            "while flag {let status=try {acc=advance(acc,1); 1} recover |_| {0};}",
+            "AffineValueInLoop",
+        ),
+        (
+            "while flag {let status=try {acc={let next=acc; let result:Result<Int,Int> = Err(2); let k=result?; next}; 1};}",
+            "AffineValueInLoop",
+        ),
+        (
+            "while flag {let status:Result<Int,Int> = try {acc={let next=acc; let result:Result<Int,Int> = Err(2); let k=result?; next}; 1};}",
+            "AffineValueInLoop",
+        ),
+    ] {
+        let found = check(body);
+        assert!(
+            found.iter().any(|message| message.contains(diagnostic)),
+            "{body}: {found:?}"
+        );
+    }
+}
+
+#[test]
 fn checked_shared_borrows_keep_affine_owners_available() {
     for body in [
         "let borrowed:&Token=&first; let again:&Token=&first; first.value",

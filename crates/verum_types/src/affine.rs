@@ -112,8 +112,12 @@ pub struct AffineTracker {
     /// from a known ordinary declaration and from the Copy protocol.
     resource_disciplines: Map<Text, verum_common::ResourceDiscipline>,
 
-    /// Current loop nesting depth (0 = not in loop)
-    loop_depth: usize,
+    /// Binding sets restored when nested repetition ends.
+    outer_loops: List<Map<Text, Span>>,
+    /// Stores currently evaluating their replacement value.
+    replacements: List<LoopReplacement>,
+    /// First pending store inside each enclosing local `?` target.
+    residual_targets: List<usize>,
     /// How deep we are inside a region from which the enclosing loop's
     /// BACK-EDGE cannot be reached — a block carrying an unconditional
     /// `return` at its own top level. See `enter_leaving_region`.
@@ -121,7 +125,7 @@ pub struct AffineTracker {
 
     /// Set of variable names that were bound before entering the current loop
     /// Used to detect use of outer-scope affine values in loops
-    pre_loop_bindings: Set<Text>,
+    pre_loop_bindings: Map<Text, Span>,
 
     /// Names the exactly-once obligation does NOT apply to in the
     /// function this tracker belongs to: its own parameters, `self`
@@ -174,11 +178,19 @@ struct AffineBinding {
     moved_indices: Set<usize>,
 }
 
+#[derive(Debug, Clone)]
+struct LoopReplacement {
+    name: Text,
+    declaration: Span,
+    depth: usize,
+    moved: bool,
+}
+
 /// Outer bindings temporarily hidden by a match arm's own pattern names.
 #[derive(Clone)]
 pub(crate) struct PatternScope {
     hidden: Map<Text, Maybe<AffineBinding>>,
-    pre_loop_bindings: Set<Text>,
+    pre_loop_bindings: Map<Text, Span>,
     linear_exempt: Set<Text>,
 }
 
@@ -221,9 +233,11 @@ impl AffineTracker {
         Self {
             bindings: Map::new(),
             resource_disciplines: Map::new(),
-            loop_depth: 0,
+            outer_loops: List::new(),
+            replacements: List::new(),
+            residual_targets: List::new(),
             leaving_depth: 0,
-            pre_loop_bindings: Set::new(),
+            pre_loop_bindings: Map::new(),
             linear_exempt: Set::new(),
         }
     }
@@ -257,9 +271,11 @@ impl AffineTracker {
         Self {
             bindings: Map::new(),
             resource_disciplines: self.resource_disciplines.clone(),
-            loop_depth: 0,
+            outer_loops: List::new(),
+            replacements: List::new(),
+            residual_targets: List::new(),
             leaving_depth: 0,
-            pre_loop_bindings: Set::new(),
+            pre_loop_bindings: Map::new(),
             linear_exempt: Set::new(),
         }
     }
@@ -449,26 +465,138 @@ impl AffineTracker {
     /// Records all current bindings as "pre-loop" so we can detect
     /// when affine values from outer scope are used inside the loop.
     pub fn enter_loop(&mut self) {
-        if self.loop_depth == 0 {
-            // First loop level - record current bindings
-            self.pre_loop_bindings = self.bindings.keys().cloned().collect();
-        }
-        self.loop_depth += 1;
+        let visible = self
+            .bindings
+            .iter()
+            .map(|(name, binding)| (name.clone(), binding.binding_span))
+            .collect();
+        self.outer_loops
+            .push(std::mem::replace(&mut self.pre_loop_bindings, visible));
     }
 
-    /// Exit a loop context
+    /// Restore the enclosing loop's entry when leaving a nested loop.
     pub fn exit_loop(&mut self) {
-        if self.loop_depth > 0 {
-            self.loop_depth -= 1;
-            if self.loop_depth == 0 {
-                self.pre_loop_bindings.clear();
-            }
+        if let Some(previous) = self.outer_loops.pop() {
+            self.pre_loop_bindings = previous;
         }
     }
 
-    /// Check if we're currently inside a loop
+    /// Whether checking a repeated body.
     pub fn in_loop(&self) -> bool {
-        self.loop_depth > 0
+        !self.outer_loops.is_empty()
+    }
+
+    /// The destination is a particular lexical binding. Its current value may
+    /// be moved while evaluating a store that restores it before repetition.
+    pub(crate) fn begin_replacement(&mut self, name: &Text) -> bool {
+        let Some(binding) = self.bindings.get(name) else {
+            return false;
+        };
+        if self.pre_loop_bindings.get(name) != Some(&binding.binding_span) {
+            return false;
+        }
+        self.replacements.push(LoopReplacement {
+            name: name.clone(),
+            declaration: binding.binding_span,
+            depth: self.outer_loops.len(),
+            moved: false,
+        });
+        true
+    }
+
+    pub(crate) fn end_replacement(&mut self) {
+        self.replacements.pop();
+    }
+
+    fn check_skipped_stores<'a>(
+        mut stores: impl Iterator<Item = &'a LoopReplacement>,
+        span: Span,
+    ) -> Result<(), TypeError> {
+        if let Some(store) = stores.find(|store| store.moved) {
+            return Err(TypeError::AffineValueInLoop {
+                name: store.name.clone(),
+                binding_span: store.declaration,
+                use_span: span,
+            });
+        }
+        Ok(())
+    }
+
+    pub(crate) fn check_loop_jump(&self, labelled: bool, span: Span) -> Result<(), TypeError> {
+        let depth = self.outer_loops.len();
+        Self::check_skipped_stores(
+            self.replacements
+                .iter()
+                .filter(|store| labelled || store.depth >= depth),
+            span,
+        )
+    }
+
+    pub(crate) fn enter_residual_target(&mut self) {
+        self.residual_targets.push(self.replacements.len());
+    }
+
+    pub(crate) fn exit_residual_target(&mut self) {
+        self.residual_targets.pop();
+    }
+
+    pub(crate) fn check_residual_exit(&self, span: Span) -> Result<(), TypeError> {
+        if let Some(&first) = self.residual_targets.last() {
+            Self::check_skipped_stores(self.replacements.iter().skip(first), span)?;
+        }
+        Ok(())
+    }
+
+    fn loop_forbids_move(&mut self, name: &str) -> bool {
+        if !self.in_loop() {
+            return false;
+        }
+        let name = Text::from(name);
+        let Some(declaration) = self.pre_loop_bindings.get(&name) else {
+            return false;
+        };
+        if !self
+            .bindings
+            .get(&name)
+            .is_some_and(|binding| binding.binding_span == *declaration)
+        {
+            return false;
+        }
+        let depth = self.outer_loops.len();
+        if let Some(pending) = self.replacements.iter_mut().rev().find(|pending| {
+            pending.name == name && pending.declaration == *declaration && pending.depth == depth
+        }) {
+            pending.moved = true;
+            return false;
+        }
+        self.loop_can_iterate()
+    }
+
+    /// Only a completed store establishes a fresh whole value at the place.
+    pub(crate) fn reinitialize_value(
+        &mut self,
+        name: &Text,
+        initialized: bool,
+        store: Span,
+    ) -> Result<(), TypeError> {
+        if let Some(binding) = self.bindings.get_mut(name) {
+            if initialized
+                && binding.resource_kind == ResourceKind::Linear
+                && !binding.definitely_consumed
+            {
+                return Err(TypeError::LinearNotConsumed {
+                    name: name.clone(),
+                    binding_span: binding.binding_span,
+                    scope_end: store,
+                });
+            }
+            binding.is_consumed = false;
+            binding.definitely_consumed = false;
+            binding.first_use = None;
+            binding.moved_fields.clear();
+            binding.moved_indices.clear();
+        }
+        Ok(())
     }
 
     /// Enter a region the enclosing loop cannot iterate out of.
@@ -508,7 +636,7 @@ impl AffineTracker {
 
     /// Is the enclosing loop's back-edge reachable from here?
     fn loop_can_iterate(&self) -> bool {
-        self.loop_depth > 0 && self.leaving_depth == 0
+        self.in_loop() && self.leaving_depth == 0
     }
 
     /// Record a use of an affine value
@@ -525,7 +653,7 @@ impl AffineTracker {
                 self.bindings.get(&Text::from(name)).map(|b| b.is_consumed)
             );
         }
-        let loop_can_iterate = self.loop_can_iterate();
+        let loop_forbids_move = self.loop_forbids_move(name);
         if let Some(binding) = self.bindings.get_mut(&Text::from(name)) {
             if binding.is_consumed {
                 // Value already consumed
@@ -570,7 +698,7 @@ impl AffineTracker {
 
             // Check for use of outer-scope affine value in loop
             // This is an error because the loop might execute multiple times
-            if loop_can_iterate && self.pre_loop_bindings.contains(&Text::from(name)) {
+            if loop_forbids_move {
                 return Err(TypeError::AffineValueInLoop {
                     name: name.to_text(),
                     binding_span: binding.binding_span,
@@ -628,7 +756,7 @@ impl AffineTracker {
         field_name: &str,
         span: Span,
     ) -> Result<(), TypeError> {
-        let loop_can_iterate = self.loop_can_iterate();
+        let loop_forbids_move = self.loop_forbids_move(var_name);
         if let Some(binding) = self.bindings.get_mut(&Text::from(var_name)) {
             // Check if the whole struct has been consumed
             if binding.is_consumed {
@@ -649,7 +777,7 @@ impl AffineTracker {
             }
 
             // Check for use in loop
-            if loop_can_iterate && self.pre_loop_bindings.contains(&Text::from(var_name)) {
+            if loop_forbids_move {
                 return Err(TypeError::AffineValueInLoop {
                     name: format!("{}.{}", var_name, field_name).to_text(),
                     binding_span: binding.binding_span,
@@ -688,7 +816,6 @@ impl AffineTracker {
     /// let whole = container; // Now valid!
     /// ```
     pub fn reinitialize_field(&mut self, var_name: &str, field_name: &str) {
-        let loop_can_iterate = self.loop_can_iterate();
         if let Some(binding) = self.bindings.get_mut(&Text::from(var_name)) {
             // Remove the field from moved_fields set
             binding.moved_fields.retain(|moved| !Self::contains_projection(field_name, moved));
@@ -723,7 +850,7 @@ impl AffineTracker {
         index: usize,
         span: Span,
     ) -> Result<(), TypeError> {
-        let loop_can_iterate = self.loop_can_iterate();
+        let loop_forbids_move = self.loop_forbids_move(var_name);
         if let Some(binding) = self.bindings.get_mut(&Text::from(var_name)) {
             // Check if the whole tuple has been consumed
             if binding.is_consumed {
@@ -744,7 +871,7 @@ impl AffineTracker {
             }
 
             // Check for use in loop
-            if loop_can_iterate && self.pre_loop_bindings.contains(&Text::from(var_name)) {
+            if loop_forbids_move {
                 return Err(TypeError::AffineValueInLoop {
                     name: format!("{}.{}", var_name, index).to_text(),
                     binding_span: binding.binding_span,
@@ -782,7 +909,6 @@ impl AffineTracker {
     ///
     /// This is called when a moved tuple element is reassigned.
     pub fn reinitialize_index(&mut self, var_name: &str, index: usize) {
-        let loop_can_iterate = self.loop_can_iterate();
         if let Some(binding) = self.bindings.get_mut(&Text::from(var_name)) {
             binding.moved_indices.remove(&index);
         }
@@ -903,6 +1029,9 @@ impl AffineTracker {
     /// if either path consumed it (so a later use is refused), and
     /// MUST-consumed only if both did (so a `linear` binding is satisfied).
     pub fn merge_branch(&mut self, other: &AffineTracker) {
+        for (store, alternative) in self.replacements.iter_mut().zip(&other.replacements) {
+            store.moved |= alternative.moved;
+        }
         for (name, binding) in self.bindings.iter_mut() {
             let (other_may, other_must) = match other.bindings.get(name) {
                 Some(b) => (b.is_consumed, b.definitely_consumed),
@@ -939,7 +1068,8 @@ impl AffineTracker {
                 },
             );
         }
-        AffineAlternatives { states }
+        let moved_replacements = self.replacements.iter().map(|store| store.moved).collect();
+        AffineAlternatives { states, moved_replacements }
     }
 
     /// Put the bindings back to a snapshot, so the next alternative starts
@@ -947,6 +1077,9 @@ impl AffineTracker {
     /// an arm's own pattern variables — are left alone; they are out of
     /// scope by the time the merge runs.
     pub fn restore_alternatives(&mut self, at: &AffineAlternatives) {
+        for (store, &moved) in self.replacements.iter_mut().zip(&at.moved_replacements) {
+            store.moved = moved;
+        }
         if std::env::var_os("VERUM_TRACE_AFFINE").is_some() {
             eprintln!("[affine] restore {} states", at.states.len());
         }
@@ -977,6 +1110,11 @@ impl AffineTracker {
     pub fn merge_alternatives(&mut self, branches: &[AffineAlternatives]) {
         if branches.is_empty() {
             return;
+        }
+        for (index, store) in self.replacements.iter_mut().enumerate() {
+            store.moved = branches.iter().any(|branch| {
+                branch.moved_replacements.get(index).copied().unwrap_or(store.moved)
+            });
         }
         for (name, b) in self.bindings.iter_mut() {
             let mut may = false;
@@ -1044,6 +1182,7 @@ struct ConsumptionState {
 #[derive(Debug, Clone)]
 pub struct AffineAlternatives {
     states: Map<Text, ConsumptionState>,
+    moved_replacements: List<bool>,
 }
 
 impl Default for AffineTracker {

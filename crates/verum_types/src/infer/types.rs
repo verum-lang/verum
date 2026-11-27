@@ -1936,6 +1936,7 @@ fn substitute_refinement_binder(
     pub(super) fn infer_try_operator(&mut self, inner_expr: &Expr, try_span: Span) -> Result<InferResult> {
         // Step 1: Infer type of inner expression
         let inner_result = self.synth_expr(inner_expr)?;
+        self.affine_tracker.check_residual_exit(try_span)?;
         let inner_ty = self.unifier.apply(&inner_result.ty);
         if std::env::var_os("VERUM_TRACE_TRY").is_some() {
             // T0927: the SAME source gives 0 errors on 32 runs of 40 and
@@ -2262,17 +2263,9 @@ fn substitute_refinement_binder(
 
         // Step 2: Temporarily set function return type to Result<T, E> so that
         // the ? operator inside the try block passes type checking.
-        let saved_return_type = self.current_function_return_type.clone();
         let try_ok_var = Type::Var(crate::ty::TypeVar::fresh());
-        self.current_function_return_type =
-            Maybe::Some(Type::result(try_ok_var.clone(), error_type.clone()));
-
-        // Step 3: Infer the block's type
-        let block_result = self.synth_expr(inner_block)?;
+        let block_result = self.synth_in_try_target(inner_block, Type::result(try_ok_var, error_type.clone()))?;
         let success_type = block_result.ty;
-
-        // Restore original function return type
-        self.current_function_return_type = saved_return_type;
 
         // Step 3: Determine result type using PROTOCOL-BASED detection
         // If the block already returns a Try-compatible type, use it directly
@@ -2294,6 +2287,19 @@ fn substitute_refinement_binder(
         };
 
         Ok(InferResult::new(result_type))
+    }
+
+    pub(super) fn synth_in_try_target(
+        &mut self,
+        body: &Expr,
+        return_type: Type,
+    ) -> Result<InferResult> {
+        let previous = self.current_function_return_type.replace(return_type);
+        self.affine_tracker.enter_residual_target();
+        let result = self.synth_expr(body);
+        self.affine_tracker.exit_residual_target();
+        self.current_function_return_type = previous;
+        result
     }
 
     /// Check if two residual types are compatible for ? operator.

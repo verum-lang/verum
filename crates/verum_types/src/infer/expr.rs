@@ -909,15 +909,7 @@ impl TypeChecker {
         // the ? operator inside the try block passes type checking.
         // Without this, ? checks the enclosing function's return type (e.g. Int)
         // and emits E0205.
-        let saved_return_type = self.current_function_return_type.clone();
-        self.current_function_return_type = Maybe::Some(expected.clone());
-
-        // Check if inner block already produces a Try-compatible type
-        // First synthesize to see what type the block naturally produces
-        let block_result = self.synth_expr(inner_block)?;
-
-        // Restore original function return type
-        self.current_function_return_type = saved_return_type;
+        let block_result = self.synth_in_try_target(inner_block, expected.clone())?;
         let block_ty = &block_result.ty;
 
         // Resolve type variables to get the actual structure
@@ -4612,13 +4604,13 @@ impl TypeChecker {
 
                 For { .. } => self.with_repeated_body(|tc| tc.infer_for_loop(current_expr)),
 
-                Break { label: _, value: _ } => {
-                    // Break has Never type (diverging control flow)
+                Break { value, label } => {
+                    if let Some(value) = value { self.synth_expr(value)?; }
+                    self.affine_tracker.check_loop_jump(label.is_some(), current_expr.span)?;
                     Ok(InferResult::new(Type::never()))
                 }
-
-                Continue { label: _ } => {
-                    // Continue has Never type (diverging control flow)
+                Continue { label } => {
+                    self.affine_tracker.check_loop_jump(label.is_some(), current_expr.span)?;
                     Ok(InferResult::new(Type::never()))
                 }
 
