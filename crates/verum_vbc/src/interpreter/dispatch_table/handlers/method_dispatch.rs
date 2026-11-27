@@ -6529,7 +6529,9 @@ pub(super) fn dispatch_primitive_method(
                     let len = get_array_length(ptr, header)?;
                     return Ok(Some(Value::from_bool(len == 0)));
                 }
-                "push" if is_list => {
+                name if is_list && crate::intrinsics::registry::appends_owned_element(
+                    verum_common::well_known_types::WellKnownType::List, name, usize::from(args.count),
+                ) => {
                     let caller_base = state.reg_base();
                     let new_val = state.registers.get(caller_base, Reg(args.start.0));
                     // eprintln!("[DEBUG List::push] receiver={:?}, new_val={:?}", *receiver, new_val);
@@ -10791,7 +10793,9 @@ pub(super) fn dispatch_array_method(
         }
 
         // ===== Mutating methods =====
-        "push" => {
+        name if header.type_id.is_list_like() && crate::intrinsics::registry::appends_owned_element(
+            verum_common::well_known_types::WellKnownType::List, name, usize::from(args.count),
+        ) => {
             let new_val = state.registers.get(caller_base, Reg(args.start.0));
             list_push(state, receiver, new_val)?;
             Ok(Some(Value::unit()))

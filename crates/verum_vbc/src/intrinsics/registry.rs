@@ -42,6 +42,18 @@ use crate::instruction::{
 /// Thread-safe lazy initialization ensures the registry is built exactly once.
 pub static INTRINSIC_REGISTRY: LazyLock<IntrinsicRegistry> = LazyLock::new(IntrinsicRegistry::new);
 
+/// Dynamic collection members that append an entire argument without observing or
+/// mutating its contents. Both execution tiers dispatch the same member.
+pub fn appends_owned_element(
+    owner: verum_common::well_known_types::WellKnownType,
+    member: &str,
+    explicit_arity: usize,
+) -> bool {
+    owner == verum_common::well_known_types::WellKnownType::List
+        && member == "push"
+        && explicit_arity == 1
+}
+
 const fn signal_watch(name: &'static str, op: crate::signal_watch::SignalWatchOp) -> Intrinsic {
     Intrinsic {
         // Installing/restoring a disposition and draining its counter change
@@ -1424,6 +1436,23 @@ impl Intrinsic {
         match self.strategy {
             CodegenStrategy::InlineSequence(InlineSequenceId::ListStorageWrite) => Some(WellKnownType::List),
             CodegenStrategy::InlineSequence(InlineSequenceId::DequeStorageWrite) => Some(WellKnownType::Deque),
+            _ => None,
+        }
+    }
+
+    /// The result carries the value's stored loans. A take also vacates the
+    /// physical slot and therefore requires exclusive access to the owner.
+    pub fn owned_slot_read_carrier(
+        &self,
+    ) -> Option<(verum_common::well_known_types::WellKnownType, bool)> {
+        use verum_common::well_known_types::WellKnownType;
+        match self.strategy {
+            CodegenStrategy::InlineSequence(InlineSequenceId::ListStorageRead) => {
+                Some((WellKnownType::List, false))
+            }
+            CodegenStrategy::InlineSequence(InlineSequenceId::DequeStorageTake) => {
+                Some((WellKnownType::Deque, true))
+            }
             _ => None,
         }
     }

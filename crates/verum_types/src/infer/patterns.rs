@@ -368,15 +368,20 @@ impl TypeChecker {
     pub(super) fn bind_parameter_pattern(&mut self, pattern: &Pattern, ty: &Type) -> Result<()> {
         self.bind_pattern(pattern, ty)?;
         if let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind {
-            use crate::context::ReferenceOrigin;
-            if self.reference_mode(ty, pattern.span)?.is_some() {
-                self.ctx.env.set_reference_origin(&name.name, ReferenceOrigin::Parameter);
-            } else if self.carries_stored_loan(ty) {
-                // The incoming value may carry its caller's loans. At entry it
-                // contains no loans from this activation. Borrowing the local
-                // slot that holds the value must still use its own lifetime.
-                self.ctx.env.set_reference_origin(&name.name, ReferenceOrigin::OwnedPayload(Box::default()));
-            }
+            self.bind_parameter_origin(&name.name, ty, pattern.span)?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn bind_parameter_origin(&mut self, name: &str, ty: &Type, span: Span) -> Result<()> {
+        use crate::context::ReferenceOrigin;
+        if self.reference_mode(ty, span)?.is_some() {
+            self.ctx.env.set_reference_origin(name, ReferenceOrigin::Parameter);
+        } else if self.carries_stored_loan(ty) {
+            // The incoming value may carry its caller's loans. At entry it
+            // contains no loans from this activation. Borrowing the local
+            // slot that holds the value must still use its own lifetime.
+            self.ctx.env.set_reference_origin(name, ReferenceOrigin::OwnedPayload(Box::default()));
         }
         Ok(())
     }

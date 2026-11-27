@@ -10604,9 +10604,7 @@ impl TypeChecker {
                             .env
                             .insert("self", TypeScheme::mono(param_ty.clone()));
                         self.ctx.env.set_binding_loan_region("self", self.borrow_tracker.scope_depth());
-                        if self.reference_mode(&param_ty, param.span)?.is_some() {
-                            self.ctx.env.set_reference_origin("self", crate::context::ReferenceOrigin::Parameter);
-                        }
+                        self.bind_parameter_origin("self", &param_ty, param.span)?;
                         if matches!(param.kind, FunctionParamKind::SelfValueMut | FunctionParamKind::SelfOwnMut) {
                             self.ctx.env.mark_mutable_place("self");
                         }
@@ -17305,7 +17303,12 @@ impl TypeChecker {
                 Some((receiver, kind.is_none_or(|kind| kind.meta().is_borrowed))), precise_origins,
             )?;
             if !preserves_input_payloads {
-                tc.retain_possible_call_writes(args, parameters, None, borrow)?;
+                let appended = borrowed_deref_target.is_none()
+                    && kind.is_some_and(|kind| kind.meta().is_borrowed && kind.meta().allows_mutation)
+                    && tc.retain_runtime_append(span, receiver, method, args)?;
+                if !appended {
+                    tc.retain_possible_call_writes(args, parameters, None, borrow)?;
+                }
             }
             Ok(result)
         })

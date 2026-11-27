@@ -440,28 +440,29 @@ fn registered_errors<const N: usize>(sources: [(&str, Text); N]) -> List<Text> {
         .collect()
 }
 
+fn declaration<'a>(source: &'a str, name: &str) -> &'a str {
+    let module = FastParser::new()
+        .parse_module_str(source, FileId::new(1))
+        .unwrap();
+    let item = module
+        .items
+        .iter()
+        .find(|item| match &item.kind {
+            verum_ast::ItemKind::Type(ty) => ty.name.as_str() == name,
+            verum_ast::ItemKind::Function(function) => function.name.as_str() == name,
+            _ => false,
+        })
+        .unwrap();
+    // The item span starts at `type` / `fn`. Retain its source-line
+    // modifiers so the ordinary mount checks its actual visibility.
+    let start = source[..item.span.start as usize]
+        .rfind('\n')
+        .map_or(0, |line| line + 1);
+    &source[start..item.span.end as usize]
+}
+
 #[test]
 fn imported_list_storage_write_retains_only_the_source_payload() {
-    fn declaration<'a>(source: &'a str, name: &str) -> &'a str {
-        let module = FastParser::new()
-            .parse_module_str(source, FileId::new(1))
-            .unwrap();
-        let item = module
-            .items
-            .iter()
-            .find(|item| match &item.kind {
-                verum_ast::ItemKind::Type(ty) => ty.name.as_str() == name,
-                verum_ast::ItemKind::Function(function) => function.name.as_str() == name,
-                _ => false,
-            })
-            .unwrap();
-        // The item span starts at `type` / `fn`. Retain its source-line
-        // modifiers so the ordinary mount checks its actual visibility.
-        let start = source[..item.span.start as usize]
-            .rfind('\n')
-            .map_or(0, |line| line + 1);
-        &source[start..item.span.end as usize]
-    }
     let list = declaration(include_str!("../../../core/collections/list.vr"), "List");
     let write = declaration(
         include_str!("../../../core/intrinsics/memory.vr"),
@@ -497,6 +498,153 @@ fn imported_list_storage_write_retains_only_the_source_payload() {
             );
         }
     }
+}
+
+#[test]
+fn a_checked_slot_read_transfers_existing_loans_without_borrowing_its_local_owner() {
+    let list = declaration(include_str!("../../../core/collections/list.vr"), "List");
+    let memory = include_str!("../../../core/intrinsics/memory.vr");
+    let read = declaration(memory, "list_storage_read");
+    let write = declaration(memory, "list_storage_write");
+    let imports = "mount core.collections.list.List; mount core.intrinsics.memory.{list_storage_read as read_slot, list_storage_write as put};";
+    for (caller, expected) in [
+        (
+            "unsafe fn extract<T>(items:List<T>)->T {unsafe {read_slot(&items,0)}}",
+            None,
+        ),
+        (
+            "unsafe fn extract(items:List<&Int>)->&Int {unsafe {read_slot(&items,0)}}",
+            None,
+        ),
+        (
+            "unsafe fn move_slot<T>(items:List<T>,mut out:List<T>)->List<T> {unsafe {put(&mut out,0,read_slot(&items,0));} out}",
+            None,
+        ),
+        (
+            "unsafe fn move_slot<T>(items:List<T>,mut out:List<T>)->List<T> {let old=unsafe {read_slot(&items,0)}; unsafe {put(&mut out,0,old);} out}",
+            None,
+        ),
+        (
+            "unsafe fn extract(mut items:List<&Int>)->&Int {let local=73; unsafe {put(&mut items,0,&local); read_slot(&items,0)}}",
+            Some("local"),
+        ),
+        (
+            "unsafe fn extract(mut items:List<&Int>, opaque:fn(&mut List<&Int>))->&Int {opaque(&mut items); unsafe {read_slot(&items,0)}}",
+            Some("cannot establish the lifetime"),
+        ),
+    ] {
+        let found = registered_errors([
+            ("core.collections.list", list.into()),
+            (
+                "core.intrinsics.memory",
+                format!("mount core.collections.list.List; {read} {write}").into(),
+            ),
+            ("consumer", format!("{imports} {caller}").into()),
+        ]);
+        match expected {
+            None => assert!(found.is_empty(), "{caller}: {found:?}"),
+            Some(text) => assert!(
+                found.iter().any(|e| e.contains(text)),
+                "{caller}: {found:?}"
+            ),
+        }
+    }
+}
+
+#[test]
+fn taking_a_slot_requires_its_exclusive_owner_and_retains_the_moved_values_loans() {
+    let ring = include_str!("../../../core/collections/deque.vr");
+    let take = declaration(ring, "deque_storage_take");
+    let write = declaration(ring, "deque_storage_write");
+    let owner = "type Deque<T> is {head:Int};";
+    for (caller, expected) in [
+        (
+            "unsafe fn extract<T>(mut items:Deque<T>)->T {unsafe {deque_storage_take(&mut items,0)}}",
+            None,
+        ),
+        (
+            r#"unsafe fn extract<T>(mut items:Deque<T>)->T {@intrinsic("deque_storage_take",&mut items,0)}"#,
+            None,
+        ),
+        (
+            "unsafe fn extract(mut items:Deque<&Int>)->&Int {let local=73; unsafe {deque_storage_write(&mut items,0,&local); deque_storage_take(&mut items,0)}}",
+            Some("local"),
+        ),
+        (
+            r#"unsafe fn extract(items:&Deque<Int>)->Int {@intrinsic("deque_storage_take",items,0)}"#,
+            Some("exclusive reference"),
+        ),
+        (
+            r#"fn extract(items:&mut Deque<Int>)->Int {@intrinsic("deque_storage_take",items,0)}"#,
+            Some("requires unsafe"),
+        ),
+        (
+            r#"unsafe fn extract(items:&mut Deque<Int>)->Bool {@intrinsic("deque_storage_take",items,0)}"#,
+            Some("mismatch"),
+        ),
+        (
+            r#"unsafe fn extract(items:&mut Deque<Int>)->Int {@intrinsic("deque_storage_take",items,true)}"#,
+            Some("mismatch"),
+        ),
+    ] {
+        let found = module_errors(
+            "core.collections.deque",
+            &format!("{owner} {take} {write} {caller}"),
+        );
+        match expected {
+            None => assert!(found.is_empty(), "{caller}: {found:?}"),
+            Some(text) => assert!(
+                found.iter().any(|e| e.contains(text)),
+                "{caller}: {found:?}"
+            ),
+        }
+    }
+}
+
+#[test]
+fn dynamic_list_push_retains_the_inserted_value_in_its_canonical_owner() {
+    let source = include_str!("../../../core/collections/list.vr");
+    let list = declaration(source, "List");
+    let body = source.split_once("    public fn push(").unwrap().1;
+    let end = body.find("\n    }").unwrap();
+    let method = format!("implement<T> List<T> {{ public fn push({} }} }}", &body[..end]);
+    for (provider, caller, expected) in [
+        ("core.collections.list", "fn collect<T>(mut items:List<T>, a:T, b:T)->List<T> {items.push(a);items.push(b);items}", None),
+        ("core.collections.list", "fn collect(mut items:List<&Int>, a:&Int)->List<&Int> {items.push(a);items}", None),
+        ("core.collections.list", "fn collect(mut items:List<&Int>)->List<&Int> {{let local=11;items.push(&local);}items}", Some("local")),
+        ("core.collections.list", "fn collect(mut items:List<&Int>, a:&Int,f:fn(&mut List<&Int>))->List<&Int> {f(&mut items);items.push(a);items}", Some("cannot establish the lifetime")),
+        ("other", "fn collect<T>(mut items:List<T>, a:T, b:T)->List<T> {items.push(a);items.push(b);items}", Some("cannot establish the lifetime")),
+    ] {
+        let found = registered_errors([
+            (provider, format!("{list} {method}").into()),
+            ("consumer", format!("mount {provider}.List; {caller}").into()),
+        ]);
+        match expected {
+            None => assert!(found.is_empty(), "{provider}: {caller}: {found:?}"),
+            Some(text) => assert!(found.iter().any(|error| error.contains(text)), "{provider}: {caller}: {found:?}"),
+        }
+    }
+    let extension = "type Push<T> is protocol { fn push(&mut self, value:T); }; implement<T> Push<T> for List<T> { fn push(&mut self, value:T) { self.len = self.len + 1; } }";
+    let found = registered_errors([
+        ("core.collections.list", format!("{list} {extension}").into()),
+        ("consumer", "mount core.collections.list.{List,Push}; fn collect<T>(mut items:List<T>, a:T, b:T)->List<T> {items.push(a);items.push(b);items}".into()),
+    ]);
+    assert!(found.iter().any(|error| error.contains("cannot establish the lifetime")), "{found:?}");
+}
+
+#[test]
+fn a_taken_caller_owned_element_does_not_borrow_the_ring_metadata() {
+    let ring = include_str!("../../../core/collections/deque.vr");
+    let take = declaration(ring, "deque_storage_take");
+    let put = declaration(ring, "deque_storage_write");
+    let owner = "type Deque<T> is {head:Int};";
+    let selected = "fn advance<T>(items:&mut Deque<T>)->T {let moved=unsafe {deque_storage_take(items,0)}; items.head=1; moved}";
+    let owned = "implement<T> Deque<T> { fn consume(mut self)->T {let moved=unsafe {deque_storage_take(&mut self,0)}; self.head=1; moved} }";
+    let found = module_errors("core.collections.deque", &format!("{owner} {take} {put} {selected} {owned}"));
+    assert!(found.is_empty(), "{found:?}");
+    let retaining = "implement<T> Deque<T> { fn invalid(self)->&Int {&self.head} }";
+    let found = module_errors("core.collections.deque", &format!("{owner} {take} {retaining}"));
+    assert!(found.iter().any(|e| e.contains("self") && e.contains("does not live long enough")), "{found:?}");
 }
 
 #[test]

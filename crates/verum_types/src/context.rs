@@ -1969,6 +1969,21 @@ impl TypeEnv {
         &self,
         source: &crate::ty::RecordReceiver,
     ) -> Option<List<crate::ty::RecordReceiver>> {
+        self.stored_value_origins(source, false)
+    }
+
+    /// An incoming collection's pre-existing elements belong to the caller.
+    /// Moving an element borrows no local storage in the callee. Loans added
+    /// by this activation still travel with that element.
+    pub(crate) fn collection_element_origins(
+        &self, source: &crate::ty::RecordReceiver,
+    ) -> Option<List<crate::ty::RecordReceiver>> {
+        self.stored_value_origins(source, true)
+    }
+
+    fn stored_value_origins(
+        &self, source: &crate::ty::RecordReceiver, collection_element: bool,
+    ) -> Option<List<crate::ty::RecordReceiver>> {
         let mut scope = Some(self);
         while let Some(env) = scope {
             if let Some(place) = env
@@ -1979,6 +1994,7 @@ impl TypeEnv {
                 let mut origins = match &place.reference {
                     Some(ReferenceOrigin::Exact(origin)) => List::from_iter([origin.clone()]),
                     Some(ReferenceOrigin::Candidates(origins) | ReferenceOrigin::OwnedPayload(origins)) => List::from(origins.as_ref()),
+                    Some(ReferenceOrigin::Parameter) if collection_element => List::new(),
                     Some(ReferenceOrigin::Parameter) => List::from_iter([source.clone()]),
                     None => List::new(),
                 };

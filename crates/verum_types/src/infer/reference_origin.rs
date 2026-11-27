@@ -31,6 +31,13 @@ enum AutoBorrowRoot {
     IncludeExclusive,
 }
 
+/// Observed candidates and whether they describe the complete payload.
+#[derive(Debug)]
+pub(super) struct EvaluatedValueOrigins {
+    origins: Option<List<RecordReceiver>>,
+    complete: bool,
+}
+
 pub(super) struct CopiedCapture {
     name: verum_common::Text,
     scheme: crate::context::TypeScheme,
@@ -191,7 +198,7 @@ impl TypeChecker {
         }
         if matches!(unparen(value).kind,
             ExprKind::Tuple(_) | ExprKind::Array(_) | ExprKind::Record { .. })
-            && let Some(origins) = self.evaluated_value_origins.get(&value.span).and_then(Option::as_ref)
+            && let Some(origins) = self.evaluated_value_origins.get(&value.span).and_then(|observed| observed.origins.as_ref())
         {
             return origins.clone();
         }
@@ -298,7 +305,7 @@ impl TypeChecker {
     /// later assignment. Missing observations leave the enclosing span intact.
     fn escaping_operand_span(&self, expression: &Expr, source: &RecordReceiver) -> verum_ast::Span {
         let carries = |span| self.evaluated_value_origins.get(&span)
-            .and_then(Option::as_ref).is_some_and(|origins| origins.contains(source));
+            .and_then(|observed| observed.origins.as_ref()).is_some_and(|origins| origins.contains(source));
         let mut value = expression;
         loop {
             let next = match &unparen(value).kind {
@@ -374,7 +381,8 @@ impl TypeChecker {
         if !needed {
             // A shared expansion site cannot authenticate a different binding.
             if let Some(previous) = self.evaluated_value_origins.get_mut(&body.span) {
-                *previous = None;
+                previous.origins = None;
+                previous.complete = false;
             }
             return;
         }
@@ -387,19 +395,36 @@ impl TypeChecker {
         span: verum_ast::Span,
         origins: Option<List<RecordReceiver>>,
     ) {
-        if span.is_empty() { return; }
-        self.evaluated_value_origins.entry(span).and_modify(|previous| {
-            match (previous.as_mut(), origins.as_ref()) {
-                (Some(known), Some(observed)) => {
-                    for origin in observed {
-                        if !known.contains(origin) {
-                            known.push(origin.clone());
+        self.record_owned_value_origins(span, origins, false);
+    }
+
+    /// Reused expansion sites can union possible loans but keep completeness
+    /// only when every evaluation supplied an exhaustive set.
+    pub(super) fn record_owned_value_origins(
+        &mut self,
+        span: verum_ast::Span,
+        origins: Option<List<RecordReceiver>>,
+        complete: bool,
+    ) {
+        if span.is_empty() {
+            return;
+        }
+        self.evaluated_value_origins
+            .entry(span)
+            .and_modify(|previous| {
+                previous.complete &= complete;
+                match (previous.origins.as_mut(), origins.as_ref()) {
+                    (Some(known), Some(observed)) => {
+                        for origin in observed {
+                            if !known.contains(origin) {
+                                known.push(origin.clone());
+                            }
                         }
                     }
+                    _ => previous.origins = None,
                 }
-                _ => *previous = None,
-            }
-        }).or_insert(origins);
+            })
+            .or_insert(EvaluatedValueOrigins { origins, complete });
     }
 
     pub(super) fn observe_closure_capture_origins(
@@ -486,7 +511,7 @@ impl TypeChecker {
                 for field in fields {
                     if let Some(value) = &field.value {
                         self.collect_evaluated_operand_origins(value, &mut origins);
-                    } else if let Some(known) = self.evaluated_value_origins.get(&field.span).and_then(Option::as_ref) {
+                    } else if let Some(known) = self.evaluated_value_origins.get(&field.span).and_then(|observed| observed.origins.as_ref()) {
                         for origin in known {
                             if !origins.contains(origin) { origins.push(origin.clone()); }
                         }
@@ -651,9 +676,9 @@ impl TypeChecker {
 
     fn evaluated_result_origins(&self, value: &Expr) -> Option<&List<RecordReceiver>> {
         match &unparen(value).kind {
-            ExprKind::Call { .. } | ExprKind::MethodCall { .. } | ExprKind::Closure { .. }
+            ExprKind::Call { .. } | ExprKind::MethodCall { .. } | ExprKind::MetaFunction { .. } | ExprKind::Closure { .. }
             | ExprKind::Tuple(_) | ExprKind::Array(_) | ExprKind::Record { .. } =>
-                self.evaluated_value_origins.get(&value.span)?.as_ref(),
+                self.evaluated_value_origins.get(&value.span)?.origins.as_ref(),
             _ => None,
         }
     }
@@ -662,7 +687,23 @@ impl TypeChecker {
     /// context or callback environment. A checked insertion needs the complete
     /// set, including when an opaque result was first bound to a local.
     pub(super) fn complete_slot_value_origins(&mut self, value: &Expr) -> bool {
-        let value = unparen(value);
+        let mut value = unparen(value);
+        while let ExprKind::Block(block) | ExprKind::Unsafe(block) = &value.kind {
+            let Some(tail) = block.expr.as_deref() else {
+                return false;
+            };
+            if !block.stmts.is_empty() {
+                return false;
+            }
+            value = unparen(tail);
+        }
+        if self
+            .evaluated_value_origins
+            .get(&value.span)
+            .is_some_and(|observed| observed.complete && observed.origins.is_some())
+        {
+            return true;
+        }
         match &value.kind {
             ExprKind::Path(path) => {
                 self.reference_result_origin(value).is_some()
@@ -817,7 +858,7 @@ impl TypeChecker {
             ExprKind::Index { index, .. } if matches!(index.kind, ExprKind::Range { .. }) => {
                 self.collect_borrowed_place_candidates(value, found);
             }
-            ExprKind::Block(block) | ExprKind::Async(block) => {
+            ExprKind::Block(block) | ExprKind::Async(block) | ExprKind::Unsafe(block) => {
                 self.collect_block_candidates(block, found)
             }
             ExprKind::If {
@@ -833,7 +874,7 @@ impl TypeChecker {
             ExprKind::Match { expr, arms } => {
                 let mut uncertain = false;
                 for arm in arms {
-                    if let Some(origins) = self.evaluated_value_origins.get(&arm.body.span).and_then(Option::as_ref) {
+                    if let Some(origins) = self.evaluated_value_origins.get(&arm.body.span).and_then(|observed| observed.origins.as_ref()) {
                         for origin in origins {
                             add(found, origin.clone());
                         }
@@ -1155,21 +1196,24 @@ impl TypeChecker {
         false
     }
 
-    /// The selected source must forward all three operands, unchanged, to an
-    /// owned-slot operation of this exact instantiated container declaration.
-    /// Any additional computation, destination or hidden input keeps the
-    /// ordinary unknown-write rule.
-    fn direct_owned_slot_write(
-        &mut self,
+    /// A single registry operation selected from its actual declaration may
+    /// publish its operand roles across an import. Retain their order even
+    /// when the wrapper has renamed or reordered its formal parameters.
+    fn direct_slot_operation(
+        &self,
         span: verum_ast::Span,
-        params: &[Type],
-    ) -> Option<[usize; 2]> {
+        arity: usize,
+    ) -> Option<(
+        &'static verum_vbc::intrinsics::registry::Intrinsic,
+        List<usize>,
+    )> {
         use verum_ast::{FunctionParamKind, PatternKind};
         let (_, source) = self.type_registry.callable_declaration(span)?;
         if !source.contexts.is_empty()
             || source.is_async
             || source.is_generator
             || source.is_meta
+            || !source.is_unsafe
             || source.extern_abi.is_some()
             || source.is_variadic
             || !source.attributes.is_empty()
@@ -1177,11 +1221,44 @@ impl TypeChecker {
             || source.throws_clause.is_some()
             || !source.requires.is_empty()
             || !source.ensures.is_empty()
-            || source.params.len() != 3
-            || params.len() != 3
+            || source.params.len() != arity
         {
             return None;
         }
+        let (operation, args) = super::callable_properties::direct_intrinsic_body(source)?;
+        if args.len() != arity {
+            return None;
+        }
+        let mut positions = List::new();
+        for arg in args {
+            let ExprKind::Path(path) = &unparen(arg).kind else {
+                return None;
+            };
+            let name = path.as_ident()?;
+            let position = source.params.iter().position(|param| {
+                matches!(&param.kind,
+                FunctionParamKind::Regular { pattern, default_value: None, .. }
+                    if param.attributes.is_empty() && matches!(&pattern.kind,
+                        PatternKind::Ident { name: formal, by_ref: false, subpattern: None, .. }
+                            if formal.name == name.name))
+            })?;
+            if positions.contains(&position) {
+                return None;
+            }
+            positions.push(position);
+        }
+        Some((operation, positions))
+    }
+
+    fn direct_owned_slot_write(
+        &self,
+        span: verum_ast::Span,
+        params: &[Type],
+    ) -> Option<[usize; 2]> {
+        let (operation, positions) = self.direct_slot_operation(span, 3)?;
+        let [owner, index, payload] = positions.as_slice() else {
+            return None;
+        };
         let Type::Function { return_type, .. } = self.type_registry.lookup_call_target(span)?
         else {
             return None;
@@ -1189,53 +1266,156 @@ impl TypeChecker {
         if self.unifier.apply(return_type) != Type::Unit {
             return None;
         }
-        let (operation, args) = super::callable_properties::direct_intrinsic_body(&source)?;
-        let carrier = operation.owned_slot_write_carrier()?;
-        let [owner, index, payload] = args else {
-            return None;
-        };
-        let parameter = |value: &Expr| {
-            let ExprKind::Path(path) = &unparen(value).kind else {
-                return None;
-            };
-            let name = path.as_ident()?;
-            source.params.iter().position(|param| {
-                matches!(&param.kind,
-                FunctionParamKind::Regular { pattern, default_value: None, .. }
-                    if param.attributes.is_empty() && matches!(&pattern.kind,
-                        PatternKind::Ident { name: formal, by_ref: false, subpattern: None, .. }
-                            if formal.name == name.name))
-            })
-        };
-        let [owner, index, payload] = [parameter(owner)?, parameter(index)?, parameter(payload)?];
-        if owner == index || index == payload || owner == payload {
-            return None;
-        }
-        let element = self.owned_slot_element(&params[owner], carrier, span)?;
-        if !self.types_equivalent(&element, &params[payload])
-            || !self.types_equivalent(&params[index], &Type::Int)
-        {
-            return None;
-        }
-        Some([owner, payload])
+        let element = self.owned_slot_element(
+            params.get(*owner)?,
+            operation.owned_slot_write_carrier()?,
+            true,
+            span,
+        )?;
+        (self.types_equivalent(&element, params.get(*payload)?)
+            && self.types_equivalent(params.get(*index)?, &Type::Int))
+        .then_some([*owner, *payload])
     }
 
     fn owned_slot_element(
         &self,
         ty: &Type,
         carrier: verum_common::well_known_types::WellKnownType,
+        exclusive: bool,
         span: verum_ast::Span,
     ) -> Option<Type> {
-        let Type::Reference {
-            mutable: true,
-            inner,
-        } = self.place_reference_head(ty, span).ok()?
-        else {
+        let Type::Reference { mutable, inner } = self.place_reference_head(ty, span).ok()? else {
             return None;
         };
+        if exclusive && !mutable {
+            return None;
+        }
         let (name, args) = self.conversion_nominal_head(&inner)?;
         let [element] = args else { return None };
         (self.declared_runtime_storage_carrier(&name)? == carrier).then(|| element.clone())
+    }
+
+    fn require_slot_access(&self, operation: &str, span: verum_ast::Span) -> crate::Result<()> {
+        if self.in_unsafe_context
+            || self.source_type_registration.unsafe_function_body
+                == Some(self.borrow_tracker.current_closure_id())
+        {
+            Ok(())
+        } else {
+            Err(crate::TypeError::OtherWithCodeSpanned {
+                code: "E0444".into(),
+                msg: format!("{operation} requires unsafe access to collection storage").into(),
+                span,
+            })
+        }
+    }
+
+    /// Read a stored value, independently of how long the reference to its
+    /// backing owner lives. An unknown prior mutation keeps the observed
+    /// contents unproved. Taking a slot also invalidates structural facts.
+    fn slot_value_origins(
+        &mut self,
+        owner: &Expr,
+        element: &Type,
+        take: bool,
+    ) -> Option<List<RecordReceiver>> {
+        let backing = self
+            .reference_result_origin(owner)
+            .or_else(|| self.call_input_place(owner).map(|place| place.0))?;
+        if take {
+            self.refinement_evidence
+                .invalidate_write(std::slice::from_ref(&backing));
+        }
+        if !self.carries_stored_loan(element) {
+            return Some(List::new());
+        }
+        if !self.check_payload_origin_observation(&backing)
+            || !backing.fields.is_empty()
+            || !self.ctx.env.storage_has_payload_origins(backing.binding)
+        {
+            return None;
+        }
+        self.ctx.env.collection_element_origins(&backing)
+    }
+
+    pub(super) fn imported_slot_read_origins(
+        &mut self,
+        span: verum_ast::Span,
+        args: &[Expr],
+        params: &[Type],
+        result: &Type,
+    ) -> Option<List<RecordReceiver>> {
+        let (operation, positions) = self.direct_slot_operation(span, 2)?;
+        let (carrier, take) = operation.owned_slot_read_carrier()?;
+        let [owner, index] = positions.as_slice() else {
+            return None;
+        };
+        if args
+            .iter()
+            .any(|argument| self.deref_adjustments.contains_key(&argument.span))
+        {
+            return None;
+        }
+        let element = self.owned_slot_element(params.get(*owner)?, carrier, take, span)?;
+        if !self.types_equivalent(&element, result)
+            || !self.types_equivalent(params.get(*index)?, &Type::Int)
+        {
+            return None;
+        }
+        self.slot_value_origins(args.get(*owner)?, &element, take)
+    }
+
+    pub(super) fn check_slot_read(
+        &mut self,
+        operation: &'static verum_vbc::intrinsics::registry::Intrinsic,
+        carrier: verum_common::well_known_types::WellKnownType,
+        take: bool,
+        args: &[Expr],
+        expression: &Expr,
+    ) -> crate::Result<Type> {
+        let span = expression.span;
+        let [_, owner, index] = args else {
+            return Err(crate::TypeError::wrong_arg_count(
+                operation.name.into(),
+                2,
+                args.len().saturating_sub(1),
+                span,
+            ));
+        };
+        self.require_slot_access(operation.name, span)?;
+        self.with_call_place_types(expression, &args[1..], |checker| {
+            let owner_type = checker.synth_expr(owner)?.ty;
+            let element = checker
+                .owned_slot_element(&owner_type, carrier, take, owner.span)
+                .ok_or_else(|| crate::TypeError::OtherWithCodeSpanned {
+                    code: "E0444".into(),
+                    msg: format!(
+                        "{} requires {}reference to its declared {} storage",
+                        operation.name,
+                        if take { "an exclusive " } else { "a " },
+                        carrier.as_str()
+                    )
+                    .into(),
+                    span: owner.span,
+                })?;
+            checker.check_expr(index, &Type::Int)?;
+            let parameters = [owner_type, Type::Int];
+            checker.check_call_loans(&args[1..], Some(&parameters), None)?;
+            if let Some(origins) = checker.slot_value_origins(owner, &element, take) {
+                checker.record_owned_value_origins(span, Some(origins), true);
+            } else {
+                checker.observe_call_result_origins(
+                    span,
+                    &element,
+                    &args[1..],
+                    Some(&parameters),
+                    None,
+                    None,
+                    None,
+                )?;
+            }
+            Ok(element)
+        })
     }
 
     pub(super) fn check_slot_intrinsic(
@@ -1254,25 +1434,12 @@ impl TypeChecker {
                 span,
             ));
         };
-        if !self.in_unsafe_context
-            && self.source_type_registration.unsafe_function_body
-                != Some(self.borrow_tracker.current_closure_id())
-        {
-            return Err(crate::TypeError::OtherWithCodeSpanned {
-                code: "E0444".into(),
-                msg: format!(
-                    "{} requires unsafe access to an uninitialized slot",
-                    operation.name
-                )
-                .into(),
-                span,
-            });
-        }
+        self.require_slot_access(operation.name, span)?;
         let operands = &args[1..];
         self.with_call_place_types(expression, operands, |checker| {
             let owner_type = checker.synth_expr(owner)?.ty;
             let element = checker
-                .owned_slot_element(&owner_type, carrier, owner.span)
+                .owned_slot_element(&owner_type, carrier, true, owner.span)
                 .ok_or_else(|| crate::TypeError::OtherWithCodeSpanned {
                     code: "E0444".into(),
                     msg: format!(
@@ -1314,6 +1481,54 @@ impl TypeChecker {
             return Ok(false);
         };
         self.retain_slot_payload(owner, value, &parameters[payload], span)
+    }
+
+    /// A dynamically intercepted method is selected by its nominal runtime
+    /// owner. A source extension, protocol member, or signature without the
+    /// declared element operand cannot grant the same write contract.
+    pub(super) fn retain_runtime_append(
+        &mut self,
+        span: verum_ast::Span,
+        receiver: &Expr,
+        method: &verum_ast::Ident,
+        args: &[Expr],
+    ) -> crate::Result<bool> {
+        let [value] = args else { return Ok(false) };
+        if self.deref_adjustments.contains_key(&value.span) {
+            return Ok(false);
+        }
+        let Some(Type::Reference { mutable: true, inner: declared_receiver }) =
+            self.type_registry.declared_receiver(span)
+        else { return Ok(false) };
+        let Some((owner, [element])) = self.conversion_nominal_head(declared_receiver) else { return Ok(false) };
+        let Some(carrier) = self.declared_runtime_storage_carrier(&owner) else { return Ok(false) };
+        if !verum_vbc::intrinsics::registry::appends_owned_element(carrier, method.as_str(), args.len()) {
+            return Ok(false);
+        }
+        let Some((module, source)) = self.type_registry.callable_declaration(span) else { return Ok(false) };
+        let Some((type_module, _)) = owner.rsplit_once('.') else { return Ok(false) };
+        let Some(verum_ast::expr::ResolvedCallTarget::StaticCall {
+            source_method: Some((selected_owner, selected_span)), ..
+        }) = self.resolved_call_targets.get(&span) else { return Ok(false) };
+        if selected_owner != module || *selected_span != source.span
+            || module.as_str() != type_module || source.name.name != method.name
+            || source.is_async || source.is_generator || source.is_meta
+            || !source.attributes.is_empty() || source.std_attr.is_some() || source.throws_clause.is_some()
+            || !source.requires.is_empty() || !source.ensures.is_empty() || !source.generics.is_empty()
+            || !matches!(source.params.as_slice(), [first, second]
+                if matches!(first.kind, verum_ast::FunctionParamKind::SelfRefMut)
+                    && first.attributes.is_empty() && second.attributes.is_empty()
+                    && matches!(second.kind, verum_ast::FunctionParamKind::Regular { default_value: None, .. }))
+        {
+            return Ok(false);
+        }
+        let Some(Type::Function { params, return_type, .. }) = self.type_registry.lookup_call_target(span) else { return Ok(false) };
+        let [parameter] = params.as_slice() else { return Ok(false) };
+        if !self.types_equivalent(element, parameter) || self.unifier.apply(return_type) != Type::Unit {
+            return Ok(false);
+        }
+        let element = element.clone();
+        self.retain_slot_payload(receiver, value, &element, span)
     }
 
     fn retain_slot_payload(
@@ -1557,12 +1772,14 @@ impl TypeChecker {
         let ExprKind::Path(path) = &root.kind else { return None };
         let name = match path.segments.as_slice() {
             [verum_ast::ty::PathSegment::Name(name)] => name.name.as_str(),
-            [verum_ast::ty::PathSegment::SelfValue]
-                if access == AutoBorrowRoot::IncludeExclusive => "self",
+            [verum_ast::ty::PathSegment::SelfValue] => "self",
             _ => return None,
         };
         let ty = self.ctx.env.lookup(name)?.ty.clone();
         let head = self.place_reference_head(&ty, root.span).ok()?;
+        if access == AutoBorrowRoot::SharedOnly && name == "self" && head.reference_parts().is_some() {
+            return None;
+        }
         let reference = match &head {
             Type::Reference { mutable: false, .. } => true,
             Type::Reference { mutable: true, inner }

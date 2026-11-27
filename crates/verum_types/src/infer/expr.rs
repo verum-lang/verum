@@ -7884,10 +7884,16 @@ impl TypeChecker {
                 }
             }
         }
-        self.observe_call_result_origins(
-            expr.span, &resolved_return, args, Some(&params), Some(func), None, precise_origins,
-        )?;
-        if !preserves_input_payloads && !self.retain_known_slot_write(expr.span, args, &params)? {
+        let slot_origins = self.imported_slot_read_origins(expr.span, args, &params, &resolved_return);
+        let reads_known_slot = slot_origins.is_some();
+        if let Some(origins) = slot_origins {
+            self.record_owned_value_origins(expr.span, Some(origins), true);
+        } else {
+            self.observe_call_result_origins(
+                expr.span, &resolved_return, args, Some(&params), Some(func), None, precise_origins,
+            )?;
+        }
+        if !preserves_input_payloads && !reads_known_slot && !self.retain_known_slot_write(expr.span, args, &params)? {
             self.retain_possible_call_writes(args, Some(&params), Some(func), None)?;
         }
         Ok(InferResult::new(resolved_return))
@@ -11904,6 +11910,9 @@ impl TypeChecker {
             use verum_vbc::{instruction::TypeInspection, intrinsics::registry::CodegenStrategy};
             if let Some(carrier) = operation.intrinsic.owned_slot_write_carrier() {
                 return self.check_slot_intrinsic(operation.intrinsic, carrier, args, expr);
+            }
+            if let Some((carrier, take)) = operation.intrinsic.owned_slot_read_carrier() {
+                return self.check_slot_read(operation.intrinsic, carrier, take, args, expr);
             }
             match operation.intrinsic.strategy {
                 CodegenStrategy::RetainCopy => {

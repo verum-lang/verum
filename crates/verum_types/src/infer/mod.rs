@@ -614,7 +614,7 @@ pub struct FunctionContract {
 pub struct TypeChecker {
     analysis_control: Option<crate::AnalysisControl>,
     /// Origins of evaluated values are local to the current function's binding identities.
-    evaluated_value_origins: Map<Span, Maybe<List<crate::ty::RecordReceiver>>>,
+    evaluated_value_origins: Map<Span, reference_origin::EvaluatedValueOrigins>,
     closure_return_depth: Maybe<usize>,
     place_operands: List<Map<usize, Maybe<write_places::EvaluatedOperand>>>,
     /// Type context

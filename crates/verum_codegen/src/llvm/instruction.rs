@@ -17169,8 +17169,9 @@ fn lower_call_method<'ctx>(
                 ctx.mark_text_register(dst.0);
                 return Ok(());
             }
-            "push" if args.count == 1
-                && !ctx.is_text_register(receiver.0)
+            name if verum_vbc::intrinsics::registry::appends_owned_element(
+                    verum_common::well_known_types::WellKnownType::List, name, usize::from(args.count),
+                ) && !ctx.is_text_register(receiver.0)
                 && !ctx.is_string_register(receiver.0)
                 && ctx
                     .get_refmut_source(receiver.0)
