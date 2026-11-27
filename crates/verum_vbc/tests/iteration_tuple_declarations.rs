@@ -8,6 +8,30 @@ use verum_vbc::{
 };
 
 #[test]
+fn a_singleton_tuple_retains_its_slot_across_a_function_call() {
+    use verum_vbc::{deserialize::deserialize_module, serialize::serialize_module};
+
+    let source = r#"
+        module consumer;
+        fn read(value: &(Int,)) -> Int { value.0 }
+        fn main() -> Int {
+            let single: (Int,) = (42,);
+            read(&single)
+        }
+    "#;
+    let ast = Parser::new(source).parse_module().unwrap();
+    let module = VbcCodegen::with_config(CodegenConfig::new("consumer"))
+        .compile_module(&ast)
+        .unwrap();
+    let decoded = deserialize_module(&serialize_module(&module).unwrap()).unwrap();
+    for image in [module, decoded] {
+        let main = image.find_function_by_name("consumer.main").unwrap();
+        let mut vm = Interpreter::try_new_validated(Arc::new(image)).unwrap();
+        assert_eq!(vm.execute_function(main).unwrap().try_as_i64(), Some(42));
+    }
+}
+
+#[test]
 fn collection_tuple_bindings_resolve_each_nominal_receiver() {
     let source = r#"
         module consumer;
