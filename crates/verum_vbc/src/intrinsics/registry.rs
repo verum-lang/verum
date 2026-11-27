@@ -1404,10 +1404,14 @@ impl Intrinsic {
     }
 
     /// Source operand installed as a complete owned value by a memory operation.
-    /// The exchange's first operand is the destination reference.
+    /// A raw store or exchange takes the destination followed by its new value.
     pub(crate) fn stored_value_operand(&self) -> Option<usize> {
         match self.strategy {
-            CodegenStrategy::InlineSequence(InlineSequenceId::Replace) => Some(1),
+            CodegenStrategy::InlineSequence(
+                InlineSequenceId::Replace
+                | InlineSequenceId::PtrWriteRaw
+                | InlineSequenceId::PtrWriteVolatile,
+            ) | CodegenStrategy::DirectOpcode(Opcode::DerefMut) => Some(1),
             _ if self.owned_slot_write_carrier().is_some() => Some(2),
             _ => None,
         }

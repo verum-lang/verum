@@ -17,6 +17,21 @@ use crate::instruction::Opcode;
 use crate::types::TypeId;
 use crate::value::Value;
 
+/// Native scalar and pointer storage uses its machine representation; a value
+/// with no separate native representation carries its complete boxed word.
+fn raw_store_word(value: Value) -> i64 {
+    if value.is_float() {
+        value.as_f64().to_bits() as i64
+    } else if value.is_regular_ptr() {
+        value.as_ptr::<u8>() as i64
+    } else if value.is_bool() {
+        i64::from(value.as_bool())
+    } else if value.is_int() {
+        value.as_i64()
+    } else {
+        value.to_bits() as i64
+    }
+}
 
 /// An encoded register reference is never a native address, including when
 /// an older archive used a sized raw load for a managed reference.
@@ -934,7 +949,7 @@ fn mem_extended_body(
             if ptr.is_null() {
                 return Err(InterpreterError::NullPointer);
             }
-            let v = state.get_reg(value_reg).as_i64();
+            let v = raw_store_word(state.get_reg(value_reg));
             // SAFETY: null-checked; caller supplies a pointer valid for
             // `size`-byte writes (raw-pointer contract, mirrors DerefMutRaw).
             unsafe {
@@ -1188,46 +1203,7 @@ fn mem_extended_body(
                     return Ok(DispatchResult::Continue);
                 }
             }
-            // MACHINE representation: the payload (as_i64 for ints,
-            // bit-pattern for floats via to_f64 bits, raw ptr for heap
-            // values) — an `*mut Int` cell holds 11, never the NaN box.
-            let payload: i64 = if v.is_float() {
-                v.as_f64().to_bits() as i64
-            } else if v.is_regular_ptr() {
-                v.as_ptr::<u8>() as i64
-            } else if v.is_bool() {
-                // A `*mut Bool` cell holds 0 or 1, and `as_i64` refuses
-                // a boolean — `is_int()` does not include TAG_BOOLEAN.
-                // `let y: Bool = true;` in a `static mut` reached the
-                // catch-all below and tripped
-                // `debug_assert!(self.is_int(), "Expected int, got {:?}")`
-                // with tag 2 (TAG_BOOLEAN).
-                i64::from(v.as_bool())
-            } else if v.is_int() {
-                v.as_i64()
-            } else {
-                // Everything else — variants and any other value whose
-                // machine form IS its NaN box — is written verbatim.
-                //
-                // This arm used to be an unconditional `as_i64()`, on
-                // the assumption that "not float, not pointer" means
-                // integer. It is a CLOSED set treated as open with a
-                // default, and the default decodes a box's payload bits
-                // as if they were a number.
-                //
-                // In a debug build the assert fires — which is how this
-                // was found, through
-                // `verum_compiler/tests/core_stdlib_validation_test.rs`,
-                // a suite that had never run in CI. In a release build
-                // there is no assert: the write silently stores garbage
-                // and the next read hands it back with the original
-                // type's tag.
-                //
-                // A variant has no unboxed machine form, so the box IS
-                // the representation and storing it verbatim is the only
-                // value that round-trips.
-                v.to_bits() as i64
-            };
+            let payload = raw_store_word(v);
             // SAFETY: null-checked; caller supplies a pointer valid for
             // `size`-byte writes (raw-pointer contract).
                         if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceStaticmut) {
