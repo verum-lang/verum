@@ -316,7 +316,9 @@ impl TypeChecker {
             step = unparen(operand);
             target = false;
         }
-        if let Some((name, projection)) = self.borrow_place(place) {
+        let borrowed = self.borrow_place(place);
+        let written = self.flow_write_origins(place, borrowed.as_ref().map(|(name, _)| name), replaces_referent);
+        if let Some((name, projection)) = borrowed {
             let conflict = self.borrow_tracker.check_place_borrow(
                 &name,
                 projection.as_deref(),
@@ -345,7 +347,24 @@ impl TypeChecker {
         if replaces_referent && let Some(ty) = replacement {
             self.check_referent_overwrite(ty, write_site)?;
         }
+        self.refinement_evidence.invalidate_write(&written);
         Ok(())
+    }
+
+    pub(super) fn flow_write_origins(
+        &mut self, place: &Expr, root: Option<&Text>, through_reference: bool,
+    ) -> List<RecordReceiver> {
+        let mut sources = List::new();
+        if self.refinement_evidence.is_empty() { return sources; }
+        if through_reference && root.is_none_or(|name| self.ctx.env.reference_candidates(name).is_empty()) {
+            // An untracked pointer can alias a different lexical binding.
+            return sources;
+        }
+        self.collect_borrowed_place_candidates(place, &mut sources);
+        if let Some(binding) = root.and_then(|name| self.ctx.env.flow_binding(name)) {
+            sources.push(RecordReceiver { binding, fields: List::new() });
+        }
+        sources
     }
 
     /// Resolve the storage a borrow or write may touch. Dynamic projections

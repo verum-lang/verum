@@ -1240,6 +1240,8 @@ pub(crate) enum ReferenceOrigin {
 #[derive(Clone, Debug, Default)]
 struct RecordPlace {
     id: Option<u64>,
+    /// Lexical slot observed by path conditions, stable across replacement of its value.
+    flow_id: Option<u64>,
     loan_region: Option<usize>,
     mutable: bool,
     projection: Option<Span>,
@@ -1675,6 +1677,35 @@ impl TypeEnv {
         None
     }
 
+    pub(crate) fn flow_binding(&mut self, name: &Text) -> Option<u64> {
+        let mut scope = self;
+        loop {
+            if scope.bindings.contains_key(name) {
+                if scope.type_parameter_mirrors.contains(name)
+                    || (scope.parent.is_none() && !scope.constant_values.contains(name))
+                {
+                    return None;
+                }
+                let place = scope.record_places.entry(name.clone()).or_default();
+                if place.flow_id.is_none() {
+                    place.flow_id = place.identity();
+                }
+                return place.flow_id;
+            }
+            scope = scope.parent.as_deref_mut()?;
+        }
+    }
+
+    pub(crate) fn visible_flow_id(&self, name: &Text) -> Option<u64> {
+        let mut scope = self;
+        loop {
+            if scope.bindings.contains_key(name) {
+                return scope.record_places.get(name)?.flow_id;
+            }
+            scope = scope.parent.as_deref()?;
+        }
+    }
+
     pub(crate) fn check_record_place_write(
         &mut self,
         name: &str,
@@ -1687,6 +1718,7 @@ impl TypeEnv {
             if invalidate_binding {
                 *place = RecordPlace {
                     mutable: true,
+                    flow_id: place.flow_id,
                     loan_region: place.loan_region,
                     ..Default::default()
                 };

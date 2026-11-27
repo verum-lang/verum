@@ -3028,21 +3028,21 @@ impl TypeChecker {
     /// }
     /// ```
     pub fn get_evidence_assumptions(&self) -> List<verum_ast::expr::Expr> {
-        self.refinement_evidence.to_smt_assumptions()
+        self.refinement_evidence.visible_conditions(&self.ctx.env).map(|fact| fact.predicate.clone()).collect()
     }
 
     /// Check if we have evidence that a variable is non-empty
     ///
     /// Useful for checking List/Array bounds safety without SMT query.
     pub fn has_non_empty_evidence(&mut self, var_name: &verum_common::Text) -> bool {
-        self.refinement_evidence.has_non_empty_evidence(var_name)
+        self.refinement_evidence.visible_conditions(&self.ctx.env).any(|fact| fact.constrains_variable(var_name) && fact.is_non_empty_check())
     }
 
     /// Check if we have evidence that a variable is Some/Ok
     ///
     /// Useful for checking Maybe/Result unwrap safety without SMT query.
     pub fn has_some_or_ok_evidence(&mut self, var_name: &verum_common::Text) -> bool {
-        self.refinement_evidence.has_some_or_ok_evidence(var_name)
+        self.refinement_evidence.visible_conditions(&self.ctx.env).any(|fact| fact.constrains_variable(var_name) && fact.is_some_or_ok_check())
     }
 
     /// Check refinement with current path evidence
@@ -3189,12 +3189,13 @@ impl TypeChecker {
                     // Check if the scrutinee type actually has this method via protocol
                     // implementations. If not, we still add the evidence as it may be
                     // resolved later or used for refinement narrowing.
-                    self.refinement_evidence.add_method_evidence(
+                    let condition = crate::refinement_evidence::PathCondition::from_method_result(
                         var_name.clone(),
                         &method_name,
-                        false, // Not negated - the check is true
+                        false, // The pattern matched this variant.
                         span,
                     );
+                    self.refinement_evidence.observe(condition, &mut self.ctx.env);
                 }
             }
 
@@ -3211,8 +3212,7 @@ impl TypeChecker {
                     },
                     span,
                 );
-                self.refinement_evidence
-                    .add_evidence_from_condition(&eq_expr, span);
+                self.observe_condition(&eq_expr, false);
             }
 
             // Range pattern: e.g., 0..10
@@ -3235,8 +3235,7 @@ impl TypeChecker {
                         },
                         span,
                     );
-                    self.refinement_evidence
-                        .add_evidence_from_condition(&ge_expr, span);
+                    self.observe_condition(&ge_expr, false);
                 }
 
                 // Add: var < end (or var <= end if inclusive)
@@ -3252,8 +3251,7 @@ impl TypeChecker {
                         },
                         span,
                     );
-                    self.refinement_evidence
-                        .add_evidence_from_condition(&bound_expr, span);
+                    self.observe_condition(&bound_expr, false);
                 }
             }
 
@@ -3277,107 +3275,20 @@ impl TypeChecker {
 
     // ==================== Flow-Sensitive Type Narrowing ====================
 
-    /// Narrow variable types in the current scope based on a condition expression.
-    ///
-    /// When entering an if-then branch with condition `x > 0`, this method
-    /// narrows the type of `x` from `Int` to `Int{it > 0}` in the current scope.
-    pub(super) fn narrow_variable_types_from_condition(&mut self, condition: &Expr, negated: bool) {
-        if negated {
-            let neg = crate::refinement_evidence::PathCondition::negate_expr_static(condition);
-            self.narrow_variable_types_impl(&neg);
-        } else {
-            self.narrow_variable_types_impl(condition);
+    /// Branch predicates describe the value read at this point. The binding
+    /// scheme remains the declaration used to check writes and form mutable references.
+    pub(super) fn flow_read_type(&self, name: &str, ty: Type) -> Type {
+        if matches!(ty.base(), Type::Int | Type::Float)
+            && let Some(predicate) = self.refinement_evidence.read_predicate(name, &self.ctx.env)
+        {
+            return Type::refined(ty, predicate);
         }
+        ty
     }
 
-    fn narrow_variable_types_impl(&mut self, condition: &Expr) {
-        match &condition.kind {
-            ExprKind::Binary { op, left, right } => match op {
-                BinOp::And => {
-                    self.narrow_variable_types_impl(left);
-                    self.narrow_variable_types_impl(right);
-                }
-                BinOp::Gt | BinOp::Ge | BinOp::Lt | BinOp::Le | BinOp::Eq | BinOp::Ne => {
-                    if let Maybe::Some(var_name) = self.extract_simple_var_name(left) {
-                        if let Some(scheme) = self.ctx.env.lookup(&var_name) {
-                            let current_ty = scheme.ty.clone();
-                            if self.is_refineable_type(&current_ty) {
-                                let base_type = self.strip_refinement(&current_ty);
-                                let it_ident = verum_ast::ty::Ident::new("it", condition.span);
-                                let it_expr = Expr::ident(it_ident);
-                                let predicate_expr = Expr::new(
-                                    ExprKind::Binary {
-                                        op: *op,
-                                        left: Box::new(it_expr),
-                                        right: Box::new((**right).clone()),
-                                    },
-                                    condition.span,
-                                );
-                                let predicate = crate::refinement::RefinementPredicate::narrowed(
-                                    predicate_expr,
-                                    condition.span,
-                                );
-                                let refined_ty = Type::Refined {
-                                    base: Box::new(base_type),
-                                    predicate,
-                                };
-                                self.ctx.env.insert_mono(var_name, refined_ty);
-                            }
-                        }
-                    } else if let Maybe::Some(var_name) = self.extract_simple_var_name(right) {
-                        if let Some(scheme) = self.ctx.env.lookup(&var_name) {
-                            let current_ty = scheme.ty.clone();
-                            if self.is_refineable_type(&current_ty) {
-                                let base_type = self.strip_refinement(&current_ty);
-                                let flipped_op = match op {
-                                    BinOp::Gt => BinOp::Lt,
-                                    BinOp::Ge => BinOp::Le,
-                                    BinOp::Lt => BinOp::Gt,
-                                    BinOp::Le => BinOp::Ge,
-                                    other => *other,
-                                };
-                                let it_ident = verum_ast::ty::Ident::new("it", condition.span);
-                                let it_expr = Expr::ident(it_ident);
-                                let predicate_expr = Expr::new(
-                                    ExprKind::Binary {
-                                        op: flipped_op,
-                                        left: Box::new(it_expr),
-                                        right: Box::new((**left).clone()),
-                                    },
-                                    condition.span,
-                                );
-                                let predicate = crate::refinement::RefinementPredicate::narrowed(
-                                    predicate_expr,
-                                    condition.span,
-                                );
-                                let refined_ty = Type::Refined {
-                                    base: Box::new(base_type),
-                                    predicate,
-                                };
-                                self.ctx.env.insert_mono(var_name, refined_ty);
-                            }
-                        }
-                    }
-                }
-                _ => {}
-            },
-            _ => {}
-        }
-    }
-
-    fn is_refineable_type(&self, ty: &Type) -> bool {
-        match ty {
-            Type::Int | Type::Float => true,
-            Type::Refined { base, .. } => self.is_refineable_type(base),
-            _ => false,
-        }
-    }
-
-    fn strip_refinement(&self, ty: &Type) -> Type {
-        match ty {
-            Type::Refined { base, .. } => self.strip_refinement(base),
-            other => other.clone(),
-        }
+    pub(super) fn observe_condition(&mut self, expr: &Expr, negated: bool) {
+        let fact = crate::refinement_evidence::PathCondition::from_if_condition(expr, negated, expr.span);
+        self.refinement_evidence.observe(fact, &mut self.ctx.env);
     }
 
     // ==================== Type Variable Bounds Management ====================
@@ -9815,7 +9726,7 @@ impl TypeChecker {
                             let _ = std::io::stderr().flush();
                         }
                         let value_result = self.synth_expr(val)?;
-                        value_result.ty
+                        value_result.ty.into_storage_type()
                     };
 
                     // CRITICAL: Apply unifier to resolve type variables before generalizing
@@ -12083,7 +11994,7 @@ with .to_float() or .to_int() (at {:?})",
         op: BinOp,
         span: Span,
     ) -> Result<InferResult> {
-        let left_ty = self.synth_expr(left)?.ty;
+        let left_ty = self.synth_expr(left)?.ty.into_storage_type();
         match &left_ty {
             Type::Int | Type::Float | Type::Var(_) => {
                 let right_ty = self.synth_expr(right)?.ty;
@@ -12370,7 +12281,7 @@ with .to_float() or .to_int() (at {:?})",
             RefMut => {
                 // CRITICAL: Set call_arg_context so inner path lookup uses borrow_value
                 // instead of use_value. Taking &mut x borrows x, it does NOT consume/move x.
-                let result = self.synth_address_operand(expr)?;
+                let result = self.synth_mutable_address(expr)?;
 
                 // Auto-deref smart pointers: &mut Heap<T> -> &mut T, &mut Shared<T> -> &mut T
                 // STDLIB-AGNOSTIC: These are Verum memory types, not Rust types
@@ -12409,7 +12320,7 @@ with .to_float() or .to_int() (at {:?})",
                 Ok(InferResult::new(Type::checked_reference(false, result.ty)))
             }
             RefCheckedMut => {
-                let result = self.synth_borrowed_operand(expr)?;
+                let result = self.synth_mutable_address(expr)?;
 
                 Ok(InferResult::new(Type::checked_reference(true, result.ty)))
             }
@@ -12449,7 +12360,7 @@ with .to_float() or .to_int() (at {:?})",
                         "unsafe mutable reference requires unsafe block: `unsafe { &unsafe mut expr }`",
                     )));
                 }
-                let result = self.synth_borrowed_operand(expr)?;
+                let result = self.synth_mutable_address(expr)?;
                 Ok(InferResult::new(Type::unsafe_reference(true, result.ty)))
             }
             // Ownership operators: %x and %mut x

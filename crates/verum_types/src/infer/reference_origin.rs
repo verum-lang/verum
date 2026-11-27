@@ -1178,6 +1178,15 @@ impl TypeChecker {
             let writes_payload = mode == Some(true) && self.carries_stored_loan(payload);
             let writes_through_value = mode.is_none() && writable_source
                 && !self.callable_has_closed_environment(argument);
+            // Even a scalar referent can change value, although it cannot
+            // retain a loan. An opaque closure may mutate captured storage.
+            if (mode == Some(true) || writes_through_value) && !self.refinement_evidence.is_empty() {
+                if origins.iter().any(|source| self.ctx.env.record_storage_name(source.binding).is_none()) {
+                    self.refinement_evidence.invalidate_write(&[]);
+                } else {
+                    self.refinement_evidence.invalidate_write(&origins);
+                }
+            }
             if writes_payload || writes_through_value {
                 // A known destination needs one bounded layout traversal.
                 // An opaque captured destination remains conservative.

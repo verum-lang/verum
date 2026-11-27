@@ -35,11 +35,13 @@
 //!
 //! # Performance
 //!
-//! - Evidence lookup: O(1) hash map
+//! - Queries and invalidation visit the active path conditions.
 //! - Evidence propagation: O(n) where n = active conditions
 //! - Memory: ~64 bytes per tracked variable
 
-use std::collections::HashMap;
+use crate::context::TypeEnv;
+use crate::refinement::RefinementPredicate;
+use crate::ty::RecordReceiver;
 use std::fmt::{self, Display};
 
 use verum_ast::{
@@ -48,7 +50,7 @@ use verum_ast::{
     span::Span,
     ty::{Ident, Path, PathSegment},
 };
-use verum_common::{Heap, List, Map, Maybe, Set, Text};
+use verum_common::{Heap, List, Maybe, Shared, Text};
 
 // ============================================================================
 // PATH CONDITION
@@ -290,11 +292,99 @@ pub struct RefinementEvidence {
 /// A scope of evidence (corresponds to a control flow scope)
 #[derive(Debug, Clone, Default)]
 struct EvidenceScope {
-    /// Path conditions active in this scope
-    conditions: Vec<PathCondition>,
-    /// Variables with learned predicates in this scope
-    /// Maps variable name → list of learned predicates
-    variable_predicates: HashMap<Text, Vec<PathCondition>>,
+    repeated: bool,
+    conditions: List<Shared<ObservedCondition>>,
+}
+
+/// The spellings in a predicate must still resolve to the same lexical
+/// bindings. A write through any of their possible referents retires the
+/// observation as well. Missing origins never establish a storage identity.
+#[derive(Debug)]
+struct ObservedCondition {
+    condition: PathCondition,
+    bindings: List<(Text, u64)>,
+    referents: List<u64>,
+    mutable: bool,
+    unknown_backing: bool,
+}
+
+impl ObservedCondition {
+    fn visible(&self, env: &TypeEnv) -> bool {
+        self.bindings
+            .iter()
+            .all(|(name, id)| env.visible_flow_id(name) == Some(*id))
+    }
+
+    fn observe(condition: PathCondition, env: &mut TypeEnv) -> Option<Self> {
+        let mut bindings = List::new();
+        let mut referents = List::new();
+        let mut mutable = false;
+        let mut unknown_backing = false;
+        let method_subject = match &condition.predicate.kind {
+            ExprKind::Unary {
+                op: UnOp::Not,
+                expr,
+            } => expr.as_ref(),
+            _ => &condition.predicate,
+        };
+        let mut work = vec![&condition.predicate];
+        while let Some(expr) = work.pop() {
+            match &expr.kind {
+                ExprKind::Literal(_) => {}
+                ExprKind::Path(path) => {
+                    let name = &path.as_ident()?.name;
+                    if bindings.iter().any(|(known, _)| known == name) {
+                        continue;
+                    }
+                    let id = env.flow_binding(name)?;
+                    bindings.push((name.clone(), id));
+                    if let Some(slot) = env.record_source(name, false) {
+                        referents.push(slot.binding);
+                    }
+                    let sources = env.reference_candidates(name);
+                    let scalar = env.lookup(name).is_some_and(|scheme| {
+                        matches!(
+                            scheme.ty.base(),
+                            crate::Type::Int
+                                | crate::Type::Float
+                                | crate::Type::Bool
+                                | crate::Type::Char
+                        )
+                    });
+                    mutable |= env.binding_place_is_mutable(name) || !scalar;
+                    // An untracked pointer or aggregate can observe the same
+                    // backing storage as a write to a different known place.
+                    unknown_backing |= !scalar && sources.is_empty();
+                    referents.extend(sources.into_iter().map(|source| source.binding));
+                }
+                ExprKind::Paren(inner)
+                | ExprKind::Field { expr: inner, .. }
+                | ExprKind::TupleIndex { expr: inner, .. }
+                | ExprKind::Unary {
+                    op: UnOp::Neg | UnOp::Not | UnOp::BitNot | UnOp::Deref,
+                    expr: inner,
+                } => work.push(inner),
+                ExprKind::Binary { left, right, op } if !op.is_assignment() => {
+                    work.extend([left.as_ref(), right.as_ref()]);
+                }
+                ExprKind::MethodCall { receiver, args, .. }
+                    if args.is_empty() && std::ptr::eq(expr, method_subject) =>
+                {
+                    work.push(receiver)
+                }
+                // An arbitrary computation may depend on storage absent from
+                // its syntax, and re-evaluating it need not give the same value.
+                _ => return None,
+            }
+        }
+        Some(Self {
+            condition,
+            bindings,
+            referents,
+            mutable,
+            unknown_backing,
+        })
+    }
 }
 
 /// Statistics for evidence tracking
@@ -328,6 +418,19 @@ impl RefinementEvidence {
         self.scopes.push(EvidenceScope::default());
     }
 
+    pub(crate) fn push_repeated_scope(&mut self) -> usize {
+        let depth = self.scopes.len();
+        self.scopes.push(EvidenceScope {
+            repeated: true,
+            conditions: List::new(),
+        });
+        depth
+    }
+
+    pub(crate) fn restore_depth(&mut self, depth: usize) {
+        self.scopes.truncate(depth);
+    }
+
     /// Pop a scope (leaving nested control flow)
     pub fn pop_scope(&mut self) {
         if self.scopes.len() > 1 {
@@ -337,22 +440,134 @@ impl RefinementEvidence {
 
     /// Add a path condition to the current scope
     pub fn add_condition(&mut self, condition: PathCondition) {
+        self.push_observation(ObservedCondition {
+            condition,
+            bindings: List::new(),
+            referents: List::new(),
+            mutable: false,
+            unknown_backing: false,
+        });
+    }
+
+    fn push_observation(&mut self, condition: ObservedCondition) {
         self.stats.conditions_added += 1;
-
-        if let Maybe::Some(ref var_name) = condition.constrained_var {
-            // Also add to variable-specific index
-            if let Some(scope) = self.scopes.last_mut() {
-                scope
-                    .variable_predicates
-                    .entry(var_name.clone())
-                    .or_default()
-                    .push(condition.clone());
-            }
-        }
-
         if let Some(scope) = self.scopes.last_mut() {
-            scope.conditions.push(condition);
+            scope.conditions.push(Shared::new(condition));
         }
+    }
+
+    pub(crate) fn observe(&mut self, condition: PathCondition, env: &mut TypeEnv) {
+        if let Some(observed) = ObservedCondition::observe(condition, env) {
+            self.push_observation(observed);
+        }
+    }
+
+    pub(crate) fn visible_conditions<'a>(
+        &'a self,
+        env: &'a TypeEnv,
+    ) -> impl DoubleEndedIterator<Item = &'a PathCondition> {
+        let repeated = self
+            .scopes
+            .iter()
+            .rposition(|scope| scope.repeated)
+            .unwrap_or(0);
+        self.scopes
+            .iter()
+            .enumerate()
+            .flat_map(move |(depth, scope)| {
+                scope
+                    .conditions
+                    .iter()
+                    .filter(move |fact| depth >= repeated || !fact.mutable)
+            })
+            .filter(move |observed| observed.visible(env))
+            .map(|observed| &observed.condition)
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.scopes.iter().all(|scope| scope.conditions.is_empty())
+    }
+
+    pub(crate) fn invalidate_mutable(&mut self) {
+        for scope in &mut self.scopes {
+            scope.conditions.retain(|observed| !observed.mutable);
+        }
+    }
+
+    pub(crate) fn invalidate_write(&mut self, origins: &[RecordReceiver]) {
+        for scope in &mut self.scopes {
+            scope.conditions.retain(|observed| {
+                if origins.is_empty() || observed.unknown_backing {
+                    return false;
+                }
+                !origins.iter().any(|source| {
+                    observed
+                        .bindings
+                        .iter()
+                        .any(|(_, id)| *id == source.binding)
+                        || observed.referents.contains(&source.binding)
+                })
+            });
+        }
+    }
+
+    /// A fact reaches a join only when both incoming paths retain the same observation.
+    pub(crate) fn intersect(&mut self, other: &Self) {
+        for (scope, other) in self.scopes.iter_mut().zip(&other.scopes) {
+            scope.conditions.retain(|here| {
+                other
+                    .conditions
+                    .iter()
+                    .any(|there| std::ptr::eq(&**here, &**there))
+            });
+        }
+    }
+
+    pub(crate) fn join_into(&self, join: &mut Option<Self>) {
+        if let Some(existing) = join {
+            existing.intersect(self);
+        } else {
+            *join = Some(self.clone());
+        }
+    }
+
+    pub(crate) fn read_predicate(&self, name: &str, env: &TypeEnv) -> Option<RefinementPredicate> {
+        for condition in self.visible_conditions(env).rev() {
+            let ExprKind::Binary { op, left, right } = &condition.predicate.kind else {
+                continue;
+            };
+            if !op.is_comparison() {
+                continue;
+            }
+            let names = |expr: &Expr| matches!(&expr.kind, ExprKind::Path(path) if path.as_ident().is_some_and(|id| id.name == name));
+            let (op, bound) = if names(left) {
+                (*op, right)
+            } else if names(right) {
+                (
+                    match op {
+                        BinOp::Gt => BinOp::Lt,
+                        BinOp::Ge => BinOp::Le,
+                        BinOp::Lt => BinOp::Gt,
+                        BinOp::Le => BinOp::Ge,
+                        other => *other,
+                    },
+                    left,
+                )
+            } else {
+                continue;
+            };
+            let span = condition.source_span;
+            let predicate = Expr::new(
+                ExprKind::Binary {
+                    op,
+                    left: Heap::new(Expr::ident(Ident::new("it", span))),
+                    right: bound.clone(),
+                },
+                span,
+            );
+            return Some(RefinementPredicate::narrowed(predicate, span));
+        }
+        None
     }
 
     /// Add evidence that a condition holds in the current scope
@@ -384,20 +599,17 @@ impl RefinementEvidence {
     pub fn get_variable_evidence(&mut self, var_name: &Text) -> Vec<&PathCondition> {
         self.stats.conditions_used += 1;
 
-        let mut result = Vec::new();
-        for scope in &self.scopes {
-            if let Some(conditions) = scope.variable_predicates.get(var_name) {
-                result.extend(conditions.iter());
-            }
-        }
-        result
+        self.get_all_conditions()
+            .into_iter()
+            .filter(|condition| condition.constrains_variable(var_name))
+            .collect()
     }
 
-    /// Get all active path conditions
+    /// Get all active path conditions.
     pub fn get_all_conditions(&self) -> Vec<&PathCondition> {
         self.scopes
             .iter()
-            .flat_map(|scope| scope.conditions.iter())
+            .flat_map(|scope| scope.conditions.iter().map(|entry| &entry.condition))
             .collect()
     }
 

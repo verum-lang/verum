@@ -134,6 +134,7 @@ struct BranchPatternScope {
 struct ConditionFailures {
     ownership: List<crate::affine::AffineAlternatives>,
     loans: Option<crate::aliasing::BorrowTracker>,
+    evidence: Option<crate::refinement_evidence::RefinementEvidence>,
 }
 
 impl TypeChecker {
@@ -243,6 +244,13 @@ impl TypeChecker {
         self.synth_borrowed_operand(expr)
     }
 
+    pub(super) fn synth_mutable_address(&mut self, expr: &Expr) -> Result<InferResult> {
+        let mut result = self.synth_address_operand(expr)?;
+        result.ty = result.ty.into_storage_type();
+        self.observe_expression_type(expr, &result.ty);
+        Ok(result)
+    }
+
     fn with_expression_value_context<T>(
         &mut self, expr: &Expr, infer: impl FnOnce(&mut Self) -> Result<T>,
     ) -> Result<T> {
@@ -320,7 +328,11 @@ impl TypeChecker {
         while let ExprKind::Paren(inner) = &place.kind { place = inner; }
         if mutable || matches!(place.kind, ExprKind::Field { .. } | ExprKind::Index { .. }
             | ExprKind::TupleIndex { .. } | ExprKind::Unary { op: UnOp::Deref, .. }) {
-            let result = self.synth_address_operand(expr)?;
+            let result = if mutable {
+                self.synth_mutable_address(expr)?
+            } else {
+                self.synth_address_operand(expr)?
+            };
             let source = result.ty.clone();
             let checked = self.check_synthesized_value(expr, expected, result)?;
             if mutable
@@ -1185,6 +1197,8 @@ impl TypeChecker {
         // HERE, not through the synth path.
         let affine_at_match = self.affine_tracker.snapshot_alternatives();
         let loans_at_match = self.borrow_tracker.clone_for_branch();
+        let mut pending_evidence = self.refinement_evidence.clone();
+        let mut joined_evidence = None;
         let mut escaping_loans = loans_at_match.clone_for_branch();
         // A `match` has TWO walkers, one per direction. This probe
         // names WHICH one ran: an instrument that can only see one of
@@ -1197,12 +1211,14 @@ impl TypeChecker {
         for arm in arms.iter() {
             self.affine_tracker.restore_alternatives(&affine_at_match);
             self.borrow_tracker = loans_at_match.clone_for_branch();
+            self.refinement_evidence = pending_evidence.clone();
             let arm_result =
-                self.infer_scoped_match_arm(arm, scrutinee, &scrutinee_ty, None, Some(expected), &sources)?;
+                self.infer_scoped_match_arm(arm, scrutinee, &scrutinee_ty, None, Some(expected), &sources, &mut pending_evidence)?;
             // An arm that diverges never reaches the code after the
             // match, so what it consumed cannot reach it either.
             if !self.is_never_type(&arm_result.ty) {
                 affine_per_arm.push(self.affine_tracker.snapshot_alternatives());
+                self.refinement_evidence.join_into(&mut joined_evidence);
                 escaping_loans.merge_live_loans(&self.borrow_tracker);
             }
         }
@@ -1212,6 +1228,7 @@ impl TypeChecker {
             self.affine_tracker.merge_alternatives(&affine_per_arm);
         }
 
+        self.refinement_evidence = joined_evidence.unwrap_or(pending_evidence);
         self.borrow_tracker = escaping_loans;
 
         self.check_match_coverage(&scrutinee_ty, arms, expr.span)?;
@@ -4287,7 +4304,7 @@ impl TypeChecker {
                 if let Some(ctor_fn) = self.bare_payload_ctor_as_fn(name, &resolved_ty, span)? {
                     return Ok(ctor_fn);
                 }
-                Ok(resolved_ty.into_expression_type())
+                Ok(self.flow_read_type(name, resolved_ty.into_expression_type()))
             } else {
                 // Try module-level function lookup
                 if let Maybe::Some(scheme) = self.lookup_function_in_module(name) {
@@ -4588,12 +4605,12 @@ impl TypeChecker {
                 TryBlock(inner_block) => self.infer_try_block(inner_block, expr.span),
 
                 // Loop expressions
-                Loop { .. } => self.infer_expr_loop(current_expr, expr.span),
+                Loop { .. } => self.with_repeated_body(|tc| tc.infer_expr_loop(current_expr, expr.span)),
 
                 // Refinement types enhancement: flow-sensitive refinement propagation, evidence tracking for verified predicates — Refinement Evidence Propagation
-                While { .. } => self.infer_while_loop(current_expr),
+                While { .. } => self.with_repeated_body(|tc| tc.infer_while_loop(current_expr)),
 
-                For { .. } => self.infer_for_loop(current_expr),
+                For { .. } => self.with_repeated_body(|tc| tc.infer_for_loop(current_expr)),
 
                 Break { label: _, value: _ } => {
                     // Break has Never type (diverging control flow)
@@ -4652,24 +4669,24 @@ impl TypeChecker {
 
                 // List comprehension: [x * 2 for x in list if x > 0]
                 // Expression grammar: precedence levels, associativity rules, all constructs are expressions — .10 - Comprehension expressions
-                Comprehension { .. } => self.infer_expr_comprehension(current_expr),
+                Comprehension { .. } => self.with_repeated_body(|tc| tc.infer_expr_comprehension(current_expr)),
 
                 // Stream comprehension: stream[x * 2 for x in source]
                 // Expression grammar: precedence levels, associativity rules, all constructs are expressions — .11 - Stream processing syntax
-                StreamComprehension { .. } => self.infer_expr_stream_comprehension(current_expr),
+                StreamComprehension { .. } => self.with_repeated_body(|tc| tc.infer_expr_stream_comprehension(current_expr)),
 
                 // Map comprehension: {k: v for (k, v) in pairs if condition}
                 // Async generator expressions: "async fn*" combining async iteration with yield
-                MapComprehension { .. } => self.infer_map_comprehension_expr(current_expr),
+                MapComprehension { .. } => self.with_repeated_body(|tc| tc.infer_map_comprehension_expr(current_expr)),
 
                 // Set comprehension: set{x for x in items if condition}
                 // Generator pipeline operations: composing generators with map/filter/take combinators
-                SetComprehension { .. } => self.infer_expr_set_comprehension(current_expr),
+                SetComprehension { .. } => self.with_repeated_body(|tc| tc.infer_expr_set_comprehension(current_expr)),
 
                 // Generator expression: gen{x for x in items if condition}
                 // Recursive generators: generators that yield from sub-generators via yield* delegation
                 // Generators are lazy iterators that yield values on demand
-                GeneratorComprehension { .. } => self.infer_expr_generator_comprehension(current_expr),
+                GeneratorComprehension { .. } => self.with_repeated_body(|tc| tc.infer_expr_generator_comprehension(current_expr)),
 
                 // Await expression: expr.await
                 // Async/await integration: async functions return Future<T>, await extracts T, select for multi-future - Async/Await Integration
@@ -4727,7 +4744,7 @@ impl TypeChecker {
                 // For-await loop: for await pattern in async_iterable { body }
                 // Spec: grammar/verum.ebnf - for_await_loop production (v2.10)
                 // Iterates over an async iterator, awaiting each value
-                ForAwait { .. } => self.infer_expr_for_await(current_expr, expr.span),
+                ForAwait { .. } => self.with_repeated_body(|tc| tc.infer_expr_for_await(current_expr, expr.span)),
 
                 // Throw expression: throw error_value
                 // Spec: grammar/verum.ebnf - throw_expr production
@@ -4865,6 +4882,16 @@ impl TypeChecker {
             name: Self::range_literal_constructor(*inclusive).into(),
             args: vec![elem_ty].into(),
         }))
+    }
+
+    /// A mutable fact from outside a loop is unavailable on its back edge.
+    /// Keep the observation in its owning scope so writes can still retire it
+    /// and a read-only loop preserves it for the continuation.
+    fn with_repeated_body<T>(&mut self, check: impl FnOnce(&mut Self) -> Result<T>) -> Result<T> {
+        let depth = self.refinement_evidence.push_repeated_scope();
+        let result = check(self);
+        self.refinement_evidence.restore_depth(depth);
+        result
     }
 
     fn infer_expr_loop(&mut self, expr: &Expr, _span: Span) -> Result<InferResult> {
@@ -5098,6 +5125,9 @@ impl TypeChecker {
             }
             affine.snapshot_alternatives()
         };
+        let mut evidence = self.refinement_evidence.clone();
+        for _ in 0..=scopes.len() { evidence.pop_scope(); }
+        evidence.join_into(&mut failures.evidence);
         failures.ownership.push(ownership);
         if let Some(existing) = &mut failures.loans {
             existing.merge_live_loans(&loans);
@@ -5105,20 +5135,6 @@ impl TypeChecker {
             failures.loans = Some(loans);
         }
         Ok(())
-    }
-
-    fn apply_condition_evidence(&mut self, condition: &Expr, negated: bool) {
-        if negated {
-            self.refinement_evidence.add_negated_evidence(condition, condition.span);
-        } else {
-            self.refinement_evidence.add_evidence_from_condition(condition, condition.span);
-        }
-        self.narrow_variable_types_from_condition(condition, negated);
-        if let Some((var, method, was_negated)) =
-            crate::refinement_evidence::EvidencePropagator::analyze_method_condition(condition)
-        {
-            self.refinement_evidence.add_method_evidence(var, &method, was_negated ^ negated, condition.span);
-        }
     }
 
     fn infer_conditional_branches(
@@ -5159,7 +5175,7 @@ impl TypeChecker {
                         } else {
                             self.check_expr(guard, &Type::bool())?;
                             self.record_condition_failure(&scopes, guard.span, &mut failures)?;
-                            self.apply_condition_evidence(guard, false);
+                            self.observe_condition(guard, false);
                             continue;
                         }
                     }
@@ -5171,7 +5187,7 @@ impl TypeChecker {
                 let name = self.extract_simple_var_name(subject);
                 self.record_condition_failure(&scopes, subject.span, &mut failures)?;
                 scopes.push(self.open_branch_pattern(pattern, subject, &binding_ty, name.as_ref(), &origins)?);
-                if let Some(predicate) = predicate { self.apply_condition_evidence(predicate, false); }
+                if let Some(predicate) = predicate { self.observe_condition(predicate, false); }
             }
             let result = match expected {
                 Some(ty) => self.check_block(then_branch, ty)?,
@@ -5207,6 +5223,9 @@ impl TypeChecker {
             alternatives => self.affine_tracker.merge_alternatives(alternatives),
         }
         let taken_loans = std::mem::replace(&mut self.borrow_tracker, failed_loans);
+        let taken_evidence = std::mem::replace(
+            &mut self.refinement_evidence, failures.evidence.unwrap_or_default(),
+        );
         // Only the negation of the whole condition follows from a failed
         // conjunction. A later guard might never have been evaluated.
         let negative = match condition.conditions.as_slice() {
@@ -5218,7 +5237,7 @@ impl TypeChecker {
             self.refinement_evidence.push_scope();
         }
         if (else_branch.is_some() || !then_reaches_join) && let Some(expr) = negative {
-            self.apply_condition_evidence(expr, true);
+            self.observe_condition(expr, true);
         }
         let else_result = match (else_branch, expected) {
             (Some(branch), Some(ty)) => self.check_expr(branch, ty),
@@ -5239,9 +5258,11 @@ impl TypeChecker {
                 self.affine_tracker.merge_alternatives(&[
                     self.affine_tracker.snapshot_alternatives(), taken_affine,
                 ]);
+                self.refinement_evidence.intersect(&taken_evidence);
                 self.borrow_tracker.merge_live_loans(&taken_loans);
             } else {
                 self.affine_tracker.restore_alternatives(&taken_affine);
+                self.refinement_evidence = taken_evidence;
                 self.borrow_tracker = taken_loans;
             }
         }
@@ -5310,22 +5331,7 @@ impl TypeChecker {
                         // Add condition evidence for the loop body
                         // Inside the loop, condition is true
                         self.refinement_evidence.push_scope();
-                        self.refinement_evidence
-                            .add_evidence_from_condition(condition, condition.span);
-
-                        // Add method evidence if applicable
-                        if let Maybe::Some((var_name, method_name, negated)) =
-                            crate::refinement_evidence::EvidencePropagator::analyze_method_condition(
-                                condition,
-                            )
-                        {
-                            self.refinement_evidence.add_method_evidence(
-                                var_name,
-                                method_name.as_str(),
-                                negated,
-                                condition.span,
-                            );
-                        }
+                        self.observe_condition(condition, false);
 
                         self.infer_block(body)?;
                         self.refinement_evidence.pop_scope();
@@ -5511,11 +5517,13 @@ impl TypeChecker {
                                 // Output place - must be an lvalue (assignable)
                                 let place_ty = self.synth_expr(place)?;
                                 self.check_place_is_lvalue(place, &place_ty.ty)?;
+                                self.check_write_access(place, None, place.span)?;
                             }
                             AsmOperandKind::InOut { place, .. } => {
                                 // Input/output place - must be an lvalue
                                 let place_ty = self.synth_expr(place)?;
                                 self.check_place_is_lvalue(place, &place_ty.ty)?;
+                                self.check_write_access(place, None, place.span)?;
                             }
                             AsmOperandKind::InLateOut {
                                 in_expr, out_place, ..
@@ -5524,6 +5532,7 @@ impl TypeChecker {
                                 self.synth_expr(in_expr)?;
                                 let place_ty = self.synth_expr(out_place)?;
                                 self.check_place_is_lvalue(out_place, &place_ty.ty)?;
+                                self.check_write_access(out_place, None, out_place.span)?;
                             }
                             AsmOperandKind::Sym { path } => {
                                 // Symbol reference - verify the path exists
@@ -5552,6 +5561,9 @@ impl TypeChecker {
                         }
                     }
 
+                    if !options.nomem && !options.readonly {
+                        self.refinement_evidence.invalidate_write(&[]);
+                    }
                     // Check for noreturn option - if set, asm diverges
                     if options.noreturn {
                         Ok(InferResult::new(Type::never()))
@@ -5675,12 +5687,15 @@ impl TypeChecker {
         scrutinee_name: Option<&Text>,
         expected: Option<&Type>,
         sources: &[crate::ty::RecordReceiver],
+        pending_evidence: &mut crate::refinement_evidence::RefinementEvidence,
     ) -> Result<InferResult> {
         let scope = self.open_branch_pattern(&arm.pattern, scrutinee, scrutinee_ty, scrutinee_name, sources)?;
         let result = (|| {
             if let Some(guard) = &arm.guard {
                 self.check_expr(guard, &Type::bool())?;
-                self.refinement_evidence.add_evidence_from_condition(guard, guard.span);
+                // The guard can write before failing and continuing to the next arm.
+                pending_evidence.intersect(&self.refinement_evidence);
+                self.observe_condition(guard, false);
             }
             match expected {
                 Some(ty) => self.check_expr(&arm.body, ty),
@@ -5791,6 +5806,8 @@ impl TypeChecker {
                     // a value consumed in ONE arm is still gone afterwards.
                     let affine_at_match = self.affine_tracker.snapshot_alternatives();
                     let loans_at_match = self.borrow_tracker.clone_for_branch();
+                    let mut pending_evidence = self.refinement_evidence.clone();
+                    let mut joined_evidence = None;
                     let mut escaping_loans = loans_at_match.clone_for_branch();
                     if std::env::var_os("VERUM_TRACE_AFFINE").is_some() {
                         eprintln!("[affine] match walker=SYNTH arm-loop, {} arms", arms.len());
@@ -5801,9 +5818,10 @@ impl TypeChecker {
                     for arm in arms.iter() {
                         self.affine_tracker.restore_alternatives(&affine_at_match);
                         self.borrow_tracker = loans_at_match.clone_for_branch();
+                        self.refinement_evidence = pending_evidence.clone();
                         let resolved_scrut_ty = self.unifier.apply(&binding_ty);
                         let arm_result = self.infer_scoped_match_arm(
-                            arm, scrutinee, &resolved_scrut_ty, scrutinee_var.as_ref(), None, &sources,
+                            arm, scrutinee, &resolved_scrut_ty, scrutinee_var.as_ref(), None, &sources, &mut pending_evidence,
                         )?;
                         let is_arm_never = self.is_never_type(&arm_result.ty);
 
@@ -5821,6 +5839,7 @@ impl TypeChecker {
                         // is the authority, and it is already computed above.
                         if !is_arm_never {
                             affine_per_arm.push(self.affine_tracker.snapshot_alternatives());
+                            self.refinement_evidence.join_into(&mut joined_evidence);
                             escaping_loans.merge_live_loans(&self.borrow_tracker);
                         }
                     }
@@ -5841,6 +5860,7 @@ impl TypeChecker {
 
                     self.check_match_coverage(&scrut_ty, arms, expr.span)?;
 
+                    self.refinement_evidence = joined_evidence.unwrap_or(pending_evidence);
                     self.borrow_tracker = escaping_loans;
                     Ok(InferResult::new(result_ty))
     }
@@ -6211,6 +6231,10 @@ impl TypeChecker {
             self.current_function_throws.take(),
             self.generator_context.take(),
         );
+        // This body may run after the enclosing path has changed, or more
+        // than once. Its own analysis does not execute a write in the caller.
+        let outer_evidence = self.refinement_evidence.clone();
+        self.refinement_evidence.push_repeated_scope();
         let result = self.with_async_context(*async_, |checker| {
             if *async_ {
                 checker.borrow_tracker.enter_async_scope();
@@ -6226,6 +6250,7 @@ impl TypeChecker {
             }
             result
         });
+        self.refinement_evidence = outer_evidence;
         if result.is_err() {
             self.borrow_tracker.cancel_closure(closure_id);
         }
@@ -6576,7 +6601,7 @@ impl TypeChecker {
                     if let Some(ctor_fn) = self.bare_payload_ctor_as_fn(name, &resolved_ty, expr.span)? {
                         return Ok(InferResult::new(ctor_fn));
                     }
-                    Ok(InferResult::new(resolved_ty.into_expression_type()))
+                    Ok(InferResult::new(self.flow_read_type(name, resolved_ty.into_expression_type())))
                 }
                 None => {
                     // Try module-level function lookup for cross-function inference
@@ -10773,6 +10798,7 @@ impl TypeChecker {
         // the enclosing function is async. This lets
         //  spawn { sleep(d).await; limiter.refill() }
         // typecheck inside a non-async helper.
+        self.refinement_evidence.invalidate_mutable();
         let inner_result = self.with_async_context(true, |checker| checker.synth_expr(expr))?;
 
         // If expr is a Future<T>, result is JoinHandle<T>
@@ -12525,6 +12551,18 @@ impl TypeChecker {
         let ExprKind::DestructuringAssign { pattern, op, value } = &expr.kind else { unreachable!() };
         // 1. Type-check the value expression
         let value_result = self.synth_expr(value)?;
+
+        // The destination bindings belong to the enclosing lexical scopes.
+        // Retire their observations before any pattern binding can hide them.
+        if !self.refinement_evidence.is_empty() {
+            let mut targets = Default::default();
+            self.collect_capture_pattern_bindings(pattern, &mut targets);
+            for name in targets {
+                let place = Expr::ident(verum_ast::Ident::new(name.clone(), pattern.span));
+                let sources = self.flow_write_origins(&place, Some(&name), false);
+                self.refinement_evidence.invalidate_write(&sources);
+            }
+        }
 
         if *op == verum_ast::BinOp::Assign {
             // Simple destructuring assignment: (a, b) = expr

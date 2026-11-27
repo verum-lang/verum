@@ -1924,6 +1924,24 @@ impl Type {
         }
     }
 
+    /// A condition refines a read of a place. Inferred storage and exclusive
+    /// references carry only the invariants declared for the stored value.
+    pub(crate) fn into_storage_type(mut self) -> Self {
+        let mut work = smallvec::SmallVec::<[&mut Self; 8]>::new();
+        work.push(&mut self);
+        while let Some(slot) = work.pop() {
+            while let Self::Refined { base, predicate } = slot {
+                if predicate.provenance != crate::refinement::PredicateProvenance::Narrowed {
+                    break;
+                }
+                *slot = std::mem::replace(base.as_mut(), Type::Unit);
+            }
+            slot.for_each_child_mut(|child| work.push(child));
+        }
+        drop(work);
+        self
+    }
+
     /// Reading a value binder in a term observes its declared carrier and
     /// refinement. Type applications still use the binder's exact identity.
     pub(crate) fn into_expression_type(self) -> Self {

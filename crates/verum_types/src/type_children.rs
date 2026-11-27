@@ -6,7 +6,7 @@ impl Type {
     /// Visit the same slots and order as `map_children`, without cloning a node.
     /// This lets the substitution machine rebuild results and reprocess owned
     /// type applications while retaining declaration-owned metadata.
-    pub(super) fn for_each_child_mut(&mut self, mut visit: impl FnMut(&mut Type)) {
+    pub(super) fn for_each_child_mut<'a>(&'a mut self, mut visit: impl FnMut(&'a mut Type)) {
         match self {
             Type::Function {
                 params,

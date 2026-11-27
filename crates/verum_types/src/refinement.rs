@@ -102,7 +102,7 @@ pub struct RefinementPredicate {
     ///
     /// Flow-sensitive narrowing turns an `if` condition into a
     /// `Type::Refined` so the branch sees a sharper type
-    /// (`narrow_variable_types_impl`).  That predicate is an ASSUMPTION —
+    /// at the read. That predicate is an ASSUMPTION —
     /// there is nothing to discharge — while a declared `Int{it >= 1}` is
     /// an OBLIGATION.  Both were built by `RefinementPredicate::inline`,
     /// so nothing downstream could tell them apart, and a diagnostic about
