@@ -274,7 +274,7 @@ fn json_metadata() -> CoreMetadata {
     serde_json::from_slice(&serde_json::to_vec(&metadata).unwrap()).unwrap()
 }
 
-fn source_errors(value: &str, eager: bool) -> List<Text> {
+fn source_errors(value: &str, eager: bool) -> List<TypeError> {
     let source = format!(
         r#"
         fn consume(fields: &Map<Text, {value}>) -> Bool {{ true }}
@@ -289,7 +289,7 @@ fn source_errors(value: &str, eager: bool) -> List<Text> {
     source_errors_with_metadata(json_metadata(), &source, eager)
 }
 
-fn source_errors_with_metadata(metadata: CoreMetadata, source: &str, eager: bool) -> List<Text> {
+fn source_errors_with_metadata(metadata: CoreMetadata, source: &str, eager: bool) -> List<TypeError> {
     let mut checker = checker(metadata, eager);
     checker.set_current_module_path("consumer");
     let ast = Parser::new(source).parse_module().expect("source grammar");
@@ -301,35 +301,11 @@ fn source_errors_with_metadata(metadata: CoreMetadata, source: &str, eager: bool
                 .expect("source signature");
         }
     }
-    let mut errors: List<Text> = ast
-        .items
-        .iter()
-        .filter_map(|item| {
-            checker
-                .check_item(item)
-                .err()
-                .map(|e| Text::from(format!("{e:?}")))
-        })
-        .collect();
-    errors.extend(
-        checker
-            .take_deferred_errors()
-            .into_iter()
-            .map(|e| Text::from(format!("{e:?}"))),
-    );
-    errors.extend(
-        checker
-            .diagnostic_sources()
-            .iter()
-            .map(|e| Text::from(format!("{e:?}"))),
-    );
-    errors.extend(
-        checker
-            .diagnostics()
-            .iter()
-            .filter(|error| error.is_error())
-            .map(|error| Text::from(format!("{error:?}"))),
-    );
+    let mut errors: List<_> = ast.items.iter().filter_map(|item| checker.check_item(item).err()).collect();
+    errors.extend(checker.take_deferred_errors());
+    // The driver retains the source errors for every rendered diagnostic.
+    assert_eq!(checker.diagnostic_sources().len(), checker.diagnostics().len());
+    errors.extend(checker.diagnostic_sources);
     errors
 }
 
@@ -348,7 +324,7 @@ fn borrowed_json_object_cannot_be_forwarded_as_integer_values() {
         assert!(
             errors
                 .iter()
-                .any(|error| error.contains("Mismatch") || error.contains("Type mismatch")),
+                .any(|error| matches!(error, TypeError::Mismatch { .. })),
             "eager={eager}: {errors:#?}"
         );
     }
@@ -431,9 +407,8 @@ fn same_named_sums_with_the_same_cases_keep_their_method_owners() {
             // declare that method on the foreign receiver.
             let missing = source_errors_with_metadata(metadata.clone(), source, eager);
             assert!(
-                !missing.is_empty() && missing.iter().all(|error| error.starts_with(
-                    "Mismatch { expected: Text { inner: \"foreign.json.JsonValue\" }, actual: Text { inner: \"core.encoding.json.JsonValue\" },"
-                )),
+                matches!(missing.as_slice(), [TypeError::MethodNotFound { ty, method, .. }]
+                    if ty == "foreign.json.JsonValue" && method == "as_object"),
                 "eager={eager} reverse={reverse}: foreign method was invented: {missing:?}"
             );
 
@@ -461,7 +436,7 @@ fn same_named_sums_with_the_same_cases_keep_their_method_owners() {
             assert!(
                 wrong_result
                     .iter()
-                    .any(|error| error.contains("Mismatch") || error.contains("Type mismatch")),
+                    .any(|error| matches!(error, TypeError::Mismatch { .. })),
                 "eager={eager} reverse={reverse}: wrong owner result accepted: {wrong_result:?}"
             );
         }
