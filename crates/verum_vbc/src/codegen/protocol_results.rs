@@ -33,6 +33,17 @@ pub(super) struct ProtocolMethod {
     pub is_async: bool,
 }
 
+impl ProtocolMethod {
+    /// Comparisons borrow a value operand as an ordinary shared reference.
+    pub(super) fn borrows_operator_operand(&self, operand: &TypeRef) -> bool {
+        matches!(self.inputs.as_slice(), [TypeRef::Reference {
+            inner,
+            mutability: crate::types::Mutability::Immutable,
+            tier: crate::types::CbgrTier::Tier0,
+        }] if inner.as_ref() == operand)
+    }
+}
+
 impl VbcCodegen {
     /// In a protocol default, a bare `Self` in expression position denotes the
     /// implementing type. The lexical protocol selects the associated function.
@@ -453,10 +464,19 @@ impl VbcCodegen {
     ) -> Maybe<CodegenResult<ProtocolMethod>> {
         let subject = self.protocol_bound_subject(left)?;
         let protocols = self.current_protocol_bounds.get(&subject)?.clone();
-        let owner = self.nominal_type_id(protocol)?;
-        let selected = self.protocol_method(protocols, method, 1, Receiver::Operator { value: left, owner })?;
+        let select = |name| {
+            let owner = self.nominal_type_id(name)?;
+            self.protocol_method(protocols.clone(), method, 1, Receiver::Operator { value: left, owner })
+        };
+        // The type checker admits both total and partial ordering.
+        let selected = select(protocol).or_else(|| match protocol {
+            "Ord" => select("PartialOrd"),
+            _ => None,
+        })?;
         match selected {
-            Ok(selected) if !selected.is_async && selected.inputs.as_slice() == std::slice::from_ref(right) => Some(Ok(selected)),
+            Ok(selected) if !selected.is_async
+                && (selected.inputs.as_slice() == std::slice::from_ref(right)
+                    || protocol == "Ord" && selected.borrows_operator_operand(right)) => Some(Ok(selected)),
             Ok(_) => None,
             Err(error) => Some(Err(error)),
         }
