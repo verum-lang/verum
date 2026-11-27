@@ -1,0 +1,53 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L2
+// @tags: sqlite, integers, generate-series, cache-size
+// @expected-exit: 0
+
+mount core.database.sqlite.native.dbstat.series.{series_params, cursor_open, estimate_row_count};
+mount core.database.sqlite.native.page_cache_sizing_api.cache_size.{CacheSizeInterpretation, classify, effective_page_count};
+
+fn test_cache_size() {
+    assert_eq(effective_page_count(-4096, 1024), 4096);
+    assert_eq(effective_page_count(12, 4096), 12);
+    assert_eq(effective_page_count(Int.MIN, 4096), 0);
+    assert_eq(effective_page_count(-1, 0), 0);
+    match classify(Int.MIN) {
+        CacheSizeInterpretation.InKib(n) => assert_eq(n, 1099511627776),
+        _ => panic("expected KiB"),
+    }
+}
+
+fn test_series_estimate() {
+    let lo = Int.MIN as Int64;
+    let hi = Int.MAX as Int64;
+    assert_eq(estimate_row_count(&series_params(lo, hi, 1_i64)), hi);
+    assert_eq(estimate_row_count(&series_params(hi, lo, lo)), 2_i64);
+    assert_eq(estimate_row_count(&series_params(lo, hi, -1_i64)), 0_i64);
+    assert_eq(estimate_row_count(&series_params(-5_i64, 4_i64, 2_i64)), 5_i64);
+    assert_eq(estimate_row_count(&series_params(1_i64, 2_i64, 0_i64)), 2_i64);
+}
+
+fn test_series_cursor() {
+    let lo = Int.MIN as Int64;
+    let hi = Int.MAX as Int64;
+    let mut up = cursor_open(series_params(hi - 1_i64, hi, 1_i64));
+    assert_eq(up.current_value(), hi - 1_i64);
+    up.next();
+    assert_eq(up.current_value(), hi);
+    up.next();
+    assert(up.at_eof());
+
+    let mut down = cursor_open(series_params(hi, lo, lo));
+    assert_eq(down.current_value(), hi);
+    down.next();
+    assert_eq(down.current_value(), -1_i64);
+    down.next();
+    assert(down.at_eof());
+}
+
+fn main() {
+    test_cache_size();
+    test_series_estimate();
+    test_series_cursor();
+}

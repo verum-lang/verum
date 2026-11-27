@@ -55,7 +55,7 @@ module core.database.sqlite.native.l0_vfs.locking;
 // =============================================================================
 
 mount sys.common;
-mount sys.common.{FileDesc, OSError, Shared, Exclusive, try_lock_region, unlock_region};
+mount sys.common.{FileDesc, OSError, FcntlLockKind, try_lock_region, unlock_region};
 mount base.{Result, Ok, Err, Text, Maybe};
 // Reached through ambient visibility rather than a request
 // until now (T0780 census).
@@ -105,19 +105,8 @@ public fn lock_manager_new(fd: FileDesc) -> SqliteLockManager {
 /// intra-process connections deterministically pick distinct bytes up
 /// to the SHARED_SIZE limit.
 fn choose_shared_byte(fd: FileDesc) -> Int {
-    // Int.MIN-safe magnitude — file descriptors are typically small
-    // positive Int32, but the cast through Int makes Int.MIN
-    // theoretically reachable; the historical `-raw` wrapped for
-    // Int.MIN, leaving `h` negative and `h % SHARED_SIZE` returning
-    // a negative byte offset — which the locking byte selector
-    // would then treat as an invalid range.
-    let raw: Int = fd.0 as Int;
-    let h: UInt64 = if raw < 0 {
-        (((!raw) as UInt64) + 1_u64)
-    } else {
-        raw as UInt64
-    };
-    SHARED_FIRST + ((h as Int) % SHARED_SIZE)
+    let raw: Int = fd.0;
+    SHARED_FIRST + ((raw.unsigned_abs() % (SHARED_SIZE as UInt64)) as Int)
 }
 
 // -----------------------------------------------------------------------------
@@ -174,7 +163,7 @@ public fn acquire_shared(manager: &mut SqliteLockManager) -> Result<(), VfsError
             // step in SQLite's protocol — without it, a long reader can
             // starve a waiting writer.
             match try_lock_region(
-                manager.fd, Exclusive, PENDING_BYTE, 1,
+                manager.fd, FcntlLockKind.Exclusive, PENDING_BYTE, 1,
             ) {
                 Result.Ok(_) => {},
                 Result.Err(e) => { return Result.Err(to_vfs_error(e)); }
@@ -182,7 +171,7 @@ public fn acquire_shared(manager: &mut SqliteLockManager) -> Result<(), VfsError
 
             // Now take the SHARED-byte lock.
             let shared_res = try_lock_region(
-                manager.fd, Shared, manager.shared_byte, 1,
+                manager.fd, FcntlLockKind.Shared, manager.shared_byte, 1,
             );
 
             // Release PENDING_BYTE regardless of success — we no longer
@@ -191,7 +180,7 @@ public fn acquire_shared(manager: &mut SqliteLockManager) -> Result<(), VfsError
 
             match shared_res {
                 Result.Ok(_)  => {
-                    manager.state = Shared;
+                    manager.state = LockKind.Shared;
                     Result.Ok(())
                 }
                 Result.Err(e) => Result.Err(to_vfs_error(e)),
@@ -210,7 +199,7 @@ public fn acquire_reserved(manager: &mut SqliteLockManager) -> Result<(), VfsErr
         }),
         Shared => {
             match try_lock_region(
-                manager.fd, Exclusive, RESERVED_BYTE, 1,
+                manager.fd, FcntlLockKind.Exclusive, RESERVED_BYTE, 1,
             ) {
                 Result.Ok(_)  => {
                     manager.state = Reserved;
@@ -233,7 +222,7 @@ public fn acquire_pending(manager: &mut SqliteLockManager) -> Result<(), VfsErro
         }),
         Shared | Reserved => {
             match try_lock_region(
-                manager.fd, Exclusive, PENDING_BYTE, 1,
+                manager.fd, FcntlLockKind.Exclusive, PENDING_BYTE, 1,
             ) {
                 Result.Ok(_) => {
                     manager.state = Pending;
@@ -283,10 +272,10 @@ public fn acquire_exclusive(manager: &mut SqliteLockManager) -> Result<(), VfsEr
             // can succeed.
             let _ = unlock_region(manager.fd, manager.shared_byte, 1);
             match try_lock_region(
-                manager.fd, Exclusive, SHARED_FIRST, SHARED_SIZE,
+                manager.fd, FcntlLockKind.Exclusive, SHARED_FIRST, SHARED_SIZE,
             ) {
                 Result.Ok(_) => {
-                    manager.state = Exclusive;
+                    manager.state = LockKind.Exclusive;
                     Result.Ok(())
                 }
                 Result.Err(e) => {
@@ -295,7 +284,7 @@ public fn acquire_exclusive(manager: &mut SqliteLockManager) -> Result<(), VfsEr
                     // kernel state has diverged from `manager.state`
                     // and continuing risks double-write corruption.
                     match try_lock_region(
-                        manager.fd, Shared, manager.shared_byte, 1,
+                        manager.fd, FcntlLockKind.Shared, manager.shared_byte, 1,
                     ) {
                         Result.Ok(_) => {
                             // Kernel state matches our advertised state
@@ -354,7 +343,7 @@ public fn check_reserved(manager: &SqliteLockManager) -> Result<Bool, VfsError> 
         _ => {},
     }
     // Someone else might — probe via try-lock + immediate release.
-    match try_lock_region(manager.fd, Exclusive, RESERVED_BYTE, 1) {
+    match try_lock_region(manager.fd, FcntlLockKind.Exclusive, RESERVED_BYTE, 1) {
         Result.Ok(_) => {
             // We got it — no one else held it. Release and report false.
             let _ = unlock_region(manager.fd, RESERVED_BYTE, 1);

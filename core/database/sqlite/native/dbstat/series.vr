@@ -68,7 +68,10 @@ implement SeriesCursor {
 
     public fn next(&mut self) {
         if self.eof { return; }
-        let n = self.current + self.params.step;
+        let n = match self.current.checked_add(self.params.step) {
+            Maybe.Some(value) => value,
+            Maybe.None => { self.eof = true; return; },
+        };
         self.current = n;
         if self.params.step > 0_i64 {
             if n > self.params.stop { self.eof = true; }
@@ -97,28 +100,16 @@ implement SeriesCursor {
 // -----------------------------------------------------------------------------
 
 public fn estimate_row_count(p: &SeriesParams) -> Int64 {
-    // Int.MIN-safe magnitudes. Series params arrive from user SQL —
-    // `step = Int64.MIN` would make `-step` overflow back to MIN
-    // (still negative), and the `span / abs_step` divisor goes
-    // negative, producing a nonsense planner estimate. Compute
-    // magnitudes via UInt64 then clamp the result back.
     let step = if p.step == 0_i64 { 1_i64 } else { p.step };
-    let abs_step_u: UInt64 = if step < 0_i64 {
-        (((!step) as UInt64) + 1_u64)
-    } else {
-        step as UInt64
-    };
-    let span_u: UInt64 = if p.stop > p.start {
-        ((p.stop - p.start) as UInt64)
-    } else {
-        ((p.start - p.stop) as UInt64)
-    };
-    if abs_step_u == 0_u64 { return 1_i64; }
-    let est = (span_u / abs_step_u) + 1_u64;
-    // Clamp to Int64.MAX in case the unsigned estimate doesn't fit.
-    if est > 9_223_372_036_854_775_807_u64 {
-        9_223_372_036_854_775_807_i64
-    } else {
-        est as Int64
+    if (step > 0_i64 && p.start > p.stop) || (step < 0_i64 && p.start < p.stop) {
+        return 0_i64;
     }
+    // In signed order, the unsigned subtraction is the exact distance modulo 2^64.
+    let span = if step > 0_i64 {
+        (p.stop as UInt64).wrapping_sub(p.start as UInt64)
+    } else {
+        (p.start as UInt64).wrapping_sub(p.stop as UInt64)
+    };
+    let steps = span / (step as Int).unsigned_abs();
+    if steps >= (Int.MAX as UInt64) { Int.MAX as Int64 } else { (steps as Int64) + 1_i64 }
 }

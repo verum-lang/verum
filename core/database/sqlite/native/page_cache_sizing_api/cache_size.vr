@@ -21,11 +21,7 @@ public fn classify(n: Int) -> CacheSizeInterpretation {
     if n >= 0 {
         InPages(n)
     } else {
-        // Int.MIN-safe magnitude — `-n` for `n == Int.MIN` wraps back
-        // to Int.MIN. Saturate via the canonical bit-flip pattern;
-        // 2^40 KiB is the sanity cap also enforced by
-        // `effective_page_count`.
-        let mag_u: UInt64 = ((!n) as UInt64) + 1_u64;
+        let mag_u = n.unsigned_abs();
         let cap: UInt64 = 1099511627776_u64;
         let mag = if mag_u > cap { cap as Int } else { mag_u as Int };
         InKib(mag)
@@ -42,18 +38,11 @@ public fn interp_name(i: &CacheSizeInterpretation) -> Text {
 // Effective page count given page_size (bytes).
 //
 
-// SOUNDNESS: pragma_value is a user-supplied PRAGMA argument.
-// `(-pragma_value)` would wrap back to Int.MIN if pragma_value were
-// Int.MIN, and `kib * 1024` would silently overflow Int64 on
-// |pragma_value| > ~2^53 KiB. Reject Int.MIN explicitly and cap |kib|
-// at 2^40 (1 PiB of cache, comfortably beyond any production cache),
-// so the multiply by 1024 cannot overflow Int64.
+// Budgets above 2^40 KiB return zero. Within this limit the byte count fits UInt64.
 public fn effective_page_count(pragma_value: Int, page_size_bytes: Int) -> Int {
     if pragma_value >= 0 { return pragma_value; }
     if page_size_bytes <= 0 { return 0; }
-    // Canonical Int.MIN-safe negation: `(!n) + 1` produces UInt64 magnitude
-    // even when n is Int.MIN. Same recipe as sqlite_version_fmt.int_to_text.
-    let kib_u: UInt64 = ((!pragma_value) as UInt64) + 1_u64;
+    let kib_u = pragma_value.unsigned_abs();
     if kib_u > 1099511627776_u64 {                 // 2^40 — sanity cap
         return 0;
     }

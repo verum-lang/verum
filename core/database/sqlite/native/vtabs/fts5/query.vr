@@ -366,6 +366,7 @@ fn adjacent(a: &Fts5SegmentPostingList, b: &Fts5SegmentPostingList) -> Fts5Segme
 
 fn near(a: &Fts5SegmentPostingList, b: &Fts5SegmentPostingList, dist: Int) -> Fts5SegmentPostingList {
     let mut out = posting_list_new();
+    let limit = if dist < 0 { 0_u64 } else { dist as UInt64 };
     let ai = a.iter();
     let bi = b.iter();
     let mut i: Int = 0;
@@ -373,21 +374,9 @@ fn near(a: &Fts5SegmentPostingList, b: &Fts5SegmentPostingList, dist: Int) -> Ft
         let mut j: Int = 0;
         while j < bi.len() {
             if ai[i].rowid == bi[j].rowid {
-                // Int.MIN-safe magnitude. Token positions are
-                // typically small but the subtraction `ai - bi`
-                // could in principle hit Int.MIN if a corrupted
-                // index supplied positions at the type boundary;
-                // `-diff` would wrap and `abs_d <= dist` would
-                // trivially succeed, polluting the result set.
-                let diff: Int = ai[i].position - bi[j].position;
-                let abs_d_u: UInt64 = if diff < 0 {
-                    (((!diff) as UInt64) + 1_u64)
-                } else {
-                    diff as UInt64
-                };
-                let dist_u: UInt64 = if dist < 0 { 0_u64 } else { dist as UInt64 };
-                if abs_d_u <= dist_u {
-                    out.add(ai[i]);
+                // An overflowing signed difference is farther than any accepted Int distance.
+                if let Maybe.Some(delta) = ai[i].position.checked_sub(bi[j].position) {
+                    if delta.unsigned_abs() <= limit { out.add(ai[i]); }
                 }
             }
             j = j + 1;
