@@ -5,6 +5,8 @@
 // @timeout: 5000
 // @expected-exit: 0
 
+module core.database.sqlite.native.tests.blob_smoke;
+
 mount core.database.sqlite.native.incrblob.flags.{
     BlobOpenMode, BomReadOnly, BomReadWrite,
     open_mode_text, flag_int, permits_write, from_int,
@@ -66,6 +68,9 @@ fn test_handle_in_bounds_predicate() {
     assert(h.in_bounds(0, 1024));
     assert(!h.in_bounds(1023, 2));
     assert(!h.in_bounds(-1, 10));
+    assert(!h.in_bounds(1, Int.MAX));
+    assert(h.in_bounds(1024, 0));
+    assert(!h.in_bounds(1025, 0));
 }
 
 fn test_handle_reopen_updates_size_and_rowid() {
@@ -73,8 +78,8 @@ fn test_handle_reopen_updates_size_and_rowid() {
     h.close();
     h.reopen(99 as Int64, 2048);
     assert(h.is_open());
-    assert_eq(h.rowid, 99 as Int64);
-    assert_eq(h.byte_size, 2048);
+    assert_eq(h.target().rowid, 99 as Int64);
+    assert_eq(h.byte_len(), 2048);
 }
 
 // -----------------------------------------------------------------------------
@@ -137,7 +142,12 @@ fn test_engine_validate_write_on_readonly() {
 fn test_engine_close_then_validate_aborted() {
     let mut e = engine_new();
     let id = e.open("main".clone(), "t".clone(), "data".clone(), 1 as Int64, BomReadWrite, 100);
-    let _ = e.close(id);
+    assert(e.close(id));
+    assert(!e.close(id));
+    assert_eq(e.open_handle_count(), 0);
+    assert(e.lookup_size(id) is Maybe.None);
+    assert(e.reopen(id, 2_i64, 100) is Err(BeAborted));
+    assert(e.validate_read(id, 0, 0) is Err(BeAborted));
     match e.validate_read(id, 0, 1) {
         Err(BeAborted) => {},
         _              => panic("aborted after close"),

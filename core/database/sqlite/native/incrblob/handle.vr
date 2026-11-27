@@ -21,13 +21,16 @@ mount core.database.sqlite.native.incrblob.flags.{
     BlobOpenMode, BomReadOnly, BomReadWrite, permits_write,
 };
 
+public(in core.database.sqlite.native) type BlobTarget is {
+    public(in core.database.sqlite.native) schema: Text,
+    public(in core.database.sqlite.native) table: Text,
+    public(in core.database.sqlite.native) column: Text,
+    public(in core.database.sqlite.native) rowid: Int64,
+};
+
 public type BlobHandle is {
     handle_id: Int64,
-    /// Schema (typically "main").
-    schema_name: Text,
-    table_name: Text,
-    column_name: Text,
-    rowid: Int64,
+    target: BlobTarget,
     mode: BlobOpenMode,
     /// Cached size in bytes (sqlite3_blob_bytes).
     byte_size: Int,
@@ -46,10 +49,7 @@ public fn blob_handle(
 ) -> BlobHandle {
     BlobHandle {
         handle_id: handle_id,
-        schema_name: schema_name,
-        table_name: table_name,
-        column_name: column_name,
-        rowid: rowid,
+        target: BlobTarget { schema: schema_name, table: table_name, column: column_name, rowid },
         mode: mode,
         byte_size: byte_size,
         closed: false,
@@ -57,20 +57,23 @@ public fn blob_handle(
 }
 
 implement BlobHandle {
+    public(in core.database.sqlite.native) fn target(&self) -> &BlobTarget { &self.target }
+    public(in core.database.sqlite.native) fn id(&self) -> Int64 { self.handle_id }
+    public fn byte_len(&self) -> Int { self.byte_size }
+
     public fn is_open(&self) -> Bool { !self.closed }
 
     public fn close(&mut self) { self.closed = true; }
 
     /// True iff the requested (offset, length) lies entirely within the BLOB.
     public fn in_bounds(&self, offset: Int, length: Int) -> Bool {
-        if offset < 0 || length < 0 { return false; }
-        offset + length <= self.byte_size
+        offset >= 0 && length >= 0 && offset <= self.byte_size && length <= self.byte_size - offset
     }
 
     /// Reopen against a different rowid — leaves table/column intact.
     /// SQLite's sqlite3_blob_reopen.
     public fn reopen(&mut self, new_rowid: Int64, new_byte_size: Int) {
-        self.rowid = new_rowid;
+        self.target.rowid = new_rowid;
         self.byte_size = new_byte_size;
         self.closed = false;
     }

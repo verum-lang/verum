@@ -18,7 +18,7 @@
 module core.database.sqlite.native.incrblob.engine;
 
 mount base.{Text, Bool, Maybe};
-mount collections.List;
+mount collections.Map;
 mount core.database.sqlite.native.incrblob.flags.{
     BlobOpenMode, BomReadOnly, BomReadWrite,
 };
@@ -30,23 +30,17 @@ mount core.database.sqlite.native.incrblob.error.{
 };
 
 public type BlobEngine is {
-    handles: List<BlobHandle>,
+    handles: Map<Int64, BlobHandle>,
     next_handle_id: Int64,
 }
 
 public fn engine_new() -> BlobEngine {
-    BlobEngine { handles: List.new(), next_handle_id: 1 as Int64 }
+    BlobEngine { handles: Map.new(), next_handle_id: 1 as Int64 }
 }
 
 implement BlobEngine {
     public fn open_handle_count(&self) -> Int {
-        let mut n: Int = 0;
-        let mut i: Int = 0;
-        while i < self.handles.len() {
-            if self.handles[i].is_open() { n = n + 1; }
-            i = i + 1;
-        }
-        n
+        self.handles.len()
     }
 
     /// Open a handle. The caller has already resolved the column to a
@@ -62,49 +56,41 @@ implement BlobEngine {
     ) -> Int64 {
         let id = self.next_handle_id;
         self.next_handle_id = id + 1_i64;
-        self.handles.push(blob_handle(
-            id, schema_name, table_name, column_name, rowid, mode, byte_size,
-        ));
+        let handle = blob_handle(id, schema_name, table_name, column_name, rowid, mode, byte_size);
+        self.handles.insert(handle.id(), handle);
         id
     }
 
-    /// Validate a read of `length` bytes starting at `offset`. Returns
-    /// `Result.Ok(())` if the read may proceed, else the appropriate error.
+    public(in core.database.sqlite.native) fn lookup(&self, handle_id: &Int64) -> Result<&BlobHandle, BlobError> {
+        match self.handles.get_key_value(handle_id) {
+            Maybe.Some((_, handle)) => Result.Ok(handle),
+            Maybe.None => Result.Err(BeAborted),
+        }
+    }
+
+    public(in core.database.sqlite.native) fn access(
+        &self, handle_id: &Int64, offset: Int, length: Int, write: Bool,
+    ) -> Result<&BlobHandle, BlobError> {
+        let handle = self.lookup(handle_id)?;
+        if write && !handle.permits_write() { return Result.Err(BeReadOnly); }
+        if !handle.in_bounds(offset, length) { return Result.Err(BeOutOfRange(offset, length)); }
+        Result.Ok(handle)
+    }
+
     public fn validate_read(&self, handle_id: Int64, offset: Int, length: Int) -> Result<(), BlobError> {
-        match self.find(handle_id) {
-            Maybe.Some(idx) => {
-                let h = &self.handles[idx];
-                if !h.is_open() { return Result.Err(BeAborted); }
-                if !h.in_bounds(offset, length) {
-                    return Result.Err(BeOutOfRange(offset, length));
-                }
-                Result.Ok(())
-            }
-            Maybe.None => Result.Err(BeAborted),
-        }
+        self.access(&handle_id, offset, length, false)?;
+        Result.Ok(())
     }
 
-    /// Validate a write at (offset, length). Same as read + must be RW.
     public fn validate_write(&self, handle_id: Int64, offset: Int, length: Int) -> Result<(), BlobError> {
-        match self.find(handle_id) {
-            Maybe.Some(idx) => {
-                let h = &self.handles[idx];
-                if !h.is_open() { return Result.Err(BeAborted); }
-                if !h.permits_write() { return Result.Err(BeReadOnly); }
-                if !h.in_bounds(offset, length) {
-                    return Result.Err(BeOutOfRange(offset, length));
-                }
-                Result.Ok(())
-            }
-            Maybe.None => Result.Err(BeAborted),
-        }
+        self.access(&handle_id, offset, length, true)?;
+        Result.Ok(())
     }
 
-    /// Reopen against a different rowid.
     public fn reopen(&mut self, handle_id: Int64, new_rowid: Int64, new_byte_size: Int) -> Result<(), BlobError> {
-        match self.find(handle_id) {
-            Maybe.Some(idx) => {
-                self.handles[idx].reopen(new_rowid, new_byte_size);
+        match self.handles.get_mut(&handle_id) {
+            Maybe.Some(handle) => {
+                handle.reopen(new_rowid, new_byte_size);
                 Result.Ok(())
             }
             Maybe.None => Result.Err(BeAborted),
@@ -112,28 +98,13 @@ implement BlobEngine {
     }
 
     public fn close(&mut self, handle_id: Int64) -> Bool {
-        match self.find(handle_id) {
-            Maybe.Some(idx) => {
-                self.handles[idx].close();
-                true
-            }
-            Maybe.None => false,
-        }
+        self.handles.remove(handle_id).is_some()
     }
 
     public fn lookup_size(&self, handle_id: Int64) -> Maybe<Int> {
-        match self.find(handle_id) {
-            Maybe.Some(idx) => Maybe.Some(self.handles[idx].byte_size),
-            Maybe.None      => Maybe.None,
+        match self.lookup(&handle_id) {
+            Result.Ok(handle) => Maybe.Some(handle.byte_len()),
+            Result.Err(_) => Maybe.None,
         }
-    }
-
-    fn find(&self, handle_id: Int64) -> Maybe<Int> {
-        let mut i: Int = 0;
-        while i < self.handles.len() {
-            if self.handles[i].handle_id == handle_id { return Maybe.Some(i); }
-            i = i + 1;
-        }
-        Maybe.None
     }
 }

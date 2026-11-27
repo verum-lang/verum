@@ -41,7 +41,7 @@ module core.database.sqlite.native.l6_session.connection;
 // it behind a trait hierarchy once that lands.
 // =============================================================================
 
-mount core.database.sqlite.native.l6_session.row_store.{ConnectionRows, connection_rows};
+mount core.database.sqlite.native.l6_session.row_store.{CellAddress, ConnectionRows, connection_rows};
 mount core.database.sqlite.native.l4_vdbe.cursor_table.CursorWriteback;
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Text, Maybe};
@@ -390,6 +390,16 @@ implement SqliteNativeConnection {
     /// Current rows at `root_page`. Returns empty list if unknown.
     public fn rows_at(&self, root_page: Int) -> List<List<Register>> {
         self.table_store.read(root_page)
+    }
+
+    public(in core.database.sqlite.native) fn cell_at(&self, address: &CellAddress) -> Maybe<&Register> {
+        self.table_store.cell(address)
+    }
+
+    public(in core.database.sqlite.native) fn replace_cell_at(
+        &mut self, address: CellAddress, value: Register,
+    ) -> Bool {
+        self.table_store.replace_cell(address, value)
     }
 
     /// Replace rows at `root_page`. Creates the slot if absent.

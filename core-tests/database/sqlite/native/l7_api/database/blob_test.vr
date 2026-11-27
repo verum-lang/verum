@@ -1,0 +1,39 @@
+module core.database.sqlite.native.tests.blob_io;
+
+mount core.database.sqlite.native.l7_api.database.{SqliteApiDbError, open_admin, open_readonly};
+mount core.database.sqlite.native.l7_api.blob.{blob_open, blob_read, blob_write, blob_bytes, blob_reopen, blob_close};
+
+@test
+fn test_blob_access_validates_the_handle_before_touching_the_cell() {
+    let mut db = open_admin().unwrap();
+    db.execute(&"CREATE TABLE docs (payload TEXT)").unwrap();
+    db.execute(&"INSERT INTO docs VALUES ('abc')").unwrap();
+    let reader = blob_open(&mut db, &"main", &"docs", &"PAYLOAD", 1_i64, false).unwrap();
+    assert(blob_write(&mut db, reader, 0, &[]) is Result.Err(SqliteApiDbError.DbReadonly));
+    assert(blob_read(&db, reader, 4, 0) is Result.Err(SqliteApiDbError.DbBindRange(_)));
+    blob_close(&mut db, reader).unwrap();
+    assert(blob_read(&db, reader, 0, 0).is_err());
+    db.begin().unwrap();
+    let writer = blob_open(&mut db, &"main", &"docs", &"payload", 1_i64, true).unwrap();
+    blob_write(&mut db, writer, 1, &[120_u8]).unwrap();
+    assert_eq(blob_read(&db, writer, 1, 1).unwrap()[0], 120_u8);
+    assert(blob_write(&mut db, writer, 1, &[255_u8]) is Result.Err(SqliteApiDbError.DbDataTypeMismatch));
+    blob_close(&mut db, writer).unwrap();
+    db.rollback().unwrap();
+    let reopened = blob_open(&mut db, &"main", &"docs", &"payload", 1_i64, true).unwrap();
+    assert_eq(blob_read(&db, reopened, 1, 1).unwrap()[0], 98_u8);
+    assert(blob_reopen(&mut db, reopened, 2_i64).is_err());
+    assert(blob_write(&mut db, reopened, 0, &[]).is_err());
+    assert(blob_bytes(&db, reopened).is_err());
+}
+
+@test
+fn test_readonly_connection_refuses_a_writable_blob() {
+    let mut db = open_readonly().unwrap();
+    assert(blob_open(&mut db, &"main", &"docs", &"payload", 1_i64, true) is Result.Err(SqliteApiDbError.DbReadonly));
+}
+
+fn main() {
+    test_blob_access_validates_the_handle_before_touching_the_cell();
+    test_readonly_connection_refuses_a_writable_blob();
+}

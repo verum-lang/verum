@@ -83,6 +83,7 @@ implement TableMeta {
     }
 
     public(in core.database.sqlite.native) fn root_page(&self) -> Int { self.root_page }
+    public(in core.database.sqlite.native) fn has_rowid(&self) -> Bool { !self.without_rowid }
 }
 
 public type IndexMeta is {

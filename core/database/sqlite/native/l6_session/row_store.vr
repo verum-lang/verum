@@ -8,6 +8,12 @@ module core.database.sqlite.native.l6_session.row_store;
 mount core.database.sqlite.native.l4_vdbe.register.Register;
 mount core.database.sqlite.native.l4_vdbe.cursor_table.CursorWriteback;
 
+public(in core.database.sqlite.native) type CellAddress is {
+    public(in core.database.sqlite.native) root: Int,
+    public(in core.database.sqlite.native) row: Int,
+    public(in core.database.sqlite.native) column: Int,
+};
+
 type SavedRows is { root: Int, previous: Maybe<List<List<Register>>> };
 
 public(in core.database.sqlite.native) type ConnectionRows is {
@@ -33,6 +39,29 @@ implement ConnectionRows {
     }
     public(in core.database.sqlite.native) fn read(&self, root: Int) -> List<List<Register>> {
         self.tables.get_or(root, [])
+    }
+
+    public(in core.database.sqlite.native) fn cell(&self, address: &CellAddress) -> Maybe<&Register> {
+        match self.tables.get_key_value(&address.root) {
+            Maybe.Some((_, rows)) => {
+                if address.row < 0 || address.row >= rows.len() || address.column < 0 || address.column >= rows[address.row].len() {
+                    return Maybe.None;
+                }
+                Maybe.Some(&rows[address.row][address.column])
+            }
+            Maybe.None => Maybe.None,
+        }
+    }
+
+    public(in core.database.sqlite.native) fn replace_cell(
+        &mut self, address: CellAddress, value: Register,
+    ) -> Bool {
+        if self.cell(&address).is_none() { return false; }
+        self.record_change(address.root);
+        match self.tables.get_mut(&address.root) {
+            Maybe.Some(rows) => { rows[address.row][address.column] = value; true }
+            Maybe.None => false,
+        }
     }
 
     fn record_change(&mut self, root: Int) {
