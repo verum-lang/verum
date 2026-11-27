@@ -29,7 +29,7 @@ module core.database.sqlite.native.l4_vdbe.interpreter;
 // to `Yield` until the actor IPC integration lands.
 // =============================================================================
 
-mount core.base.memory.replace;
+mount core.base.memory.{replace, swap};
 mount collections.List;
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l4_vdbe.opcode.Opcode;
@@ -91,9 +91,7 @@ public type affine VdbeState is {
     /// drained by the L6 writeback bridge to fire update_hook
     /// callbacks. Empty for read-only programs.
     mutations: List<RowMutation>,
-    /// Active parameter bindings — written exclusively at the L6
-    /// `PreparedStatement.step()` boundary; read by `Variable` /
-    /// `VariableNamed` opcode handlers.
+    /// Statement bindings consumed by the positional and named variable opcodes.
     bindings: ParamBindings,
 };
 
@@ -126,9 +124,17 @@ implement VdbeState {
         replace(&mut self.mutations, List.new())
     }
 
-    /// Snapshot the caller's bindings into the interpreter state.
+    /// Install an owned binding table for a stand-alone VDBE program.
     public fn install_bindings(&mut self, b: ParamBindings) {
         self.bindings = b;
+    }
+
+    public(in core.database.sqlite.native) fn bindings_mut(&mut self) -> &mut ParamBindings {
+        &mut self.bindings
+    }
+
+    public(in core.database.sqlite.native) fn transfer_bindings_to(&mut self, next: &mut VdbeState) {
+        swap(&mut self.bindings, &mut next.bindings);
     }
 
     /// Borrow the active bindings.

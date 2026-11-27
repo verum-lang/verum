@@ -23,31 +23,17 @@ module core.database.sqlite.native.l6_session.statement_lifecycle;
 // real client code (DB drivers, ORM layers) needs.
 //
 // All operations are pure where possible; mutation is confined to
-// the `PreparedStatement.state: VdbeState` (the interpreter's
-// register file + cursor table) and to the per-statement
-// `bindings` (`ParamBindings` from `l4_vdbe.bindings`).
+// the statement's VDBE state, which owns the execution registers, cursors
+// and parameter bindings.
 // =============================================================================
 
-mount collections.{List, Map};
-mount base.{Result, Ok, Err, Text, Maybe};
-mount core.database.sqlite.native.l4_vdbe.{
-    VdbeProgram, ResultColumn,
-    Register, RNull,
-    RegisterKind,
-    register_kind,
-    StepResult, VdbeState, vdbe_state_new, step,
-    ParamBindings, param_bindings_new,
-};
-mount core.database.sqlite.native.l4_vdbe.interpreter.{
-    Row, Done, Yield, ExecError,
-};
-mount core.database.sqlite.native.l6_session.statement.{
-    PreparedStatement, StmtError,
-};
+mount collections.List;
+mount base.{Result, Text, Maybe};
+mount core.database.sqlite.native.l4_vdbe.register.{Register, RegisterKind, register_kind};
+mount core.database.sqlite.native.l4_vdbe.interpreter.StepResult;
+mount core.database.sqlite.native.l6_session.statement.PreparedStatement;
 mount core.database.sqlite.native.l6_session.sql_value.{
-    SqlValue, VNull, VInt, VReal, VText, VBlob,
-    ColumnType, CtNull, CtInt, CtReal, CtText, CtBlob,
-    sql_value_from_register, register_from_sql_value,
+    SqlValue, ColumnType, sql_value_from_register, register_from_sql_value,
     value_type, value_to_int, value_to_real, value_to_text,
     value_to_blob, value_to_text16, value_bytes, value_bytes16,
     sql_text_from_utf16, column_type_code,
@@ -92,50 +78,35 @@ public type StepOutcome is
 /// Bind a parameter by 1-based positional index (matches SQLite
 /// `sqlite3_bind_*` semantics).  Index 0 is reserved/invalid.
 ///
-/// The supplied `Register` value is stored in the statement's
-/// `bindings.positional` table and consumed at execution time
-/// when the VDBE encounters a `Variable(reg_dst, idx)` opcode.
+/// The VDBE reads the bound register when it encounters
+/// `Variable(reg_dst, idx)`.
 public fn bind_positional(
     stmt: &mut PreparedStatement,
     index: Int,
     value: Register,
 ) -> Result<(), LifecycleError> {
-    if index <= 0 {
-        return Result.Err(LeIndexOutOfRange(index));
-    }
-    // Grow the positional list to size `index` (1-based → array
-    // length must be at least `index`).
-    let cur_len = stmt.bindings.positional.len();
-    let mut i: Int = cur_len;
-    while i < index {
-        stmt.bindings.positional.push(RNull);
-        i = i + 1;
-    }
-    stmt.bindings.positional[index - 1] = value;
+    if stmt.is_finalized() { return Result.Err(LeAlreadyFinalized); }
+    if index <= 0 { return Result.Err(LeIndexOutOfRange(index)); }
+    stmt.bind_value(index, value);
     Result.Ok(())
 }
 
-/// Bind a parameter by name (e.g. `:user_id` or `@token`).  Reads
-/// the name verbatim — the leading sigil is part of the key.
+/// Bind the name used by the SQL compiler, with the sigil removed:
+/// pass `"user_id"` for the SQL parameter `:user_id`.
 public fn bind_named(
     stmt: &mut PreparedStatement,
     name: Text,
     value: Register,
 ) -> Result<(), LifecycleError> {
-    stmt.bindings.named.insert(name, value);
+    if stmt.is_finalized() { return Result.Err(LeAlreadyFinalized); }
+    stmt.bind_named_value(name, value);
     Result.Ok(())
 }
 
 /// Convenience: bind every parameter to NULL.  Used by reset()
 /// when the caller passes `clear_bindings=true`.
 public fn clear_bindings(stmt: &mut PreparedStatement) {
-    let n = stmt.bindings.positional.len();
-    let mut i: Int = 0;
-    while i < n {
-        stmt.bindings.positional[i] = RNull;
-        i = i + 1;
-    }
-    stmt.bindings.named = Map.new();
+    stmt.clear_binding_values();
 }
 
 // -----------------------------------------------------------------------------
@@ -151,34 +122,18 @@ public fn clear_bindings(stmt: &mut PreparedStatement) {
 /// stamped into `stmt.last_row_start` / `stmt.last_row_cols` so
 /// `column_value` can read each column from the register file.
 public fn step_one(stmt: &mut PreparedStatement) -> StepOutcome {
-    // Snapshot bindings into the interpreter state so the VDBE
-    // sees the latest values for `Variable(reg_dst, idx)` opcodes.
-    stmt.state.install_bindings(stmt.bindings.clone());
-
-    // Loop until we hit a terminal step result.  The interpreter's
-    // `step` returns Row(start, n) on ResultRow, Done on Halt,
-    // ExecError on runtime fault, Yield to advance pc one opcode.
+    if stmt.is_finalized() { return SoErrored("prepared stmt: already finalized".clone()); }
     let max_steps: Int = 1000000;
-    let mut steps: Int = 0;
-    while steps < max_steps {
-        let result = step(&mut stmt.state, &stmt.program);
-        match result {
-            Row(reg_start, n_cols) => {
-                stmt.last_row_start = reg_start;
-                stmt.last_row_cols = n_cols;
-                return SoRowReady;
-            }
-            Done => return SoDone,
-            ExecError(code, msg) => return SoErrored(format_exec_error(code, &msg)),
-            Yield => {}
-        }
-        steps = steps + 1;
+    match stmt.step_with_budget(max_steps) {
+        StepResult.Row(_, _) => SoRowReady,
+        StepResult.Done => SoDone,
+        StepResult.ExecError(code, msg) => SoErrored(format_exec_error(code, &msg)),
+        StepResult.Yield => SoErrored(f"step_one: max_steps {max_steps} exceeded"),
     }
-    SoErrored(f"step_one: max_steps {max_steps} exceeded".as_str().to_owned())
 }
 
 fn format_exec_error(code: Int, msg: &Text) -> Text {
-    f"VDBE exec error (code {code}): {msg}".as_str().to_owned()
+    f"VDBE exec error (code {code}): {msg}"
 }
 
 /// Reset the statement to its initial state — clears the
@@ -186,27 +141,19 @@ fn format_exec_error(code: Int, msg: &Text) -> Text {
 /// drop bindings (per SQLite semantics).  Pass
 /// `also_clear_bindings = true` to drop them too (sqlite3_clear_bindings).
 public fn reset(stmt: &mut PreparedStatement, also_clear_bindings: Bool) -> Result<(), LifecycleError> {
-    // Re-create the VdbeState from the program — same shape as
-    // the prepare-time initialiser.
-    stmt.state = vdbe_state_new(&stmt.program);
+    if stmt.is_finalized() { return Result.Err(LeAlreadyFinalized); }
+    stmt.reset();
     if also_clear_bindings {
         clear_bindings(stmt);
     }
     Result.Ok(())
 }
 
-/// Finalize the statement — release all interpreter state.  After
-/// finalize the statement is no longer usable; subsequent step/
-/// reset calls return `LeAlreadyFinalized`.
-///
-/// Foundation: marks the state as finalized via a sentinel; the
-/// next bind/step path checks the sentinel.  Real implementation
-/// drops the state entirely once Verum's affine analysis allows
-/// "leave a struct field in a documented dropped state".
+/// Release execution state and bindings. Later bind, reset and finalize calls
+/// return `LeAlreadyFinalized`; stepping reports a finalized statement.
 public fn finalize(stmt: &mut PreparedStatement) -> Result<(), LifecycleError> {
-    // Foundation marker — re-initialise to a known-empty state.
-    stmt.state = vdbe_state_new(&stmt.program);
-    clear_bindings(stmt);
+    if stmt.is_finalized() { return Result.Err(LeAlreadyFinalized); }
+    stmt.finish();
     Result.Ok(())
 }
 
@@ -218,25 +165,19 @@ public fn finalize(stmt: &mut PreparedStatement) -> Result<(), LifecycleError> {
 /// the first step (returns the program's declared result-column
 /// count).  O(1).
 public fn column_count(stmt: &PreparedStatement) -> Int {
-    stmt.program.result_column_count()
+    stmt.result_column_count()
 }
 
 /// Column name at zero-based index `i`.  Returns the empty string
 /// for out-of-range indices to match SQLite's defensive behaviour.
 public fn column_name(stmt: &PreparedStatement, i: Int) -> Text {
-    if i < 0 || i >= stmt.program.result_column_count() {
-        return "".clone();
-    }
-    stmt.program.result_columns[i].name.clone()
+    stmt.program_ref().result_column_name(i)
 }
 
 /// Declared column type as text (e.g. "INTEGER", "TEXT").  Empty
 /// string for expressions without a declared type.
 public fn column_declared_type(stmt: &PreparedStatement, i: Int) -> Text {
-    if i < 0 || i >= stmt.program.result_column_count() {
-        return "".clone();
-    }
-    stmt.program.result_columns[i].declared_type.clone()
+    stmt.program_ref().result_column_declared_type(i)
 }
 
 /// Column value at zero-based index `i` of the current result row.

@@ -16,8 +16,8 @@ module core.database.sqlite.native.l4_vdbe.bindings;
 // must be readable from the L4 interpreter's `Variable` / `VariableNamed`
 // opcodes without a layering violation upward. The L6 `PreparedStatement`
 // is responsible for marshalling user-side `bind_*` calls into this
-// module's API and copying the populated table into `VdbeState.bindings`
-// before each step boundary.
+// module's API. The VDBE state owns a single table across step boundaries;
+// rewinding a prepared statement retains it until the caller clears it.
 //
 
 // SQLite parameter syntax:
@@ -72,6 +72,16 @@ public fn param_bindings_new() -> ParamBindings {
 implement ParamBindings {
     public fn clear(&mut self) {
         self.positional = List.new();
+        self.named = Map.new();
+    }
+
+    /// Clear values without changing the allocated positional parameter range.
+    public(in core.database.sqlite.native) fn clear_values(&mut self) {
+        let mut i: Int = 0;
+        while i < self.positional.len() {
+            self.positional[i] = Register.RNull;
+            i = i + 1;
+        }
         self.named = Map.new();
     }
 

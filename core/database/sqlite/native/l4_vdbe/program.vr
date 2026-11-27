@@ -185,6 +185,20 @@ implement VdbeProgram {
     }
     public fn result_column_count(&self) -> Int { self.result_columns.len() }
 
+    public(in core.database.sqlite.native) fn result_column_name(&self, index: Int) -> Text {
+        match self.result_columns.get(index) {
+            Maybe.Some(column) => column.name,
+            Maybe.None => Text.new(),
+        }
+    }
+
+    public(in core.database.sqlite.native) fn result_column_declared_type(&self, index: Int) -> Text {
+        match self.result_columns.get(index) {
+            Maybe.Some(column) => column.declared_type,
+            Maybe.None => Text.new(),
+        }
+    }
+
     public fn constant_at(&self, index: Int) -> ConstantEntry { self.constants.get(index) }
     public(in core.database.sqlite.native) fn add_constant(&mut self, value: ConstantEntry) -> Int {
         self.constants.add(value)

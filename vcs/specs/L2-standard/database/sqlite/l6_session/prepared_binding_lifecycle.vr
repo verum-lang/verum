@@ -1,0 +1,67 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L2
+// @tags: sqlite, statement, bindings, lifecycle
+// @expected-exit: 0
+
+module core.database.sqlite.native.l6_session.tests.prepared_binding_lifecycle;
+
+mount core.database.sqlite.native.l4_vdbe.opcode.Opcode;
+mount core.database.sqlite.native.l4_vdbe.program.{ConstantEntry, program_new};
+mount core.database.sqlite.native.l4_vdbe.register.Register;
+mount core.database.sqlite.native.l6_session.statement.prepared_program;
+mount core.database.sqlite.native.l6_session.statement_lifecycle.{
+    LifecycleError, StepOutcome, bind_positional, bind_named, step_one,
+    reset, finalize, column_count, column_name, column_declared_type, column_value,
+};
+
+fn main() {
+    let sql = "SELECT ?1 AS pos, :n AS named".clone();
+    let mut program = program_new(sql.clone(), 3);
+    program.declare_result_column("pos".clone(), "INTEGER".clone());
+    program.declare_result_column("named".clone(), "TEXT".clone());
+    let key = program.add_constant(ConstantEntry.KText("n".clone()));
+    let _ = program.emit(Opcode.Variable(1, 1));
+    let _ = program.emit(Opcode.VariableNamed(2, key));
+    let _ = program.emit(Opcode.ResultRow(1, 2));
+    let _ = program.emit(Opcode.Halt(0, 0));
+
+    let mut stmt = prepared_program(&sql, program);
+    assert_eq(column_count(&stmt), 2);
+    assert_eq(column_name(&stmt, 0), "pos");
+    assert_eq(column_declared_type(&stmt, 1), "TEXT");
+    assert_eq(column_name(&stmt, -1), "");
+    assert_eq(column_declared_type(&stmt, 2), "");
+    assert(column_value(&stmt, 0) is Register.RNull);
+    assert(bind_positional(&mut stmt, 0, Register.RNull) is Result.Err(LifecycleError.LeIndexOutOfRange(0)));
+    assert(bind_positional(&mut stmt, 1, Register.RInt(Int.MIN as Int64)).is_ok());
+    assert(bind_named(&mut stmt, "n".clone(), Register.RText("named value".clone())).is_ok());
+    assert(step_one(&mut stmt) is StepOutcome.SoRowReady);
+    match column_value(&stmt, 0) {
+        Register.RInt(value) => assert_eq(Text.from_int(value as Int), "-9223372036854775808"),
+        _ => panic("positional integer missing"),
+    }
+    match column_value(&stmt, 1) {
+        Register.RText(value) => assert_eq(value, "named value"),
+        _ => panic("named text missing"),
+    }
+    assert(column_value(&stmt, -1) is Register.RNull);
+    assert(column_value(&stmt, 2) is Register.RNull);
+    assert(step_one(&mut stmt) is StepOutcome.SoDone);
+    assert(column_value(&stmt, 0) is Register.RNull);
+
+    assert(reset(&mut stmt, false).is_ok());
+    assert(step_one(&mut stmt) is StepOutcome.SoRowReady);
+    assert(column_value(&stmt, 0) is Register.RInt(_));
+    assert(column_value(&stmt, 1) is Register.RText(_));
+    assert(reset(&mut stmt, true).is_ok());
+    assert(step_one(&mut stmt) is StepOutcome.SoRowReady);
+    assert(column_value(&stmt, 0) is Register.RNull);
+    assert(column_value(&stmt, 1) is Register.RNull);
+    assert(finalize(&mut stmt).is_ok());
+    assert(column_value(&stmt, 0) is Register.RNull);
+    assert(step_one(&mut stmt) is StepOutcome.SoErrored(_));
+    assert(bind_positional(&mut stmt, 1, Register.RNull) is Result.Err(LifecycleError.LeAlreadyFinalized));
+    assert(reset(&mut stmt, false) is Result.Err(LifecycleError.LeAlreadyFinalized));
+    assert(finalize(&mut stmt) is Result.Err(LifecycleError.LeAlreadyFinalized));
+}
