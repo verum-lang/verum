@@ -113,7 +113,7 @@ public fn julian_to_cal(jd: Float64) -> Calendar {
 // Argument parsing
 // -----------------------------------------------------------------------------
 
-fn parse_uint(bs: &List<Byte>, start: Int, len: Int) -> Maybe<Int> {
+fn parse_uint(bs: &[Byte], start: Int, len: Int) -> Maybe<Int> {
     if start + len > bs.len() { return Maybe.None; }
     // Defence-in-depth: callers pass small `len` (4 for year, 2 for
     // month/day/etc.) but a buggy or hostile caller could pass a
@@ -133,26 +133,24 @@ fn parse_uint(bs: &List<Byte>, start: Int, len: Int) -> Maybe<Int> {
 }
 
 public fn parse_iso(s: &Text) -> Maybe<Calendar> {
-    let bs_t = s.as_bytes();
-    let mut bs: List<Byte> = List.with_capacity(bs_t.len());
-    bs.extend_from_slice(bs_t);
+    let bs = s.as_bytes();
     if bs.len() < 10 { return Maybe.None; }
-    let y = parse_uint(&bs, 0, 4);
-    let m = parse_uint(&bs, 5, 2);
-    let d = parse_uint(&bs, 8, 2);
+    let y = parse_uint(bs, 0, 4);
+    let m = parse_uint(bs, 5, 2);
+    let d = parse_uint(bs, 8, 2);
     let mut hh: Int = 0;
     let mut mm: Int = 0;
     let mut ss: Int = 0;
     let mut ms: Int = 0;
     if bs.len() >= 16 {
-        match parse_uint(&bs, 11, 2) { Maybe.Some(v) => { hh = v; }, Maybe.None => {} }
-        match parse_uint(&bs, 14, 2) { Maybe.Some(v) => { mm = v; }, Maybe.None => {} }
+        match parse_uint(bs, 11, 2) { Maybe.Some(v) => { hh = v; }, Maybe.None => {} }
+        match parse_uint(bs, 14, 2) { Maybe.Some(v) => { mm = v; }, Maybe.None => {} }
     }
     if bs.len() >= 19 {
-        match parse_uint(&bs, 17, 2) { Maybe.Some(v) => { ss = v; }, Maybe.None => {} }
+        match parse_uint(bs, 17, 2) { Maybe.Some(v) => { ss = v; }, Maybe.None => {} }
     }
     if bs.len() >= 23 {
-        match parse_uint(&bs, 20, 3) { Maybe.Some(v) => { ms = v; }, Maybe.None => {} }
+        match parse_uint(bs, 20, 3) { Maybe.Some(v) => { ms = v; }, Maybe.None => {} }
     }
     match y { Maybe.Some(yv) => match m { Maybe.Some(mv) => match d { Maybe.Some(dv) => {
         return Maybe.Some(Calendar {
@@ -355,7 +353,7 @@ fn apply_modifier(jd: Float64, m: &Text) -> Maybe<Float64> {
         if had_digit && i < bs.len() && bs[i] == (32 as Byte) { i = i + 1; }
         if had_digit {
             let unit_off = i;
-            let unit_text = bytes_to_text(&bs, unit_off);
+            let unit_text = bytes_to_text(bs, unit_off);
             let unit = lower_text(&unit_text);
             let nf: Float64 = (n as Float64) * sign;
             if text_eq(&unit, &"day".clone()) || text_eq(&unit, &"days".clone()) {
@@ -514,7 +512,7 @@ fn lower_text(s: &Text) -> Text {
 fn text_eq(a: &Text, b: &Text) -> Bool { a == b }
 fn text_eq_lower(a: &Text, b: &Text) -> Bool { lower_text(a) == lower_text(b) }
 
-fn bytes_to_text(bs: &List<Byte>, off: Int) -> Text {
+fn bytes_to_text(bs: &[Byte], off: Int) -> Text {
     let mut out = Text.with_capacity(bs.len() - off);
     let mut i: Int = off;
     while i < bs.len() { out.push_byte(bs[i]); i = i + 1; }

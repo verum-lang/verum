@@ -99,7 +99,7 @@ public fn parse_path(s: &Text) -> Result<List<PathSeg>, PathParseError> {
             i = i + 1;
             // Optional bracket form: `.[N]`
             if i < bs.len() && bs[i] == (91 as Byte) {
-                let r = parse_index(&bs, i);
+                let r = parse_index(bs, i);
                 match r {
                     Result.Ok(pair) => { out.push(PsIndex(pair.0)); i = pair.1; }
                     Result.Err(e)   => { return Result.Err(e); }
@@ -126,7 +126,7 @@ public fn parse_path(s: &Text) -> Result<List<PathSeg>, PathParseError> {
             while k < i { name.push_byte(bs[k]); k = k + 1; }
             out.push(PsField(name));
         } else if b == (91 as Byte) {
-            let r = parse_index(&bs, i);
+            let r = parse_index(bs, i);
             match r {
                 Result.Ok(pair) => { out.push(PsIndex(pair.0)); i = pair.1; }
                 Result.Err(e)   => { return Result.Err(e); }
@@ -145,7 +145,7 @@ fn is_name_byte(b: Byte) -> Bool {
     b == (95 as Byte)
 }
 
-fn parse_index(bs: &List<Byte>, start: Int) -> Result<(Int, Int), PathParseError> {
+fn parse_index(bs: &[Byte], start: Int) -> Result<(Int, Int), PathParseError> {
     if start >= bs.len() || bs[start] != (91 as Byte) { return Result.Err(PpUnclosedBracket); }
     let mut i: Int = start + 1;
     let mut idx: Int = 0;
