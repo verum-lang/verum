@@ -14336,27 +14336,60 @@ impl VbcCodegen {
                 for segment in parts.iter().skip(1) { owner.push('.'); owner.push_str(segment); }
                 self.declared_namespace_mount(&owner, scope)?.then_some(owner)
             } else { None };
-            if rooted || namespace_alias.is_some() {
-                let owner = namespace_alias.unwrap_or_else(|| parts.join("."));
-                self.validate_rooted_type_owner(&owner, receiver.span)?;
-                let selected = if let Some(declaration) = self.nominal_type_id(&owner)
-                    .and_then(|id| self.type_by_id(id))
-                    .and_then(|ty| self.type_declaration_identity(ty))
-                {
-                    self.registered_receiver_method(&declaration, method.name.as_str())
-                } else {
-                    self.resolve_source_value_export(&format!("{owner}.{}", method.name), scope)
-                        .map_err(|message| CodegenError::with_span(CodegenErrorKind::TypeInference(message), receiver.span))?
-                        .map(|(key, _)| key)
-                }.ok_or_else(|| CodegenError::undefined_function(format!("{owner}.{}", method.name)))?;
-                // Normalize the selected declaration before ordinary call
-                // lowering. Defaults, foreign ABI and generic witnesses keep
-                // their existing shared implementation, rather than entering
-                // the narrower static-method path with an invented receiver.
-                let callable = Expr::new(ExprKind::Path(Path::new(selected.split('.')
-                    .map(|part| PathSegment::Name(verum_ast::Ident::new(part, receiver.span))).collect(),
-                    receiver.span)), receiver.span);
-                return self.compile_call(&callable, args, type_args);
+            let namespace = rooted || namespace_alias.is_some();
+            let owner = namespace_alias.or_else(|| {
+                (rooted || (parts.len() > 1 && !self.is_value_receiver_binding(&parts[0])))
+                    .then(|| parts.join("."))
+            });
+            if let Some(owner) = owner {
+                let declaration = self.source_nominal_type_id(&owner).flatten()
+                    .and_then(|id| self.type_by_id(id));
+                let alias = declaration.filter(|ty| ty.kind == crate::types::TypeKind::Alias && ty.type_params.is_empty());
+                if namespace || alias.is_some() {
+                    self.validate_rooted_type_owner(&owner, receiver.span)?;
+                    // A mounted alias may already be a qualified path. Use the
+                    // selected declaration for the provider and its fixed type arguments.
+                    if let Some(alias) = alias {
+                        let target = self.expand_declared_alias(crate::types::TypeRef::Concrete(alias.id))
+                            .ok_or_else(|| CodegenError::with_span(CodegenErrorKind::TypeInference(format!("unresolved type alias `{owner}`")), receiver.span))?;
+                        if matches!(target, crate::types::TypeRef::Instantiated { .. })
+                            && let Some((function, receiver_ty)) = self.declared_static_receiver_method(
+                                &target, method.as_str(), args.len(),
+                            )?
+                        {
+                            return self.compile_static_call_on(&function.clone(), args, type_args,
+                                Some(FactoryReceiver::ExplicitSelf(&receiver_ty)));
+                        }
+                        let key = self.registered_receiver_method(&owner, method.as_str()).or_else(|| {
+                            let provider = self.type_by_id(target.base_type_id()?)?;
+                            self.registered_receiver_method(&self.type_declaration_identity(provider)?, method.as_str())
+                        }).ok_or_else(|| CodegenError::undefined_function(format!("{owner}.{method}")))?;
+                        let function = self.ctx.lookup_qualified_function(&key).cloned()
+                            .ok_or_else(|| CodegenError::undefined_function(key.clone()))?;
+                        if args.len() < function.param_count {
+                            return self.compile_resolved_function_call(&function, &key, &key, args, type_args);
+                        }
+                        return self.compile_static_method_call(&function, args, type_args);
+                    }
+                    let selected = if let Some(declaration) = self.nominal_type_id(&owner)
+                        .and_then(|id| self.type_by_id(id))
+                        .and_then(|ty| self.type_declaration_identity(ty))
+                    {
+                        self.registered_receiver_method(&declaration, method.name.as_str())
+                    } else {
+                        self.resolve_source_value_export(&format!("{owner}.{}", method.name), scope)
+                            .map_err(|message| CodegenError::with_span(CodegenErrorKind::TypeInference(message), receiver.span))?
+                            .map(|(key, _)| key)
+                    }.ok_or_else(|| CodegenError::undefined_function(format!("{owner}.{}", method.name)))?;
+                    // Normalize the selected declaration before ordinary call
+                    // lowering. Defaults, foreign ABI and generic witnesses keep
+                    // their existing shared implementation, rather than entering
+                    // the narrower static-method path with an invented receiver.
+                    let callable = Expr::new(ExprKind::Path(Path::new(selected.split('.')
+                        .map(|part| PathSegment::Name(verum_ast::Ident::new(part, receiver.span))).collect(),
+                        receiver.span)), receiver.span);
+                    return self.compile_call(&callable, args, type_args);
+                }
             }
             parts.push(method.name.to_string());
             if std::env::var_os("VERUM_TRACE_TPCALL").is_some() {

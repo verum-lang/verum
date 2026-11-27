@@ -14,6 +14,50 @@ fn compile(source: &str) -> VbcModule {
         .compile_module(&Parser::new(source).parse_module().unwrap())
         .unwrap()
 }
+
+#[test]
+fn mounted_alias_chains_call_their_own_static_method_and_preserve_its_borrow() {
+    use std::sync::Arc;
+    use verum_ast::FileId;
+    use verum_fast_parser::FastParser;
+    use verum_vbc::interpreter::Interpreter;
+
+    let parser = FastParser::new();
+    let sources = [
+        "module store; public type Entry is { value: Int };
+         public type Parcel<T> is { value: T };
+         implement<T> Parcel<T> { public fn wrap(value: T) -> Self { Self { value: value } } }
+         implement Entry { public fn increment(n: &mut Int, by: Int = 3) -> Entry {
+             *n = *n + by; Entry { value: *n }
+         } }",
+        "module surface; mount store.Entry; public type Ticket is Entry;
+         public type Pass is Ticket; mount store.Parcel; public type Counter is Parcel<Int>;",
+        "module other; public type Entry is { value: Int };
+         implement Entry { public fn increment(n: Int, by: Int) -> Entry { Entry { value: 99 } } }",
+        "module app; mount surface.{Pass, Counter}; fn run() -> Int {
+             let mut number = 4;
+             let receipt = Pass.increment(&mut number);
+             Counter.wrap(number * 10 + receipt.value).value
+         }",
+    ];
+    let modules: List<_> = sources.iter().enumerate().map(|(index, source)|
+        parser.parse_module_str(source, FileId::new(index as u32 + 1)).unwrap()
+    ).collect();
+    for order in [[0, 1, 2, 3], [2, 0, 1, 3]] {
+        let units: List<_> = order.iter().map(|index| &modules[*index]).collect();
+        let mut codegen = VbcCodegen::with_config(CodegenConfig::new("app"));
+        codegen.initialize();
+        codegen.collect_unit_declarations(&units).unwrap();
+        codegen.resolve_pending_imports();
+        codegen.compile_unit_items(&units, ItemFailurePolicy::Strict).unwrap();
+        let module = codegen.finalize_module().unwrap();
+        for image in [roundtrip(&module), module] {
+            let entry = image.find_function_by_name("app.run").unwrap();
+            let mut vm = Interpreter::try_new_validated(Arc::new(image)).unwrap();
+            assert_eq!(vm.execute_function(entry).unwrap().try_as_i64(), Some(77));
+        }
+    }
+}
 fn declaration_interface(source: &str) -> VbcModule {
     let ast = Parser::new(source).parse_module().unwrap();
     VbcCodegen::new().collect_declaration_interface(&[&ast]).unwrap()
