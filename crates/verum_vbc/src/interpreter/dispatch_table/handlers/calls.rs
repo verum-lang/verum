@@ -1214,7 +1214,7 @@ pub(in super::super) fn handle_tail_call_op(
     if let Some(frame) = state.call_stack.current() {
         let caller = state.module.get_function(frame.function)
             .ok_or(InterpreterError::FunctionNotFound(frame.function))?;
-        crate::parameter_convention::validate_call(caller, func)
+        state.module.validate_parameter_call(caller, func)
             .map_err(|message| InterpreterError::InvalidBytecode {
                 pc: state.pc() as usize, message: message.into_string(),
             })?;

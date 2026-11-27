@@ -95,16 +95,28 @@ pub fn validate_body(function: &FunctionDescriptor) -> Result<(), Text> {
     Ok(())
 }
 
-/// Both sides must agree before executing a selected source body. External
-/// intrinsic implementations own their independent ABI and are not parameter
-/// cleanup certificates. Legacy-to-legacy remains the legacy convention.
-pub fn validate_call(caller: &FunctionDescriptor, callee: &FunctionDescriptor) -> Result<(), Text> {
-    validate_body(caller)?;
-    validate_body(callee)?;
-    if !callee.requires_intrinsic_implementation()
-        && caller.owned_value_parameters != callee.owned_value_parameters
-    {
-        return Err("incompatible owned parameter calling conventions".into());
+impl VbcModule {
+    /// A source call must use the parameter lifecycle implemented by both
+    /// declarations. Intrinsics own their independent ABI.
+    pub fn validate_parameter_call(
+        &self,
+        caller: &FunctionDescriptor,
+        callee: &FunctionDescriptor,
+    ) -> Result<(), Text> {
+        validate_body(caller)?;
+        validate_body(callee)?;
+        if !callee.requires_intrinsic_implementation()
+            && caller.owned_value_parameters != callee.owned_value_parameters
+        {
+            let label = |function: &FunctionDescriptor| {
+                let name = self.get_string(function.name).unwrap_or("<unnamed>");
+                format!("{name} [#{}]", function.id.0)
+            };
+            return Err(format!(
+                "incompatible owned parameter calling conventions: {} calls {}",
+                label(caller), label(callee)
+            ).into());
+        }
+        Ok(())
     }
-    Ok(())
 }

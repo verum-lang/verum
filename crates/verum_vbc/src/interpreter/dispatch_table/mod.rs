@@ -1308,7 +1308,7 @@ fn dispatch_until_return(
                 let validity = if let Some(parent) = state.call_stack.parent() {
                     let caller = state.module.get_function(parent.function)
                         .ok_or(InterpreterError::FunctionNotFound(parent.function))?;
-                    crate::parameter_convention::validate_call(caller, callee)
+                    state.module.validate_parameter_call(caller, callee)
                 } else { crate::parameter_convention::validate_body(callee) };
                 validity.map_err(|message| InterpreterError::InvalidBytecode {
                     pc: 0, message: message.into_string(),

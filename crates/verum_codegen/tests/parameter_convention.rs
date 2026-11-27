@@ -28,6 +28,7 @@ fn compile(source: &str) -> verum_vbc::VbcModule {
 fn native_mixed_parameter_convention_is_refused_before_emission_of_the_call() {
     let mut module = compile("fn take(value: Int) -> Int { value } fn main() -> Int { take(73) }");
     let take = module.find_function_by_name("take").unwrap();
+    let main = module.find_function_by_name("main").unwrap();
     let function = module
         .functions
         .iter_mut()
@@ -42,7 +43,9 @@ fn native_mixed_parameter_convention_is_refused_before_emission_of_the_call() {
     );
     let error = lowering.lower_module(&module).unwrap_err();
     assert!(
-        error.to_string().contains("incompatible owned parameter"),
+        error.to_string().contains(&format!(
+            "incompatible owned parameter calling conventions: main [#{}] calls take [#{}]", main.0, take.0
+        )),
         "{error}"
     );
 }

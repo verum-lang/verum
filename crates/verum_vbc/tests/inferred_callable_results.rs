@@ -159,6 +159,8 @@ fn a_forward_result_remains_unknown_instead_of_inheriting_the_unit_abi_default()
     );
     for module in modules(&source) {
         signature(&module, "candidate", None);
+        let caller = module.find_function_by_name("candidate").unwrap();
+        let callee = module.find_function_by_name("pending").unwrap();
         let error = run(module, false).unwrap_err();
         // An unresolved forward also lacks the owned-call inventory. Either
         // boundary may refuse first; neither admits a semantic unit result.
@@ -168,7 +170,10 @@ fn a_forward_result_remains_unknown_instead_of_inheriting_the_unit_abi_default()
                 "{message}"
             ),
             verum_vbc::interpreter::InterpreterError::InvalidBytecode { message, .. } => {
-                assert_eq!(message, "incompatible owned parameter calling conventions")
+                assert_eq!(message, format!(
+                    "incompatible owned parameter calling conventions: candidate [#{}] calls pending [#{}]",
+                    caller.0, callee.0
+                ))
             }
             other => panic!("unexpected forward refusal: {other}"),
         }

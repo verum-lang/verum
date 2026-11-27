@@ -1343,7 +1343,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
     ) -> Result<FunctionValue<'ctx>> {
         if let Some(module) = self.vbc_module {
             if let Some(caller) = self.vbc_function_id.and_then(|id| module.get_function(id)) {
-                verum_vbc::parameter_convention::validate_call(caller, declaration)
+                module.validate_parameter_call(caller, declaration)
                     .map_err(LlvmLoweringError::unsupported)?;
             } else if declaration.owned_value_parameters {
                 return Err(LlvmLoweringError::unsupported(
