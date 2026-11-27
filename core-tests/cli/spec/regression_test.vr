@@ -1,6 +1,7 @@
 mount core.cli.spec.{ArgSpec, CommandSpec, FlagSpec};
 mount core.cli.builder.AppBuilder;
-mount core.cli.parser.parse_argv;
+mount core.cli.parser.{flag, parse_argv, Parser, ParseState};
+mount core.base.maybe.Maybe;
 mount core.collections.List;
 mount core.text.Text;
 mount core.base.result.Result;
@@ -57,4 +58,17 @@ fn test_required_positionals_belong_to_the_selected_command() {
     let present: List<Text> = ["tool", "inspect", "document"];
     assert(parse_argv(&root, missing) is Result.Err);
     assert(parse_argv(&root, present) is Result.Ok);
+}
+
+@test
+fn test_flag_parser_preserves_attached_values_and_leaves_mismatches_in_place() {
+    let mode = flag(FlagSpec.value("mode", "Mode"));
+    let model = flag(FlagSpec.value("model", "Model"));
+    let mut state = ParseState.new(["--mode=λ=x", "--mode=", "--mode", "", "--model=z", "--mode"]);
+    assert_eq(mode.parse(&mut state).unwrap(), Maybe.Some("λ=x"));
+    assert_eq(mode.parse(&mut state).unwrap(), Maybe.Some(""));
+    assert_eq(mode.parse(&mut state).unwrap(), Maybe.Some(""));
+    assert(mode.parse(&mut state) is Result.Ok(Maybe.None));
+    assert_eq(model.parse(&mut state).unwrap(), Maybe.Some("z"));
+    assert(mode.parse(&mut state) is Result.Err(_));
 }

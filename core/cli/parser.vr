@@ -155,22 +155,24 @@ fn classify(tok: Text, settings: &CommandSettings) -> TokenKind {
 
     // Long flag --name[=value]
     if tok.starts_with(&dd) {
-        let body = tok.slice(2, tok.len());
-        let eq = Text.from("=");
-        match body.find(&eq) {
-            Maybe.Some(eq_idx) => {
-                let name = body.slice(0, eq_idx);
-                let val = body.slice(eq_idx + 1, body.len());
-                TokenKind.TLong(name, Maybe.Some(val))
-            },
-            Maybe.None => TokenKind.TLong(body, Maybe.None),
-        }
+        let (name, value) = split_long_option(&tok);
+        TokenKind.TLong(name, value)
     } else {
         // Short flag(s): -abc, -p8080, -1 (negative number)
         if settings.allow_negative_numbers && looks_like_number(&tok) {
             return TokenKind.TPositional(tok);
         }
         TokenKind.TShort(tok.slice(1, tok.len()))
+    }
+}
+
+/// Split a long option after its two leading dashes. An empty value after
+/// the first equals sign is still an explicit value.
+fn split_long_option(token: &Text) -> (Text, Maybe<Text>) {
+    let body = token.slice(2, token.len());
+    match body.find(&"=") {
+        Maybe.Some(index) => (body.slice(0, index), Maybe.Some(body.slice(index + 1, body.len()))),
+        Maybe.None => (body, Maybe.None),
     }
 }
 
@@ -708,25 +710,21 @@ public type FlagParser is {
 
 implement Parser<Maybe<Text>> for FlagParser {
     fn parse(&self, state: &mut ParseState) -> Result<Maybe<Text>, ParseError> {
-        let key = match &self.spec.long {
-            Maybe.Some(l) => l.clone(),
-            Maybe.None => return Result.Ok(Maybe.None),
+        let (name, attached) = match state.peek() {
+            Maybe.Some(token) if token.len() > 2 && token.starts_with(&"--") => split_long_option(token),
+            _ => return Result.Ok(Maybe.None),
         };
-        // Look ahead: is the current token --<key>= or --<key>?
-        let mut prefix = Text.from("--");
-        prefix.push_str(&key);
-        match state.peek() {
-            Maybe.Some(t) => {
-                if t == &prefix {
-                    state.advance();
-                    return match state.advance() {
-                        Maybe.Some(v) => Result.Ok(Maybe.Some(v)),
-                        Maybe.None => Result.Err(ParseError.missing_value(key)),
-                    };
-                }
-                Result.Ok(Maybe.None)
+        match &self.spec.long {
+            Maybe.Some(expected) if &name == expected => {},
+            _ => return Result.Ok(Maybe.None),
+        }
+        state.cursor = state.cursor + 1;
+        match attached {
+            Maybe.Some(value) => Result.Ok(Maybe.Some(value)),
+            Maybe.None => match state.advance() {
+                Maybe.Some(value) => Result.Ok(Maybe.Some(value)),
+                Maybe.None => Result.Err(ParseError.missing_value(name)),
             },
-            Maybe.None => Result.Ok(Maybe.None),
         }
     }
 
