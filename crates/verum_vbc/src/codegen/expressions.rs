@@ -78,6 +78,11 @@ struct CallInstantiation {
     rejection: Option<CodegenError>,
 }
 
+enum FactoryReceiver<'a> {
+    ExplicitSelf(&'a crate::types::TypeRef),
+    Enclosing(&'a crate::types::TypeRef),
+}
+
 impl CallInstantiation {
     fn known(arguments: impl IntoIterator<Item = crate::types::TypeRef>) -> Self {
         Self {
@@ -13829,6 +13834,13 @@ impl VbcCodegen {
             return self.compile_static_method_call(&function, args, type_args);
         }
 
+        if Self::named_place_binding(receiver) == Some("Self")
+            && let Some(owner) = self.lexical_factory_receiver(receiver)
+            && let Some((function, owner)) = self.declared_static_receiver_method(owner, method.as_str(), args.len())?
+        {
+            return self.compile_static_call_on(&function.clone(), args, type_args, Some(FactoryReceiver::ExplicitSelf(&owner)));
+        }
+
         // Static calls on declaration-owned type parameters and associated
         // projections use the same witness as a type annotation in this frame.
         if let Some(type_ref) = self.type_parameter_static_receiver(receiver)? {
@@ -14430,36 +14442,11 @@ impl VbcCodegen {
                         }
                         Some(w)
                     })
-                    .or_else(|| {
-                        // Enclosing-impl relay: a bare self-type static call
-                        // INSIDE a generic impl (`Matrix.zeros(n, n)` in the
-                        // body of `implement<T: Semiring> Matrix<T>`): the
-                        // callee's type params ARE the enclosing impl's, so
-                        // stage the identity witness vector [Generic(0..k)]
-                        // and let the runtime chain it through this frame's
-                        // own witness table.
-                        let recv = static_receiver_type.as_deref()?;
-                        let impl_ty = self.ctx.current_impl_type_name.as_deref()?;
-                        if VbcCodegen::strip_generic_args(impl_ty) != recv {
-                            return None;
-                        }
-                        let k = self.ctx.generic_type_params_ordered.len();
-                        if k == 0 {
-                            return None;
-                        }
-                        Some(
-                            (0..k)
-                                .map(|i| {
-                                    crate::types::TypeRef::Generic(
-                                        crate::types::TypeParamId(i as u16),
-                                    )
-                                })
-                                .collect(),
-                        )
-                    })
             };
 
         if let Some(ref type_name) = static_receiver_type {
+            let lexical_owner = static_witness_args.is_none()
+                .then(|| self.lexical_factory_receiver(receiver).cloned()).flatten();
             if let Some(info) = self.scalar_alias_static_method(type_name, method.name.as_str(), args.len())?.cloned() {
                 self.ctx.pending_static_call_type_args = static_witness_args.clone();
                 return self.compile_static_method_call(&info, args, type_args);
@@ -14505,7 +14492,7 @@ impl VbcCodegen {
                     // call (taken at its entry; every non-consuming path
                     // drops them).
                     self.ctx.pending_static_call_type_args = static_witness_args.clone();
-                    return self.compile_static_method_call(&func_info, args, type_args);
+                    return self.compile_static_call_on(&func_info, args, type_args, lexical_owner.as_ref().map(FactoryReceiver::Enclosing));
                 }
                 if let Some(func_info) = self.ctx.lookup_function(candidate).cloned()
                     && func_info.param_count == args.len()
@@ -14519,7 +14506,7 @@ impl VbcCodegen {
                         );
                     }
                     self.ctx.pending_static_call_type_args = static_witness_args.clone();
-                    return self.compile_static_method_call(&func_info, args, type_args);
+                    return self.compile_static_call_on(&func_info, args, type_args, lexical_owner.as_ref().map(FactoryReceiver::Enclosing));
                 }
             }
         }
@@ -18392,6 +18379,16 @@ impl VbcCodegen {
         args: &verum_common::List<Expr>,
         type_args: &verum_common::List<verum_ast::ty::GenericArg>,
     ) -> CodegenResult<Option<Reg>> {
+        self.compile_static_call_on(func_info, args, type_args, None)
+    }
+
+    fn compile_static_call_on(
+        &mut self,
+        func_info: &FunctionInfo,
+        args: &verum_common::List<Expr>,
+        type_args: &verum_common::List<verum_ast::ty::GenericArg>,
+        owner: Option<FactoryReceiver<'_>>,
+    ) -> CodegenResult<Option<Reg>> {
         // CONST-GENERIC-VALUE-CARRY-1: take the callsite-staged witness
         // args UNCONDITIONALLY at entry — every early-return path
         // (variant ctor, transparent wrapper, intrinsic) drops them, so a
@@ -18576,7 +18573,30 @@ impl VbcCodegen {
             start: args_start,
             count: args.len() as u8,
         };
-        let mut inferred_type_args = self.infer_call_instantiation(func_info.id.0, None, args, type_args);
+        let mut inferred_type_args = if let Some(owner) = owner {
+            let mut bindings = crate::mono::TypeSubstitution::empty();
+            self.bind_source_type_arguments(func_info, type_args, &mut bindings)?;
+            let selected = self.selected_argument_bindings_in(func_info, args.len(), args.iter(), None, bindings)
+                .and_then(|ordinary| {
+                    let (owner, fixed) = match owner {
+                        FactoryReceiver::ExplicitSelf(owner) => (owner, true),
+                        FactoryReceiver::Enclosing(owner) => (owner, false),
+                    };
+                    let mut completed = ordinary.clone();
+                    if self.bind_static_receiver_declaration(func_info, owner, &mut completed).is_some() {
+                        Some(completed)
+                    } else if fixed {
+                        None
+                    } else {
+                        // A bare name may construct a different instantiation
+                        // when the arguments select it.
+                        Some(ordinary)
+                    }
+                });
+            Some(CallInstantiation::declared(func_info, Ok(selected)))
+        } else {
+            self.infer_call_instantiation(func_info.id.0, None, args, type_args)
+        };
         if let Some(staged) = staged_type_args {
             let inferred = inferred_type_args.get_or_insert_with(CallInstantiation::default);
             for (index, value) in staged.into_iter().enumerate() { inferred.fill(index, value); }

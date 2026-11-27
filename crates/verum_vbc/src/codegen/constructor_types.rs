@@ -680,6 +680,18 @@ impl VbcCodegen {
             .then_some(())
     }
 
+    /// The receiver of a factory inside an implementation is a type in the
+    /// caller's scope. Its arguments may be reordered, specialized or absent
+    /// from the enclosing method's own generic parameters.
+    pub(super) fn lexical_factory_receiver(&self, receiver: &Expr) -> Option<&TypeRef> {
+        let ExprKind::Path(path) = &receiver.kind else { return None; };
+        let name = path.as_ident()?.as_str();
+        let owner = self.current_impl_receiver.as_ref().filter(|owner| owner.semantic)?;
+        if name == "Self" { return Some(&owner.ty); }
+        if self.is_value_receiver_binding(name) { return None; }
+        (self.nominal_type_id(name)? == owner.ty.base_type_id()?).then_some(&owner.ty)
+    }
+
     /// A receiver can determine F without mentioning the result parameter in
     /// its own nominal arguments. Only F's declared callable bound can then
     /// determine that residual slot; caller and callee IDs remain separate.
@@ -891,6 +903,18 @@ impl VbcCodegen {
                 type_args,
                 args,
             } => {
+                if let Some(owner) = self.lexical_factory_receiver(receiver)
+                    && let Some((callable, owner)) = self.declared_static_receiver_method(owner, method.as_str(), args.len()).ok()?
+                {
+                    // A bare nominal can be specialized by the surrounding
+                    // call. Explicit Self always denotes this implementation.
+                    if Self::named_place_binding(receiver) != Some("Self")
+                        && let Some(result) = self.source_call_result(callable, None, type_args, args, expected, depth)
+                    {
+                        return Some(result);
+                    }
+                    return self.source_call_result(callable, Some(&owner), type_args, args, expected, depth);
+                }
                 if let ExprKind::Path(path) = &receiver.kind
                     && let Some(ident) = path.as_ident()
                     && !self.is_value_receiver_binding(ident.as_str())

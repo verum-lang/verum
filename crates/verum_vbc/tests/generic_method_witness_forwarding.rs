@@ -54,6 +54,45 @@ fn run(source: &str) {
 }
 
 #[test]
+fn static_factories_retain_the_implementation_receiver_across_binder_reordering() {
+    let source = r#"
+        type Pair<A, B> is { marker: Int };
+        implement<A, B> Pair<A, B> {
+            fn fresh() -> Pair<A, B> { Pair { marker: 0 } }
+            fn from_values(left: A, right: B) -> Pair<A, B> { Pair { marker: 1 } }
+            fn left(&self) -> UInt64 { A.id }
+            fn right(&self) -> UInt64 { B.id }
+        }
+        implement<Y, X> Pair<X, Y> {
+            fn check<Extra>(&self, extra: Extra) -> Bool {
+                let a = Self.fresh();
+                let b = Pair.fresh();
+                let reversed = Pair.from_values(true, 37);
+                a.left() == X.id && a.right() == Y.id && b.left() == X.id && b.right() == Y.id
+                    && reversed.left() == Bool.id && reversed.right() == Int.id
+            }
+        }
+        fn probe() -> Int {
+            let p: Pair<Int, Bool> = Pair { marker: 0 };
+            if p.check<Text>("third") { 1 } else { 0 }
+        }
+    "#;
+    let ast = Parser::new(source).parse_module().unwrap();
+    for bootstrap in [false, true] {
+        let module = lower(&ast, bootstrap).unwrap();
+        let wire = deserialize_module(&serialize_module(&module).unwrap()).unwrap();
+        for module in [module, wire] {
+            let entry = module.find_function_by_name("forwarding.probe").unwrap();
+            let mut vm = Interpreter::try_new_validated(Arc::new(module)).unwrap();
+            assert_eq!(vm.execute_function(entry).unwrap().try_as_i64(), Some(1));
+        }
+        let conflicting = source.replace("Pair.from_values(true, 37)", "Self.from_values(true, 37)");
+        let invalid = Parser::new(&conflicting).parse_module().unwrap();
+        assert!(lower(&invalid, bootstrap).is_err(), "Self must keep its selected parameters");
+    }
+}
+
+#[test]
 fn a_generic_function_forwards_its_witness_to_a_borrowed_receiver() {
     run(r#"
 fn forward<T>(sink: &Sink<T>, value: T) { sink.consume(value); }
