@@ -1,6 +1,9 @@
 module core.database.sqlite.native.planner_cost.tests.estimates;
 mount core.database.sqlite.native.planner_cost.stats.table_stats_default;
-mount core.database.sqlite.native.planner_cost.cost.{AmFullScan, estimate_access, cost_total};
+mount core.database.sqlite.native.planner_cost.cost.{
+    AmFullScan, estimate_access, estimate_sort_cost, estimate_aggregate_cost,
+    cost_constant, cost_total, cost_combine, cost_concat,
+};
 mount core.database.sqlite.native.planner_cost.selectivity.{
     estimate, PkColEqLiteral, PkColEqCol, PkColIn, PkColIsNull, PkColIsNotNull,
 };
@@ -37,6 +40,33 @@ fn test_empty_table_has_no_nulls_and_unknown_cardinality() {
     assert(empty.record_column_distribution("k", 0_i64, 0_i64));
     assert(estimate(&PkColIsNull("k"), &empty) == 0.0);
     assert(estimate(&PkColEqLiteral("k"), &empty) == 0.1);
+}
+
+@test
+fn test_operator_costs_keep_the_estimated_rows_and_accumulated_work() {
+    let input = cost_constant(8.0);
+    let filtered = input.apply_row_cost(0.5, 0.125);
+    assert(filtered.estimated_rows() == 4.0);
+    assert(cost_total(&filtered) == 0.5);
+
+    let sort = estimate_sort_cost(filtered.estimated_rows());
+    let sorted = filtered.followed_by(&sort, filtered.estimated_rows());
+    let total = cost_total(&sorted);
+    assert(total > 3.2999 && total < 3.3001);
+    let group = estimate_aggregate_cost(sorted.estimated_rows(), 1);
+    let grouped = sorted.followed_by(&group, group.estimated_rows());
+    assert(grouped.estimated_rows() == 1.0);
+    let total_grouped = cost_total(&grouped);
+    assert(total_grouped > 5.2249 && total_grouped < 5.2251);
+
+    let outer = estimate_sort_cost(2.0);
+    let inner = estimate_sort_cost(8.0);
+    let join = outer.append_join(&inner, 4.0, 0.5);
+    assert(join.estimated_rows() == 6.0);
+    let total_join = cost_total(&join);
+    assert(total_join > 11.3999 && total_join < 11.4001);
+    assert(cost_concat(&outer, &inner).estimated_rows() == 10.0);
+    assert(cost_combine(&outer, &inner).estimated_rows() == 16.0);
 }
 
 fn main() {}

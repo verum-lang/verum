@@ -16,10 +16,9 @@
 )
 module core.database.sqlite.native.planner_cost.join_order;
 
-mount base.{Bool, Maybe};
 mount collections.List;
 mount core.database.sqlite.native.planner_cost.cost.{
-    Cost, cost_zero, cost_concat, cost_total, cost_less,
+    Cost, cost_zero, cost_total, cost_less,
 };
 
 public type Relation is {
@@ -69,7 +68,7 @@ public fn greedy(
     }
     order.push(best_first);
     visited[best_first] = true;
-    let mut current_cost = clone_cost(&rels[best_first].base_cost);
+    let mut current_cost = rels[best_first].base_cost;
     let mut current_rows = rels[best_first].est_rows;
     let mut placed: Int = 1;
     while placed < rels.len() {
@@ -80,12 +79,7 @@ public fn greedy(
             if !visited[idx] {
                 let pair = pair_cost(order[order.len() - 1], idx);
                 let join_rows = current_rows * rels[idx].est_rows * pair.selectivity;
-                let join_cost = Cost {
-                    rows: join_rows,
-                    setup_cost: rels[idx].base_cost.setup_cost,
-                    per_row_cost: pair.per_row_cost,
-                };
-                let candidate = cost_concat(&current_cost, &join_cost);
+                let candidate = current_cost.append_join(&rels[idx].base_cost, join_rows, pair.per_row_cost);
                 let candidate_total = cost_total(&candidate);
                 if best < 0 || candidate_total < best_total {
                     best = idx;
@@ -97,12 +91,7 @@ public fn greedy(
         if best < 0 { break; }
         let pair = pair_cost(order[order.len() - 1], best);
         let join_rows = current_rows * rels[best].est_rows * pair.selectivity;
-        let join_cost = Cost {
-            rows: join_rows,
-            setup_cost: rels[best].base_cost.setup_cost,
-            per_row_cost: pair.per_row_cost,
-        };
-        current_cost = cost_concat(&current_cost, &join_cost);
+        current_cost = current_cost.append_join(&rels[best].base_cost, join_rows, pair.per_row_cost);
         current_rows = join_rows;
         order.push(best);
         visited[best] = true;
@@ -146,7 +135,8 @@ public fn dp_choose(
     let mut indices: List<Int> = List.new();
     let mut i: Int = 0;
     while i < rels.len() { indices.push(i); i = i + 1; }
-    let mut best_plan: Maybe<JoinPlan> = Maybe.None;
+    let mut best_index: Int = -1;
+    let mut best_cost = cost_zero();
     let mut best_total: Float64 = 0.0;
     let perms = permutations(&indices);
     let mut k: Int = 0;
@@ -154,24 +144,19 @@ public fn dp_choose(
         let p = &perms[k];
         let plan_cost = cost_for_order(rels, p, pair_cost);
         let t = cost_total(&plan_cost);
-        let take = match &best_plan {
-            Maybe.None    => true,
-            Maybe.Some(_) => t < best_total,
-        };
-        if take {
-            best_plan = Maybe.Some(JoinPlan {
-                order: clone_order(p),
-                total_cost: plan_cost,
-            });
+        if best_index < 0 || t < best_total {
+            best_index = k;
+            best_cost = plan_cost;
             best_total = t;
         }
         k = k + 1;
     }
-    let plan = match best_plan {
-        Maybe.Some(p) => p,
-        Maybe.None    => JoinPlan { order: List.new(), total_cost: cost_zero() },
+    let order: List<Int> = if best_index < 0 {
+        List.new()
+    } else {
+        clone_order(&perms[best_index])
     };
-    DpResult { plan: plan, n_alternatives: perms.len() }
+    DpResult { plan: JoinPlan { order: order, total_cost: best_cost }, n_alternatives: perms.len() }
 }
 
 fn cost_for_order(
@@ -181,18 +166,13 @@ fn cost_for_order(
 ) -> Cost {
     if order.len() == 0 { return cost_zero(); }
     let first = order[0];
-    let mut acc = clone_cost(&rels[first].base_cost);
+    let mut acc = rels[first].base_cost;
     let mut rows = rels[first].est_rows;
     let mut i: Int = 1;
     while i < order.len() {
         let pair = pair_cost(order[i - 1], order[i]);
         let join_rows = rows * rels[order[i]].est_rows * pair.selectivity;
-        let join_cost = Cost {
-            rows: join_rows,
-            setup_cost: rels[order[i]].base_cost.setup_cost,
-            per_row_cost: pair.per_row_cost,
-        };
-        acc = cost_concat(&acc, &join_cost);
+        acc = acc.append_join(&rels[order[i]].base_cost, join_rows, pair.per_row_cost);
         rows = join_rows;
         i = i + 1;
     }
@@ -238,12 +218,4 @@ fn clone_order(o: &List<Int>) -> List<Int> {
     let mut out: List<Int> = List.with_capacity(o.len());
     out.extend_from_slice(o.as_slice());
     out
-}
-
-fn clone_cost(c: &Cost) -> Cost {
-    Cost {
-        rows: c.rows,
-        setup_cost: c.setup_cost,
-        per_row_cost: c.per_row_cost,
-    }
 }

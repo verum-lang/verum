@@ -32,7 +32,11 @@ public type Cost is {
 };
 
 public fn cost_zero() -> Cost {
-    Cost { rows: 0.0, setup_cost: 0.0, per_row_cost: 0.0 }
+    cost_constant(0.0)
+}
+
+public(in core.database.sqlite.native) fn cost_constant(rows: Float64) -> Cost {
+    Cost { rows: rows, setup_cost: 0.0, per_row_cost: 0.0 }
 }
 
 public fn cost_total(c: &Cost) -> Float64 {
@@ -53,6 +57,38 @@ public fn cost_concat(a: &Cost, b: &Cost) -> Cost {
         rows: a.rows + b.rows,
         setup_cost: a.setup_cost + b.setup_cost,
         per_row_cost: a.per_row_cost + b.per_row_cost,
+    }
+}
+
+implement Cost {
+    public(in core.database.sqlite.native) fn estimated_rows(&self) -> Float64 { self.rows }
+
+    /// Charge row-by-row work and retain the estimated fraction of the input.
+    public(in core.database.sqlite.native) fn apply_row_cost(
+        &self, selectivity: Float64, extra_per_row: Float64,
+    ) -> Cost {
+        Cost {
+            rows: self.rows * selectivity,
+            setup_cost: self.setup_cost,
+            per_row_cost: self.per_row_cost + extra_per_row,
+        }
+    }
+
+    /// Add the operator's work at its estimated output cardinality.
+    public(in core.database.sqlite.native) fn followed_by(&self, operator: &Cost, output_rows: Float64) -> Cost {
+        Cost {
+            rows: output_rows,
+            setup_cost: self.setup_cost + operator.setup_cost,
+            per_row_cost: self.per_row_cost + operator.per_row_cost,
+        }
+    }
+
+    /// Add the inner relation's startup and the work of this join step.
+    public(in core.database.sqlite.native.planner_cost) fn append_join(
+        &self, inner: &Cost, joined_rows: Float64, per_row_cost: Float64,
+    ) -> Cost {
+        let step = Cost { rows: joined_rows, setup_cost: inner.setup_cost, per_row_cost: per_row_cost };
+        cost_concat(self, &step)
     }
 }
 
