@@ -52,7 +52,7 @@ mount core.database.sqlite.native.l5_sql.ast.{
     InsertStmt, InsertSource, SqlOnConflict,
     UpdateStmt, UpdateAssignment,
     DeleteStmt,
-    TableRef, CreateTableStmt,
+    TableRef, CreateTableStmt, ColumnDef, ColumnConstraint, TableConstraint,
 };
 
 // -----------------------------------------------------------------------------
@@ -93,6 +93,10 @@ public type PlanColumn is {
     alias: Text,                 // user-visible name (may be empty)
     expr: Expr,                  // expression produced
 };
+
+implement PlanColumn {
+    public(in core.database.sqlite.native.l5_sql) fn expression(&self) -> &Expr { &self.expr }
+}
 
 // -----------------------------------------------------------------------------
 // PlanNode
@@ -397,6 +401,116 @@ fn clone_text_list(xs: &List<Text>) -> List<Text> {
     out
 }
 
+/// Copy children before parents. The traversal stack holds child indices, so
+/// reallocating it cannot invalidate a reference into the input plan.
+public(in core.database.sqlite.native.l5_sql) fn clone_plan(root: &PlanNode) -> PlanNode {
+    let mut path: List<Int> = [];
+    let mut next_child: List<Int> = [0];
+    let mut copies: List<PlanNode> = [];
+    while next_child.len() > 0 {
+        let mut node: &PlanNode = root;
+        let mut depth: Int = 0;
+        while depth < path.len() {
+            node = match plan_child_at(node, path[depth]) {
+                Maybe.Some(child) => child,
+                Maybe.None => panic("invalid child path while copying SQL plan"),
+            };
+            depth = depth + 1;
+        }
+        let top = next_child.len() - 1;
+        let index = next_child[top];
+        if plan_child_at(node, index).is_some() {
+            next_child[top] = index + 1;
+            path.push(index);
+            next_child.push(0);
+        } else {
+            let copied = copy_plan_node(node, &mut copies);
+            copies.push(copied);
+            next_child.pop();
+            path.pop();
+        }
+    }
+    take_plan_copy(&mut copies)
+}
+
+fn plan_child_at(node: &PlanNode, index: Int) -> Maybe<&PlanNode> {
+    match node {
+        PnFilter(ref child, _) | PnProject(ref child, _) | PnSort(ref child, _)
+        | PnDistinct(ref child, _) | PnLimit(ref child, _, _) | PnGroupBy(ref child, _, _, _)
+        | PnInsert(_, _, ref child, _) => {
+            if index == 0 { Maybe.Some(child.as_ref()) } else { Maybe.None }
+        }
+        PnUnionAll(ref left, ref right) | PnUnion(ref left, ref right, _)
+        | PnIntersect(ref left, ref right, _) | PnExcept(ref left, ref right, _) => {
+            if index == 0 { Maybe.Some(left.as_ref()) }
+            else if index == 1 { Maybe.Some(right.as_ref()) }
+            else { Maybe.None }
+        }
+        _ => Maybe.None,
+    }
+}
+
+fn take_plan_copy(copies: &mut List<PlanNode>) -> PlanNode {
+    match copies.pop() {
+        Maybe.Some(node) => node,
+        Maybe.None => panic("missing child while copying SQL plan"),
+    }
+}
+
+fn copy_plan_node(node: &PlanNode, copies: &mut List<PlanNode>) -> PlanNode {
+    match node {
+        PnValues(ref rows, n) => PnValues(clone_rows(rows), n),
+        PnTableScan(ref table, id, n) => PnTableScan(clone_table_ref(table), id, n),
+        PnFilter(_, ref predicate) => PnFilter(Heap.new(take_plan_copy(copies)), clone_expr(predicate)),
+        PnProject(_, ref columns) => PnProject(Heap.new(take_plan_copy(copies)), clone_plan_columns(columns)),
+        PnSort(_, ref terms) => PnSort(Heap.new(take_plan_copy(copies)), clone_order_terms(terms)),
+        PnDistinct(_, n) => PnDistinct(Heap.new(take_plan_copy(copies)), n),
+        PnGroupBy(_, ref groups, ref columns, ref having) => PnGroupBy(
+            Heap.new(take_plan_copy(copies)), clone_expr_list(groups), clone_plan_columns(columns), clone_opt_expr(having),
+        ),
+        PnUnionAll(_, _) => {
+            let right = Heap.new(take_plan_copy(copies));
+            PnUnionAll(Heap.new(take_plan_copy(copies)), right)
+        }
+        PnUnion(_, _, n) => {
+            let right = Heap.new(take_plan_copy(copies));
+            PnUnion(Heap.new(take_plan_copy(copies)), right, n)
+        }
+        PnIntersect(_, _, n) => {
+            let right = Heap.new(take_plan_copy(copies));
+            PnIntersect(Heap.new(take_plan_copy(copies)), right, n)
+        }
+        PnExcept(_, _, n) => {
+            let right = Heap.new(take_plan_copy(copies));
+            PnExcept(Heap.new(take_plan_copy(copies)), right, n)
+        }
+        PnNestedLoopJoin(ref left, lc, ln, ref right, rc, rn, ref on, outer) => PnNestedLoopJoin(
+            clone_table_ref(left), lc, ln, clone_table_ref(right), rc, rn, clone_opt_expr(on), outer,
+        ),
+        PnLimit(_, ref limit, ref offset) => PnLimit(Heap.new(take_plan_copy(copies)), clone_expr(limit), clone_opt_expr(offset)),
+        PnInsert(ref table, ref cols, _, ref conflict) => PnInsert(
+            clone_table_ref(table), clone_text_list(cols), Heap.new(take_plan_copy(copies)), clone_opt_on_conflict(conflict),
+        ),
+        PnDelete(ref table, id, ref predicate) => PnDelete(clone_table_ref(table), id, clone_opt_expr(predicate)),
+        PnUpdate(ref table, id, n, ref assignments, ref predicate) => PnUpdate(
+            clone_table_ref(table), id, n, clone_assignments(assignments), clone_opt_expr(predicate),
+        ),
+        PnCreateTable(ref stmt) => PnCreateTable(clone_create_table(stmt)),
+        PnDrop(kind, if_exists, ref table) => PnDrop(kind, if_exists, clone_table_ref(table)),
+        PnTransaction(tx) => PnTransaction(tx),
+        PnPragma(ref name, ref value) => PnPragma(name.clone(), clone_opt_expr(value)),
+        PnNoop => PnNoop,
+    }
+}
+
+fn clone_plan_columns(columns: &List<PlanColumn>) -> List<PlanColumn> {
+    let mut result: List<PlanColumn> = List.with_capacity(columns.len());
+    for i in range(0, columns.len()) {
+        result.push(PlanColumn { alias: columns[i].alias.clone(), expr: clone_expr(&columns[i].expr) });
+    }
+    result
+}
+
 fn clone_rows(rows: &List<List<Expr>>) -> List<List<Expr>> {
     let mut out: List<List<Expr>> = List.new();
     let mut i: Int = 0;
@@ -503,15 +617,15 @@ public fn clone_expr(e: &Expr) -> Expr {
         EColumn(ref t, ref n) => EColumn(clone_table_ref(t), n.clone()),
         EVar(ref s)        => EVar(s.clone()),
         EPositional(n)     => EPositional(n),
-        EUnary(op, ref x)  => EUnary(op, Heap.new(clone_expr(x))),
-        EBinary(op, ref a, ref b) => EBinary(op, Heap.new(clone_expr(a)), Heap.new(clone_expr(b))),
+        EUnary(op, ref x)  => EUnary(op, Heap.new(clone_expr(x.as_ref()))),
+        EBinary(op, ref a, ref b) => EBinary(op, Heap.new(clone_expr(a.as_ref())), Heap.new(clone_expr(b.as_ref()))),
         EFunc(ref n, ref args, d) => EFunc(n.clone(), clone_expr_list(args), d),
         ECase(ref s, ref arms, ref el) => ECase(
-            match s { Maybe.Some(ref x) => Maybe.Some(Heap.new(clone_expr(x))), Maybe.None => Maybe.None },
+            match s { Maybe.Some(ref x) => Maybe.Some(Heap.new(clone_expr(x.as_ref()))), Maybe.None => Maybe.None },
             clone_case_arms(arms),
-            match el { Maybe.Some(ref x) => Maybe.Some(Heap.new(clone_expr(x))), Maybe.None => Maybe.None },
+            match el { Maybe.Some(ref x) => Maybe.Some(Heap.new(clone_expr(x.as_ref()))), Maybe.None => Maybe.None },
         ),
-        EIn(ref e, ref xs, neg) => EIn(Heap.new(clone_expr(e)), clone_expr_list(xs), neg),
+        EIn(ref e, ref xs, neg) => EIn(Heap.new(clone_expr(e.as_ref())), clone_expr_list(xs), neg),
         // Subquery expressions are rejected by the resolver
         // (`TooComplex("subquery in expression")`) before reaching
         // clone_expr. Pre-fix these arms silently coerced to
@@ -523,19 +637,19 @@ public fn clone_expr(e: &Expr) -> Expr {
         // returning a wrong-answer result set.
         EInSubquery(_, _, _) => panic("clone_expr: EInSubquery should be rejected by the resolver before clone"),
         EBetween(ref e, ref lo, ref hi, neg) => EBetween(
-            Heap.new(clone_expr(e)), Heap.new(clone_expr(lo)), Heap.new(clone_expr(hi)), neg,
+            Heap.new(clone_expr(e.as_ref())), Heap.new(clone_expr(lo.as_ref())), Heap.new(clone_expr(hi.as_ref())), neg,
         ),
         ELike(ref e, ref p, ref esc, neg) => ELike(
-            Heap.new(clone_expr(e)),
-            Heap.new(clone_expr(p)),
-            match esc { Maybe.Some(ref x) => Maybe.Some(Heap.new(clone_expr(x))), Maybe.None => Maybe.None },
+            Heap.new(clone_expr(e.as_ref())),
+            Heap.new(clone_expr(p.as_ref())),
+            match esc { Maybe.Some(ref x) => Maybe.Some(Heap.new(clone_expr(x.as_ref()))), Maybe.None => Maybe.None },
             neg,
         ),
-        ECast(ref x, ref t) => ECast(Heap.new(clone_expr(x)), t.clone()),
-        ECollate(ref x, ref n) => ECollate(Heap.new(clone_expr(x)), n.clone()),
+        ECast(ref x, ref t) => ECast(Heap.new(clone_expr(x.as_ref())), t.clone()),
+        ECollate(ref x, ref n) => ECollate(Heap.new(clone_expr(x.as_ref())), n.clone()),
         EExists(_, _)   => panic("clone_expr: EExists should be rejected by the resolver before clone"),
         ESubquery(_)    => panic("clone_expr: ESubquery should be rejected by the resolver before clone"),
-        ENullIf(ref a, ref b) => ENullIf(Heap.new(clone_expr(a)), Heap.new(clone_expr(b))),
+        ENullIf(ref a, ref b) => ENullIf(Heap.new(clone_expr(a.as_ref())), Heap.new(clone_expr(b.as_ref()))),
         ECoalesce(ref xs)     => ECoalesce(clone_expr_list(xs)),
         EColumnRef(cid, idx)  => EColumnRef(cid, idx),
     }
@@ -582,17 +696,54 @@ fn clone_literal(l: &SqlLiteral) -> SqlLiteral {
 }
 
 fn clone_create_table(ct: &CreateTableStmt) -> CreateTableStmt {
-    // Constraints cloning is heavy — for v1 the planner just forwards
-    // the AST value; clone by pushing it through a constructor that
-    // the codegen never mutates.
+    let mut columns: List<ColumnDef> = List.with_capacity(ct.columns.len());
+    for i in range(0, ct.columns.len()) {
+        let column = &ct.columns[i];
+        let mut constraints: List<ColumnConstraint> = List.with_capacity(column.constraints.len());
+        for j in range(0, column.constraints.len()) {
+            constraints.push(clone_column_constraint(&column.constraints[j]));
+        }
+        columns.push(ColumnDef {
+            name: column.name.clone(), declared_type: column.declared_type.clone(), constraints: constraints,
+        });
+    }
+    let mut constraints: List<TableConstraint> = List.with_capacity(ct.constraints.len());
+    for i in range(0, ct.constraints.len()) {
+        constraints.push(clone_table_constraint(&ct.constraints[i]));
+    }
     CreateTableStmt {
         if_not_exists: ct.if_not_exists,
         temporary: ct.temporary,
         table: clone_table_ref(&ct.table),
-        columns: ct.columns.clone(),
-        constraints: ct.constraints.clone(),
+        columns: columns,
+        constraints: constraints,
         strict: ct.strict,
         without_rowid: ct.without_rowid,
+    }
+}
+
+fn clone_column_constraint(constraint: &ColumnConstraint) -> ColumnConstraint {
+    match constraint {
+        CcPrimaryKey(ref conflict, auto) => CcPrimaryKey(clone_opt_on_conflict(conflict), auto),
+        CcNotNull(ref conflict) => CcNotNull(clone_opt_on_conflict(conflict)),
+        CcUnique(ref conflict) => CcUnique(clone_opt_on_conflict(conflict)),
+        CcCheck(ref expr) => CcCheck(clone_expr(expr)),
+        CcDefault(ref expr) => CcDefault(clone_expr(expr)),
+        CcCollate(ref name) => CcCollate(name.clone()),
+        CcForeignKey(ref table, ref columns) => CcForeignKey(clone_table_ref(table), clone_text_list(columns)),
+    }
+}
+
+fn clone_table_constraint(constraint: &TableConstraint) -> TableConstraint {
+    match constraint {
+        TcPrimaryKey(ref columns, ref conflict, auto) => TcPrimaryKey(
+            clone_text_list(columns), clone_opt_on_conflict(conflict), auto,
+        ),
+        TcUnique(ref columns, ref conflict) => TcUnique(clone_text_list(columns), clone_opt_on_conflict(conflict)),
+        TcCheck(ref expr) => TcCheck(clone_expr(expr)),
+        TcForeignKey(ref columns, ref table, ref targets) => TcForeignKey(
+            clone_text_list(columns), clone_table_ref(table), clone_text_list(targets),
+        ),
     }
 }
 

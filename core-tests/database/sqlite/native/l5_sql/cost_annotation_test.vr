@@ -1,0 +1,74 @@
+module core.database.sqlite.native.l5_sql.tests.cost_annotation;
+
+mount core.database.sqlite.native.l5_sql.ast.{
+    CreateTableStmt, TableRef, ColumnDef, ColumnConstraint, CcDefault, TableConstraint, TcCheck,
+    Expr, EUnary, EPositional, UnOp, UNeg,
+};
+mount core.database.sqlite.native.l5_sql.planner.{PlanNode, PlanColumn, PnValues, PnGroupBy, PnDistinct, PnUnionAll, PnCreateTable, clone_plan};
+mount core.database.sqlite.native.l5_sql.cost_annotated.{
+    CostAnnotatedPlan, annotate_with_cost, explain_annotated, stats_catalogue_new,
+};
+
+fn values(index: Int) -> PlanNode {
+    let rows: List<List<Expr>> = [[EPositional(index)]];
+    PnValues(rows, 1)
+}
+
+fn annotated_query() -> CostAnnotatedPlan {
+    let keys: List<Expr> = [EPositional(1)];
+    let projection: List<PlanColumn> = List.new();
+    let grouped = PnGroupBy(Heap.new(values(73)), keys, projection, Maybe.None);
+    let distinct = PnDistinct(Heap.new(values(29)), 1);
+    let input = PnUnionAll(Heap.new(grouped), Heap.new(distinct));
+    let annotation = annotate_with_cost(&input, &stats_catalogue_new());
+    assert(input is PnUnionAll(_, _));
+    annotation
+}
+
+@test
+fn test_annotation_owns_the_plan_and_preserves_operand_order() {
+    let annotation = annotated_query();
+    let output = explain_annotated(&annotation);
+    assert_eq(output, "UnionAll ~rows=1 total_cost=0\n  GroupBy ~rows=0 total_cost=0\n    Values ~rows=1 total_cost=0\n  Distinct ~rows=1 total_cost=0\n    Values ~rows=1 total_cost=0\n");
+}
+
+fn copied_ddl() -> PlanNode {
+    let mut defaults: List<ColumnConstraint> = List.new();
+    let operand: Heap<Expr> = Heap.new(EPositional(73));
+    let unary: Expr = EUnary(UNeg, operand);
+    let constraint: ColumnConstraint = CcDefault(unary);
+    defaults.push(constraint);
+    let mut columns: List<ColumnDef> = List.new();
+    let column = ColumnDef { name: "sample", declared_type: "INT", constraints: defaults };
+    columns.push(column);
+    let mut checks: List<TableConstraint> = List.new();
+    let check: TableConstraint = TcCheck(EPositional(29));
+    checks.push(check);
+    let stmt = CreateTableStmt {
+        if_not_exists: true, temporary: false, strict: true, without_rowid: false,
+        table: TableRef { schema: "", name: "measure", alias: "" },
+        columns: columns,
+        constraints: checks,
+    };
+    let original = PnCreateTable(stmt);
+    clone_plan(&original)
+}
+
+@test
+fn test_copied_ddl_owns_default_and_check_expressions() {
+    let copied = copied_ddl();
+    match &copied {
+        PnCreateTable(ref stmt) => {
+            assert_eq(stmt.table.name, "measure");
+            assert_eq(stmt.columns[0].name, "sample");
+            match &stmt.columns[0].constraints[0] {
+                CcDefault(EUnary(UNeg, ref nested)) => assert(nested.as_ref() is EPositional(73)),
+                _ => panic("missing default expression"),
+            }
+            assert(stmt.constraints[0] is TcCheck(EPositional(29)));
+        }
+        _ => panic("missing CREATE TABLE plan"),
+    }
+}
+
+fn main() {}
