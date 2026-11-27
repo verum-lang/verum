@@ -58,6 +58,10 @@ public fn range_query(box_q: BoundingBox, mode: QueryMode) -> RangeQuery {
     RangeQuery { box_q: box_q, mode: mode }
 }
 
+implement RangeQuery {
+    public fn bounds(&self) -> &BoundingBox { &self.box_q }
+}
+
 // -----------------------------------------------------------------------------
 // Predicate translation — convert SQL WHERE clause shape to RangeQuery
 // -----------------------------------------------------------------------------
@@ -89,63 +93,9 @@ public fn build_range_query(dims: &List<DimBound>, mode: QueryMode) -> RangeQuer
 // -----------------------------------------------------------------------------
 
 public fn run_range_query(tree: &RTree, q: &RangeQuery) -> List<Int64> {
-    // The tree.search returns intersect semantics; refine here for covers
-    // / contained_in.
-    let candidates = tree.search(&q.box_q);
     match q.mode {
-        QmIntersect => candidates,
-        QmCovers => filter_by_predicate(tree, &candidates, q),
-        QmContainedIn => filter_by_predicate(tree, &candidates, q),
+        QmIntersect => tree.search(&q.box_q),
+        QmCovers => tree.search_matching(&q.box_q, |area, entry| area.covers(entry)),
+        QmContainedIn => tree.search_matching(&q.box_q, |area, entry| entry.covers(area)),
     }
-}
-
-fn filter_by_predicate(tree: &RTree, candidates: &List<Int64>, q: &RangeQuery) -> List<Int64> {
-    let mut out: List<Int64> = List.new();
-    let mut i: Int = 0;
-    while i < candidates.len() {
-        // Need the candidate's MBB; walk every leaf to find it.
-        let m = lookup_mbb(tree, candidates[i]);
-        match m {
-            Maybe.Some(b) => {
-                let pass = match q.mode {
-                    QmCovers       => q.box_q.covers(&b),
-                    QmContainedIn  => b.covers(&q.box_q),
-                    QmIntersect    => true,
-                };
-                if pass { out.push(candidates[i]); }
-            }
-            Maybe.None => {}
-        }
-        i = i + 1;
-    }
-    out
-}
-
-fn lookup_mbb(tree: &RTree, rowid: Int64) -> Maybe<BoundingBox> {
-    let mut i: Int = 0;
-    while i < tree.nodes.len() {
-        match &tree.nodes[i] {
-            core.database.sqlite.native.rtree.node.RnLeaf(_id, entries) => {
-                let mut k: Int = 0;
-                while k < entries.len() {
-                    if entries[k].rowid == rowid {
-                        let b = &entries[k].mbb;
-                        let mut min: List<Float64> = List.new();
-                        let mut max: List<Float64> = List.new();
-                        let mut z: Int = 0;
-                        while z < b.min.len() {
-                            min.push(b.min[z]);
-                            max.push(b.max[z]);
-                            z = z + 1;
-                        }
-                        return Maybe.Some(bbox(min, max));
-                    }
-                    k = k + 1;
-                }
-            }
-            _ => {}
-        }
-        i = i + 1;
-    }
-    Maybe.None
 }

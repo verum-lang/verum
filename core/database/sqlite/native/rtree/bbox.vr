@@ -18,6 +18,7 @@
 module core.database.sqlite.native.rtree.bbox;
 
 mount base.{Bool};
+mount core.base.protocols.Clone;
 mount collections.List;
 
 public type BoundingBox is {
@@ -41,6 +42,12 @@ public fn bbox_new(dim: Int) -> BoundingBox {
 
 public fn bbox(min: List<Float64>, max: List<Float64>) -> BoundingBox {
     BoundingBox { min: min, max: max }
+}
+
+implement Clone for BoundingBox {
+    fn clone(&self) -> BoundingBox {
+        BoundingBox { min: self.min.clone(), max: self.max.clone() }
+    }
 }
 
 implement BoundingBox {

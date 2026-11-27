@@ -145,15 +145,18 @@ fn test_quadratic_split_distributes_entries() {
     boxes.push(make_bbox(10.0 as Float64, 10.0 as Float64, 11.0 as Float64, 11.0 as Float64));
     boxes.push(make_bbox(11.0 as Float64, 11.0 as Float64, 12.0 as Float64, 12.0 as Float64));
     let groups = quadratic_split(&boxes, 1);
-    assert_eq(groups.group_a.len() + groups.group_b.len(), 4);
+    let (left, right) = groups.partitions();
+    assert(left.len() > 0 && right.len() > 0);
+    assert_eq(left.len() + right.len(), 4);
 }
 
 fn test_quadratic_split_rejects_singleton() {
     let mut boxes: List<BoundingBox> = List.new();
     boxes.push(make_bbox(0.0 as Float64, 0.0 as Float64, 1.0 as Float64, 1.0 as Float64));
     let groups = quadratic_split(&boxes, 1);
-    assert_eq(groups.group_a.len(), 0);
-    assert_eq(groups.group_b.len(), 0);
+    let (left, right) = groups.partitions();
+    assert_eq(left.len(), 0);
+    assert_eq(right.len(), 0);
 }
 
 // -----------------------------------------------------------------------------
@@ -171,7 +174,7 @@ fn test_build_range_query_from_dim_bounds() {
     dims.push(dim_bound(0.0 as Float64, 10.0 as Float64));
     dims.push(dim_bound(0.0 as Float64, 10.0 as Float64));
     let q = build_range_query(&dims, QmIntersect);
-    assert_eq(q.box_q.dimension(), 2);
+    assert_eq(q.bounds().dimension(), 2);
 }
 
 fn test_run_range_query_intersect() {
@@ -181,7 +184,26 @@ fn test_run_range_query_intersect() {
     assert_eq(run_range_query(&t, &q).len(), 1);
 }
 
+fn test_each_range_predicate_uses_the_matching_entry() {
+    let mut tree = rtree_new(1, 8);
+    tree.insert(7_i64, bbox([0.0], [20.0]));
+    tree.insert(7_i64, bbox([5.0], [8.0]));
+    tree.insert(9_i64, bbox([10.0], [13.0]));
+    tree.insert(11_i64, bbox([30.0], [40.0]));
+    let hits = run_range_query(&tree, &range_query(bbox([4.0], [10.0]), QmIntersect));
+    assert(hits.len() == 3 && hits[0] == 7_i64 && hits[1] == 7_i64 && hits[2] == 9_i64);
+    let inside = run_range_query(&tree, &range_query(bbox([4.0], [10.0]), QmCovers));
+    let covering = run_range_query(&tree, &range_query(bbox([4.0], [10.0]), QmContainedIn));
+    assert(inside.len() == 1 && inside[0] == 7_i64);
+    assert(covering.len() == 1 && covering[0] == 7_i64);
+    assert(tree.delete(7_i64));
+    assert(!tree.delete(7_i64));
+    let remaining = tree.search(&bbox([0.0], [50.0]));
+    assert(remaining.len() == 2 && remaining[0] == 9_i64 && remaining[1] == 11_i64);
+}
+
 fn main() {
+    test_each_range_predicate_uses_the_matching_entry();
     test_bbox_area_unit_square();
     test_bbox_intersects_overlap();
     test_bbox_no_intersect_when_disjoint();

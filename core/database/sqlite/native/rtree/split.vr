@@ -45,6 +45,12 @@ public fn empty_groups() -> SplitGroups {
     SplitGroups { group_a: List.new(), group_b: List.new() }
 }
 
+implement SplitGroups {
+    public fn partitions(&self) -> (&[Int], &[Int]) {
+        (self.group_a.as_slice(), self.group_b.as_slice())
+    }
+}
+
 // -----------------------------------------------------------------------------
 // quadratic_split — driver
 // -----------------------------------------------------------------------------
@@ -64,8 +70,8 @@ public fn quadratic_split(boxes: &List<BoundingBox>, min_per_group: Int) -> Spli
     assigned[seed_a] = true;
     assigned[seed_b] = true;
 
-    let mut mbb_a = clone_bbox(&boxes[seed_a]);
-    let mut mbb_b = clone_bbox(&boxes[seed_b]);
+    let mut mbb_a = boxes[seed_a].clone();
+    let mut mbb_b = boxes[seed_b].clone();
 
     loop {
         // If one group is so small that the rest must go to it to
@@ -178,16 +184,4 @@ fn absorb_remaining(
         }
         i = i + 1;
     }
-}
-
-fn clone_bbox(b: &BoundingBox) -> BoundingBox {
-    let mut min: List<Float64> = List.new();
-    let mut max: List<Float64> = List.new();
-    let mut i: Int = 0;
-    while i < b.min.len() {
-        min.push(b.min[i]);
-        max.push(b.max[i]);
-        i = i + 1;
-    }
-    BoundingBox { min: min, max: max }
 }

@@ -35,6 +35,11 @@ mount core.database.sqlite.native.rtree.bbox.{
 
 public type RtreeNodeLeafEntry is { rowid: Int64, mbb: BoundingBox }
 
+implement RtreeNodeLeafEntry {
+    public(in core.database.sqlite.native.rtree) fn id(&self) -> Int64 { self.rowid }
+    public(in core.database.sqlite.native.rtree) fn bounds(&self) -> &BoundingBox { &self.mbb }
+}
+
 public fn leaf_entry(rowid: Int64, mbb: BoundingBox) -> RtreeNodeLeafEntry {
     RtreeNodeLeafEntry { rowid: rowid, mbb: mbb }
 }
@@ -83,7 +88,7 @@ public fn cover_mbb(n: &RNode) -> BoundingBox {
     match n {
         RnInterior(_, es) => {
             if es.len() == 0 { return bbox_new(0); }
-            let mut acc = clone_bbox(&es[0].mbb);
+            let mut acc = es[0].mbb.clone();
             let mut i: Int = 1;
             while i < es.len() {
                 acc = acc.enlarged_to(&es[i].mbb);
@@ -93,7 +98,7 @@ public fn cover_mbb(n: &RNode) -> BoundingBox {
         }
         RnLeaf(_, es) => {
             if es.len() == 0 { return bbox_new(0); }
-            let mut acc = clone_bbox(&es[0].mbb);
+            let mut acc = es[0].mbb.clone();
             let mut i: Int = 1;
             while i < es.len() {
                 acc = acc.enlarged_to(&es[i].mbb);
@@ -102,16 +107,4 @@ public fn cover_mbb(n: &RNode) -> BoundingBox {
             acc
         }
     }
-}
-
-fn clone_bbox(b: &BoundingBox) -> BoundingBox {
-    let mut min: List<Float64> = List.new();
-    let mut max: List<Float64> = List.new();
-    let mut i: Int = 0;
-    while i < b.min.len() {
-        min.push(b.min[i]);
-        max.push(b.max[i]);
-        i = i + 1;
-    }
-    BoundingBox { min: min, max: max }
 }
