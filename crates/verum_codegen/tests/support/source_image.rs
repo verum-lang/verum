@@ -46,8 +46,16 @@ pub fn run_module(
 
 /// Return the linked program's actual status and diagnostics for refusal tests.
 pub fn execute_module(
+    wire: verum_vbc::VbcModule,
+    configure: impl FnOnce(&verum_llvm::module::Module<'_>),
+) -> std::process::Output {
+    execute_with_arguments(wire, configure, &[])
+}
+
+pub fn execute_with_arguments(
     mut wire: verum_vbc::VbcModule,
     configure: impl FnOnce(&verum_llvm::module::Module<'_>),
+    arguments: &[&std::ffi::OsStr],
 ) -> std::process::Output {
     for function in &mut wire.functions {
         function.is_generic = !function.type_params.is_empty();
@@ -104,5 +112,5 @@ pub fn execute_module(
         "{}",
         Text::from_utf8_lossy(&link.stderr)
     );
-    Command::new(executable).output().expect("native execution")
+    Command::new(executable).args(arguments).output().expect("native execution")
 }

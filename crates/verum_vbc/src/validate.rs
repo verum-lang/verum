@@ -442,6 +442,15 @@ impl<'a> Validator<'a> {
 
     /// Validates a single function descriptor.
     fn validate_function_descriptor(&mut self, desc: &FunctionDescriptor, _index: usize) {
+        if let Some(info) = desc.intrinsic_name
+            .and_then(|id| self.module.get_string(id))
+            .and_then(crate::intrinsics::lookup_intrinsic)
+            && let Some(message) = info.intrinsic.opcode_declaration_error(desc)
+        {
+            let owner = self.module.get_string(desc.name).unwrap_or("<unnamed>");
+            let carrier = self.module.display_type_ref(&desc.return_type);
+            self.errors.push(VbcError::Deserialization(format!("{owner}: {message} (VBC result {carrier})")));
+        }
         if desc.closure_capture_count.is_some() && self.module.header.version_minor < 61 {
             self.errors.push(VbcError::Deserialization("closure environment convention requires VBC minor 61".into()));
         }

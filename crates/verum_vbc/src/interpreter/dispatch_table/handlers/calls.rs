@@ -1481,7 +1481,7 @@ fn try_dispatch_intrinsic_function(
                     ),
                 });
             }
-            if let Some(message) = intrinsic.unary_opcode_declaration_error(descriptor) {
+            if let Some(message) = intrinsic.opcode_declaration_error(descriptor) {
                 return Err(InterpreterError::InvalidBytecode {
                     pc: state.pc() as usize, message: message.into_string(),
                 });
@@ -2349,19 +2349,6 @@ fn try_dispatch_intrinsic_named(
                     Err(_) => Ok(Some(Value::from_i64(-1))),
                 },
                 None => Ok(Some(Value::from_i64(-1))),
-            }
-        }
-
-        // --- Command-line Arguments ---
-        "__args_count_raw" => Ok(Some(Value::from_i64(std::env::args().count() as i64))),
-        "__arg_raw" => {
-            let idx = get_i64_arg(state, 0) as usize;
-            match std::env::args().nth(idx) {
-                Some(arg) => {
-                    // Use small string if fits, otherwise nil
-                    Ok(Some(Value::from_small_string(&arg).unwrap_or(Value::nil())))
-                }
-                None => Ok(Some(Value::nil())),
             }
         }
 

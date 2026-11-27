@@ -347,12 +347,12 @@ public fn __defer_depth_raw() -> Int;
 // =============================================================================
 
 /// Get number of command-line arguments.
-@intrinsic("args_count")
+@intrinsic("process_arg_count")
 public fn __args_count_raw() -> Int;
 
-/// Get argument at index.
-@intrinsic("arg")
-public fn __arg_raw(index: Int) -> Text;
+/// Original process argument bytes at a checked index.
+@intrinsic("process_arg_bytes")
+public fn __arg_bytes_raw(index: Int) -> &[Byte];
 
 // =============================================================================
 // Concurrency primitives — mutex

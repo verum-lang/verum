@@ -291,6 +291,8 @@ pub enum IntrinsicHint {
 pub enum CodegenStrategy {
     /// Permission-checked Linux signal operation with a fixed (Int) -> Int ABI.
     LinuxSignal(crate::signal_watch::SignalWatchOp),
+    /// A system operation with a destination followed by its source registers.
+    SystemRegisters(crate::instruction::SysSubOpcode),
     /// Maps directly to a single VBC opcode.
     DirectOpcode(Opcode),
 
@@ -1386,40 +1388,79 @@ pub enum IntrinsicCallBound {
     Unknown,
 }
 
+/// Exact result types of system operations callable through VBC declarations.
+#[derive(Copy, Clone)]
+pub enum OpcodeResult {
+    Scalar(crate::types::TypeId),
+    ByteSlice,
+}
+
+impl OpcodeResult {
+    fn accepts(self, result: Option<&crate::types::TypeRef>) -> bool {
+        use crate::types::{CbgrTier, Mutability, TypeId, TypeRef};
+        match (self, result) {
+            (Self::Scalar(id), Some(TypeRef::Concrete(actual))) => *actual == id,
+            (Self::ByteSlice, Some(TypeRef::Reference {
+                inner, mutability: Mutability::Immutable, tier: CbgrTier::Tier0,
+            })) => matches!(inner.as_ref(), TypeRef::Slice(element) if **element == TypeRef::Concrete(TypeId::BYTE)),
+            _ => false,
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Scalar(id) => id.well_known_name().expect("fixed scalar has a source name"),
+            Self::ByteSlice => "&[Byte]",
+        }
+    }
+}
+
 impl Intrinsic {
-    /// Exact scalar types for operations with callable VBC wrappers.
-    pub fn unary_opcode_signature(&self) -> Option<(crate::types::TypeId, crate::types::TypeId)> {
+    /// Fixed source ABI for operations that can also be invoked as values.
+    pub fn opcode_signature(&self) -> Option<(&'static [crate::types::TypeId], OpcodeResult)> {
+        use crate::instruction::SysSubOpcode;
         use crate::types::TypeId;
         match self.strategy {
-            CodegenStrategy::LinuxSignal(_) => Some((TypeId::INT, TypeId::INT)),
+            CodegenStrategy::SystemRegisters(SysSubOpcode::ArgumentCount) => Some((&[], OpcodeResult::Scalar(TypeId::INT))),
+            CodegenStrategy::SystemRegisters(SysSubOpcode::ArgumentBytes) => Some((&[TypeId::INT], OpcodeResult::ByteSlice)),
+            CodegenStrategy::LinuxSignal(_) => Some((&[TypeId::INT], OpcodeResult::Scalar(TypeId::INT))),
             CodegenStrategy::InlineSequence(InlineSequenceId::CharGeneralCategory) =>
-                Some((TypeId::CHAR, TypeId::INT)),
+                Some((&[TypeId::CHAR], OpcodeResult::Scalar(TypeId::INT))),
             _ => None,
         }
     }
 
-    /// Check the producer or decoded callable against the selected opcode declaration.
-    pub fn unary_opcode_signature_error(
+    /// Check each declared parameter and the result against the selected operation.
+    pub fn opcode_signature_error<'a>(
         &self,
-        parameter: Option<&crate::types::TypeRef>,
+        parameters: impl Iterator<Item = Option<&'a crate::types::TypeRef>>,
         result: Option<&crate::types::TypeRef>,
     ) -> Option<verum_common::Text> {
         use crate::types::TypeRef;
-        let (arg, ret) = self.unary_opcode_signature()?;
-        (parameter != Some(&TypeRef::Concrete(arg)) || result != Some(&TypeRef::Concrete(ret)))
-            .then(|| format!("{} requires ({}) -> {}", self.name,
-                arg.well_known_name().unwrap(), ret.well_known_name().unwrap()).into())
+        let (arguments, ret) = self.opcode_signature()?;
+        let signature_matches = parameters.map(|p| p.and_then(|p| match p {
+            TypeRef::Concrete(id) => Some(*id),
+            _ => None,
+        })).eq(arguments.iter().copied().map(Some));
+        if signature_matches && ret.accepts(result) { return None; }
+        let args = arguments.iter().map(|ty| ty.well_known_name().unwrap()).collect::<verum_common::List<_>>().join(", ");
+        Some(format!("{} requires ({args}) -> {}", self.name, ret.name()).into())
     }
 
-    /// Validate arity as well as parameter and result identities on the wire.
-    pub fn unary_opcode_declaration_error(
+    /// Validate the complete callable ABI on the wire.
+    pub fn opcode_declaration_error(
         &self, declaration: &crate::module::FunctionDescriptor,
     ) -> Option<verum_common::Text> {
-        let parameter = match declaration.params.as_slice() {
-            [arg] => Some(&arg.type_ref),
-            _ => None,
-        };
-        self.unary_opcode_signature_error(parameter, Some(&declaration.return_type))
+        let abi = || declaration.params.iter().map(|p| Some(&p.type_ref));
+        let result = Some(&declaration.return_type);
+        self.opcode_signature_error(abi(), result).or_else(|| {
+            let result = declaration.semantic_return.as_ref().or(result);
+            if let Some(parameters) = declaration.semantic_parameter_types() {
+                self.opcode_signature_error(parameters.iter().map(Option::as_ref), result)
+            } else {
+                self.opcode_signature_error(abi(), result)
+            }
+        })
     }
 
     /// Source operand installed as a complete owned value by a memory operation.
@@ -6123,6 +6164,26 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     // =========================================================================
     // Environment-variable intrinsics (ENV-IMPL-TRIO-1, #55)
     // =========================================================================
+    Intrinsic {
+        name: "process_arg_count",
+        category: IntrinsicCategory::Platform,
+        hints: &[],
+        param_count: 0,
+        return_count: 1,
+        strategy: CodegenStrategy::SystemRegisters(crate::instruction::SysSubOpcode::ArgumentCount),
+        mlir_op: None,
+        doc: "Length of the program argument vector",
+    },
+    Intrinsic {
+        name: "process_arg_bytes",
+        category: IntrinsicCategory::Platform,
+        hints: &[],
+        param_count: 1,
+        return_count: 1,
+        strategy: CodegenStrategy::SystemRegisters(crate::instruction::SysSubOpcode::ArgumentBytes),
+        mlir_op: None,
+        doc: "Immutable program argument bytes at an in-range index",
+    },
     Intrinsic {
         name: "get_env_impl",
         category: IntrinsicCategory::Tier,

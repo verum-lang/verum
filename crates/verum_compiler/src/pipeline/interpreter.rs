@@ -9,8 +9,8 @@
 //!
 //!  * `phase_interpret` — primary AST-driven entry; compiles to
 //!  VBC, builds an interpreter, finds main, runs.
-//!  * `phase_interpret_with_args` — args-bearing variant; passes
-//!  argv into `main(args: List<Text>) -> Int`.
+//!  * `phase_interpret_with_args` — supplies the program's invocation
+//!  to the standard library before constructors and the entry point run.
 //!  * `phase_interpret_for_test` — captured-stdout/stderr variant
 //!  for the test harness; threads the same script-mode policy
 //!  into the interpreter's PermissionRouter.
@@ -108,6 +108,11 @@ impl<'s> CompilationPipeline<'s> {
         self.interpret_vbc(vbc_module, List::new(), entry_name.as_deref())
     }
 
+    fn program_arguments(&self, arguments: List<Text>) -> std::sync::Arc<[Text]> {
+        let program = Text::from(self.session.options().input.to_string_lossy().as_ref());
+        std::iter::once(program).chain(arguments).collect()
+    }
+
     /// One execution path for freshly compiled, cached and argument-bearing
     /// programs. Constructors, permissions and diagnostic capture share the
     /// same lifecycle, including failures before the entry body returns.
@@ -119,6 +124,8 @@ impl<'s> CompilationPipeline<'s> {
     ) -> Result<()> {
         crate::api::ensure_scripting_compiler_installed();
         let mut interpreter = VbcInterpreter::try_new(module)?;
+        let arguments = self.program_arguments(args);
+        interpreter.state.config.program_arguments = arguments.clone();
         interpreter.state.config.target_capabilities = Some(std::sync::Arc::new(self.session.target_settings()?.capabilities()?));
         let rt = &self.session.language_features().runtime;
         interpreter.state.config.async_scheduler = rt.async_scheduler.as_str().to_string();
@@ -150,8 +157,7 @@ impl<'s> CompilationPipeline<'s> {
             let result = if parameters == 0 {
                 interpreter.execute_function(main)
             } else {
-                let arguments: List<_> = args.iter().map(|arg| arg.to_string()).collect();
-                let value = interpreter.alloc_string_list(&arguments)
+                let value = interpreter.alloc_string_list(&arguments[1..])
                     .map_err(|error| anyhow::anyhow!("Failed to allocate args: {error:?}"))?;
                 interpreter.call(main, &[value])
             };
@@ -532,6 +538,7 @@ impl<'s> CompilationPipeline<'s> {
 
         // Step 2: Create VBC interpreter with output capture enabled
         let mut interpreter = VbcInterpreter::new(vbc_module);
+        interpreter.state.config.program_arguments = self.program_arguments(List::new());
         interpreter.state.config.target_capabilities = Some(std::sync::Arc::new(self.session.target_settings()?.capabilities()?));
         interpreter.state.enable_output_capture();
         interpreter.state.config.count_instructions = true;

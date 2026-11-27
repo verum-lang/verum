@@ -33,6 +33,8 @@ module core.sys.process_ops;
 // because the language emits that name. rings.toml states the same
 // consequence for ring 0 and the same remedy (T1064).
 mount core.base.maybe.{Maybe};
+public mount core.base.env.{args, args_count as arg_count};
+mount core.base.env.{arg as checked_argument};
 mount core.base.result.{Result};
 mount core.collections.list.{List};
 mount core.text.text.{Text};
@@ -46,8 +48,6 @@ mount core.intrinsics.runtime.os.{
     __fd_close_raw,
     __ptr_read_i64,
     __ptr_free,
-    __args_count_raw,
-    __arg_raw,
 };
 // The ONE chunk-read primitive (VBC-PROC-3) — shared with
 // core.io.process. Tier-0 intercepts it at the call boundary;
@@ -181,30 +181,7 @@ public fn run(program: Text, args: List<Text>) -> ProcessExitStatus {
     }
 }
 
-/// Get command-line arguments.
-public fn args() -> List<Text> {
-    let count = __args_count_raw();
-    let mut result = List.new();
-    let mut i = 0;
-    while i < count {
-        result.push(__arg_raw(i));
-        i = i + 1;
-    }
-    result
-}
-
-/// Get a specific command-line argument without bounds checking.
-///
-/// **Internal**: callers MUST verify `0 <= index < args_count()` —
-/// out-of-range access yields undefined behaviour at the OS layer.
-/// User code should call `core.base.env.arg(index) -> Maybe<Text>`,
-/// which performs the bounds check.  Renamed from `arg` to break
-/// the simple-name collision with the safe variant (Task #42).
+/// Return the argument at an in-range index, including the program at index zero.
 public fn arg_unchecked(index: Int) -> Text {
-    __arg_raw(index)
-}
-
-/// Get the number of command-line arguments.
-public fn arg_count() -> Int {
-    __args_count_raw()
+    checked_argument(index).expect("process argument index out of bounds")
 }

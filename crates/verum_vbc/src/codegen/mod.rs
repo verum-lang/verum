@@ -10980,14 +10980,14 @@ impl VbcCodegen {
         signature_scope.extend(shadow.clone());
         self.validate_source_parameter_types(func, &signature_scope)?;
         let return_type = func.return_type.as_ref()
-            .map(|ty| self.resolve_field_type_ref(ty, &signature_scope)).transpose()?;
+            .map(|ty| self.resolve_callable_result_type(ty, &signature_scope, intrinsic_name.as_deref()))
+            .transpose()?;
         let semantic_params = self.source_semantic_parameters(
             func, &signature_scope, &dense, &Self::ordered_generic_param_ids(&dense, &shadow),
         );
-        if let Some(intr) = intrinsic_name.as_deref().and_then(crate::intrinsics::lookup_intrinsic)
-            && let Some(message) = intr.intrinsic.unary_opcode_signature_error(
-                match semantic_params.as_slice() { [arg] => arg.as_ref(), _ => None },
-                return_type.as_ref(),
+        if let Some(info) = intrinsic_name.as_deref().and_then(crate::intrinsics::lookup_intrinsic)
+            && let Some(message) = info.intrinsic.opcode_signature_error(
+                semantic_params.iter().map(Option::as_ref), return_type.as_ref(),
             )
         {
             return Err(CodegenError::unsupported_expr(message));
@@ -17569,6 +17569,19 @@ impl VbcCodegen {
         self.resolve_type_ref_scoped(ty, generic_param_map, false)
     }
 
+    /// A fixed opcode's declared result is also its VBC result contract, including
+    /// the reference tier and mutability. Both registration and emission use it.
+    fn resolve_callable_result_type(
+        &self,
+        ty: &verum_ast::ty::Type,
+        scope: &std::collections::HashMap<String, u16>,
+        intrinsic: Option<&str>,
+    ) -> CodegenResult<TypeRef> {
+        let retain_reference = intrinsic.and_then(crate::intrinsics::lookup_intrinsic)
+            .is_some_and(|info| info.intrinsic.opcode_signature().is_some());
+        self.resolve_type_ref_scoped(ty, scope, retain_reference)
+    }
+
     /// The SIGNATURE question: what the SOURCE said, so a reader on the
     /// far side of the archive gets the declaration back unchanged.
     /// Same walk, opposite verdict on reference wrappers (T1033).
@@ -19620,6 +19633,15 @@ impl VbcCodegen {
                     self.ctx.registers.source_returns.record(self.ctx.instructions.len() - 1, semantic_result);
                 }
             }
+        } else if let Some(info) = self.extract_intrinsic_name(func)
+            .and_then(|name| crate::intrinsics::lookup_intrinsic(&name))
+            && info.intrinsic.opcode_signature().is_some()
+        {
+            // A first-class declaration and an inlined call execute the same operation.
+            let arguments: verum_common::List<_> = (0..u16::from(info.intrinsic.param_count)).map(Reg).collect();
+            let result = self.ctx.alloc_temp();
+            self.emit_intrinsic_instructions(&info, &arguments, result, 1, func_info.return_type.as_ref())?;
+            self.emit_parameter_return(Some(result));
         } else if !is_runtime_intrinsic_forward_decl {
             // Regular forward decl with no runtime-intrinsic shape —
             // emit the safe Unit return.
@@ -19994,7 +20016,9 @@ impl VbcCodegen {
         // TypeRef::Generic(idx) instead of degrading to
         // TypeRef::Concrete(PTR).
         if let verum_common::Maybe::Some(ref ret_ty_ast) = func.return_type {
-            let resolved_return = self.resolve_field_type_ref(ret_ty_ast, &render_generic_param_map)?;
+            let resolved_return = self.resolve_callable_result_type(
+                ret_ty_ast, &render_generic_param_map, func_info.intrinsic_name.as_deref(),
+            )?;
             descriptor.return_type = resolved_return;
         } else if let Some(result) = descriptor.semantic_return.clone() {
             // The completed source body supplies both the semantic contract and

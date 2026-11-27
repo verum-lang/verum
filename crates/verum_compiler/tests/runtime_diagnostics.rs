@@ -165,3 +165,29 @@ fn actual_entry_retains_a_detached_task_failure_in_the_same_measurement_capture(
     assert!(report.async_tasks.rows[0].error.as_deref().unwrap().contains("missing_child_method"));
     assert!(session.take_runtime_measurements().is_none());
 }
+
+#[test]
+fn cached_program_reads_the_invocation_from_its_zero_argument_entry() {
+    let src = r#"
+        module application;
+        @intrinsic("process_arg_count") fn count() -> Int;
+        @intrinsic("process_arg_bytes") fn argument(index: Int) -> &[Byte];
+        fn main() -> Int {
+            if count() != 4 || argument(0).len() != 9 || argument(0)[0] != 115 as Byte { return 1; }
+            if argument(1).len() != 0 || argument(2).len() != 2 || argument(2)[1] != 45 as Byte { return 2; }
+            if argument(3).len() != 7 || argument(3)[0] != 102 as Byte { return 3; }
+            73
+        }
+    "#;
+    let source = verum_fast_parser::Parser::new(src).parse_module().unwrap();
+    let module = verum_vbc::codegen::VbcCodegen::new().compile_module(&source).unwrap();
+    let encoded = verum_vbc::serialize::serialize_module(&module).unwrap();
+    let wire = verum_vbc::deserialize::deserialize_module_validated(&encoded).unwrap();
+    let mut session = Session::new(CompilerOptions {
+        input: "sample.vr".into(),
+        ..Default::default()
+    });
+    let args = ["", "--", "file.vr"].map(Text::from).into_iter().collect();
+    CompilationPipeline::new(&mut session).run_compiled_vbc(Arc::new(wire), args).unwrap();
+    assert_eq!(session.take_exit_code(), Some(73));
+}

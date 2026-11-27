@@ -678,12 +678,12 @@ impl Interpreter {
     }
 
     /// Allocates a List<Text> from Rust strings and returns it as a Value.
-    pub fn alloc_string_list(&mut self, strings: &[String]) -> InterpreterResult<Value> {
+    pub fn alloc_string_list(&mut self, strings: &[impl AsRef<str>]) -> InterpreterResult<Value> {
         let count = strings.len();
         // Allocate each string first
         let mut elements = Vec::with_capacity(count);
         for s in strings {
-            elements.push(self.alloc_string(s)?);
+            elements.push(self.alloc_string(s.as_ref())?);
         }
         // Allocate list header: [length, capacity, backing_ptr]
         let header_size = 3 * std::mem::size_of::<i64>();

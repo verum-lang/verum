@@ -76,6 +76,13 @@ fn extended_operands(dest: Reg, args: &[Reg]) -> Vec<u8> {
     operands
 }
 
+/// Encode system-call registers identically in inline and first-class calls.
+pub(crate) fn system_register_instruction(
+    op: crate::instruction::SysSubOpcode, dst: Reg, args: &[Reg],
+) -> Instruction {
+    Instruction::SysExtended { sub_op: op.to_byte(), operands: extended_operands(dst, args) }
+}
+
 /// One fixed-byte producer for inline calls and synthesized intrinsic bodies.
 /// `src` is preserved by the caller when it aliases `dest`; the four temporary
 /// registers are distinct from both. Extended operands use the wire encoder.
@@ -120,6 +127,10 @@ pub fn expand_intrinsic_wrapper(intr: &Intrinsic) -> Option<WrapperBody> {
     };
 
     let emitted = match &intr.strategy {
+        CodegenStrategy::SystemRegisters(op) => {
+            e.emit(system_register_instruction(*op, dest, &args));
+            true
+        }
         CodegenStrategy::LinuxSignal(op) => {
             e.emit(op.instruction(dest, args[0]));
             true

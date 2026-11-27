@@ -5292,7 +5292,11 @@ pub enum SysSubOpcode {
     EnvSet = 0x31,
     /// Remove an environment variable (name).
     EnvUnset = 0x32,
-    // 0x33-0x3F  RESERVED for environment / process metadata.
+    /// Number of arguments in this program invocation (including argv[0]).
+    ArgumentCount = 0x33,
+    /// Read the original bytes of an in-range program argument.
+    ArgumentBytes = 0x34,
+    // 0x35-0x3F  RESERVED for environment / process metadata.
     // 0x40-0xFF  RESERVED.
 }
 
@@ -5314,6 +5318,8 @@ impl SysSubOpcode {
             0x30 => Some(Self::EnvGet),
             0x31 => Some(Self::EnvSet),
             0x32 => Some(Self::EnvUnset),
+            0x33 => Some(Self::ArgumentCount),
+            0x34 => Some(Self::ArgumentBytes),
             _ => None,
         }
     }

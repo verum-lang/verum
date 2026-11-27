@@ -361,6 +361,26 @@ fn sys_extended_body(
             Ok(DispatchResult::Continue)
         }
 
+        Some(SysSubOpcode::ArgumentCount) => {
+            let dst = read_reg(state)?;
+            state.set_reg(dst, Value::from_i64(state.config.program_arguments.len() as i64));
+            Ok(DispatchResult::Continue)
+        }
+        Some(SysSubOpcode::ArgumentBytes) => {
+            use crate::interpreter::error::InterpreterError;
+            let dst = read_reg(state)?;
+            let src = read_reg(state)?;
+            let index = state.get_reg(src).try_as_i64().ok_or(InterpreterError::TypeMismatch {
+                expected: "Int", got: "non-Int", operation: "process argument index",
+            })?;
+            let argv = &state.config.program_arguments;
+            let argument = usize::try_from(index).ok().and_then(|i| argv.get(i))
+                .ok_or(InterpreterError::IndexOutOfBounds { index, length: argv.len() })?;
+            let span = state.heap.alloc_byte_literal(argument.as_bytes())?;
+            state.record_allocation();
+            state.set_reg(dst, Value::from_ptr(span.as_ptr()));
+            Ok(DispatchResult::Continue)
+        }
         Some(SysSubOpcode::EnvGet) => {
             let dst = read_reg(state)?;
             let name_reg = read_reg(state)?;

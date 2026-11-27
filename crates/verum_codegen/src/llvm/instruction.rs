@@ -11436,8 +11436,6 @@ fn lower_call<'ctx>(
     // and access command-line arguments without depending on stdlib module bodies.
     if bare_name == "__file_read_to_string_raw"
     || bare_name == "__file_write_string_raw"
-    || bare_name == "__args_count_raw"
-    || bare_name == "__arg_raw"
     || bare_name == "__mutex_new_raw"
     || bare_name == "__mutex_lock_raw"
     || bare_name == "__mutex_unlock_raw"
@@ -11582,47 +11580,6 @@ fn lower_call<'ctx>(
                 let text_result = ctx
                     .builder()
                     .build_call(text_from_cstr_fn, &[char_result.into()], "file_text")
-                    .or_llvm_err()?
-                    .basic_value_or("text_from_cstr: no value")?;
-                ctx.set_register(dst.0, text_result);
-                ctx.mark_text_register(dst.0);
-                return Ok(());
-            }
-
-            "__args_count_raw" => {
-                // __args_count_raw() -> Int
-                let fn_type = i64_type.fn_type(&[], false);
-        let argc_fn = super::error::get_or_declare_function(module, "verum_get_argc", fn_type);
-                let result = ctx
-                    .builder()
-                    .build_call(argc_fn, &[], "argc")
-                    .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .unwrap_or_else(|| i64_type.const_int(0, false).into());
-                ctx.set_register(dst.0, result);
-                return Ok(());
-            }
-
-            "__arg_raw" => {
-                // __arg_raw(index: Int) -> Text
-                // Returns: C string pointer to argv[index], wrap in Text
-                let index_val = ctx.get_register(args.start.0)?;
-                let fn_type = ptr_type.fn_type(&[i64_type.into()], false);
-        let argv_fn = super::error::get_or_declare_function(module, "verum_get_argv", fn_type);
-                let char_result = ctx
-                    .builder()
-                    .build_call(argv_fn, &[index_val.into()], "argv_i")
-                    .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .unwrap_or_else(|| ptr_type.const_null().into());
-
-                // Wrap char* result in Text object
-                let text_from_cstr_fn = { let fn_type = i64_type.fn_type(&[ptr_type.into()], false); super::error::get_or_declare_function(module, "verum_text_from_cstr", fn_type) };
-                let text_result = ctx
-                    .builder()
-                    .build_call(text_from_cstr_fn, &[char_result.into()], "arg_text")
                     .or_llvm_err()?
                     .basic_value_or("text_from_cstr: no value")?;
                 ctx.set_register(dst.0, text_result);
@@ -33176,6 +33133,56 @@ fn lower_sys_extended<'ctx>(
             let f = ctx.types().bool_type().const_int(0, false);
             ctx.set_register(dst_reg, f.into());
             ctx.mark_bool_register(dst_reg);
+            Ok(())
+        }
+
+        Some(op @ (SysSubOpcode::ArgumentCount | SysSubOpcode::ArgumentBytes)) => {
+            let mut pos = 0;
+            let dst = read_reg_varlen(operands, &mut pos)?;
+            let index = if op == SysSubOpcode::ArgumentBytes {
+                Some(read_reg_varlen(operands, &mut pos)?)
+            } else {
+                None
+            };
+            if pos != operands.len() {
+                return Err(LlvmLoweringError::internal("invalid process argument operands"));
+            }
+            let module = ctx.get_module();
+            let int = ctx.types().i64_type();
+            let count_fn = super::error::get_or_declare_function(
+                module, "verum_get_argc", int.fn_type(&[], false),
+            );
+            let count = ctx.builder().build_call(count_fn, &[], "argc")
+                .or_llvm_err()?.basic_value_or("missing argument count")?.into_int_value();
+            let Some(index) = index else {
+                ctx.set_register(dst, count.into());
+                return Ok(());
+            };
+            let index = as_i64(ctx, ctx.get_register(index)?, "argument_index")?;
+            let valid = ctx.builder().build_int_compare(IntPredicate::ULT, index, count, "valid_argument")
+                .or_llvm_err()?;
+            let error = ctx.llvm_context().append_basic_block(ctx.function(), "argument_out_of_bounds");
+            let read = ctx.llvm_context().append_basic_block(ctx.function(), "read_argument");
+            ctx.builder().build_conditional_branch(valid, read, error).or_llvm_err()?;
+            ctx.builder().position_at_end(error);
+            emit_runtime_abort(ctx, "process argument index out of bounds", "argument_bounds")?;
+            ctx.builder().build_unreachable().or_llvm_err()?;
+            ctx.builder().position_at_end(read);
+            let ptr = ctx.llvm_context().ptr_type(verum_llvm::AddressSpace::default());
+            let arg_fn = super::error::get_or_declare_function(
+                module, "verum_get_argv", ptr.fn_type(&[int.into()], false),
+            );
+            let raw = ctx.builder().build_call(arg_fn, &[index.into()], "argv_i")
+                .or_llvm_err()?.basic_value_or("missing program argument")?;
+            let runtime = super::runtime::RuntimeLowering::new(ctx.llvm_context());
+            let strlen = runtime.get_or_declare_strlen(module)?;
+            let length = ctx.builder().build_call(strlen, &[raw.into()], "argument_length")
+                .or_llvm_err()?.basic_value_or("missing byte length")?.into_int_value();
+            let address = ctx.builder().build_ptr_to_int(raw.into_pointer_value(), int, "argument_data")
+                .or_llvm_err()?;
+            let span = emit_slice_fatref_alloc(ctx, address, length, int.const_int(1, false), "argument_slice")?;
+            ctx.set_register(dst, span.into());
+            ctx.mark_slice_register(dst);
             Ok(())
         }
 

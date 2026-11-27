@@ -164,7 +164,8 @@ pub const VERSION_MAJOR: u16 = 2;
 // source was a value predicate or an incorrectly classified type equation.
 // v2.65: handlers may discard or forward a pending exception at its producer's
 // ownership boundary without publishing the exception as a raw register value.
-pub const VERSION_MINOR: u16 = 65;
+// v2.66 adds declared process argument operations to SysExtended.
+pub const VERSION_MINOR: u16 = 66;
 /// First wire version that can discard or forward a producer-owned exception.
 pub const EXCEPTION_DISPOSITION_VERSION: u16 = 65;
 pub const OWNED_CLOSURE_ENVIRONMENT_VERSION: u16 = 63;

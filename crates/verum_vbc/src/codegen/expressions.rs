@@ -36159,7 +36159,7 @@ impl VbcCodegen {
     /// `ptr_elem_stride` is the byte stride for a pointer-arithmetic
     /// intrinsic (see [`Self::ptr_intrinsic_byte_stride`]); callers that
     /// do not resolve a pointer operand pass the default `8`.
-    fn emit_intrinsic_instructions(
+    pub(super) fn emit_intrinsic_instructions(
         &mut self,
         info: &IntrinsicInfo,
         args: &[Reg],
@@ -36184,6 +36184,9 @@ impl VbcCodegen {
         }
 
         match &intrinsic.strategy {
+            CodegenStrategy::SystemRegisters(op) => {
+                self.ctx.emit(crate::intrinsics::expand::system_register_instruction(*op, dest, args));
+            }
             CodegenStrategy::LinuxSignal(op) => {
                 let [operand] = args else {
                     return Err(CodegenError::unsupported_expr(format!("{} requires one Int", intrinsic.name)));

@@ -2370,6 +2370,8 @@ impl NurseryRegistry {
 /// Interpreter configuration.
 #[derive(Debug, Clone)]
 pub struct InterpreterConfig {
+    /// The program's argv, including argv[0]. An embedded VM starts without arguments.
+    pub program_arguments: std::sync::Arc<[verum_common::Text]>,
     /// Explicit compilation/execution target. Missing facts refuse queries;
     /// the interpreter never substitutes its build host for an unknown target.
     pub target_capabilities: Option<Arc<crate::target::TargetCapabilities>>,
@@ -2428,6 +2430,7 @@ pub struct InterpreterConfig {
 impl Default for InterpreterConfig {
     fn default() -> Self {
         Self {
+            program_arguments: std::sync::Arc::from([]),
             target_capabilities: None,
             // Production-sized call stack. Each frame is ~64 bytes (regs +
             // bookkeeping), so 16384 frames ≈ 1 MB on the interpreter's

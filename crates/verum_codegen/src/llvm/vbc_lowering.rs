@@ -1258,9 +1258,9 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                 // from instructions or a private symbol supplied by the caller.
                 if let Some(intr) = func_desc.intrinsic_name.and_then(|id| vbc_module.strings.get(id))
                     .and_then(verum_vbc::intrinsics::lookup_intrinsic)
-                    && intr.intrinsic.unary_opcode_signature().is_some()
+                    && intr.intrinsic.opcode_signature().is_some()
                 {
-                    if let Some(message) = intr.intrinsic.unary_opcode_declaration_error(func_desc) {
+                    if let Some(message) = intr.intrinsic.opcode_declaration_error(func_desc) {
                         return Err(LlvmLoweringError::TypeLowering(message));
                     }
                     let body = verum_vbc::intrinsics::expand::expand_intrinsic_wrapper(intr.intrinsic)
