@@ -682,6 +682,19 @@ fn execute_method_call(
     // unrelated later calls by construction.
     let mut call_witness_sidecar: Option<Box<[crate::types::TypeRef]>> =
         state.pending_call_witness.take();
+    let list_get_element = state.module.get_string(StringId(method_id))
+        .filter(|name| name.rsplit('.').next() == Some("get"))
+        .and_then(|_| {
+            if let Some([element]) = call_witness_sidecar.as_deref() {
+                return Some(element.clone());
+            }
+            match declared_receiver.as_ref().map(crate::receiver_methods::pointee) {
+                Some(crate::types::TypeRef::Instantiated { base, args })
+                    if state.module.declared_runtime_carrier(*base) == Some(WKT::List)
+                        && args.len() == 1 => Some(args[0].clone()),
+                _ => None,
+            }
+        });
 
     let mut take_witness = |module: &crate::module::VbcModule, target: FunctionId| {
         let Some(receiver) = &declared_receiver else {
@@ -1701,7 +1714,7 @@ fn execute_method_call(
     if dispatch_receiver.is_ptr()
         && !dispatch_receiver.is_nil()
         && let Some(result) =
-            dispatch_array_method(state, dispatch_receiver, &bare_method_name, &args)?
+            dispatch_array_method(state, dispatch_receiver, &bare_method_name, &args, list_get_element.as_ref())?
     {
         state.set_reg(dst, result);
         return Ok(DispatchResult::Continue);
@@ -10558,6 +10571,7 @@ pub(super) fn dispatch_array_method(
     receiver: Value,
     method: &str,
     args: &RegRange,
+    list_get_element: Option<&crate::types::TypeRef>,
 ) -> InterpreterResult<Option<Value>> {
     // FATREF-DISPATCH-ROUTE-1 (#51): same regular-pointer contract as
     // dispatch_variant_method — marker-carrying refs never probe headers.
@@ -10737,7 +10751,19 @@ pub(super) fn dispatch_array_method(
             let idx = state.registers.get(caller_base, Reg(args.start.0)).as_i64() as usize;
             if idx < len {
                 let elem = get_array_element(state, ptr, header, idx)?;
-                let result = make_some_value(state, elem)?;
+                let result = if header.type_id.is_list_like() {
+                    // Both the initialized slot and the result own this element.
+                    // Let source dispatch handle calls without an element witness.
+                    let Some(declared) = list_get_element else {
+                        return Ok(None);
+                    };
+                    try_alloc_variant_with_payload(
+                        state, TypeId::MAYBE, verum_common::well_known_types::maybe_success_tag(),
+                        |state| super::copy_typed::copy_declared(state, elem, declared),
+                    )
+                } else {
+                    make_some_value(state, elem)
+                }?;
                 Ok(Some(result))
             } else {
                 let result = make_none_value(state)?;
@@ -11671,7 +11697,25 @@ pub(super) fn alloc_variant_with_payload(
     tag: u32,
     payload: Value,
 ) -> InterpreterResult<Value> {
+    try_alloc_variant_with_payload(state, parent_type_id, tag, |_| Ok(payload))
+}
+
+fn try_alloc_variant_with_payload(
+    state: &mut InterpreterState,
+    parent_type_id: TypeId,
+    tag: u32,
+    build: impl FnOnce(&mut InterpreterState) -> InterpreterResult<Value>,
+) -> InterpreterResult<Value> {
     let obj = state.heap.alloc_variant(parent_type_id, tag, 1)?;
+    let payload = match build(state) {
+        Ok(value) => value,
+        Err(error) => {
+            // SAFETY: This heap allocated the unpublished variant and no payload was installed.
+            unsafe { state.heap.free(obj) };
+            return Err(error);
+        }
+    };
+    // SAFETY: alloc_variant reserved one payload slot and the object is still unpublished.
     unsafe {
         let base = obj.as_ptr() as *mut u8;
         std::ptr::write(heap::variant_payload_ptr_mut(base, 0), payload);

@@ -306,7 +306,7 @@ implement<T> List<T> {
     @inline(always)
     public fn get(&self, idx: Int) -> Maybe<T> {
         if idx >= 0 && idx < self.len {
-            unsafe { Maybe.Some(list_storage_read(self, idx)) }
+            Maybe.Some(self[idx])
         } else {
             Maybe.None
         }
