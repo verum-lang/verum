@@ -9131,7 +9131,16 @@ impl TypeChecker {
                                 _ => None,
                             },
                         };
-                        if let Some(fields) = known_fields {
+                        // A resolved sum also has a complete set of directly
+                        // accessible fields: its payload fields belong to the
+                        // matched variant. Projecting one from the sum cannot
+                        // acquire a type from the surrounding expression.
+                        if known_fields.is_some()
+                            || matches!(
+                                self.expand_generic_to_variant(&normalized_ty)?,
+                                Type::Variant(_)
+                            )
+                        {
                             // One read-lock: decide method-membership AND collect
                             // the type's real members for the did-you-mean list.
                             let (is_member_fn, mut members) = {
@@ -9145,8 +9154,9 @@ impl TypeChecker {
                                     b.contains_key(&bare_key)
                                         || b.contains_key(&static_key)
                                 });
-                                let mut ms: Vec<String> = fields
-                                    .keys()
+                                let mut ms: Vec<String> = known_fields
+                                    .into_iter()
+                                    .flat_map(|fields| fields.keys())
                                     .map(|k| k.as_str().to_string())
                                     .collect();
                                 if let Some(b) = bucket {

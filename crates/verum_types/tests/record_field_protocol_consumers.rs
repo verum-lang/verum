@@ -193,6 +193,39 @@ fn declared_deref_private_target_read_is_refused() {
 }
 
 #[test]
+fn sum_with_declared_deref_uses_the_target_field_type_and_visibility() {
+    let helpers = format!(
+        r#"{DEREF_TYPES}
+        type EitherSide<Item> is LeftSide(Item) | RightSide(Item);
+        type Payload<Value> is {{ item: Value }};
+        implement<Item> Deref for EitherSide<Item> {{
+            type Target = Item;
+            fn deref(&self) -> &Item {{
+                match self {{ LeftSide(ref v) => v, RightSide(ref v) => v }}
+            }}
+        }}"#
+    );
+    assert_public(&helpers, "fn probe(value: EitherSide<Packet>) -> Int { value.visible }");
+    assert_private(&helpers, "fn probe(value: EitherSide<Packet>) -> Int { value.hidden }");
+    let errors = check(&helpers, "fn probe(value: EitherSide<Packet>) -> Bool { value.visible }");
+    assert!(errors.iter().any(|error| error.contains("Mismatch")), "{errors:?}");
+    assert_public(&helpers, "fn probe(value: EitherSide<Payload<Bool>>) -> Bool { value.item }");
+    let errors = check(&helpers, "fn probe(value: EitherSide<Payload<Bool>>) -> Int { value.item }");
+    assert!(errors.iter().any(|error| error.contains("Mismatch")), "{errors:?}");
+}
+
+#[test]
+fn sum_without_deref_rejects_payload_fields_before_matching() {
+    let helpers = "type EitherSide<Item> is LeftSide(Item) | RightSide(Item);";
+    for receiver in ["EitherSide<Packet>", "&EitherSide<Packet>"] {
+        let probe = format!("fn probe(value: {receiver}) -> Int {{ value.visible }}");
+        let errors = check(helpers, &probe);
+        assert!(errors.iter().any(|error| error.contains("UnknownField")
+            && error.contains("visible")), "{receiver}: {errors:?}");
+    }
+}
+
+#[test]
 fn declared_deref_mut_public_target_write_is_allowed() {
     assert_public(
         &format!("{DEREF_TYPES} {DEREF_IMPLS}"),

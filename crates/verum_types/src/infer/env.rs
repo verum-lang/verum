@@ -12605,34 +12605,17 @@ with .to_float() or .to_int() (at {:?})",
             return Ok(None);
         };
         for _ in 0..MAX_DEREF_CHAIN {
-            if let Type::Record(fields) = &current {
-                if let Option::Some(t) = fields.get(field) {
-                    self.check_record_field_visibility(&current, field, span)?;
-                    return Ok(Some((t.clone(), hops)));
-                }
-            }
-            let name: Text = match &current {
-                Type::Named { path, .. } => self.path_to_string(path),
-                Type::Generic { name, .. } => name.clone(),
-                _ => Text::from(""),
+            let owner = match &current {
+                Type::Named { path, .. } => Some(self.path_to_string(path)),
+                Type::Generic { name, .. } => Some(name.clone()),
+                _ => None,
             };
-            if !name.is_empty() {
-                // Same two-step lookup the field-access site itself uses:
-                // the `__struct_fields_<T>` record first, then the type.
-                let struct_key = format!("__struct_fields_{}", name);
-                let fields = match self.ctx.lookup_type(struct_key.as_str()) {
-                    Option::Some(Type::Record(f)) => Some(f),
-                    _ => match self.ctx.lookup_type(name.as_str()) {
-                        Option::Some(Type::Record(f)) => Some(f),
-                        _ => None,
-                    },
-                };
-                if let Some(f) = fields {
-                    if let Option::Some(t) = f.get(field) {
-                        self.check_record_field_visibility(&current, field, span)?;
-                        return Ok(Some((t.clone(), hops)));
-                    }
-                }
+            if let Some(owner) = owner {
+                self.ensure_stdlib_type_loaded_transitive(&owner);
+            }
+            if let Some(ty) = self.lookup_field_type(&current, field) {
+                self.check_record_field_visibility(&current, field, span)?;
+                return Ok(Some((ty, hops)));
             }
             if !current.is_transparent_carrier() {
                 hops += 1;
