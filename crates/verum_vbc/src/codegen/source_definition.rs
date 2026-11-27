@@ -110,6 +110,12 @@ impl VbcCodegen {
             .current_source_module
             .as_deref()
             .unwrap_or_else(|| self.source_module_root());
+        self.implementation_definition_in_module(item, owner)
+    }
+
+    pub(super) fn implementation_definition_in_module(
+        &self, item: &verum_ast::Item, owner: &str,
+    ) -> CodegenResult<SourceDefinitionIdentity> {
         let scopes = self.definition_lexical_scopes(owner)?;
         let mut digest = blake3::Hasher::new();
         verum_ast::source_definition::encode_implementation(

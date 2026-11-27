@@ -654,7 +654,7 @@ impl VbcCodegen {
     }
 }
 
-fn parameter_name(parameter: &GenericParam) -> Option<&str> {
+pub(super) fn parameter_name(parameter: &GenericParam) -> Option<&str> {
     match &parameter.kind {
         GenericParamKind::Type { name, .. }
         | GenericParamKind::Const { name, .. }

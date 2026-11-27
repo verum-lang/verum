@@ -111,24 +111,60 @@ impl VbcCodegen {
         Ok(Some(constructor(crate::module::FunctionId(id))))
     }
 
+    /// Wire argument spellings and callable bounds belong to the implementation
+    /// declaration, including a blanket declaration instantiated for a receiver.
+    pub(super) fn implementation_text_bindings(
+        &mut self, declaration: &verum_ast::decl::ImplDecl,
+    ) -> (Vec<crate::types::StringId>, Vec<(crate::types::StringId, crate::types::StringId)>) {
+        use crate::types::StringId;
+        use verum_ast::ty::{GenericArg, GenericParamKind, TypeBoundKind, TypeKind};
+        let ImplKind::Protocol { protocol_args, .. } = &declaration.kind else {
+            return (Vec::new(), Vec::new());
+        };
+        let arguments = protocol_args.iter().filter_map(|arg| {
+            let GenericArg::Type(ty) = arg else { return None; };
+            Some(StringId(self.ctx.intern_string_raw(&verum_ast::pretty::format_type(ty))))
+        }).collect();
+        let bounds = declaration.generics.iter().filter_map(|generic| {
+            let GenericParamKind::Type { name, bounds, .. } = &generic.kind else { return None; };
+            let bound = bounds.iter().find_map(|bound| match &bound.kind {
+                TypeBoundKind::Callable(ty) if matches!(ty.kind, TypeKind::Function { .. } | TypeKind::Rank2Function { .. }) => Some(ty),
+                _ => None,
+            })?;
+            Some((StringId(self.ctx.intern_string_raw(name.as_str())),
+                StringId(self.ctx.intern_string_raw(&verum_ast::pretty::format_descriptor_type(bound)))))
+        }).collect();
+        (arguments, bounds)
+    }
+
     pub(super) fn attach_declared_implementation(
         &mut self,
         implementation: &ImplKind,
         name: &str,
         fact: ImplementationAttachment,
     ) -> CodegenResult<()> {
-        if let Some(id) = self.implementation_nominal_id(implementation) {
-            // Scalar aliases may share a runtime ID; their source spelling
-            // still owns their implementation metadata.
-            let scalar = TypeId::from_well_known_scalar_name(name) == Some(id);
-            let slot = self.types.iter().position(|ty| {
-                ty.id == id
-                    && (!scalar
-                        || ((ty.canonical_scalar_type_id(name) == Some(id)
-                            || self.canonical_runtime_record_id(ty) == Some(id))
-                            && self.ctx.strings.get(ty.name.0 as usize).map(String::as_str)
-                                == Some(name)))
-            });
+        self.attach_implementation_to_target(self.implementation_nominal_id(implementation), name, fact)
+    }
+
+    /// A scalar alias can share its runtime ID with another spelling. Each
+    /// source declaration still owns a distinct set of protocol implementations.
+    pub(super) fn implementation_target_slot(&self, id: TypeId, name: &str) -> Option<usize> {
+        let scalar = TypeId::from_well_known_scalar_name(name) == Some(id);
+        self.types.iter().position(|ty| {
+            ty.id == id
+                && (!scalar
+                    || ((ty.canonical_scalar_type_id(name) == Some(id)
+                        || self.canonical_runtime_record_id(ty) == Some(id))
+                        && self.ctx.strings.get(ty.name.0 as usize).map(String::as_str)
+                            == Some(name)))
+        })
+    }
+
+    pub(super) fn attach_implementation_to_target(
+        &mut self, target: Maybe<TypeId>, name: &str, fact: ImplementationAttachment,
+    ) -> CodegenResult<()> {
+        if let Some(id) = target {
+            let slot = self.implementation_target_slot(id, name);
             if let Some(slot) = slot {
                 fact.attach(&mut self.types[slot]);
                 return Ok(());

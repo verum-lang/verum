@@ -388,6 +388,7 @@ struct DeferredDefaultMethod {
     implementation: DeferredImplScope,
     constraints: Option<DefaultConstraintScope>,
     directly_implemented: bool,
+    blanket_row: Option<blanket_impls::BlanketSelection>,
 }
 
 impl DeferredDefaultMethod {
@@ -417,6 +418,8 @@ pub struct BlanketImpl {
     pub source_module: Option<String>,
     /// Share the source body across implementors rather than cloning its AST.
     pub declaration: std::sync::Arc<verum_ast::decl::ImplDecl>,
+    source: std::sync::Arc<verum_ast::source_implementation::AssociatedImplementationSource>,
+    definition: crate::module::SourceDefinitionIdentity,
 }
 
 impl BlanketImpl {
@@ -1281,6 +1284,7 @@ pub struct VbcCodegen {
     /// declaration-order-independent: every explicit body registers
     /// first, and a default only fills a still-empty slot.
     pending_default_registrations: Vec<DeferredDefaultMethod>,
+    pending_blanket_rows: Vec<blanket_impls::MaterializedBlanket>,
     /// Local associated equalities indexed by the full specialized impl receiver.
     concrete_impl_bindings:
         HashMap<(ConcreteImplType, crate::types::ProtocolId), HashMap<String, ConcreteImplType>>,
@@ -2598,6 +2602,7 @@ impl VbcCodegen {
             pending_protocol_method_slots: HashMap::new(),
             refinement_scope_active: false,
             pending_default_registrations: Vec::new(),
+            pending_blanket_rows: Vec::new(),
             concrete_impl_bindings: HashMap::new(),
             blanket_impls: Vec::new(),
             implementation_headers: Default::default(),
@@ -3545,6 +3550,7 @@ impl VbcCodegen {
             std::collections::HashSet<String>,
         > = std::collections::HashMap::new();
         per_proto_overrides.insert(root_application, implemented_methods.clone());
+        let mut blanket_rows = HashMap::new();
         let mut implementation_preparation =
             implementation_obligations::ImplementationPreparation::default();
 
@@ -3627,6 +3633,10 @@ impl VbcCodegen {
                 // default method binds `Self`/the type param to `type_name`,
                 // so the body's `self.cmp(other)` dispatches to `Int.cmp`.
                 let selected_items = self.selected_impl_items(&blanket.declaration)?;
+                let blanket_row = self.queue_blanket_row(
+                    &blanket, &derived, implementation, type_name, &receiver, &selected_items,
+                )?;
+                if let Some(row) = blanket_row { blanket_rows.insert(derived.key.clone(), row); }
                 let selected_overrides = selected_items.iter().filter_map(|item| match &item.kind {
                     verum_ast::decl::ImplItemKind::Function(function) => Some(function.name.name.to_string()),
                     _ => None,
@@ -3636,9 +3646,7 @@ impl VbcCodegen {
                     _ => None,
                 }) {
                     let full_method_name = self.source_impl_method_key(type_name, body_func.name.name.as_str());
-                    // An explicit `implement Derived for ThisType` block wins:
-                    // same guard the default-method replay uses below.
-                    if self.impl_method_for_receiver(&full_method_name, &receiver.ty).is_some() {
+                    if blanket_row.is_none() && self.impl_method_for_receiver(&full_method_name, &receiver.ty).is_some() {
                         continue;
                     }
                     // T0701: deferred like the plain default-method
@@ -3648,10 +3656,13 @@ impl VbcCodegen {
                         body_func, type_name, &deferred_scope,
                         blanket.source_module.clone(), None,
                     );
+                    method.blanket_row = blanket_row;
+                    method.implementation.protocol = Some(std::sync::Arc::new(derived.clone()));
                     method.implementation.source_substitution = blanket_substitution.for_function(body_func);
                     if self.pending_default_registrations.iter().any(|pending| {
                         pending.receiver_name == method.receiver_name
                             && pending.implementation.receiver == method.implementation.receiver
+                            && pending.protocol_owner() == method.protocol_owner()
                             && pending.function.name.name == method.function.name.name
                             && !pending.implementation.source_substitution.is_empty()
                             && (pending.lexical_owner != method.lexical_owner || pending.function != method.function)
@@ -3695,6 +3706,7 @@ impl VbcCodegen {
                     protocol_info.default_methods.iter().collect();
                 sorted_methods.sort_by(|a, b| a.0.cmp(b.0));
 
+                let blanket_row = blanket_rows.get(&application.key).copied();
                 let application = std::sync::Arc::new(application);
                 for (method_name, default_func) in sorted_methods {
                     if overrides.contains(method_name) {
@@ -3702,7 +3714,7 @@ impl VbcCodegen {
                     }
 
                     let full_method_name = self.source_impl_method_key(type_name, method_name);
-                    if self.impl_method_for_receiver(&full_method_name, &receiver.ty).is_some() {
+                    if blanket_row.is_none() && self.impl_method_for_receiver(&full_method_name, &receiver.ty).is_some() {
                         continue;
                     }
 
@@ -3731,6 +3743,7 @@ impl VbcCodegen {
                         default_func, type_name, &deferred_scope,
                         Some(protocol_info.source_module.clone()), constraints,
                     );
+                    method.blanket_row = blanket_row;
                     method.implementation.protocol = Some(application.clone());
                     method.directly_implemented = application.protocol.is_some()
                         && application.protocol == root_protocol;
@@ -3756,6 +3769,7 @@ impl VbcCodegen {
             lexical_owner,
             constraints,
             directly_implemented: false,
+            blanket_row: None,
             implementation: DeferredImplScope {
                 protocol: implementation.protocol.clone(),
                 dense,
@@ -3781,7 +3795,8 @@ impl VbcCodegen {
         let previous_receiver = self.current_impl_receiver.replace(scope.receiver.clone());
         let previous_substitution = std::mem::replace(&mut self.current_source_substitution, scope.source_substitution.clone());
         let previous_impl_name = self.ctx.current_impl_type_name.clone();
-        let previous_definition = std::mem::replace(&mut self.current_impl_definition, scope.declaration.definition);
+        let definition = self.materialized_method_definition(method);
+        let previous_definition = std::mem::replace(&mut self.current_impl_definition, definition);
         let previous_ast = self.current_impl_ast_generics.replace(scope.declaration.ast_generics.clone());
         let previous_where = std::mem::replace(&mut self.current_impl_where_clause, scope.declaration.where_clause.clone());
         let previous_associated = std::mem::replace(&mut self.current_impl_associated_equalities, scope.declaration.associated_equalities.clone());
@@ -3879,7 +3894,11 @@ impl VbcCodegen {
         // materialisations FIRST — the whole collect phase has run, so
         // every explicit impl body already owns its unsuffixed slot
         // and a default only fills slots that are still empty.
-        let deferred = std::mem::take(&mut self.pending_default_registrations);
+        self.select_blanket_rows()?;
+        let mut deferred = std::mem::take(&mut self.pending_default_registrations);
+        // Preserve ordinary method linkage for direct implementations. Qualified
+        // blanket slots can then register a distinct sibling with the same name.
+        deferred.sort_by_key(|method| method.blanket_row.is_some());
         let mut direct = HashMap::<_, Vec<usize>>::new();
         let key = |method: &DeferredDefaultMethod| (
             method.implementation.receiver.ty.base_type_id(), method.protocol_owner(),
@@ -3909,7 +3928,14 @@ impl VbcCodegen {
                 method.implementation.declaration.owner.as_deref(),
                 type_name, default_func.name.name.as_str(),
             );
-            if self.impl_method_for_receiver(&full_method_name, &method.implementation.receiver.ty).is_some() {
+            let blanket_slot = if let Some(row) = method.blanket_row {
+                let materialized = &self.pending_blanket_rows[row.index];
+                if materialized.overridden { continue; }
+                let slot = materialized.members.iter().position(|name| name == default_func.name.as_str());
+                if slot.is_some_and(|slot| materialized.implementation.methods[slot] != u32::MAX) { continue; }
+                slot.map(|slot| (row.index, slot))
+            } else { None };
+            if blanket_slot.is_none() && self.impl_method_for_receiver(&full_method_name, &method.implementation.receiver.ty).is_some() {
                 continue;
             }
             if let Some(constraints) = &method.constraints {
@@ -3932,10 +3958,14 @@ impl VbcCodegen {
             if let Some(protocol) = method.protocol_owner() {
                 self.default_method_protocols.insert(id, protocol);
             }
+            if let Some((row, slot)) = blanket_slot {
+                self.pending_blanket_rows[row].implementation.methods[slot] = id.0;
+            }
             self.pending_default_methods.push((id, method));
         }
 
         self.bind_deferred_protocol_slots();
+        self.attach_blanket_rows()?;
 
         // Take ownership of pending methods to avoid borrow conflicts
         let pending = std::mem::take(&mut self.pending_default_methods);
@@ -5258,7 +5288,7 @@ impl VbcCodegen {
                 match &item.kind {
                     ItemKind::Impl(declaration) => {
                         self.record_implementation_header(declaration, &owner)?;
-                        self.record_blanket_impl(declaration, Some(owner.clone()))?;
+                        self.record_blanket_impl(item, Some(owner.clone()))?;
                     }
                     ItemKind::Module(child) => {
                         if let Some(items) = &child.items {
@@ -9908,7 +9938,7 @@ impl VbcCodegen {
                     self.ensure_structural_impl_target_type(impl_decl, tn);
                 }
 
-                self.record_blanket_impl(impl_decl, self.ctx.current_source_module.clone())?;
+                self.record_blanket_impl(item, self.ctx.current_source_module.clone())?;
                 if self.retains_blanket_declaration(impl_decl) {
                     return Ok(());
                 }
@@ -10191,29 +10221,7 @@ impl VbcCodegen {
                                     (StringId(self.ctx.intern_string_raw(&name)), ty)).collect()
                             };
 
-                            // Per-impl protocol type-args, source-rendered
-                            // (ProtocolImpl.protocol_args_text doc — #47
-                            // FromResidual sibling-impl collapse).
-                            let protocol_args_text: Vec<StringId> = {
-                                let mut v = Vec::new();
-                                if let verum_ast::decl::ImplKind::Protocol {
-                                    protocol_args, ..
-                                } = &impl_decl.kind
-                                {
-                                    for arg in protocol_args.iter() {
-                                        if let verum_ast::ty::GenericArg::Type(t) = arg {
-                                            let rendered =
-                                                verum_ast::pretty::format_type(t);
-                                            v.push(StringId(
-                                                self.ctx.intern_string_raw(
-                                                    rendered.as_str(),
-                                                ),
-                                            ));
-                                        }
-                                    }
-                                }
-                                v
-                            };
+                            let (protocol_args_text, fn_bound_ids) = self.implementation_text_bindings(impl_decl);
                             if std::env::var("VERUM_TRACE_IMPL_ATTACH").is_ok()
                                 && pn == "FromResidual"
                             {
@@ -10226,56 +10234,6 @@ impl VbcCodegen {
                                     pn, ty_name, tid.map(|t| t.0), has_desc
                                 );
                             }
-                            // v14 carry: impl generic params whose bound is a
-                            // FUNCTION type. `implement<I, B, F: fn(I.Item) -> B>`
-                            // is exactly the shape the typechecker needs to recover
-                            // `B` from a concrete receiver; without it `type Item = B`
-                            // never reduces and the parameter it sits in accepts
-                            // anything (T0997).
-                            //
-                            // Interned HERE, before the `&mut self.types` loop below:
-                            // the interner takes `&mut self` too and the two borrows
-                            // cannot overlap.
-                            let fn_bound_ids: Vec<(StringId, StringId)> = {
-                                let pairs: Vec<(String, String)> = impl_decl
-                                    .generics
-                                    .iter()
-                                    .filter_map(|g| match &g.kind {
-                                        verum_ast::ty::GenericParamKind::Type {
-                                            name,
-                                            bounds,
-                                            ..
-                                        } => {
-                                            let fb = bounds.iter().find_map(|b| match &b.kind {
-                                                verum_ast::ty::TypeBoundKind::Callable(t)
-                                                    if matches!(
-                                                        t.kind,
-                                                        verum_ast::ty::TypeKind::Function { .. }
-                                                            | verum_ast::ty::TypeKind::Rank2Function { .. }
-                                                    ) =>
-                                                {
-                                                    Some(t)
-                                                }
-                                                _ => None,
-                                            })?;
-                                            Some((
-                                                name.name.to_string(),
-                                                verum_ast::pretty::format_descriptor_type(fb).to_string(),
-                                            ))
-                                        }
-                                        _ => None,
-                                    })
-                                    .collect();
-                                pairs
-                                    .iter()
-                                    .map(|(n, b)| {
-                                        (
-                                            StringId(self.ctx.intern_string_raw(n)),
-                                            StringId(self.ctx.intern_string_raw(b)),
-                                        )
-                                    })
-                                    .collect()
-                            };
                             // Push protocol impl onto the concrete type's
                             // descriptor.  The impl is carried BY ITS TARGET
                             // TYPE, so a target this module does not declare

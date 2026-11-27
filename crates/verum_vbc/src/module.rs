@@ -1539,6 +1539,22 @@ impl VbcModule {
         if let Some(selected) = self.bound_static_protocol_method(receiver, method, argc)? {
             return Ok(Some(selected));
         }
+        // A source protocol owns its member even if another protocol on the
+        // receiver has the same name. Legacy dyn:<type parameter> selectors
+        // have no declared protocol and still use receiver specialization.
+        if let Some((qualifier, member)) = self.get_string(method)
+            .and_then(|selector| selector.strip_prefix("dyn:"))
+            .and_then(|selector| selector.rsplit_once('.'))
+            .filter(|(qualifier, _)| qualifier.contains('.') || self.types.iter().any(|declaration|
+                declaration.kind == crate::types::TypeKind::Protocol
+                    && self.get_string(declaration.name) == Some(*qualifier)))
+        {
+            let missing = || format!("no implementation of declared protocol member `{qualifier}.{member}` for {receiver:?}");
+            let head = receiver.base_type_id().ok_or_else(missing)?;
+            let (protocol, _) = self.protocol_member_owner(head, Some(qualifier), member, false)?.ok_or_else(missing)?;
+            let target = self.implementation_member(head, Some(receiver), protocol, member, None)?.ok_or_else(missing)?;
+            return self.bind_instance_receiver(target, receiver, argc).map(Some).ok_or_else(missing);
+        }
         let specialized = self.receiver_specialization(receiver, method, argc)?;
         let target = specialized.or_else(|| {
             let name = self.get_string(method)?.rsplit('.').next()?;
@@ -1663,6 +1679,13 @@ impl VbcModule {
         &self, receiver: crate::types::TypeId, protocol: crate::types::ProtocolId,
         method: &str, operand: Option<crate::types::TypeId>,
     ) -> Result<Option<FunctionId>, String> {
+        self.implementation_member(receiver, None, protocol, method, operand)
+    }
+
+    fn implementation_member(
+        &self, receiver: TypeId, application: Option<&TypeRef>, protocol: ProtocolId,
+        method: &str, operand: Option<TypeId>,
+    ) -> Result<Option<FunctionId>, String> {
         let Some(owner) = self.get_type(receiver) else { return Ok(None) };
         let Some(declaration) = self.get_type(crate::types::TypeId(protocol.0)) else { return Ok(None) };
         let mut slots = declaration.variants.iter().filter(|member| self.get_string(member.name) == Some(method));
@@ -1675,6 +1698,10 @@ impl VbcModule {
             let id = FunctionId(raw);
             let target = self.get_function(id).filter(|f| f.id == id && f.has_definition())
                 .ok_or_else(|| format!("protocol member `{method}` has no local definition in slot {raw}"))?;
+            if let Some(actual) = application
+                && let Some(declared) = &target.source_receiver
+                && !crate::mono::match_declared_types(declared, actual, &mut crate::mono::TypeSubstitution::empty())
+            { continue; }
             if let Some(actual) = operand
                 && let Some(formal) = target.semantic_parameter_types()
                     .and_then(|parameters| parameters.get(1)).and_then(Option::as_ref)
