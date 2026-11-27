@@ -744,6 +744,11 @@ fn expand_sequence(
                 }
             }
         }
+        InlineSequenceId::Forget => {
+            let [owned] = args else { return false };
+            e.emit(Instruction::LoadUnit { dst: *owned });
+            e.emit(Instruction::LoadUnit { dst: dest });
+        }
         InlineSequenceId::DropInPlace => {
             if !args.is_empty() {
                 e.emit(Instruction::ChkRef { ref_reg: args[0] });

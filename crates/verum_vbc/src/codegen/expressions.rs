@@ -37412,6 +37412,11 @@ impl VbcCodegen {
             }
 
             // Memory lifecycle intrinsics
+            InlineSequenceId::Forget => {
+                let [owned] = args else { return Err(CodegenError::internal("forget requires one owned operand")); };
+                self.ctx.emit(Instruction::LoadUnit { dst: *owned });
+                self.ctx.emit(Instruction::LoadUnit { dst: dest });
+            }
             InlineSequenceId::DropInPlace => {
                 // Call destructor on value at pointer
                 // Uses ChkRef which encodes to DropRef opcode at bytecode level

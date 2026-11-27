@@ -548,6 +548,8 @@ pub enum InlineSequenceId {
     RealtimeSecs,
     /// realtime_nanos: wall clock time (nanoseconds)
     RealtimeNanos,
+    /// Consume a value without executing its destructor.
+    Forget,
     /// drop_in_place: run destructor via pointer
     DropInPlace,
     /// make_slice: construct fat pointer from ptr + len
@@ -1419,6 +1421,7 @@ impl Intrinsic {
     /// A raw store or exchange takes the destination followed by its new value.
     pub(crate) fn stored_value_operand(&self) -> Option<usize> {
         match self.strategy {
+            CodegenStrategy::InlineSequence(InlineSequenceId::Forget) => Some(0),
             CodegenStrategy::InlineSequence(
                 InlineSequenceId::Replace
                 | InlineSequenceId::PtrWriteRaw
@@ -2177,8 +2180,8 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         ],
         param_count: 1, // value
         return_count: 0,
-        strategy: CodegenStrategy::DirectOpcode(Opcode::Nop), // ownership transfer, no runtime cost
-        mlir_op: None,                                        // compile-time only
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::Forget),
+        mlir_op: None,
         doc: "Prevent value from being dropped",
     },
     Intrinsic {

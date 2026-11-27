@@ -1201,6 +1201,7 @@ impl IntrinsicLowering {
             InlineSequenceId::FutexWait => self.lower_futex_wait(operands),
             InlineSequenceId::FutexWake => self.lower_futex_wake(operands),
             // Memory lifecycle intrinsics
+            InlineSequenceId::Forget => None,
             InlineSequenceId::DropInPlace => {
                 // Call destructor via LLVM lifetime end + custom drop
                 if !operands.is_empty() {
