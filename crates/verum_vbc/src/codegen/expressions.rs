@@ -26800,50 +26800,17 @@ impl VbcCodegen {
         });
         let base_name: Option<&str> = base_name_owned.as_deref();
 
-        // Three-way classification: Maybe, Result, or user-defined Try type.
-        let mut is_maybe_type = declared.as_ref().and_then(nominal) == Some(crate::types::TypeId::MAYBE);
-        let is_result_type = declared.as_ref().and_then(nominal) == Some(crate::types::TypeId::RESULT);
-
-        // **Iterator-protocol `?` keystone** (closes ADAPTER-TRY-NEXT-1, the
-        // bug that left every iterator adapter body — `let item =
-        // self.iter.next()?; …` — yielding `None` on the first `Some`).
-        //
-        // When `?` is applied DIRECTLY to a `.next()`/`.next_back()` method
-        // call whose receiver has a generic type-param type (`self.iter: I`),
-        // `extract_expr_type_name` returns None (no concrete `<I>.next`
-        // return type to resolve), so neither `is_maybe_type` nor
-        // `is_result_type` fires and `success_tag` falls back to 0 — which
-        // for `Maybe` is the *None* tag. The `?` then tests "is None?"
-        // instead of "is Some?", so every `Some(x)` takes the failure path
-        // and propagates `None`. Confirmed: a probe capturing the value
-        // shows `is_some=true` yet `?` still propagates None.
-        //
-        // The Iterator protocol contract fixes the shape regardless of the
-        // concrete receiver type: `next`/`next_back` return `Maybe<Self.Item>`.
-        // Every `fn next` in `core/` that can appear under `?` returns a
-        // top-level `Maybe` (the only non-Maybe `next`s are RNG `-> UInt64`,
-        // which are never `?`-applied since `UInt64` isn't a `Try` type), so
-        // this classification is sound for the `?` operator. Gate tightly:
-        // only when classification genuinely failed AND `?` is applied
-        // directly to a `next`/`next_back` call.
-        if let ExprKind::MethodCall { method, .. } = &inner.kind
-            && matches!(method.name.as_str(), "next" | "next_back")
-        {
-            // FORCE Maybe — overriding the unclassified/`is_result`-shaped
-            // fallback. For a `?` applied to a generic-type-param receiver's
-            // `next()` (`self.iter.next()?` — the universal Iterator-adapter
-            // idiom), `extract_expr_type_name` returns no Maybe-classifiable
-            // base, so `success_tag` defaults to 0 — which for `Maybe` is the
-            // *None* tag. The `?` then tests "is None?" instead of "is Some?",
-            // so every `Some(x)` takes the failure path and propagates None
-            // (the whole iterator-adapter family yielded nothing). Every
-            // `fn next`/`fn next_back` in `core/` that can appear under `?`
-            // returns a top-level `Maybe` (the only non-Maybe `next`s are RNG
-            // `-> UInt64`, never `?`-applied), so this override is sound.
-            // Pinned by core-tests/base/iterator (ADAPTER-TRY-NEXT-1).
-            is_maybe_type = true;
+        let carrier = declared.as_ref().and_then(nominal);
+        let is_result_type = carrier == Some(crate::types::TypeId::RESULT);
+        let is_maybe_type = carrier == Some(crate::types::TypeId::MAYBE);
+        if !is_result_type && !is_maybe_type && declared.as_ref().and_then(|ty|
+            self.declared_protocol_member(ty, verum_common::well_known_types::WellKnownProtocol::Try, "Output")
+        ).is_none() {
+            return Err(CodegenError::with_span(
+                CodegenErrorKind::InvalidSourceSignature("the ? operand has no declared Try carrier".into()),
+                span,
+            ));
         }
-        let is_result_type = is_result_type && !is_maybe_type;
 
         // Success tag: read from the canonical layout constants.
         // For Maybe: Some=1 (None=0 is failure). For Result: Ok=0 (Err=1 is failure).

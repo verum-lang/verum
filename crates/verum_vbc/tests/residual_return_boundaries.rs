@@ -53,6 +53,10 @@ fn source_value(source: &str, expected: i64) {
     let module = VbcCodegen::with_config(CodegenConfig::new("residual_boundaries"))
         .compile_module(&ast)
         .expect("source VBC");
+    assert_probe_value(module, expected);
+}
+
+fn assert_probe_value(module: verum_vbc::module::VbcModule, expected: i64) {
     let bytes = verum_vbc::serialize::serialize_module(&module).expect("serialize VBC");
     let module = verum_vbc::deserialize::deserialize_module(&bytes).expect("decode VBC");
     let entry = module
@@ -131,11 +135,10 @@ fn probe() -> Int {
 
 #[test]
 fn inferred_try_output_retains_the_applied_receiver_of_a_generic_method() {
-    source_value(
-        r#"
-        module core;
-        public type Maybe<T> is None | Some(T);
-        public type Result<T,E> is Ok(T) | Err(E);
+    let module = compile_with_try_carriers(r#"
+        module lookup;
+        mount core.base.maybe.{Maybe, Some, None};
+        mount core.base.result.{Result, Ok, Err};
         type Failure is { public code: Int };
         implement<T> Maybe<T> {
             fn ok_or_else<E,F:fn()->E>(self, f:F)->Result<T,E> {
@@ -154,9 +157,8 @@ fn inferred_try_output_retains_the_applied_receiver_of_a_generic_method() {
             match require(key) { Ok((_,oid)) => oid, Err(error) => error.code }
         }
         fn probe()->Int { read(1)*10000 + read(0)*100 + read(-1) }
-    "#,
-        921731,
-    );
+    "#).expect("declared lookup carriers");
+    assert_probe_value(module, 921731);
 }
 
 #[test]
@@ -695,4 +697,99 @@ fn inspect() -> Int {
             1
         );
     }
+}
+
+const PROPAGATED_ARGUMENTS: &str = r#"
+module core.propagated;
+mount core.base.result.Result;
+mount core.base.maybe.Maybe;
+type Marker is Key(Int);
+type Checked<T> is Result<T, Int>;
+fn selected(ok: Bool) -> Checked<Marker> {
+    if ok { Result.Ok(Key(73)) } else { Result.Err(29) }
+}
+fn optional(ok: Bool) -> Maybe<Marker> {
+    if ok { Maybe.Some(Key(17)) } else { Maybe.None }
+}
+fn identity<T>(item: T) -> T { item }
+"#;
+
+fn compile_with_try_carriers(source: &str) -> verum_vbc::codegen::CodegenResult<verum_vbc::module::VbcModule> {
+    use verum_ast::{FileId, ItemKind};
+    use verum_fast_parser::FastParser;
+    use verum_vbc::codegen::ItemFailurePolicy;
+
+    let parser = FastParser::new();
+    let carrier = |file, source, name: &str| {
+        let mut unit = parser.parse_module_str(source, FileId::new(file)).expect("carrier syntax");
+        unit.items.retain(|item| match &item.kind {
+            ItemKind::Module(module) => module.items.is_none(),
+            ItemKind::Type(declaration) => declaration.name.as_str() == name,
+            _ => false,
+        });
+        unit
+    };
+    let result = carrier(1, include_str!("../../../core/base/result.vr"), "Result");
+    let maybe = carrier(2, include_str!("../../../core/base/maybe.vr"), "Maybe");
+    let caller = parser.parse_module_str(source, FileId::new(3)).expect("caller syntax");
+    let units = [&result, &maybe, &caller];
+    let mut generator = VbcCodegen::with_config(CodegenConfig::new(""));
+    generator.initialize();
+    generator.collect_unit_declarations(&units)?;
+    generator.resolve_pending_imports();
+    generator.compile_unit_items(&units, ItemFailurePolicy::Strict)?;
+    generator.finalize_module()
+}
+
+fn compile_propagated_argument(body: &str) -> verum_vbc::codegen::CodegenResult<verum_vbc::module::VbcModule> {
+    compile_with_try_carriers(&format!("{PROPAGATED_ARGUMENTS}\n{body}"))
+}
+
+#[test]
+fn generic_argument_receives_the_selected_success_payload() {
+    let module = compile_propagated_argument(r#"
+        fn collect_result(ok: Bool) -> Result<Marker, Int> { Result.Ok(identity(selected(ok)?)) }
+        type Producer is { ok: Bool };
+        implement Producer { fn next(&self) -> Checked<Marker> { selected(self.ok) } }
+        fn from_method(ok: Bool) -> Result<Marker, Int> {
+            let producer = Producer { ok };
+            Result.Ok(identity(producer.next()?))
+        }
+        fn nullable(ok: Bool) -> Maybe<Marker> { Maybe.Some(identity(optional(ok)?)) }
+        fn probe() -> Int {
+            if collect_result(true) is Result.Ok(Key(73)) && collect_result(false) is Result.Err(29)
+                && from_method(true) is Result.Ok(Key(73)) && from_method(false) is Result.Err(29)
+                && nullable(true) is Maybe.Some(Key(17)) && nullable(false) is Maybe.None
+            { 1 } else { 0 }
+        }
+    "#).expect("inferred payload");
+    let bytes = verum_vbc::serialize::serialize_module(&module).unwrap();
+    for image in [module, verum_vbc::deserialize::deserialize_module(&bytes).unwrap()] {
+        let entry = image.find_function_by_name("core.propagated.probe").unwrap();
+        let result = Interpreter::new(Arc::new(image)).execute_function(entry).unwrap();
+        assert_eq!(result.try_as_i64(), Some(1));
+    }
+}
+
+#[test]
+fn incompatible_generic_argument_cannot_replace_the_success_payload() {
+    let error = compile_propagated_argument(r#"
+        fn invalid(ok: Bool) -> Result<Int, Int> {
+            Result.Ok(identity<Int>(selected(ok)?))
+        }
+    "#).expect_err("the selected payload is Marker");
+    assert!(error.to_string().contains("conflicting source argument"), "{error}");
+}
+
+#[test]
+fn a_next_method_without_a_try_carrier_is_rejected() {
+    let error = compile_propagated_argument(r#"
+        type Source is ();
+        implement Source { fn next_back(&self) -> Int { 17 } }
+        fn invalid(source: &Source) -> Maybe<Int> {
+            let item = source.next_back()?;
+            Maybe.Some(item)
+        }
+    "#).expect_err("a method name cannot declare a Try carrier");
+    assert!(error.to_string().contains("no declared Try carrier"), "{error}");
 }

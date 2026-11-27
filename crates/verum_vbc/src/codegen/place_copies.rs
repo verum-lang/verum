@@ -187,7 +187,23 @@ impl VbcCodegen {
             ExprKind::Block(block) | ExprKind::Unsafe(block) =>
                 self.ctx.declared_result_types.get(&block.span).cloned().flatten(),
             ExprKind::Cast { ty, .. } => self.source_type_in_current_scope(ty),
-            ExprKind::Match { .. } | ExprKind::Select { .. } | ExprKind::Await(_) | ExprKind::Try(_) => self.ctx.declared_result_types.get(&expr.span).cloned().flatten(),
+            ExprKind::Match { .. } | ExprKind::Select { .. } | ExprKind::Await(_) =>
+                self.ctx.declared_result_types.get(&expr.span).cloned().flatten(),
+            ExprKind::Try(inner) => {
+                if let Some(result) = self.ctx.declared_result_types.get(&expr.span) {
+                    return result.clone();
+                }
+                // A generic call can select its arguments before lowering the ?.
+                // Only the selected carrier's successful arm produces that value.
+                use verum_common::well_known_types::{maybe_success_tag, result_success_tag};
+                let carrier = self.expand_declared_alias(nested(inner, None)?)?;
+                let tag = match carrier.base_type_id()? {
+                    crate::types::TypeId::RESULT => result_success_tag(),
+                    crate::types::TypeId::MAYBE => maybe_success_tag(),
+                    _ => return None,
+                };
+                self.projected_variant_field(&carrier, tag, 0)
+            }
             ExprKind::If { then_branch, else_branch, .. } => {
                 let left = self.ctx.declared_result_types.get(&then_branch.span).cloned().flatten();
                 let right = else_branch.as_ref().map_or(
