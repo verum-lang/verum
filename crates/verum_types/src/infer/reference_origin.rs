@@ -487,19 +487,26 @@ impl TypeChecker {
         &mut self, field: &verum_ast::expr::FieldInit, ty: &Type,
     ) {
         let mut origins = List::new();
-        if self.carries_stored_loan(ty) {
-            if let Some(place) = self.ctx.env.record_source(&field.name.name, false) {
-                self.check_payload_origin_observation(&place);
-            }
-            origins = self.ctx.env.reference_candidates(&field.name.name);
-        }
-        self.record_evaluated_origins(field.span, Some(origins));
+        let complete = if self.carries_stored_loan(ty) {
+            let name = &field.name.name;
+            let known = self.ctx.env.binding_has_payload_origins(name)
+                || (self.reference_mode(ty, field.span).is_ok_and(|mode| mode.is_some())
+                    && self.ctx.env.record_source(name, true).is_some());
+            let observed = self.ctx.env.record_source(name, false)
+                .is_some_and(|place| self.check_payload_origin_observation(&place));
+            origins = self.ctx.env.reference_candidates(name);
+            known && observed
+        } else {
+            true
+        };
+        self.record_owned_value_origins(field.span, Some(origins), complete);
     }
 
     /// Aggregate fields are evaluated individually, before later fields can
     /// replace the places from which earlier field values were copied.
     pub(super) fn observe_aggregate_result_origins(&mut self, value: &Expr, ty: &Type) {
         let mut origins = List::new();
+        let mut complete = false;
         match &unparen(value).kind {
             ExprKind::Tuple(values) | ExprKind::Array(verum_ast::ArrayExpr::List(values)) => {
                 for value in values { self.collect_evaluated_operand_origins(value, &mut origins); }
@@ -508,10 +515,16 @@ impl TypeChecker {
                 self.collect_evaluated_operand_origins(value, &mut origins);
             }
             ExprKind::Record { fields, base, .. } => {
+                complete = true;
                 for field in fields {
                     if let Some(value) = &field.value {
+                        complete &= self.observed_operand_type(value).is_some_and(|ty|
+                            !self.carries_stored_loan(&ty) || self.observed_known_owned_payload(value));
                         self.collect_evaluated_operand_origins(value, &mut origins);
-                    } else if let Some(known) = self.evaluated_value_origins.get(&field.span).and_then(|observed| observed.origins.as_ref()) {
+                    } else if let Some(observed) = self.evaluated_value_origins.get(&field.span)
+                        && let Some(known) = &observed.origins
+                    {
+                        complete &= observed.complete;
                         for origin in known {
                             if !origins.contains(origin) { origins.push(origin.clone()); }
                         }
@@ -520,12 +533,16 @@ impl TypeChecker {
                         return;
                     }
                 }
-                if let Some(base) = base { self.collect_evaluated_operand_origins(base, &mut origins); }
+                if let Some(base) = base {
+                    complete &= self.observed_operand_type(base).is_some_and(|ty|
+                        !self.carries_stored_loan(&ty) || self.observed_known_owned_payload(base));
+                    self.collect_evaluated_operand_origins(base, &mut origins);
+                }
             }
             _ => return,
         }
         if !self.carries_stored_loan(ty) { origins.clear(); }
-        self.record_evaluated_origins(value.span, Some(origins));
+        self.record_owned_value_origins(value.span, Some(origins), complete);
     }
 
     /// A call result may carry any evaluated input or callable capture unless
@@ -1207,7 +1224,6 @@ impl TypeChecker {
         &'static verum_vbc::intrinsics::registry::Intrinsic,
         List<usize>,
     )> {
-        use verum_ast::{FunctionParamKind, PatternKind};
         let (_, source) = self.type_registry.callable_declaration(span)?;
         if !source.contexts.is_empty()
             || source.is_async
@@ -1231,17 +1247,7 @@ impl TypeChecker {
         }
         let mut positions = List::new();
         for arg in args {
-            let ExprKind::Path(path) = &unparen(arg).kind else {
-                return None;
-            };
-            let name = path.as_ident()?;
-            let position = source.params.iter().position(|param| {
-                matches!(&param.kind,
-                FunctionParamKind::Regular { pattern, default_value: None, .. }
-                    if param.attributes.is_empty() && matches!(&pattern.kind,
-                        PatternKind::Ident { name: formal, by_ref: false, subpattern: None, .. }
-                            if formal.name == name.name))
-            })?;
+            let position = super::callable_properties::forwarded_parameter_index(source, arg)?;
             if positions.contains(&position) {
                 return None;
             }
@@ -1363,6 +1369,69 @@ impl TypeChecker {
             return None;
         }
         self.slot_value_origins(args.get(*owner)?, &element, take)
+    }
+
+    /// A registered exchange returns the old value already present in its
+    /// destination. A reference in that value keeps its original referent.
+    /// The mutable borrow of the slot itself lasts only through the call.
+    fn exchanged_slot(
+        &mut self,
+        span: verum_ast::Span,
+        args: &[Expr],
+        params: &[Type],
+        result: &Type,
+    ) -> Option<(RecordReceiver, Type, Option<usize>)> {
+        let (slot, replacement) = self.exchange_parameters(span)?;
+        if args.len() != params.len() || args.iter().any(|arg| self.deref_adjustments.contains_key(&arg.span)) {
+            return None;
+        }
+        let Type::Reference { mutable: true, inner } = self.place_reference_head(params.get(slot)?, span).ok()?
+            else { return None; };
+        if !self.types_equivalent(&inner, result) || inner.contains_type(|ty|
+            matches!(ty, Type::Unknown | Type::Placeholder { .. }))
+        {
+            return None;
+        }
+        let argument = unparen(args.get(slot)?);
+        let origin = if let ExprKind::Unary { op: UnOp::RefMut, expr } = &argument.kind {
+            let place = unparen(expr);
+            match &place.kind {
+                ExprKind::Path(path) => self.ctx.env.record_source(path.as_ident()?.as_str(), false)?,
+                ExprKind::Field { expr: owner, field } => {
+                    let (mut origin, ty) = self.call_input_place(owner)?;
+                    let field_ty = self.lookup_field_type(&self.record_conversion_head(&ty), &field.name)?;
+                    let field_ty = self.unifier.try_apply(&field_ty, field.span).ok()?;
+                    if !self.types_equivalent(&field_ty, &inner) { return None; }
+                    origin.fields.push(field.name.clone());
+                    origin
+                }
+                _ => return None,
+            }
+        } else {
+            self.reference_result_origin(argument)?
+        };
+        if !self.ctx.env.storage_has_payload_origins(origin.binding)
+            || !self.check_payload_origin_observation(&origin)
+        {
+            return None;
+        }
+        Some((origin, *inner, replacement))
+    }
+
+    pub(super) fn observe_value_exchange(
+        &mut self, span: verum_ast::Span, args: &[Expr], params: &[Type], result: &Type,
+    ) -> crate::Result<Option<bool>> {
+        let Some((destination, element, replacement)) = self.exchanged_slot(span, args, params, result) else {
+            return Ok(None);
+        };
+        let Some(old) = self.ctx.env.referent_value_origins(&destination) else { return Ok(None) };
+        // Capture the old contents before retaining any loan in the new value.
+        self.record_owned_value_origins(span, Some(old), true);
+        let accounted_for = match replacement.and_then(|index| args.get(index)) {
+            Some(value) => self.retain_slot_payload_at(destination, value, &element, span)?,
+            None => false,
+        };
+        Ok(Some(accounted_for))
     }
 
     pub(super) fn check_slot_read(
@@ -1544,6 +1613,12 @@ impl TypeChecker {
         else {
             return Ok(false);
         };
+        self.retain_slot_payload_at(destination, value, element, span)
+    }
+
+    fn retain_slot_payload_at(
+        &mut self, destination: RecordReceiver, value: &Expr, element: &Type, span: verum_ast::Span,
+    ) -> crate::Result<bool> {
         // Installing a slot does not read any other slot. An earlier unknown
         // write keeps its evidence boundary until the contents are observed.
         if self.carries_stored_loan(element)

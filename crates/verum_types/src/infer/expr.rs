@@ -7896,16 +7896,18 @@ impl TypeChecker {
                 }
             }
         }
-        let slot_origins = self.imported_slot_read_origins(expr.span, args, &params, &resolved_return);
-        let reads_known_slot = slot_origins.is_some();
-        if let Some(origins) = slot_origins {
+        let known_writes = if let Some(origins) = self.imported_slot_read_origins(expr.span, args, &params, &resolved_return) {
             self.record_owned_value_origins(expr.span, Some(origins), true);
+            true
+        } else if let Some(known) = self.observe_value_exchange(expr.span, args, &params, &resolved_return)? {
+            known
         } else {
             self.observe_call_result_origins(
                 expr.span, &resolved_return, args, Some(&params), Some(func), None, precise_origins,
             )?;
-        }
-        if !preserves_input_payloads && !reads_known_slot && !self.retain_known_slot_write(expr.span, args, &params)? {
+            false
+        };
+        if !preserves_input_payloads && !known_writes && !self.retain_known_slot_write(expr.span, args, &params)? {
             self.retain_possible_call_writes(args, Some(&params), Some(func), None)?;
         }
         Ok(InferResult::new(resolved_return))

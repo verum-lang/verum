@@ -43,6 +43,24 @@ pub(super) fn direct_intrinsic_body(
     (args.len() == usize::from(selected.param_count) + 1).then(|| (selected, &args.as_slice()[1..]))
 }
 
+/// Resolve a forwarded value by its unique lexical parameter binding.
+pub(super) fn forwarded_parameter_index(function: &FunctionDecl, mut value: &Expr) -> Option<usize> {
+    while let ExprKind::Paren(inner) = &value.kind {
+        value = inner;
+    }
+    let ExprKind::Path(path) = &value.kind else { return None };
+    let name = &path.as_ident()?.name;
+    let mut matches = function.params.iter().enumerate().filter(|(_, parameter)| {
+        matches!(&parameter.kind,
+            verum_ast::FunctionParamKind::Regular { pattern, default_value: None, .. }
+                if parameter.attributes.is_empty() && matches!(&pattern.kind,
+                    PatternKind::Ident { name: formal, by_ref: false, subpattern: None, .. }
+                        if &formal.name == name))
+    });
+    let index = matches.next()?.0;
+    matches.next().is_none().then_some(index)
+}
+
 pub(super) fn owned_slot_body_result(declaration: &FunctionDecl) -> Option<Type> {
     direct_intrinsic_body(declaration)?
         .0
@@ -467,6 +485,81 @@ impl TypeChecker {
             FunctionBody::Expr(expression) => Some(expression),
             _ => None,
         }
+    }
+
+    /// Identify the borrowed input whose previous contents a selected exchange
+    /// returns. A forwarding call has to resolve in the declaring module and
+    /// its other operand must be independent of the slot being handed over.
+    pub(super) fn exchange_parameters(&self, span: Span) -> Option<(usize, Option<usize>)> {
+        use verum_ast::{FunctionParamKind, ty::TypeKind};
+        use verum_vbc::intrinsics::registry::{CodegenStrategy, InlineSequenceId};
+
+        fn ordinary(function: &FunctionDecl) -> bool {
+            !has_implicit_call_computation(function) && !function.is_unsafe && !function.is_meta
+                && !function.is_variadic && function.throws_clause.is_none()
+                && function.attributes.iter().all(|attr| attr.name.as_str() == "inline")
+        }
+        fn input_type(function: &FunctionDecl, index: usize) -> Option<&verum_ast::Type> {
+            match &function.params.get(index)?.kind {
+                FunctionParamKind::Regular { ty, .. } => Some(ty), _ => None,
+            }
+        }
+        fn generic_name(ty: &verum_ast::Type) -> Option<&Text> {
+            let TypeKind::Path(path) = &ty.kind else { return None; };
+            Some(&path.as_ident()?.name)
+        }
+        fn value_type(function: &FunctionDecl, slot: usize) -> Option<&Text> {
+            let TypeKind::Reference { mutable: true, inner } = &input_type(function, slot)?.kind
+                else { return None; };
+            let result = generic_name(function.return_type.as_ref()?)?;
+            (generic_name(inner)? == result && function.generics.iter().any(|param|
+                matches!(&param.kind, verum_ast::ty::GenericParamKind::Type { name, .. } if name.name == *result)))
+                .then_some(result)
+        }
+        fn direct(function: &FunctionDecl) -> Option<(usize, usize)> {
+            if !ordinary(function) || function.params.len() != 2 { return None; }
+            let (operation, [destination, incoming]) = direct_intrinsic_body(function)? else { return None; };
+            if !matches!(operation.strategy, CodegenStrategy::InlineSequence(InlineSequenceId::Replace)) {
+                return None;
+            }
+            let slot = forwarded_parameter_index(function, destination)?;
+            let value = forwarded_parameter_index(function, incoming)?;
+            (slot != value && generic_name(input_type(function, value)?)? == value_type(function, slot)?)
+                .then_some((slot,value))
+        }
+
+        let (owner, function) = self.type_registry.callable_declaration(span)?;
+        if let Some((slot, value)) = direct(function) { return Some((slot, Some(value))); }
+        if !ordinary(function) { return None; }
+        let forwarded = Self::source_forwarding_expression(function)?;
+        let ExprKind::Call { func, args, type_args } = &forwarded.kind
+            else { return None; };
+        if !type_args.is_empty() || args.len() != 2 || forwarded_parameter_index(function, func).is_some() {
+            return None;
+        }
+        let ExprKind::Path(path) = &func.kind else { return None; };
+        let (destination, incoming) = match self.type_registry.callable_declaration(forwarded.span) {
+            Some((_, leaf)) => direct(leaf)?,
+            None => {
+                let (_, leaf) = self.source_function_for_properties(owner, &path.as_ident()?.name)?;
+                direct(leaf.declaration())?
+            }
+        };
+        let slot = forwarded_parameter_index(function, args.get(destination)?)?;
+        let stored = value_type(function, slot)?;
+        let replacement = args.get(incoming)?;
+        if let Some(value) = forwarded_parameter_index(function, replacement) {
+            return (function.params.len() == 2 && value != slot
+                && generic_name(input_type(function, value)?)? == stored)
+                .then_some((slot, Some(value)));
+        }
+        let ExprKind::MethodCall { receiver, args, type_args, .. } = &replacement.kind else {
+            return None;
+        };
+        (function.params.len() == 1 && args.is_empty() && type_args.is_empty()
+            && matches!(&receiver.kind, ExprKind::Path(path)
+                if path.as_ident().is_some_and(|name| &name.name == stored))
+            && forwarded_parameter_index(function, receiver).is_none()).then_some((slot, None))
     }
 
     fn direct_intrinsic_operands(expression: &Expr) -> Option<(PropertyRequirement, &[Expr])> {

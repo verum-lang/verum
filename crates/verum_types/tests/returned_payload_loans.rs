@@ -37,6 +37,63 @@ fn copied_payload_return_does_not_borrow_the_local_container_or_lookup_key() {
 }
 
 #[test]
+fn a_typed_exchange_returns_the_previous_slots_contents() {
+    let declarations = r#"
+        type Holder<T> is { public value:T, public marker:Int };
+        fn exchange<T>(slot:&mut T, replacement:T)->T { @intrinsic("replace",slot,replacement) }
+        fn forward<T>(replacement:T, slot:&mut T)->T { exchange(slot,replacement) }
+    "#;
+    for operation in ["exchange(&mut stored.value,replacement)", "forward(replacement,&mut stored.value)"] {
+        let generic = format!("fn extract<T>(mut stored:Holder<T>, replacement:T)->T {{ {operation} }}");
+        let errors = diagnostics(declarations, &generic);
+        assert!(errors.is_empty(), "{generic}: {errors:?}");
+        let caller = format!("fn extract(input:&Int,replacement:&Int)->&Int {{
+            let mut stored=Holder{{value:input,marker:3}}; {operation}
+        }}");
+        let errors = diagnostics(declarations, &caller);
+        assert!(errors.is_empty(), "{caller}: {errors:?}");
+        let caller = format!("fn escape(replacement:&Int)->&Int {{
+            let local=4; let mut stored=Holder{{value:&local,marker:3}}; {operation}
+        }}");
+        let errors = diagnostics(declarations, &caller);
+        assert!(errors.iter().any(|error| error.contains("local")
+            && error.contains("does not live long enough")), "{caller}: {errors:?}");
+    }
+}
+
+#[test]
+fn an_exchanging_signature_cannot_return_a_local_storage_address() {
+    let errors = diagnostics(
+        "type Holder<T> is { public value:T, public marker:Int };
+         fn exchange<T>(slot:&mut Holder<T>, replacement:T)->&Int { &slot.marker }",
+        "fn escape(mut stored:Holder<Int>)->&Int { exchange(&mut stored,7) }",
+    );
+    assert!(errors.iter().any(|error| error.contains("stored")
+        && error.contains("does not live long enough")), "{errors:?}");
+}
+
+#[test]
+fn a_forwarder_cannot_substitute_an_unrelated_value_for_the_old_slot() {
+    let errors = diagnostics(
+        "fn exchange<T>(slot:&mut T, replacement:T)->T { replacement }
+         fn forward<T>(slot:&mut T, replacement:T)->T { exchange(slot,replacement) }",
+        "fn escape(slot:&mut &Int)->&Int { let local=7; forward(slot,&local) }",
+    );
+    assert!(errors.iter().any(|error| error.contains("local") &&
+        error.contains("does not live long enough")), "{errors:?}");
+}
+
+#[test]
+fn exchanging_a_value_cannot_install_a_local_loan_in_caller_storage() {
+    let errors = diagnostics(
+        "fn exchange<T>(slot:&mut T, new_value:T)->T { @intrinsic(\"replace\",slot,new_value) }",
+        "fn install(slot:&mut &Int) { let local=5; let old=exchange(slot,&local); }",
+    );
+    assert!(errors.iter().any(|error| error.contains("local") &&
+        (error.contains("does not live long enough") || error.contains("shorter"))), "{errors:?}");
+}
+
+#[test]
 fn a_borrowed_receiver_can_return_its_own_type_with_different_provenance() {
     let declaration = "type Duplicate is protocol {fn duplicate(&self)->Self;};";
     let caller = "fn receive(input:&Int)->Payload {
