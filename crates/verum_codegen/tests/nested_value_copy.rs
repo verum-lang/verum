@@ -356,6 +356,23 @@ fn run_native(source: &str) {
 }
 
 #[test]
+fn native_match_transfers_an_owned_field_and_retires_its_sibling() {
+    run_native(r#"
+        type Item is { value: Int };
+        type Pair is Empty | Ready(Item, Item);
+        fn produce() -> Pair { Pair.Ready(Item { value: 73 }, Item { value: 9 }) }
+        fn first() -> Item {
+            match produce() {
+                Pair.Ready(_, other) if false => other,
+                Pair.Ready(selected, _) => selected,
+                _ => panic("expected a pair"),
+            }
+        }
+        fn main() -> Int { let value = first(); value.value }
+    "#);
+}
+
+#[test]
 fn native_packed_array_copy_preserves_encoding_and_ownership() {
     run_native(include_str!("../../verum_vbc/tests/fixtures/packed_array_copy.vr"));
 }

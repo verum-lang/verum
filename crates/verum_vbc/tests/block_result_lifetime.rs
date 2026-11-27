@@ -50,6 +50,7 @@ fn make(counter: &mut Count) -> Watch {
     let value = Watch { counter, digit: 1 };
     value
 }
+
 fn probe() -> Int {
     let mut counter = Count { value: 0 };
     { let value = make(&mut counter); if counter.value != 0 { return 99; } }
@@ -324,4 +325,31 @@ fn probe() -> Int {
     }
 }
 "#), 11);
+}
+
+#[test]
+fn forwarding_a_temporary_sum_field_keeps_its_sibling_cleanup() {
+    let value = run(r#"
+type Packet is Empty | Pair(Watch, Watch);
+fn make(first: &mut Count, second: &mut Count) -> Packet {
+    Packet.Pair(Watch { counter: first, digit: 1 }, Watch { counter: second, digit: 2 })
+}
+fn select_first(first: &mut Count, second: &mut Count) -> Watch {
+    match make(first, second) {
+        Packet.Pair(_, other) if false => other,
+        Packet.Pair(chosen, _) => chosen,
+        _ => panic("expected a pair"),
+    }
+}
+fn probe() -> Int {
+    let mut first = Count { value: 0 };
+    let mut second = Count { value: 0 };
+    {
+        let selected = select_first(&mut first, &mut second);
+        if first.value != 0 || second.value != 2 { return 0; }
+    }
+    first.value * 10 + second.value
+}
+"#);
+    assert_eq!(value, 12);
 }

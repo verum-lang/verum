@@ -19903,6 +19903,13 @@ impl VbcCodegen {
         let scrutinee_type = self.declared_expression_result(
             scrutinee, Some(scrutinee_reg), scrutinee_start, self.ctx.instructions.len(),
         );
+        // A by-value call owns its result. Only structural sums can surrender
+        // a field: a custom destructor may inspect every field of its receiver.
+        let owns_sum = matches!(Self::normalized_place(scrutinee).kind,
+            ExprKind::Call { .. } | ExprKind::MethodCall { .. })
+            && scrutinee_type.as_ref().and_then(crate::types::TypeRef::base_type_id)
+                .and_then(|id| self.type_by_id(id)).is_some_and(|ty| ty.kind == crate::types::TypeKind::Sum
+                && ty.drop_fn.is_none() && !ty.is_transparent_wrapper);
 
         // Record the scrutinee's static type (+ tuple element types, +
         // Heap<T>/Shared<T> unwrap) for the payload-type inference in
@@ -19935,6 +19942,7 @@ impl VbcCodegen {
             // This ensures pattern-bound variables (like `v` in `Some(v)`) are
             // available when evaluating the guard expression.
             self.ctx.enter_scope();
+            let bind_start = self.ctx.instructions.len();
             self.compile_pattern_bind_from_expr(&arm.pattern, scrutinee_reg, scrutinee)?;
 
             // Check guard if present (pattern variables are now available)
@@ -19953,8 +19961,13 @@ impl VbcCodegen {
 
             // Compile arm body
             let arm_start = self.ctx.instructions.len();
+            let field = (owns_sum && demand.is_used() && arm.guard.is_none())
+                .then(|| self.forwarded_variant_field(&arm.body, scrutinee_reg, bind_start, arm_start))
+                .flatten();
+            let arm_demand = demand.for_branch();
+            let arm_demand = if field.is_some() { arm_demand.for_transferred_value() } else { arm_demand };
             let arm_result = self.with_forwarded_result(span, Self::normalized_place(&arm.body).span, |cg|
-                cg.compile_expr_with_demand(&arm.body, demand.for_branch()))?;
+                cg.compile_expr_with_demand(&arm.body, arm_demand))?;
             let arm_type = self.declared_expression_result(
                 &arm.body, arm_result, arm_start, self.ctx.instructions.len(),
             );
@@ -19970,6 +19983,16 @@ impl VbcCodegen {
                     dst: result,
                     src: reg,
                 });
+                if let Some(field) = field {
+                    // Typed cleanup already treats Unit as a retired slot. The
+                    // temporary still owns its shell and every sibling field.
+                    let retired = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::LoadUnit { dst: retired });
+                    self.ctx.emit(Instruction::SetVariantData {
+                        variant: scrutinee_reg, field, value: retired,
+                    });
+                    self.ctx.free_temp(retired);
+                }
             } else {
                 self.ctx.emit(Instruction::LoadUnit { dst: result });
             }
@@ -20011,6 +20034,32 @@ impl VbcCodegen {
         self.retire_observed_operand(scrutinee, scrutinee_reg, scrutinee_type.as_ref());
 
         Ok(Some(result))
+    }
+
+    /// Trace the selected binding back through this arm's emitted reads.
+    /// Aliases, nested projections and computations do not transfer a field.
+    fn forwarded_variant_field(&self, body: &Expr, owner: Reg, start: usize, end: usize) -> Option<u32> {
+        let binding = self.ctx.lookup_var(Self::named_place_binding(body)?)?;
+        if binding.pattern_alias != Some(super::registers::PatternAlias::Scrutinee)
+            || !self.ctx.registers.value_uses.active.get(&binding.reg)
+                .and_then(|fact| fact.declaration_type.as_ref())
+                .is_some_and(|field| self.declaration_requires_drop(field))
+        {
+            return None;
+        }
+        let mut source = binding.reg;
+        for instruction in self.ctx.instructions.get(start..end)?.iter().rev() {
+            match instruction {
+                Instruction::Mov { dst, src } => {
+                    if *dst == source { source = *src; }
+                }
+                Instruction::GetVariantData { dst, variant, field } => {
+                    if *dst == source { return (*variant == owner).then_some(*field); }
+                }
+                _ => return None,
+            }
+        }
+        None
     }
 
     /// Preserve the type of each tuple component, including nested literals.

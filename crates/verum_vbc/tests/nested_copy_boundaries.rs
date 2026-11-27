@@ -82,6 +82,45 @@ fn text_payload_copies_survive_the_original_parameter_cleanup() {
 }
 
 #[test]
+fn a_sum_destructor_observes_its_original_field_after_matching_a_temporary() {
+    run(r#"
+        mount core.base.protocols.Drop;
+        type Packet is Empty | Data(Text);
+        implement Drop for Packet {
+            fn drop(&mut self) {
+                match self {
+                    Packet.Data(text) => assert(text.len() == 12),
+                    _ => {},
+                }
+            }
+        }
+        fn packet() -> Packet { Packet.Data("payload text") }
+        fn extract() -> Text {
+            match packet() { Packet.Data(text) => text, _ => "" }
+        }
+        fn probe() -> Int {
+            let text = extract();
+            if text == "payload text" { 73 } else { 0 }
+        }
+    "#);
+}
+
+#[test]
+fn forwarding_a_field_from_a_named_sum_preserves_both_values() {
+    run(r#"
+        type Packet is Empty | Data(Text);
+        fn probe() -> Int {
+            let owner = Packet.Data("payload text");
+            let result = match owner { Packet.Data(text) => text, _ => "" };
+            match owner {
+                Packet.Data(original) => if original == result && result == "payload text" { 73 } else { 0 },
+                _ => 0,
+            }
+        }
+    "#);
+}
+
+#[test]
 fn assignment_preserves_nested_ownership() {
     run(r#"
         type Leaf is { value: Int };

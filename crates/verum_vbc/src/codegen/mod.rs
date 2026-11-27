@@ -734,6 +734,15 @@ impl ResultDemand {
             Self::Discarded
         }
     }
+
+    /// The producer transfers the only ownership obligation across this edge.
+    fn for_transferred_value(self) -> Self {
+        match self {
+            Self::Branch { callable_return: true } => Self::CallableReturn,
+            Self::Branch { callable_return: false } => Self::Used,
+            demand => demand,
+        }
+    }
 }
 
 type ConstantScope = std::sync::Arc<std::collections::HashMap<String, FunctionInfo>>;
@@ -20438,8 +20447,18 @@ impl VbcCodegen {
 
         // Compile trailing expression
         if let Some(ref expr) = block.expr {
+            // The outgoing scope already hands this exact local to its
+            // consumer and omits its destructor. A branch must not clone it
+            // first; cells, pattern views and outer bindings retain their owner.
+            let owned_tail = matches!(demand, ResultDemand::Branch { .. })
+                && !self.ctx.has_pending_defers()
+                && Self::named_place_binding(expr).and_then(|name| self.ctx.lookup_var(name))
+                    .is_some_and(|binding| binding.kind == RegisterKind::Local
+                        && binding.scope_level == self.ctx.registers.scope_level()
+                        && !binding.is_cell && binding.pattern_alias.is_none());
+            let tail_demand = if owned_tail { demand.for_transferred_value() } else { demand };
             result = self.with_forwarded_result(block.span, Self::normalized_place(expr).span, |cg|
-                cg.compile_expr_with_demand(expr, demand))?;
+                cg.compile_expr_with_demand(expr, tail_demand))?;
         }
 
         // T1506: preserve the result while its binding is still in scope.
