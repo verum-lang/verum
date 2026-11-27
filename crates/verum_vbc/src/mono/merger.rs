@@ -314,8 +314,8 @@ impl ModuleMerger {
         // converted back to byte form by its fixup pass).
         Self::reencode_bytecode(&mut output);
 
-        // Step 6: Update module flags
-        output.update_flags();
+        // The merged module is executable before serialization.
+        output.finalize_header();
 
         // Step 7: Compute final statistics
         self.stats.bytecode_after = output.bytecode.len();

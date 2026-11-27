@@ -94,10 +94,13 @@ fn positive(nested: bool, borrowed: bool) {
         !ops.iter().any(|op| matches!(op, I::CallM { .. })),
         "no unresolved from_value: {ops:?}"
     );
-    let value = verum_vbc::interpreter::Interpreter::new(std::sync::Arc::new(result))
-        .execute_function(entry)
-        .unwrap();
-    assert_eq!(value.as_i64(), 7);
+    let bytes = verum_vbc::serialize::serialize_module(&result).unwrap();
+    let decoded = verum_vbc::deserialize::deserialize_module(&bytes).unwrap();
+    for module in [result, decoded] {
+        let mut vm = verum_vbc::interpreter::Interpreter::try_new_validated(std::sync::Arc::new(module))
+            .expect("the specialized module must validate at its execution boundary");
+        assert_eq!(vm.execute_function(entry).unwrap().as_i64(), 7);
+    }
 }
 #[test]
 fn source_field_argument_keeps_the_concrete_type_method_target() {

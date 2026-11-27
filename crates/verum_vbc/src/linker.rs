@@ -723,11 +723,7 @@ impl VbcLinker {
     /// Consume the linker, return the merged output module ready for
     /// the interpreter or AOT lowering.
     pub fn finalize(mut self) -> VbcModule {
-        // The in-memory output is a complete module before serialization.
-        self.out.header.type_table_count = self.out.types.len() as u32;
-        self.out.header.function_table_count = self.out.functions.len() as u32;
-        self.out.header.constant_pool_count = self.out.constants.len() as u32;
-        self.out.update_flags();
+        self.out.finalize_header();
         self.out.resolve_external_bands();
         self.out
     }

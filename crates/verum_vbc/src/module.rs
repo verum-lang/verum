@@ -2554,6 +2554,15 @@ impl VbcModule {
         }
     }
 
+    /// Publish the in-memory section counts and feature flags after a producer
+    /// finishes building or transforming the module.
+    pub(crate) fn finalize_header(&mut self) {
+        self.header.type_table_count = self.types.len() as u32;
+        self.header.function_table_count = self.functions.len() as u32;
+        self.header.constant_pool_count = self.constants.len() as u32;
+        self.update_flags();
+    }
+
     /// Updates module flags based on content.
     pub fn update_flags(&mut self) {
         // Preserve profile flags that were set via set_profile_flags

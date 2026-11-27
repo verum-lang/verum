@@ -24536,9 +24536,6 @@ impl VbcCodegen {
             self.config.is_embedded,
         );
 
-        // Update auto-detected flags (preserves profile flags)
-        module.update_flags();
-
         // Transfer static init functions as global constructors (with remapped IDs)
         for func_id in &self.static_init_functions {
             let new_id = func_id_remap.get(&func_id.0).copied().unwrap_or(func_id.0);
@@ -24561,18 +24558,6 @@ impl VbcCodegen {
         }
         module.field_id_to_name = id_to_name;
         module.type_field_layouts = self.type_field_layouts.clone();
-
-        // Sync header table-counts with the populated module sections.
-        // The validator's `validate_header` step compares
-        // `header.<table>_count` to `module.<table>.len()` and rejects
-        // any mismatch.  Without this sync, every non-empty
-        // codegen-built module fails opt-in validation purely on
-        // header-vs-section drift — orthogonal to the actual bytecode
-        // structure.  Mirrors what `serialize::write_module` computes
-        // implicitly at write-time.
-        module.header.type_table_count = module.types.len() as u32;
-        module.header.function_table_count = module.functions.len() as u32;
-        module.header.constant_pool_count = module.constants.len() as u32;
 
         // Materialise the cross-module call name table (collected
         // above into `external_pending` while `func_id_remap` was in
@@ -24748,6 +24733,7 @@ impl VbcCodegen {
             crate::source_declaration_integrity::validate_type_descriptor_diagnostic(descriptor, &module.strings)
                 .map_err(CodegenError::from)?;
         }
+        module.finalize_header();
         Ok(module)
     }
 
