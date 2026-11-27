@@ -98,7 +98,6 @@ fn execute_with_runtime(
     let mut vbc = VbcCodegen::new().compile_module(&ast).expect("VBC");
     // Match native source execution: concrete calls select their declared
     // specialization before lowering, including the callee's typed cleanup.
-    let mut graph = verum_vbc::mono::InstantiationGraph::new();
     for function in &mut vbc.functions {
         function.is_generic = !function.type_params.is_empty();
         let start = function.bytecode_offset as usize;
@@ -108,11 +107,7 @@ fn execute_with_runtime(
         verum_vbc::bytecode::jump_offsets_to_instr_indices(&mut instructions);
         function.instructions = Some(instructions);
     }
-    for function in &vbc.functions {
-        verum_vbc::mono::discover_call_instantiations(
-            &vbc, function.instructions.as_ref().unwrap(), function.func_id_base, &mut graph,
-        ).expect("declared call witnesses");
-    }
+    let graph = verum_vbc::mono::module_instantiations(&vbc).expect("declared call witnesses");
     let vbc = verum_vbc::mono::monomorphize_minimal(vbc, &graph)
         .expect("specialized source module").module;
     let context = Context::create();
@@ -546,4 +541,38 @@ fn inferred_scalar_local_and_forwarded_reference_keep_their_own_storage() {
     let (result, fields) = execute(source, 1, 2, true);
     assert_eq!(result, 10);
     assert_eq!(&fields[3..], &[1, 5]);
+}
+
+#[test]
+fn a_value_slot_borrow_passes_the_stored_record_to_an_object_reader() {
+    let source = r#"
+        type Holder<T> is { address: &unsafe mut T };
+        type Cell is { padding: Int, value: Int };
+        implement<T> Holder<T> {
+            fn borrow(&self) -> &T { unsafe { &*self.address } }
+        }
+        fn inspect_cell(cell: &Cell) -> Int { cell.value }
+        fn probe(holder: &Holder<Cell>, unused: Bool) -> Int { inspect_cell(holder.borrow()) }
+    "#;
+    let cell = [0_i64, 0, 0, 11, 73];
+    // The first word is the slot's payload. Distinct remaining fields make an
+    // unadapted read of the slot as a record produce a defined wrong answer.
+    let storage = [cell.as_ptr() as i64, 0, 0, 17, 23];
+    let (value, _) = execute(source, storage.as_ptr() as i64, 0, false);
+    assert_eq!(value, 73);
+}
+
+#[test]
+fn a_value_slot_borrow_preserves_the_address_for_scalar_dereference() {
+    let source = r#"
+        type Holder<T> is { address: &unsafe mut T };
+        implement<T> Holder<T> {
+            fn borrow(&self) -> &T { unsafe { &*self.address } }
+        }
+        fn inspect_number(value: &Int) -> Int { *value }
+        fn probe(holder: &Holder<Int>, unused: Bool) -> Int { inspect_number(holder.borrow()) }
+    "#;
+    let scalar = 37_i64;
+    let (value, _) = execute(source, &scalar as *const i64 as i64, 0, false);
+    assert_eq!(value, 37);
 }

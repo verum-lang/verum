@@ -28328,9 +28328,15 @@ fn lower_mem_extended<'ctx>(
             let dst_reg = op_reg(operands, 0);
             let ptr_reg = op_reg(operands, 1);
             let val = ctx.get_register(ptr_reg)?;
+            let preloaded = ctx.is_pass_through_ref(ptr_reg);
             ctx.set_register(dst_reg, val);
-            if ctx.is_pass_through_ref(ptr_reg) {
+            if preloaded {
                 ctx.mark_pass_through_ref(dst_reg);
+            } else {
+                // Native DerefValue forwards the address of a Value-sized slot.
+                // A record consumer needs its contained handle, while a scalar
+                // dereference or a writable borrower still uses the address.
+                ctx.record_reference_site(super::native_call::ReferenceSiteKind::SlotOutput(dst_reg));
             }
             if ctx.is_list_register(ptr_reg) {
                 ctx.mark_list_register(dst_reg);

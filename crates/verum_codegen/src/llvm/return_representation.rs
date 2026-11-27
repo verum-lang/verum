@@ -809,6 +809,20 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                     may_write = true;
                     state.invalidate_storage();
                 }
+                I::MemExtended { sub_op, operands } if *sub_op == Mem::DerefValue as u8 => {
+                    let mut cursor = 0;
+                    let mut operand = || verum_vbc::encoding::decode_reg(operands, &mut cursor);
+                    let (Ok(dst), Ok(source)) = (operand(), operand()) else {
+                        return BodyFacts::unknown(instructions.len());
+                    };
+                    if cursor != operands.len() {
+                        return BodyFacts::unknown(instructions.len());
+                    }
+                    use_input(source, 2, &state);
+                    let slot = sites.get(&pc).is_some_and(|sites|
+                        sites.contains(&ReferenceSiteKind::SlotOutput(dst.0)));
+                    write = Some((dst, if slot { R::Slot } else { R::Unknown }));
+                }
                 I::MemExtended { sub_op, operands } if matches!(
                     Mem::from_byte(*sub_op),
                     Some(Mem::ListStorageStride
