@@ -19715,10 +19715,9 @@ impl VbcCodegen {
                 owner = Some(inner);
             }
             match owner {
-                Some(TypeRef::Instantiated { base, args })
-                    if matches!(*base, TypeId::ARRAY | TypeId::LIST | TypeId::SET | TypeId::DEQUE) && args.len() == 1 => {
-                        args.first().cloned()
-                    }
+                Some(TypeRef::Instantiated { base, args }) if args.len() == 1
+                    && (*base == TypeId::ARRAY || matches!(self.declared_runtime_carrier(*base),
+                        Some(WKT::List | WKT::Set | WKT::Deque))) => args.first().cloned(),
                 Some(TypeRef::Array { element, .. } | TypeRef::Slice(element)) => Some(element.as_ref().clone()),
                 _ => None,
             }
