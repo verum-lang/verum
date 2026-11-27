@@ -516,20 +516,17 @@ extern {
     /// `size` is size_t (kept Int per file convention).
     fn getcwd(buf: &unsafe Byte, size: Int) -> &Byte;
 
-    /// Open directory
-    public fn opendir(name: &Byte) -> &unsafe DIR;
-
-    /// Read directory entry
-    // `&unsafe`, not `&`: C returns a RAW pointer into its own
-    // directory buffer, and a plain `&Dirent` is a Verum reference —
-    // dereferencing one over a C address reads the wrong bytes.
-    // `opendir` two lines up already declares `&unsafe DIR`; this was
-    // the only extern in the file returning a bare `&` to a RECORD
-    // type (the others return `&Byte`). T0916.
-    public fn readdir(dirp: &DIR) -> &unsafe Dirent;
+    @ffi_name("opendir")
+    fn opendir_native(name: *const Byte) -> *mut Byte;
+    @ffi_name("readdir")
+    fn readdir_native(dirp: *mut Byte) -> *const Byte;
+    @ffi_name("opendir$INODE64")
+    fn opendir_inode64(name: *const Byte) -> *mut Byte;
+    @ffi_name("readdir$INODE64")
+    fn readdir_inode64(dirp: *mut Byte) -> *const Byte;
 
     /// Close directory. C: `int closedir(DIR *dirp);`.
-    public fn closedir(dirp: &DIR) -> Int32;
+    fn closedir(dirp: *mut Byte) -> Int32;
 
     // =========================================================================
     // Filesystem Operations
@@ -625,7 +622,7 @@ extern {
     /// `&mut Int` would dereference 8 bytes including 4 bytes of unrelated
     /// adjacent TLS data; `&mut Int32` reads exactly the 4 bytes the C
     /// library writes.
-    fn __error() -> &mut Int32;
+    fn __error() -> *mut Int32;
 
     /// String error. C: `char *strerror(int errnum);`.
     fn strerror(errnum: Int32) -> &Byte;
@@ -918,33 +915,6 @@ public type DarwinSockaddrIn6 is {
     sin6_scope_id: UInt32,
 };
 
-/// DIR opaque type
-public type DIR is {
-    _opaque: [Byte; 1],
-};
-
-/// dirent structure
-///
-/// `@repr(C)` IS LOAD-BEARING, not documentation. `readdir` returns a
-/// pointer into C's own buffer, and codegen gives a reference-to-T the
-/// struct-pointer arm WITH A LAYOUT INDEX only when T is in
-/// `repr_c_types` (codegen/mod.rs:13688) — otherwise it takes the
-/// plain pointer arm, which is opaque and layout-free. Without the
-/// attribute `(*entry).d_namlen`
-/// reads through Verum's record layout over a C address, and the
-/// garbage length feeds `d_name[..name_len]`: the measured SIGSEGV in
-/// `ReadDir.next` (T0916). `opendir` is unaffected because `DIR` is
-/// opaque and never dereferenced.
-@repr(C)
-public type Dirent is {
-    d_ino: UInt64,
-    d_seekoff: UInt64,
-    d_reclen: UInt16,
-    d_namlen: UInt16,
-    d_type: UInt8,
-    d_name: [Byte; 1024],
-};
-
 /// sigaction structure
 public type Sigaction is {
     // Darwin exposes a union of native handler addresses, including SIG_DFL and SIG_IGN.
@@ -1201,44 +1171,16 @@ public const VM_FLAGS_RANDOM_ADDR: Int = 0x0008;
 // Safe Wrapper Functions
 // =============================================================================
 
-/// Get the last error number.
-///
-
-/// `__error()` returns `int *` (pointer to TLS errno slot). Verum-side
-/// declared as `&mut Int32` to match the C type precisely.
-///
-
-/// The deref `*__error()` is the load-bearing read. VBC's `Deref`
-/// instruction currently reads `sizeof(Value)=8` bytes regardless of
-/// the pointee type, so the 4-byte i32 errno slot leaks 4 bytes of
-/// adjacent TLS bookkeeping into the upper half (live evidence at
-/// `errno = 0x7E04ED1B 3000002F` — low 32 = real errno, high 32 =
-/// constant TLS leak). Tracked under task #26 (typed deref opcodes:
-/// `DerefI8`/`DerefI16`/`DerefI32`/…). Until that architectural fix
-/// lands, mask the leaked high bytes here.
-///
-
-/// errno values are always non-negative on POSIX (1..255 in practice),
-/// so a 32-bit zero-extending mask is the correct projection. When
-/// the typed-deref work lands the mask becomes redundant — the
-/// `&mut Int32` reference will read exactly four bytes by design.
+/// Read Darwin's thread-local C int.
 public fn errno() -> Int {
-    unsafe {
-        // BUG-#26 workaround: mask the upper 32 bits leaked by the
-        // Value-sized Deref read. errno is always non-negative, so
-        // zero-extension via the mask is the correct semantics.
-        (*__error() as Int) & 0xFFFFFFFF
-    }
+    let address = unsafe { __error() } as Int;
+    @intrinsic("load_i32", address)
 }
 
-/// Set the error number.
-///
-
-/// Writes the i32 errno slot via `*__error() = err as Int32`. The
-/// `DerefMut` write side is not affected by the read-side
-/// 8-vs-4-byte bug — `Int32` truncation happens before the write.
+/// Set Darwin's thread-local C int.
 public fn set_errno(err: Int) {
-    unsafe { *__error() = err as Int32; }
+    let address = unsafe { __error() } as Int;
+    let _ = @intrinsic("store_i32", address, err);
 }
 
 /// Copy the complete byte string, accepting an optional final NUL.
@@ -2016,58 +1958,55 @@ public fn safe_exit(status: Int32) -> ! {
 }
 
 // =============================================================================
-// Directory Streams — reachable wrappers
+// Directory streams
 // =============================================================================
-//
-// THESE ADD NO CHECKING, and the `safe_` prefix should not be read as
-// promising any. They exist because a name declared inside the
-// `@ffi("libSystem.B.dylib") extern { … }` block above (:39-649, 117
-// declarations) does not resolve through a cross-module `mount`.
-// `core/io/fs.vr` mounted `opendir` / `readdir` / `closedir` from here
-// directly and got, at check time,
-//
-//     error<E100>: unbound variable: sys_opendir
-//     error<E100>: unbound variable: sys_readdir
-//     error<E100>: unbound variable: sys_closedir
-//
-// and at run time the unresolved-callee sentinel
-// `Function 2147483647 not found`, so `read_dir` has never worked on
-// macOS (T0916).
-//
-// The rule is NOT the naming convention. `errno` (below) is mounted by
-// fs.vr without a `safe_` prefix and resolves, because it is a real
-// function declared outside the FFI block; and `DIR` / `Dirent` (:819,
-// :824) are mounted by the same statement and resolve for the same
-// reason. What makes a libsystem name reachable is being declared
-// outside `extern { }`, which is what these three wrappers provide.
-//
-// Callers keep their own null checks and path packing. Taking `&[Byte]`
-// and returning `Result` would be the better shape (rule 7 of
-// docs/architecture/ffi-byte-buffer-contract.md), but no wrapper in
-// this file returns a reference or a `Result<&…>`, so the signature
-// that can be VERIFIED today is the one that matches the extern.
 
-/// Open a directory stream. C: `DIR *opendir(const char *name);`.
-///
-/// Returns a null handle on failure; `errno()` carries the reason.
-/// `name` must already be NUL-terminated — see `copy_path_nul`.
-public fn safe_opendir(name: &Byte) -> &unsafe DIR {
-    unsafe { opendir(name) }
+// The SDK's 64-bit-inode declarations use suffixed symbols on x86_64.
+@cfg(target_arch = "aarch64")
+fn opendir(name: *const Byte) -> *mut Byte { unsafe { opendir_native(name) } }
+
+@cfg(target_arch = "x86_64")
+fn opendir(name: *const Byte) -> *mut Byte { unsafe { opendir_inode64(name) } }
+
+@cfg(target_arch = "aarch64")
+fn readdir(dirp: *mut Byte) -> *const Byte { unsafe { readdir_native(dirp) } }
+
+@cfg(target_arch = "x86_64")
+fn readdir(dirp: *mut Byte) -> *const Byte { unsafe { readdir_inode64(dirp) } }
+
+pub(in core) fn open_directory(path: &[Byte]) -> Result<*mut Byte, OSError> {
+    let mut path_buf: [Byte; 4096] = [0; 4096];
+    copy_path_nul(&mut path_buf, path)?;
+    let dirp = opendir(path_buf[..].as_ptr());
+    if (dirp as Int) == 0 {
+        let status = errno();
+        return Result.Err(OSError.new(status, errno_to_message(status)));
+    }
+    Result.Ok(dirp)
 }
 
-/// Read the next directory entry. C: `struct dirent *readdir(DIR *dirp);`.
-///
-/// Returns null at end of stream AND on error. As in C, the two are
-/// told apart by clearing `errno` before the call.
-public fn safe_readdir(dirp: &DIR) -> &unsafe Dirent {
-    unsafe { readdir(dirp) }
+// Darwin's 64-bit struct dirent begins with two UInt64s and two UInt16s.
+// The following byte is d_type, immediately followed by the inline C name.
+const DIRENT_TYPE_OFFSET: Int = 20;
+const DIRENT_NAME_OFFSET: Int = DIRENT_TYPE_OFFSET + 1;
+
+/// Copy the name and type while libSystem still owns this entry's buffer.
+pub(in core) fn read_directory_entry(handle: *mut Byte) -> Result<Maybe<(Text, UInt8)>, OSError> {
+    set_errno(0);
+    let entry = readdir(handle);
+    let address = entry as Int;
+    if address == 0 {
+        let status = errno();
+        if status == 0 { return Result.Ok(Maybe.None); }
+        return Result.Err(OSError.new(status, errno_to_message(status)));
+    }
+    let kind = @intrinsic("load_byte", address + DIRENT_TYPE_OFFSET) as UInt8;
+    let name = Text.from_cstr(unsafe { (address + DIRENT_NAME_OFFSET) as &unsafe Byte });
+    Result.Ok(Maybe.Some((name, kind)))
 }
 
-/// Close a directory stream. C: `int closedir(DIR *dirp);`.
-///
-/// Returns 0 on success, -1 on failure.
-public fn safe_closedir(dirp: &DIR) -> Int32 {
-    unsafe { closedir(dirp) }
+pub(in core) fn close_directory(handle: *mut Byte) {
+    unsafe { closedir(handle); }
 }
 
 // =============================================================================

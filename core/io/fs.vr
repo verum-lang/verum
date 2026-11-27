@@ -108,16 +108,8 @@ mount sys.darwin.libsystem.{
     safe_chmod as sys_chmod,
     safe_getcwd as sys_getcwd,
     safe_chdir as sys_chdir,
-    // The wrappers, not the extern declarations: a name inside
-    // libsystem's `@ffi(...) extern { }` block does not resolve
-    // through a cross-module mount (T0916).
-    safe_opendir as sys_opendir,
-    safe_readdir as sys_readdir,
-    safe_closedir as sys_closedir,
-    errno,
+    open_directory, read_directory_entry, close_directory,
     DarwinStat as SysStat,
-    Dirent,
-    DIR,
     O_RDONLY, O_WRONLY, O_CREAT, O_TRUNC, O_DIRECTORY,
 };
 @cfg(target_os = "macos")
@@ -515,7 +507,7 @@ public type ReadDir is {
     // Linux: file descriptor for getdents64
     fd: Int,
     // macOS: opendir handle
-    dir_handle: Int,
+    dir_handle: *mut Byte,
     base_path: PathBuf,
     buffer: [Byte; READDIR_BUFFER_SIZE],
     buffer_pos: Int,
@@ -547,7 +539,7 @@ implement Iterator for ReadDir {
                     }
                     Result.Err(e) => {
                         self.finished = true;
-                        return Maybe.Some(Result.Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }));
+                        return Maybe.Some(Result.Err(StreamError.with_message(io_error_kind_from_os_code(e.code), f"OS error {e.code}")));
                     }
                 }
             }
@@ -612,43 +604,38 @@ implement Iterator for ReadDir {
         }
 
         loop {
-            // The record stores the handle as `Int` so one shape serves
-            // both platforms (Linux keeps an fd here); cast back at the
-            // boundary. Before T0916 this line did not typecheck either —
-            // `E100: unbound variable` fired first and hid it.
-            let entry = unsafe { sys_readdir(self.dir_handle as &DIR) };
-            if entry.is_null() {
-                self.finished = true;
-                return Maybe.None;
+            match read_directory_entry(self.dir_handle) {
+                Result.Ok(Maybe.Some((name, d_type))) => {
+                    // Skip . and ..
+                    if name == "." || name == ".." {
+                        continue;
+                    }
+
+                    let file_type = match d_type {
+                        4 => FileType.Dir,     // DT_DIR
+                        8 => FileType.File,    // DT_REG
+                        10 => FileType.Symlink, // DT_LNK
+                        _ => FileType.Unknown,
+                    };
+
+                    let mut full_path = self.base_path.clone();
+                    full_path.push_str(&name);
+
+                    return Maybe.Some(Result.Ok(DirEntry {
+                        path: full_path,
+                        file_name: name,
+                        file_type: file_type,
+                    }));
+                },
+                Result.Ok(Maybe.None) => {
+                    self.finished = true;
+                    return Maybe.None;
+                },
+                Result.Err(e) => {
+                    self.finished = true;
+                    return Maybe.Some(Result.Err(StreamError.with_message(io_error_kind_from_os_code(e.code), e.message)));
+                },
             }
-
-            // Extract name from dirent
-            let name_len = unsafe { (*entry).d_namlen as Int };
-            let name_bytes = unsafe { &(*entry).d_name[..name_len] };
-            let name = Text.from_utf8_lossy(name_bytes);
-
-            // Skip . and ..
-            if name == "." || name == ".." {
-                continue;
-            }
-
-            // Determine file type from d_type
-            let d_type = unsafe { (*entry).d_type };
-            let file_type = match d_type {
-                4 => FileType.Dir,     // DT_DIR
-                8 => FileType.File,    // DT_REG
-                10 => FileType.Symlink, // DT_LNK
-                _ => FileType.Unknown,
-            };
-
-            let mut full_path = self.base_path.clone();
-            full_path.push_str(&name);
-
-            return Maybe.Some(Result.Ok(DirEntry {
-                path: full_path,
-                file_name: name,
-                file_type: file_type,
-            }));
         }
     }
 }
@@ -656,8 +643,9 @@ implement Iterator for ReadDir {
 @cfg(target_os = "macos")
 implement Drop for ReadDir {
     fn drop(&mut self) {
-        if !self.dir_handle.is_null() {
-            unsafe { sys_closedir(self.dir_handle as &DIR) };
+        if (self.dir_handle as Int) != 0 {
+            close_directory(self.dir_handle);
+            self.dir_handle = core.intrinsics.memory.null_ptr_mut();
         }
     }
 }
@@ -688,7 +676,7 @@ public fn metadata(path: &Path) -> IoResult<Metadata> {
             let raw = FsMetadataRaw.from_stat(&stat_buf, true);
             Result.Ok(Metadata { raw: raw })
         }
-        Result.Err(e) => Result.Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }),
+        Result.Err(e) => Result.Err(StreamError.with_message(io_error_kind_from_os_code(e.code), f"OS error {e.code}")),
     }
 }
 
@@ -703,7 +691,7 @@ public fn symlink_metadata(path: &Path) -> IoResult<Metadata> {
             let raw = FsMetadataRaw.from_stat(&stat_buf, false);
             Result.Ok(Metadata { raw: raw })
         }
-        Result.Err(e) => Result.Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }),
+        Result.Err(e) => Result.Err(StreamError.with_message(io_error_kind_from_os_code(e.code), f"OS error {e.code}")),
     }
 }
 
@@ -762,7 +750,7 @@ public fn create_dir(path: &Path) -> IoResult<()> {
 
     match sys_mkdir(path_bytes, mode) {
         Result.Ok(()) => Result.Ok(()),
-        Result.Err(e) => Result.Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }),
+        Result.Err(e) => Result.Err(StreamError.with_message(io_error_kind_from_os_code(e.code), f"OS error {e.code}")),
     }
 }
 
@@ -810,7 +798,7 @@ public fn remove_dir(path: &Path) -> IoResult<()> {
 
     match sys_rmdir(path_bytes) {
         Result.Ok(()) => Result.Ok(()),
-        Result.Err(e) => Result.Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }),
+        Result.Err(e) => Result.Err(StreamError.with_message(io_error_kind_from_os_code(e.code), f"OS error {e.code}")),
     }
 }
 
@@ -871,7 +859,7 @@ public fn read_dir(path: &Path) -> IoResult<ReadDir> {
                 // macOS-only handle; this is the Linux branch, and an
                 // omitted field is not a compile error on the annotated
                 // path today — it reads back as a float zero (T1367).
-                dir_handle: 0,
+                dir_handle: core.intrinsics.memory.null_ptr_mut(),
                 base_path: path.to_path_buf(),
                 buffer: [0; READDIR_BUFFER_SIZE],
                 buffer_pos: 0,
@@ -879,52 +867,19 @@ public fn read_dir(path: &Path) -> IoResult<ReadDir> {
                 finished: false,
             })
         }
-        Result.Err(e) => Result.Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }),
+        Result.Err(e) => Result.Err(StreamError.with_message(io_error_kind_from_os_code(e.code), f"OS error {e.code}")),
     }
 }
 
 @cfg(target_os = "macos")
 public fn read_dir(path: &Path) -> IoResult<ReadDir> {
-    let path_str = path.as_str();
-    let path_bytes = path_str.as_bytes();
-
-    // Null-terminate the path
-    // PACKED, not `[0_u8; N]`: the bare form is a NaN-boxed List of
-    // 8-byte-strided Value slots, and this buffer is handed to C.
-    let mut path_buf: [Byte; PATH_MAX_BYTES] = [0; PATH_MAX_BYTES];
-    let len = path_bytes.len().min(PATH_MAX_BYTES - 1);
-    path_buf[..len].copy_from_slice(&path_bytes[..len]);
-    path_buf[len] = 0;
-
-    // CALLED BY THE MOUNTED NAMES, which this file already imports
-    // (`opendir as sys_opendir`, `errno`) forty lines up.
-    //
-    // Spelled as the dotted path `sys.darwin.libsystem.opendir(…)` these
-    // two calls did not resolve — and nothing said so. An unresolved
-    // module-path call is accepted with an unknown type rather than
-    // reported, so the body could not be compiled and the bake shipped
-    // `read_dir` as a STUB. The failure surfaced only when a program
-    // called it:
-    //
-    //     Panic: [lenient] stage-5 qualified cross-module fn stub never
-    //     resolved (func_id=4269801471)
-    //
-    // `walk_dir` inherited it through `read_dir(path)?`, so listing a
-    // directory — the first thing any build tool does — was impossible
-    // from Verum (T0916). The language-level defect is filed separately:
-    // a module-path call that resolves to nothing must be an error.
-    // SUBSLICE first. `.as_ptr()` on the array VARIABLE returns the
-    // object base — C would read the ObjectHeader as the path.
-    // Rule 3, docs/architecture/ffi-byte-buffer-contract.md.
-    let dir_handle = unsafe { sys_opendir(path_buf[..].as_ptr() as &Byte) };
-    if dir_handle.is_null() {
-        let err = errno();
-        return Result.Err(StreamError { kind: io_error_kind_from_os_code(err), message: Maybe.Some(f"OS error {err}") });
-    }
-
+    let dir_handle = match open_directory(path.as_str().as_bytes()) {
+        Result.Ok(handle) => handle,
+        Result.Err(e) => return Result.Err(StreamError.with_message(io_error_kind_from_os_code(e.code), e.message)),
+    };
     Result.Ok(ReadDir {
         fd: 0,
-        dir_handle: dir_handle as Int,
+        dir_handle: dir_handle,
         base_path: path.to_path_buf(),
         buffer: [0; READDIR_BUFFER_SIZE],
         buffer_pos: 0,
@@ -946,7 +901,7 @@ public fn remove_file(path: &Path) -> IoResult<()> {
 
     match sys_unlink(path_bytes) {
         Result.Ok(()) => Result.Ok(()),
-        Result.Err(e) => Result.Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }),
+        Result.Err(e) => Result.Err(StreamError.with_message(io_error_kind_from_os_code(e.code), f"OS error {e.code}")),
     }
 }
 
@@ -965,7 +920,7 @@ public fn rename(from: &Path, to: &Path) -> IoResult<()> {
 
     match sys_rename(from_bytes, to_bytes) {
         Result.Ok(()) => Result.Ok(()),
-        Result.Err(e) => Result.Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }),
+        Result.Err(e) => Result.Err(StreamError.with_message(io_error_kind_from_os_code(e.code), f"OS error {e.code}")),
     }
 }
 
@@ -1001,7 +956,7 @@ public fn copy(from: &Path, to: &Path) -> IoResult<Int> {
         while written < n {
             let w = dst.write(&buf[written..n])?;
             if w == 0 {
-                return Result.Err(StreamError { kind: IoErrorKind.WriteZero, message: Maybe.Some("write returned 0") });
+                return Result.Err(StreamError.with_message(IoErrorKind.WriteZero, "write returned 0"));
             }
             written = written + w;
         }
@@ -1026,7 +981,7 @@ public fn hard_link(src: &Path, dst: &Path) -> IoResult<()> {
 
     match sys_link(src_bytes, dst_bytes) {
         Result.Ok(()) => Result.Ok(()),
-        Result.Err(e) => Result.Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }),
+        Result.Err(e) => Result.Err(StreamError.with_message(io_error_kind_from_os_code(e.code), f"OS error {e.code}")),
     }
 }
 
@@ -1046,7 +1001,7 @@ public fn symlink(src: &Path, dst: &Path) -> IoResult<()> {
 
     match sys_symlink(src_bytes, dst_bytes) {
         Result.Ok(()) => Result.Ok(()),
-        Result.Err(e) => Result.Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }),
+        Result.Err(e) => Result.Err(StreamError.with_message(io_error_kind_from_os_code(e.code), f"OS error {e.code}")),
     }
 }
 
@@ -1068,7 +1023,7 @@ public fn read_link(path: &Path) -> IoResult<PathBuf> {
             let target = Text.from_utf8_lossy(&buf[..n]);
             Result.Ok(PathBuf.from(&target))
         }
-        Result.Err(e) => Result.Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }),
+        Result.Err(e) => Result.Err(StreamError.with_message(io_error_kind_from_os_code(e.code), f"OS error {e.code}")),
     }
 }
 
@@ -1094,7 +1049,7 @@ public fn canonicalize(path: &Path) -> IoResult<PathBuf> {
     };
 
     // Resolve symlinks by following them
-    let mut components = List.new();
+    let mut components: List<Text> = [];
     for component in result.components() {
         // DESTRUCTURE THE VARIANT; DO NOT RENDER IT. This loop used to
         // call `component.as_str()`, a method `Component` does not
@@ -1190,7 +1145,7 @@ public fn set_permissions(path: &Path, perm: Permissions) -> IoResult<()> {
 
     match sys_chmod(path_bytes, perm.mode) {
         Result.Ok(()) => Result.Ok(()),
-        Result.Err(e) => Result.Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }),
+        Result.Err(e) => Result.Err(StreamError.with_message(io_error_kind_from_os_code(e.code), f"OS error {e.code}")),
     }
 }
 
@@ -1250,16 +1205,14 @@ public fn temp_dir() -> PathBuf {
 
 /// Get the current working directory.
 public fn current_dir() -> IoResult<PathBuf> {
-    let mut buf = [0_u8; PATH_MAX_BYTES];
-
+    let mut buf: [Byte; PATH_MAX_BYTES] = [0; PATH_MAX_BYTES];
     match sys_getcwd(&mut buf) {
         Result.Ok(n) => {
-            // Find the null terminator
-            let len = buf[..n].iter().position(|&b| b == 0).unwrap_or(n);
+            let len = if n > 0 && buf[n - 1] == 0 { n - 1 } else { n };
             let path = Text.from_utf8_lossy(&buf[..len]);
             Result.Ok(PathBuf.from(&path))
         }
-        Result.Err(e) => Result.Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }),
+        Result.Err(e) => Result.Err(StreamError.with_message(io_error_kind_from_os_code(e.code), f"OS error {e.code}")),
     }
 }
 
@@ -1270,7 +1223,7 @@ public fn set_current_dir(path: &Path) -> IoResult<()> {
 
     match sys_chdir(path_bytes) {
         Result.Ok(()) => Result.Ok(()),
-        Result.Err(e) => Result.Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }),
+        Result.Err(e) => Result.Err(StreamError.with_message(io_error_kind_from_os_code(e.code), f"OS error {e.code}")),
     }
 }
 
@@ -1319,7 +1272,7 @@ public fn write(path: &Path, contents: &[Byte]) -> IoResult<()> {
     while written < contents.len() {
         let n = file.write(&contents[written..])?;
         if n == 0 {
-            return Result.Err(StreamError { kind: IoErrorKind.WriteZero, message: Maybe.Some("write returned 0") });
+            return Result.Err(StreamError.with_message(IoErrorKind.WriteZero, "write returned 0"));
         }
         written = written + n;
     }

@@ -6,7 +6,7 @@
 // =============================================================================
 
 mount core.io.fs.{
-    FileType, Permissions,
+    FileType, Permissions, read_dir,
     create_dir_all, remove_dir_all, temp_dir, metadata, symlink_metadata,
     symlink, hard_link, exists, is_symlink, read_link,
 };
@@ -195,6 +195,42 @@ fn test_create_dir_all_makes_the_whole_chain_and_remove_dir_all_unmakes_it() {
     // Recursive on the way out as well: the root is gone, not just the
     // leaf.
     assert(!exists(&root.as_path()));
+}
+
+@cfg(target_os = "macos")
+@test
+fn directory_iteration_owns_names_and_reports_types() {
+    let root = scratch(&Text.from("dirent"));
+    let mut child = root.clone();
+    child.push_str(&"child");
+    let mut file = root.clone();
+    file.push_str(&"café.txt");
+    create_dir_all(&child.as_path()).unwrap();
+    write_bytes(&file.to_text(), &[7_u8]).unwrap();
+
+    let mut entries = read_dir(&root.as_path()).unwrap();
+    let first = entries.next().unwrap().unwrap();
+    let second = entries.next().unwrap().unwrap();
+    assert(entries.next().is_none());
+    assert(entries.next().is_none());
+    let (directory, regular) = if first.file_type().is_dir() {
+        (first, second)
+    } else {
+        (second, first)
+    };
+    assert(directory.file_type().is_dir() && regular.file_type().is_file());
+    assert(*directory.file_name() == "child" && *regular.file_name() == "café.txt");
+    assert(directory.path().as_str() == child.as_path().as_str());
+    assert(regular.path().as_str() == file.as_path().as_str());
+    let mut empty = read_dir(&child.as_path()).unwrap();
+    assert(empty.next().is_none());
+    let mut missing = root.clone();
+    missing.push_str(&"missing");
+    match read_dir(&missing.as_path()) {
+        Result.Err(e) => assert(e.kind() is NotFound),
+        Result.Ok(_) => panic("missing directory opened"),
+    }
+    remove_dir_all(&root.as_path()).unwrap();
 }
 
 @test
