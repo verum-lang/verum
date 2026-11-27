@@ -828,7 +828,7 @@ impl<'a> RecursiveParser<'a> {
             return self.parse_extern_function_type(boundary);
         }
 
-        // Tuple type: (A, B, C) - at least 2 elements
+        // Grouped type, unit, or tuple.
         if self.stream.check(&TokenKind::LParen) {
             return self.parse_tuple_type();
         }
@@ -1546,31 +1546,27 @@ impl<'a> RecursiveParser<'a> {
         Ok(ty)
     }
 
-    /// Parse tuple type: (A, B, C) - requires at least 2 elements
+    /// A comma at this parenthesis depth constructs a tuple, including (T,).
     fn parse_tuple_type(&mut self) -> ParseResult<Type> {
         let start_pos = self.stream.position();
 
         self.stream.expect(TokenKind::LParen)?;
 
-        let types = if self.stream.check(&TokenKind::RParen) {
+        let mut has_comma = false;
+        let mut types = if self.stream.check(&TokenKind::RParen) {
             Vec::new()
         } else {
-            self.comma_separated(|p| p.parse_type())?
+            self.comma_separated(|parser| {
+                let ty = parser.parse_type()?;
+                has_comma |= parser.stream.check(&TokenKind::Comma);
+                Ok(ty)
+            })?
         };
 
         self.stream.expect(TokenKind::RParen)?;
-
         let span = self.stream.make_span(start_pos);
-
-        // Single element is just a parenthesized type, not a tuple
-        // Tuples need at least 2 elements
-        if types.len() == 1 {
-            // Just return the inner type (parentheses are ignored in type syntax)
-            // SAFETY: len() == 1 guarantees exactly one element
-            return Ok(types
-                .into_iter()
-                .next()
-                .expect("types.len() == 1 guarantees one element"));
+        if !has_comma && let Some(inner) = types.pop() {
+            return Ok(inner);
         }
 
         Ok(Type::new(

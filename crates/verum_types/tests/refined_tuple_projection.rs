@@ -95,3 +95,26 @@ fn projected_mutation_cannot_invalidate_the_enclosing_refinement() {
         "whole-value replacement failed: {found:?}"
     );
 }
+
+
+#[test]
+fn a_singleton_tuple_and_its_element_are_distinct_types() {
+    use verum_common::List;
+    use verum_types::Type;
+    assert_eq!(Type::Tuple(List::from_single(Type::Int)).to_string(), "(Int,)");
+    for valid in [
+        "fn field(value: &(Int,)) -> Int { value.0 }",
+        "fn grouped(value: (Int)) -> Int { value }",
+        "fn produce(value: Int) -> (Int,) { (value,) }",
+    ] {
+        let found = errors(valid);
+        assert!(found.is_empty(), "{valid}: {found:?}");
+    }
+    for invalid in [
+        "fn bad(value: &(Int,)) -> Int { value.1 }",
+        "fn bad(value: (Int,)) -> Int { value }",
+        "fn bad(value: Int) -> (Int,) { value }",
+    ] {
+        assert!(!errors(invalid).is_empty(), "{invalid}");
+    }
+}

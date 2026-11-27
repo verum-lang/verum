@@ -3097,6 +3097,9 @@ impl fmt::Display for TypeDisplay<'_> {
                     }
                     write!(f, "{}", self.child(ty))?;
                 }
+                if types.len() == 1 {
+                    write!(f, ",")?;
+                }
                 write!(f, ")")
             }
             Type::Array { element, size } => {

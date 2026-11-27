@@ -3050,7 +3050,8 @@ impl AstSink {
     ///
     /// Grammar (from verum.ebnf):
     /// ```text
-    /// tuple_type = '(' , type_expr , { ',' , type_expr } , ')' ;
+    /// grouped_type = '(' , type_expr , ')' ;
+    /// tuple_type = '(' , type_expr , ',' , [ type_expr , { ',' , type_expr } , [ ',' ] ] , ')' ;
     /// ```
     fn convert_tuple_type(&mut self, node: &SyntaxNode) -> Option<Type> {
         let span = self.range_to_span(node.text_range());
@@ -3063,12 +3064,12 @@ impl AstSink {
             }
         }
 
-        // Single-element tuple is still a tuple (needed for trailing comma case)
-        // Empty parens is unit type, but that's typically handled elsewhere
         if element_types.is_empty() {
             return Some(Type::new(TypeKind::Unit, span));
         }
-
+        if element_types.len() == 1 && !self.has_token(node, SyntaxKind::COMMA) {
+            return element_types.pop();
+        }
         Some(Type::new(TypeKind::Tuple(element_types), span))
     }
 
