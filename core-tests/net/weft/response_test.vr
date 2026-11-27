@@ -63,7 +63,7 @@ fn weft_response_binary_replacement_retains_error_status_and_other_headers() {
 @test
 fn weft_response_json_rejection_retains_status_and_detail() {
     let req = WeftRequest.new(Method.Post, "/", Maybe.None, Headers.new(), []);
-    let response = match extract_json<Int>(&req, &JsonExtractorConfig.default()) {
+    let response = match extract_json<Int>(&req, JsonExtractorConfig.default()) {
         Result.Err(error) => error.into_response(),
         Result.Ok(_) => panic("expected a missing Content-Type rejection"),
     };

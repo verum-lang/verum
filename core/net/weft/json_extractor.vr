@@ -26,11 +26,9 @@
 //  violations bubble up as 422 Unprocessable Entity.
 //
 
-// The deserialise step uses the `JsonDeserialize<T>` protocol; users
-// implement it directly or derive it via `@derive(JsonDeserialize)`
-// on their record / sum type. Built-in impls cover the primitive
-// shapes (Int / Float / Bool / Text / List<T> / Map<K,V> / Maybe<T>)
-// + canonical record / sum patterns through the `@derive` machinery.
+// Implement JsonDeserialize<T> to consume a JSON value and report a typed
+// error at its document path. Built-in implementations cover Int, Float,
+// Bool, Text, List<T> and Maybe<T>.
 //
 
 // =============================================================================
@@ -153,7 +151,7 @@ implement JsonExtractError {
 }
 
 // =============================================================================
-// JsonDeserialize<T> — protocol the user / derive macro implements
+// JsonDeserialize<T> — type-directed deserialization
 // =============================================================================
 //
 
@@ -164,7 +162,7 @@ implement JsonExtractError {
 // successfully-parsed primitive doesn't satisfy a refined target.
 
 public type JsonDeserialize<T> is protocol {
-    fn from_json(value: &JsonValue, path: &Text) -> Result<T, JsonExtractError>;
+    fn from_json(value: JsonValue, path: Text) -> Result<T, JsonExtractError>;
 };
 
 // -----------------------------------------------------------------------------
@@ -172,60 +170,60 @@ public type JsonDeserialize<T> is protocol {
 // -----------------------------------------------------------------------------
 
 implement JsonDeserialize<Int> for Int {
-    fn from_json(v: &JsonValue, path: &Text) -> Result<Int, JsonExtractError> {
+    fn from_json(v: JsonValue, path: Text) -> Result<Int, JsonExtractError> {
         match v {
-            JsonValue.JsonInt(n) => Result.Ok(*n as Int),
+            JsonValue.JsonInt(n) => Result.Ok(n),
             JsonValue.JsonFloat(f) => {
-                let truncated = *f as Int;
-                if (truncated as Float) == *f {
+                let truncated = f as Int;
+                if (truncated as Float) == f {
                     Result.Ok(truncated)
                 } else {
                     Result.Err(JsonExtractError.ShapeMismatch {
                         reason: f"expected integer, got fractional float",
-                        path: path.clone(),
+                        path,
                     })
                 }
             },
             _ => Result.Err(JsonExtractError.ShapeMismatch {
                 reason: f"expected integer",
-                path: path.clone(),
+                path,
             }),
         }
     }
 }
 
 implement JsonDeserialize<Float> for Float {
-    fn from_json(v: &JsonValue, path: &Text) -> Result<Float, JsonExtractError> {
+    fn from_json(v: JsonValue, path: Text) -> Result<Float, JsonExtractError> {
         match v {
-            JsonValue.JsonFloat(f) => Result.Ok(*f),
-            JsonValue.JsonInt(n)   => Result.Ok(*n as Float),
+            JsonValue.JsonFloat(f) => Result.Ok(f),
+            JsonValue.JsonInt(n)   => Result.Ok(n as Float),
             _ => Result.Err(JsonExtractError.ShapeMismatch {
                 reason: f"expected number",
-                path: path.clone(),
+                path,
             }),
         }
     }
 }
 
 implement JsonDeserialize<Bool> for Bool {
-    fn from_json(v: &JsonValue, path: &Text) -> Result<Bool, JsonExtractError> {
+    fn from_json(v: JsonValue, path: Text) -> Result<Bool, JsonExtractError> {
         match v {
-            JsonValue.JsonBool(b) => Result.Ok(*b),
+            JsonValue.JsonBool(b) => Result.Ok(b),
             _ => Result.Err(JsonExtractError.ShapeMismatch {
                 reason: f"expected boolean",
-                path: path.clone(),
+                path,
             }),
         }
     }
 }
 
 implement JsonDeserialize<Text> for Text {
-    fn from_json(v: &JsonValue, path: &Text) -> Result<Text, JsonExtractError> {
+    fn from_json(v: JsonValue, path: Text) -> Result<Text, JsonExtractError> {
         match v {
-            JsonValue.JsonString(s) => Result.Ok(s.clone()),
+            JsonValue.JsonString(s) => Result.Ok(s),
             _ => Result.Err(JsonExtractError.ShapeMismatch {
                 reason: f"expected string",
-                path: path.clone(),
+                path,
             }),
         }
     }
@@ -234,7 +232,7 @@ implement JsonDeserialize<Text> for Text {
 implement<T> JsonDeserialize<Maybe<T>> for Maybe<T>
     where T: JsonDeserialize<T>
 {
-    fn from_json(v: &JsonValue, path: &Text) -> Result<Maybe<T>, JsonExtractError> {
+    fn from_json(v: JsonValue, path: Text) -> Result<Maybe<T>, JsonExtractError> {
         match v {
             JsonValue.JsonNull => Result.Ok(Maybe.None),
             other => match T.from_json(other, path) {
@@ -248,21 +246,18 @@ implement<T> JsonDeserialize<Maybe<T>> for Maybe<T>
 implement<T> JsonDeserialize<List<T>> for List<T>
     where T: JsonDeserialize<T>
 {
-    fn from_json(v: &JsonValue, path: &Text) -> Result<List<T>, JsonExtractError> {
+    fn from_json(v: JsonValue, path: Text) -> Result<List<T>, JsonExtractError> {
         match v {
             JsonValue.JsonArray(elems) => {
-                let mut out: List<T> = [];
-                let mut i: Int = 0;
-                while i < elems.len() {
-                    let elem_path = f"{path}[{i}]";
-                    out.push(T.from_json(&elems[i], &elem_path)?);
-                    i = i + 1;
+                let mut out: List<T> = List.with_capacity(elems.len());
+                for (i, element) in elems.into_iter().enumerate() {
+                    out.push(T.from_json(element, f"{path}[{i}]")?);
                 }
                 Result.Ok(out)
             },
             _ => Result.Err(JsonExtractError.ShapeMismatch {
                 reason: f"expected array",
-                path: path.clone(),
+                path,
             }),
         }
     }
@@ -272,6 +267,7 @@ implement<T> JsonDeserialize<List<T>> for List<T>
 // JsonExtractorConfig — per-handler tuning
 // =============================================================================
 
+@derive(Clone, Copy)
 public type JsonExtractorConfig is {
     /// Maximum body size we'll accept. Default 1 MiB.
     max_body_bytes: Int,
@@ -312,7 +308,7 @@ implement JsonExtractorConfig {
 /// Try to extract a typed `T` from the request body. Composable
 /// without a handler — useful when the caller wants the typed
 /// value but already has the WeftRequest in hand.
-public fn extract_json<T>(req: &WeftRequest, cfg: &JsonExtractorConfig)
+public fn extract_json<T>(req: &WeftRequest, cfg: JsonExtractorConfig)
     -> Result<T, JsonExtractError>
     where T: JsonDeserialize<T>
 {
@@ -347,8 +343,7 @@ public fn extract_json<T>(req: &WeftRequest, cfg: &JsonExtractorConfig)
         Result.Err(e) => return Result.Err(JsonExtractError.ParseError { json_err: e }),
     };
     // Gate 5: type-directed materialisation.
-    let root_path = Text.from("$");
-    T.from_json(&value, &root_path)
+    T.from_json(value, Text.from("$"))
 }
 
 /// True iff the media type is application/json or *+json (RFC 6838
@@ -417,8 +412,7 @@ implement<T> FromRequest for Json<T>
     async fn from_request(req: &mut WeftRequest)
         -> Result<Json<T>, JsonExtractError>
     {
-        let cfg = JsonExtractorConfig.default();
-        let value = extract_json<T>(req, &cfg)?;
+        let value = extract_json<T>(req, JsonExtractorConfig.default())?;
         Result.Ok(Json { inner: value })
     }
 }

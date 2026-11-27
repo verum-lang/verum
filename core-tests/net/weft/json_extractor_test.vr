@@ -13,8 +13,19 @@ fn test_invalid_utf8_reports_the_first_bad_byte_in_the_body() {
         path_params: Map.new(), peer_addr: Maybe.None,
     };
     let cfg = JsonExtractorConfig.default().relaxed_content_type();
-    match extract_json<Int>(&req, &cfg) {
+    match extract_json<Int>(&req, cfg) {
         Result.Err(JsonExtractError.InvalidUtf8 { offset }) => assert_eq(offset, 3),
         _ => panic("expected a UTF-8 error in the request body"),
     }
+}
+
+@test
+fn test_one_configuration_can_decode_multiple_requests() {
+    let req = WeftRequest {
+        method: Method.Post, path: "/", raw_query: Maybe.None, headers: Headers.new(),
+        body: [0x37_u8, 0x33_u8], path_params: Map.new(), peer_addr: Maybe.None,
+    };
+    let cfg = JsonExtractorConfig.default().relaxed_content_type();
+    assert(extract_json<Int>(&req, cfg) is Result.Ok(73));
+    assert(extract_json<Float>(&req, cfg) is Result.Ok(73.0));
 }
