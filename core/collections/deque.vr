@@ -75,6 +75,17 @@ unsafe fn deque_storage_write<T>(deque: &mut Deque<T>, index: Int, value: T) {
     @intrinsic("deque_storage_write", deque, index, value)
 }
 
+/// Move an initialized physical slot into a distinct vacant slot of the same ring.
+unsafe fn deque_move_slot<T>(deque: &mut Deque<T>, source: Int, destination: Int) {
+    let value = deque_storage_take(deque, source);
+    deque_storage_write(deque, destination, value);
+}
+
+/// Vacate one initialized slot and discharge its owned value at this scope.
+unsafe fn deque_drop_slot<T>(deque: &mut Deque<T>, index: Int) {
+    let removed: T = deque_storage_take(deque, index);
+}
+
 /// Borrow one initialized slot, retaining its owner's backing and capabilities.
 unsafe fn deque_storage_ref<T>(deque: &Deque<T>, index: Int) -> &T {
     @intrinsic("deque_storage_ref", deque, index)
@@ -613,11 +624,13 @@ implement<T> Deque<T> {
     }
 
     /// Convert to list by consuming the deque.
-    public fn into_list(self) -> List<T> {
+    public fn into_list(mut self) -> List<T> {
         let mut result: List<T> = List.with_capacity(self.len);
-        let mut d = self;
-        while let Maybe.Some(val) = d.pop_front() {
-            result.push(val);
+        while self.len > 0 {
+            let value = unsafe { deque_storage_take(&mut self, self.head) };
+            self.head = self.wrap_index(self.head + 1);
+            self.len = self.len - 1;
+            result.push(value);
         }
         result
     }
@@ -681,13 +694,12 @@ implement<T> Deque<T> {
                     let src_phys = self.physical_index(i);
                     let dst_phys = self.physical_index(kept);
                     unsafe {
-                        let val = deque_storage_take(self, src_phys);
-                        deque_storage_write(self, dst_phys, val);
+                        deque_move_slot(self, src_phys, dst_phys);
                     }
                 }
                 kept = kept + 1;
             } else {
-                let removed: T = unsafe { deque_storage_take(self, phys) };
+                unsafe { deque_drop_slot(self, phys); }
             }
             i = i + 1;
         }
@@ -707,13 +719,12 @@ implement<T> Deque<T> {
                     let src_phys = self.physical_index(i);
                     let dst_phys = self.physical_index(kept);
                     unsafe {
-                        let val = deque_storage_take(self, src_phys);
-                        deque_storage_write(self, dst_phys, val);
+                        deque_move_slot(self, src_phys, dst_phys);
                     }
                 }
                 kept = kept + 1;
             } else {
-                let removed: T = unsafe { deque_storage_take(self, phys) };
+                unsafe { deque_drop_slot(self, phys); }
             }
             i = i + 1;
         }
@@ -772,8 +783,7 @@ implement<T> Deque<T> {
             let src_phys = self.physical_index(i - 1);
             let dst_phys = self.physical_index(i);
             unsafe {
-                let val = deque_storage_take(self, src_phys);
-                deque_storage_write(self, dst_phys, val);
+                deque_move_slot(self, src_phys, dst_phys);
             }
             i = i - 1;
         }
@@ -800,8 +810,7 @@ implement<T> Deque<T> {
             let src_phys = self.physical_index(i + 1);
             let dst_phys = self.physical_index(i);
             unsafe {
-                let val = deque_storage_take(self, src_phys);
-                deque_storage_write(self, dst_phys, val);
+                deque_move_slot(self, src_phys, dst_phys);
             }
             i = i + 1;
         }
@@ -1431,8 +1440,7 @@ implement<T> Deque<T> {
                     let src_phys = self.physical_index(i);
                     let dst_phys = self.physical_index(kept);
                     unsafe {
-                        let val = deque_storage_take(self, src_phys);
-                        deque_storage_write(self, dst_phys, val);
+                        deque_move_slot(self, src_phys, dst_phys);
                     }
                 }
                 kept = kept + 1;
@@ -1472,13 +1480,12 @@ implement<T> Deque<T> {
                     let src_phys = self.physical_index(read);
                     let dst_phys = self.physical_index(write);
                     unsafe {
-                        let val = deque_storage_take(self, src_phys);
-                        deque_storage_write(self, dst_phys, val);
+                        deque_move_slot(self, src_phys, dst_phys);
                     }
                 }
                 write = write + 1;
             } else {
-                let removed: T = unsafe { deque_storage_take(self, read_phys) };
+                unsafe { deque_drop_slot(self, read_phys); }
             }
             read = read + 1;
         }
@@ -1517,13 +1524,12 @@ implement<T> Deque<T> {
                     let src_phys = self.physical_index(read);
                     let dst_phys = self.physical_index(write);
                     unsafe {
-                        let val = deque_storage_take(self, src_phys);
-                        deque_storage_write(self, dst_phys, val);
+                        deque_move_slot(self, src_phys, dst_phys);
                     }
                 }
                 write = write + 1;
             } else {
-                let removed: T = unsafe { deque_storage_take(self, read_phys) };
+                unsafe { deque_drop_slot(self, read_phys); }
             }
             read = read + 1;
         }

@@ -65,6 +65,8 @@ fn test_clear_and_drop_release_the_remaining_affine_values_once() {
         queue.push_back(Guard { weight: 4 });
     }
     assert(unsafe { DESTROYED } == 7);
+    check_compaction_drops_each_affine_element_once();
+    check_into_list_moves_wrapped_affine_values();
 }
 
 @test
@@ -92,6 +94,83 @@ fn test_capacity_and_owner_backed_spans() {
         run[7] = 42;
     }
     assert(ring.pop_back().unwrap() == 42);
+}
+
+fn retain_odd(item: &Int) -> Bool { *item % 2 == 1 }
+fn bump_and_keep(item: &mut Int) -> Bool {
+    *item = *item + 10;
+    *item != 17
+}
+fn same(a: &Int, b: &Int) -> Bool { *a == *b }
+fn keep_guard(item: &Guard) -> Bool { item.weight > 1 && item.weight < 8 }
+
+@test
+fn test_wrapped_compaction_preserves_order() {
+    let mut ring: Deque<Int> = Deque.with_capacity(8);
+    let mut i = 0;
+    while i < 8 { ring.push_back(i); i = i + 1; }
+    i = 0;
+    while i < 4 { assert(ring.pop_front().unwrap() == i); i = i + 1; }
+    ring.push_back(8);
+    ring.push_back(9);
+    ring.push_back(10);
+    ring.push_back(11);
+    ring.retain(retain_odd);
+    assert(ring.len() == 4);
+    ring.retain_mut(bump_and_keep);
+    assert(ring.len() == 3);
+    assert(ring.front().unwrap() == 15);
+    assert(ring.back().unwrap() == 21);
+    ring.insert(1, 19);
+    assert(ring.dedup_by(same) == 1);
+    ring.insert(1, 17);
+    assert(ring.remove(1).unwrap() == 17);
+    let extracted = ring.extract_if(|item| *item == 19);
+    assert(extracted.len() == 1 && extracted[0] == 19);
+    assert(ring.pop_front().unwrap() == 15);
+    assert(ring.pop_front().unwrap() == 21);
+    assert(ring.is_empty());
+}
+
+fn check_compaction_drops_each_affine_element_once() {
+    unsafe { DESTROYED = 0; }
+    {
+        let mut ring: Deque<Guard> = Deque.with_capacity(4);
+        ring.push_back(Guard { weight: 1 });
+        ring.push_back(Guard { weight: 2 });
+        ring.push_back(Guard { weight: 4 });
+        ring.push_back(Guard { weight: 8 });
+        ring.retain(keep_guard);
+        assert(unsafe { DESTROYED } == 9);
+        assert(ring.len() == 2);
+        match ring.pop_front() {
+            Maybe.Some(first) => { assert(first.weight == 2); },
+            Maybe.None => panic("missing retained guard"),
+        }
+        assert(ring.front_mut().unwrap().weight == 4);
+    }
+    assert(unsafe { DESTROYED } == 15);
+}
+
+fn check_into_list_moves_wrapped_affine_values() {
+    unsafe { DESTROYED = 0; }
+    {
+        let mut ring: Deque<Guard> = Deque.with_capacity(4);
+        ring.push_back(Guard { weight: 1 });
+        ring.push_back(Guard { weight: 2 });
+        ring.push_back(Guard { weight: 4 });
+        ring.push_back(Guard { weight: 8 });
+        match ring.pop_front() { Maybe.Some(old) => { assert(old.weight == 1); }, Maybe.None => panic("missing wrapped guard"), }
+        ring.push_back(Guard { weight: 16 });
+        let values = ring.into_list();
+        assert(unsafe { DESTROYED } == 1);
+        assert(values.len() == 4);
+        { let slot: &Guard = &values[0]; assert(slot.weight == 2); }
+        { let slot: &Guard = &values[1]; assert(slot.weight == 4); }
+        { let slot: &Guard = &values[2]; assert(slot.weight == 8); }
+        { let slot: &Guard = &values[3]; assert(slot.weight == 16); }
+    }
+    assert(unsafe { DESTROYED } == 31);
 }
 
 fn main() {}
