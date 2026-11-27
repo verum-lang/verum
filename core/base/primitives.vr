@@ -40,12 +40,12 @@ mount core.intrinsics.arithmetic.{
 mount core.intrinsics.conversion.{
     int_to_float, float_to_int,
     f32_to_bits, f32_from_bits, f64_to_bits, f64_from_bits,
-    to_le_bytes, to_be_bytes, from_le_bytes, from_be_bytes,
     to_le_bytes_2, to_le_bytes_4, to_le_bytes_8,
     to_be_bytes_2, to_be_bytes_4, to_be_bytes_8,
     from_le_bytes_2, from_le_bytes_4, from_le_bytes_8,
     from_be_bytes_2, from_be_bytes_4, from_be_bytes_8,
 };
+mount core.intrinsics.platform.{target_is_little_endian, target_pointer_width};
 mount core.intrinsics.float.{
     f32_infinity, f32_neg_infinity, f32_nan,
     sqrt, cbrt, exp, expm1, exp2,
@@ -63,6 +63,98 @@ mount core.intrinsics.runtime.text.{
 
 // Popcount and bitreverse: provide as direct intrinsic calls
 fn popcnt<T>(x: T) -> T { @intrinsic("ctpop", x) }
+
+// Each limb uses the fixed-width byte conversion intrinsics. The target order
+// selects both the order of the limbs and the order of the bytes in each limb.
+fn encode_wide_bytes(value: UInt128, little: Bool) -> [Byte; 16] {
+    let lo = value as Int;
+    let hi = (value >> 64) as Int;
+    let first: [Byte; 8] = if little { to_le_bytes_8(lo) } else { to_be_bytes_8(hi) };
+    let second: [Byte; 8] = if little { to_le_bytes_8(hi) } else { to_be_bytes_8(lo) };
+    let mut bytes: [Byte; 16] = [0; 16];
+    let mut i = 0;
+    while i < 8 {
+        bytes[i] = first[i];
+        bytes[i + 8] = second[i];
+        i = i + 1;
+    }
+    bytes
+}
+
+fn decode_wide_bytes(bytes: &[Byte], little: Bool) -> UInt128 {
+    if bytes.len() != 16 {
+        panic("byte sequence length differs from the numeric width");
+    }
+    let mut first: [Byte; 8] = [0; 8];
+    let mut second: [Byte; 8] = [0; 8];
+    let mut i = 0;
+    while i < 8 {
+        first[i] = bytes[i];
+        second[i] = bytes[i + 8];
+        i = i + 1;
+    }
+    let lo = (if little { from_le_bytes_8(first) } else { from_be_bytes_8(second) }) as UInt64;
+    let hi = (if little { from_le_bytes_8(second) } else { from_be_bytes_8(first) }) as UInt64;
+    ((hi as UInt128) << 64) | (lo as UInt128)
+}
+
+fn pointer_byte_count() -> Int {
+    let bits = target_pointer_width() as Int;
+    if bits > 64 || bits % 8 != 0 {
+        panic("pointer byte conversion requires a byte-aligned width of at most 64 bits");
+    }
+    bits / 8
+}
+
+fn append_word_bytes(bytes: &mut List<Byte>, value: UInt64, width: Int, little: Bool) {
+    let mut i = 0;
+    while i < width {
+        let offset = if little { i } else { width - i - 1 };
+        bytes.push((value >> (offset * 8)) as Byte);
+        i = i + 1;
+    }
+}
+
+fn encode_word_bytes(value: UInt64, width: Int, little: Bool) -> List<Byte> {
+    let mut bytes: List<Byte> = List.with_capacity(width);
+    append_word_bytes(&mut bytes, value, width, little);
+    bytes
+}
+
+fn encode_wide_byte_list(value: UInt128, little: Bool) -> List<Byte> {
+    let lo = value as UInt64;
+    let hi = (value >> 64) as UInt64;
+    let mut bytes: List<Byte> = List.with_capacity(16);
+    if little {
+        append_word_bytes(&mut bytes, lo, 8, true);
+        append_word_bytes(&mut bytes, hi, 8, true);
+    } else {
+        append_word_bytes(&mut bytes, hi, 8, false);
+        append_word_bytes(&mut bytes, lo, 8, false);
+    }
+    bytes
+}
+
+fn decode_word_bytes(bytes: &[Byte], width: Int, little: Bool) -> UInt64 {
+    if bytes.len() != width {
+        panic("byte sequence length differs from the numeric width");
+    }
+    let mut result: UInt64 = 0;
+    let mut i = 0;
+    while i < width {
+        let offset = if little { width - i - 1 } else { i };
+        result = (result << 8) | (bytes[offset] as UInt64);
+        i = i + 1;
+    }
+    result
+}
+
+fn signed_pointer_bits(value: UInt64) -> ISize {
+    let width = pointer_byte_count();
+    if width == 8 { return value as ISize; }
+    let sign: Int = 1 << (width * 8 - 1);
+    (((value as Int) ^ sign) - sign) as ISize
+}
 
 // =============================================================================
 // Int - 64-bit signed integer
@@ -548,11 +640,15 @@ implement Int {
         (self >> 1) + (other >> 1) + bitand(bitand(self, other), 1)
     }
 
-    /// Native-endian byte representation (little-endian on this platform).
-    public fn to_ne_bytes(self) -> List<Byte> { self.to_le_bytes() }
+    /// Native-endian byte representation.
+    public fn to_ne_bytes(self) -> List<Byte> {
+        encode_word_bytes(self as UInt64, 8, target_is_little_endian())
+    }
 
-    /// Construct from native-endian bytes (little-endian on this platform).
-    public fn from_ne_bytes(bytes: List<Byte>) -> Int { Int.from_le_bytes(bytes) }
+    /// Construct from native-endian bytes.
+    public fn from_ne_bytes(bytes: List<Byte>) -> Int {
+        decode_word_bytes(bytes.as_slice(), 8, target_is_little_endian()) as Int
+    }
 
     /// Parse integer from string in the given radix (2-36).
     ///
@@ -1258,12 +1354,12 @@ implement Float {
 
     /// Convert to native-endian byte representation.
     public fn to_ne_bytes(self) -> [Byte; 8] {
-        self.to_le_bytes()
+        if target_is_little_endian() { self.to_le_bytes() } else { self.to_be_bytes() }
     }
 
     /// Create from native-endian bytes.
     public fn from_ne_bytes(bytes: [Byte; 8]) -> Float {
-        Float.from_le_bytes(bytes)
+        if target_is_little_endian() { Float.from_le_bytes(bytes) } else { Float.from_be_bytes(bytes) }
     }
 
     /// Midpoint of two floats, avoiding overflow.
@@ -2182,8 +2278,12 @@ implement UInt64 {
         let b = other.to_int();
         ((a >> 1) + (b >> 1) + bitand(bitand(a, b), 1)) as UInt64
     }
-    public fn to_ne_bytes(self) -> List<Byte> { to_le_bytes(self) }
-    public fn from_ne_bytes(bytes: List<Byte>) -> UInt64 { from_le_bytes(bytes) }
+    public fn to_ne_bytes(self) -> List<Byte> {
+        encode_word_bytes(self, 8, target_is_little_endian())
+    }
+    public fn from_ne_bytes(bytes: List<Byte>) -> UInt64 {
+        decode_word_bytes(bytes.as_slice(), 8, target_is_little_endian())
+    }
 }
 
 // =============================================================================
@@ -2368,8 +2468,12 @@ implement UInt32 {
         let b = other.to_int();
         ((a >> 1) + (b >> 1) + bitand(bitand(a, b), 1)) as UInt32
     }
-    public fn to_ne_bytes(self) -> [Byte; 4] { to_le_bytes_4(self) }
-    public fn from_ne_bytes(bytes: [Byte; 4]) -> UInt32 { from_le_bytes_4(bytes) }
+    public fn to_ne_bytes(self) -> [Byte; 4] {
+        if target_is_little_endian() { self.to_le_bytes() } else { self.to_be_bytes() }
+    }
+    public fn from_ne_bytes(bytes: [Byte; 4]) -> UInt32 {
+        if target_is_little_endian() { UInt32.from_le_bytes(bytes) } else { UInt32.from_be_bytes(bytes) }
+    }
 }
 
 // =============================================================================
@@ -2531,8 +2635,12 @@ implement UInt16 {
         let b = other.to_int();
         ((a >> 1) + (b >> 1) + bitand(bitand(a, b), 1)) as UInt16
     }
-    public fn to_ne_bytes(self) -> List<Byte> { to_le_bytes(self) }
-    public fn from_ne_bytes(bytes: List<Byte>) -> UInt16 { from_le_bytes(bytes) }
+    public fn to_ne_bytes(self) -> List<Byte> {
+        encode_word_bytes(self as UInt64, 2, target_is_little_endian())
+    }
+    public fn from_ne_bytes(bytes: List<Byte>) -> UInt16 {
+        decode_word_bytes(bytes.as_slice(), 2, target_is_little_endian()) as UInt16
+    }
 }
 
 // =============================================================================
@@ -2601,10 +2709,18 @@ implement UInt8 {
     public fn rotate_left(self, n: Int) -> UInt8 { rotl(self, n) }
     public fn rotate_right(self, n: Int) -> UInt8 { rotr(self, n) }
     public fn swap_bytes(self) -> UInt8 { bswap(self) }
-    public fn to_le_bytes(self) -> List<Byte> { to_le_bytes(self) }
-    public fn to_be_bytes(self) -> List<Byte> { to_be_bytes(self) }
-    public fn from_le_bytes(bytes: List<Byte>) -> UInt8 { from_le_bytes(bytes) }
-    public fn from_be_bytes(bytes: List<Byte>) -> UInt8 { from_be_bytes(bytes) }
+    public fn to_le_bytes(self) -> List<Byte> {
+        List.of(self as Byte)
+    }
+    public fn to_be_bytes(self) -> List<Byte> {
+        List.of(self as Byte)
+    }
+    public fn from_le_bytes(bytes: List<Byte>) -> UInt8 {
+        decode_word_bytes(bytes.as_slice(), 1, true) as UInt8
+    }
+    public fn from_be_bytes(bytes: List<Byte>) -> UInt8 {
+        decode_word_bytes(bytes.as_slice(), 1, true) as UInt8
+    }
     public fn to_binary(self) -> Text { self.to_int().to_binary() }
     public fn to_hex(self) -> Text { self.to_int().to_hex() }
     public fn to_octal(self) -> Text { self.to_int().to_octal() }
@@ -2694,8 +2810,12 @@ implement UInt8 {
         let b = other.to_int();
         ((a >> 1) + (b >> 1) + bitand(bitand(a, b), 1)) as UInt8
     }
-    public fn to_ne_bytes(self) -> List<Byte> { to_le_bytes(self) }
-    public fn from_ne_bytes(bytes: List<Byte>) -> UInt8 { from_le_bytes(bytes) }
+    public fn to_ne_bytes(self) -> List<Byte> {
+        List.of(self as Byte)
+    }
+    public fn from_ne_bytes(bytes: List<Byte>) -> UInt8 {
+        decode_word_bytes(bytes.as_slice(), 1, true) as UInt8
+    }
 }
 
 // =============================================================================
@@ -2726,10 +2846,10 @@ implement UInt128 {
         if self < min_val { min_val } else if self > max_val { max_val } else { self }
     }
 
-    public fn to_le_bytes(self) -> [Byte; 16] { to_le_bytes(self) }
-    public fn to_be_bytes(self) -> [Byte; 16] { to_be_bytes(self) }
-    public fn from_le_bytes(bytes: [Byte; 16]) -> UInt128 { from_le_bytes(bytes) }
-    public fn from_be_bytes(bytes: [Byte; 16]) -> UInt128 { from_be_bytes(bytes) }
+    public fn to_le_bytes(self) -> [Byte; 16] { encode_wide_bytes(self, true) }
+    public fn to_be_bytes(self) -> [Byte; 16] { encode_wide_bytes(self, false) }
+    public fn from_le_bytes(bytes: [Byte; 16]) -> UInt128 { decode_wide_bytes(&bytes[..], true) }
+    public fn from_be_bytes(bytes: [Byte; 16]) -> UInt128 { decode_wide_bytes(&bytes[..], false) }
 
     public fn checked_add(self, rhs: UInt128) -> Maybe<UInt128> { checked_add(self, rhs) }
     public fn checked_sub(self, rhs: UInt128) -> Maybe<UInt128> { checked_sub(self, rhs) }
@@ -2836,8 +2956,12 @@ implement UInt128 {
         let b = other.to_int();
         ((a >> 1) + (b >> 1) + bitand(bitand(a, b), 1)) as UInt128
     }
-    public fn to_ne_bytes(self) -> List<Byte> { to_le_bytes(self) }
-    public fn from_ne_bytes(bytes: List<Byte>) -> UInt128 { from_le_bytes(bytes) }
+    public fn to_ne_bytes(self) -> List<Byte> {
+        encode_wide_byte_list(self, target_is_little_endian())
+    }
+    public fn from_ne_bytes(bytes: List<Byte>) -> UInt128 {
+        decode_wide_bytes(bytes.as_slice(), target_is_little_endian())
+    }
     public fn abs_diff(self, other: UInt128) -> Int {
         let a = self.to_int();
         let b = other.to_int();
@@ -2931,10 +3055,18 @@ implement Int8 {
     public fn rotate_left(self, n: Int) -> Int8 { rotl(self, n) }
     public fn rotate_right(self, n: Int) -> Int8 { rotr(self, n) }
     public fn swap_bytes(self) -> Int8 { bswap(self) }
-    public fn to_le_bytes(self) -> List<Byte> { to_le_bytes(self) }
-    public fn to_be_bytes(self) -> List<Byte> { to_be_bytes(self) }
-    public fn from_le_bytes(bytes: List<Byte>) -> Int8 { from_le_bytes(bytes) }
-    public fn from_be_bytes(bytes: List<Byte>) -> Int8 { from_be_bytes(bytes) }
+    public fn to_le_bytes(self) -> List<Byte> {
+        List.of(self as Byte)
+    }
+    public fn to_be_bytes(self) -> List<Byte> {
+        List.of(self as Byte)
+    }
+    public fn from_le_bytes(bytes: List<Byte>) -> Int8 {
+        decode_word_bytes(bytes.as_slice(), 1, true) as Int8
+    }
+    public fn from_be_bytes(bytes: List<Byte>) -> Int8 {
+        decode_word_bytes(bytes.as_slice(), 1, true) as Int8
+    }
     public fn to_binary(self) -> Text { self.to_int().to_binary() }
     public fn to_hex(self) -> Text { self.to_int().to_hex() }
     public fn to_octal(self) -> Text { self.to_int().to_octal() }
@@ -3033,8 +3165,12 @@ implement Int8 {
         let b = other.to_int();
         ((a >> 1) + (b >> 1) + bitand(bitand(a, b), 1)) as Int8
     }
-    public fn to_ne_bytes(self) -> List<Byte> { to_le_bytes(self) }
-    public fn from_ne_bytes(bytes: List<Byte>) -> Int8 { from_le_bytes(bytes) }
+    public fn to_ne_bytes(self) -> List<Byte> {
+        List.of(self as Byte)
+    }
+    public fn from_ne_bytes(bytes: List<Byte>) -> Int8 {
+        decode_word_bytes(bytes.as_slice(), 1, true) as Int8
+    }
 }
 
 // =============================================================================
@@ -3056,8 +3192,8 @@ implement Int16 {
 
     public fn to_le_bytes(self) -> [Byte; 2] { to_le_bytes_2(self) }
     public fn to_be_bytes(self) -> [Byte; 2] { to_be_bytes_2(self) }
-    public fn from_le_bytes(bytes: [Byte; 2]) -> Int16 { from_le_bytes_2(bytes) }
-    public fn from_be_bytes(bytes: [Byte; 2]) -> Int16 { from_be_bytes_2(bytes) }
+    public fn from_le_bytes(bytes: [Byte; 2]) -> Int16 { from_le_bytes_2(bytes) as Int16 }
+    public fn from_be_bytes(bytes: [Byte; 2]) -> Int16 { from_be_bytes_2(bytes) as Int16 }
 
     public fn abs(self) -> Int16 { abs_signed(self) }
     public fn signum(self) -> Int16 { signum(self) }
@@ -3208,8 +3344,12 @@ implement Int16 {
         let b = other.to_int();
         ((a >> 1) + (b >> 1) + bitand(bitand(a, b), 1)) as Int16
     }
-    public fn to_ne_bytes(self) -> List<Byte> { to_le_bytes(self) }
-    public fn from_ne_bytes(bytes: List<Byte>) -> Int16 { from_le_bytes(bytes) }
+    public fn to_ne_bytes(self) -> List<Byte> {
+        encode_word_bytes(self as UInt64, 2, target_is_little_endian())
+    }
+    public fn from_ne_bytes(bytes: List<Byte>) -> Int16 {
+        decode_word_bytes(bytes.as_slice(), 2, target_is_little_endian()) as Int16
+    }
 }
 
 // =============================================================================
@@ -3231,8 +3371,8 @@ implement Int32 {
 
     public fn to_le_bytes(self) -> [Byte; 4] { to_le_bytes_4(self) }
     public fn to_be_bytes(self) -> [Byte; 4] { to_be_bytes_4(self) }
-    public fn from_le_bytes(bytes: [Byte; 4]) -> Int32 { from_le_bytes_4(bytes) }
-    public fn from_be_bytes(bytes: [Byte; 4]) -> Int32 { from_be_bytes_4(bytes) }
+    public fn from_le_bytes(bytes: [Byte; 4]) -> Int32 { from_le_bytes_4(bytes) as Int32 }
+    public fn from_be_bytes(bytes: [Byte; 4]) -> Int32 { from_be_bytes_4(bytes) as Int32 }
 
     public fn abs(self) -> Int32 { abs_signed(self) }
     public fn signum(self) -> Int32 { signum(self) }
@@ -3383,8 +3523,12 @@ implement Int32 {
         let b = other.to_int();
         ((a >> 1) + (b >> 1) + bitand(bitand(a, b), 1)) as Int32
     }
-    public fn to_ne_bytes(self) -> [Byte; 4] { to_le_bytes_4(self) }
-    public fn from_ne_bytes(bytes: [Byte; 4]) -> Int32 { from_le_bytes_4(bytes) }
+    public fn to_ne_bytes(self) -> [Byte; 4] {
+        if target_is_little_endian() { self.to_le_bytes() } else { self.to_be_bytes() }
+    }
+    public fn from_ne_bytes(bytes: [Byte; 4]) -> Int32 {
+        if target_is_little_endian() { Int32.from_le_bytes(bytes) } else { Int32.from_be_bytes(bytes) }
+    }
 }
 
 // =============================================================================
@@ -3559,8 +3703,12 @@ implement Int64 {
         let b = other.to_int();
         ((a >> 1) + (b >> 1) + bitand(bitand(a, b), 1)) as Int64
     }
-    public fn to_ne_bytes(self) -> List<Byte> { to_le_bytes(self) }
-    public fn from_ne_bytes(bytes: List<Byte>) -> Int64 { from_le_bytes(bytes) }
+    public fn to_ne_bytes(self) -> List<Byte> {
+        encode_word_bytes(self as UInt64, 8, target_is_little_endian())
+    }
+    public fn from_ne_bytes(bytes: List<Byte>) -> Int64 {
+        decode_word_bytes(bytes.as_slice(), 8, target_is_little_endian()) as Int64
+    }
 }
 
 // =============================================================================
@@ -3582,10 +3730,10 @@ implement Int128 {
     public const MAX: Int128 = 170141183460469231731687303715884105727;
     public const BITS: Int = 128;
 
-    public fn to_le_bytes(self) -> [Byte; 16] { to_le_bytes(self) }
-    public fn to_be_bytes(self) -> [Byte; 16] { to_be_bytes(self) }
-    public fn from_le_bytes(bytes: [Byte; 16]) -> Int128 { from_le_bytes(bytes) }
-    public fn from_be_bytes(bytes: [Byte; 16]) -> Int128 { from_be_bytes(bytes) }
+    public fn to_le_bytes(self) -> [Byte; 16] { encode_wide_bytes(self as UInt128, true) }
+    public fn to_be_bytes(self) -> [Byte; 16] { encode_wide_bytes(self as UInt128, false) }
+    public fn from_le_bytes(bytes: [Byte; 16]) -> Int128 { decode_wide_bytes(&bytes[..], true) as Int128 }
+    public fn from_be_bytes(bytes: [Byte; 16]) -> Int128 { decode_wide_bytes(&bytes[..], false) as Int128 }
 
     public fn abs(self) -> Int128 { abs_signed(self) }
     public fn signum(self) -> Int128 { signum(self) }
@@ -3709,8 +3857,12 @@ implement Int128 {
         let b = other.to_int();
         ((a >> 1) + (b >> 1) + bitand(bitand(a, b), 1)) as Int128
     }
-    public fn to_ne_bytes(self) -> List<Byte> { to_le_bytes(self) }
-    public fn from_ne_bytes(bytes: List<Byte>) -> Int128 { from_le_bytes(bytes) }
+    public fn to_ne_bytes(self) -> List<Byte> {
+        encode_wide_byte_list(self as UInt128, target_is_little_endian())
+    }
+    public fn from_ne_bytes(bytes: List<Byte>) -> Int128 {
+        decode_wide_bytes(bytes.as_slice(), target_is_little_endian()) as Int128
+    }
     public fn abs_diff(self, other: Int128) -> Int {
         let a = self.to_int();
         let b = other.to_int();
@@ -3797,10 +3949,18 @@ implement ISize {
     public fn overflowing_sub(self, rhs: ISize) -> (ISize, Bool) { overflowing_sub(self, rhs) }
     public fn overflowing_mul(self, rhs: ISize) -> (ISize, Bool) { overflowing_mul(self, rhs) }
     public fn reverse_bits(self) -> ISize { bitreverse(self) }
-    public fn to_le_bytes(self) -> List<Byte> { to_le_bytes(self) }
-    public fn to_be_bytes(self) -> List<Byte> { to_be_bytes(self) }
-    public fn from_le_bytes(bytes: List<Byte>) -> ISize { from_le_bytes(bytes) }
-    public fn from_be_bytes(bytes: List<Byte>) -> ISize { from_be_bytes(bytes) }
+    public fn to_le_bytes(self) -> List<Byte> {
+        encode_word_bytes(self as UInt64, pointer_byte_count(), true)
+    }
+    public fn to_be_bytes(self) -> List<Byte> {
+        encode_word_bytes(self as UInt64, pointer_byte_count(), false)
+    }
+    public fn from_le_bytes(bytes: List<Byte>) -> ISize {
+        signed_pointer_bits(decode_word_bytes(bytes.as_slice(), pointer_byte_count(), true))
+    }
+    public fn from_be_bytes(bytes: List<Byte>) -> ISize {
+        signed_pointer_bits(decode_word_bytes(bytes.as_slice(), pointer_byte_count(), false))
+    }
     public fn to_binary(self) -> Text { self.to_int().to_binary() }
     public fn to_hex(self) -> Text { self.to_int().to_hex() }
     public fn to_octal(self) -> Text { self.to_int().to_octal() }
@@ -3899,8 +4059,12 @@ implement ISize {
         let b = other.to_int();
         ((a >> 1) + (b >> 1) + bitand(bitand(a, b), 1)) as ISize
     }
-    public fn to_ne_bytes(self) -> List<Byte> { to_le_bytes(self) }
-    public fn from_ne_bytes(bytes: List<Byte>) -> ISize { from_le_bytes(bytes) }
+    public fn to_ne_bytes(self) -> List<Byte> {
+        encode_word_bytes(self as UInt64, pointer_byte_count(), target_is_little_endian())
+    }
+    public fn from_ne_bytes(bytes: List<Byte>) -> ISize {
+        signed_pointer_bits(decode_word_bytes(bytes.as_slice(), pointer_byte_count(), target_is_little_endian()))
+    }
 }
 
 
@@ -3964,10 +4128,18 @@ implement USize {
     public fn overflowing_sub(self, rhs: USize) -> (USize, Bool) { overflowing_sub(self, rhs) }
     public fn overflowing_mul(self, rhs: USize) -> (USize, Bool) { overflowing_mul(self, rhs) }
     public fn reverse_bits(self) -> USize { bitreverse(self) }
-    public fn to_le_bytes(self) -> List<Byte> { to_le_bytes(self) }
-    public fn to_be_bytes(self) -> List<Byte> { to_be_bytes(self) }
-    public fn from_le_bytes(bytes: List<Byte>) -> USize { from_le_bytes(bytes) }
-    public fn from_be_bytes(bytes: List<Byte>) -> USize { from_be_bytes(bytes) }
+    public fn to_le_bytes(self) -> List<Byte> {
+        encode_word_bytes(self as UInt64, pointer_byte_count(), true)
+    }
+    public fn to_be_bytes(self) -> List<Byte> {
+        encode_word_bytes(self as UInt64, pointer_byte_count(), false)
+    }
+    public fn from_le_bytes(bytes: List<Byte>) -> USize {
+        decode_word_bytes(bytes.as_slice(), pointer_byte_count(), true) as USize
+    }
+    public fn from_be_bytes(bytes: List<Byte>) -> USize {
+        decode_word_bytes(bytes.as_slice(), pointer_byte_count(), false) as USize
+    }
     public fn to_binary(self) -> Text { self.to_int().to_binary() }
     public fn to_hex(self) -> Text { self.to_int().to_hex() }
     public fn to_octal(self) -> Text { self.to_int().to_octal() }
@@ -4057,8 +4229,12 @@ implement USize {
         let b = other.to_int();
         ((a >> 1) + (b >> 1) + bitand(bitand(a, b), 1)) as USize
     }
-    public fn to_ne_bytes(self) -> List<Byte> { to_le_bytes(self) }
-    public fn from_ne_bytes(bytes: List<Byte>) -> USize { from_le_bytes(bytes) }
+    public fn to_ne_bytes(self) -> List<Byte> {
+        encode_word_bytes(self as UInt64, pointer_byte_count(), target_is_little_endian())
+    }
+    public fn from_ne_bytes(bytes: List<Byte>) -> USize {
+        decode_word_bytes(bytes.as_slice(), pointer_byte_count(), target_is_little_endian()) as USize
+    }
 }
 
 
@@ -4181,8 +4357,12 @@ implement Float32 {
         let bits = from_be_bytes_4(bytes);
         f32_from_bits(bits)
     }
-    public fn to_ne_bytes(self) -> [Byte; 4] { self.to_le_bytes() }
-    public fn from_ne_bytes(bytes: [Byte; 4]) -> Float32 { Float32.from_le_bytes(bytes) }
+    public fn to_ne_bytes(self) -> [Byte; 4] {
+        if target_is_little_endian() { self.to_le_bytes() } else { self.to_be_bytes() }
+    }
+    public fn from_ne_bytes(bytes: [Byte; 4]) -> Float32 {
+        if target_is_little_endian() { Float32.from_le_bytes(bytes) } else { Float32.from_be_bytes(bytes) }
+    }
 
     public fn to_float(self) -> Float { self as Float }
 
@@ -4391,8 +4571,12 @@ implement Float64 {
         let bits = from_be_bytes_8(bytes);
         f64_from_bits(bits)
     }
-    public fn to_ne_bytes(self) -> [Byte; 8] { self.to_le_bytes() }
-    public fn from_ne_bytes(bytes: [Byte; 8]) -> Float64 { Float64.from_le_bytes(bytes) }
+    public fn to_ne_bytes(self) -> [Byte; 8] {
+        if target_is_little_endian() { self.to_le_bytes() } else { self.to_be_bytes() }
+    }
+    public fn from_ne_bytes(bytes: [Byte; 8]) -> Float64 {
+        if target_is_little_endian() { Float64.from_le_bytes(bytes) } else { Float64.from_be_bytes(bytes) }
+    }
 
     /// Midpoint of two Float64 values, avoiding overflow.
     public fn midpoint(self, other: Float64) -> Float64 {

@@ -1,0 +1,63 @@
+mount core.base.primitives.*;
+mount core.collections.list.List;
+mount core.intrinsics.platform.{target_is_little_endian, target_pointer_width};
+
+@test
+fn native_bytes_preserve_both_128_bit_words() {
+    let bits: UInt128 = 170141183460469231740910675752738881793u128;
+    let big: [Byte; 16] = [128, 0, 0, 0, 0, 0, 0, 0, 128, 0, 0, 0, 0, 0, 1, 1];
+    let little: [Byte; 16] = [1, 1, 0, 0, 0, 0, 0, 128, 0, 0, 0, 0, 0, 0, 0, 128];
+    let expected: [Byte; 16] = if target_is_little_endian() { little } else { big };
+    let mut actual: List<Byte> = bits.to_ne_bytes();
+    assert_eq(actual.len(), 16);
+    let mut index = 0;
+    while index < 16 {
+        assert_eq(actual[index], expected[index]);
+        index = index + 1;
+    }
+    assert_eq(UInt128.from_ne_bytes(actual), bits);
+    let second = bits.to_ne_bytes();
+    actual.push(42u8);
+    assert_eq(actual.len(), 17);
+    assert_eq(second.len(), 16);
+    assert_eq(UInt128.from_le_bytes(little), bits);
+    assert_eq(UInt128.from_be_bytes(big), bits);
+    let minimum: Int128 = -170141183460469231731687303715884105728i128;
+    assert_eq(Int128.from_ne_bytes(minimum.to_ne_bytes()), minimum);
+}
+
+@test
+fn native_bytes_preserve_signed_and_floating_bits() {
+    let byte: List<Byte> = (-31i8).to_ne_bytes();
+    assert_eq(byte[0], 225u8);
+    assert_eq(Int8.from_ne_bytes(byte), -31i8);
+    assert_eq(Int16.from_ne_bytes((-32510i16).to_ne_bytes()), -32510i16);
+    assert_eq(Int32.from_ne_bytes((-2122153084i32).to_ne_bytes()), -2122153084i32);
+    let negative_zero = -0.0f32;
+    assert_eq(Float32.from_ne_bytes(negative_zero.to_ne_bytes()).to_bits(), 2147483648u32);
+}
+
+@test
+fn native_pointer_bytes_match_the_target_width() {
+    let n: ISize = -62715isize;
+    let bytes = n.to_ne_bytes();
+    assert_eq(bytes.len(), (target_pointer_width() as Int) / 8);
+    assert_eq(ISize.from_ne_bytes(bytes), n);
+    let positive: USize = 2172814212usize;
+    assert_eq(USize.from_ne_bytes(positive.to_ne_bytes()), positive);
+}
+
+@test
+@should_panic(expected = "byte sequence length differs from the numeric width")
+fn wide_native_bytes_reject_a_short_list() {
+    let bytes: List<Byte> = List.of(0u8);
+    UInt128.from_ne_bytes(bytes);
+}
+
+@test
+@should_panic(expected = "byte sequence length differs from the numeric width")
+fn native_pointer_bytes_reject_an_extra_byte() {
+    let mut bytes = USize.to_ne_bytes(0usize);
+    bytes.push(0u8);
+    USize.from_ne_bytes(bytes);
+}
