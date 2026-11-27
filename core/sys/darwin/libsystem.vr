@@ -740,7 +740,8 @@ public type DarwinTimeval is {
     tv_usec: Int,
 };
 
-/// mach_timebase_info structure
+/// The two uint32_t fields of mach_timebase_info_data_t.
+@repr(C)
 public type MachTimebaseInfo is {
     numer: UInt32,
     denom: UInt32,
@@ -1600,20 +1601,44 @@ public fn safe_nanosleep(seconds: Int, nanoseconds: Int) -> Result<(), OSError> 
     }
 }
 
-/// Get monotonic time in nanoseconds (high performance)
-public fn monotonic_nanos() -> UInt64 {
-    static mut timebase_info: MachTimebaseInfo = MachTimebaseInfo { numer: 0, denom: 0 };
-    static mut timebase_initialized: Bool = false;
-
-    unsafe {
-        if !timebase_initialized {
-            mach_timebase_info(&mut timebase_info);
-            timebase_initialized = true;
-        }
-
-        let ticks = mach_absolute_time();
-        (ticks * timebase_info.numer as UInt64) / timebase_info.denom as UInt64
+fn system_timebase() -> MachTimebaseInfo {
+    let mut info = MachTimebaseInfo { numer: 0_u32, denom: 0_u32 };
+    let status = unsafe { mach_timebase_info(&mut info) };
+    if status != 0 {
+        panic("mach_timebase_info failed");
     }
+    if info.numer == 0_u32 || info.denom == 0_u32 {
+        panic("mach_timebase_info returned a zero scale");
+    }
+    info
+}
+
+// Divide first so a representable result survives a large intermediate product.
+// The remainder and both scale factors fit in 32 bits.
+fn scale_ticks(value: UInt64, numer: UInt32, denom: UInt32) -> UInt64 {
+    let n = numer as UInt64;
+    let d = denom as UInt64;
+    let whole = value / d;
+    let fraction = (value % d) * n / d;
+    if whole > (0xffffffffffffffff_u64 - fraction) / n {
+        panic("Mach time conversion exceeds UInt64");
+    }
+    whole * n + fraction
+}
+
+pub(in core.sys.darwin) fn mach_ticks_to_nanos(ticks: UInt64) -> UInt64 {
+    let info = system_timebase();
+    scale_ticks(ticks, info.numer, info.denom)
+}
+
+pub(in core.sys.darwin) fn nanos_to_mach_ticks(nanos: UInt64) -> UInt64 {
+    let info = system_timebase();
+    scale_ticks(nanos, info.denom, info.numer)
+}
+
+/// Nanoseconds on the Mach absolute clock.
+public fn monotonic_nanos() -> UInt64 {
+    mach_ticks_to_nanos(unsafe { mach_absolute_time() })
 }
 
 /// Get monotonic time in microseconds (high performance)

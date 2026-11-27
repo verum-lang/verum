@@ -32,7 +32,7 @@ module core.sys.darwin.time;
 
 mount sys.common.OSError;
 mount super.libsystem.{
-    mach_absolute_time, mach_timebase_info, MachTimebaseInfo,
+    mach_absolute_time, mach_ticks_to_nanos, nanos_to_mach_ticks,
     clock_gettime_ffi, nanosleep_ffi, DarwinTimespec,
     CLOCK_REALTIME, CLOCK_MONOTONIC, CLOCK_MONOTONIC_RAW,
     CLOCK_PROCESS_CPUTIME_ID, CLOCK_THREAD_CPUTIME_ID,
@@ -49,66 +49,6 @@ public const CLOCK_MONOTONIC_ID: Int = 6;
 public const CLOCK_MONOTONIC_RAW_ID: Int = 4;
 public const CLOCK_PROCESS_CPUTIME: Int = 12;
 public const CLOCK_THREAD_CPUTIME: Int = 16;
-
-// =============================================================================
-// Mach Time Conversion
-// =============================================================================
-
-/// Cached timebase info for Mach time conversion
-static mut TIMEBASE_NUMER: UInt32 = 0;
-static mut TIMEBASE_DENOM: UInt32 = 0;
-static mut TIMEBASE_INITIALIZED: Bool = false;
-
-/// Initialize the Mach timebase conversion factors.
-fn init_timebase() {
-    unsafe {
-        if TIMEBASE_INITIALIZED {
-            return;
-        }
-
-        let mut info = MachTimebaseInfo { numer: 0, denom: 0 };
-        mach_timebase_info(&mut info);
-
-        TIMEBASE_NUMER = info.numer;
-        TIMEBASE_DENOM = info.denom;
-        TIMEBASE_INITIALIZED = true;
-    }
-}
-
-/// Convert Mach absolute time to nanoseconds.
-fn mach_to_nanos(mach_time: UInt64) -> UInt64 {
-    init_timebase();
-    unsafe {
-        // DARWIN-MACH-TIMEBASE-TIER0-1: a ZERO denom means the
-        // timebase never initialized (Tier-0 mach_timebase_info
-        // out-param write-back) — 0 == 0 satisfied the fast path and
-        // RAW mach ticks leaked out as "nanoseconds" (41.67x slow on
-        // Apple Silicon). An uninitialized timebase must never take
-        // the identity path.
-        if TIMEBASE_DENOM != 0 && TIMEBASE_NUMER == TIMEBASE_DENOM {
-            mach_time
-        } else if TIMEBASE_DENOM != 0 {
-            // General case: scale by timebase ratio
-            (mach_time * (TIMEBASE_NUMER as UInt64)) / (TIMEBASE_DENOM as UInt64)
-        } else {
-            // Timebase unavailable: the runtime intrinsic is the
-            // canonical clock authority on both tiers.
-            core.intrinsics.monotonic_nanos()
-        }
-    }
-}
-
-/// Convert nanoseconds to Mach absolute time.
-fn nanos_to_mach(nanos: UInt64) -> UInt64 {
-    init_timebase();
-    unsafe {
-        if TIMEBASE_NUMER == TIMEBASE_DENOM {
-            nanos
-        } else {
-            (nanos * (TIMEBASE_DENOM as UInt64)) / (TIMEBASE_NUMER as UInt64)
-        }
-    }
-}
 
 // =============================================================================
 // Time Structures
@@ -212,23 +152,23 @@ implement DarwinInstant {
     public fn elapsed(&self) -> DarwinDuration {
         let now = unsafe { mach_absolute_time() };
         let diff = now - self.0;
-        DarwinDuration(mach_to_nanos(diff))
+        DarwinDuration(mach_ticks_to_nanos(diff))
     }
 
     /// DarwinDuration between two instants.
     public fn duration_since(&self, earlier: &DarwinInstant) -> DarwinDuration {
         let diff = self.0 - earlier.0;
-        DarwinDuration(mach_to_nanos(diff))
+        DarwinDuration(mach_ticks_to_nanos(diff))
     }
 
     /// Add duration to instant.
     public fn add(&self, duration: DarwinDuration) -> DarwinInstant {
-        DarwinInstant(self.0 + nanos_to_mach(duration.0))
+        DarwinInstant(self.0 + nanos_to_mach_ticks(duration.0))
     }
 
     /// Subtract duration from instant.
     public fn sub(&self, duration: DarwinDuration) -> DarwinInstant {
-        DarwinInstant(self.0 - nanos_to_mach(duration.0))
+        DarwinInstant(self.0 - nanos_to_mach_ticks(duration.0))
     }
 
     /// Check if this instant is before another.
@@ -256,15 +196,7 @@ implement DarwinInstant {
 // Clock Operations
 // =============================================================================
 
-/// Get monotonic time in nanoseconds (using Mach time).
-///
-
-/// This is the highest precision monotonic time source on macOS.
-/// Not affected by system time changes or NTP adjustments.
-public fn monotonic_nanos() -> UInt64 {
-    let mach_time = unsafe { mach_absolute_time() };
-    mach_to_nanos(mach_time)
-}
+public mount super.libsystem.monotonic_nanos;
 
 /// Get monotonic time in microseconds.
 public fn monotonic_micros() -> UInt64 {
@@ -361,7 +293,7 @@ public fn sleep_until_mach(deadline: UInt64) {
         return;
     }
 
-    let remaining_nanos = mach_to_nanos(deadline - now);
+    let remaining_nanos = mach_ticks_to_nanos(deadline - now);
     let _ = sleep(DarwinDuration(remaining_nanos));
 }
 
@@ -494,7 +426,7 @@ implement DarwinPerfCounter {
     @inline
     public fn elapsed(&self) -> DarwinDuration {
         let now = unsafe { mach_absolute_time() };
-        DarwinDuration(mach_to_nanos(now - self.0))
+        DarwinDuration(mach_ticks_to_nanos(now - self.0))
     }
 
     /// Get elapsed ticks (raw Mach time units).
@@ -506,19 +438,19 @@ implement DarwinPerfCounter {
     /// Difference between two counter readings.
     @inline
     public fn diff(&self, earlier: &DarwinPerfCounter) -> DarwinDuration {
-        DarwinDuration(mach_to_nanos(self.0 - earlier.0))
+        DarwinDuration(mach_ticks_to_nanos(self.0 - earlier.0))
     }
 
     /// Get elapsed time since an earlier counter reading.
     @inline
     public fn elapsed_since(&self, earlier: DarwinPerfCounter) -> DarwinDuration {
-        DarwinDuration(mach_to_nanos(self.0 - earlier.0))
+        DarwinDuration(mach_ticks_to_nanos(self.0 - earlier.0))
     }
 
     /// Get the counter value as nanoseconds.
     @inline
     public fn as_nanos(&self) -> UInt64 {
-        mach_to_nanos(self.0)
+        mach_ticks_to_nanos(self.0)
     }
 }
 
@@ -560,7 +492,7 @@ implement DarwinDeadlineTimer {
     public fn at(instant: DarwinInstant) -> DarwinDeadlineTimer {
         // Note: DarwinInstant uses mach_absolute_time internally, so convert to nanos
         DarwinDeadlineTimer {
-            deadline: mach_to_nanos(instant.0),
+            deadline: mach_ticks_to_nanos(instant.0),
             has_deadline: true,
         }
     }

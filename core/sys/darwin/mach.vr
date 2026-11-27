@@ -180,12 +180,6 @@ extern {
     // Mach Time
     // =========================================================================
 
-    /// Get absolute time (high precision)
-    fn mach_absolute_time() -> UInt64;
-
-    /// Get time base info
-    fn mach_timebase_info(info: &mut MachTimebaseInfo) -> KernReturn;
-
     /// Wait until absolute time
     fn mach_wait_until(deadline: UInt64) -> KernReturn;
 
@@ -793,21 +787,7 @@ public fn safe_vm_protect(address: VmAddress, size: VmSize, prot: VmProt) -> Res
     }
 }
 
-/// Get high-precision monotonic time in nanoseconds
-public fn monotonic_nanos() -> UInt64 {
-    static mut timebase_info: MachTimebaseInfo = MachTimebaseInfo { numer: 0, denom: 0 };
-    static mut timebase_initialized: Bool = false;
-
-    unsafe {
-        if !timebase_initialized {
-            mach_timebase_info(&mut timebase_info);
-            timebase_initialized = true;
-        }
-
-        let ticks = mach_absolute_time();
-        (ticks * timebase_info.numer as UInt64) / timebase_info.denom as UInt64
-    }
-}
+public mount super.libsystem.monotonic_nanos;
 
 /// Create semaphore (safe wrapper)
 public fn safe_semaphore_create(initial_value: Int) -> Result<SemaphoreT, KernReturn> {

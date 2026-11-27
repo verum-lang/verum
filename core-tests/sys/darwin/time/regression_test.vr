@@ -10,6 +10,7 @@ mount core.sys.darwin.time.{
     CLOCK_MONOTONIC_ID,
     CLOCK_PROCESS_CPUTIME,
     CLOCK_THREAD_CPUTIME,
+    DarwinDuration, DarwinInstant,
 };
 
 // =============================================================================
@@ -39,3 +40,28 @@ fn regression_clock_cputime_canonical_values() {
 }
 
 fn main() {}
+
+@cfg(target_os = "macos")
+@ffi("libSystem.B.dylib")
+extern {
+    fn clock_gettime_nsec_np(id: Int32) -> UInt64;
+}
+
+// CLOCK_UPTIME_RAW reports the Mach absolute clock in nanoseconds.
+@cfg(target_os = "macos")
+@test
+fn mach_clock_uses_host_timebase() {
+    let start = unsafe { clock_gettime_nsec_np(8_i32) };
+    let sample = core.sys.darwin.time.monotonic_nanos();
+    let mach_sample = core.sys.darwin.mach.monotonic_nanos();
+    let stop = unsafe { clock_gettime_nsec_np(8_i32) };
+    assert(start <= sample && sample <= mach_sample && mach_sample <= stop);
+
+    let zero = DarwinInstant.from_raw(0_u64);
+    let second = DarwinDuration.from_nanos(1_000_000_000_u64);
+    let later = zero.add(second);
+    let elapsed = later.duration_since(&zero);
+    let next_tick = DarwinInstant.from_raw(later.as_raw() + 1_u64);
+    assert(elapsed.as_nanos() <= 1_000_000_000_u64);
+    assert(next_tick.duration_since(&zero).as_nanos() >= 1_000_000_000_u64);
+}
