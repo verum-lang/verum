@@ -42,6 +42,7 @@
 module core.cli.parser;
 
 mount core.base.{Maybe, Result};
+mount core.base.protocols.Default;
 mount core.collections.{List, Map, Set};
 mount core.text.Text;
 mount core.cli.spec.{
@@ -56,14 +57,18 @@ mount core.cli.error.{ParseError, ParseErrorKind, ParseDiagnostic};
 
 /// A captured flag value as raw Text (typing happens in runtime layer).
 public type CapturedFlag is {
-    /// Flag long-name (preferred) or short-letter rendered as Text.
-    public(in core.cli) name:    Text,
     /// All values captured for this flag (length matches arity).
     /// For switches (arity Exactly(0)) this is empty and the count reflects occurrences.
     public(in core.cli) values:  List<Text>,
     /// Number of times the flag appeared (for counter / repeated tracking).
     public(in core.cli) occurrences: Int,
 };
+
+implement Default for CapturedFlag {
+    fn default() -> CapturedFlag {
+        CapturedFlag { values: List.new(), occurrences: 0 }
+    }
+}
 
 /// A captured positional argument.
 public type CapturedArg is {
@@ -342,7 +347,6 @@ fn handle_long(
             Maybe.Some(f) => if f.is_negatable() {
                 let key = flag_key(f);
                 let cap = CapturedFlag {
-                    name: key.clone(),
                     values: { let mut v: List<Text> = List.new(); v.push(Text.from("false")); v },
                     occurrences: 1,
                 };
@@ -484,9 +488,9 @@ fn capture_flag(
         ));
     }
 
-    let stored = outcome.flags.entry(key).or_insert_with_key(default_captured);
+    let stored = outcome.flags.entry(key).or_default();
     if stored.occurrences > 0 && !f.is_repeated() && !f.is_counter() {
-        return Result.Err(ParseError.duplicate_flag(stored.name.clone()));
+        return Result.Err(ParseError.duplicate_flag(flag_key(f)));
     }
     stored.values.append(&mut values);
     stored.occurrences += 1;
@@ -503,12 +507,8 @@ fn flag_key(f: &FlagSpec) -> Text {
     }
 }
 
-fn default_captured(key: &Text) -> CapturedFlag {
-    CapturedFlag { name: key.clone(), values: List.new(), occurrences: 0 }
-}
-
 fn increment_capture(flags: &mut Map<Text, CapturedFlag>, key: Text) {
-    let stored = flags.entry(key).or_insert_with_key(default_captured);
+    let stored = flags.entry(key).or_default();
     stored.occurrences += 1;
 }
 

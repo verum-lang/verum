@@ -304,8 +304,7 @@ fn apply_env_for_command(cmd: &CommandSpec, outcome: &mut ParseOutcome) {
                         Maybe.Some(v) => {
                             let mut values = List.new();
                             values.push(v);
-                            outcome.flags.insert(key.clone(), CapturedFlag {
-                                name: key,
+                            outcome.flags.insert(key, CapturedFlag {
                                 values: values,
                                 occurrences: 1,
                             });
