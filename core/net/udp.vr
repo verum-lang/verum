@@ -91,7 +91,7 @@ mount sys.linux.syscall.{
     set_socket_timeout,
     set_ip_tos, set_ip_recvtos, set_ipv6_tclass, set_ipv6_recvtclass,
     // Multicast
-    join_multicast_v4, leave_multicast_v4,
+    join_multicast_v4 as sys_join_multicast_v4, leave_multicast_v4 as sys_leave_multicast_v4,
     set_multicast_ttl_v4, set_multicast_loop_v4,
     // Peek and non-blocking
     peek, recv_nonblock, send_nonblock,
@@ -709,12 +709,12 @@ implement UdpSocket {
     /// socket.join_multicast_v4(&Ipv4Addr.new(239, 0, 0, 1), &Ipv4Addr.unspecified())?;
     /// ```
     public fn join_multicast_v4(&self, multiaddr: &Ipv4Addr, interface: &Ipv4Addr) -> Result<(), IoError> {
-        @cfg(target_os = "macos") {
+        @cfg(any(target_os = "macos", target_os = "linux")) {
             let request = ipv4_membership_request(multiaddr, interface);
             let bytes = &request[..];
             return sys_join_multicast_v4(self.fd, bytes).map_err(|e| IoError.from_os(e));
         }
-        @cfg(any(target_os = "linux", target_os = "windows")) {
+        @cfg(target_os = "windows") {
             let (a, b, c, d) = multiaddr.octets();
             let mcast = ((a as UInt32) << 24) | ((b as UInt32) << 16) | ((c as UInt32) << 8) | (d as UInt32);
 
@@ -726,12 +726,12 @@ implement UdpSocket {
 
     /// Leave an IPv4 multicast group.
     public fn leave_multicast_v4(&self, multiaddr: &Ipv4Addr, interface: &Ipv4Addr) -> Result<(), IoError> {
-        @cfg(target_os = "macos") {
+        @cfg(any(target_os = "macos", target_os = "linux")) {
             let request = ipv4_membership_request(multiaddr, interface);
             let bytes = &request[..];
             return sys_leave_multicast_v4(self.fd, bytes).map_err(|e| IoError.from_os(e));
         }
-        @cfg(any(target_os = "linux", target_os = "windows")) {
+        @cfg(target_os = "windows") {
             let (a, b, c, d) = multiaddr.octets();
             let mcast = ((a as UInt32) << 24) | ((b as UInt32) << 16) | ((c as UInt32) << 8) | (d as UInt32);
 

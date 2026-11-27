@@ -61,7 +61,7 @@ PRELUDE_SOURCE = CORE / "mod.vr"
 # intrinsic itself, whose codegen strategy was an `llvm.bitcast` between two record
 # layouts that do not correspond. One collision removed by deleting the thing, which is
 # the only way this number goes down that also removes a hazard.
-BASELINE_ALL = 616
+BASELINE_ALL = 614
 BASELINE_SQLITE = 84
 # The PRELUDE scope — the subset a user meets without importing anything.
 # This is not a stylistic count: for these names the ambiguity DECIDES which
@@ -81,7 +81,7 @@ BASELINE_SQLITE = 84
 BASELINE_PRELUDE = 17
 # Same populations under the (name, arity, first-param type) key — the
 # REUSE question. Duplicated WORK, not merely a shared verb.
-BASELINE_ALL_TYPED = 297
+BASELINE_ALL_TYPED = 295
 # `--kind types`: two TOP-LEVEL type declarations — public OR private —
 # sharing a SIMPLE NAME in different modules. Frozen at the measured count.
 #
@@ -91,7 +91,7 @@ BASELINE_ALL_TYPED = 297
 # `Modifier` sum — so `write_modifiers` shipped as a panic stub until the
 # SQLite type was renamed `DateModifier`. Every remaining pair is the same
 # shape, waiting for a resolution order to shift under it.
-BASELINE_TYPES = 125
+BASELINE_TYPES = 124
 # The subset of BASELINE_TYPES whose declarations disagree about the type's
 # SHAPE — record vs newtype vs sum vs unit vs protocol. Measured 2026-09-12.
 # This is the ratchet that matters: a shape disagreement is what makes

@@ -34,6 +34,7 @@ public mount sys.common.{OSError, FileDesc, IOVec, MemProt, MapFlags};
 
 // Import syscall intrinsic from consolidated stdlib.intrinsics
 mount core.intrinsics.syscall6;
+mount core.sys.linux.errno.EINVAL;
 
 // IntCoercible — for Timespec / SockaddrIn syscall-arg types.
 // BytewiseFfi — for SockaddrIn (packed `sockaddr_in` byte
@@ -1543,7 +1544,7 @@ public fn setsockopt(
             fd.as_raw(),
             level,
             optname,
-            optval as Int,
+            optval.as_ptr() as Int,
             optlen,
             0
         )
@@ -1761,47 +1762,19 @@ public fn set_recv_buffer_size(fd: FileDesc, size: Int) -> Result<(), OSError> {
     setsockopt_int(fd, SOL_SOCKET, SO_RCVBUF, size)
 }
 
-/// struct ip_mreq for multicast membership.
-@repr(C)
-public type IpMreq is {
-    imr_multiaddr: UInt32,   // Multicast group address (network byte order)
-    imr_interface: UInt32,   // Interface address (network byte order), 0 = default
-};
-
-/// Join an IPv4 multicast group.
-///
-
-/// multiaddr: multicast group address (4 bytes, network byte order)
-/// interface: local interface address (4 bytes, network byte order), 0 = default
-public fn join_multicast_v4(fd: FileDesc, multiaddr: UInt32, interface: UInt32) -> Result<(), OSError> {
-    // T1135: `&record as &unsafe Byte` hands the kernel the record's
-    // heap header. `struct ip_mreq` is eight bytes; write them.
-    let mut mreq: [Byte; 8] = [0; 8];
-    mreq[0] = (multiaddr & 0xFF) as Byte;
-    mreq[1] = ((multiaddr >> 8) & 0xFF) as Byte;
-    mreq[2] = ((multiaddr >> 16) & 0xFF) as Byte;
-    mreq[3] = ((multiaddr >> 24) & 0xFF) as Byte;
-    mreq[4] = (interface & 0xFF) as Byte;
-    mreq[5] = ((interface >> 8) & 0xFF) as Byte;
-    mreq[6] = ((interface >> 16) & 0xFF) as Byte;
-    mreq[7] = ((interface >> 24) & 0xFF) as Byte;
-    setsockopt(fd, SOL_IP, IP_ADD_MEMBERSHIP, &mreq[..], 8)  // sizeof(ip_mreq) = 8
+/// Join the group specified by a packed IPv4 multicast request.
+public fn join_multicast_v4(fd: FileDesc, request: &[Byte]) -> Result<(), OSError> {
+    set_ipv4_membership(fd, IP_ADD_MEMBERSHIP, request)
 }
 
-/// Leave an IPv4 multicast group.
-public fn leave_multicast_v4(fd: FileDesc, multiaddr: UInt32, interface: UInt32) -> Result<(), OSError> {
-    // T1135: `&record as &unsafe Byte` hands the kernel the record's
-    // heap header. `struct ip_mreq` is eight bytes; write them.
-    let mut mreq: [Byte; 8] = [0; 8];
-    mreq[0] = (multiaddr & 0xFF) as Byte;
-    mreq[1] = ((multiaddr >> 8) & 0xFF) as Byte;
-    mreq[2] = ((multiaddr >> 16) & 0xFF) as Byte;
-    mreq[3] = ((multiaddr >> 24) & 0xFF) as Byte;
-    mreq[4] = (interface & 0xFF) as Byte;
-    mreq[5] = ((interface >> 8) & 0xFF) as Byte;
-    mreq[6] = ((interface >> 16) & 0xFF) as Byte;
-    mreq[7] = ((interface >> 24) & 0xFF) as Byte;
-    setsockopt(fd, SOL_IP, IP_DROP_MEMBERSHIP, &mreq[..], 8)
+/// Drop the group membership on the interface specified in the request.
+public fn leave_multicast_v4(fd: FileDesc, request: &[Byte]) -> Result<(), OSError> {
+    set_ipv4_membership(fd, IP_DROP_MEMBERSHIP, request)
+}
+
+fn set_ipv4_membership(fd: FileDesc, option: Int, request: &[Byte]) -> Result<(), OSError> {
+    if request.len() != 8 { return Result.Err(OSError.from_code(EINVAL)); }
+    setsockopt(fd, SOL_IP, option, request, 8)
 }
 
 /// Set multicast TTL (time-to-live) for IPv4.

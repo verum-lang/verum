@@ -45,7 +45,7 @@ fn regression_udp_recv_from_blocking_and_nonblocking() {
 // UDP-4 — multicast group join + leave
 // =============================================================================
 
-@cfg(target_os = "macos")
+@cfg(any(target_os = "linux", target_os = "macos"))
 @test
 fn regression_udp_multicast_join_leave() {
     let interface = Ipv4Addr.localhost();

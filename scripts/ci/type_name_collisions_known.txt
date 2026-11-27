@@ -94,8 +94,6 @@ Finding	core/cli/verify.vr
 Finding	core/database/sqlite/native/integrity_walker_api/finding.vr
 Interval	core/async/interval.vr
 Interval	core/cog/resolve.vr
-IpMreq	core/sys/linux/syscall.vr
-IpMreq	core/sys/windows/winsock2.vr
 Judgment	core/verify/kernel_soundness/judgment.vr
 Judgment	core/verify/kernel_v0/judgment.vr
 KEvent	core/sys/darwin/libsystem.vr
