@@ -6146,103 +6146,97 @@ implement Default for Float32 {
 
 implement Display for Int8 {
     public fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str(&self.to_int().to_text())
+        f.write_str(&f"{*self}")
     }
 }
 
 implement Debug for Int8 {
     public fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str(&self.to_int().to_text())
+        self.fmt(f)
     }
 }
 
 implement Display for Int16 {
     public fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str(&self.to_int().to_text())
+        f.write_str(&f"{*self}")
     }
 }
 
 implement Debug for Int16 {
     public fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str(&self.to_int().to_text())
+        self.fmt(f)
     }
 }
 
 implement Display for Int32 {
     public fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str(&self.to_int().to_text())
+        f.write_str(&f"{*self}")
     }
 }
 
 implement Debug for Int32 {
     public fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str(&self.to_int().to_text())
+        self.fmt(f)
     }
 }
 
 implement Display for Int128 {
     public fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        // Full-width render (T0272): `.to_int()` narrows to i64 and would
-        // print `Int128.MAX` as `-1`. `to_text()` on a 128-bit receiver
-        // compiles to the width-aware signed render op.
-        f.write_str(&self.to_text())
+        f.write_str(&f"{*self}")
     }
 }
 
 implement Debug for Int128 {
     public fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str(&self.to_text())
+        self.fmt(f)
     }
 }
 
 implement Display for UInt16 {
     public fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str(&self.to_int().to_text())
+        f.write_str(&f"{*self}")
     }
 }
 
 implement Debug for UInt16 {
     public fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str(&self.to_int().to_text())
+        self.fmt(f)
     }
 }
 
 implement Display for UInt32 {
     public fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str(&self.to_int().to_text())
+        f.write_str(&f"{*self}")
     }
 }
 
 implement Debug for UInt32 {
     public fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str(&self.to_int().to_text())
+        self.fmt(f)
     }
 }
 
 implement Display for UInt64 {
     public fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str(&self.to_int().to_text())
+        f.write_str(&f"{*self}")
     }
 }
 
 implement Debug for UInt64 {
     public fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str(&self.to_int().to_text())
+        self.fmt(f)
     }
 }
 
 implement Display for UInt128 {
     public fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        // Full-width render (T0272): `.to_int()` narrows to i64. `to_text()`
-        // on an unsigned receiver compiles to the width-aware unsigned
-        // render op, so the high bit reads as magnitude, never as sign.
-        f.write_str(&self.to_text())
+        f.write_str(&f"{*self}")
     }
 }
 
 implement Debug for UInt128 {
     public fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str(&self.to_text())
+        self.fmt(f)
     }
 }
 

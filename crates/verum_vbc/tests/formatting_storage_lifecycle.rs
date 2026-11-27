@@ -42,6 +42,32 @@ fn exercise(source: &str) {
 }
 
 #[test]
+fn comparisons_retire_fresh_text_operands_and_preserve_named_ones() {
+    exercise(r#"
+        fn message(n: Int) -> Text { f"record number {n}" }
+        fn probe() -> Int {
+            let name = message(2);
+            if message(1) < name && name == message(2)
+                && message(3) != message(4) && name.len() == 15 { 73 } else { 0 }
+        }
+    "#);
+}
+
+#[test]
+fn scalar_formatting_preserves_pointer_sized_signedness_and_dereferences() {
+    exercise(r#"
+        fn render_signed(value: &ISize) -> Text { f"{*value}" }
+        fn render_unsigned(value: &USize) -> Text { f"{*value}" }
+        fn probe() -> Int {
+            let signed: ISize = -42;
+            let unsigned: USize = 18446744073709551615u64 as USize;
+            if render_signed(&signed) == "-42"
+                && render_unsigned(&unsigned) == "18446744073709551615" { 73 } else { 0 }
+        }
+    "#);
+}
+
+#[test]
 fn repeated_formatting_retires_conversions_and_keeps_named_fields() {
     exercise(r#"
         type Packet is { text: Text };

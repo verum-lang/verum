@@ -1,0 +1,24 @@
+mount core.base.protocols.{Debug, Display, Formatter};
+
+@test
+fn full_width_unsigned_display_appends_to_the_formatter() {
+    let mut text: Text = "u=";
+    {
+        let mut formatter = Formatter.new(&mut text);
+        18446744073709551615u64.fmt(&mut formatter).unwrap();
+        formatter.write_str("/").unwrap();
+        340282366920938463463374607431768211455u128.fmt_debug(&mut formatter).unwrap();
+    }
+    assert_eq(text, "u=18446744073709551615/340282366920938463463374607431768211455");
+}
+
+@test
+fn signed_debug_keeps_the_minimum_value() {
+    let minimum: Int128 = -170141183460469231731687303715884105728i128;
+    let mut text: Text = "";
+    {
+        let mut formatter = Formatter.new(&mut text);
+        minimum.fmt_debug(&mut formatter).unwrap();
+    }
+    assert_eq(text, "-170141183460469231731687303715884105728");
+}

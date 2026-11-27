@@ -3539,8 +3539,8 @@ impl VbcCodegen {
             && let Some(arity) = Self::tuple_eq_arity(left, right)
         {
             self.emit_tuple_elementwise_eq(dest, left_reg, right_reg, arity, op == BinOp::Ne);
-            self.ctx.free_temp(left_reg);
-            self.ctx.free_temp(right_reg);
+            self.retire_observed_operand(left, left_reg, left_declaration.as_ref());
+            self.retire_observed_operand(right, right_reg, right_declaration.as_ref());
             return Ok(Some(dest));
         }
 
@@ -3555,9 +3555,6 @@ impl VbcCodegen {
                         a: left_reg,
                         b: right_reg,
                     });
-                    self.retire_observed_operand(left, left_reg, left_declaration.as_ref());
-                    self.retire_observed_operand(right, right_reg, right_declaration.as_ref());
-                    return Ok(Some(dest));
                 } else if is_float {
                     self.ctx.emit(Instruction::BinaryF {
                         op: BinaryFloatOp::Add,
@@ -3997,9 +3994,13 @@ impl VbcCodegen {
             | BinOp::ShrAssign => unreachable!(),
         }
 
-        // Free operand temporaries
-        self.ctx.free_temp(left_reg);
-        self.ctx.free_temp(right_reg);
+        if op.is_comparison() || (is_text && matches!(op, BinOp::Add | BinOp::Concat)) {
+            self.retire_observed_operand(left, left_reg, left_declaration.as_ref());
+            self.retire_observed_operand(right, right_reg, right_declaration.as_ref());
+        } else {
+            self.ctx.free_temp(left_reg);
+            self.ctx.free_temp(right_reg);
+        }
 
         Ok(Some(dest))
     }
@@ -43688,74 +43689,43 @@ impl VbcCodegen {
         expr_reg: Reg,
         declared: Option<&crate::types::TypeRef>,
     ) -> CodegenResult<TextConversion> {
-        if declared == Some(&crate::types::TypeRef::Concrete(crate::types::TypeId::TEXT))
-        {
+        use crate::types::{TypeId, TypeRef};
+        use verum_common::well_known_types::type_names;
+
+        if declared == Some(&TypeRef::Concrete(TypeId::TEXT)) {
             // No Mov: an observation cannot transfer the source binding's owner.
             return Ok(TextConversion::Borrowed(expr_reg));
         }
         let str_reg = self.ctx.alloc_temp();
-        let expr_type = self.infer_expr_type_kind(expr);
-        let type_name = match &expr_type {
-            Some(verum_ast::ty::TypeKind::Char) => "Char",
-            Some(verum_ast::ty::TypeKind::Float) => "Float",
-            Some(verum_ast::ty::TypeKind::Path(path)) => {
-                match path.as_ident().map(|id| id.name.as_str()) {
-                    Some("Char") => "Char",
-                    Some("Float") | Some("Float64") | Some("Float32") => "Float",
-                    _ => "",
-                }
+        // The produced value retains the scalar identity across dereferences,
+        // module qualification and aliases. A user-defined nominal type keeps
+        // its own Display implementation even if its leaf name is numeric.
+        let scalar = match declared {
+            Some(TypeRef::Concrete(id)) if *id != TypeId::PTR => Some(*id),
+            None | Some(TypeRef::Concrete(TypeId::PTR)) => {
+                self.infer_expr_type_name(expr).and_then(|name| {
+                    TypeId::from_well_known_scalar_name(&name)
+                        .map(|id| id.declared_scalar_identity(&name))
+                })
             }
-            _ => "",
+            _ => None,
         };
-        if type_name == "Char" {
-            self.ctx.emit(Instruction::CharToStr {
-                dst: str_reg,
-                src: expr_reg,
-            });
-        } else if type_name == "Float" {
+        let unsigned = match scalar {
+            Some(id) => id.well_known_name().is_some_and(type_names::is_unsigned_integer_type),
+            None => declared.is_none() && self.infer_expr_is_unsigned(expr),
+        };
+        if scalar == Some(TypeId::CHAR) {
+            self.ctx.emit(Instruction::CharToStr { dst: str_reg, src: expr_reg });
+        } else if scalar.is_some_and(TypeId::is_float) {
             self.emit_intrinsic_library_call("verum_float_to_text", &[expr_reg], str_reg)?;
-        } else if self.infer_expr_is_unsigned(expr) {
-            // Unsigned-integer display (T0364).  A `UInt64`/`Byte`/…
-            // value with the high bit set carries correct BITS but no
-            // signedness tag at runtime, so the signed `ToString` /
-            // `IntToText` path renders it as an i64 two's-complement
-            // negative (`u64::MAX` → "-1").  Exactly like the `Float`
-            // leg above, carry the decision in the bytecode here — the
-            // one codegen site that still knows the operand's static
-            // type — via the unsigned sibling render op.  Reuses the
-            // ordered-compare gate's OWN signedness authority
-            // (`infer_expr_is_unsigned` → `is_unsigned_integer_type`),
-            // never a fourth ad-hoc derivation; a signed `Int` fails
-            // this predicate and stays on the unchanged path below.
-            //
-            // `UInt128` takes this arm too (T0272): the former 128-bit
-            // interlock is retired — `UIntToText`'s interpreter handler
-            // is width-aware (boxed-i128 renders full u128 magnitude),
-            // so the unsigned render op is correct at every width.
+        } else if unsigned {
             self.emit_intrinsic_library_call("verum_uint_to_text", &[expr_reg], str_reg)?;
-        } else if self
-            .infer_expr_type_name(expr)
-            .as_deref()
-            .and_then(type_names::numeric_bit_width)
-            == Some(128)
+        } else if scalar.is_some_and(TypeId::is_integer) {
+            self.emit_intrinsic_library_call("verum_int_to_text", &[expr_reg], str_reg)?;
+        } else if scalar == Some(TypeId::BOOL)
+            || !self.try_emit_display_dispatch(expr, expr_reg, str_reg)?
         {
-            // Signed 128-bit display (T0272 width-aware arm). `Int128`
-            // must NOT route through protocol Display dispatch: the
-            // stdlib `fmt` receives `self` through a call boundary that
-            // narrows to i64 today, and any user-visible fallback that
-            // narrows silently is exactly the defect class this task
-            // closes. `ToString`'s handler formats a boxed-i128 at full
-            // width (signed, per this static type), so emit it directly —
-            // the same one-instruction shape the other primitives use.
-            self.ctx.emit(Instruction::ToString {
-                dst: str_reg,
-                src: expr_reg,
-            });
-        } else if !self.try_emit_display_dispatch(expr, expr_reg, str_reg)? {
-            self.ctx.emit(Instruction::ToString {
-                dst: str_reg,
-                src: expr_reg,
-            });
+            self.ctx.emit(Instruction::ToString { dst: str_reg, src: expr_reg });
         }
         Ok(TextConversion::Owned(str_reg))
     }
@@ -43972,37 +43942,6 @@ impl VbcCodegen {
             }
             return Ok(false);
         }
-        // Primitives have inline `ToString` handlers in the runtime
-        // (`format_value_for_print`'s Int/Float/Bool/Byte branches at
-        // `handlers/debug.rs:168-196`).  Routing them through the
-        // protocol-dispatch chain inflates each f-string interpolation
-        // from one opcode (`ToString`) to ~9 opcodes (LoadK + 2×RefMut
-        // + 2×Call + 2×Mov + register-block setup) for zero semantic
-        // gain — the user-side `implement Display for Int` body
-        // produces identical text to the runtime formatter.  Skip
-        // for the canonical primitive set so the hot path stays cheap.
-        if matches!(
-            base.as_str(),
-            "Int"
-                | "Float"
-                | "Bool"
-                | "Byte"
-                | "Char"
-                | "Int32"
-                | "UInt64"
-                | "Float32"
-                | "Float64"
-                | "Int8"
-                | "Int16"
-                | "UInt8"
-                | "UInt16"
-                | "UInt32"
-                | "USize"
-                | "ISize"
-        ) {
-            return Ok(false);
-        }
-
         // Gate detection: confirm the type implements Display by
         // consulting either (a) the local function table for
         // `<Type>.fmt` — the cheapest signal, surfaces user-defined
