@@ -62,13 +62,14 @@ impl TypeChecker {
         &mut self,
         destination: &Expr,
         origins: &[RecordReceiver],
+        complete: bool,
     ) -> crate::Result<()> {
         let direct = match &unparen(destination).kind {
             ExprKind::Path(path) => path.as_ident().map(|name| name.name.clone()),
             _ => None,
         };
         if origins.is_empty() {
-            if let Some(name) = direct { self.ctx.env.replace_current_binding_origins(&name, origins); }
+            if let Some(name) = direct { self.ctx.env.replace_current_binding_origins(&name, origins, complete); }
             return Ok(());
         }
         let (holder, _) = self.borrow_place(destination)
@@ -84,7 +85,7 @@ impl TypeChecker {
         let region = self.ctx.env.binding_loan_region(&holder)
             .ok_or(crate::TypeError::UnknownRecordOrigin { span: destination.span })?;
         self.retain_origins_in_region(origins, region, destination.span)?;
-        if !direct.is_some_and(|name| self.ctx.env.replace_current_binding_origins(&name, origins)) {
+        if !direct.is_some_and(|name| self.ctx.env.replace_current_binding_origins(&name, origins, complete)) {
             self.ctx.env.assign_reference_origins(&holder, origins);
         }
         Ok(())
@@ -256,14 +257,18 @@ impl TypeChecker {
         value: &Expr,
         ty: &Type,
     ) -> crate::Result<Option<ReferenceOrigin>> {
-        if self.reference_mode(ty, value.span)?.is_some() {
+        if self.reference_mode(ty, value.span)?.is_some() || !self.carries_stored_loan(ty) {
             return Ok(None);
         }
         let sources = self.aggregate_origins(value, ty);
         for source in &sources {
             self.retain_origin(source, None, value.span)?;
         }
-        Ok((!sources.is_empty()).then(|| ReferenceOrigin::Candidates(sources.into_boxed_slice())))
+        if self.complete_slot_value_origins(value) {
+            Ok(Some(ReferenceOrigin::OwnedPayload(sources.into_boxed_slice())))
+        } else {
+            Ok((!sources.is_empty()).then(|| ReferenceOrigin::Candidates(sources.into_boxed_slice())))
+        }
     }
 
     pub(super) fn check_aggregate_escape(
@@ -650,6 +655,46 @@ impl TypeChecker {
             | ExprKind::Tuple(_) | ExprKind::Array(_) | ExprKind::Record { .. } =>
                 self.evaluated_value_origins.get(&value.span)?.as_ref(),
             _ => None,
+        }
+    }
+
+    /// A visible loan is only one candidate when a producer can also read a
+    /// context or callback environment. A checked insertion needs the complete
+    /// set, including when an opaque result was first bound to a local.
+    pub(super) fn complete_slot_value_origins(&mut self, value: &Expr) -> bool {
+        let value = unparen(value);
+        match &value.kind {
+            ExprKind::Path(path) => {
+                self.reference_result_origin(value).is_some()
+                    || path
+                        .as_ident()
+                        .is_some_and(|name| self.ctx.env.binding_has_payload_origins(&name.name))
+            }
+            ExprKind::Unary {
+                op: UnOp::Ref | UnOp::RefMut | UnOp::RefChecked | UnOp::RefCheckedMut,
+                ..
+            } => self.reference_result_origin(value).is_some(),
+            ExprKind::Record {
+                fields, base: None, ..
+            } => fields.iter().all(|field| {
+                let ty = match field.value.as_ref() {
+                    Some(value) => self.type_registry.lookup_expr(value.span),
+                    None => self
+                        .ctx
+                        .env
+                        .lookup(&field.name.name)
+                        .map(|scheme| &scheme.ty),
+                };
+                ty.is_some_and(|ty| !self.carries_stored_loan(ty))
+            }),
+            ExprKind::Call { .. } | ExprKind::MethodCall { .. } => {
+                self.evaluated_result_origins(value).is_some()
+                    && self.type_registry.declared_receiver(value.span).is_none()
+                    && matches!(self.type_registry.explicit_input_target(value.span), Some(Type::Function { params, contexts, .. })
+                        if contexts.as_ref().is_none_or(|contexts| contexts.is_empty())
+                            && params.iter().all(|ty| !self.may_supply_call_borrow(ty)))
+            }
+            _ => false,
         }
     }
 
@@ -1108,6 +1153,216 @@ impl TypeChecker {
             span,
         });
         false
+    }
+
+    /// The selected source must forward all three operands, unchanged, to an
+    /// owned-slot operation of this exact instantiated container declaration.
+    /// Any additional computation, destination or hidden input keeps the
+    /// ordinary unknown-write rule.
+    fn direct_owned_slot_write(
+        &mut self,
+        span: verum_ast::Span,
+        params: &[Type],
+    ) -> Option<[usize; 2]> {
+        use verum_ast::{FunctionParamKind, PatternKind};
+        let (_, source) = self.type_registry.callable_declaration(span)?;
+        if !source.contexts.is_empty()
+            || source.is_async
+            || source.is_generator
+            || source.is_meta
+            || source.extern_abi.is_some()
+            || source.is_variadic
+            || !source.attributes.is_empty()
+            || source.std_attr.is_some()
+            || source.throws_clause.is_some()
+            || !source.requires.is_empty()
+            || !source.ensures.is_empty()
+            || source.params.len() != 3
+            || params.len() != 3
+        {
+            return None;
+        }
+        let Type::Function { return_type, .. } = self.type_registry.lookup_call_target(span)?
+        else {
+            return None;
+        };
+        if self.unifier.apply(return_type) != Type::Unit {
+            return None;
+        }
+        let (operation, args) = super::callable_properties::direct_intrinsic_body(&source)?;
+        let carrier = operation.owned_slot_write_carrier()?;
+        let [owner, index, payload] = args else {
+            return None;
+        };
+        let parameter = |value: &Expr| {
+            let ExprKind::Path(path) = &unparen(value).kind else {
+                return None;
+            };
+            let name = path.as_ident()?;
+            source.params.iter().position(|param| {
+                matches!(&param.kind,
+                FunctionParamKind::Regular { pattern, default_value: None, .. }
+                    if param.attributes.is_empty() && matches!(&pattern.kind,
+                        PatternKind::Ident { name: formal, by_ref: false, subpattern: None, .. }
+                            if formal.name == name.name))
+            })
+        };
+        let [owner, index, payload] = [parameter(owner)?, parameter(index)?, parameter(payload)?];
+        if owner == index || index == payload || owner == payload {
+            return None;
+        }
+        let element = self.owned_slot_element(&params[owner], carrier, span)?;
+        if !self.types_equivalent(&element, &params[payload])
+            || !self.types_equivalent(&params[index], &Type::Int)
+        {
+            return None;
+        }
+        Some([owner, payload])
+    }
+
+    fn owned_slot_element(
+        &self,
+        ty: &Type,
+        carrier: verum_common::well_known_types::WellKnownType,
+        span: verum_ast::Span,
+    ) -> Option<Type> {
+        let Type::Reference {
+            mutable: true,
+            inner,
+        } = self.place_reference_head(ty, span).ok()?
+        else {
+            return None;
+        };
+        let (name, args) = self.conversion_nominal_head(&inner)?;
+        let [element] = args else { return None };
+        (self.declared_runtime_storage_carrier(&name)? == carrier).then(|| element.clone())
+    }
+
+    pub(super) fn check_slot_intrinsic(
+        &mut self,
+        operation: &'static verum_vbc::intrinsics::registry::Intrinsic,
+        carrier: verum_common::well_known_types::WellKnownType,
+        args: &[Expr],
+        expression: &Expr,
+    ) -> crate::Result<Type> {
+        let span = expression.span;
+        let [_, owner, index, value] = args else {
+            return Err(crate::TypeError::wrong_arg_count(
+                operation.name.into(),
+                3,
+                args.len().saturating_sub(1),
+                span,
+            ));
+        };
+        if !self.in_unsafe_context
+            && self.source_type_registration.unsafe_function_body
+                != Some(self.borrow_tracker.current_closure_id())
+        {
+            return Err(crate::TypeError::OtherWithCodeSpanned {
+                code: "E0444".into(),
+                msg: format!(
+                    "{} requires unsafe access to an uninitialized slot",
+                    operation.name
+                )
+                .into(),
+                span,
+            });
+        }
+        let operands = &args[1..];
+        self.with_call_place_types(expression, operands, |checker| {
+            let owner_type = checker.synth_expr(owner)?.ty;
+            let element = checker
+                .owned_slot_element(&owner_type, carrier, owner.span)
+                .ok_or_else(|| crate::TypeError::OtherWithCodeSpanned {
+                    code: "E0444".into(),
+                    msg: format!(
+                        "{} requires an exclusive reference to its declared {} storage",
+                        operation.name,
+                        carrier.as_str()
+                    )
+                    .into(),
+                    span: owner.span,
+                })?;
+            checker.check_expr(index, &Type::Int)?;
+            checker.check_expr(value, &element)?;
+            let parameters = [owner_type, Type::Int, element];
+            checker.check_call_loans(operands, Some(&parameters), None)?;
+            checker.consume_affine_call_args(operands, &parameters)?;
+            if !checker.retain_slot_payload(owner, value, &parameters[2], span)? {
+                checker.retain_possible_call_writes(operands, Some(&parameters), None, None)?;
+            }
+            Ok(Type::Unit)
+        })
+    }
+
+    pub(super) fn retain_known_slot_write(
+        &mut self,
+        span: verum_ast::Span,
+        args: &[Expr],
+        parameters: &[Type],
+    ) -> crate::Result<bool> {
+        let Some([owner, payload]) = self.direct_owned_slot_write(span, parameters) else {
+            return Ok(false);
+        };
+        if args
+            .iter()
+            .any(|argument| self.deref_adjustments.contains_key(&argument.span))
+        {
+            return Ok(false);
+        }
+        let [Some(owner), Some(value)] = [args.get(owner), args.get(payload)] else {
+            return Ok(false);
+        };
+        self.retain_slot_payload(owner, value, &parameters[payload], span)
+    }
+
+    fn retain_slot_payload(
+        &mut self,
+        owner: &Expr,
+        value: &Expr,
+        element: &Type,
+        span: verum_ast::Span,
+    ) -> crate::Result<bool> {
+        let Some(destination) = self
+            .reference_result_origin(owner)
+            .or_else(|| self.call_input_place(owner).map(|place| place.0))
+        else {
+            return Ok(false);
+        };
+        // Installing a slot does not read any other slot. An earlier unknown
+        // write keeps its evidence boundary until the contents are observed.
+        if self.carries_stored_loan(element)
+            && !self
+                .ctx
+                .env
+                .storage_has_payload_origins(destination.binding)
+        {
+            return Ok(false);
+        }
+        let incoming = if self.carries_stored_loan(element) {
+            let Some(origins) = self.observed_operand_origins(value) else {
+                return Ok(false);
+            };
+            // A missing proof of generic payload origins cannot license a
+            // previously unknown write simply because no loan was observed.
+            if !self.observed_known_owned_payload(value) {
+                return Ok(false);
+            }
+            origins
+        } else {
+            List::new()
+        };
+        let Some(region) = self.ctx.env.storage_loan_region(destination.binding) else {
+            return Ok(false);
+        };
+        self.check_input_storage_retention(&incoming, &destination, span)?;
+        self.retain_origins_in_region(&incoming, region, span)?;
+        self.refinement_evidence
+            .invalidate_write(std::slice::from_ref(&destination));
+        Ok(self
+            .ctx
+            .env
+            .insert_owned_slot_origins(destination.binding, &incoming))
     }
 
     /// An unknown callee can store an incoming loan in each writable carrier.

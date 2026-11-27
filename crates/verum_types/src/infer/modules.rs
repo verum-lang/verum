@@ -9573,7 +9573,14 @@ impl TypeChecker {
             checker.with_value_obligation_scope(true, |checker| {
                 checker.with_declared_universe_scope("function", &func.name.name, &func.generics, |checker| {
                     checker.validate_function_universes(func)?;
-                    checker.with_function_body_context(|checker| checker.check_function_inner(func))
+                    checker.with_function_body_context(|checker| {
+                        let previous = checker.source_type_registration.unsafe_function_body;
+                        checker.source_type_registration.unsafe_function_body =
+                            func.is_unsafe.then(|| checker.borrow_tracker.current_closure_id());
+                        let result = checker.check_function_inner(func);
+                        checker.source_type_registration.unsafe_function_body = previous;
+                        result
+                    })
                 })
             })
         });
@@ -9850,7 +9857,7 @@ impl TypeChecker {
         let explicit_return_type = if let Some(ref ret_ty) = func.return_type {
             Some(self.declared_type(ret_ty)?)
         } else {
-            None
+            super::callable_properties::owned_slot_body_result(func)
         };
 
         // For recursive functions, we need to add the function to the environment

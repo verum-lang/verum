@@ -7887,7 +7887,7 @@ impl TypeChecker {
         self.observe_call_result_origins(
             expr.span, &resolved_return, args, Some(&params), Some(func), None, precise_origins,
         )?;
-        if !preserves_input_payloads {
+        if !preserves_input_payloads && !self.retain_known_slot_write(expr.span, args, &params)? {
             self.retain_possible_call_writes(args, Some(&params), Some(func), None)?;
         }
         Ok(InferResult::new(resolved_return))
@@ -11902,6 +11902,9 @@ impl TypeChecker {
             .and_then(|operation| verum_vbc::intrinsics::lookup_intrinsic(&operation))
         {
             use verum_vbc::{instruction::TypeInspection, intrinsics::registry::CodegenStrategy};
+            if let Some(carrier) = operation.intrinsic.owned_slot_write_carrier() {
+                return self.check_slot_intrinsic(operation.intrinsic, carrier, args, expr);
+            }
             match operation.intrinsic.strategy {
                 CodegenStrategy::RetainCopy => {
                     if !self.in_unsafe_context {

@@ -1408,7 +1408,18 @@ impl Intrinsic {
     pub(crate) fn stored_value_operand(&self) -> Option<usize> {
         match self.strategy {
             CodegenStrategy::InlineSequence(InlineSequenceId::Replace) => Some(1),
-            CodegenStrategy::InlineSequence(InlineSequenceId::ListStorageWrite | InlineSequenceId::DequeStorageWrite) => Some(2),
+            _ if self.owned_slot_write_carrier().is_some() => Some(2),
+            _ => None,
+        }
+    }
+
+    /// A whole value moves into a slot of this exact declaring owner. The
+    /// owner, physical index and value are the three source operands in order.
+    pub fn owned_slot_write_carrier(&self) -> Option<verum_common::well_known_types::WellKnownType> {
+        use verum_common::well_known_types::WellKnownType;
+        match self.strategy {
+            CodegenStrategy::InlineSequence(InlineSequenceId::ListStorageWrite) => Some(WellKnownType::List),
+            CodegenStrategy::InlineSequence(InlineSequenceId::DequeStorageWrite) => Some(WellKnownType::Deque),
             _ => None,
         }
     }

@@ -1233,6 +1233,8 @@ pub(crate) enum ReferenceOrigin {
     Parameter,
     Exact(crate::ty::RecordReceiver),
     Candidates(Box<[crate::ty::RecordReceiver]>),
+    /// All activation-local loans held by an owned value are accounted for.
+    OwnedPayload(Box<[crate::ty::RecordReceiver]>),
 }
 
 /// Identity changes on a write. An old alias can never attach its evidence
@@ -1246,6 +1248,9 @@ struct RecordPlace {
     mutable: bool,
     projection: Option<Span>,
     reference: Option<ReferenceOrigin>,
+    /// Origins inserted after construction into a proved owned storage slot.
+    /// The existing binding still owns its original incoming loan identity.
+    inserted_origins: List<crate::ty::RecordReceiver>,
     unverified_write: Option<Span>,
 }
 
@@ -1738,7 +1743,7 @@ impl TypeEnv {
         if reference {
             match place.reference.as_ref()? {
                 ReferenceOrigin::Exact(source) => return Some(source.clone()),
-                ReferenceOrigin::Candidates(_) => return None,
+                ReferenceOrigin::Candidates(_) | ReferenceOrigin::OwnedPayload(_) => return None,
                 ReferenceOrigin::Parameter => {}
             }
         }
@@ -1749,11 +1754,25 @@ impl TypeEnv {
     }
 
     pub(crate) fn reference_candidates(&mut self, name: &str) -> List<crate::ty::RecordReceiver> {
-        if let Some(ReferenceOrigin::Candidates(inputs)) = self
-            .local_record_place(name)
-            .and_then(|place| place.reference.as_ref())
-        {
-            return List::from(inputs.as_ref());
+        let Some(place) = self.local_record_place(name) else {
+            return List::new();
+        };
+        if !matches!(
+            place.reference,
+            Some(ReferenceOrigin::Parameter | ReferenceOrigin::Exact(_))
+        ) {
+            let mut origins = match &place.reference {
+                Some(
+                    ReferenceOrigin::Candidates(inputs) | ReferenceOrigin::OwnedPayload(inputs),
+                ) => List::from(inputs.as_ref()),
+                _ => List::new(),
+            };
+            for origin in &place.inserted_origins {
+                if !origins.contains(origin) {
+                    origins.push(origin.clone());
+                }
+            }
+            return origins;
         }
         self.record_source(name, true).into_iter().collect()
     }
@@ -1764,12 +1783,15 @@ impl TypeEnv {
         &mut self,
         name: &str,
         sources: &[crate::ty::RecordReceiver],
+        complete: bool,
     ) -> bool {
         let mut scope = self;
         loop {
             if scope.bindings.contains_key(name) {
                 let place = scope.record_places.entry(name.into()).or_default();
-                place.reference = Some(ReferenceOrigin::Candidates(sources.into()));
+                place.reference = Some(if complete { ReferenceOrigin::OwnedPayload(sources.into()) }
+                    else { ReferenceOrigin::Candidates(sources.into()) });
+                place.inserted_origins.clear();
                 place.unverified_write = None;
                 return true;
             }
@@ -1777,6 +1799,61 @@ impl TypeEnv {
             let Some(parent) = scope.parent.as_deref_mut() else { return false; };
             scope = parent;
         }
+    }
+
+    pub(crate) fn insert_owned_slot_origins(
+        &mut self,
+        binding: u64,
+        incoming: &[crate::ty::RecordReceiver],
+    ) -> bool {
+        let mut scope = self;
+        loop {
+            if let Some(place) = scope
+                .record_places
+                .values_mut()
+                .find(|place| place.id == Some(binding))
+            {
+                for origin in incoming {
+                    if !place.inserted_origins.contains(origin) {
+                        place.inserted_origins.push(origin.clone());
+                    }
+                }
+                return true;
+            }
+            let Some(parent) = scope.parent.as_deref_mut() else {
+                return false;
+            };
+            scope = parent;
+        }
+    }
+
+    pub(crate) fn binding_has_payload_origins(&mut self, name: &str) -> bool {
+        self.local_record_place(name).is_some_and(|place| {
+            place.unverified_write.is_none()
+                && matches!(place.reference, Some(ReferenceOrigin::OwnedPayload(_)))
+        })
+    }
+
+    pub(crate) fn storage_has_payload_origins(&self, binding: u64) -> bool {
+        let mut scope = Some(self);
+        while let Some(env) = scope {
+            if let Some(place) = env
+                .record_places
+                .values()
+                .find(|place| place.id == Some(binding))
+            {
+                return matches!(
+                    place.reference,
+                    Some(
+                        ReferenceOrigin::OwnedPayload(_)
+                            | ReferenceOrigin::Parameter
+                            | ReferenceOrigin::Exact(_)
+                    )
+                ) && place.unverified_write.is_none();
+            }
+            scope = env.parent.as_deref();
+        }
+        false
     }
 
     pub(crate) fn invalidate_payload_origins(
@@ -1838,12 +1915,16 @@ impl TypeEnv {
                 .values()
                 .find(|place| place.id == Some(source.binding))
             {
-                return Some(match &place.reference {
+                let mut origins = match &place.reference {
                     Some(ReferenceOrigin::Exact(origin)) => List::from_iter([origin.clone()]),
-                    Some(ReferenceOrigin::Candidates(origins)) => List::from(origins.as_ref()),
+                    Some(ReferenceOrigin::Candidates(origins) | ReferenceOrigin::OwnedPayload(origins)) => List::from(origins.as_ref()),
                     Some(ReferenceOrigin::Parameter) => List::from_iter([source.clone()]),
                     None => List::new(),
-                });
+                };
+                for origin in &place.inserted_origins {
+                    if !origins.contains(origin) { origins.push(origin.clone()); }
+                }
+                return Some(origins);
             }
             scope = env.parent.as_deref();
         }

@@ -11972,7 +11972,8 @@ with .to_float() or .to_int() (at {:?})",
                         if !origins.contains(&source) { origins.push(source); }
                     }
                 }
-                self.retain_assignment_origins(left, &origins)?;
+                let complete = self.carries_stored_loan(&stored_type) && self.complete_slot_value_origins(right);
+                self.retain_assignment_origins(left, &origins, complete)?;
                 if let Some(name) = destination {
                     self.affine_tracker.reinitialize_value(&name, initialized, _span)?;
                 }

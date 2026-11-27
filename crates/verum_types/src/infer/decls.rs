@@ -6388,6 +6388,8 @@ impl TypeChecker {
         // Build return type
         let return_type = if let Some(ref ret_ty) = func.return_type {
             self.declared_type(ret_ty)?
+        } else if let Some(result) = super::callable_properties::owned_slot_body_result(func) {
+            result
         } else {
             // No explicit return type - use a fresh type variable
             // This will be unified with the body type during check_function

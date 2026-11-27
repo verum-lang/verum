@@ -17,6 +17,39 @@ pub(super) fn intrinsic_operation_name(surface: &str, args: &[Expr]) -> Option<T
     }
 }
 
+/// Select an operation only when it is the complete body of this declaration.
+/// Extra statements and alternate branches may change the result or write set.
+pub(super) fn direct_intrinsic_body(
+    declaration: &FunctionDecl,
+) -> Option<(&'static verum_vbc::intrinsics::registry::Intrinsic, &[Expr])> {
+    let mut expression = match declaration.body.as_ref()? {
+        verum_ast::FunctionBody::Block(block) if block.stmts.is_empty() => block.expr.as_deref()?,
+        verum_ast::FunctionBody::Expr(expression) => expression,
+        _ => return None,
+    };
+    while let ExprKind::Paren(inner) = &expression.kind {
+        expression = inner;
+    }
+    let ExprKind::MetaFunction {
+        name,
+        args,
+        parenthesized: true,
+    } = &expression.kind
+    else {
+        return None;
+    };
+    let name = intrinsic_operation_name(name.as_str(), args)?;
+    let selected = lookup_intrinsic(&name)?.intrinsic;
+    (args.len() == usize::from(selected.param_count) + 1).then(|| (selected, &args.as_slice()[1..]))
+}
+
+pub(super) fn owned_slot_body_result(declaration: &FunctionDecl) -> Option<Type> {
+    direct_intrinsic_body(declaration)?
+        .0
+        .owned_slot_write_carrier()
+        .map(|_| Type::Unit)
+}
+
 pub(super) fn intrinsic_requirement(name: &str) -> Option<PropertyRequirement> {
     match lookup_intrinsic(name).map(|info| info.intrinsic.call_bound()) {
         Some(IntrinsicCallBound::Pure) => Some(PropertyRequirement::AtMost(PropertySet::pure())),

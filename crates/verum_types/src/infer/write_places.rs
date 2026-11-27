@@ -11,6 +11,7 @@ use verum_common::{List, Map, Text};
 pub(super) struct EvaluatedOperand {
     ty: Type,
     origins: List<RecordReceiver>,
+    known_owned_payload: bool,
 }
 
 fn unparen(mut expr: &Expr) -> &Expr {
@@ -216,7 +217,8 @@ impl TypeChecker {
                 }
             }
         }
-        let observed = EvaluatedOperand { ty: ty.clone(), origins };
+        let known_owned_payload = self.carries_stored_loan(ty) && self.complete_slot_value_origins(expr);
+        let observed = EvaluatedOperand { ty: ty.clone(), origins, known_owned_payload };
         for scope in &mut self.place_operands {
             if let Some(slot) = scope.get_mut(&key) {
                 *slot = Some(observed.clone());
@@ -553,5 +555,12 @@ impl TypeChecker {
         self.place_operands.iter().rev()
             .find_map(|scope| scope.get(&key)?.as_ref())
             .map(|operand| operand.origins.clone())
+    }
+
+    pub(super) fn observed_known_owned_payload(&self, expr: &Expr) -> bool {
+        let key = std::ptr::from_ref(unparen(expr)).addr();
+        self.place_operands.iter().rev()
+            .find_map(|scope| scope.get(&key)?.as_ref())
+            .is_some_and(|operand| operand.known_owned_payload)
     }
 }

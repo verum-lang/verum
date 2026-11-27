@@ -8,12 +8,16 @@ fn errors(declarations: &str, caller: &str) -> List<Text> {
     let source = format!(
         "type Cell is {{ public pointer:&Int, public value:Int }}; {declarations} {caller}"
     );
+    module_errors("write_probe", &source)
+}
+
+fn module_errors(owner: &str, source: &str) -> List<Text> {
     let module = FastParser::new()
-        .parse_module_str(&source, FileId::new(1))
+        .parse_module_str(source, FileId::new(1))
         .unwrap();
     let mut checker = TypeChecker::with_minimal_context();
     checker.register_primitives();
-    checker.set_current_module_path("write_probe");
+    checker.set_current_module_path(owner);
     let mut errors = checker.prepare_module_declarations(&module);
     for item in &module.items {
         if let Err(error) = checker.check_item(item) {
@@ -170,6 +174,194 @@ fn scalar_write_through_a_managed_field_retains_both_layers_of_loans() {
 }
 
 #[test]
+fn owned_slot_writes_retain_the_inserted_value_and_the_existing_slots() {
+    let declarations = r#"
+        type Deque<T> is { head:Int };
+        unsafe fn place<T>(value:T, output:&mut Deque<T>, index:Int) {
+            @intrinsic("deque_storage_write",output,index,value)
+        }
+    "#;
+    for (caller, should_pass) in [
+        (
+            "fn preserve(mut queue:Deque<&Int>, value:&Int)->Deque<&Int> {unsafe {place(value,&mut queue,0);} queue}",
+            true,
+        ),
+        (
+            "fn preserve<T>(mut queue:Deque<T>, value:T)->Deque<T> {unsafe {place(value,&mut queue,0);} queue}",
+            true,
+        ),
+        (
+            "fn preserve<T>(mut queue:Deque<T>, first:T, second:T)->Deque<T> {unsafe {place(first,&mut queue,0);place(second,&mut queue,1);} queue}",
+            true,
+        ),
+        (
+            "fn retain(mut queue:Deque<&Int>)->Deque<&Int> {{let local=8; unsafe {place(&local,&mut queue,0);}} queue}",
+            false,
+        ),
+        (
+            "fn retain()->Deque<&Int> {let mut queue:Deque<&Int> = Deque{head:0}; let local=8; unsafe {place(&local,&mut queue,0);} queue}",
+            false,
+        ),
+    ] {
+        let source = format!("{declarations} {caller}");
+        let found = module_errors("core.collections.deque", &source);
+        if should_pass {
+            assert!(found.is_empty(), "{caller}: {found:?}");
+        } else {
+            assert!(
+                found
+                    .iter()
+                    .any(|e| e.contains("local") && e.contains("does not live long enough")),
+                "{caller}: {found:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn an_incoming_generic_payload_cannot_lend_its_stack_slot_to_the_caller() {
+    let found = errors("", "fn retain<T>(value:T)->&T {&value}");
+    assert!(
+        found
+            .iter()
+            .any(|error| error.contains("value") && error.contains("does not live long enough")),
+        "{found:?}"
+    );
+}
+
+#[test]
+fn record_shorthand_copies_the_origins_of_slots_installed_since_construction() {
+    let source = r#"
+        type Deque<T> is {head:Int};
+        type Holder is {items:Deque<&Int>};
+        unsafe fn put<T>(items:&mut Deque<T>, n:Int, value:T) {@intrinsic("deque_storage_write",items,n,value)}
+        fn capture()->Holder {
+            let mut items:Deque<&Int> = Deque{head:0};
+            let local=73;
+            unsafe {put(&mut items,0,&local);}
+            Holder{items}
+        }
+    "#;
+    let found = module_errors("core.collections.deque", source);
+    assert!(
+        found
+            .iter()
+            .any(|e| e.contains("local") && e.contains("does not live long enough")),
+        "{found:?}"
+    );
+}
+
+#[test]
+fn an_inline_slot_operation_checks_its_inputs_and_retains_the_moved_payload() {
+    let declaration = "type Deque<T> is {head:Int};";
+    for (function, expected) in [
+        (
+            r#"fn store<T>(mut items:Deque<T>, value:T)->Deque<T> {unsafe {@intrinsic("deque_storage_write",&mut items,0,value);} items}"#,
+            None,
+        ),
+        (
+            r#"fn store(mut items:Deque<&Int>)->Deque<&Int> {{let local=73; unsafe {@intrinsic("deque_storage_write",&mut items,0,&local);}} items}"#,
+            Some("does not live long enough"),
+        ),
+        (
+            r#"fn store(items:&Deque<Int>) {unsafe {@intrinsic("deque_storage_write",items,0,7);}}"#,
+            Some("exclusive reference"),
+        ),
+        (
+            r#"fn store(items:&mut Deque<Int>) {@intrinsic("deque_storage_write",items,0,7)}"#,
+            Some("requires unsafe"),
+        ),
+        (
+            r#"unsafe fn store(items:&mut Deque<Int>)->&Int {@intrinsic("deque_storage_write",items,0,7)}"#,
+            Some("mismatch"),
+        ),
+    ] {
+        let found = module_errors(
+            "core.collections.deque",
+            &format!("{declaration} {function}"),
+        );
+        match expected {
+            Some(message) => assert!(
+                found.iter().any(|error| error.contains(message)),
+                "{function}: {found:?}"
+            ),
+            None => assert!(found.is_empty(), "{function}: {found:?}"),
+        }
+    }
+}
+
+#[test]
+fn owned_slot_authority_requires_the_selected_carrier_and_complete_operation() {
+    let caller = "fn preserve(mut queue:Deque<&Int>, value:&Int)->Deque<&Int> {unsafe {place(&mut queue,0,value);} queue}";
+    for (owner, body) in [
+        (
+            "application",
+            "@intrinsic(\"deque_storage_write\",output,index,value)",
+        ),
+        (
+            "core.collections.deque",
+            "@intrinsic(\"list_storage_write\",output,index,value)",
+        ),
+        (
+            "core.collections.deque",
+            "let copy=index; @intrinsic(\"deque_storage_write\",output,copy,value)",
+        ),
+    ] {
+        let source = format!(
+            "type Deque<T> is {{ pointer:&Int }}; unsafe fn place<T>(output:&mut Deque<T>, index:Int, value:T) {{{body}}} {caller}"
+        );
+        let found = module_errors(owner, &source);
+        assert!(
+            found
+                .iter()
+                .any(|e| e.contains("cannot establish the lifetime")),
+            "{owner} {body}: {found:?}"
+        );
+    }
+}
+
+#[test]
+fn an_explicit_input_does_not_cover_an_opaque_contexts_payload() {
+    let declarations = r#"
+        type Deque<T> is {head:Int};
+        context Hidden {fn choose(seed:&Int)->&Int;}
+        unsafe fn put<T>(items:&mut Deque<T>, index:Int, value:T) {@intrinsic("deque_storage_write",items,index,value)}
+    "#;
+    let checked = module_errors("core.collections.deque", declarations);
+    assert!(checked.is_empty(), "{checked:?}");
+    for store in [
+        "unsafe {put(&mut items,0,Hidden.choose(seed));}",
+        "let selected=Hidden.choose(seed); unsafe {put(&mut items,0,selected);}",
+        "let mut selected=seed; selected=Hidden.choose(seed); unsafe {put(&mut items,0,selected);}",
+    ] {
+        let caller = format!(
+            "{declarations} fn store(mut items:Deque<&Int>,seed:&Int)->Deque<&Int> using [Hidden] {{{store} items}}"
+        );
+        let found = module_errors("core.collections.deque", &caller);
+        assert!(
+            found
+                .iter()
+                .any(|e| e.contains("cannot establish the lifetime") && e.contains("items")),
+            "{store}: {found:?}"
+        );
+    }
+}
+
+#[test]
+fn installing_a_vacant_slot_does_not_observe_other_slots_after_an_opaque_write() {
+    let declaration = r#"type Deque<T> is {head:Int}; unsafe fn put<T>(items:&mut Deque<T>, index:Int, value:T) {@intrinsic("deque_storage_write",items,index,value)}"#;
+    let discard = "fn store(items:&mut Deque<&Int>, action:fn(&mut Deque<&Int>), value:&Int) {action(items); unsafe {put(items,0,value);}}";
+    let found = module_errors(
+        "core.collections.deque",
+        &format!("{declaration} {discard}"),
+    );
+    assert!(found.is_empty(), "{found:?}");
+    let read = "fn store(mut items:Deque<&Int>, action:fn(&mut Deque<&Int>), value:&Int)->Deque<&Int> {action(&mut items); unsafe {put(&mut items,0,value);} items}";
+    let found = module_errors("core.collections.deque", &format!("{declaration} {read}"));
+    assert!(found.iter().any(|error| error.contains("cannot establish the lifetime") && error.contains("items")), "{found:?}");
+}
+
+#[test]
 fn writing_through_another_reference_field_remains_conservative() {
     let found = errors(
         "type Holder is { public target:&mut Cell }; fn update(holder:&mut Holder) { holder.target.pointer=&holder.target.value; }",
@@ -216,46 +408,109 @@ fn a_nominal_value_with_cleanup_is_not_a_primitive_scalar_write() {
     );
 }
 
+fn registered_errors<const N: usize>(sources: [(&str, Text); N]) -> List<Text> {
+    use verum_modules::{ModuleInfo, ModulePath, ModuleRegistry, extract_exports_from_module};
+    let mut registry = ModuleRegistry::new();
+    for (owner, source) in sources {
+        let id = registry.allocate_id();
+        let file = FileId::new(id.as_u32());
+        let ast = FastParser::new().parse_module_str(&source, file).unwrap();
+        let path = ModulePath::from_str(owner);
+        let exports = extract_exports_from_module(&ast, id, &path).unwrap();
+        let mut info = ModuleInfo::new(id, path, ast, file, source);
+        info.exports = exports;
+        registry.register(info);
+    }
+    let module = registry.get_by_path("consumer").unwrap();
+    let mut checker = TypeChecker::with_minimal_context();
+    checker.register_primitives();
+    checker.set_current_module_path("consumer");
+    checker.set_module_registry_direct(registry);
+    let mut found = checker.prepare_module_declarations(&module.ast);
+    for item in &module.ast.items {
+        if let Err(error) = checker.check_item(item) {
+            found.push(error);
+        }
+    }
+    found.extend(checker.take_deferred_errors());
+    found
+        .iter()
+        .chain(checker.diagnostic_sources())
+        .map(|e| e.to_string().into())
+        .collect()
+}
+
+#[test]
+fn imported_list_storage_write_retains_only_the_source_payload() {
+    fn declaration<'a>(source: &'a str, name: &str) -> &'a str {
+        let module = FastParser::new()
+            .parse_module_str(source, FileId::new(1))
+            .unwrap();
+        let item = module
+            .items
+            .iter()
+            .find(|item| match &item.kind {
+                verum_ast::ItemKind::Type(ty) => ty.name.as_str() == name,
+                verum_ast::ItemKind::Function(function) => function.name.as_str() == name,
+                _ => false,
+            })
+            .unwrap();
+        // The item span starts at `type` / `fn`. Retain its source-line
+        // modifiers so the ordinary mount checks its actual visibility.
+        let start = source[..item.span.start as usize]
+            .rfind('\n')
+            .map_or(0, |line| line + 1);
+        &source[start..item.span.end as usize]
+    }
+    let list = declaration(include_str!("../../../core/collections/list.vr"), "List");
+    let write = declaration(
+        include_str!("../../../core/intrinsics/memory.vr"),
+        "list_storage_write",
+    );
+    let imports = "mount core.collections.list.List; mount core.intrinsics.memory.{list_storage_write as put};";
+    for (caller, accepted) in [
+        (
+            "fn store<T>(mut items:List<T>, value:T)->List<T> {unsafe {put(&mut items,0,value);} items}",
+            true,
+        ),
+        (
+            "fn store(mut items:List<&Int>)->List<&Int> {{let local=73; unsafe {put(&mut items,0,&local);}} items}",
+            false,
+        ),
+    ] {
+        let found = registered_errors([
+            ("core.collections.list", list.into()),
+            (
+                "core.intrinsics.memory",
+                format!("mount core.collections.list.List; {write}").into(),
+            ),
+            ("consumer", format!("{imports} {caller}").into()),
+        ]);
+        if accepted {
+            assert!(found.is_empty(), "{found:?}");
+        } else {
+            assert!(
+                found
+                    .iter()
+                    .any(|e| e.contains("local") && e.contains("does not live long enough")),
+                "{found:?}"
+            );
+        }
+    }
+}
+
 #[test]
 fn renamed_source_mounts_keep_the_selected_owners_write_footprint() {
-    use verum_modules::{ModuleInfo, ModulePath, ModuleRegistry, extract_exports_from_module};
     for (write, accepted) in [
         ("cell.value=73;", true),
         ("cell.value=73;cell.pointer=key;", false),
     ] {
         for call in ["selected", "service.update"] {
-            let mut registry = ModuleRegistry::new();
-            for (owner, source) in [
-                ("owner",format!("public type Cell is {{public pointer:&Int,public value:Int}}; public fn update(cell:&mut Cell,key:&Int)->Unit {{{write}}}")),
+            let found = registered_errors([
+                ("owner",format!("public type Cell is {{public pointer:&Int,public value:Int}}; public fn update(cell:&mut Cell,key:&Int)->Unit {{{write}}}").into()),
                 ("decoy","public type Cell is {public pointer:&Int,public value:Int}; public fn update(cell:&mut Cell,key:&Int)->Unit {cell.pointer=key;}".into()),
-                ("consumer",format!("mount decoy.*; mount owner.{{self as service,Cell as Carrier,update as selected}}; fn preserve(mut cell:Carrier)->Carrier {{let local=4;{call}(&mut cell,&local);cell}}")),
-            ] {
-                let id=registry.allocate_id();
-                let file=FileId::new(id.as_u32());
-                let ast=FastParser::new().parse_module_str(&source,file).unwrap();
-                let path=ModulePath::from_str(owner);
-                let exports=extract_exports_from_module(&ast,id,&path).unwrap();
-                let mut info=ModuleInfo::new(id,path,ast,file,source.into());
-                info.exports=exports;
-                registry.register(info);
-            }
-            let module = registry.get_by_path("consumer").unwrap();
-            let mut checker = TypeChecker::with_minimal_context();
-            checker.register_primitives();
-            checker.set_current_module_path("consumer");
-            checker.set_module_registry_direct(registry);
-            let mut found = checker.prepare_module_declarations(&module.ast);
-            for item in &module.ast.items {
-                if let Err(error) = checker.check_item(item) {
-                    found.push(error);
-                }
-            }
-            found.extend(checker.take_deferred_errors());
-            let found: List<Text> = found
-                .iter()
-                .chain(checker.diagnostic_sources())
-                .map(|e| e.to_string().into())
-                .collect();
+                ("consumer",format!("mount decoy.*; mount owner.{{self as service,Cell as Carrier,update as selected}}; fn preserve(mut cell:Carrier)->Carrier {{let local=4;{call}(&mut cell,&local);cell}}").into()),
+            ]);
             if accepted {
                 assert!(found.is_empty(), "{call}: {found:?}");
             } else {

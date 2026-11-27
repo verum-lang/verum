@@ -15,6 +15,9 @@ pub(crate) struct SourceTypeRegistration {
     pub method_publications: Map<(Text, verum_ast::Span), List<(Text, Text)>>,
     /// Result declared by the current catch_unwind wrapper and the enclosing closure identity.
     pub(super) catch_unwind_body: Option<(Option<crate::aliasing::RefId>, Type)>,
+    /// The unsafe function currently authorizing raw operations. A nested
+    /// callable runs under its own declaration and closure identity.
+    pub(super) unsafe_function_body: Option<Option<crate::aliasing::RefId>>,
     pub active_impl_bounds: verum_common::Set<(Text, Text)>,
     pub(super) loading_owner_candidates: verum_common::Set<(Text, Option<super::implementation_sources::StructuralProtocolHead>)>,
     /// Public sequence methods imported by each source scope. Store the
