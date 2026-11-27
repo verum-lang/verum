@@ -494,6 +494,7 @@ extern {
     /// Get peer name (remote address). Same socklen_t* invariant as
     /// `getsockname` — `addrlen` must be `&mut UInt32`.
     fn getpeername(sockfd: Int32, addr: &unsafe Byte, addrlen: &mut UInt32) -> Int32;
+    fn getpeereid(sockfd: Int32, euid: &mut UInt32, egid: &mut UInt32) -> Int32;
 
     // =========================================================================
     // Directory Operations
@@ -2420,6 +2421,17 @@ public fn safe_getsockname(fd: FileDesc, addr_buf: &mut [Byte], addr_len: &mut U
     } else {
         Result.Ok(())
     }
+}
+
+/// Effective credentials of the connected Unix-domain peer.
+public fn safe_getpeereid(fd: FileDesc) -> Result<(UInt32, UInt32), OSError> {
+    let mut uid: UInt32 = 0;
+    let mut gid: UInt32 = 0;
+    if unsafe { getpeereid(fd.0, &mut uid, &mut gid) } < 0 {
+        let code = errno();
+        return Result.Err(OSError.new(code, errno_to_message(code)));
+    }
+    Result.Ok((uid, gid))
 }
 
 /// Get peer socket address (safe wrapper). Same socklen_t* invariant
