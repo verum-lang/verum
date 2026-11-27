@@ -9,6 +9,7 @@ use super::ffi_extended::value_as_addr;
 use super::cbgr_helpers::{decode_cbgr_ref, is_cbgr_ref, peel_heap_cell};
 use crate::types::TypeId;
 use crate::value::Value;
+use verum_common::well_known_types::WellKnownType;
 
 // ============================================================================
 // Memory + Collection Operations
@@ -1734,8 +1735,8 @@ pub(in super::super) fn handle_array_len(
 ) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let arr = read_reg(state)?;
-    // Read and discard type_hint byte (used by LLVM lowering, not interpreter).
-    let _type_hint = read_u8(state)?;
+    // Native code uses the static hint. The VM has the live carrier identity.
+    let type_hint = read_u8(state)?;
 
     let mut val = state.get_reg(arr);
 
@@ -1915,10 +1916,24 @@ pub(in super::super) fn handle_array_len(
         let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
         let len = (unsafe { (*data_ptr).as_i64() }) as usize;
         len
-    } else if header.type_id == TypeId::MAP || header.type_id == TypeId::SET {
-        // Map/Set layout: [count, capacity, entries_ptr] - read count
-        let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
-        (unsafe { (*data_ptr).as_i64() }) as usize
+    } else if header.type_id == TypeId::MAP || header.type_id == TypeId::SET
+        || (!header.type_id.is_builtin() && !header.type_id.is_semantic_type()
+            && state.module.declared_runtime_carrier(header.type_id) == Some(WellKnownType::Map))
+    {
+        // A map literal and the source Map constructor share the count slot.
+        // The source constructor allocates with its declaration's local ID.
+        if header_size < std::mem::size_of::<Value>() {
+            return Err(InterpreterError::InvalidOperand {
+                message: "collection has no entry-count slot".into(),
+            });
+        }
+        // SAFETY: the carrier identity establishes slot 0 and its allocation
+        // has at least one aligned Value after the header.
+        let count = unsafe { *ptr.add(heap::OBJECT_HEADER_SIZE).cast::<Value>() };
+        count.try_as_i64().and_then(|n| usize::try_from(n).ok())
+            .ok_or_else(|| InterpreterError::InvalidOperand {
+                message: "collection entry count must be a nonnegative Int".into(),
+            })?
     } else if header.type_id == crate::types::TypeId::TEXT {
         // Canonical heap Text record `{ptr, len, cap}` (ARCH-P5 final
         // leg — the `[len:u64][bytes…]` legacy layout is retired):
@@ -1948,6 +1963,10 @@ pub(in super::super) fn handle_array_len(
         // Deque layout: [data, head, len, cap] — read len (field 2)
         let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
         (unsafe { (*data_ptr.add(2)).as_i64() }) as usize
+    } else if type_hint == WellKnownType::Map.len_type_hint() {
+        return Err(InterpreterError::InvalidOperand {
+            message: "Map length requires its declared runtime carrier".into(),
+        });
     } else {
         // Array/Tuple - elements stored directly, size / sizeof(Value)
         header_size / std::mem::size_of::<Value>()

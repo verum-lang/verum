@@ -2,6 +2,25 @@ mount core.collections.map.Map;
 mount core.base.maybe.Maybe;
 mount core.base.result.Result;
 
+type NamedEntries is { entries: Map<Text, Int> };
+
+implement NamedEntries {
+    fn count(&self) -> Int { self.entries.len() }
+}
+
+@test
+fn projected_map_length_tracks_live_entries() {
+    let mut owner = NamedEntries { entries: Map.new() };
+    assert_eq(owner.count(), 0);
+    owner.entries.insert("first", 11);
+    assert_eq(owner.count(), 1);
+    owner.entries.insert("second", 22);
+    owner.entries.insert("first", 33);
+    assert_eq(owner.count(), 2);
+    owner.entries.clear();
+    assert_eq(owner.count(), 0);
+}
+
 @test
 fn initialized_slots_survive_growth_removal_and_fallible_reuse() {
     let mut values: Map<Int, Int> = Map.new();

@@ -315,6 +315,16 @@ impl VbcCodegen {
                 },
             }),
             ExprKind::MethodCall { receiver, method, type_args, args } => {
+                // A fixed array length can fold to LoadI. Its Int declaration
+                // comes from the structural operation, including at generic
+                // argument boundaries where an immediate alone has no type.
+                if method.name == "len" && args.is_empty() && type_args.is_empty()
+                    && let Some(declaration) = nested(receiver, None)
+                        .and_then(|ty| self.expand_declared_alias(ty))
+                    && matches!(crate::receiver_methods::pointee(&declaration), TypeRef::Array { .. })
+                {
+                    return Some(TypeRef::Concrete(crate::types::TypeId::INT));
+                }
                 if type_args.is_empty()
                     && let Some(member) = self.default_static_member(receiver, method.name.as_str(), args.len()).ok()?
                     && !member.is_async

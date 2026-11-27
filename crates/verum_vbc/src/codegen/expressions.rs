@@ -15251,18 +15251,13 @@ impl VbcCodegen {
         // Handle built-in methods that map to dedicated opcodes
         // BUT only if the receiver doesn't have a user-defined method with the same name
         if method.name == "len" && args.is_empty() {
-            // A borrowed slice retains its structural declaration. Resolve its
-            // operation through the intrinsic registry; an `&[...]` display
-            // name must not misclassify it as a user record.
-            let slice_receiver = match receiver_result_declaration.clone()
-                .and_then(|ty| self.expand_declared_alias(ty))
-            {
-                Some(crate::types::TypeRef::Slice(_)) => true,
-                Some(crate::types::TypeRef::Reference { inner, .. }) =>
-                    matches!(self.expand_declared_alias(*inner), Some(crate::types::TypeRef::Slice(_))),
-                _ => false,
-            };
-            if slice_receiver {
+            use crate::types::{TypeId, TypeRef};
+
+            let declaration = receiver_result_declaration.clone()
+                .or_else(|| self.projection_operand_declaration(receiver))
+                .and_then(|ty| self.expand_declared_alias(ty));
+            let owner = declaration.as_ref().map(crate::receiver_methods::pointee);
+            if matches!(owner, Some(TypeRef::Slice(_))) {
                 let intrinsic = lookup_intrinsic("slice_len")
                     .or_internal("slice length is absent from the intrinsic registry")?;
                 let result = self.ctx.alloc_temp();
@@ -15270,164 +15265,48 @@ impl VbcCodegen {
                 self.ctx.free_temp(receiver_reg);
                 return Ok(Some(result));
             }
-            // T1192 — A PACKED `[T; N]` KNOWS ITS LENGTH ONLY HERE.
-            //
-            // T1269 widened this from `[Byte; N]` to every fixed-size
-            // array: `NewTypedArray` (0x34) allocates through the same
-            // headerless allocator as `NewByteArray` (0x30), so
-            // `[Int; 5]` answered **0** for `.len()` at Tier 1 by
-            // exactly the reasoning below, one opcode over.
-            //
-            // `[Byte; N]` lowers to `verum_cbgr_allocate(N)`, which
-            // returns a HEADERLESS block: the pointer addresses the first
-            // data byte, so there is no object header in front of it and
-            // no length word inside it. Every AOT probe in `lower_len`
-            // assumes otherwise — the slice-cell probe reads word 0, the
-            // List arm reads a `type_id` at 0 and a length at 24, the Pack
-            // arm reads 32 — so each of them reads this array's own
-            // contents or past its allocation. Measured before this fix:
-            // `[Byte; 16]` answered 16 at Tier 0 and **0** at Tier 1, with
-            // rc=0 and no diagnostic, so a `while i < buf.len()` loop over
-            // a scratch buffer simply did not run.
-            //
-            // `N` is part of the TYPE and cannot change under a binding,
-            // so this is a compile-time constant and belongs in the
-            // frontend, where the annotation was read
-            // (`codegen/statements.rs` computes `byte_array_size` and
-            // marks the variable).
-            //
-            // THE FIX WAS TRIED IN THE BACKEND FIRST AND COULD NOT WORK,
-            // which is why it is here: a per-register fact set at the
-            // `NewByteArray` arm needs the size operand to be an LLVM
-            // constant, and `FunctionContext::get_register` emits a
-            // `build_load` because `vbc_lowering.rs` enables alloca mode
-            // UNCONDITIONALLY ("Fix: always enable alloca mode"). The
-            // constant test could not fire once, in any program. Doing it
-            // here also retires the per-register fact entirely — no
-            // propagation through `Mov`, no clear-list entry, none of the
-            // T1167 / T1194 stale-fact shape.
-            if let ExprKind::Path(path) = &receiver.kind
-                && path.segments.len() == 1
-                && let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0]
-                && let Some(n) = self.ctx.fixed_array_count(&ident.name)
-            {
-                let result = self.ctx.alloc_temp();
-                self.ctx.emit(Instruction::LoadI {
-                    dst: result,
-                    value: n as i64,
-                });
-                return Ok(Some(result));
-            }
 
-            // Check if receiver has a user-defined len method.
-            // Skip stdlib collection types — their len must use the built-in Len opcode
-            // which reads from the correct runtime memory offset. Compiled stdlib methods
-            // like List.len use GetF with header offsets that don't match the C runtime
-            // object layout, causing .len() to return 0.
-            let (has_user_defined_len, len_type_hint) = {
-                let mut found = false;
-                let mut hint = 0u8;
-                if let ExprKind::Path(path) = &receiver.kind
-                    && path.segments.len() == 1
-                    && let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0]
-                {
-                    let var_name = ident.name.to_string();
-                    if let Some(type_name) = self.ctx.variable_type_names.get(&var_name) {
-                        let resolved_type = self.resolve_type_alias(type_name);
-                        let base_type = VbcCodegen::strip_generic_args(&resolved_type);
-                        // VBC-internal: derive Len opcode type_hint from WKT registry.
-                        // The interpreter's Len handler uses this hint byte to dispatch
-                        // to the correct runtime length implementation (List=1, Map=2,
-                        // Set=3, Deque=4, Text=5). Channel is 0 on purpose — it has
-                        // no builtin length at either tier. See WKT::len_type_hint().
-                        hint = WKT::from_name(base_type)
-                            .map(|wkt| wkt.len_type_hint())
-                            .unwrap_or(0);
-                        // VBC-internal: WKT::requires_builtin_len() returns true for
-                        // types (Text, List, Map) whose compiled stdlib .len() uses GetF
-                        // field offsets that don't match the NaN-boxed runtime object
-                        // layout. Forces the Len opcode path instead.
-                        let use_builtin_len = WKT::from_name(base_type)
-                            .map(|wkt| wkt.requires_builtin_len())
-                            .unwrap_or(false);
-                        found = !use_builtin_len
-                            && self
-                                .ctx
-                                .lookup_function(&format!("{}.len", base_type))
-                                .is_some();
-                    }
-                }
-                // Fallback: check via extract_expr_type_name (handles typed let bindings)
-                if !found && hint == 0 {
-                    if let Some(type_name) = self.extract_expr_type_name(receiver) {
-                        let base_type = VbcCodegen::strip_generic_args(&type_name);
-                        // VBC-internal: same Len opcode hint / builtin-len logic as the
-                        // primary path above, but via expression-level type extraction.
-                        hint = WKT::from_name(base_type)
-                            .map(|wkt| wkt.len_type_hint())
-                            .unwrap_or(0);
-                        let use_builtin_len = WKT::from_name(base_type)
-                            .map(|wkt| wkt.requires_builtin_len())
-                            .unwrap_or(false);
-                        found = !use_builtin_len
-                            && self
-                                .ctx
-                                .lookup_function(&format!("{}.len", base_type))
-                                .is_some();
-                    }
-                } else if !found {
-                    // hint already set from first path, still check fallback for found
-                    if let Some(type_name) = self.extract_expr_type_name(receiver) {
-                        let base_type = VbcCodegen::strip_generic_args(&type_name);
-                        // VBC-internal: only check requires_builtin_len here (hint already
-                        // resolved from the primary path above).
-                        let use_builtin_len = WKT::from_name(base_type)
-                            .map(|wkt| wkt.requires_builtin_len())
-                            .unwrap_or(false);
-                        found = !use_builtin_len
-                            && self
-                                .ctx
-                                .lookup_function(&format!("{}.len", base_type))
-                                .is_some();
-                    }
-                }
-                (found, hint)
-            };
-
-            // Force Len opcode when type_hint is known (even if compiled .len() exists).
-            // Compiled .len() uses GetF offsets that may not match runtime layout.
-            if has_user_defined_len && len_type_hint != 0 {
-                // Type is known to be a collection — use Len opcode regardless
-                let result = self.ctx.alloc_temp();
-                self.ctx.emit(Instruction::Len {
-                    dst: result,
-                    arr: receiver_reg,
-                    type_hint: len_type_hint,
+            // Packed arrays have no native header. The local binding also
+            // retains concrete zero extents, which a legacy array declaration
+            // can conflate with an unresolved symbolic count.
+            let fixed_count = Self::expr_ident_name(receiver)
+                .and_then(|name| self.ctx.fixed_array_count(&name))
+                .and_then(|count| i64::try_from(count).ok())
+                .or_else(|| match owner {
+                    Some(TypeRef::Array { length, .. }) if *length > 0 => i64::try_from(*length).ok(),
+                    _ => None,
                 });
+            if let Some(count) = fixed_count {
+                let result = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::LoadI { dst: result, value: count });
                 self.retire_observed_operand(receiver, receiver_reg, receiver_result_declaration.as_ref());
                 return Ok(Some(result));
             }
-            // T1370. `has_user_defined_len` is answered from a
-            // MOUNT-scoped registry while ordinary method dispatch is
-            // not, so an unmounted receiver type loses the method here
-            // and keeps it everywhere else. Measured: with `Metadata`
-            // unmounted, `m.is_file()` is correct and `m.len()` is 1
-            // against a raw.size of 10. A record is never a builtin
-            // container, so there is nothing for `Len` to mean on one —
-            // fall through to the dispatch that already works.
-            let receiver_is_known_non_container = self
-                .extract_expr_type_name(receiver)
-                .map(|tn| VbcCodegen::strip_generic_args(&tn).to_string())
-                .filter(|b| !b.is_empty())
-                .map(|b| WKT::from_name(&b).is_none() && !b.starts_with('['))
-                .unwrap_or(false);
-            if !has_user_defined_len && !receiver_is_known_non_container {
+
+            // Only a reserved carrier or its canonical source declaration can
+            // select a native layout. A record named Map in another module is
+            // an ordinary method receiver, including when read from a field.
+            let id = owner.and_then(TypeRef::base_type_id);
+            let carrier = id.and_then(|id| self.declared_runtime_carrier(id));
+            let hint = carrier.map(WKT::len_type_hint).unwrap_or(0);
+            let structural = matches!(owner, Some(TypeRef::Array { .. } | TypeRef::Tuple(_)))
+                || matches!(id, Some(TypeId::ARRAY | TypeId::TUPLE));
+            let builtin = if structural || hint != 0 {
+                true
+            } else if id.and_then(|id| self.type_by_id(id)).is_some() && carrier.is_none() {
+                false
+            } else if let Some(name) = self.extract_expr_type_name(receiver) {
+                let base = Self::strip_generic_args(&name);
+                (base.is_empty() || base.starts_with('[') || carrier.is_some())
+                    && self.ctx.lookup_function(&format!("{base}.len")).is_none()
+            } else {
+                // With no declared receiver, the VM can measure a runtime
+                // sequence using the unhinted opcode.
+                true
+            };
+            if builtin {
                 let result = self.ctx.alloc_temp();
-                self.ctx.emit(Instruction::Len {
-                    dst: result,
-                    arr: receiver_reg,
-                    type_hint: len_type_hint,
-                });
+                self.ctx.emit(Instruction::Len { dst: result, arr: receiver_reg, type_hint: hint });
                 self.retire_observed_operand(receiver, receiver_reg, receiver_result_declaration.as_ref());
                 return Ok(Some(result));
             }

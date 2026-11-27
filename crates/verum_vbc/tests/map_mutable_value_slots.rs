@@ -585,6 +585,144 @@ fn check(name: &str, expected: i64) {
 fn existing_owned_lookup_control() {
     check("read_control", 719);
 }
+
+#[test]
+fn length_of_source_maps_literals_and_structural_sequences() {
+    let caller = Parser::new(r#"
+module projected_lengths;
+mount core.collections.map.Map;
+type Holder is { padding: Int, values: Map<Text, Int>, key: Text };
+
+implement Holder {
+    fn value_count(&self) -> Int { self.values.len() }
+}
+
+fn source_map_count() -> Int {
+    let empty: Map<Text, Int> = Map.new();
+    if empty.len() != 0 { return -1; }
+    let table = Holder { padding: 11, values: Map.new(), key: "owner" };
+    table.value_count()
+}
+
+fn literal_map_count() -> Int {
+    let table = Holder { padding: 11, values: { "one": 1, "two": 2 }, key: "owner" };
+    table.value_count()
+}
+
+type Measure is { value: Int };
+implement Measure {
+    fn len(&self) -> Int { self.value }
+}
+type Readings is { measure: Measure, items: [Int; 3] };
+
+fn slice_count(values: &[Byte]) -> Int { values.len() }
+fn observed<T>(value: T) -> T { value }
+
+fn measure_lengths() -> Int {
+    let readings = Readings { measure: Measure { value: 47 }, items: [18, 6, 9] };
+    let bytes: [Byte; 5] = [0_u8; 5];
+    if observed(readings.items.len()) != 3 { return -1; }
+    if observed(bytes.len()) != 5 { return -2; }
+    if slice_count(b"abc") != 3 { return -3; }
+    if slice_count(b"") != 0 { return -4; }
+    readings.measure.len()
+}
+"#).parse_module().expect("projected length program");
+    let declarations = |source: &str, file: verum_ast::FileId, names: &[&str]| {
+        let mut module = verum_fast_parser::FastParser::new()
+            .parse_module_str(source, file).expect("production collection declarations");
+        module.items.retain(|item| match &item.kind {
+            verum_ast::ItemKind::Module(decl) => decl.items.is_none(),
+            verum_ast::ItemKind::Mount(_) => true,
+            kind => kind.type_or_protocol_name().is_some_and(|name| names.contains(&name.as_str())),
+        });
+        module
+    };
+    let protocols = declarations(include_str!("../../../core/base/protocols.vr"),
+        verum_ast::FileId::new(1), &["Hash", "Eq", "PartialEq", "Hasher"]);
+    let map_file = verum_ast::FileId::new(2);
+    let mut map = declarations(PRODUCTION_MAP, map_file, &["Map", "Slot"]);
+    let methods = cursor_methods(PRODUCTION_MAP, map_file, &[("Map", &["new", "len"])]);
+    map.items.extend(methods.items.into_iter().filter(|item| {
+        matches!(&item.kind, verum_ast::ItemKind::Impl(decl)
+            if matches!(decl.kind, verum_ast::decl::ImplKind::Inherent(_)))
+    }));
+    let units = [&protocols, &map, &caller];
+    let mut codegen = VbcCodegen::with_config(verum_vbc::codegen::CodegenConfig::new(""));
+    codegen.initialize();
+    codegen.collect_unit_declarations(&units).expect("declared Map and caller");
+    codegen.resolve_pending_imports();
+    codegen.compile_unit_items(&units, ItemFailurePolicy::Strict).expect("actual Map.new and Map.len");
+    let mut original = codegen.finalize_module().expect("projected length program");
+    original.resolve_protocol_dispatch();
+    let bytes = verum_vbc::serialize::serialize_module(&original).expect("wire writer");
+    let loaded = verum_vbc::deserialize::deserialize_module(&bytes).expect("wire reader");
+    for (route, module) in [("source", original), ("wire", loaded)] {
+        let module = Arc::new(module);
+        for (name, expected) in [
+            ("source_map_count", 0), ("literal_map_count", 2),
+            ("measure_lengths", 47),
+        ] {
+            let entry = module.find_function_by_name(&format!("projected_lengths.{name}")).unwrap();
+            let result = Interpreter::new(module.clone()).execute_function(entry);
+            assert!(matches!(result, Ok(value) if value.try_as_i64() == Some(expected)),
+                "{route}/{name}: {result:?}");
+        }
+    }
+}
+
+#[test]
+fn foreign_map_name_preserves_its_length_method() {
+    use verum_vbc::bytecode::encode_instruction;
+    use verum_vbc::instruction::Reg;
+    use verum_vbc::interpreter::InterpreterError;
+
+    let ast = Parser::new(r#"
+        module local_measurement;
+        type Map is { initial: Int, multiplier: Int };
+        implement Map {
+            fn len(&self) -> Int { self.initial * self.multiplier }
+        }
+        type Holder is { table: Map };
+        fn projected(holder: &Holder) -> Int { holder.table.len() }
+        fn measure() -> Int {
+            let table = Map { initial: 6, multiplier: 7 };
+            assert_eq(table.len(), 42);
+            projected(&Holder { table: Map { initial: 3, multiplier: 17 } })
+        }
+    "#).parse_module().expect("user Map grammar");
+    let mut module = VbcCodegen::new().compile_module(&ast).expect("user Map program");
+    let entry = module.find_function_by_name("local_measurement.measure").expect("entry");
+    let bytes = verum_vbc::serialize::serialize_module(&module).expect("wire writer");
+    let loaded = verum_vbc::deserialize::deserialize_module(&bytes).expect("wire reader");
+    for module in [module.clone(), loaded] {
+        let value = Interpreter::new(Arc::new(module)).execute_function(entry).expect("user length");
+        assert_eq!(value.try_as_i64(), Some(51));
+    }
+
+    // Replay the former lowering of the field read. The hint cannot grant
+    // the canonical Map layout to an unrelated record.
+    let projected = module.find_function_by_name("local_measurement.projected").unwrap();
+    let start = module.bytecode.len() as u32;
+    for instruction in [
+        Instruction::GetF { dst: Reg(1), obj: Reg(0), field_idx: 0 },
+        Instruction::Len { dst: Reg(2), arr: Reg(1), type_hint: 2 },
+        Instruction::Ret { value: Reg(2) },
+    ] {
+        encode_instruction(&instruction, &mut module.bytecode);
+    }
+    let body = &mut module.functions[projected.0 as usize];
+    body.bytecode_offset = start;
+    body.bytecode_length = module.bytecode.len() as u32 - start;
+    body.register_count = body.register_count.max(3);
+    body.instructions = None;
+    let bytes = verum_vbc::serialize::serialize_module(&module).unwrap();
+    let loaded = verum_vbc::deserialize::deserialize_module(&bytes).unwrap();
+    let error = Interpreter::new(Arc::new(loaded)).execute_function(entry).unwrap_err();
+    assert!(matches!(error, InterpreterError::InvalidOperand { ref message }
+        if message.contains("Map length")), "{error}");
+}
+
 #[test]
 fn unit_is_a_valid_hash_key_across_lookup_growth_and_removal() {
     check("unit_keys_are_values", 18725);
