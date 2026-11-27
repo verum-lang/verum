@@ -112,7 +112,7 @@ public fn compute_keyid(key: &TufKey) -> Result<KeyId, CanonicalError> {
     obj.insert("scheme".to_text(),  json_string(scheme_to_text(&key.scheme)));
     obj.insert("keyval".to_text(),  key.keyval.clone());
     let bytes = canonical_signing_payload(&json_object(obj))?;
-    let digest = hash.crypto.sha256.digest(&bytes);
+    let digest = hash.crypto.sha256.digest(bytes.as_slice());
     Result.Ok(KeyId(hex_encode(&digest)))
 }
 

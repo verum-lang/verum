@@ -129,14 +129,14 @@ public type TufKeyScheme is
 @derive(Eq, Clone, Debug)
 public type TufKey is {
     /// Key type identifier as it appears on the wire.
-    keytype:     TufKeyType,
+    public(in core.security.tuf) keytype: TufKeyType,
     /// Signature scheme.
-    scheme:      TufKeyScheme,
+    public(in core.security.tuf) scheme: TufKeyScheme,
     /// Algorithm-specific key material — typically a single field
     /// `public` holding the hex-encoded key bytes (Ed25519/ECDSA) or
     /// PEM (RSA). Stored as a JsonObject so unknown algorithms still
     /// round-trip on the wire.
-    keyval:      JsonValue,
+    public(in core.security.tuf) keyval: JsonValue,
 };
 
 /// `keyid` per TUF spec §4.2.2: SHA-256 of the canonical-JSON
