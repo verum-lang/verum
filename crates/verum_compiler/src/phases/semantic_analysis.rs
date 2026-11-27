@@ -211,12 +211,29 @@ impl SemanticAnalysisPhase {
         selected: &mut [(Text, Text, verum_ast::Module)],
         session: &crate::Session,
     ) -> anyhow::Result<()> {
+        let graph = Self::source_admission_registry(selected, session)?;
+        self.admit_registered_sources(selected, session, &graph)
+    }
+
+    pub(crate) fn source_admission_registry(
+        selected: &[(Text, Text, verum_ast::Module)],
+        session: &crate::Session,
+    ) -> anyhow::Result<crate::owned_source_semantics::SourceRegistry> {
         let graph = verum_common::Shared::new(parking_lot::RwLock::new(session.module_registry().read().clone()));
         crate::owned_source_semantics::register_sources_with_text(&graph,
             selected.iter().map(|(owner, path, module)| (owner.as_str(), path.as_str(), module)),
             |id| session.get_source(id).map(|file| file.source.clone()))?;
+        Ok(graph)
+    }
+
+    pub(crate) fn admit_registered_sources(
+        &self,
+        selected: &mut [(Text, Text, verum_ast::Module)],
+        session: &crate::Session,
+        graph: &crate::owned_source_semantics::SourceRegistry,
+    ) -> anyhow::Result<()> {
         let outcomes = self.check_source_roster(
-            selected, &graph, session.options().num_threads,
+            selected, graph, session.options().num_threads,
             |error| error.to_diagnostic_with_span(Some(|span| session.convert_span(span))),
         )?;
         // A failed owner cannot poison a sibling's inference state, and no

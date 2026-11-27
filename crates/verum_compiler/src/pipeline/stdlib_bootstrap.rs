@@ -25,7 +25,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use tracing::debug;
 
-use verum_common::Text;
+use verum_common::{List, Set, Text};
 use verum_modules::{
     ModuleInfo, ModulePath, extract_exports_from_module, resolve_glob_reexports,
     resolve_specific_reexport_kinds,
@@ -47,72 +47,58 @@ struct OwnedSourceFile {
     ast: verum_ast::Module,
 }
 
+struct BootstrapSources {
+    modules: List<StdlibModule>,
+    groups: Vec<(String, Vec<OwnedSourceFile>)>,
+    selected: List<(Text, Text, verum_ast::Module)>,
+}
+
 impl<'s> CompilationPipeline<'s> {
-    /// Compile the standard library to a VBC archive.
-    ///
-    /// This method is only available in `StdlibBootstrap` mode (created via `new_core()`).
-    /// It uses global type registration across ALL modules before compiling any module,
-    /// which eliminates cross-module dependency constraints.
-    ///
-    /// # Flow
-    ///
-    /// 1. Discover all stdlib modules via `StdlibModuleResolver`
-    /// 2. Parse ALL modules to AST
-    /// 3. Register ALL types globally (multi-pass across all modules)
-    /// 4. Compile each module to VBC bytecode
-    /// 5. Build and write `stdlib.vbca` archive
-    ///
-    /// # Returns
-    ///
-    /// Returns `StdlibCompilationResult` containing compilation statistics,
-    /// or an error if compilation fails.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if:
-    /// - The pipeline is not in `StdlibBootstrap` mode
-    /// - Module discovery fails
-    /// - Parsing fails
-    /// - Type registration fails
-    /// - VBC codegen fails
-    /// - Archive writing fails
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// use verum_compiler::{Session, CompilationPipeline, CoreConfig};
-    ///
-    /// let config = CoreConfig::new("stdlib")
-    ///  .with_output("target/stdlib.vbca");
-    ///
-    /// let mut session = Session::default();
-    /// let mut pipeline = CompilationPipeline::new_core(&mut session, config);
-    ///
-    /// let result = pipeline.compile_core()?;
-    /// println!("Compiled {} modules with {} functions",
-    ///  result.modules_compiled, result.functions_compiled);
-    /// ```
-    pub fn compile_core(&mut self) -> Result<StdlibCompilationResult> {
-        self.compile_core_with_origin(None)
+    fn bootstrap_config(&self) -> Result<&CoreConfig> {
+        match &self.build_mode {
+            BuildMode::StdlibBootstrap { config } => Ok(config),
+            BuildMode::Normal => anyhow::bail!("stdlib source operations require StdlibBootstrap mode"),
+        }
     }
 
-    pub(crate) fn compile_core_with_origin(&mut self, origin: Option<&Path>) -> Result<StdlibCompilationResult> {
-        use verum_vbc::write_archive_to_file;
+    fn bootstrap_semantics(&self) -> crate::phases::semantic_analysis::SemanticAnalysisPhase {
+        crate::phases::semantic_analysis::SemanticAnalysisPhase::new()
+            .with_language_features(self.session.language_features())
+            .with_target(self.session.cfg_evaluator().config().clone())
+    }
 
-        // Extract config from build_mode (or fail if not in StdlibBootstrap mode)
-        let config = match &self.build_mode {
-            BuildMode::StdlibBootstrap { config } => config.clone(),
-            BuildMode::Normal => {
-                return Err(anyhow::anyhow!(
-                    "compile_core() requires StdlibBootstrap mode. Use new_core() to create the pipeline."
-                ));
-            }
-        };
-
-        let start = std::time::Instant::now();
+    /// Type-check the requested file owners against the full target-selected
+    /// stdlib declaration graph. Dependencies supply their declarations; only
+    /// the requested bodies are admitted. This operation writes no archive.
+    pub fn check_core_sources(&mut self, owners: &[Text]) -> Result<()> {
+        anyhow::ensure!(!owners.is_empty(), "at least one stdlib module is required");
+        let config = self.bootstrap_config()?.clone();
         let mut phase = self.session.measure_phase("Stdlib discovery");
-        let mut module_times = std::collections::HashMap::new();
+        let BootstrapSources { mut selected, .. } = self.read_bootstrap_sources(&config, None, &mut phase)?;
+        let requested: Set<&str> = owners.iter().map(Text::as_str).collect();
+        let mut missing = requested.clone();
+        for (owner, _, _) in &selected {
+            missing.remove(&owner.as_str());
+        }
+        if !missing.is_empty() {
+            let mut names: List<_> = missing.into_iter().collect();
+            names.sort_unstable();
+            anyhow::bail!("stdlib modules absent from the selected target: {}", names.join(", "));
+        }
+        phase.next("Stdlib source admission");
+        let graph = crate::phases::semantic_analysis::SemanticAnalysisPhase::source_admission_registry(
+            &selected, self.session,
+        )?;
+        selected.retain(|(owner, _, _)| requested.contains(&owner.as_str()));
+        self.bootstrap_semantics().admit_registered_sources(&mut selected, self.session, &graph)
+    }
 
+    fn read_bootstrap_sources(
+        &mut self,
+        config: &CoreConfig,
+        origin: Option<&Path>,
+        phase: &mut crate::session::PhaseTimer,
+    ) -> Result<BootstrapSources> {
         // ====================================================================
         // STEP 1: Discover modules
         // ====================================================================
@@ -137,7 +123,7 @@ impl<'s> CompilationPipeline<'s> {
         }
 
         // Get modules in dependency order
-        let modules_to_compile: Vec<StdlibModule> =
+        let modules_to_compile: List<StdlibModule> =
             resolver.modules_in_order().into_iter().cloned().collect();
         phase.next("Stdlib parsing");
 
@@ -212,12 +198,69 @@ impl<'s> CompilationPipeline<'s> {
         let identities: Vec<_> = all_parsed_modules.iter().flat_map(|(_, files)| files)
             .map(|file| (file.owner.as_str(), resolver.source_path(&file.path).to_string_lossy().into_owned(), &file.ast)).collect();
         let refs: Vec<_> = identities.iter().map(|(owner, path, ast)| (*owner, path.as_str(), *ast)).collect();
-        let mut selected = crate::owned_source_semantics::select_source_roster(&refs, &target)?;
+        let selected = crate::owned_source_semantics::select_source_roster(&refs, &target)?;
+        Ok(BootstrapSources { modules: modules_to_compile, groups: all_parsed_modules, selected })
+    }
+
+    /// Compile the standard library to a VBC archive.
+    ///
+    /// This method is only available in `StdlibBootstrap` mode (created via `new_core()`).
+    /// It uses global type registration across ALL modules before compiling any module,
+    /// which eliminates cross-module dependency constraints.
+    ///
+    /// # Flow
+    ///
+    /// 1. Discover all stdlib modules via `StdlibModuleResolver`
+    /// 2. Parse ALL modules to AST
+    /// 3. Register ALL types globally (multi-pass across all modules)
+    /// 4. Compile each module to VBC bytecode
+    /// 5. Build and write `stdlib.vbca` archive
+    ///
+    /// # Returns
+    ///
+    /// Returns `StdlibCompilationResult` containing compilation statistics,
+    /// or an error if compilation fails.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The pipeline is not in `StdlibBootstrap` mode
+    /// - Module discovery fails
+    /// - Parsing fails
+    /// - Type registration fails
+    /// - VBC codegen fails
+    /// - Archive writing fails
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use verum_compiler::{Session, CompilationPipeline, CoreConfig};
+    ///
+    /// let config = CoreConfig::new("stdlib")
+    ///  .with_output("target/stdlib.vbca");
+    ///
+    /// let mut session = Session::default();
+    /// let mut pipeline = CompilationPipeline::new_core(&mut session, config);
+    ///
+    /// let result = pipeline.compile_core()?;
+    /// println!("Compiled {} modules with {} functions",
+    ///  result.modules_compiled, result.functions_compiled);
+    /// ```
+    pub fn compile_core(&mut self) -> Result<StdlibCompilationResult> {
+        self.compile_core_with_origin(None)
+    }
+
+    pub(crate) fn compile_core_with_origin(&mut self, origin: Option<&Path>) -> Result<StdlibCompilationResult> {
+        use verum_vbc::write_archive_to_file;
+
+        let config = self.bootstrap_config()?.clone();
+        let start = std::time::Instant::now();
+        let mut phase = self.session.measure_phase("Stdlib discovery");
+        let mut module_times = std::collections::HashMap::new();
+        let BootstrapSources { modules: modules_to_compile, groups: mut all_parsed_modules, mut selected } =
+            self.read_bootstrap_sources(&config, origin, &mut phase)?;
         phase.next("Stdlib source admission");
-        let semantic = crate::phases::semantic_analysis::SemanticAnalysisPhase::new()
-            .with_language_features(self.session.language_features())
-            .with_target(target);
-        semantic.admit_selected_sources(&mut selected, self.session)?;
+        self.bootstrap_semantics().admit_selected_sources(&mut selected, self.session)?;
 
         phase.next("Stdlib materialization");
         let mut selected: verum_common::Map<_, _> = selected.into_iter().map(|(owner, _, ast)| (owner, ast)).collect();

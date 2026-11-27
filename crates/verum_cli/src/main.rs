@@ -2589,6 +2589,19 @@ enum PackageCommands {
 
 #[derive(Subcommand)]
 enum StdlibSub {
+    /// Type-check named modules against the stdlib declarations for this target.
+    Check {
+        /// Fully qualified source module names, such as core.cli.error.
+        #[clap(required = true, value_name = "MODULE")]
+        modules: Vec<Text>,
+        /// Directory containing the stdlib's mod.vr. Defaults to the workspace core/.
+        #[clap(long, value_name = "DIR")]
+        stdlib_path: Option<std::path::PathBuf>,
+        /// Maximum parallel module checks.
+        #[clap(long, value_name = "N")]
+        threads: Option<std::num::NonZeroUsize>,
+    },
+
     /// Precompile `core/` to a `.vbca` archive embedded into the
     /// compiler binary at build time (Phase 4 of the precompiled-
     /// stdlib epic). Default output path is
@@ -4432,6 +4445,9 @@ fn run_command(cli: Cli) -> Result<()> {
         },
 
         Commands::Stdlib { sub } => match sub {
+            StdlibSub::Check { modules, stdlib_path, threads } => {
+                commands::stdlib_precompile::check(&modules, stdlib_path, threads)
+            }
             StdlibSub::Precompile {
                 stdlib_path,
                 out,

@@ -18,6 +18,28 @@ use verum_compiler::precompile::{PrecompileConfig, precompile_stdlib};
 use crate::error::CliError;
 use crate::ui;
 
+pub fn check(
+    modules: &[verum_common::Text],
+    stdlib_path: Option<PathBuf>,
+    threads: Option<NonZeroUsize>,
+) -> Result<(), CliError> {
+    use verum_compiler::{CompilerOptions, CoreConfig, Session, pipeline::CompilationPipeline};
+
+    let cfg = resolve_config(stdlib_path, None, None, threads, false)?;
+    let mut options = CompilerOptions::default();
+    if let Some(workers) = threads {
+        options.num_threads = workers.get();
+    }
+    let mut session = Session::new(options);
+    let mut pipeline = CompilationPipeline::new_core(&mut session, CoreConfig::new(cfg.stdlib_path));
+    pipeline.check_core_sources(modules)
+        .map_err(|error| CliError::Custom(format!("{error:#}")))?;
+    for module in modules {
+        ui::detail("Checked", module);
+    }
+    Ok(())
+}
+
 /// Entry point invoked by the dispatcher in `main.rs`.
 pub fn run(
     stdlib_path: Option<PathBuf>,

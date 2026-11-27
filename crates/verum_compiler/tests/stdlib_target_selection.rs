@@ -9,6 +9,40 @@ fn write(root: &Path, file: &str, source: &str) {
     std::fs::write(path, source).unwrap();
 }
 
+#[test]
+fn checking_selected_bodies_uses_the_complete_target_graph_and_writes_no_archive() {
+    use verum_compiler::{CoreConfig, Session, pipeline::CompilationPipeline};
+
+    let root = tempfile::tempdir().unwrap();
+    write(root.path(), "mod.vr", r#"
+        module core;
+        public module model; public module reader; public module rejected;
+        @cfg(all(target_os = "windows", target_os = "linux")) public module excluded;
+    "#);
+    write(root.path(), "model.vr", "module core.model;
+        public type Cell is { value: Int };
+        implement Cell { public fn read(&self) -> Int { self.value } }");
+    write(root.path(), "reader.vr", "module core.reader; mount core.model.Cell;
+        fn read(cell: &Cell) -> Int { cell.read() }");
+    write(root.path(), "rejected.vr", "module core.rejected; mount core.model.Cell;
+        fn read(cell: &Cell) -> Int { cell.value }");
+    write(root.path(), "excluded.vr", "module core.excluded;");
+
+    let archive = root.path().join("runtime.vbca");
+    let config = CoreConfig::new(root.path()).with_output(&archive);
+    let mut session = Session::new(Default::default());
+    let mut pipeline = CompilationPipeline::new_core(&mut session, config);
+    pipeline.check_core_sources(&["core.reader".into()]).unwrap();
+    let err = pipeline.check_core_sources(&["core.reader".into(), "core.rejected".into()])
+        .unwrap_err().to_string();
+    assert!(err.contains("core.rejected") && err.contains("E202"), "{err}");
+    let err = pipeline.check_core_sources(&["core.excluded".into(), "core.unknown".into()])
+        .unwrap_err().to_string();
+    assert!(err.contains("absent from the selected target: core.excluded, core.unknown"), "{err}");
+    assert!(pipeline.check_core_sources(&[]).is_err());
+    assert!(!archive.exists());
+}
+
 fn selected(root: &Path, triple: &str) -> BTreeSet<String> {
     let mut resolver = StdlibModuleResolver::with_target(root, TargetConfig::for_target(triple));
     resolver.discover().unwrap();
