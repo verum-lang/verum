@@ -17699,9 +17699,8 @@ impl TypeChecker {
             return Ok(InferResult::new(Type::Never));
         }
 
-        // Strip refinement types: methods on Float{{<predicate>}} should resolve as Float methods
+        // Keep a refinement until the candidate's receiver permission is known.
         let recv_ty_raw: &Type = precomputed_recv_ty.insert(match recv_ty_raw {
-            Type::Refined { base, .. } => *base,
             Type::Sigma { fst_type, .. } => *fst_type,
             other => other,
         });
@@ -24678,8 +24677,7 @@ impl TypeChecker {
 
     fn auto_deref_for_method_call(ty: &Type) -> Type {
         match ty {
-            // Strip refinement types: methods on T{predicate} resolve as T methods
-            Type::Refined { base, .. } | Type::Sigma { fst_type: base, .. } => {
+            Type::Sigma { fst_type: base, .. } => {
                 Self::auto_deref_for_method_call(base)
             }
             // Dereference &T -> inner

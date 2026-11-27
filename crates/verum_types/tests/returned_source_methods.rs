@@ -1379,3 +1379,22 @@ fn implicit_receiver_roles_belong_to_the_selected_nominal() {
     let errors = check(&unknown, &providers);
     assert!(errors.iter().any(|error| error.contains("UnknownType") && !error.contains("wrong kind")), "{errors:?}");
 }
+
+#[test]
+fn refined_carriers_inherit_read_operations_without_granting_write_permission() {
+    let providers = [("demo.count", r#"
+        public type Positive is Int{it > 0};
+        public type Named is Positive;
+        public type Counter is { public count: Named };
+        implement Int {
+            public fn read_count(&self) -> Int { *self }
+            public fn next_count(self) -> Int { self + 1 }
+            public fn clear_count(&mut self) { *self = 0; }
+        }
+    "#)];
+    let imports = "mount demo.count.{Counter, Named};";
+    let valid = check(&format!("{imports} fn read(x: &Counter) -> Int {{ x.count.read_count() + x.count.next_count() }}"), &providers);
+    assert!(valid.is_empty(), "{valid:?}");
+    let invalid = check(&format!("{imports} fn clear(x: &mut Counter) {{ x.count.clear_count(); }}"), &providers);
+    assert!(invalid.iter().any(|error| error.contains("clear_count")), "{invalid:?}");
+}

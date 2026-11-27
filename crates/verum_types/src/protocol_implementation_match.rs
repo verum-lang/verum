@@ -56,6 +56,18 @@ impl ProtocolChecker {
         if declaration.has_value_inference() { return false; }
         let Ok(instance) = scheme.try_instantiate() else { return false; };
         let Some(pattern) = &instance.impl_self_type else { return false; };
+        let Some(resolved) = self.resolve_alias_head(actual) else { return false; };
+        let mut actual = resolved.as_ref();
+        // Reading or consuming a refined value can use its carrier's operations.
+        // A mutable receiver could store a value outside the original predicate.
+        // Generic and refined receiver patterns still match the actual type.
+        if matches!(scheme.receiver_kind, Some(verum_ast::method_dispatch::ReceiverKind::SelfRef
+            | verum_ast::method_dispatch::ReceiverKind::SelfValue))
+            && self.resolve_alias_head(pattern).is_some_and(|pattern|
+                !matches!(pattern.as_ref(), Type::Refined { .. } | Type::Var(_)))
+        {
+            while let Type::Refined { base, .. } = actual { actual = base; }
+        }
         for variable in pattern.free_vars() {
             if !instance.fresh_vars.contains(&variable) {
                 rigid_variables.entry(variable).or_insert_with(|| crate::unify::RigidVar {
