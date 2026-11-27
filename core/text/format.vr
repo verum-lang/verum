@@ -35,6 +35,7 @@
     lifecycle: Lifecycle.Definition
 )
 module core.text.format;
+mount core.sys.common.FileDesc;
 // TWIN-TYPE MERGE (task #48): the alias target must be locally
 // visible (braced) for the ALIAS-VS-MARKER scope gate.
 public mount core.base.protocols.{Formatter, TextFormatter, FormatSpec, TextAlignment, Sign, FmtResult, int_to_string, float_to_string};
@@ -46,28 +47,19 @@ public mount core.base.protocols.{Formatter, TextFormatter, FormatSpec, TextAlig
 // =============================================================================
 
 @cfg(target_os = "linux")
-mount sys.linux.syscall.{
+mount core.sys.linux.syscall.{
     write as sys_write,
-    FileDesc,
 };
 
 @cfg(target_os = "macos")
-mount sys.darwin.libsystem.{
+mount core.sys.darwin.libsystem.{
     safe_write as sys_write,
 };
-@cfg(target_os = "macos")
-mount sys.common.FileDesc;
 
 @cfg(target_os = "windows")
-mount sys.windows.kernel32.{
+mount core.sys.windows.kernel32.{
     write as sys_write,
 };
-@cfg(target_os = "windows")
-mount sys.common.FileDesc;
-
-// Standard file descriptors
-const STDOUT_FD: Int = 1;
-const STDERR_FD: Int = 2;
 
 // =============================================================================
 // Native Number-to-String Conversion
@@ -405,32 +397,32 @@ implement DebugMap {
 
 // Print text to stdout (no newline).
 public fn print(s: &Text) {
-    let fd = FileDesc.from_raw(STDOUT_FD);
+    let fd = FileDesc.STDOUT;
     let _ = sys_write(fd, s.as_bytes());
 }
 
 // Print text to stdout with newline.
 public fn println(s: &Text) {
-    let fd = FileDesc.from_raw(STDOUT_FD);
+    let fd = FileDesc.STDOUT;
     let _ = sys_write(fd, s.as_bytes());
     let _ = sys_write(fd, b"\n");
 }
 
 // Print empty line to stdout.
 public fn println_empty() {
-    let fd = FileDesc.from_raw(STDOUT_FD);
+    let fd = FileDesc.STDOUT;
     let _ = sys_write(fd, b"\n");
 }
 
 // Print text to stderr (no newline).
 public fn eprint(s: &Text) {
-    let fd = FileDesc.from_raw(STDERR_FD);
+    let fd = FileDesc.STDERR;
     let _ = sys_write(fd, s.as_bytes());
 }
 
 // Print text to stderr with newline.
 public fn eprintln(s: &Text) {
-    let fd = FileDesc.from_raw(STDERR_FD);
+    let fd = FileDesc.STDERR;
     let _ = sys_write(fd, s.as_bytes());
     let _ = sys_write(fd, b"\n");
 }

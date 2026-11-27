@@ -233,19 +233,19 @@ fn probe_descriptor(descriptor: &mut PollDescriptor) -> Result<Int, OSError> {
 
 implement FileDesc {
     /// Invalid file descriptor constant.
-    const INVALID: FileDesc = FileDesc(-1);
+    public const INVALID: FileDesc = FileDesc(-1);
 
     /// Standard input (fd 0).
-    const STDIN: FileDesc = FileDesc(0);
+    public const STDIN: FileDesc = FileDesc(0);
 
     /// Standard output (fd 1).
-    const STDOUT: FileDesc = FileDesc(1);
+    public const STDOUT: FileDesc = FileDesc(1);
 
     /// Standard error (fd 2).
-    const STDERR: FileDesc = FileDesc(2);
+    public const STDERR: FileDesc = FileDesc(2);
 
-    /// Create a file descriptor from raw value.
-    fn from_raw(fd: Int) -> FileDesc {
+    /// Wrap a descriptor number. Ownership of the open file stays with the caller.
+    public fn from_raw(fd: Int) -> FileDesc {
         FileDesc(fd)
     }
 
@@ -254,8 +254,8 @@ implement FileDesc {
         self.0
     }
 
-    /// Check if this is a valid file descriptor.
-    fn is_valid(&self) -> Bool {
+    /// Whether the number is in the nonnegative descriptor range.
+    public fn is_valid(&self) -> Bool {
         self.0 >= 0
     }
 }

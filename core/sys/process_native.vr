@@ -74,10 +74,12 @@ mount core.sys.common.{OSError, FileDesc};
 mount core.sys.linux.syscall as platform_syscall;
 
 @cfg(target_os = "linux")
-mount core.sys.linux.syscall.{F_SETFD, FD_CLOEXEC};
+mount core.sys.linux.syscall.{close as close_descriptor, F_SETFD, FD_CLOEXEC};
 
 @cfg(target_os = "macos")
 mount core.sys.darwin.libsystem as platform_syscall;
+@cfg(target_os = "macos")
+mount core.sys.darwin.libsystem.{safe_close as close_descriptor};
 
 // =============================================================================
 // SpawnResult — what `native_spawn` returns
@@ -211,9 +213,9 @@ public fn native_spawn(
 
         // ── Parent path ─────────────────────────────────────────────
         // Close child-only pipe ends; keep parent ends.
-        if capture_stdin  { let _ = platform_syscall.close(FileDesc.from_raw(stdin_pipe[0])); }
-        if capture_stdout { let _ = platform_syscall.close(FileDesc.from_raw(stdout_pipe[1])); }
-        if capture_stderr { let _ = platform_syscall.close(FileDesc.from_raw(stderr_pipe[1])); }
+        if capture_stdin  { let _ = close_descriptor(FileDesc.from_raw(stdin_pipe[0])); }
+        if capture_stdout { let _ = close_descriptor(FileDesc.from_raw(stdout_pipe[1])); }
+        if capture_stderr { let _ = close_descriptor(FileDesc.from_raw(stderr_pipe[1])); }
 
         // The parent's `blob` lives until function return — its drop
         // happens AFTER we have observed the spawn success. The child's
@@ -277,18 +279,18 @@ fn child_setup_stdio(
     // Each dup2/close is a single syscall — async-signal-safe.
     if stdin_pipe[0] >= 0 {
         let _ = platform_syscall.dup2(FileDesc.from_raw(stdin_pipe[0]), FileDesc.from_raw(0 as Int32));
-        let _ = platform_syscall.close(FileDesc.from_raw(stdin_pipe[0]));
-        let _ = platform_syscall.close(FileDesc.from_raw(stdin_pipe[1]));
+        let _ = close_descriptor(FileDesc.from_raw(stdin_pipe[0]));
+        let _ = close_descriptor(FileDesc.from_raw(stdin_pipe[1]));
     }
     if stdout_pipe[1] >= 0 {
         let _ = platform_syscall.dup2(FileDesc.from_raw(stdout_pipe[1]), FileDesc.from_raw(1 as Int32));
-        let _ = platform_syscall.close(FileDesc.from_raw(stdout_pipe[0]));
-        let _ = platform_syscall.close(FileDesc.from_raw(stdout_pipe[1]));
+        let _ = close_descriptor(FileDesc.from_raw(stdout_pipe[0]));
+        let _ = close_descriptor(FileDesc.from_raw(stdout_pipe[1]));
     }
     if stderr_pipe[1] >= 0 {
         let _ = platform_syscall.dup2(FileDesc.from_raw(stderr_pipe[1]), FileDesc.from_raw(2 as Int32));
-        let _ = platform_syscall.close(FileDesc.from_raw(stderr_pipe[0]));
-        let _ = platform_syscall.close(FileDesc.from_raw(stderr_pipe[1]));
+        let _ = close_descriptor(FileDesc.from_raw(stderr_pipe[0]));
+        let _ = close_descriptor(FileDesc.from_raw(stderr_pipe[1]));
     }
 }
 
@@ -304,8 +306,8 @@ fn child_exit(code: Int) -> ! {
 
 @cfg(any(target_os = "linux", target_os = "macos"))
 fn close_pipe(p: &[Int32; 2]) {
-    if p[0] >= 0 { let _ = platform_syscall.close(FileDesc.from_raw(p[0])); }
-    if p[1] >= 0 { let _ = platform_syscall.close(FileDesc.from_raw(p[1])); }
+    if p[0] >= 0 { let _ = close_descriptor(FileDesc.from_raw(p[0])); }
+    if p[1] >= 0 { let _ = close_descriptor(FileDesc.from_raw(p[1])); }
 }
 
 // =============================================================================

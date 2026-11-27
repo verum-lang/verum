@@ -32,7 +32,8 @@
     lifecycle: Lifecycle.Definition
 )
 module core.io.stdio;
-mount io.protocols.*;
+mount core.sys.common.FileDesc;
+mount core.io.protocols.*;
 
 // =============================================================================
 // V-LLSI Native I/O Imports
@@ -41,35 +42,26 @@ mount io.protocols.*;
 // =============================================================================
 
 @cfg(target_os = "linux")
-mount sys.linux.syscall.{
+mount core.sys.linux.syscall.{
     read as sys_read,
     write as sys_write,
-    FileDesc,
 };
 
 @cfg(target_os = "macos")
-mount sys.darwin.libsystem.{
+mount core.sys.darwin.libsystem.{
     safe_read as sys_read,
     safe_write as sys_write,
 };
-@cfg(target_os = "macos")
-mount sys.common.FileDesc;
 
 @cfg(target_os = "windows")
-mount sys.windows.kernel32.{
+mount core.sys.windows.kernel32.{
     read as sys_read,
     write as sys_write,
 };
-@cfg(target_os = "windows")
-mount sys.common.FileDesc;
 
 // =============================================================================
 // Constants
 // =============================================================================
-
-const STDIN_FD: Int = 0;
-const STDOUT_FD: Int = 1;
-const STDERR_FD: Int = 2;
 
 const STDIN_BUFFER_SIZE: Int = 1024;
 
@@ -120,7 +112,7 @@ implement Stdin {
                 break;
             }
 
-            let fd = FileDesc.from_raw(STDIN_FD);
+            let fd = FileDesc.STDIN;
             match sys_read(fd, &mut bytes[total..total+1]) {
                 Result.Ok(0) => break,  // EOF
                 Result.Ok(1) => {
@@ -155,7 +147,7 @@ implement Stdin {
 
 implement Read for Stdin {
     fn read(&mut self, buf: &mut [Byte]) -> IoResult<Int> {
-        let fd = FileDesc.from_raw(STDIN_FD);
+        let fd = FileDesc.STDIN;
         match sys_read(fd, buf) {
             Result.Ok(n) => Result.Ok(n),
             Result.Err(e) => Result.Err(StreamError.from_raw_os_error(e.code)),
@@ -171,7 +163,7 @@ public type StdinLock is {
 
 implement Read for StdinLock {
     fn read(&mut self, buf: &mut [Byte]) -> IoResult<Int> {
-        let fd = FileDesc.from_raw(STDIN_FD);
+        let fd = FileDesc.STDIN;
         match sys_read(fd, buf) {
             Result.Ok(n) => Result.Ok(n),
             Result.Err(e) => Result.Err(StreamError.from_raw_os_error(e.code)),
@@ -187,7 +179,7 @@ implement BufRead for StdinLock {
             self.buf_pos = 0;
 
             let mut tmp = [0_u8; STDIN_BUFFER_SIZE];
-            let fd = FileDesc.from_raw(STDIN_FD);
+            let fd = FileDesc.STDIN;
             match sys_read(fd, &mut tmp) {
                 Result.Ok(n) => {
                     if n > 0 {
@@ -256,7 +248,7 @@ implement Stdout {
 
 implement Write for Stdout {
     fn write(&mut self, buf: &[Byte]) -> IoResult<Int> {
-        let fd = FileDesc.from_raw(STDOUT_FD);
+        let fd = FileDesc.STDOUT;
         match sys_write(fd, buf) {
             Result.Ok(n) => Result.Ok(n),
             Result.Err(e) => Result.Err(StreamError.from_raw_os_error(e.code)),
@@ -275,7 +267,7 @@ public type StdoutLock is ();
 
 implement Write for StdoutLock {
     fn write(&mut self, buf: &[Byte]) -> IoResult<Int> {
-        let fd = FileDesc.from_raw(STDOUT_FD);
+        let fd = FileDesc.STDOUT;
         match sys_write(fd, buf) {
             Result.Ok(n) => Result.Ok(n),
             Result.Err(e) => Result.Err(StreamError.from_raw_os_error(e.code)),
@@ -309,7 +301,7 @@ implement Stderr {
 
 implement Write for Stderr {
     fn write(&mut self, buf: &[Byte]) -> IoResult<Int> {
-        let fd = FileDesc.from_raw(STDERR_FD);
+        let fd = FileDesc.STDERR;
         match sys_write(fd, buf) {
             Result.Ok(n) => Result.Ok(n),
             Result.Err(e) => Result.Err(StreamError.from_raw_os_error(e.code)),
@@ -327,7 +319,7 @@ public type StderrLock is ();
 
 implement Write for StderrLock {
     fn write(&mut self, buf: &[Byte]) -> IoResult<Int> {
-        let fd = FileDesc.from_raw(STDERR_FD);
+        let fd = FileDesc.STDERR;
         match sys_write(fd, buf) {
             Result.Ok(n) => Result.Ok(n),
             Result.Err(e) => Result.Err(StreamError.from_raw_os_error(e.code)),
@@ -368,32 +360,32 @@ public fn stderr() -> Stderr {
 
 // Print text to stdout.
 public fn print(s: &Text) {
-    let fd = FileDesc.from_raw(STDOUT_FD);
+    let fd = FileDesc.STDOUT;
     let _ = sys_write(fd, s.as_bytes());
 }
 
 // Print text to stdout with newline.
 public fn println(s: &Text) {
-    let fd = FileDesc.from_raw(STDOUT_FD);
+    let fd = FileDesc.STDOUT;
     let _ = sys_write(fd, s.as_bytes());
     let _ = sys_write(fd, b"\n");
 }
 
 // Print empty line.
 public fn println_empty() {
-    let fd = FileDesc.from_raw(STDOUT_FD);
+    let fd = FileDesc.STDOUT;
     let _ = sys_write(fd, b"\n");
 }
 
 // Print text to stderr.
 public fn eprint(s: &Text) {
-    let fd = FileDesc.from_raw(STDERR_FD);
+    let fd = FileDesc.STDERR;
     let _ = sys_write(fd, s.as_bytes());
 }
 
 // Print text to stderr with newline.
 public fn eprintln(s: &Text) {
-    let fd = FileDesc.from_raw(STDERR_FD);
+    let fd = FileDesc.STDERR;
     let _ = sys_write(fd, s.as_bytes());
     let _ = sys_write(fd, b"\n");
 }
