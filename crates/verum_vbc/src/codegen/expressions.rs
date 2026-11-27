@@ -33597,9 +33597,13 @@ impl VbcCodegen {
         negated: bool,
     ) -> CodegenResult<Option<Reg>> {
         // Evaluate scrutinee
+        let start = self.ctx.instructions.len();
         let scrutinee_reg = self
             .compile_expr(scrutinee)?
             .or_internal("is pattern scrutinee has no value")?;
+        let declaration = self.declared_expression_result(
+            scrutinee, Some(scrutinee_reg), start, self.ctx.instructions.len(),
+        );
 
         // Set scrutinee type for variant collision resolution in compile_pattern_test.
         // The `is` expression doesn't go through compile_match, so match_scrutinee_type
@@ -33623,7 +33627,7 @@ impl VbcCodegen {
             });
         }
 
-        self.ctx.free_temp(scrutinee_reg);
+        self.retire_observed_operand(scrutinee, scrutinee_reg, declaration.as_ref());
         Ok(Some(result))
     }
 

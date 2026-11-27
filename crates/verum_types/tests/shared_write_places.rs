@@ -4,6 +4,24 @@ use verum_ast::FileId;
 use verum_fast_parser::FastParser;
 use verum_types::TypeChecker;
 
+#[test]
+fn standalone_pattern_tests_observe_places_and_keep_moves_inside_computations() {
+    let declarations = "type affine Ticket is Ready(Int) | Spent; fn take(t:Ticket)->Ticket { t }";
+    for (body, valid) in [
+        ("fn f(t:Ticket)->Ticket { let seen = t is Ticket.Ready(_); t }", true),
+        ("fn f(t:Ticket)->Bool { let used=take(t); t is Ticket.Spent }", false),
+        ("fn f(t:Ticket)->Ticket { let seen=take(t) is Ticket.Spent; t }", false),
+    ] {
+        let diagnostics = errors(&format!("{declarations} {body}"));
+        if valid {
+            assert!(diagnostics.is_empty(), "{body}: {diagnostics:?}");
+        } else {
+            assert!(diagnostics.iter().any(|error| error.contains("moved") || error.contains("after move")),
+                "{body}: {diagnostics:?}");
+        }
+    }
+}
+
 fn errors(source: &str) -> Vec<String> {
     let source = format!("public type Boxed is {{ public value: Int }};\n{source}");
     let module = FastParser::new()

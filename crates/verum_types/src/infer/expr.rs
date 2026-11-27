@@ -5036,16 +5036,18 @@ impl TypeChecker {
         else {
             unreachable!()
         };
-        // Type check the expression being tested
-        let test_result = self.synth_expr(test_expr)?;
+        // A predicate observes the subject; evaluating a computed subject
+        // still transfers arguments according to the selected callable.
+        let test_result = self.synth_borrowed_operand(test_expr)?;
 
         // Validate that the pattern is compatible with the expression type
         // This uses the same logic as match arm pattern checking
         self.ctx.enter_scope();
         // bind_pattern will validate pattern compatibility and report errors
         // for incompatible patterns (e.g., matching Int against Some(x))
-        self.bind_pattern(pattern, &test_result.ty)?;
+        let pattern_result = self.bind_pattern(pattern, &test_result.ty);
         self.ctx.exit_scope();
+        pattern_result?;
 
         // Is expressions always return Bool (regardless of negation)
         Ok(InferResult::new(Type::bool()))

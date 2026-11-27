@@ -42,6 +42,19 @@ fn exercise(source: &str) {
 }
 
 #[test]
+fn pattern_predicates_retire_temporaries_and_keep_their_named_subject() {
+    exercise(r#"
+        fn message() -> Text { f"record number {123}" }
+        fn probe() -> Int {
+            let named = message();
+            let matched = message() is "record number 123";
+            let seen = named is "record number 123";
+            if matched && seen && named.len() == 17 { 73 } else { 0 }
+        }
+    "#);
+}
+
+#[test]
 fn comparisons_retire_fresh_text_operands_and_preserve_named_ones() {
     exercise(r#"
         fn message(n: Int) -> Text { f"record number {n}" }
