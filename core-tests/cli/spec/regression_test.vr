@@ -1,8 +1,22 @@
 mount core.cli.spec.{CommandSpec, FlagSpec};
+mount core.cli.builder.AppBuilder;
 mount core.cli.parser.parse_argv;
 mount core.collections.List;
 mount core.text.Text;
 mount core.base.result.Result;
+
+@test
+fn test_command_lookup_returns_the_declared_subcommand_for_its_alias() {
+    let leaf = CommandSpec.new("inspect", "Inspect inputs");
+    let build = AppBuilder.new("build", "Build inputs").alias("b").subcommand(leaf).build();
+    let root = CommandSpec.new("tool", "Tool").add_subcommand(build);
+    for name in ["build", "b"] {
+        let selected = root.find_subcommand(&name).unwrap();
+        assert(selected.find_subcommand(&"inspect").is_some());
+    }
+    assert(root.find_subcommand(&"inspect").is_none());
+    assert(root.find_subcommand(&"missing").is_none());
+}
 
 @test
 fn test_nested_command_counter_accepts_repeated_switches() {

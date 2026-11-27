@@ -40,8 +40,8 @@
 )
 module core.cli.spec;
 
-mount core.{Maybe, Result, List, Map, Set, Text, Heap};
-mount core.base.protocols.{Debug, Display, Clone, Eq, Default};
+mount core.{Maybe, List, Text};
+mount core.base.protocols.{Clone, Default};
 
 // =============================================================================
 // Arity — how many values an arg / flag consumes
@@ -565,13 +565,20 @@ implement CommandSpec {
 
     /// Find a subcommand by name (or alias).
     public fn find_subcommand(&self, name: &Text) -> Maybe<&CommandSpec> {
+        match self.subcommand_index(name) {
+            Maybe.Some(i) => Maybe.Some(&self.subcommands[i]),
+            Maybe.None => Maybe.None,
+        }
+    }
+
+    public(in core.cli) fn subcommand_index(&self, name: &Text) -> Maybe<Int> {
         let mut i: Int = 0;
         while i < self.subcommands.len() {
             let sc = &self.subcommands[i];
-            if &sc.name == name { return Maybe.Some(sc); }
+            if &sc.name == name { return Maybe.Some(i); }
             let mut j: Int = 0;
             while j < sc.aliases.len() {
-                if &sc.aliases[j] == name { return Maybe.Some(sc); }
+                if &sc.aliases[j] == name { return Maybe.Some(i); }
                 j = j + 1;
             }
             i = i + 1;
