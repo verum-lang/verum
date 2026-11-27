@@ -86,6 +86,14 @@ fn an_exclusive_call_invalidates_the_guard_but_a_shared_call_preserves_it() {
 }
 
 #[test]
+fn writing_through_a_stored_exclusive_reference_retires_the_guard() {
+    let source = "type Cell is {public value:Int}; type Holder is {public cell:&mut Cell}; implement Holder {fn reset(&mut self) {self.cell.value=0;}} fn test(holder:&mut Holder, x:Int) {if x < holder.cell.value {let before = x;holder.reset();let after = x;}}";
+    assert_reads(source, &[("before = x;", true), ("after = x;", false)]);
+    let independent = "type Cell is {public value:Int}; type Holder is {public cell:&mut Cell}; implement Holder {fn reset(&mut self) {self.cell.value=0;}} fn test(holder:&mut Holder, input:Int) {let mut x=input; if x >= 0 {holder.reset();let kept = x;}}";
+    assert_reads(independent, &[("kept = x;", true)]);
+}
+
+#[test]
 fn changing_a_value_cannot_bypass_its_declared_refinement() {
     let (errors, _) = check("fn test() { let mut x: Int{it > 0} = 3; if x == 3 { x = -1; } }");
     assert!(

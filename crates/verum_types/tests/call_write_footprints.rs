@@ -161,6 +161,15 @@ fn a_context_input_is_not_mistaken_for_an_explicit_argument() {
 }
 
 #[test]
+fn scalar_write_through_a_managed_field_retains_both_layers_of_loans() {
+    let found = errors(
+        "type Writer is { public target:&mut Cell }; implement Writer { fn set(&mut self, n:Int) { self.target.value=n; } }",
+        "fn preserve(mut writer:Writer)->Writer { writer.set(1); writer.set(2); writer }",
+    );
+    assert!(found.is_empty(), "{found:?}");
+}
+
+#[test]
 fn writing_through_another_reference_field_remains_conservative() {
     let found = errors(
         "type Holder is { public target:&mut Cell }; fn update(holder:&mut Holder) { holder.target.pointer=&holder.target.value; }",

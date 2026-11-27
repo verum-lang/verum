@@ -15,11 +15,13 @@ struct ScalarCallProof {
     receiver: Option<Type>,
     result: Type,
     structural: bool,
+    writes_through_borrow: bool,
 }
 
 struct ReturnedBodyTypes {
     nodes: List<Type>,
     writes: List<Type>,
+    writes_through_borrow: bool,
 }
 
 fn unparen(mut expression: &Expr) -> &Expr {
@@ -775,7 +777,7 @@ impl TypeChecker {
             }
             _ => return None,
         };
-        self.returned_call_value_origins(expression.span, args, receiver)
+        self.returned_call_value_origins(expression.span, args, receiver, false)
     }
 
     pub(super) fn returned_call_value_origins(
@@ -783,6 +785,7 @@ impl TypeChecker {
         span: verum_ast::Span,
         args: &[Expr],
         receiver: Option<&Expr>,
+        invoking: bool,
     ) -> Option<List<RecordReceiver>> {
         let derivation = self.type_registry.returned_value(span)?.clone();
         let Type::Function {
@@ -940,7 +943,27 @@ impl TypeChecker {
                 return None;
             }
         }
-        values.get(derivation.result).cloned()
+        let origins = values.get(derivation.result)?.clone();
+        if invoking && facts.writes_through_borrow && !self.refinement_evidence.is_empty() {
+            // The reborrow can change a different binding's value without
+            // replacing the reference stored in the outer record. Retire
+            // guards of the input and its known referents when the call runs.
+            let mut changed = List::new();
+            for (value, ty) in args.iter().zip(&params).chain(receiver.zip(declared_receiver.as_ref())) {
+                if self.reference_mode(ty, span).ok()? != Some(true) { continue; }
+                let Some(root) = self.reference_result_origin(value)
+                    .or_else(|| self.call_input_place(value).map(|place| place.0)) else {
+                    changed.clear();
+                    break;
+                };
+                if let Some(referents) = self.ctx.env.referent_value_origins(&root) {
+                    changed.extend(referents);
+                }
+                changed.push(root);
+            }
+            self.refinement_evidence.invalidate_write(&changed);
+        }
+        Some(origins)
     }
 
     /// Complete a source signature before caller instantiation. An unknown
@@ -978,6 +1001,7 @@ impl TypeChecker {
         let mut expected: List<Option<Type>> = (0..body.nodes.len()).map(|_| None).collect();
         *expected.get_mut(body.result)? = result.map(|ty| self.unifier.apply(ty));
         let mut writes = List::new();
+        let mut writes_through_borrow = false;
         for write in &body.writes {
             let input = match body.nodes.get(write.input)? {
                 ReturnedValueNode::Parameter(index) => parameters.get(*index)?,
@@ -999,15 +1023,29 @@ impl TypeChecker {
                 } => *inner,
                 _ => return None,
             };
+            let mut through_borrow = false;
             for name in &write.fields {
-                // A reference-valued intermediate names another storage edge.
-                // Neither custom Deref nor a computed place is a direct field.
-                if self.reference_mode(&field, span).ok()?.is_some() {
-                    return None;
-                }
+                field = match self.place_reference_head(&field, span).ok()? {
+                    Type::Reference { mutable: true, inner }
+                    | Type::CheckedReference { mutable: true, inner } => {
+                        through_borrow = true;
+                        *inner
+                    }
+                    Type::Reference { .. } | Type::CheckedReference { .. }
+                    | Type::UnsafeReference { .. } | Type::GenRef { .. } => return None,
+                    owned => owned,
+                };
                 field = self.lookup_field_type(&field, name)?;
             }
             let field = self.unifier.apply(&field);
+            // An ordinary reborrow owns the selected scalar write only. A
+            // reference-bearing destination could replace loans of the
+            // referent, whose owner differs from this outer input.
+            if through_borrow && field.primitive_name().is_none()
+                && !self.has_registered_scalar_storage(&field) {
+                return None;
+            }
+            writes_through_borrow |= through_borrow;
             let slot = expected.get_mut(write.value)?;
             if slot.as_ref().is_some_and(|previous| previous != &field) {
                 return None;
@@ -1183,7 +1221,9 @@ impl TypeChecker {
                     let arguments = arguments.iter().map(|index| nodes.get(*index).cloned())
                         .collect::<Option<List<_>>>()?;
                     let receiver = match receiver { Some(index) => Some(nodes.get(*index)?), None => None };
-                    self.scalar_call_result(calls.get(span)?, *span, &arguments, receiver)?
+                    let proof = calls.get(span)?;
+                    writes_through_borrow |= proof.writes_through_borrow;
+                    self.scalar_call_result(proof, *span, &arguments, receiver)?
                 }
                 ReturnedValueNode::Choice { condition, arms } => {
                     let first = nodes.get(arms[0])?;
@@ -1246,7 +1286,7 @@ impl TypeChecker {
             }
             nodes.push(ty);
         }
-        Some(ReturnedBodyTypes { nodes, writes })
+        Some(ReturnedBodyTypes { nodes, writes, writes_through_borrow })
     }
 
     /// Validate the selected source-call graph in postorder. Cycles, missing
@@ -1281,6 +1321,7 @@ impl TypeChecker {
                     let proof = ScalarCallProof {
                         parameters: params, receiver, result: self.unifier.apply(&return_type),
                         structural: structural.is_some(),
+                        writes_through_borrow: false,
                     };
                     if !matches!(proof.result, Type::Unit | Type::Never)
                         && !self.forwarding_scalar(&proof.result) { return None; }
@@ -1301,7 +1342,7 @@ impl TypeChecker {
                     pending.push(Work::Finish(span, body, proof));
                     pending.extend(calls.into_iter().map(Work::Enter));
                 }
-                Work::Finish(span, body, proof) => {
+                Work::Finish(span, body, mut proof) => {
                     let facts = self.returned_body_types_with_calls(
                         &body, &proof.parameters, proof.receiver.as_ref(), Some(&proof.result), span, &proofs,
                     )?;
@@ -1309,6 +1350,7 @@ impl TypeChecker {
                     for write in &facts.writes {
                         if !self.write_value_has_structural_cleanup(write, span) { return None; }
                     }
+                    proof.writes_through_borrow = facts.writes_through_borrow;
                     proofs.insert(span, proof);
                     active.remove(&span);
                 }

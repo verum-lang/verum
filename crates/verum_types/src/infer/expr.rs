@@ -7828,7 +7828,7 @@ impl TypeChecker {
         else {
             unreachable!()
         };
-        let precise_origins = self.returned_value_origins(expr);
+        let precise_origins = self.returned_call_value_origins(expr.span, args, None, true);
         let preserves_input_payloads = self.type_registry.constructed_value(expr.span).is_some()
             || precise_origins.is_some();
         self.check_call_loans(args, Some(&params), None)?;

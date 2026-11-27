@@ -17261,7 +17261,7 @@ impl TypeChecker {
                 Some(Type::Function { params, .. }) if params.len() == args.len() => Some(params.as_slice()),
                 _ => None,
             };
-            let precise_origins = tc.returned_call_value_origins(span, args, Some(receiver));
+            let precise_origins = tc.returned_call_value_origins(span, args, Some(receiver), true);
             let preserves_input_payloads = tc.type_registry.constructed_value(span).is_some()
                 || precise_origins.is_some();
             tc.check_call_loans(args, parameters, borrow)?;
