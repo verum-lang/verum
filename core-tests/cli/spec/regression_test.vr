@@ -1,4 +1,4 @@
-mount core.cli.spec.{CommandSpec, FlagSpec};
+mount core.cli.spec.{ArgSpec, CommandSpec, FlagSpec};
 mount core.cli.builder.AppBuilder;
 mount core.cli.parser.parse_argv;
 mount core.collections.List;
@@ -36,4 +36,25 @@ fn test_nested_command_counter_accepts_repeated_switches() {
     invalid_argv.push("inspect".to_text());
     invalid_argv.push("--other".to_text());
     assert(parse_argv(&report, invalid_argv) is Result.Err);
+}
+
+@test
+fn test_short_bundle_continues_after_a_multibyte_flag() {
+    let root = CommandSpec.new("tool", "Tool")
+        .add_flag(FlagSpec.switch("lambda", "Count lambdas").short('λ'))
+        .add_flag(FlagSpec.switch("verbose", "Verbose").short('v'));
+    let valid: List<Text> = ["tool", "-λv"];
+    let undeclared: List<Text> = ["tool", "-λz"];
+    assert(parse_argv(&root, valid) is Result.Ok);
+    assert(parse_argv(&root, undeclared) is Result.Err);
+}
+
+@test
+fn test_required_positionals_belong_to_the_selected_command() {
+    let leaf = CommandSpec.new("inspect", "Inspect").add_arg(ArgSpec.required("input", "Input"));
+    let root = CommandSpec.new("tool", "Tool").add_subcommand(leaf);
+    let missing: List<Text> = ["tool", "inspect"];
+    let present: List<Text> = ["tool", "inspect", "document"];
+    assert(parse_argv(&root, missing) is Result.Err);
+    assert(parse_argv(&root, present) is Result.Ok);
 }

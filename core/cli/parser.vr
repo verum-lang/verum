@@ -140,19 +140,16 @@ type TokenKind is
 
 /// Classify a single argv token. Numbers like `-1` are positional iff
 /// `allow_negative_numbers = true` AND they parse as numbers.
-fn classify(tok: &Text, settings: &CommandSettings, after_dd: Bool) -> TokenKind {
-    if after_dd { return TokenKind.TPositional(tok.clone()); }
+fn classify(tok: Text, settings: &CommandSettings) -> TokenKind {
     let dd = Text.from("--");
     let dash = Text.from("-");
-    if tok == &dd { return TokenKind.TDoubleDash; }
+    if tok == dd { return TokenKind.TDoubleDash; }
     if tok.len() < 2 || !tok.starts_with(&dash) {
-        return TokenKind.TPositional(tok.clone());
+        return TokenKind.TPositional(tok);
     }
-    if tok == &dash { return TokenKind.TPositional(tok.clone()); }
 
     // Long flag --name[=value]
-    let dash_dash = Text.from("--");
-    if tok.starts_with(&dash_dash) {
+    if tok.starts_with(&dd) {
         let body = tok.slice(2, tok.len());
         let eq = Text.from("=");
         match body.find(&eq) {
@@ -165,8 +162,8 @@ fn classify(tok: &Text, settings: &CommandSettings, after_dd: Bool) -> TokenKind
         }
     } else {
         // Short flag(s): -abc, -p8080, -1 (negative number)
-        if settings.allow_negative_numbers && looks_like_number(tok) {
-            return TokenKind.TPositional(tok.clone());
+        if settings.allow_negative_numbers && looks_like_number(&tok) {
+            return TokenKind.TPositional(tok);
         }
         TokenKind.TShort(tok.slice(1, tok.len()))
     }
@@ -203,9 +200,8 @@ fn looks_like_number(s: &Text) -> Bool {
 // =============================================================================
 
 /// Parse argv against a root CommandSpec. The first argv token (program
-/// name) is consumed as the root command name regardless of value —
-/// matches POSIX convention. Pass `argv_skip_zero = true` to elide the
-/// zeroth token if argv has been pre-stripped.
+/// name) is consumed regardless of its spelling. The command path uses
+/// the declared names of the root and each selected subcommand.
 public fn parse_argv(
     root: &CommandSpec,
     argv: List<Text>,
@@ -230,55 +226,45 @@ public fn parse_argv(
     Result.Ok(outcome)
 }
 
-/// Parse a single command level (potentially descending into subcommands).
+/// Follow subcommands as their tokens are consumed. Only the selected leaf
+/// enforces required arguments, flags and groups.
 fn parse_command(
-    cmd: &CommandSpec,
+    root: &CommandSpec,
     state: &mut ParseState,
     outcome: &mut ParseOutcome,
 ) -> Result<Unit, ParseError> {
+    let mut cmd: &CommandSpec = root;
     let mut positional_idx: Int = 0;
 
     while !state.at_end() {
+        let tok = state.advance().unwrap();
         if state.after_double_dash {
-            match state.advance() {
-                Maybe.Some(tok) => outcome.trailing.push(tok),
-                Maybe.None => break,
-            }
+            outcome.trailing.push(tok);
             continue;
         }
 
-        let tok = state.peek().unwrap().clone();
-        // Fully-qualified path — bare `classify` collides with 8+
-        // 2-arg `classify(...)` siblings in sqlite native modules
-        // (task #11 mount-scope-aware lookup defect).
-        let kind = core.cli.parser.classify(&tok, &cmd.settings, state.after_double_dash);
-
-        match kind {
+        match classify(tok, &cmd.settings) {
             TokenKind.TDoubleDash => {
-                state.advance();
                 state.after_double_dash = true;
             },
             TokenKind.TLong(name, attached) => {
-                state.advance();
                 handle_long(cmd, &name, attached, state, outcome)?;
             },
             TokenKind.TShort(body) => {
-                state.advance();
                 handle_short(cmd, &body, state, outcome)?;
             },
             TokenKind.TPositional(tok_text) => {
                 // Possible subcommand?
                 if positional_idx == 0 {
-                    match cmd.find_subcommand(&tok_text) {
-                        Maybe.Some(sub) => {
-                            state.advance();
-                            outcome.command_path.push(sub.name.clone());
-                            return parse_command(sub, state, outcome);
+                    match cmd.subcommand_index(&tok_text) {
+                        Maybe.Some(i) => {
+                            cmd = &cmd.subcommands[i];
+                            outcome.command_path.push(cmd.name.clone());
+                            continue;
                         },
                         Maybe.None => {},
                     }
                 }
-                state.advance();
                 handle_positional(cmd, &tok_text, &mut positional_idx, outcome)?;
             },
         }
@@ -289,7 +275,7 @@ fn parse_command(
     while i < cmd.args.len() {
         let a = &cmd.args[i];
         if a.arity.is_required() {
-            let captured = find_captured_arg(&outcome.args, &a.name);
+            let captured = captured_arg_index(&outcome.args, &a.name);
             match captured {
                 Maybe.Some(_) => {},
                 Maybe.None => return Result.Err(ParseError.missing_required(a.name.clone())),
@@ -304,7 +290,7 @@ fn parse_command(
         let f = &cmd.flags[j];
         if f.arity.is_required() {
             let key = flag_key(f);
-            if !outcome.flags.contains_key(&key) {
+            if outcome.flags.get_key_value(&key) is Maybe.None {
                 return Result.Err(ParseError.missing_required(key));
             }
         }
@@ -316,15 +302,10 @@ fn parse_command(
 
     // Subcommand-required guard.
     if cmd.settings.subcommand_required && cmd.subcommands.len() > 0 {
-        if outcome.command_path.len() == 1
-            || (outcome.command_path.len() > 0
-                && outcome.command_path[outcome.command_path.len() - 1] == cmd.name)
-        {
-            return Result.Err(ParseError.bare(
-                ParseErrorKind.MissingRequired,
-                Text.from(f"command '{cmd.name}' requires a subcommand"),
-            ));
-        }
+        return Result.Err(ParseError.bare(
+            ParseErrorKind.MissingRequired,
+            Text.from(f"command '{cmd.name}' requires a subcommand"),
+        ));
     }
 
     Result.Ok(())
@@ -409,6 +390,8 @@ fn handle_short(
             Maybe.None => return Result.Ok(()),
         };
 
+        let next = i + ch.len_utf8();
+
         // Built-in -h / -V.
         if !cmd.settings.disable_help_flag && ch == 'h' {
             outcome.help_requested = true;
@@ -432,14 +415,14 @@ fn handle_short(
         if f.arity.is_switch() {
             // Switch — record presence and continue with rest of bundle.
             let key = flag_key(f);
-            increment_capture(&mut outcome.flags, &key);
-            i = i + 1;
+            increment_capture(&mut outcome.flags, key);
+            i = next;
             continue;
         }
 
         // Value-bearing short: rest of body is the attached value, if non-empty.
-        let rest = if i + 1 < body.len() {
-            Maybe.Some(body.slice(i + 1, body.len()))
+        let rest = if next < body.len() {
+            Maybe.Some(body.slice(next, body.len()))
         } else {
             Maybe.None
         };
@@ -461,7 +444,7 @@ fn capture_flag(
     let key = flag_key(f);
 
     if f.arity.is_switch() {
-        increment_capture(&mut outcome.flags, &key);
+        increment_capture(&mut outcome.flags, key);
         return Result.Ok(());
     }
 
@@ -471,35 +454,29 @@ fn capture_flag(
 
     let mut values: List<Text> = List.new();
 
-    // First value: prefer attached, else next argv token.
+    // An attached value is part of the flag itself.
     match attached {
         Maybe.Some(v) => values.push(v),
-        Maybe.None => {
-            match state.advance() {
-                Maybe.Some(v) => values.push(v),
-                Maybe.None => return Result.Err(ParseError.missing_value(key)),
-            }
-        },
+        Maybe.None => {},
     }
 
-    // Greedy consumption up to upper bound (only for AtLeast/Range/Unlimited).
-    let max_more = match upper_opt {
-        Maybe.Some(hi) => hi - 1,
-        Maybe.None => 1024,           // generous fallback
-    };
-    let mut took: Int = 1;
-    while took <= max_more {
-        match state.peek() {
-            Maybe.Some(t) => {
-                let dash = Text.from("-");
-                if t.starts_with(&dash) && t != &dash { break; }
-                values.push(state.advance().unwrap());
-                took = took + 1;
-            },
-            Maybe.None => break,
+    let dash = Text.from("-");
+    while !state.at_end() {
+        match upper_opt {
+            Maybe.Some(hi) => if values.len() >= hi { break; },
+            Maybe.None => {},
         }
+        // A required first value may itself begin with a dash.
+        let starts_option = match state.peek() {
+            Maybe.Some(t) => t.starts_with(&dash) && t != &dash,
+            Maybe.None => false,
+        };
+        if starts_option && (lower == 0 || !values.is_empty()) { break; }
+        values.push(state.advance().unwrap());
     }
 
+    let took = values.len();
+    if took == 0 && lower > 0 { return Result.Err(ParseError.missing_value(key)); }
     if took < lower {
         return Result.Err(ParseError.bare(
             ParseErrorKind.TooFewValues,
@@ -507,30 +484,12 @@ fn capture_flag(
         ));
     }
 
-    let already = outcome.flags.get(&key);
-    match already {
-        Maybe.Some(prev) => {
-            if !f.is_repeated() && !f.is_counter() {
-                return Result.Err(ParseError.duplicate_flag(key));
-            }
-            // append + increment occurrences
-            let mut merged = prev.clone();
-            let mut k: Int = 0;
-            while k < values.len() {
-                merged.values.push(values[k].clone());
-                k = k + 1;
-            }
-            merged.occurrences = merged.occurrences + 1;
-            outcome.flags.insert(key, merged);
-        },
-        Maybe.None => {
-            outcome.flags.insert(key.clone(), CapturedFlag {
-                name: key,
-                values: values,
-                occurrences: 1,
-            });
-        },
+    let stored = outcome.flags.entry(key).or_insert_with_key(default_captured);
+    if stored.occurrences > 0 && !f.is_repeated() && !f.is_counter() {
+        return Result.Err(ParseError.duplicate_flag(stored.name.clone()));
     }
+    stored.values.append(&mut values);
+    stored.occurrences += 1;
     Result.Ok(())
 }
 
@@ -548,21 +507,9 @@ fn default_captured(key: &Text) -> CapturedFlag {
     CapturedFlag { name: key.clone(), values: List.new(), occurrences: 0 }
 }
 
-fn increment_capture(flags: &mut Map<Text, CapturedFlag>, key: &Text) {
-    match flags.get(key) {
-        Maybe.Some(prev) => {
-            let mut updated = prev.clone();
-            updated.occurrences = updated.occurrences + 1;
-            flags.insert(key.clone(), updated);
-        },
-        Maybe.None => {
-            flags.insert(key.clone(), CapturedFlag {
-                name: key.clone(),
-                values: List.new(),
-                occurrences: 1,
-            });
-        },
-    }
+fn increment_capture(flags: &mut Map<Text, CapturedFlag>, key: Text) {
+    let stored = flags.entry(key).or_insert_with_key(default_captured);
+    stored.occurrences += 1;
 }
 
 // =============================================================================
@@ -610,23 +557,20 @@ fn matches_unlimited(a: &ArgSpec) -> Bool {
 }
 
 fn push_arg_value(outcome: &mut ParseOutcome, name: &Text, value: Text) {
-    let mut idx: Int = 0;
-    while idx < outcome.args.len() {
-        if &outcome.args[idx].name == name {
-            outcome.args[idx].values.push(value);
-            return;
-        }
-        idx = idx + 1;
+    match captured_arg_index(&outcome.args, name) {
+        Maybe.Some(idx) => outcome.args[idx].values.push(value),
+        Maybe.None => {
+            let mut new_arg = CapturedArg { name: name.clone(), values: List.new() };
+            new_arg.values.push(value);
+            outcome.args.push(new_arg);
+        },
     }
-    let mut new_arg = CapturedArg { name: name.clone(), values: List.new() };
-    new_arg.values.push(value);
-    outcome.args.push(new_arg);
 }
 
-fn find_captured_arg<'a>(args: &'a List<CapturedArg>, name: &Text) -> Maybe<&'a CapturedArg> {
+fn captured_arg_index(args: &List<CapturedArg>, name: &Text) -> Maybe<Int> {
     let mut i: Int = 0;
     while i < args.len() {
-        if &args[i].name == name { return Maybe.Some(&args[i]); }
+        if &args[i].name == name { return Maybe.Some(i); }
         i = i + 1;
     }
     Maybe.None
@@ -682,7 +626,7 @@ fn count_present(members: &List<Text>, flags: &Map<Text, CapturedFlag>) -> Int {
     let mut n: Int = 0;
     let mut i: Int = 0;
     while i < members.len() {
-        if flags.contains_key(&members[i]) { n = n + 1; }
+        if flags.get_key_value(&members[i]) is Maybe.Some(_) { n = n + 1; }
         i = i + 1;
     }
     n
