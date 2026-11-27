@@ -143,38 +143,24 @@ implement UnixError {
         UnixError.IoFailure(f"{e}")
     }
 
-    /// Lift a `UnixError` into the cross-stdlib `IoError`
-    /// (`StreamError`) used by the async / poll surfaces.
-    ///
-
-    /// Each typed variant maps to the closest semantic
-    /// `IoErrorKind`; the original detail is preserved
-    /// through the `message` field. Pre-#103, async
-    /// adapters (`poll_shutdown` / `poll_*`) collapsed
-    /// every UnixError into `IoError.Other(f"{e}")` (the io-side error),
-    /// throwing away the variant tag and forcing
-    /// downstream callers to substring-match the message
-    /// string. Now downstream `match err.kind { … }`
-    /// works directly on the typed kinds.
+    /// Preserve the error kind and available detail for I/O consumers.
     public fn to_io_error(self) -> IoError {
         match self {
             UnixError.IoFailure(msg) =>
-                IoError { kind: IoErrorKind.Other,            message: Maybe.Some(msg) },
+                IoError.with_message(IoErrorKind.Other, msg),
             UnixError.PathTooLong { limit, actual } =>
-                IoError {
-                    kind:    IoErrorKind.InvalidInput,
-                    message: Maybe.Some(f"unix path exceeds platform limit: limit={limit} actual={actual}"),
-                },
+                IoError.with_message(IoErrorKind.InvalidInput,
+                    f"unix path exceeds platform limit: limit={limit} actual={actual}"),
             UnixError.InvalidPath(msg) =>
-                IoError { kind: IoErrorKind.InvalidInput,     message: Maybe.Some(msg) },
+                IoError.with_message(IoErrorKind.InvalidInput, msg),
             UnixError.PermissionDenied =>
-                IoError { kind: IoErrorKind.PermissionDenied, message: Maybe.None },
+                IoError.new(IoErrorKind.PermissionDenied),
             UnixError.PathInUse(msg) =>
-                IoError { kind: IoErrorKind.AlreadyExists,    message: Maybe.Some(msg) },
+                IoError.with_message(IoErrorKind.AlreadyExists, msg),
             UnixError.NotFound(msg) =>
-                IoError { kind: IoErrorKind.NotFound,         message: Maybe.Some(msg) },
+                IoError.with_message(IoErrorKind.NotFound, msg),
             UnixError.PeerClosed =>
-                IoError { kind: IoErrorKind.NotConnected,     message: Maybe.None },
+                IoError.new(IoErrorKind.NotConnected),
         }
     }
 }

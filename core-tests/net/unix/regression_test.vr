@@ -20,6 +20,20 @@
 // =============================================================================
 
 mount core.net.unix.{UnixError, PeerCred, FdPassingError};
+mount core.io.IoErrorKind;
+
+@test
+fn test_unix_transport_error_keeps_its_kind_and_optional_message() {
+    let missing = UnixError.NotFound("missing socket").to_io_error();
+    let denied = UnixError.PermissionDenied.to_io_error();
+    assert(missing.kind() is IoErrorKind.NotFound);
+    assert(denied.kind() is IoErrorKind.PermissionDenied);
+    assert(denied.message().is_none());
+    match missing.message() {
+        Maybe.Some(message) => assert(*message == "missing socket"),
+        Maybe.None => panic("expected the original socket error message"),
+    }
+}
 
 // =============================================================================
 // UNIX-1 — UnixListener.bind(&Text path)
