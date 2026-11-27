@@ -242,6 +242,13 @@ impl TypeChecker {
                 expected.name
             )));
         }
+        if expected_scope.extern_abi != actual_scope.extern_abi
+            || expected_scope.is_variadic != actual_scope.is_variadic
+        {
+            return Err(invalid(span, format!(
+                "method `{}` changes its declared ABI or variadic parameters", expected.name
+            )));
+        }
         if expected_scope.binders.local.len() != actual_scope.binders.local.len() {
             return Err(invalid(
                 span,

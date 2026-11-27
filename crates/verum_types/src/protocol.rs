@@ -584,6 +584,8 @@ pub struct ProtocolMethod {
 pub struct ProtocolMethodScope {
     /// An unsafe source member may impose obligations on its caller.
     pub requires_unsafe: bool,
+    pub extern_abi: Option<Text>,
+    pub is_variadic: bool,
     pub binders: DeclarationBinders,
     pub protocol_bounds: Map<crate::ty::TypeVar, List<ProtocolBound>>,
     pub where_clauses: List<WhereClause>,

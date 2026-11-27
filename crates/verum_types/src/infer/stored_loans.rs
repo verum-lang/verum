@@ -39,6 +39,7 @@ fn queue<'a>(
 enum LoanInspection {
     Stored,
     Exposable,
+    ReturnedFromOwnedInput,
     Writable,
     SharedRetention,
 }
@@ -63,7 +64,7 @@ fn immediate(ty: &Type, inspection: LoanInspection) -> Option<bool> {
             Some(*mutable)
         }
         Type::Pointer { .. } | Type::VolatilePointer { .. } | Type::Slice { .. }
-            if inspection == LoanInspection::Exposable =>
+            if matches!(inspection, LoanInspection::Exposable | LoanInspection::ReturnedFromOwnedInput) =>
         {
             Some(true)
         }
@@ -159,6 +160,13 @@ impl TypeChecker {
     /// reading its elements would yield only scalars.
     pub(super) fn may_supply_call_borrow(&self, ty: &Type) -> bool {
         self.stored_loan_shape(ty, LoanInspection::Exposable)
+    }
+
+    /// A safe function cannot return a reference to backing storage that it
+    /// owns by value. References inside that storage, raw address inputs,
+    /// borrowed slices and opaque closures can still reach caller storage.
+    pub(super) fn may_return_input_loan(&self, ty: &Type) -> bool {
+        self.stored_loan_shape(ty, LoanInspection::ReturnedFromOwnedInput)
     }
 
     pub(super) fn may_store_writable_reference(&self, ty: &Type) -> bool {

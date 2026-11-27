@@ -148,6 +148,22 @@ impl TypeRegistry {
         self.record_call_target(span, ty, scheme.callable_source.clone(), explicit_inputs, None, scheme.returned_value.clone(), None, constructed_value);
     }
 
+    /// A source protocol is an open family. Its checked calling convention
+    /// constrains every implementation, without identifying a particular body.
+    pub(crate) fn register_bound_static_target(
+        &mut self,
+        span: Span,
+        ty: Type,
+        method: &crate::protocol::ProtocolMethod,
+    ) {
+        let explicit_inputs = method.receiver_kind() == Some(crate::core_metadata::ReceiverKind::None)
+            && method.context_requirements.is_empty()
+            && method.scope.as_ref().is_some_and(|scope| {
+                !scope.requires_unsafe && scope.extern_abi.is_none() && !scope.is_variadic
+            });
+        self.record_call_target(span, ty, None, explicit_inputs, None, None, None, None);
+    }
+
     /// A selected source receiver is separate from the explicit argument list.
     /// Unknown dispatch and context inputs do not supply this authority.
     pub(crate) fn register_declared_method_target(

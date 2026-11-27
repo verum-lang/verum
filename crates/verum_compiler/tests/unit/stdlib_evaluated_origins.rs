@@ -75,6 +75,38 @@ fn propagated_residual_keeps_loans_until_its_actual_destination() {
 }
 
 #[test]
+fn checked_static_protocol_calls_preserve_owned_inputs_and_refuse_borrowed_results() {
+    let session = crate::Session::new(crate::options::CompilerOptions::default());
+    let (registry, phase) = release_stdlib_graph(&session);
+    let header = "module collector; mount core.{Result, List, Text}; mount core.encoding.json.JsonValue;";
+    for (accepted, source) in [
+        (true, "type Factory<T> is protocol { fn read(value: JsonValue, path: Text) -> Result<T, Int>; };
+            fn collect<T: Factory<T>>(v: JsonValue) -> Result<List<T>, Int> {
+                let mut out: List<T> = List.new(); out.push(T.read(v, \"\")?); Result.Ok(out) }"),
+        (true, "type Factory<T> is protocol { fn make(value: Int) -> T; };
+            fn collect<T: Factory<T>>() -> List<T> { let mut out: List<T> = List.new(); out.push(T.make(7)); out }"),
+        (false, "type Factory<T> is protocol { fn make(value: &Int) -> T; };
+            fn leak<T: Factory<T>>() -> List<T> { let local=7; let mut out: List<T> =List.new(); out.push(T.make(&local)); out }"),
+        (false, "type Factory<T> is protocol { fn make(value: List<&Int>) -> T; };
+            fn leak<T: Factory<T>>() -> List<T> { let local=7; let mut refs: List<&Int> =List.new(); refs.push(&local);
+                let mut out: List<T> =List.new(); out.push(T.make(refs)); out }"),
+        (false, "context Hidden { fn get() -> Int; }
+            type Factory<T> is protocol { fn make() -> T using [Hidden]; };
+            fn try_collect<T: Factory<T>>() -> List<T> using [Hidden] {
+                let mut out: List<T> = List.new(); out.push(T.make()); out }"),
+    ] {
+        let module = Parser::new(&format!("{header} {source}")).parse_module().unwrap();
+        let result = check_source_module(&mut phase.configured_checker(), "collector", &module, &registry);
+        if accepted {
+            result.unwrap_or_else(|errors| panic!("{source}: {errors:#?}"));
+        } else {
+            let errors = result.expect_err(source);
+            assert!(errors.iter().any(|error| error.code() == Some("E312")), "{source}: {errors:#?}");
+        }
+    }
+}
+
+#[test]
 fn actual_stdlib_value_and_callable_origins_preserve_source_admission() {
     let session = crate::Session::new(crate::options::CompilerOptions::default());
     let (registry, phase) = release_stdlib_graph(&session);

@@ -122,7 +122,8 @@ impl TypeChecker {
             self.check_expr(operand, &self.unifier.apply(parameter))?;
         }
         let result = self.unifier.apply(return_type);
-        self.type_registry.register_call_target(span, signature);
+        let signature = self.unifier.apply(&signature);
+        self.type_registry.register_bound_static_target(span, signature, &selected.method);
         Ok(Some(super::InferResult::method(result, Some(crate::core_metadata::ReceiverKind::None))))
     }
 
@@ -136,6 +137,8 @@ impl TypeChecker {
         let mut frame = indexmap::IndexMap::new();
         let mut scope = ProtocolMethodScope {
             requires_unsafe: method.is_unsafe,
+            extern_abi: method.extern_abi.clone(),
+            is_variadic: method.is_variadic,
             ..ProtocolMethodScope::default()
         };
         for (position, parameter) in owner.iter().enumerate() {

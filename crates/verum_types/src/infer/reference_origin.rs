@@ -914,7 +914,7 @@ impl TypeChecker {
                     && self.type_registry.declared_receiver(value.span).is_none()
                     && matches!(self.type_registry.explicit_input_target(value.span), Some(Type::Function { params, contexts, .. })
                         if contexts.as_ref().is_none_or(|contexts| contexts.is_empty())
-                            && params.iter().all(|ty| !self.may_supply_call_borrow(ty)))
+                            && params.iter().all(|ty| !self.may_return_input_loan(ty)))
             }
             _ => false,
         }
