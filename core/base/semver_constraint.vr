@@ -35,6 +35,7 @@
     }
 )
 module core.base.semver_constraint;
+mount core.collections.slice.*;
 
 mount collections.list.{List};
 mount base.{Result, Ok, Err, Maybe, Some, None, Text};

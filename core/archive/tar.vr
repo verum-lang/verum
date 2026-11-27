@@ -64,6 +64,7 @@
     }
 )
 module core.archive.tar;
+mount core.collections.slice.*;
 
 mount collections.{List, Map};
 mount base.{Result, Maybe, Text};

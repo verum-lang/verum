@@ -37,6 +37,7 @@
     }
 )
 module core.cache.adapters.redis;
+mount core.collections.slice.*;
 
 // The DI context is mounted here rather than arriving ambiently: the
 // prelude published `context.standard`'s twelve names into every file

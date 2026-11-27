@@ -35,6 +35,7 @@
     }
 )
 module core.redis.stream;
+mount core.collections.slice.*;
 
 mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount collections.{List, Map};

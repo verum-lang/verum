@@ -32,6 +32,7 @@
     lifecycle: Lifecycle.Definition
 )
 module core.io.buffer;
+mount core.collections.slice.*;
 
 mount core.{Maybe, Result, List};
 mount io.protocols.{Read, Write, Seek, BufRead, StreamError as IoError, IoResult, SeekFrom, IoErrorKind};

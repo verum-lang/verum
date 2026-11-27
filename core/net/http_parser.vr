@@ -82,6 +82,7 @@
     lifecycle: Lifecycle.Definition
 )
 module core.net.http_parser;
+mount core.collections.slice.*;
 
 mount core.net.http.{Method, StatusCode, Version};
 mount core.simd.bytes.{find_byte, find_header_terminator};

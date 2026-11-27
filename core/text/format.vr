@@ -35,6 +35,7 @@
     lifecycle: Lifecycle.Definition
 )
 module core.text.format;
+mount core.collections.slice.*;
 mount core.sys.common.FileDesc;
 // TWIN-TYPE MERGE (task #48): the alias target must be locally
 // visible (braced) for the ALIAS-VS-MARKER scope gate.

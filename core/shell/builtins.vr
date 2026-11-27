@@ -23,6 +23,7 @@
     lifecycle: Lifecycle.Definition
 )
 module core.shell.builtins;
+mount core.collections.slice.*;
 
 mount core.{Maybe, Result, List, Text};
 mount core.base.env.{var_opt, temp_dir, args, exit};

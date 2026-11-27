@@ -29,6 +29,7 @@
     lifecycle: Lifecycle.Definition
 )
 module core.collections.list;
+mount core.collections.slice.*;
 
 mount core.base.iterator.{FromIterator, Extend};
 mount core.mem.allocator.AllocError;

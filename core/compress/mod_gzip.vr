@@ -12,6 +12,7 @@
     lifecycle: Lifecycle.Definition
 )
 module core.compress.mod_gzip;
+mount core.collections.slice.*;
 mount core.compress.{Algorithm, CompressError};
 mount core.hash.checksum.crc32.{crc32};
 
