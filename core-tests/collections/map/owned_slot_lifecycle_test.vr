@@ -355,4 +355,21 @@ fn test_retain_updates_values_and_retires_removed_slots() {
     assert(unsafe { VALUE_DROPS } == 12);
 }
 
+@test
+fn test_find_returns_the_attached_key_and_value() {
+    unsafe { VALUE_DROPS = 0; }
+    {
+        let mut map:Map<Int, Guard> = Map.new();
+        map.insert(2, Guard {weight:8});
+        map.insert(3, Guard {weight:16});
+        assert(map.find(|k,v| *k == 4) is Maybe.None);
+        match map.find(|k,v| *k == 2 && v.weight == 8) {
+            Maybe.Some(pair) => { assert(*pair.0 == 2); assert(pair.1.weight == 8); }
+            Maybe.None => panic("failed to borrow stored pair"),
+        }
+        assert(unsafe {VALUE_DROPS} == 0);
+    }
+    assert(unsafe {VALUE_DROPS} == 24);
+}
+
 fn main() {}

@@ -1401,11 +1401,8 @@ implement<K: Hash + Eq, V> Map<K, V> {
     /// ```
     public fn find<F: fn(&K, &V) -> Bool>(&self, f: F) -> Maybe<(&K, &V)> {
         for i in range(0, self.cap) {
-            let entry: &Slot<K, V> = unsafe { &*self.entries.offset(i) };
-            if (entry.hash > 0) {
-                if f(&entry.key, &entry.value) {
-                    return Maybe.Some((&entry.key, &entry.value));
-                }
+            if let Maybe.Some(pair) = self.occupied_pair_at(i) {
+                if f(pair.0, pair.1) { return Maybe.Some(pair); }
             }
         }
         Maybe.None
@@ -1674,8 +1671,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
     }
 
     fn value_mut_at(&mut self, index: Int) -> &mut V {
-        let address = unsafe { self.entries.offset(index) as *mut Slot<K, V> };
-        unsafe { &mut (*address).value }
+        unsafe { &mut (*(self.entries.offset(index) as *mut Slot<K, V>)).value }
     }
 
     fn insert_vacant_value(&mut self, key: K, value: V, hash: Int) -> &mut V {
