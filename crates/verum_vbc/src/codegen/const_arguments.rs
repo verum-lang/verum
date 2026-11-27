@@ -63,7 +63,7 @@ impl Constants<'_> {
         scope: Scope<'_>,
         expected: &TypeRef,
     ) -> Option<FunctionInfo> {
-        let name = VbcCodegen::constant_integer_name(expr)?;
+        let name = VbcCodegen::constant_path(expr)?;
         let info =
             self.cg
                 .scoped_constant_binding(&name, scope.owner, scope.bindings, scope.at_call)?;

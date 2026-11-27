@@ -80,6 +80,17 @@ fn valid_scalar_record_and_forward_constants_execute_after_wire_roundtrip() {
             "const WIDTH:Int=([Byte;16]).size; fn probe()->Int {WIDTH}",
             16,
         ),
+        (
+            "const SCALE:Int64=10_i64; type Cell is { ticks:Int64 }; \
+             fn scale(value:Int64)->Int64 {value*SCALE} \
+             fn probe()->Int {let raw=scale(4_i64)-SCALE+7_i64; Cell{ticks:raw}.ticks as Int}",
+            37,
+        ),
+        (
+            "const SCALE:Int64=99_i64; type Cell is { ticks:Int64 }; \
+             fn probe()->Int {const SCALE:Int64=7_i64; let raw=5_i64*SCALE+2_i64; Cell{ticks:raw}.ticks as Int}",
+            37,
+        ),
         ("const NOTHING:Unit={}; fn probe()->Int {NOTHING;37}", 37),
     ] {
         let ast = Parser::new(source).parse_module().expect("grammar");
@@ -101,7 +112,10 @@ fn valid_scalar_record_and_forward_constants_execute_after_wire_roundtrip() {
 #[test]
 fn forward_cross_module_constants_keep_their_declared_owner() {
     let consumer =
-        Parser::new("module consumer; const VALUE:Int=provider.COUNT+2; fn probe()->Int {VALUE}")
+        Parser::new(
+            "module consumer; const COUNT:Bool=false; const VALUE:Int=provider.COUNT+2; \
+             type Cell is { value:Int }; fn probe()->Int {let n=VALUE+provider.COUNT-35; Cell{value:n}.value}",
+        )
             .parse_module()
             .expect("consumer");
     let provider = Parser::new("module provider; public const COUNT:Int=35;")

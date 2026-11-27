@@ -44807,20 +44807,31 @@ impl VbcCodegen {
 
     /// Fold a statically known integer without wrapping. Unknown runtime
     /// expressions stay unknown; invalid static arithmetic is an error.
-    pub(super) fn constant_integer_name(expr: &Expr) -> Option<String> {
-        match &expr.kind {
-            ExprKind::Path(path) => Some(path.to_string().replace("::", ".")),
-            ExprKind::Field { expr: base, field } => {
-                Some(format!("{}.{}", Self::constant_integer_name(base)?, field.name))
+    pub(super) fn constant_path(mut expr: &Expr) -> Option<String> {
+        let mut suffix = verum_common::List::new();
+        loop {
+            match &expr.kind {
+                ExprKind::Path(path) => {
+                    let mut name = path.to_string().replace("::", ".");
+                    for part in suffix.into_iter().rev() {
+                        name.push('.');
+                        name.push_str(part);
+                    }
+                    return Some(name);
+                }
+                ExprKind::Field { expr: base, field } => {
+                    suffix.push(field.name.as_str());
+                    expr = base;
+                }
+                ExprKind::Paren(inner) => expr = inner,
+                _ => return None,
             }
-            ExprKind::Paren(inner) => Self::constant_integer_name(inner),
-            _ => None,
         }
     }
 
     pub(super) fn constant_integer_dependencies(expr: &Expr) -> verum_common::List<verum_common::Text> {
         fn collect(expr: &Expr, names: &mut verum_common::List<verum_common::Text>) {
-            if let Some(name) = VbcCodegen::constant_integer_name(expr) {
+            if let Some(name) = VbcCodegen::constant_path(expr) {
                 names.push(verum_common::Text::from(name));
             } else {
                 match &expr.kind {
@@ -44989,7 +45000,7 @@ impl VbcCodegen {
 
         let layout_operand = match &expr.kind {
             ExprKind::Field { expr: base, field } => {
-                let module_operand = Self::constant_integer_name(base).is_some_and(|name| {
+                let module_operand = Self::constant_path(base).is_some_and(|name| {
                     self.source_module_owners.is_module(&name, scope.unwrap_or_default(), self.source_module_root())
                 });
                 if module_operand { None } else {
@@ -45055,7 +45066,7 @@ impl VbcCodegen {
         }
         match &expr.kind {
             ExprKind::Path(_) | ExprKind::Field { .. } => {
-                let Some(name) = Self::constant_integer_name(expr) else { return Ok(None) };
+                let Some(name) = Self::constant_path(expr) else { return Ok(None) };
                 let Some(info) = self.scoped_constant_binding(&name, scope, bindings, inspect_runtime_bindings)
                 else { return Ok(None) };
                 // Source initializers retain their scalar type and checked

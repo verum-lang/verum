@@ -17,6 +17,16 @@ pub(super) fn join_result_types(left: Maybe<TypeRef>, right: Maybe<TypeRef>) -> 
 }
 
 impl VbcCodegen {
+    /// Reading a constant produces its declared value, including when its initializer was folded.
+    fn constant_expression_result(&self, expression: &Expr) -> Maybe<TypeRef> {
+        let scope = self.current_count_module_scope();
+        if let Some(name) = Self::named_place_binding(expression) {
+            return self.scoped_constant_binding(name, scope, None, true)?.return_type;
+        }
+        let path = Self::constant_path(expression)?;
+        self.scoped_constant_binding(&path, scope, None, true)?.return_type
+    }
+
     /// A bound name's display and emission queries share its active declaration.
     /// A nested pattern need not publish a second, textual type hint.
     pub(super) fn declared_binding_type_name(&self, expression: &Expr) -> Maybe<verum_common::Text> {
@@ -188,14 +198,15 @@ impl VbcCodegen {
                 if let Some(function) = self.selected_function_value(expr).ok()? {
                     return self.function_value_signature(function, self.ctx.expected_value_type.as_ref());
                 }
-                let name = Self::named_place_binding(expr)?;
-                let Some(binding) = self.ctx.lookup_var(name) else {
-                    // Reading a const/meta parameter produces a value of its
-                    // declared carrier. This also establishes index projections.
-                    return self.current_source_substitution.get_value(name)
-                        .and_then(|(witness, domain)| witness.semantic.then(|| domain.clone()));
-                };
-                self.declared_named_binding_type(name, binding.reg)
+                if let Some(name) = Self::named_place_binding(expr) {
+                    if let Some(binding) = self.ctx.lookup_var(name) {
+                        return self.declared_named_binding_type(name, binding.reg);
+                    }
+                    if let Some((witness, domain)) = self.current_source_substitution.get_value(name) {
+                        return witness.semantic.then(|| domain.clone());
+                    }
+                }
+                self.constant_expression_result(expr)
             }
             ExprKind::Is { .. } => Some(TypeRef::Concrete(crate::types::TypeId::BOOL)),
             ExprKind::Binary { op, left, right } => {
@@ -241,7 +252,10 @@ impl VbcCodegen {
                 // The receiver's semantic declaration owns this projection.
                 // A layout offset or a same-named field on another type cannot
                 // supply its ownership or replace missing archive evidence.
-                self.projected_field_declaration(nested(receiver, None)?, &field.name)
+                match nested(receiver, None) {
+                    Some(owner) => self.projected_field_declaration(owner, &field.name),
+                    None => self.constant_expression_result(expr),
+                }
             }
             ExprKind::TupleIndex { expr: receiver, index } => {
                 let mut owner = nested(receiver, None)?;
