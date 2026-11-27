@@ -136,6 +136,7 @@ fn mem_extended_body(
 ) -> InterpreterResult<DispatchResult> {
     match sub_op {
         0x08..=0x0A => super::list_storage::access(state, sub_op),
+        0x0C..=0x0F | 0x50..=0x51 => super::deque_storage::access(state, sub_op),
         0x0B => super::list_storage::resize(state),
         // Alloc: [dst, size, align]
         0x00 => {

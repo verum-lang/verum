@@ -121,7 +121,7 @@ pub(in super::super) fn handle_new_array(
 /// list, or a raw `alloc()` block a `.vr` body stored itself — is
 /// returned untouched, because for such a block element 0 IS its base.
 fn is_container_backing_slot(type_id: TypeId, field_idx: usize) -> bool {
-    field_idx == 2 && (type_id == TypeId::LIST || type_id == TypeId::BYTE_LIST)
+    (field_idx == 2 && type_id.is_list_like()) || (field_idx == 0 && type_id == TypeId::DEQUE)
 }
 
 fn container_backing_out(
@@ -3335,46 +3335,16 @@ pub(in super::super) fn handle_set_remove(
     }
 }
 
-/// NewDeque (0xCD) - Create new empty deque with default capacity.
+/// NewDeque (0xCD) - Create an empty deque with the encoded capacity hint.
 ///
-/// Format: `NewDeque dst`
+/// Format: `NewDeque dst, capacity_hint`
 pub(in super::super) fn handle_new_deque(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
-    let _capacity_hint = read_varint(state)?;
-
-    const DEFAULT_CAP: usize = verum_common::layout::DEFAULT_COLLECTION_CAPACITY as usize;
-
-    // Deque header: [data(0), head(1), len(2), cap(3)]
-    // Layout matches stdlib: type Deque<T> is { data, head, len, cap }
-    let obj = state
-        .heap
-        .alloc(TypeId::DEQUE, 4 * std::mem::size_of::<Value>())?;
-    state.record_allocation();
-
-    let header_ptr =
-        unsafe { (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-
-    let buffer = state.heap.alloc_array(TypeId::UNIT, DEFAULT_CAP)?;
-    state.record_allocation();
-    let buffer_ptr = buffer.as_ptr() as *mut u8;
-
-    let buf_data = unsafe { buffer_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-    for i in 0..DEFAULT_CAP {
-        unsafe {
-            *buf_data.add(i) = Value::unit();
-        }
-    }
-
-    unsafe {
-        *header_ptr = Value::from_ptr(buffer_ptr); // data (index 0)
-        *header_ptr.add(1) = Value::from_i64(0); // head (index 1)
-        *header_ptr.add(2) = Value::from_i64(0); // len (index 2)
-        *header_ptr.add(3) = Value::from_i64(DEFAULT_CAP as i64); // cap (index 3)
-    }
-
-    state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
+    let capacity = read_varint(state)? as usize;
+    let deque = super::deque_storage::new(state, capacity)?;
+    state.set_reg(dst, deque);
     Ok(DispatchResult::Continue)
 }
 

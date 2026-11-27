@@ -14043,14 +14043,8 @@ impl VbcCodegen {
         // which constructs the 4-field record correctly under the
         // same TypeId(513) reservation.
         //
-        // List / Set / Deque retain the legacy intercept for now —
-        // their stdlib bodies have additional unresolved defects
-        // (LoadNil instead of LoadI(0) for null_ptr() field init,
-        // raw-pointer Slot.offset arithmetic) that would surface as
-        // runtime panics on push/get/iter.  Removing the Map
-        // intercept first is the minimal blast-radius fix that
-        // closes task #123 without coupling to the orthogonal
-        // List/Set/Deque defects.
+        // Deque constructors are selected declarations as well. In particular,
+        // with_capacity must evaluate and reserve a runtime-provided capacity.
         if method.name == "new"
             && args.is_empty()
             && let Some(ref tn) = static_receiver_type
@@ -14083,11 +14077,6 @@ impl VbcCodegen {
             if tn == type_names::SET {
                 let dest = self.ctx.alloc_temp();
                 self.ctx.emit(Instruction::NewSet { dst: dest , capacity_hint: 0 });
-                return Ok(Some(dest));
-            }
-            if tn == type_names::DEQUE {
-                let dest = self.ctx.alloc_temp();
-                self.ctx.emit(Instruction::NewDeque { dst: dest , capacity_hint: 0 });
                 return Ok(Some(dest));
             }
         }
@@ -14137,8 +14126,7 @@ impl VbcCodegen {
                 Some(Instruction::NewList { dst: Reg(0) , capacity_hint: 0 })
             } else if tn == type_names::SET {
                 Some(Instruction::NewSet { dst: Reg(0) , capacity_hint: 0 })
-            } else if tn == type_names::DEQUE {
-                Some(Instruction::NewDeque { dst: Reg(0) , capacity_hint: 0 })
+
             } else {
                 None
             };
@@ -14151,9 +14139,7 @@ impl VbcCodegen {
                 // avoid reallocation through the first n pushes — the
                 // `with_capacity` contract. A non-constant / out-of-range
                 // capacity keeps the hint at 0 (the heap auto-grows; capacity is
-                // advisory). Only `List` honours the hint here — `NewSet` /
-                // `NewDeque` have no AOT capacity-aware lowering yet, so giving
-                // them a hint would diverge across tiers.
+                // advisory). Only List honours the hint here.
                 let const_cap: u16 = if let ExprKind::Literal(lit) = &args[0].kind
                     && let LiteralKind::Int(int_lit) = &lit.kind
                     && int_lit.value >= 1
@@ -14173,11 +14159,6 @@ impl VbcCodegen {
                 let instr = match template {
                     Instruction::NewList { .. } => Instruction::NewList { dst: dest , capacity_hint: const_cap },
                     Instruction::NewSet { .. } => Instruction::NewSet { dst: dest , capacity_hint: 0 },
-                    // task #40: honour the capacity hint for Deque. The AOT NewDeque
-                    // lowering reserves the backing via Deque.new()+Deque.reallocate(
-                    // next_pow2(hint)) so `Deque.with_capacity(n).capacity() >= n`; the
-                    // interpreter's NewDeque already reserves a default capacity.
-                    Instruction::NewDeque { .. } => Instruction::NewDeque { dst: dest , capacity_hint: const_cap },
                     other => other,
                 };
                 self.ctx.emit(instr);
@@ -16474,12 +16455,22 @@ impl VbcCodegen {
             return Err(CodegenError::with_span(CodegenErrorKind::UndefinedFunction(effective_method_name), method.span));
         }
 
+        // The declared Deque methods operate on the same four-field owner as
+        // NewDeque. Their parameter ownership and generic witnesses are part
+        // of the selected source call, including fallible and consuming methods.
+        let selected_ring_body = resolved_method.as_ref().is_some_and(|method| {
+            method.has_source_body && self.declared_callable_descriptors.get(&method.id)
+                .is_some_and(|descriptor| descriptor.parent_type == Some(crate::types::TypeId::DEQUE))
+        }) && receiver_result_declaration.as_ref().map(crate::receiver_methods::pointee)
+            .and_then(|ty| ty.base_type_id()) == Some(crate::types::TypeId::DEQUE);
         let devirt_func_id: Option<u32> = if receiver_slots == 0 {
             // CallM retains the selected nominal owner; the static declaration
             // authorizes arguments only, without a synthetic self parameter.
             None
         } else if exact_receiver_target.is_some() {
             exact_receiver_target
+        } else if selected_ring_body {
+            resolvable_fid
         } else if effective_method_name.starts_with("dyn:")
             || effective_method_name.starts_with("byte$")
             || effective_method_name.starts_with("int32$")
@@ -39902,11 +39893,23 @@ impl VbcCodegen {
             // literal producing a struct whose `ptr` field pointed to a
             // freshly-allocated "Clone" of the raw buffer instead of the
             // buffer itself.
-            InlineSequenceId::ListStorageRead
+            InlineSequenceId::DequeStorageTake
+            | InlineSequenceId::DequeStorageWrite
+            | InlineSequenceId::DequeStorageRef
+            | InlineSequenceId::DequeStorageRefMut
+            | InlineSequenceId::DequeStorageSlice
+            | InlineSequenceId::DequeStorageSliceMut
+            | InlineSequenceId::ListStorageRead
             | InlineSequenceId::ListStorageWrite
             | InlineSequenceId::ListStorageMove
             | InlineSequenceId::ListStorageResize => {
                 let sub_op = match seq_id {
+                    InlineSequenceId::DequeStorageTake => crate::instruction::MemSubOpcode::DequeStorageTake,
+                    InlineSequenceId::DequeStorageWrite => crate::instruction::MemSubOpcode::DequeStorageWrite,
+                    InlineSequenceId::DequeStorageRef => crate::instruction::MemSubOpcode::DequeStorageRef,
+                    InlineSequenceId::DequeStorageRefMut => crate::instruction::MemSubOpcode::DequeStorageRefMut,
+                    InlineSequenceId::DequeStorageSlice => crate::instruction::MemSubOpcode::DequeStorageSlice,
+                    InlineSequenceId::DequeStorageSliceMut => crate::instruction::MemSubOpcode::DequeStorageSliceMut,
                     InlineSequenceId::ListStorageRead => {
                         crate::instruction::MemSubOpcode::ListStorageRead
                     }

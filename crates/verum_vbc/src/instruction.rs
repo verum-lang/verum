@@ -5014,6 +5014,18 @@ pub enum MemSubOpcode {
     ListStorageMove = 0x0A,
     /// Resize owned storage without changing initialized length; returns success.
     ListStorageResize = 0x0B,
+    /// Transfer an initialized Value from a physical ring slot (dst, owner, index).
+    DequeStorageTake = 0x0C,
+    /// Install an owned Value in a vacant ring slot (dst-unit, owner, index, value).
+    DequeStorageWrite = 0x0D,
+    /// Shared projection of a live ring element (dst, owner, physical index).
+    DequeStorageRef = 0x0E,
+    /// Mutable projection of a live ring element (dst, owner, physical index).
+    DequeStorageRefMut = 0x0F,
+    /// Project a contiguous initialized span (dst, owner, physical start, length).
+    DequeStorageSlice = 0x50,
+    /// Project a contiguous writable span (dst, owner, physical start, length).
+    DequeStorageSliceMut = 0x51,
     // -- Pointer arithmetic + deref leaves (0x10-0x1F), carried over
     //    from SystemSubOpcode 0x60-0x6C (T0852).
     /// Unsigned raw-pointer load (dst, addr, size-imm).
@@ -5124,6 +5136,12 @@ impl MemSubOpcode {
             0x09 => Some(Self::ListStorageWrite),
             0x0A => Some(Self::ListStorageMove),
             0x0B => Some(Self::ListStorageResize),
+            0x0C => Some(Self::DequeStorageTake),
+            0x0D => Some(Self::DequeStorageWrite),
+            0x0E => Some(Self::DequeStorageRef),
+            0x0F => Some(Self::DequeStorageRefMut),
+            0x50 => Some(Self::DequeStorageSlice),
+            0x51 => Some(Self::DequeStorageSliceMut),
             0x10 => Some(Self::DerefRaw),
             0x11 => Some(Self::DerefMutRaw),
             0x12 => Some(Self::DerefRawPtr),

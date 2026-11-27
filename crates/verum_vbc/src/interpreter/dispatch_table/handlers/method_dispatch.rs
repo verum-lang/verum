@@ -2029,31 +2029,8 @@ fn execute_method_call(
             state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
             return Ok(DispatchResult::Continue);
         } else if is_deque {
-            // Create empty Deque: [data(0), head(1), len(2), cap(3)]
-            // Layout matches stdlib: type Deque<T> is { data, head, len, cap }
-            const DEFAULT_CAP: usize = 16;
-            let obj = state
-                .heap
-                .alloc(TypeId::DEQUE, 4 * std::mem::size_of::<Value>())?;
-            state.record_allocation();
-            let header_ptr =
-                unsafe { (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-            let buffer = state.heap.alloc_array(TypeId::UNIT, DEFAULT_CAP)?;
-            state.record_allocation();
-            let buffer_ptr = buffer.as_ptr() as *mut u8;
-            let buf_data = unsafe { buffer_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-            for i in 0..DEFAULT_CAP {
-                unsafe {
-                    *buf_data.add(i) = Value::unit();
-                }
-            }
-            unsafe {
-                *header_ptr = Value::from_ptr(buffer_ptr); // data (index 0)
-                *header_ptr.add(1) = Value::from_i64(0); // head (index 1)
-                *header_ptr.add(2) = Value::from_i64(0); // len (index 2)
-                *header_ptr.add(3) = Value::from_i64(DEFAULT_CAP as i64); // cap (index 3)
-            }
-            state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
+            let deque = super::deque_storage::new(state, 0)?;
+            state.set_reg(dst, deque);
             return Ok(DispatchResult::Continue);
         }
     }
@@ -8771,6 +8748,15 @@ pub(super) fn dispatch_primitive_method(
         // ============================================================
         let is_deque = header.type_id == TypeId::DEQUE;
         if is_deque {
+            // The selected source method owns typed copies, transfers and Drop.
+            // Bootstrap-only modules can still execute existing NewDeque bytecode.
+            if state.module.find_method_by_receiver_type(TypeId::DEQUE, method)
+                .and_then(|id| state.module.get_function(id))
+                .is_some_and(|function| function.parent_type == Some(TypeId::DEQUE))
+            {
+                return Ok(None);
+            }
+            let ring = super::deque_storage::Ring::resolve(state, *receiver)?;
             let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
             // Field indices matching stdlib layout
             const DEQUE_DATA: usize = 0;
@@ -8789,12 +8775,10 @@ pub(super) fn dispatch_primitive_method(
                 "push_back" => {
                     let caller_base = state.reg_base();
                     let val = state.registers.get(caller_base, Reg(args.start.0));
-                    let mut len = unsafe { (*header_ptr.add(DEQUE_LEN)).as_i64() } as usize;
-                    let cap = unsafe { (*header_ptr.add(DEQUE_CAP)).as_i64() } as usize;
-                    let head = unsafe { (*header_ptr.add(DEQUE_HEAD)).as_i64() } as usize;
-                    let buf_ptr = unsafe { (*header_ptr.add(DEQUE_DATA)).as_ptr::<u8>() };
-                    let mut buf_data =
-                        unsafe { buf_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
+                    let mut len = ring.len;
+                    let cap = ring.capacity;
+                    let head = ring.head;
+                    let mut buf_data = ring.data;
 
                     // Grow if full
                     if len >= cap {
@@ -8814,6 +8798,9 @@ pub(super) fn dispatch_primitive_method(
                             unsafe {
                                 *new_buf_data.add(i) = Value::unit();
                             }
+                        }
+                        if state.cbgr_bridge_extents.contains_key(&(ring.data as usize)) {
+                            super::ffi_extended::cbgr_user_deallocate(state, ring.data as i64);
                         }
                         buf_data = new_buf_data;
                         unsafe {
@@ -8840,12 +8827,10 @@ pub(super) fn dispatch_primitive_method(
                 "push_front" => {
                     let caller_base = state.reg_base();
                     let val = state.registers.get(caller_base, Reg(args.start.0));
-                    let len = unsafe { (*header_ptr.add(DEQUE_LEN)).as_i64() } as usize;
-                    let mut cap = unsafe { (*header_ptr.add(DEQUE_CAP)).as_i64() } as usize;
-                    let mut head = unsafe { (*header_ptr.add(DEQUE_HEAD)).as_i64() } as usize;
-                    let buf_ptr = unsafe { (*header_ptr.add(DEQUE_DATA)).as_ptr::<u8>() };
-                    let mut buf_data =
-                        unsafe { buf_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
+                    let len = ring.len;
+                    let mut cap = ring.capacity;
+                    let mut head = ring.head;
+                    let mut buf_data = ring.data;
 
                     // Grow if full
                     if len >= cap {
@@ -8867,6 +8852,9 @@ pub(super) fn dispatch_primitive_method(
                             }
                         }
                         cap = new_cap;
+                        if state.cbgr_bridge_extents.contains_key(&(ring.data as usize)) {
+                            super::ffi_extended::cbgr_user_deallocate(state, ring.data as i64);
+                        }
                         buf_data = new_buf_data;
                         head = 0;
                         unsafe {
@@ -8884,15 +8872,14 @@ pub(super) fn dispatch_primitive_method(
                     return Ok(Some(Value::unit()));
                 }
                 "pop_back" => {
-                    let len = unsafe { (*header_ptr.add(DEQUE_LEN)).as_i64() } as usize;
+                    let len = ring.len;
                     if len == 0 {
                         let result = make_none_value(state)?;
                         return Ok(Some(result));
                     }
-                    let cap = unsafe { (*header_ptr.add(DEQUE_CAP)).as_i64() } as usize;
-                    let head = unsafe { (*header_ptr.add(DEQUE_HEAD)).as_i64() } as usize;
-                    let buf_ptr = unsafe { (*header_ptr.add(DEQUE_DATA)).as_ptr::<u8>() };
-                    let buf_data = unsafe { buf_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
+                    let cap = ring.capacity;
+                    let head = ring.head;
+                    let buf_data = ring.data;
                     let tail_idx = (head + len - 1) % cap;
                     let val = unsafe { *buf_data.add(tail_idx) };
                     unsafe {
@@ -8903,15 +8890,14 @@ pub(super) fn dispatch_primitive_method(
                     return Ok(Some(result));
                 }
                 "pop_front" => {
-                    let len = unsafe { (*header_ptr.add(DEQUE_LEN)).as_i64() } as usize;
+                    let len = ring.len;
                     if len == 0 {
                         let result = make_none_value(state)?;
                         return Ok(Some(result));
                     }
-                    let cap = unsafe { (*header_ptr.add(DEQUE_CAP)).as_i64() } as usize;
-                    let head = unsafe { (*header_ptr.add(DEQUE_HEAD)).as_i64() } as usize;
-                    let buf_ptr = unsafe { (*header_ptr.add(DEQUE_DATA)).as_ptr::<u8>() };
-                    let buf_data = unsafe { buf_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
+                    let cap = ring.capacity;
+                    let head = ring.head;
+                    let buf_data = ring.data;
                     let val = unsafe { *buf_data.add(head) };
                     let new_head = (head + 1) % cap;
                     unsafe {
@@ -8923,28 +8909,26 @@ pub(super) fn dispatch_primitive_method(
                     return Ok(Some(result));
                 }
                 "front" | "first" => {
-                    let len = unsafe { (*header_ptr.add(DEQUE_LEN)).as_i64() } as usize;
+                    let len = ring.len;
                     if len == 0 {
                         let result = make_none_value(state)?;
                         return Ok(Some(result));
                     }
-                    let head = unsafe { (*header_ptr.add(DEQUE_HEAD)).as_i64() } as usize;
-                    let buf_ptr = unsafe { (*header_ptr.add(DEQUE_DATA)).as_ptr::<u8>() };
-                    let buf_data = unsafe { buf_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
+                    let head = ring.head;
+                    let buf_data = ring.data;
                     let val = unsafe { *buf_data.add(head) };
                     let result = make_some_value(state, val)?;
                     return Ok(Some(result));
                 }
                 "back" | "last" => {
-                    let len = unsafe { (*header_ptr.add(DEQUE_LEN)).as_i64() } as usize;
+                    let len = ring.len;
                     if len == 0 {
                         let result = make_none_value(state)?;
                         return Ok(Some(result));
                     }
-                    let cap = unsafe { (*header_ptr.add(DEQUE_CAP)).as_i64() } as usize;
-                    let head = unsafe { (*header_ptr.add(DEQUE_HEAD)).as_i64() } as usize;
-                    let buf_ptr = unsafe { (*header_ptr.add(DEQUE_DATA)).as_ptr::<u8>() };
-                    let buf_data = unsafe { buf_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
+                    let cap = ring.capacity;
+                    let head = ring.head;
+                    let buf_data = ring.data;
                     let tail_idx = (head + len - 1) % cap;
                     let val = unsafe { *buf_data.add(tail_idx) };
                     let result = make_some_value(state, val)?;
@@ -8953,24 +8937,22 @@ pub(super) fn dispatch_primitive_method(
                 "get" => {
                     let caller_base = state.reg_base();
                     let idx = state.registers.get(caller_base, Reg(args.start.0)).as_i64() as usize;
-                    let len = unsafe { (*header_ptr.add(DEQUE_LEN)).as_i64() } as usize;
+                    let len = ring.len;
                     if idx >= len {
                         let result = make_none_value(state)?;
                         return Ok(Some(result));
                     }
-                    let cap = unsafe { (*header_ptr.add(DEQUE_CAP)).as_i64() } as usize;
-                    let head = unsafe { (*header_ptr.add(DEQUE_HEAD)).as_i64() } as usize;
-                    let buf_ptr = unsafe { (*header_ptr.add(DEQUE_DATA)).as_ptr::<u8>() };
-                    let buf_data = unsafe { buf_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
+                    let cap = ring.capacity;
+                    let head = ring.head;
+                    let buf_data = ring.data;
                     let actual_idx = (head + idx) % cap;
                     let val = unsafe { *buf_data.add(actual_idx) };
                     let result = make_some_value(state, val)?;
                     return Ok(Some(result));
                 }
                 "clear" => {
-                    let cap = unsafe { (*header_ptr.add(DEQUE_CAP)).as_i64() } as usize;
-                    let buf_ptr = unsafe { (*header_ptr.add(DEQUE_DATA)).as_ptr::<u8>() };
-                    let buf_data = unsafe { buf_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
+                    let cap = ring.capacity;
+                    let buf_data = ring.data;
                     for i in 0..cap {
                         unsafe {
                             *buf_data.add(i) = Value::unit();
@@ -8983,11 +8965,10 @@ pub(super) fn dispatch_primitive_method(
                     return Ok(Some(Value::unit()));
                 }
                 "to_list" => {
-                    let len = unsafe { (*header_ptr.add(DEQUE_LEN)).as_i64() } as usize;
-                    let cap = unsafe { (*header_ptr.add(DEQUE_CAP)).as_i64() } as usize;
-                    let head = unsafe { (*header_ptr.add(DEQUE_HEAD)).as_i64() } as usize;
-                    let buf_ptr = unsafe { (*header_ptr.add(DEQUE_DATA)).as_ptr::<u8>() };
-                    let buf_data = unsafe { buf_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
+                    let len = ring.len;
+                    let cap = ring.capacity;
+                    let head = ring.head;
+                    let buf_data = ring.data;
                     let mut elems = Vec::with_capacity(len);
                     for i in 0..len {
                         let actual_idx = (head + i) % cap;

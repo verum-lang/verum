@@ -47,8 +47,9 @@ mount core.mem.allocator.AllocError;
 mount core.base.ordering.{Ordering};
 // Allocator primitives for typed-OOM (#65, #68). See list.vr for
 // rationale on the explicit mount.
-mount core.base.memory.{try_alloc, try_realloc};
-mount core.intrinsics.memory.{ptr_read, ptr_write, slice_from_raw_parts};
+mount core.base.memory.{dealloc, try_alloc};
+mount core.collections.slice.*;
+mount core.intrinsics.memory.{null_ptr_mut, ptr_offset, ptr_offset_mut};
 mount core.intrinsics.runtime.mem_raw.{memmove_addr};
 
 // =============================================================================
@@ -57,17 +58,45 @@ mount core.intrinsics.runtime.mem_raw.{memmove_addr};
 
 // Double-ended queue using ring buffer.
 public type Deque<T> is {
-    data: &unsafe T,
+    // One semantic value per word, independent of the inline foreign layout of T.
+    data: *mut UInt64,
     head: Int,          // Index of first element
     len: Int,           // Number of elements
     cap: Int,           // Capacity (always power of 2)
 };
 
+/// Transfer a language value out of an initialized physical ring slot.
+unsafe fn deque_storage_take<T>(deque: &mut Deque<T>, index: Int) -> T {
+    @intrinsic("deque_storage_take", deque, index)
+}
+
+/// Install a language value into a vacant physical ring slot.
+unsafe fn deque_storage_write<T>(deque: &mut Deque<T>, index: Int, value: T) {
+    @intrinsic("deque_storage_write", deque, index, value)
+}
+
+/// Borrow one initialized slot, retaining its owner's backing and capabilities.
+unsafe fn deque_storage_ref<T>(deque: &Deque<T>, index: Int) -> &T {
+    @intrinsic("deque_storage_ref", deque, index)
+}
+
+unsafe fn deque_storage_ref_mut<T>(deque: &mut Deque<T>, index: Int) -> &mut T {
+    @intrinsic("deque_storage_ref_mut", deque, index)
+}
+
+unsafe fn deque_storage_slice<T>(deque: &Deque<T>, start: Int, count: Int) -> &[T] {
+    @intrinsic("deque_storage_slice", deque, start, count)
+}
+
+unsafe fn deque_storage_slice_mut<T>(deque: &mut Deque<T>, start: Int, count: Int) -> &mut [T] {
+    @intrinsic("deque_storage_slice_mut", deque, start, count)
+}
+
 implement<T> Deque<T> {
     // Create empty deque.
     public fn new() -> Deque<T> {
         Deque {
-            data: null_ptr(),
+            data: null_ptr_mut(),
             head: 0,
             len: 0,
             cap: 0,
@@ -76,52 +105,27 @@ implement<T> Deque<T> {
 
     // Create with pre-allocated capacity.
     public fn with_capacity(capacity: Int) -> Deque<T> {
-        if capacity == 0 {
-            return Deque.new();
-        }
-
-        // Round up to power of 2
-        let cap = capacity.next_power_of_two();
-
-        let data = unsafe {
-            alloc(cap * T.size, T.alignment)
-        } as &unsafe T;
-
-        if data.is_null() {
-            panic(f"Deque.with_capacity({capacity}) failed: requested {cap * T.size} bytes");
-        }
-
-        Deque {
-            data: data,
-            head: 0,
-            len: 0,
-            cap: cap,
+        match Deque.try_with_capacity(capacity) {
+            Maybe.Some(deque) => deque,
+            Maybe.None => panic(f"Deque capacity {capacity} could not be allocated"),
         }
     }
 
-    // Fallible constructor: returns Maybe.None on allocation failure instead of panic.
-    // Use this in production code paths that need to handle OOM gracefully
-    // (e.g. daemons / services that should degrade rather than crash).
+    // Return None without publishing a partial ring on capacity or allocation failure.
     public fn try_with_capacity(capacity: Int) -> Maybe<Deque<T>> {
-        if capacity == 0 {
-            return Maybe.Some(Deque.new());
-        }
-
-        let cap = capacity.next_power_of_two();
-        let data = unsafe {
-            alloc(cap * T.size, T.alignment)
-        } as &unsafe T;
-
-        if data.is_null() {
+        if capacity < 0 || capacity > Int.MAX / UInt64.size {
             return Maybe.None;
         }
-
-        Maybe.Some(Deque {
-            data: data,
-            head: 0,
-            len: 0,
-            cap: cap,
-        })
+        if capacity == 0 { return Maybe.Some(Deque.new()); }
+        let cap = capacity.next_power_of_two();
+        if cap > Int.MAX / UInt64.size { return Maybe.None; }
+        match try_alloc(cap * UInt64.size, UInt64.alignment) {
+            Result.Ok(raw) => {
+                let deque: Deque<T> = Deque { data: raw as *mut UInt64, head: 0, len: 0, cap: cap };
+                Maybe.Some(deque)
+            },
+            Result.Err(_) => Maybe.None,
+        }
     }
 
     // Number of elements.
@@ -165,7 +169,7 @@ implement<T> Deque<T> {
 
         let tail = self.physical_index(self.len);
         unsafe {
-            ptr_write(self.data.offset(tail), value);
+            deque_storage_write(self, tail, value);
         }
         self.len = self.len + 1;
     }
@@ -182,7 +186,7 @@ implement<T> Deque<T> {
 
         let tail = self.physical_index(self.len);
         unsafe {
-            ptr_write(self.data.offset(tail), value);
+            deque_storage_write(self, tail, value);
         }
         self.len = self.len + 1;
         Result.Ok(())
@@ -198,7 +202,7 @@ implement<T> Deque<T> {
         // Move head backwards
         self.head = self.wrap_index(self.head - 1 + self.cap);
         unsafe {
-            ptr_write(self.data.offset(self.head), value);
+            deque_storage_write(self, self.head, value);
         }
         self.len = self.len + 1;
     }
@@ -211,7 +215,7 @@ implement<T> Deque<T> {
 
         self.head = self.wrap_index(self.head - 1 + self.cap);
         unsafe {
-            ptr_write(self.data.offset(self.head), value);
+            deque_storage_write(self, self.head, value);
         }
         self.len = self.len + 1;
         Result.Ok(())
@@ -225,7 +229,7 @@ implement<T> Deque<T> {
 
         self.len = self.len - 1;
         let tail = self.physical_index(self.len);
-        Maybe.Some(unsafe { ptr_read(self.data.offset(tail)) })
+        Maybe.Some(unsafe { deque_storage_take(self, tail) })
     }
 
     // Pop element from front.
@@ -234,7 +238,7 @@ implement<T> Deque<T> {
             return Maybe.None;
         }
 
-        let value = unsafe { ptr_read(self.data.offset(self.head)) };
+        let value = unsafe { deque_storage_take(self, self.head) };
         self.head = self.wrap_index(self.head + 1);
         self.len = self.len - 1;
         Maybe.Some(value)
@@ -247,7 +251,8 @@ implement<T> Deque<T> {
         if self.len == 0 {
             Maybe.None
         } else {
-            Maybe.Some(unsafe { *self.data.offset(self.head) })
+            let item: &T = unsafe { deque_storage_ref(self, self.head) };
+            Maybe.Some(*item)
         }
     }
 
@@ -257,7 +262,7 @@ implement<T> Deque<T> {
         if self.len == 0 {
             Maybe.None
         } else {
-            Maybe.Some(unsafe { &mut *self.data.offset(self.head) })
+            Maybe.Some(unsafe { deque_storage_ref_mut(self, self.head) })
         }
     }
 
@@ -269,7 +274,8 @@ implement<T> Deque<T> {
             Maybe.None
         } else {
             let tail = self.physical_index(self.len - 1);
-            Maybe.Some(unsafe { *self.data.offset(tail) })
+            let item: &T = unsafe { deque_storage_ref(self, tail) };
+            Maybe.Some(*item)
         }
     }
 
@@ -280,7 +286,7 @@ implement<T> Deque<T> {
             Maybe.None
         } else {
             let tail = self.physical_index(self.len - 1);
-            Maybe.Some(unsafe { &mut *self.data.offset(tail) })
+            Maybe.Some(unsafe { deque_storage_ref_mut(self, tail) })
         }
     }
 
@@ -292,7 +298,8 @@ implement<T> Deque<T> {
             Maybe.None
         } else {
             let phys = self.physical_index(idx);
-            Maybe.Some(unsafe { *self.data.offset(phys) })
+            let item: &T = unsafe { deque_storage_ref(self, phys) };
+            Maybe.Some(*item)
         }
     }
 
@@ -303,18 +310,24 @@ implement<T> Deque<T> {
             Maybe.None
         } else {
             let phys = self.physical_index(idx);
-            Maybe.Some(unsafe { &mut *self.data.offset(phys) })
+            Maybe.Some(unsafe { deque_storage_ref_mut(self, phys) })
         }
     }
 
     // Index operator (panics on out of bounds).
     public fn index(&self, idx: Int) -> &T {
-        self.get(idx).expect("Deque index out of bounds")
+        assert(idx >= 0 && idx < self.len, "Deque index out of bounds");
+        let phys = self.physical_index(idx);
+        unsafe { deque_storage_ref(self, phys) }
     }
 
     // Clear all elements.
     public fn clear(&mut self) {
-        while self.pop_front().is_some() {}
+        while self.len > 0 {
+            let tail = self.physical_index(self.len - 1);
+            let removed: T = unsafe { deque_storage_take(self, tail) };
+            self.len = self.len - 1;
+        }
         self.head = 0;
     }
 
@@ -379,12 +392,10 @@ implement<T> Deque<T> {
     // Make deque contiguous (optimize for iteration).
     public fn make_contiguous(&mut self) -> &mut [T] {
         if self.head != 0 && self.len > 0 {
-            // Need to rotate to make head = 0
-            self.rotate_left(self.head);
-            self.head = 0;
+            self.reallocate(self.cap);
         }
         unsafe {
-            slice_from_raw_parts_mut(self.data, self.len)
+            deque_storage_slice_mut(self, 0, self.len)
         }
     }
 
@@ -393,8 +404,15 @@ implement<T> Deque<T> {
         if self.len <= 1 || n == 0 {
             return;
         }
-        let n = n % self.len;
-        self.head = self.wrap_index(self.head + n);
+        let steps = ((n % self.len) + self.len) % self.len;
+        for _ in range(0, steps) {
+            let source = self.head;
+            let target = self.physical_index(self.len);
+            if source != target {
+                unsafe { deque_storage_write(self, target, deque_storage_take(self, source)); }
+            }
+            self.head = self.wrap_index(self.head + 1);
+        }
     }
 
     // Rotate elements right by n positions.
@@ -402,8 +420,15 @@ implement<T> Deque<T> {
         if self.len <= 1 || n == 0 {
             return;
         }
-        let n = n % self.len;
-        self.head = self.wrap_index(self.head - n + self.cap);
+        let steps = ((n % self.len) + self.len) % self.len;
+        for _ in range(0, steps) {
+            let source = self.physical_index(self.len - 1);
+            let target = self.wrap_index(self.head - 1 + self.cap);
+            if source != target {
+                unsafe { deque_storage_write(self, target, deque_storage_take(self, source)); }
+            }
+            self.head = target;
+        }
     }
 
     // Swap two elements by logical index.
@@ -419,9 +444,9 @@ implement<T> Deque<T> {
         let phys_j = self.physical_index(j);
 
         unsafe {
-            let tmp = ptr_read(self.data.offset(phys_i));
-            ptr_write(self.data.offset(phys_i), ptr_read(self.data.offset(phys_j)));
-            ptr_write(self.data.offset(phys_j), tmp);
+            let tmp = deque_storage_take(self, phys_i);
+            deque_storage_write(self, phys_i, deque_storage_take(self, phys_j));
+            deque_storage_write(self, phys_j, tmp);
         }
     }
 
@@ -445,7 +470,7 @@ implement<T> Deque<T> {
         let mut high = self.len;
         while low < high {
             let mid = low + (high - low) / 2;
-            let item = self.get(mid).expect("Deque.binary_search: mid < high ≤ self.len — get is_some");
+            let item: &T = self.index(mid);
             match item.cmp(value) {
                 Ordering.Less => { low = mid + 1; },
                 Ordering.Greater => { high = mid; },
@@ -467,7 +492,7 @@ implement<T> Deque<T> {
         let mut high = self.len;
         while low < high {
             let mid = low + (high - low) / 2;
-            let item = self.get(mid).expect("Deque.binary_search: mid < high ≤ self.len — get is_some");
+            let item: &T = self.index(mid);
             match f(item) {
                 Ordering.Less => { low = mid + 1; },
                 Ordering.Greater => { high = mid; },
@@ -494,9 +519,8 @@ implement<T> Deque<T> {
     /// Find first element matching predicate.
     public fn find<F: fn(&T) -> Bool>(&self, predicate: F) -> Maybe<&T> {
         for i in range(0, self.len) {
-            let item = self.get(i).expect("Deque: i in range(0, self.len) — get is_some");
-            if predicate(item) {
-                return Maybe.Some(item);
+            if predicate(self.index(i)) {
+                return Maybe.Some(self.index(i));
             }
         }
         Maybe.None
@@ -505,7 +529,7 @@ implement<T> Deque<T> {
     /// Find position of first element matching predicate.
     public fn find_position<F: fn(&T) -> Bool>(&self, predicate: F) -> Maybe<Int> {
         for i in range(0, self.len) {
-            let item = self.get(i).expect("Deque: i in range(0, self.len) — get is_some");
+            let item: &T = self.index(i);
             if predicate(item) {
                 return Maybe.Some(i);
             }
@@ -516,7 +540,7 @@ implement<T> Deque<T> {
     /// Check if any element satisfies the predicate.
     public fn any<F: fn(&T) -> Bool>(&self, predicate: F) -> Bool {
         for i in range(0, self.len) {
-            let item = self.get(i).expect("Deque: i in range(0, self.len) — get is_some");
+            let item: &T = self.index(i);
             if predicate(item) {
                 return true;
             }
@@ -527,7 +551,7 @@ implement<T> Deque<T> {
     /// Check if all elements satisfy the predicate.
     public fn all<F: fn(&T) -> Bool>(&self, predicate: F) -> Bool {
         for i in range(0, self.len) {
-            let item = self.get(i).expect("Deque: i in range(0, self.len) — get is_some");
+            let item: &T = self.index(i);
             if !predicate(item) {
                 return false;
             }
@@ -547,14 +571,13 @@ implement<T> Deque<T> {
         if self.is_empty() {
             return Maybe.None;
         }
-        let mut min_val = self.get(0).expect("Deque: non-empty branch (early-empty-return above) — get(0) is_some");
+        let mut best: Int = 0;
         for i in range(1, self.len) {
-            let item = self.get(i).expect("Deque: i in range(0, self.len) — get is_some");
-            if item < min_val {
-                min_val = item;
+            if *self.index(i) < *self.index(best) {
+                best = i;
             }
         }
-        Maybe.Some(min_val)
+        Maybe.Some(self.index(best))
     }
 
     /// Get maximum element.
@@ -565,14 +588,13 @@ implement<T> Deque<T> {
         if self.is_empty() {
             return Maybe.None;
         }
-        let mut max_val = self.get(0).expect("Deque: non-empty branch (early-empty-return above) — get(0) is_some");
+        let mut best: Int = 0;
         for i in range(1, self.len) {
-            let item = self.get(i).expect("Deque: i in range(0, self.len) — get is_some");
-            if item > max_val {
-                max_val = item;
+            if *self.index(i) > *self.index(best) {
+                best = i;
             }
         }
-        Maybe.Some(max_val)
+        Maybe.Some(self.index(best))
     }
 
     // =========================================================================
@@ -585,7 +607,7 @@ implement<T> Deque<T> {
     {
         let mut result: List<T> = List.with_capacity(self.len);
         for i in range(0, self.len) {
-            result.push(self.get(i).expect("Deque: i in range(0, self.len) — get is_some").clone());
+            result.push(self.index(i).clone());
         }
         result
     }
@@ -619,23 +641,11 @@ implement<T> Deque<T> {
 
     // Get as pair of slices (may wrap around buffer).
     public fn as_slices(&self) -> (&[T], &[T]) {
-        if self.len == 0 {
-            return (unsafe { slice_from_raw_parts(self.data, 0) },
-                    unsafe { slice_from_raw_parts(self.data, 0) });
-        }
-
-        let tail = self.wrap_index(self.head + self.len);
-
-        if self.head < tail {
-            // Contiguous
-            (unsafe { slice_from_raw_parts(self.data.offset(self.head), self.len) },
-             unsafe { slice_from_raw_parts(self.data, 0) })
-        } else {
-            // Wraps around
-            let first_len = self.cap - self.head;
-            let second_len = tail;
-            (unsafe { slice_from_raw_parts(self.data.offset(self.head), first_len) },
-             unsafe { slice_from_raw_parts(self.data, second_len) })
+        let first = self.len.min(self.cap - self.head);
+        let second = self.len - first;
+        unsafe {
+            (deque_storage_slice(self, self.head, first),
+             deque_storage_slice(self, 0, second))
         }
     }
 
@@ -664,18 +674,20 @@ implement<T> Deque<T> {
         let mut kept = 0;
         while i < self.len {
             let phys = self.physical_index(i);
-            let item: &T = unsafe { &*self.data.offset(phys) };
+            let item: &T = unsafe { deque_storage_ref(self, phys) };
             if f(item) {
                 if kept != i {
                     // Move element to kept position
                     let src_phys = self.physical_index(i);
                     let dst_phys = self.physical_index(kept);
                     unsafe {
-                        let val = ptr_read(self.data.offset(src_phys));
-                        ptr_write(self.data.offset(dst_phys), val);
+                        let val = deque_storage_take(self, src_phys);
+                        deque_storage_write(self, dst_phys, val);
                     }
                 }
                 kept = kept + 1;
+            } else {
+                let removed: T = unsafe { deque_storage_take(self, phys) };
             }
             i = i + 1;
         }
@@ -688,18 +700,20 @@ implement<T> Deque<T> {
         let mut kept = 0;
         while i < self.len {
             let phys = self.physical_index(i);
-            let item: &mut T = unsafe { &mut *self.data.offset(phys) };
+            let item: &mut T = unsafe { deque_storage_ref_mut(self, phys) };
             if f(item) {
                 if kept != i {
                     // Move element to kept position
                     let src_phys = self.physical_index(i);
                     let dst_phys = self.physical_index(kept);
                     unsafe {
-                        let val = ptr_read(self.data.offset(src_phys));
-                        ptr_write(self.data.offset(dst_phys), val);
+                        let val = deque_storage_take(self, src_phys);
+                        deque_storage_write(self, dst_phys, val);
                     }
                 }
                 kept = kept + 1;
+            } else {
+                let removed: T = unsafe { deque_storage_take(self, phys) };
             }
             i = i + 1;
         }
@@ -714,7 +728,7 @@ implement<T> Deque<T> {
         let mut i = actual_from;
         while i < actual_to {
             let phys = self.physical_index(i);
-            let item: &T = unsafe { &*self.data.offset(phys) };
+            let item: &T = unsafe { deque_storage_ref(self, phys) };
             result.push(item.clone());
             i = i + 1;
         }
@@ -758,15 +772,15 @@ implement<T> Deque<T> {
             let src_phys = self.physical_index(i - 1);
             let dst_phys = self.physical_index(i);
             unsafe {
-                let val = ptr_read(self.data.offset(src_phys));
-                ptr_write(self.data.offset(dst_phys), val);
+                let val = deque_storage_take(self, src_phys);
+                deque_storage_write(self, dst_phys, val);
             }
             i = i - 1;
         }
 
         let phys = self.physical_index(idx);
         unsafe {
-            ptr_write(self.data.offset(phys), value);
+            deque_storage_write(self, phys, value);
         }
         self.len = self.len + 1;
     }
@@ -778,7 +792,7 @@ implement<T> Deque<T> {
         }
 
         let phys = self.physical_index(idx);
-        let value = unsafe { ptr_read(self.data.offset(phys)) };
+        let value = unsafe { deque_storage_take(self, phys) };
 
         // Shift elements left: move [idx+1..len] to [idx..len-1]
         let mut i = idx;
@@ -786,8 +800,8 @@ implement<T> Deque<T> {
             let src_phys = self.physical_index(i + 1);
             let dst_phys = self.physical_index(i);
             unsafe {
-                let val = ptr_read(self.data.offset(src_phys));
-                ptr_write(self.data.offset(dst_phys), val);
+                let val = deque_storage_take(self, src_phys);
+                deque_storage_write(self, dst_phys, val);
             }
             i = i + 1;
         }
@@ -924,8 +938,8 @@ implement<T> Deque<T> {
             Maybe.None
         } else {
             let phys = self.physical_index(idx);
-            let old = unsafe { ptr_read(self.data.offset(phys)) };
-            unsafe { ptr_write(self.data.offset(phys), value); }
+            let old = unsafe { deque_storage_take(self, phys) };
+            unsafe { deque_storage_write(self, phys, value); }
             Maybe.Some(old)
         }
     }
@@ -1106,7 +1120,7 @@ implement<T> Deque<T> {
                 let mut window: List<T> = List.with_capacity(size);
                 let mut j = 0;
                 while j < size {
-                    let item = self.get(i + j).expect("Deque substring search: i + j < self.len guaranteed by outer + inner loop bounds");
+                    let item: &T = self.index(i + j);
                     window.push(item.clone());
                     j = j + 1;
                 }
@@ -1129,7 +1143,7 @@ implement<T> Deque<T> {
             let mut chunk: List<T> = List.with_capacity(chunk_end - i);
             let mut j = i;
             while j < chunk_end {
-                let item = self.get(j).expect("Deque substring search: j < self.len by loop bound");
+                let item: &T = self.index(j);
                 chunk.push(item.clone());
                 j = j + 1;
             }
@@ -1150,7 +1164,7 @@ implement<T> Deque<T> {
             let mut chunk: List<T> = List.with_capacity(size);
             let mut j = 0;
             while j < size {
-                let item = self.get(i + j).expect("Deque substring search: i + j < self.len guaranteed by outer + inner loop bounds");
+                let item: &T = self.index(i + j);
                 chunk.push(item.clone());
                 j = j + 1;
             }
@@ -1170,7 +1184,7 @@ implement<T> Deque<T> {
         let mut result: List<T> = [];
         let mut i = start;
         while i < self.len {
-            let item = self.get(i).expect("Deque: i in range(0, self.len) — get is_some");
+            let item: &T = self.index(i);
             result.push(item.clone());
             i = i + 1;
         }
@@ -1187,7 +1201,7 @@ implement<T> Deque<T> {
     {
         let mut result = Deque.new();
         for i in range(0, self.len) {
-            let item = self.get(i).expect("Deque: i in range(0, self.len) — get is_some");
+            let item: &T = self.index(i);
             if f(item) {
                 result.push_back(item.clone());
             }
@@ -1199,7 +1213,7 @@ implement<T> Deque<T> {
     public fn map<U, F: fn(&T) -> U>(&self, f: F) -> Deque<U> {
         let mut result: Deque<U> = Deque.with_capacity(self.len);
         for i in range(0, self.len) {
-            let item = self.get(i).expect("Deque: i in range(0, self.len) — get is_some");
+            let item: &T = self.index(i);
             result.push_back(f(item));
         }
         result
@@ -1213,7 +1227,7 @@ implement<T> Deque<T> {
         let mut yes = Deque.new();
         let mut no = Deque.new();
         for i in range(0, self.len) {
-            let item = self.get(i).expect("Deque: i in range(0, self.len) — get is_some");
+            let item: &T = self.index(i);
             if f(item) {
                 yes.push_back(item.clone());
             } else {
@@ -1227,7 +1241,7 @@ implement<T> Deque<T> {
     public fn count_where<F: fn(&T) -> Bool>(&self, f: F) -> Int {
         let mut count = 0;
         for i in range(0, self.len) {
-            let item = self.get(i).expect("Deque: i in range(0, self.len) — get is_some");
+            let item: &T = self.index(i);
             if f(item) {
                 count = count + 1;
             }
@@ -1239,7 +1253,7 @@ implement<T> Deque<T> {
     public fn filter_map<U, F: fn(&T) -> Maybe<U>>(&self, f: F) -> Deque<U> {
         let mut result: Deque<U> = Deque.new();
         for i in range(0, self.len) {
-            let item = self.get(i).expect("Deque: i in range(0, self.len) — get is_some");
+            let item: &T = self.index(i);
             match f(item) {
                 Maybe.Some(v) => result.push_back(v),
                 Maybe.None => {}
@@ -1252,7 +1266,7 @@ implement<T> Deque<T> {
     public fn fold<U>(&self, init: U, f: fn(U, &T) -> U) -> U {
         let mut acc = init;
         for i in range(0, self.len) {
-            let item = self.get(i).expect("Deque: i in range(0, self.len) — get is_some");
+            let item: &T = self.index(i);
             acc = f(acc, item);
         }
         acc
@@ -1261,7 +1275,7 @@ implement<T> Deque<T> {
     /// Apply a function to each element for its side effects.
     public fn for_each<F: fn(&T)>(&self, f: F) {
         for i in range(0, self.len) {
-            let item = self.get(i).expect("Deque: i in range(0, self.len) — get is_some");
+            let item: &T = self.index(i);
             f(item);
         }
     }
@@ -1274,9 +1288,9 @@ implement<T> Deque<T> {
         if self.len == 0 {
             return Maybe.None;
         }
-        let mut acc: T = self.get(0).expect("Deque: non-empty branch (early-empty-return above) — get(0) is_some").clone();
+        let mut acc: T = self.index(0).clone();
         for i in range(1, self.len) {
-            let item = self.get(i).expect("Deque: i in range(0, self.len) — get is_some");
+            let item: &T = self.index(i);
             acc = f(acc, item);
         }
         Maybe.Some(acc)
@@ -1287,10 +1301,10 @@ implement<T> Deque<T> {
     public fn flat_map<U, F: fn(&T) -> List<U>>(&self, f: F) -> Deque<U> {
         let mut result: Deque<U> = Deque.new();
         for i in range(0, self.len) {
-            let item = self.get(i).expect("Deque: i in range(0, self.len) — get is_some");
+            let item: &T = self.index(i);
             let inner = f(item);
-            for j in range(0, inner.len()) {
-                result.push_back(inner[j].clone());
+            for value in inner {
+                result.push_back(value);
             }
         }
         result
@@ -1365,7 +1379,7 @@ implement<T> Deque<T> {
             if i > 0 {
                 result.push_back(separator.clone());
             }
-            result.push_back(self.get(i).expect("Deque: i in range(0, self.len) — get is_some").clone());
+            result.push_back(self.index(i).clone());
         }
         result
     }
@@ -1382,7 +1396,7 @@ implement<T> Deque<T> {
             if i > 0 {
                 result.push_back(separator());
             }
-            result.push_back(self.get(i).expect("Deque: i in range(0, self.len) — get is_some").clone());
+            result.push_back(self.index(i).clone());
         }
         result
     }
@@ -1407,18 +1421,18 @@ implement<T> Deque<T> {
         let mut kept = 0;
         while i < self.len {
             let phys = self.physical_index(i);
-            let item: &T = unsafe { &*self.data.offset(phys) };
+            let item: &T = unsafe { deque_storage_ref(self, phys) };
             if pred(item) {
                 // Extract the element
-                let val = unsafe { ptr_read(self.data.offset(phys)) };
+                let val = unsafe { deque_storage_take(self, phys) };
                 extracted.push(val);
             } else {
                 if kept != i {
                     let src_phys = self.physical_index(i);
                     let dst_phys = self.physical_index(kept);
                     unsafe {
-                        let val = ptr_read(self.data.offset(src_phys));
-                        ptr_write(self.data.offset(dst_phys), val);
+                        let val = deque_storage_take(self, src_phys);
+                        deque_storage_write(self, dst_phys, val);
                     }
                 }
                 kept = kept + 1;
@@ -1451,18 +1465,20 @@ implement<T> Deque<T> {
         while read < self.len {
             let read_phys = self.physical_index(read);
             let write_prev_phys = self.physical_index(write - 1);
-            let read_item: &T = unsafe { &*self.data.offset(read_phys) };
-            let prev_item: &T = unsafe { &*self.data.offset(write_prev_phys) };
+            let read_item: &T = unsafe { deque_storage_ref(self, read_phys) };
+            let prev_item: &T = unsafe { deque_storage_ref(self, write_prev_phys) };
             if *read_item != *prev_item {
                 if write != read {
                     let src_phys = self.physical_index(read);
                     let dst_phys = self.physical_index(write);
                     unsafe {
-                        let val = ptr_read(self.data.offset(src_phys));
-                        ptr_write(self.data.offset(dst_phys), val);
+                        let val = deque_storage_take(self, src_phys);
+                        deque_storage_write(self, dst_phys, val);
                     }
                 }
                 write = write + 1;
+            } else {
+                let removed: T = unsafe { deque_storage_take(self, read_phys) };
             }
             read = read + 1;
         }
@@ -1494,18 +1510,20 @@ implement<T> Deque<T> {
         while read < self.len {
             let read_phys = self.physical_index(read);
             let write_prev_phys = self.physical_index(write - 1);
-            let read_item: &T = unsafe { &*self.data.offset(read_phys) };
-            let prev_item: &T = unsafe { &*self.data.offset(write_prev_phys) };
+            let read_item: &T = unsafe { deque_storage_ref(self, read_phys) };
+            let prev_item: &T = unsafe { deque_storage_ref(self, write_prev_phys) };
             if !same(prev_item, read_item) {
                 if write != read {
                     let src_phys = self.physical_index(read);
                     let dst_phys = self.physical_index(write);
                     unsafe {
-                        let val = ptr_read(self.data.offset(src_phys));
-                        ptr_write(self.data.offset(dst_phys), val);
+                        let val = deque_storage_take(self, src_phys);
+                        deque_storage_write(self, dst_phys, val);
                     }
                 }
                 write = write + 1;
+            } else {
+                let removed: T = unsafe { deque_storage_take(self, read_phys) };
             }
             read = read + 1;
         }
@@ -1540,146 +1558,50 @@ implement<T> Deque<T> {
         self.try_reallocate(new_cap)
     }
 
-    // Internal: reallocate to new capacity. Panics on OOM with
-    // the requested byte count attached so post-mortems / crash
-    // reports can correlate the failure to a specific size.
     fn reallocate(&mut self, new_cap: Int) {
-        let new_data = unsafe {
-            alloc(new_cap * T.size, T.alignment)
-        } as &unsafe T;
-
-        if new_data.is_null() {
-            panic(f"Deque reallocation failed: requested {new_cap * T.size} bytes (capacity {new_cap})");
+        match self.try_reallocate(new_cap) {
+            Result.Ok(()) => {}
+            Result.Err(error) => panic(error.message()),
         }
-
-        // Copy elements to new buffer (making contiguous)
-        if self.len > 0 {
-            let tail = self.wrap_index(self.head + self.len);
-
-            if self.head < tail {
-                // Contiguous - single copy
-                unsafe {
-                    memmove_addr(
-                        new_data as &unsafe Byte,
-                        self.data.offset(self.head) as &unsafe Byte,
-                        self.len * T.size
-                    );
-                }
-            } else {
-                // Wraps around - two copies
-                let first_len = self.cap - self.head;
-                let second_len = tail;
-
-                unsafe {
-                    memmove_addr(
-                        new_data as &unsafe Byte,
-                        self.data.offset(self.head) as &unsafe Byte,
-                        first_len * T.size
-                    );
-                    memmove_addr(
-                        new_data.offset(first_len) as &unsafe Byte,
-                        self.data as &unsafe Byte,
-                        second_len * T.size
-                    );
-                }
-            }
-        }
-
-        // Free old buffer
-        if self.cap > 0 {
-            unsafe {
-                dealloc(
-                    self.data as &unsafe Byte,
-                    self.cap * T.size,
-                    T.alignment
-                );
-            }
-        }
-
-        self.data = new_data;
-        self.head = 0;
-        self.cap = new_cap;
     }
 
-    // Internal: fallible reallocate to new capacity. Returns
-    // Result.Err(AllocError.OutOfMemory) on alloc failure rather than
-    // panicking. This is the load-bearing primitive for every
-    // try_<op> method; the panicking `reallocate` simply panics
-    // on the same failure mode.
     fn try_reallocate(&mut self, new_cap: Int) -> Result<Unit, AllocError> {
-        // Route through try_alloc so allocator-side errors propagate as
-        // typed AllocError variants. The defensive null-check below is
-        // retained as belt-and-braces.
-        let new_raw = try_alloc(new_cap * T.size, T.alignment)?;
-        let new_data = new_raw as &unsafe T;
-
-        if new_data.is_null() {
-            return Result.Err(AllocError.OutOfMemory {
-                requested: new_cap * T.size,
-            });
+        if new_cap <= 0 || new_cap < self.len || new_cap > Int.MAX / UInt64.size {
+            return Result.Err(AllocError.CapacityOverflow { requested: new_cap });
         }
-
-        // Copy elements to new buffer (making contiguous).
-        if self.len > 0 {
-            let tail = self.wrap_index(self.head + self.len);
-            if self.head < tail {
-                unsafe {
-                    memmove_addr(
-                        new_data as &unsafe Byte,
-                        self.data.offset(self.head) as &unsafe Byte,
-                        self.len * T.size
-                    );
-                }
-            } else {
-                let first_len = self.cap - self.head;
-                let second_len = tail;
-                unsafe {
-                    memmove_addr(
-                        new_data as &unsafe Byte,
-                        self.data.offset(self.head) as &unsafe Byte,
-                        first_len * T.size
-                    );
-                    memmove_addr(
-                        new_data.offset(first_len) as &unsafe Byte,
-                        self.data as &unsafe Byte,
-                        second_len * T.size
-                    );
-                }
+        let raw = try_alloc(new_cap * UInt64.size, UInt64.alignment)?;
+        let new_data = raw as *mut UInt64;
+        // The live sequence has at most two physical spans. Move both before
+        // releasing the old storage; failure above leaves every old slot live.
+        let first = self.len.min(self.cap - self.head);
+        let second = self.len - first;
+        unsafe {
+            if first > 0 {
+                memmove_addr(raw as Int, ptr_offset(self.data, self.head as ISize) as Int, first * UInt64.size);
+            }
+            if second > 0 {
+                memmove_addr(ptr_offset_mut(new_data, first as ISize) as Int, self.data as Int, second * UInt64.size);
             }
         }
-
         if self.cap > 0 {
-            unsafe {
-                dealloc(
-                    self.data as &unsafe Byte,
-                    self.cap * T.size,
-                    T.alignment
-                );
-            }
+            dealloc(self.data as &unsafe Byte, self.cap * UInt64.size, UInt64.alignment);
         }
-
         self.data = new_data;
         self.head = 0;
         self.cap = new_cap;
         Result.Ok(())
     }
 
-    // Internal: free buffer without copying.
     fn drop_buffer(&mut self) {
         if self.cap > 0 {
-            unsafe {
-                dealloc(
-                    self.data as &unsafe Byte,
-                    self.cap * T.size,
-                    T.alignment
-                );
-            }
-            self.data = null_ptr();
-            self.cap = 0;
+            dealloc(self.data as &unsafe Byte, self.cap * UInt64.size, UInt64.alignment);
         }
+        self.data = null_ptr_mut();
+        self.cap = 0;
         self.head = 0;
         self.len = 0;
     }
+
 }
 
 // =============================================================================
@@ -1688,18 +1610,8 @@ implement<T> Deque<T> {
 
 implement<T> Drop for Deque<T> {
     fn drop(&mut self) {
-        // Drop all elements
         self.clear();
-        // Free buffer
-        if self.cap > 0 {
-            unsafe {
-                dealloc(
-                    self.data as &unsafe Byte,
-                    self.cap * T.size,
-                    T.alignment
-                );
-            }
-        }
+        self.drop_buffer();
     }
 }
 
@@ -1711,7 +1623,7 @@ implement<T: Clone> Clone for Deque<T> {
     fn clone(&self) -> Deque<T> {
         let mut new_deque = Deque.with_capacity(self.len);
         for i in range(0, self.len) {
-            new_deque.push_back(self.get(i).expect("Deque: i in range(0, self.len) — get is_some").clone());
+            new_deque.push_back(self.index(i).clone());
         }
         new_deque
     }
@@ -1735,9 +1647,9 @@ implement<T> Iterator for DequeIter<T> {
         if self.idx >= self.back {
             Maybe.None
         } else {
-            let item = self.deque.get(self.idx);
-            self.idx = self.idx + 1;
-            item
+            let idx = self.idx;
+            self.idx = idx + 1;
+            Maybe.Some(self.deque.index(idx))
         }
     }
 
@@ -1753,7 +1665,7 @@ implement<T> DoubleEndedIterator for DequeIter<T> {
             Maybe.None
         } else {
             self.back = self.back - 1;
-            self.deque.get(self.back)
+            Maybe.Some(self.deque.index(self.back))
         }
     }
 
@@ -1991,7 +1903,7 @@ implement<T: Hash> Hash for Deque<T> {
     fn hash(&self, hasher: &mut Hasher) {
         hasher.write_int(self.len);
         for i in range(0, self.len) {
-            let item = self.get(i).expect("Deque: i in range(0, self.len) — get is_some");
+            let item: &T = self.index(i);
             item.hash(hasher);
         }
     }
@@ -2094,7 +2006,7 @@ implement<T> Index<Int> for Deque<T> {
     fn index(&self, idx: Int) -> &T {
         assert(idx >= 0 && idx < self.len, "Deque index out of bounds");
         let phys = self.physical_index(idx);
-        unsafe { &*self.data.offset(phys) }
+        unsafe { deque_storage_ref(self, phys) }
     }
 }
 
@@ -2102,7 +2014,7 @@ implement<T> IndexMut<Int> for Deque<T> {
     fn index_mut(&mut self, idx: Int) -> &mut T {
         assert(idx >= 0 && idx < self.len, "Deque index out of bounds");
         let phys = self.physical_index(idx);
-        unsafe { &mut *self.data.offset(phys) }
+        unsafe { deque_storage_ref_mut(self, phys) }
     }
 }
 

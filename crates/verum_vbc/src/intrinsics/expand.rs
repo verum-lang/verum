@@ -421,11 +421,23 @@ fn expand_sequence(
             let [scalar] = args else { return false };
             e.emit(crate::unicode_category::instruction(dest, *scalar));
         }
-        InlineSequenceId::ListStorageRead
+        InlineSequenceId::DequeStorageTake
+        | InlineSequenceId::DequeStorageWrite
+        | InlineSequenceId::DequeStorageRef
+        | InlineSequenceId::DequeStorageRefMut
+        | InlineSequenceId::DequeStorageSlice
+        | InlineSequenceId::DequeStorageSliceMut
+        | InlineSequenceId::ListStorageRead
         | InlineSequenceId::ListStorageWrite
         | InlineSequenceId::ListStorageMove
         | InlineSequenceId::ListStorageResize => {
             let sub_op = match seq {
+                InlineSequenceId::DequeStorageTake => crate::instruction::MemSubOpcode::DequeStorageTake,
+                InlineSequenceId::DequeStorageWrite => crate::instruction::MemSubOpcode::DequeStorageWrite,
+                InlineSequenceId::DequeStorageRef => crate::instruction::MemSubOpcode::DequeStorageRef,
+                InlineSequenceId::DequeStorageRefMut => crate::instruction::MemSubOpcode::DequeStorageRefMut,
+                InlineSequenceId::DequeStorageSlice => crate::instruction::MemSubOpcode::DequeStorageSlice,
+                InlineSequenceId::DequeStorageSliceMut => crate::instruction::MemSubOpcode::DequeStorageSliceMut,
                 InlineSequenceId::ListStorageRead => {
                     crate::instruction::MemSubOpcode::ListStorageRead
                 }

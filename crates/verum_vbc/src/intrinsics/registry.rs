@@ -1232,6 +1232,18 @@ pub enum InlineSequenceId {
     ListStorageMove,
     /// Resize an owner while preserving initialized length and allocation provenance.
     ListStorageResize,
+    /// Transfer a whole language value out of a ring slot.
+    DequeStorageTake,
+    /// Move an owned value into a vacant ring slot.
+    DequeStorageWrite,
+    /// Borrow a live physical slot for reading.
+    DequeStorageRef,
+    /// Borrow a live physical slot for writing.
+    DequeStorageRefMut,
+    /// Borrow a physically contiguous run of live ring slots.
+    DequeStorageSlice,
+    /// Mutably borrow a physically contiguous run of live ring slots.
+    DequeStorageSliceMut,
     /// alloc: allocate heap memory
     Alloc,
     /// alloc_zeroed: allocate zeroed heap memory
@@ -1396,7 +1408,7 @@ impl Intrinsic {
     pub(crate) fn stored_value_operand(&self) -> Option<usize> {
         match self.strategy {
             CodegenStrategy::InlineSequence(InlineSequenceId::Replace) => Some(1),
-            CodegenStrategy::InlineSequence(InlineSequenceId::ListStorageWrite) => Some(2),
+            CodegenStrategy::InlineSequence(InlineSequenceId::ListStorageWrite | InlineSequenceId::DequeStorageWrite) => Some(2),
             _ => None,
         }
     }
@@ -2560,6 +2572,66 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::ListStorageStride),
         mlir_op: None,
         doc: "Physical element width carried by a canonical List object",
+    },
+    Intrinsic {
+        name: "deque_storage_ref",
+        category: IntrinsicCategory::Memory,
+        hints: &[IntrinsicHint::Unsafe, IntrinsicHint::MemoryEffect, IntrinsicHint::Generic, IntrinsicHint::Inline],
+        param_count: 2,
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::DequeStorageRef),
+        mlir_op: None,
+        doc: "Borrow an initialized ring slot for reading",
+    },
+    Intrinsic {
+        name: "deque_storage_ref_mut",
+        category: IntrinsicCategory::Memory,
+        hints: &[IntrinsicHint::Unsafe, IntrinsicHint::MemoryEffect, IntrinsicHint::Generic, IntrinsicHint::Inline],
+        param_count: 2,
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::DequeStorageRefMut),
+        mlir_op: None,
+        doc: "Borrow an initialized ring slot for writing",
+    },
+    Intrinsic {
+        name: "deque_storage_slice",
+        category: IntrinsicCategory::Memory,
+        hints: &[IntrinsicHint::Unsafe, IntrinsicHint::MemoryEffect, IntrinsicHint::Generic, IntrinsicHint::Inline],
+        param_count: 3,
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::DequeStorageSlice),
+        mlir_op: None,
+        doc: "Borrow a contiguous initialized run of ring slots for reading",
+    },
+    Intrinsic {
+        name: "deque_storage_slice_mut",
+        category: IntrinsicCategory::Memory,
+        hints: &[IntrinsicHint::Unsafe, IntrinsicHint::MemoryEffect, IntrinsicHint::Generic, IntrinsicHint::Inline],
+        param_count: 3,
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::DequeStorageSliceMut),
+        mlir_op: None,
+        doc: "Borrow a contiguous initialized run of ring slots for writing",
+    },
+    Intrinsic {
+        name: "deque_storage_take",
+        category: IntrinsicCategory::Memory,
+        hints: &[IntrinsicHint::Unsafe, IntrinsicHint::MemoryEffect, IntrinsicHint::Generic, IntrinsicHint::Inline],
+        param_count: 2,
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::DequeStorageTake),
+        mlir_op: None,
+        doc: "Move an initialized value out of a Deque slot",
+    },
+    Intrinsic {
+        name: "deque_storage_write",
+        category: IntrinsicCategory::Memory,
+        hints: &[IntrinsicHint::Unsafe, IntrinsicHint::MemoryEffect, IntrinsicHint::Generic, IntrinsicHint::Inline],
+        param_count: 3,
+        return_count: 0,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::DequeStorageWrite),
+        mlir_op: None,
+        doc: "Move an owned value into a vacant Deque slot",
     },
     Intrinsic {
         name: "list_storage_read",

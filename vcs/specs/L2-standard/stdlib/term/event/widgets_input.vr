@@ -29,7 +29,8 @@ pure fn label(n: &Int) -> Text { if *n == 1 { "first" } else { "second" } }
 
 fn main() {
     let mut parser = InputParser.new();
-    let menu = Dropdown<Int>.new([1, 2], label);
+    let options: List<Int> = [1, 2];
+    let menu: Dropdown<Int> = Dropdown.new(options, label);
     let mut menu_state = DropdownState.new();
     assert(parser.feed("\x1b[B\x1b[B\r".as_bytes()) == 3);
     assert(menu_state.handle_key(&menu, next_key(&mut parser)));
@@ -37,7 +38,9 @@ fn main() {
     assert(menu_state.handle_key(&menu, next_key(&mut parser)));
     assert(menu_state.selected_index().unwrap() == 1);
 
-    let filtered = Dropdown<Int>.new([1, 2], label).searchable(true);
+    let filter_options: List<Int> = [1, 2];
+    let candidate: Dropdown<Int> = Dropdown.new(filter_options, label);
+    let filtered = candidate.searchable(true);
     let mut filtered_state = DropdownState.new();
     assert(parser.feed("\x1b[BSEC\r".as_bytes()) == 5);
     let mut i: Int = 0;

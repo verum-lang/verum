@@ -619,6 +619,7 @@ impl super::VbcCodegen {
                 || matches!(ty, TypeRef::Concrete(base) | TypeRef::Instantiated { base, .. }
                     if self.type_by_id(*base).is_some_and(|declaration|
                         (!base.is_builtin() && !base.is_semantic_type())
+                        || (*base == crate::types::TypeId::DEQUE && declaration.drop_fn.is_some())
                         || declaration.kind == crate::types::TypeKind::Sum)))
         {
             // Structural owners need their declaration even without explicit

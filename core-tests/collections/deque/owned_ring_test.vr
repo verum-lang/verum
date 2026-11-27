@@ -1,0 +1,97 @@
+module core.collections.tests.deque_owned_ring;
+mount core.collections.deque.Deque;
+mount core.base.protocols.Drop;
+
+type Payload is { name: Text, index: Int };
+type affine Guard is { weight: Int };
+static mut DESTROYED: Int = 0;
+implement Drop for Guard {
+    fn drop(&mut self) { unsafe { DESTROYED = DESTROYED + self.weight; } }
+}
+
+@test
+fn test_wrapped_growth_preserves_order_and_copy() {
+    let mut queue: Deque<Int> = Deque.new();
+    let mut i: Int = 0;
+    while i < 24 {
+        assert(queue.try_push_back(i).is_ok());
+        i = i + 1;
+    }
+    i = 0;
+    while i < 20 {
+        assert(queue.pop_front().unwrap() == i);
+        i = i + 1;
+    }
+    i = 24;
+    while i < 74 {
+        assert(queue.try_push_back(i).is_ok());
+        i = i + 1;
+    }
+    let copy: Deque<Int> = queue;
+    i = 20;
+    while i < 74 {
+        assert(queue.pop_front().unwrap() == i);
+        i = i + 1;
+    }
+    assert(queue.is_empty());
+    assert(copy.front().unwrap() == 20 && copy.back().unwrap() == 73);
+}
+
+@test
+fn test_mutable_element_belongs_to_its_ring() {
+    let mut queue: Deque<Payload> = Deque.new();
+    let value: Payload = Payload { name: "separate", index: 17 };
+    assert(queue.try_push_back(value).is_ok());
+    let snapshot: Deque<Payload> = queue;
+    match queue.front_mut() {
+        Maybe.Some(entry) => { entry.index = 28; }
+        Maybe.None => panic("missing ring element"),
+    }
+    let changed: Payload = queue.pop_front().unwrap();
+    let saved: Payload = snapshot.front().unwrap();
+    assert(saved.index == 17 && changed.index == 28);
+    assert(saved.name == "separate" && changed.name == "separate");
+}
+
+@test
+fn test_clear_and_drop_release_the_remaining_affine_values_once() {
+    unsafe { DESTROYED = 0; }
+    {
+        let mut queue: Deque<Guard> = Deque.new();
+        queue.push_back(Guard { weight: 1 });
+        queue.push_front(Guard { weight: 2 });
+        queue.clear();
+        assert(unsafe { DESTROYED } == 3);
+        queue.push_back(Guard { weight: 4 });
+    }
+    assert(unsafe { DESTROYED } == 7);
+}
+
+@test
+fn test_capacity_and_owner_backed_spans() {
+    let requested: Int = 5;
+    let mut ring: Deque<Int> = Deque.with_capacity(requested);
+    assert(ring.capacity() == 8 && ring.is_empty());
+    assert(Deque<Int>.try_with_capacity(-1) is Maybe.None);
+    {
+        let (first, second) = ring.as_slices();
+        assert(first.len() == 0 && second.len() == 0);
+    }
+    let mut i: Int = 0;
+    while i < 8 { ring.push_back(i); i = i + 1; }
+    assert(ring.pop_front().unwrap() == 0);
+    ring.push_back(8);
+    {
+        let (first, second) = ring.as_slices();
+        assert(first.len() == 7 && first[0] == 1 && first[6] == 7);
+        assert(second.len() == 1 && second[0] == 8);
+    }
+    {
+        let run = ring.make_contiguous();
+        assert(run.len() == 8);
+        run[7] = 42;
+    }
+    assert(ring.pop_back().unwrap() == 42);
+}
+
+fn main() {}

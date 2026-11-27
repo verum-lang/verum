@@ -24975,6 +24975,11 @@ fn returned_register_kind(
                     return ReturnedReference::SlotAddress;
                 }
             }
+            verum_vbc::Instruction::MemExtended { sub_op: 0x0E | 0x0F, operands }
+                if operands.len() >= 3 && op_reg(operands, 0) == r =>
+            {
+                return ReturnedReference::SlotAddress;
+            }
             verum_vbc::Instruction::FfiExtended { sub_op, operands }
                 if *sub_op == FFI_SUB_STRUCT_FIELD_ADDR && operands.len() >= 3 =>
             {
@@ -27783,6 +27788,47 @@ fn lower_mem_extended<'ctx>(
                 .basic_value_or("List resize returned void")?;
             ctx.set_register(dst, result);
             ctx.mark_bool_register(dst);
+            Ok(())
+        }
+        0x0C..=0x0F | 0x50..=0x51 => {
+            let dst = read_reg_varlen(operands, &mut pos)?;
+            let owner = read_reg_varlen(operands, &mut pos)?;
+            let index = read_reg_varlen(operands, &mut pos)?;
+            let owner = as_ptr(ctx, ctx.get_register(owner)?, "deque_owner")?;
+            let index = as_i64(ctx, ctx.get_register(index)?, "deque_slot_index")?;
+            let locate = ctx.get_module().get_function("verum_deque_storage_slot")
+                .or_missing_fn("verum_deque_storage_slot")?;
+            let slice = matches!(sub_op, 0x50 | 0x51);
+            let projecting = slice || matches!(sub_op, 0x0E | 0x0F);
+            let word = ctx.types().i64_type();
+            let count = if slice {
+                let count_reg = read_reg_varlen(operands, &mut pos)?;
+                as_i64(ctx, ctx.get_register(count_reg)?, "deque_span_length")?
+            } else { word.const_int(1, false) };
+            let borrow = ctx.types().bool_type().const_int(projecting as u64, false);
+            let slot = ctx.builder().build_call(locate, &[owner.into(), index.into(), count.into(), borrow.into()], "deque_slot")
+                .or_llvm_err()?.basic_value_or("Deque storage address")?.into_pointer_value();
+            if slice {
+                let data = ctx.builder().build_ptr_to_int(slot, word, "deque_span").or_llvm_err()?;
+                let view = emit_slice_fatref_alloc(ctx, data, count, word.const_int(8, false), "deque_slice")?;
+                ctx.set_register(dst, view.into());
+                ctx.mark_slice_register(dst);
+            } else if projecting {
+                ctx.set_register(dst, slot.into());
+            } else if sub_op == MemSubOpcode::DequeStorageTake as u8 {
+                let value = ctx.builder().build_load(word, slot, "owned_value").or_llvm_err()?;
+                ctx.builder().build_store(slot, word.const_zero()).or_llvm_err()?;
+                ctx.set_register(dst, value);
+            } else {
+                let src = read_reg_varlen(operands, &mut pos)?;
+                let value = ctx.get_register(src)?;
+                if value_is_i128(&value) {
+                    return Err(LlvmLoweringError::internal("Deque storage needs a boxed native i128 value"));
+                }
+                let bits = native_slot_value(ctx, value, "owned_value")?;
+                ctx.builder().build_store(slot, bits).or_llvm_err()?;
+                ctx.set_register(dst, word.const_zero().into());
+            }
             Ok(())
         }
         0x08..=0x0A => {

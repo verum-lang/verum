@@ -9,7 +9,7 @@ mount core.term.event.{InputParser, Event, KeyCode};
 
 fn test_ascii_byte_yields_char_event() {
     let mut p = InputParser.new();
-    p.feed(&[0x41]);      // 'A'
+    p.feed(&[0x41 as Byte]);      // 'A'
     let ev = p.next_event();
     match ev {
         Some(Event.Key(ke)) => match ke.code() {
@@ -22,9 +22,9 @@ fn test_ascii_byte_yields_char_event() {
 
 fn test_esc_alone_returns_escape() {
     let mut p = InputParser.new();
-    p.feed(&[0x1B]);
+    p.feed(&[0x1B as Byte]);
     // Some parsers wait for more bytes; drain to flush.
-    p.feed(&[0x1B]);
+    p.feed(&[0x1B as Byte]);
     match p.next_event() {
         Maybe.Some(Event.Key(ke)) => assert(ke.is_escape()),
         _ => panic("expected Escape"),
@@ -33,7 +33,7 @@ fn test_esc_alone_returns_escape() {
 
 fn test_csi_up_arrow() {
     let mut p = InputParser.new();
-    p.feed(&[0x1B, 0x5B, 0x41]);          // ESC [ A
+    p.feed(&[0x1B as Byte, 0x5B as Byte, 0x41 as Byte]);          // ESC [ A
     let ev = p.next_event();
     match ev {
         Some(Event.Key(ke)) => match ke.code() {
@@ -46,7 +46,7 @@ fn test_csi_up_arrow() {
 
 fn test_csi_down_arrow() {
     let mut p = InputParser.new();
-    p.feed(&[0x1B, 0x5B, 0x42]);          // ESC [ B
+    p.feed(&[0x1B as Byte, 0x5B as Byte, 0x42 as Byte]);          // ESC [ B
     let ev = p.next_event();
     match ev {
         Some(Event.Key(ke)) => match ke.code() {
@@ -59,9 +59,9 @@ fn test_csi_down_arrow() {
 
 fn test_reset_clears_partial_buffer() {
     let mut p = InputParser.new();
-    p.feed(&[0x1B]);                      // partial CSI
+    p.feed(&[0x1B as Byte]);                      // partial CSI
     p.reset();
-    p.feed(&[0x41]);
+    p.feed(&[0x41 as Byte]);
     let ev = p.next_event();
     match ev {
         Some(Event.Key(ke)) => match ke.code() {
@@ -75,7 +75,7 @@ fn test_reset_clears_partial_buffer() {
 fn test_utf8_two_byte() {
     let mut p = InputParser.new();
     // "ñ" = U+00F1 → 0xC3 0xB1
-    p.feed(&[0xC3, 0xB1]);
+    p.feed(&[0xC3 as Byte, 0xB1 as Byte]);
     let ev = p.next_event();
     match ev {
         Some(Event.Key(ke)) => match ke.code() {
@@ -89,7 +89,7 @@ fn test_utf8_two_byte() {
 fn test_utf8_three_byte() {
     let mut p = InputParser.new();
     // "中" = U+4E2D → 0xE4 0xB8 0xAD
-    p.feed(&[0xE4, 0xB8, 0xAD]);
+    p.feed(&[0xE4 as Byte, 0xB8 as Byte, 0xAD as Byte]);
     let ev = p.next_event();
     match ev {
         Some(Event.Key(ke)) => match ke.code() {
