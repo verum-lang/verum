@@ -624,6 +624,14 @@ fn dynamic_list_push_retains_the_inserted_value_in_its_canonical_owner() {
             Some(text) => assert!(found.iter().any(|error| error.contains(text)), "{provider}: {caller}: {found:?}"),
         }
     }
+    let source = "type State is {public cursor:Int}; type Parser is {}; implement Parser { fn read(&self, state:&mut State)->&Int {&state.cursor} }";
+    let retain = "fn collect(parser:&Parser, state:&mut State, mut items:List<&Int>)->List<&Int> {let next=parser.read(state);items.push(next);state.cursor=state.cursor+1;items}";
+    let found = registered_errors([
+        ("core.collections.list", format!("{list} {method}").into()),
+        ("consumer", format!("mount core.collections.list.List; {source} {retain}").into()),
+    ]);
+    assert!(found.iter().any(|error| error.contains("cannot borrow `state`") && error.contains("conflicting borrows")), "{found:?}");
+
     let extension = "type Push<T> is protocol { fn push(&mut self, value:T); }; implement<T> Push<T> for List<T> { fn push(&mut self, value:T) { self.len = self.len + 1; } }";
     let found = registered_errors([
         ("core.collections.list", format!("{list} {extension}").into()),
