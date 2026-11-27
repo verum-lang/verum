@@ -1,11 +1,35 @@
 //! Declared element meaning, independent of the producer's physical storage.
 use super::VbcCodegen;
 use crate::encoding::encode_reg;
-use crate::instruction::{ArithSubOpcode, Instruction, Reg};
+use crate::instruction::{ArithSubOpcode, Instruction, MemSubOpcode, Reg};
 use crate::types::{TypeId, TypeKind, TypeRef};
 use verum_common::{List, Maybe, Set};
 
 impl VbcCodegen {
+    /// Packed allocations put a typed element format before the initial value.
+    pub(super) fn emit_packed_allocation(&mut self, dst: Reg, count: Reg, init: Reg, format: Maybe<u8>) {
+        let mut operands = List::with_capacity(7).into();
+        encode_reg(dst, &mut operands);
+        encode_reg(count, &mut operands);
+        let opcode = match format {
+            Some(format) => { operands.push(format); MemSubOpcode::NewTypedArray }
+            None => MemSubOpcode::NewByteArray,
+        };
+        encode_reg(init, &mut operands);
+        self.ctx.emit(Instruction::MemExtended { sub_op: opcode.to_byte(), operands });
+    }
+
+    /// Packed stores put the optional element width after all three registers.
+    pub(super) fn emit_packed_store(&mut self, array: Reg, index: Reg, value: Reg, width: Maybe<u8>) {
+        let mut operands = List::with_capacity(7).into();
+        for reg in [array, index, value] { encode_reg(reg, &mut operands); }
+        let opcode = match width {
+            Some(width) => { operands.push(width); MemSubOpcode::TypedArrayStore }
+            None => MemSubOpcode::ByteArrayStore,
+        };
+        self.ctx.emit(Instruction::MemExtended { sub_op: opcode.to_byte(), operands });
+    }
+
     /// Only canonical signed IDs, including exact declaration-owned aliases,
     /// authorize normalization. A same-spelled record or generic parameter does
     /// not become a signed scalar merely because its storage has that width.

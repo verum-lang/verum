@@ -405,12 +405,7 @@ impl VbcCodegen {
     /// Writes a register to bytecode using variable-length encoding.
     /// Registers 0-127 use 1 byte, registers 128+ use 2 bytes.
     pub(crate) fn write_reg(output: &mut Vec<u8>, reg: u16) {
-        if reg < 128 {
-            output.push(reg as u8);
-        } else {
-            output.push(0x80 | ((reg >> 8) as u8));
-            output.push((reg & 0xFF) as u8);
-        }
+        crate::encoding::encode_reg(Reg(reg), output);
     }
 
     /// Emit a variant-construction instruction, choosing between the
@@ -25722,11 +25717,7 @@ impl VbcCodegen {
                     r
                 }
             };
-            let operands = vec![result.0 as u8, count_reg.0 as u8, init_reg.0 as u8];
-            self.ctx.emit(Instruction::MemExtended {
-                sub_op: crate::instruction::MemSubOpcode::NewByteArray.to_byte(),
-                operands,
-            });
+            self.emit_packed_allocation(result, count_reg, init_reg, None);
             self.ctx.free_temp(init_reg);
 
             if let Some(elems) = list_elems {
@@ -25739,11 +25730,7 @@ impl VbcCodegen {
                         dst: idx_reg,
                         value: idx as i64,
                     });
-                    let store = vec![result.0 as u8, idx_reg.0 as u8, val_reg.0 as u8];
-                    self.ctx.emit(Instruction::MemExtended {
-                        sub_op: crate::instruction::MemSubOpcode::ByteArrayStore.to_byte(),
-                        operands: store,
-                    });
+                    self.emit_packed_store(result, idx_reg, val_reg, None);
                     self.ctx.free_temp(idx_reg);
                     self.ctx.free_temp(val_reg);
                 }
@@ -25773,16 +25760,7 @@ impl VbcCodegen {
             } else {
                 elem_size as u8
             };
-            let operands = vec![
-                result.0 as u8,
-                count_reg.0 as u8,
-                elem_size_byte,
-                init_reg.0 as u8,
-            ];
-            self.ctx.emit(Instruction::MemExtended {
-                sub_op: crate::instruction::MemSubOpcode::NewTypedArray.to_byte(),
-                operands,
-            });
+            self.emit_packed_allocation(result, count_reg, init_reg, Some(elem_size_byte));
             self.ctx.free_temp(init_reg);
 
             if let Some(elems) = list_elems {
@@ -25795,16 +25773,7 @@ impl VbcCodegen {
                         dst: idx_reg,
                         value: idx as i64,
                     });
-                    let store = vec![
-                        result.0 as u8,
-                        idx_reg.0 as u8,
-                        val_reg.0 as u8,
-                        elem_size as u8,
-                    ];
-                    self.ctx.emit(Instruction::MemExtended {
-                        sub_op: crate::instruction::MemSubOpcode::TypedArrayStore.to_byte(),
-                        operands: store,
-                    });
+                    self.emit_packed_store(result, idx_reg, val_reg, Some(elem_size as u8));
                     self.ctx.free_temp(idx_reg);
                     self.ctx.free_temp(val_reg);
                 }

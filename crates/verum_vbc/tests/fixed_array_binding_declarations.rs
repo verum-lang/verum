@@ -37,7 +37,10 @@ fn compile(body: &str) -> Result<VbcModule, verum_vbc::codegen::CodegenError> {
     codegen.finalize_module_from_state()
 }
 fn execute(body: &str) {
-    let module = compile(body).expect("declared fixed array must not become a List");
+    execute_image(compile(body).expect("declared fixed array must not become a List"));
+}
+
+fn execute_image(module: VbcModule) {
     let wire = verum_vbc::deserialize::deserialize_module(
         &verum_vbc::serialize::serialize_module(&module).unwrap(),
     )
@@ -89,4 +92,28 @@ fn a_foreign_same_leaf_record_does_not_gain_array_projection() {
         error.to_string().contains("no declared read projection"),
         "{error}"
     );
+}
+
+#[test]
+fn packed_array_operands_keep_wide_registers_for_literals_and_repeats() {
+    let mut source = verum_common::Text::from("fn main() -> Int {");
+    for index in 0..270 {
+        use std::fmt::Write;
+        writeln!(source, "let value_{index} = {index};").unwrap();
+    }
+    source.push_str("
+        let mut a: [Byte; 3] = [1_u8, 2_u8, 3_u8];
+        let mut b: [Byte; 3] = [9_u8; 3];
+        let mut c: [Int32; 2] = [17_i32, 4_i32];
+        let mut d: [Int32; 2] = [21_i32; 2];
+        a[0] = 11_u8;
+        b[2] = a[1];
+        c[1] = d[1];
+        (a[0] as Int) + (b[2] as Int) + (c[0] as Int) + (c[1] as Int) + (d[0] as Int) + value_1
+    }");
+    let module = compile(&source).unwrap();
+    let entry = module.find_function_by_name("app.main").unwrap();
+    let descriptor = module.functions.iter().find(|f| f.id == entry).unwrap();
+    assert!(descriptor.register_count > 256);
+    execute_image(module);
 }

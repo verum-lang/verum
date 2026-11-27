@@ -1049,16 +1049,7 @@ impl VbcCodegen {
             } else {
                 elem_size as u8
             };
-            let operands = vec![
-                result.0 as u8,
-                count_reg.0 as u8,
-                elem_size_byte,
-                init_reg.0 as u8,
-            ];
-            self.ctx.emit(Instruction::MemExtended {
-                sub_op: 0x34, // MemSubOpcode::NewTypedArray
-                operands,
-            });
+            self.emit_packed_allocation(result, count_reg, init_reg, Some(elem_size_byte));
 
             self.ctx.free_temp(count_reg);
             self.ctx.free_temp(init_reg);
@@ -1083,16 +1074,7 @@ impl VbcCodegen {
                     // bytes (TYPED-ARRAY-REPR-1 #27). Replaces the old
                     // TypedArrayElementAddr + DerefMutRaw, which stored the FULL
                     // NaN-boxed Value bits so the raw load read back garbage.
-                    let store_operands = vec![
-                        result.0 as u8,
-                        idx_reg.0 as u8,
-                        val_reg.0 as u8,
-                        elem_size as u8,
-                    ];
-                    self.ctx.emit(Instruction::MemExtended {
-                        sub_op: 0x37, // MemSubOpcode::TypedArrayStore
-                        operands: store_operands,
-                    });
+                    self.emit_packed_store(result, idx_reg, val_reg, Some(elem_size as u8));
 
                     self.ctx.free_temp(idx_reg);
                     self.ctx.free_temp(val_reg);
@@ -1112,16 +1094,7 @@ impl VbcCodegen {
 
                         // TypedArrayStore: arr[idx] = val, UNBOXED (TYPED-ARRAY-
                         // REPR-1 #27) — see the literal fast path above.
-                        let store_operands = vec![
-                            result.0 as u8,
-                            idx_reg.0 as u8,
-                            val_reg.0 as u8,
-                            elem_size as u8,
-                        ];
-                        self.ctx.emit(Instruction::MemExtended {
-                            sub_op: 0x37, // MemSubOpcode::TypedArrayStore
-                            operands: store_operands,
-                        });
+                        self.emit_packed_store(result, idx_reg, val_reg, Some(elem_size as u8));
 
                         self.ctx.free_temp(idx_reg);
                         self.ctx.free_temp(val_reg);
@@ -1145,16 +1118,7 @@ impl VbcCodegen {
                             dst: idx_reg,
                             value: idx as i64,
                         });
-                        let store_operands = vec![
-                            result.0 as u8,
-                            idx_reg.0 as u8,
-                            val_reg.0 as u8,
-                            elem_size as u8,
-                        ];
-                        self.ctx.emit(Instruction::MemExtended {
-                            sub_op: 0x37, // MemSubOpcode::TypedArrayStore
-                            operands: store_operands,
-                        });
+                        self.emit_packed_store(result, idx_reg, val_reg, Some(elem_size as u8));
                         self.ctx.free_temp(idx_reg);
                     }
                     self.ctx.free_temp(val_reg);
