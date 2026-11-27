@@ -5187,6 +5187,15 @@ impl VbcCodegen {
                 UnOp::Ref => Some("deref"),
                 _ => None,
             };
+            if method.is_some()
+                && let Some(owner) = self.projection_operand_declaration(ptr_expr)
+                && let Some(borrow) = self.heap_borrow_projection(&owner, op == UnOp::RefMut)
+            {
+                let receiver = self.compile_expr(ptr_expr)?.or_internal("missing Heap borrow receiver")?;
+                let reference = self.emit_projection_method(receiver, borrow, None);
+                self.ctx.free_temp(receiver);
+                return Ok(Some(reference));
+            }
             if let Some(method) = method
                 && let Some(owner) = self.infer_expr_type_name(ptr_expr)
                 && !owner.starts_with(['&', '*'])
@@ -6192,6 +6201,15 @@ impl VbcCodegen {
                     Self::narrow_scalar_load(dest, inner_reg, id, native_pointer))
                 {
                     self.ctx.emit(load);
+                } else if let Some(borrow) = reference.as_ref().and_then(|ty| self.heap_borrow_projection(ty, false)) {
+                    let scalar = reference.as_ref().and_then(|ty| match ty {
+                        crate::types::TypeRef::Instantiated { args, .. } => args.first()?.base_type_id(),
+                        _ => None,
+                    });
+                    let reference = self.emit_projection_method(inner_reg, borrow, None);
+                    self.ctx.emit(scalar.and_then(|id| Self::narrow_scalar_load(dest, reference, id, false))
+                        .unwrap_or(Instruction::Deref { dst: dest, ref_reg: reference }));
+                    self.ctx.free_temp(reference);
                 } else if let Some(deref_qualified) = inner_type
                     .as_ref()
                     .and_then(|ty_name| {
@@ -13879,7 +13897,14 @@ impl VbcCodegen {
             self.ctx.free_temp(inner);
 
             let result = self.ctx.alloc_temp();
-            let method_id = self.call_method_id(Some(carrier.as_str()), "new");
+            let heap_constructor = selected.as_ref()
+                .filter(|_| carrier == WKT::Heap)
+                .and_then(|function| self.declared_callable_name(function.id));
+            let method_id = if let Some(name) = heap_constructor {
+                self.intern_string(name.as_str())
+            } else {
+                self.call_method_id(Some(carrier.as_str()), "new")
+            };
             // Preserve builtin dispatch while also supplying the declaration
             // witness if CallM selects the generic source constructor body.
             if let Some(type_args) = witnesses {
@@ -23777,6 +23802,17 @@ impl VbcCodegen {
         let mut current_reg = base_reg;
         let mut current_type = chain.first().cloned().unwrap_or(base_type);
         for target in chain.iter().skip(1) {
+            if let Some(borrow) = self.semantic_type_in_current_scope(&current_type)
+                .and_then(|ty| self.heap_borrow_projection(&ty, false))
+            {
+                let reference = self.emit_projection_method(current_reg, borrow, None);
+                if current_reg != base_reg { self.ctx.free_temp(current_reg); }
+                current_reg = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::Deref { dst: current_reg, ref_reg: reference });
+                self.ctx.free_temp(reference);
+                current_type = target.clone();
+                continue;
+            }
             let base = Self::strip_generic_args(&current_type);
             let method = if self.nominal_type_id(base).and_then(|id| self.declared_runtime_carrier(id))
                 .is_some_and(|kind| kind.is_smart_pointer()) {
@@ -32904,6 +32940,9 @@ impl VbcCodegen {
         dst: Reg, address: Reg, pointee: crate::types::TypeId, native_pointer: bool,
     ) -> Option<Instruction> {
         use crate::instruction::MemSubOpcode;
+        if !native_pointer && matches!(pointee, crate::types::TypeId::I128 | crate::types::TypeId::U128) {
+            return Some(Instruction::DerefWideRef { dst, reference: address });
+        }
         let (storage, width) = crate::module::CType::narrow_scalar(pointee)?;
         let mut operands = Vec::with_capacity(5);
         Self::write_reg(&mut operands, dst.0);
@@ -35451,8 +35490,8 @@ impl VbcCodegen {
             .and_then(|name| self.ctx.lookup_function(name))
             .filter(|function| function.intrinsic_name.as_deref() == Some(intrinsic_info.intrinsic.name))
             .and_then(|function| function.return_type.clone());
-        if !self.emit_pointer_arithmetic_intrinsic(
-            &intrinsic_info.intrinsic.strategy, args.get(1), &arg_regs, dest,
+        if !self.emit_typed_pointer_intrinsic(
+            &intrinsic_info.intrinsic.strategy, &args.as_slice()[1..], &arg_regs, dest,
         )? {
             self.emit_intrinsic_instructions(&intrinsic_info, &arg_regs, dest, ptr_elem_stride, declared_return.as_ref())?;
         }
@@ -35599,8 +35638,8 @@ impl VbcCodegen {
             .and_then(|name| self.ctx.lookup_function(name))
             .filter(|function| function.intrinsic_name.as_deref() == Some(intrinsic_info.intrinsic.name))
             .and_then(|function| function.return_type.clone());
-        if !self.emit_pointer_arithmetic_intrinsic(
-            &intrinsic_info.intrinsic.strategy, args.get(1), &arg_regs, dest,
+        if !self.emit_typed_pointer_intrinsic(
+            &intrinsic_info.intrinsic.strategy, &args.as_slice()[1..], &arg_regs, dest,
         )? {
             self.emit_intrinsic_instructions(&intrinsic_info, &arg_regs, dest, ptr_elem_stride, declared_return.as_ref())?;
         }
@@ -35997,8 +36036,8 @@ impl VbcCodegen {
         // so it drives the ptr-arithmetic stride selection.
         let ptr_elem_stride =
             self.ptr_intrinsic_byte_stride(info.intrinsic.name, args.first());
-        if !self.emit_pointer_arithmetic_intrinsic(
-            &info.intrinsic.strategy, args.first(), &arg_regs, dest,
+        if !self.emit_typed_pointer_intrinsic(
+            &info.intrinsic.strategy, args, &arg_regs, dest,
         )? {
             self.emit_intrinsic_instructions(info, &arg_regs, dest, ptr_elem_stride, declared_return)?;
         }
@@ -36045,14 +36084,55 @@ impl VbcCodegen {
     /// The selected registry operation owns arithmetic; the source pointer
     /// declaration owns element layout. Generic layouts remain VBC operands
     /// until the ordinary monomorphization/frame substitution supplies T.
-    fn emit_pointer_arithmetic_intrinsic(
+    fn emit_typed_pointer_intrinsic(
         &mut self,
         strategy: &crate::intrinsics::registry::CodegenStrategy,
-        pointer: Option<&Expr>,
+        operands: &[Expr],
         args: &[Reg],
         dest: Reg,
     ) -> CodegenResult<bool> {
+        use crate::instruction::HeapSlotAction;
         use crate::intrinsics::registry::{CodegenStrategy, InlineSequenceId};
+        use crate::types::{Mutability, TypeRef};
+        let pointer = operands.first();
+        if let CodegenStrategy::InlineSequence(
+            operation @ (InlineSequenceId::HeapSlotInit | InlineSequenceId::HeapSlotTake
+                | InlineSequenceId::HeapSlotBorrow { .. }),
+        ) = strategy {
+            if !self.ctx.is_unsafe() {
+                return Err(CodegenError::new(CodegenErrorKind::InvalidSourceSignature(
+                    "Heap slot access requires unsafe ownership of the allocation".into(),
+                )));
+            }
+            let (address, action) = match (*operation, args) {
+                (InlineSequenceId::HeapSlotInit, [address, value]) => (*address, HeapSlotAction::Init(*value)),
+                (InlineSequenceId::HeapSlotTake, [address]) => (*address, HeapSlotAction::Take),
+                (InlineSequenceId::HeapSlotBorrow { mutable }, [address]) => (*address, HeapSlotAction::Borrow { mutable }),
+                _ => return Err(CodegenError::internal("invalid Heap slot operands")),
+            };
+            let declaration = pointer.and_then(|pointer| self.projection_operand_declaration(pointer));
+            let Some(TypeRef::Reference { inner, mutability, tier: CbgrTier::Tier2 }) = declaration else {
+                return Err(CodegenError::new(CodegenErrorKind::TypeInference(
+                    "Heap slot access requires its raw pointee declaration".into(),
+                )));
+            };
+            if mutability != Mutability::Mutable && action != (HeapSlotAction::Borrow { mutable: false }) {
+                return Err(CodegenError::new(CodegenErrorKind::TypeInference(
+                    "owning Heap storage requires its mutable raw pointee declaration".into(),
+                )));
+            }
+            if let Some(payload) = operands.get(1) {
+                let declared = self.source_expression_declaration(payload, Some(&inner), 0)
+                    .and_then(|ty| self.expand_declared_alias(ty));
+                if declared != self.expand_declared_alias((*inner).clone()) || declared.is_none() {
+                    return Err(CodegenError::with_span(CodegenErrorKind::InvalidSourceSignature(
+                        "Heap slot initializer must have the declared raw pointee type".into(),
+                    ), payload.span));
+                }
+            }
+            self.ctx.emit(Instruction::HeapSlot { dst: dest, address, action, type_ref: *inner });
+            return Ok(true);
+        }
         let subtract = match strategy {
             CodegenStrategy::InlineSequence(InlineSequenceId::PtrOffset) => false,
             CodegenStrategy::InlineSequence(InlineSequenceId::PtrSubSeq) => true,
@@ -39744,6 +39824,8 @@ impl VbcCodegen {
             // literal producing a struct whose `ptr` field pointed to a
             // freshly-allocated "Clone" of the raw buffer instead of the
             // buffer itself.
+            InlineSequenceId::HeapSlotInit | InlineSequenceId::HeapSlotTake | InlineSequenceId::HeapSlotBorrow { .. } =>
+                return Err(CodegenError::internal("Heap slot requires its declared pointee")),
             InlineSequenceId::DequeStorageTake
             | InlineSequenceId::DequeStorageWrite
             | InlineSequenceId::DequeStorageRef

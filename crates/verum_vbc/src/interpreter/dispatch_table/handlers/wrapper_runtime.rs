@@ -123,9 +123,6 @@ pub(super) fn borrow_heap_cell(
     mutable: bool,
 ) -> InterpreterResult<Option<Value>> {
     use super::cbgr_helpers::resolve_receiver_place;
-    use crate::interpreter::InterpreterError;
-    use verum_common::layout::{ALLOCATION_HEADER_CAPABILITIES_OFFSET, ALLOCATION_HEADER_SIZE};
-
     let place = resolve_receiver_place(state, receiver)?;
     let cell = place.value;
     if !is_heap_cell(state, cell) {
@@ -133,11 +130,22 @@ pub(super) fn borrow_heap_cell(
     }
     validate_reference(state, cell)?;
     let address = cell.as_ptr::<u8>() as usize;
+    borrow_live_heap_slot(state, address, std::mem::size_of::<Value>(), place.capabilities, mutable).map(Some)
+}
+
+/// Both a bootstrap cell and a declared Heap borrow their live allocation's
+/// Value slot. The allocation header limits the permissions of the new ticket.
+pub(super) fn borrow_live_heap_slot(
+    state: &mut InterpreterState, address: usize, len: usize,
+    inherited: Capabilities, mutable: bool,
+) -> InterpreterResult<Value> {
+    use crate::interpreter::InterpreterError;
+    use verum_common::layout::{ALLOCATION_HEADER_CAPABILITIES_OFFSET, ALLOCATION_HEADER_SIZE};
     let header = address - ALLOCATION_HEADER_SIZE as usize;
-    // SAFETY: the live Heap stamp and CBGR validation establish this header.
+    // SAFETY: the caller verified that address is the base of a live CBGR allocation.
     let caps =
         unsafe { ((header + ALLOCATION_HEADER_CAPABILITIES_OFFSET as usize) as *const u16).read() };
-    let available = place.capabilities.intersect(&Capabilities(caps));
+    let available = inherited.intersect(&Capabilities(caps));
     let requested = if mutable {
         Capabilities::READ | Capabilities::WRITE
     } else {
@@ -149,15 +157,7 @@ pub(super) fn borrow_heap_cell(
             actual: u64::from(available.0),
         });
     }
-    state
-        .heap
-        .project_raw_slot(
-            address,
-            std::mem::size_of::<Value>(),
-            0,
-            Capabilities(requested),
-        )
-        .map(Some)
+    state.heap.project_raw_slot(address, len, 0, Capabilities(requested))
 }
 
 /// Resolve the owned payload only when both the declared plan and the live

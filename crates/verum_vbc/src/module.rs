@@ -1498,9 +1498,9 @@ impl VbcModule {
         self.try_bound_instance_method(receiver, method, argc).ok().flatten()
     }
 
-    /// A call witness supplies method arguments, but has no receiver identity.
-    /// Only an exact, qualified source declaration can name the instance body.
-    pub fn witnessed_instance_method(
+    /// A call witness identifies generic arguments. The complete source selector
+    /// and its declared receiver convention identify the instance or static body.
+    pub fn witnessed_source_method(
         &self,
         method: StringId,
         argc: u8,
@@ -1510,15 +1510,31 @@ impl VbcModule {
             return Ok(None);
         };
         let mut declarations = self.functions_named(name).filter(|(_, function)| {
-            function.has_source_body
-                && function.source_receiver.is_some()
-                && function.source_signature.is_some()
-                && function.params.len() == usize::from(argc) + 1
-                && self.get_string(function.params[0].name) == Some("self")
+            if !function.has_source_body || function.source_receiver.is_none()
+                || function.source_signature.is_none()
+            {
+                return false;
+            }
+            let takes_self = function.params.first()
+                .is_some_and(|p| self.get_string(p.name) == Some("self"));
+            if !takes_self {
+                // Runtime short selectors can denote an intrinsic carrier.
+                // Only a selector qualified by this declaration's own module
+                // selects a static source body.
+                let Some(owner) = function.origin_module.and_then(|id| self.get_string(id)) else {
+                    return false;
+                };
+                if !function.has_definition() || owner.is_empty()
+                    || !name.strip_prefix(owner).is_some_and(|rest| rest.starts_with('.'))
+                {
+                    return false;
+                }
+            }
+            function.params.len() == usize::from(argc) + usize::from(takes_self)
         });
         let Some((id, function)) = declarations.next() else { return Ok(None) };
         if declarations.next().is_some() {
-            return Err(format!("call witness for `{name}` has competing instance declarations"));
+            return Err(format!("call witness for `{name}` has competing source method declarations"));
         }
         if function.type_params.is_empty() {
             return Ok(None);

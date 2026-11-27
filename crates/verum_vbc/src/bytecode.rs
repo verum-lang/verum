@@ -54,7 +54,7 @@ use crate::encoding::{
 use crate::error::{VbcError, VbcResult};
 use crate::instruction::{
     BinaryFloatOp, BinaryGenericOp, BinaryIntOp, BitwiseOp, CmpSubOpcode, CompareOp,
-    FloatToIntMode, GpuSubOpcode, GradMode, Instruction, Opcode, Reg, TensorBinaryOp,
+    FloatToIntMode, GpuSubOpcode, GradMode, HeapSlotAction, Instruction, MemSubOpcode, Opcode, Reg, TensorBinaryOp,
     TensorCumulativeOp, TensorDType, TensorExtSubOpcode, TensorPoolOp, TensorReduceOp,
     TensorSubOpcode, TensorUnaryOp, UnaryFloatOp, UnaryIntOp,
 };
@@ -3002,6 +3002,32 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             encode_varint(operands.len() as u64, output);
             output.extend_from_slice(operands);
         }
+        Instruction::DerefWideRef { dst, reference } => {
+            let mut operands = Vec::new();
+            encode_reg(*dst, &mut operands);
+            encode_reg(*reference, &mut operands);
+            output.push(Opcode::MemExtended.to_byte());
+            output.push(MemSubOpcode::DerefWideRef.to_byte());
+            encode_varint(operands.len() as u64, output);
+            output.extend_from_slice(&operands);
+        }
+        Instruction::HeapSlot { dst, address, action, type_ref } => {
+            let operation = match action {
+                HeapSlotAction::Init(_) => MemSubOpcode::HeapSlotInit,
+                HeapSlotAction::Take => MemSubOpcode::HeapSlotTake,
+                HeapSlotAction::Borrow { mutable: false } => MemSubOpcode::HeapSlotBorrow,
+                HeapSlotAction::Borrow { mutable: true } => MemSubOpcode::HeapSlotBorrowMut,
+            };
+            let mut operands = Vec::new();
+            encode_reg(*dst, &mut operands);
+            encode_reg(*address, &mut operands);
+            if let HeapSlotAction::Init(value) = action { encode_reg(*value, &mut operands); }
+            encode_type_ref(type_ref, &mut operands);
+            output.push(Opcode::MemExtended.to_byte());
+            output.push(operation.to_byte());
+            encode_varint(operands.len() as u64, output);
+            output.extend_from_slice(&operands);
+        }
         Instruction::MemExtended { sub_op, operands } => {
             output.push(Opcode::MemExtended.to_byte());
             output.push(*sub_op);
@@ -5265,7 +5291,33 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
         Opcode::MemExtended => {
             let sub_op = decode_u8(data, offset)?;
             let operands = decode_bytes(data, offset)?;
-            Ok(Instruction::MemExtended { sub_op, operands })
+            if sub_op == MemSubOpcode::DerefWideRef.to_byte() {
+                let mut cursor = 0;
+                let dst = decode_reg(&operands, &mut cursor)?;
+                let reference = decode_reg(&operands, &mut cursor)?;
+                if cursor != operands.len() {
+                    return Err(VbcError::InvalidInstructionEncoding { offset: *offset, reason: "trailing wide reference operands".into() });
+                }
+                Ok(Instruction::DerefWideRef { dst, reference })
+            } else if let Some(operation @ (MemSubOpcode::HeapSlotInit | MemSubOpcode::HeapSlotTake
+                | MemSubOpcode::HeapSlotBorrow | MemSubOpcode::HeapSlotBorrowMut)) = MemSubOpcode::from_byte(sub_op)
+            {
+                let mut cursor = 0;
+                let dst = decode_reg(&operands, &mut cursor)?;
+                let address = decode_reg(&operands, &mut cursor)?;
+                let action = match operation {
+                    MemSubOpcode::HeapSlotInit => HeapSlotAction::Init(decode_reg(&operands, &mut cursor)?),
+                    MemSubOpcode::HeapSlotTake => HeapSlotAction::Take,
+                    other => HeapSlotAction::Borrow { mutable: other == MemSubOpcode::HeapSlotBorrowMut },
+                };
+                let type_ref = decode_type_ref(&operands, &mut cursor)?;
+                if cursor != operands.len() {
+                    return Err(VbcError::InvalidInstructionEncoding { offset: *offset, reason: "trailing Heap slot operands".into() });
+                }
+                Ok(Instruction::HeapSlot { dst, address, action, type_ref })
+            } else {
+                Ok(Instruction::MemExtended { sub_op, operands })
+            }
         }
 
         // ML carrier (0xFD). Codegen emits it as `Instruction::Raw` rather than

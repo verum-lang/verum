@@ -221,7 +221,7 @@ pub(super) fn bound_method_call(
                 .filter(|(_, args)| !args.is_empty()))
         }
         Instruction::SetCallWitness { type_args } => {
-            module.witnessed_instance_method(method, args.count, type_args)
+            module.witnessed_source_method(method, args.count, type_args)
         }
         _ => Ok(None),
     }

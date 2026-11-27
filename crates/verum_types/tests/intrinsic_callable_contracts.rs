@@ -7,6 +7,33 @@ use verum_fast_parser::Parser;
 use verum_types::{Type, TypeChecker};
 
 #[test]
+fn heap_storage_uses_the_declared_raw_pointee_for_reads_and_writes() {
+    let source = r#"
+        fn roundtrip<T>(p: &unsafe mut T, value: T) -> T {
+            unsafe {
+                @intrinsic("heap_slot_init", p, value);
+                @intrinsic("heap_slot_take", p)
+            }
+        }
+        fn borrowed<T>(p: &unsafe T) -> &T { unsafe { @intrinsic("heap_slot_ref", p) } }
+        fn writable<T>(p: &unsafe mut T) -> &mut T { unsafe { @intrinsic("heap_slot_mut", p) } }
+    "#;
+    let accepted = errors(source);
+    assert!(accepted.is_empty(), "{accepted:?}");
+    for (source, reason) in [
+        (r#"fn read(p: &unsafe mut Int) -> Int { @intrinsic("heap_slot_take", p) }"#, "requires unsafe"),
+        (r#"fn read(p: &unsafe Int) -> Int { unsafe { @intrinsic("heap_slot_take", p) } }"#, "mutable raw pointer"),
+        (r#"fn read(p: &mut Int) -> Int { unsafe { @intrinsic("heap_slot_take", p) } }"#, "mutable raw pointer"),
+        (r#"fn write(p: &unsafe Int) { unsafe { @intrinsic("heap_slot_mut", p); } }"#, "mutable raw pointer"),
+        (r#"fn read(p: &unsafe mut Int) -> Text { unsafe { @intrinsic("heap_slot_take", p) } }"#, "Mismatch"),
+        (r#"fn store(p: &unsafe mut Int) { unsafe { @intrinsic("heap_slot_init", p, true); } }"#, "expected 'Int', found 'Bool'"),
+    ] {
+        let rejected = errors(source);
+        assert!(rejected.iter().any(|error| error.contains(reason)), "{source}: {rejected:?}");
+    }
+}
+
+#[test]
 fn a_checked_intrinsic_body_cannot_invent_purity() {
     for source in [
         "pure fn probe(number: Int) -> Int { @intrinsic(\"syscall0\", number) }",

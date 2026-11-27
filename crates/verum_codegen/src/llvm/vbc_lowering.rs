@@ -2929,6 +2929,11 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                         wide_int_regs.insert(dst.0);
                     }
                 }
+                Instruction::DerefWideRef { dst, .. } => { wide_int_regs.insert(dst.0); }
+                Instruction::HeapSlot { dst, action: verum_vbc::instruction::HeapSlotAction::Take, type_ref, .. } if matches!(
+                    verum_vbc::type_layout::numeric_representation_with(type_ref, |id| vbc_module.get_type(id)),
+                    Some(verum_vbc::type_layout::NumericRepresentation::Integer { bits: 128, .. })
+                ) => { wide_int_regs.insert(dst.0); }
                 Instruction::Mov { dst, src } | Instruction::UnaryI { dst, src, .. } => {
                     copies.entry(src.0).or_default().push(dst.0);
                 }

@@ -623,8 +623,9 @@ fn enter_resolved_method(
         .ok_or(InterpreterError::FunctionNotFound(target))?;
     let reg_count = function.register_count;
     let first = function.params.first();
-    let takes_self = first.and_then(|p| state.module.get_string(p.name))
-        .is_none_or(|name| name == "self");
+    let takes_self = first.is_some_and(|p| {
+        state.module.get_string(p.name).is_none_or(|name| name == "self")
+    });
     let borrows_mut = first.is_some_and(|p| state.module.get_string(p.name) == Some("self")
         && matches!(p.type_ref, crate::types::TypeRef::Reference {
             mutability: crate::types::Mutability::Mutable, ..
@@ -682,6 +683,19 @@ fn execute_method_call(
     // unrelated later calls by construction.
     let mut call_witness_sidecar: Option<Box<[crate::types::TypeRef]>> =
         state.pending_call_witness.take();
+    if let Some(witness) = call_witness_sidecar.as_deref()
+        && let Some((target, arguments)) = state.module
+            .witnessed_source_method(StringId(method_id), args.count, witness)
+            .map_err(|message| InterpreterError::Panic { message })?
+        && let Some(function) = state.module.get_function(target)
+        && function.params.first().is_none_or(|p| state.module.get_string(p.name) != Some("self"))
+    {
+        // The bytecode selected a complete static source body. Its receiver
+        // identifies the type and contributes no runtime argument.
+        return enter_resolved_method(
+            state, target, receiver, receiver_reg, args, dst, Some(arguments.into_boxed_slice()),
+        );
+    }
     let list_get_element = state.module.get_string(StringId(method_id))
         .filter(|name| name.rsplit('.').next() == Some("get"))
         .and_then(|_| {

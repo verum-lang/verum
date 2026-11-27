@@ -2526,6 +2526,46 @@ fn lower_instruction_impl<'ctx>(
 
         Instruction::RetainCopy { dst, src, counter, type_ref } => retain_copy::lower(ctx, *dst, *src, *counter, type_ref),
         Instruction::CloneTyped { dst, src, type_ref } => copy_typed::lower(ctx, *dst, *src, type_ref),
+        Instruction::DerefWideRef { dst, reference } => {
+            let pointer = as_ptr(ctx, ctx.get_register(reference.0)?, "wide_reference")?;
+            let value = ctx.builder().build_load(ctx.llvm_context().i128_type(), pointer, "wide_referent").or_llvm_err()?;
+            ctx.set_register(dst.0, value);
+            Ok(())
+        }
+        Instruction::HeapSlot { dst, address, action, type_ref } => {
+            use verum_vbc::instruction::HeapSlotAction;
+            if matches!(action, HeapSlotAction::Borrow { .. }) {
+                let value = ctx.get_register(address.0)?;
+                ctx.set_register(dst.0, value);
+                ctx.record_reference_site(super::native_call::ReferenceSiteKind::SlotOutput(dst.0));
+                return Ok(());
+            }
+            let module = ctx.vbc_module().or_internal("Heap slot requires its declaring module")?;
+            if type_ref.is_generic() {
+                emit_runtime_abort(ctx, "unresolved Heap payload declaration", "heap_slot_unresolved")?;
+                ctx.builder().build_unreachable().or_llvm_err()?;
+                let dead = ctx.llvm_context().append_basic_block(ctx.function(), "heap_slot_dead");
+                ctx.builder().position_at_end(dead);
+                ctx.set_register(dst.0, ctx.types().i64_type().get_undef().into());
+                return Ok(());
+            }
+            let wide = matches!(verum_vbc::type_layout::numeric_representation_with(type_ref, |id| module.get_type(id)),
+                Some(verum_vbc::type_layout::NumericRepresentation::Integer { bits: 128, .. }));
+            let word = if wide { ctx.llvm_context().i128_type() } else { ctx.types().i64_type() };
+            let pointer = as_ptr(ctx, ctx.get_register(address.0)?, "heap_slot")?;
+            let result = if let HeapSlotAction::Init(source) = action {
+                let value = ctx.get_register(source.0)?;
+                let value = if wide { coerce_value(ctx, value, word.into(), "heap_wide")? } else { native_slot_value(ctx, value, "heap_value")?.into() };
+                ctx.builder().build_store(pointer, value).or_llvm_err()?;
+                ctx.types().i64_type().const_zero().into()
+            } else {
+                let value = ctx.builder().build_load(word, pointer, "heap_value").or_llvm_err()?;
+                ctx.builder().build_store(pointer, word.const_zero()).or_llvm_err()?;
+                value
+            };
+            ctx.set_register(dst.0, result);
+            Ok(())
+        }
         Instruction::DropTyped { src, type_ref } => drop_typed::lower(ctx, *src, type_ref),
 
         Instruction::TypeResource { dst, type_ref } => {
@@ -13297,59 +13337,6 @@ fn lower_call<'ctx>(
         return Ok(());
     }
 
-    // ============================================================
-    // **HEAP-INTORAW-1 (AOT `Call`-form twin)** — statically-resolved
-    // calls to the transparent-Heap raw round-trip.  Under the Tier-1
-    // model `Heap<T>` IS the inner value (see the `Heap.new`
-    // pass-through in `lower_call_method`), so `into_raw`/`from_raw`
-    // are the identity on the argument and `is_valid` is statically
-    // TRUE.  Letting these reach the COMPILED `core/base/memory.vr`
-    // bodies misreads the transparent value as a 3-field record
-    // (`self.ptr` on an Int → garbage).  Mirrors the CallM-side twin
-    // and the interpreter's `wrapper_runtime.rs`.
-    if (func_name == "Heap.into_raw" || func_name == "Heap.from_raw")
-        && args.count == 1
-    {
-        let v = ctx.get_register(args.start.0)?;
-        ctx.set_register(dst.0, v);
-        ctx.mark_pass_through_ref(dst.0);
-        if let Some(tn) = ctx
-            .get_obj_register_type(args.start.0)
-            .map(|s| s.to_string())
-        {
-            ctx.set_obj_register_type(dst.0, tn);
-        }
-        return Ok(());
-    }
-    // **HEAP-ACCESSORS-TRANSPARENT-1 (AOT `Call`-form twin, T1489)** —
-    // the accessors that hand back the inner value are the identity
-    // under the transparent model; see the CallM-side block for the
-    // measurement. Here `self` is argument 0.
-    if matches!(
-        func_name,
-        "Heap.as_ref" | "Heap.deref" | "Heap.into_inner"
-    ) && args.count == 1
-    {
-        let v = ctx.get_register(args.start.0)?;
-        ctx.set_register(dst.0, v);
-        if func_name != "Heap.into_inner" {
-            ctx.mark_pass_through_ref(dst.0);
-        }
-        if let Some(tn) = ctx
-            .get_obj_register_type(args.start.0)
-            .map(|s| s.to_string())
-        {
-            ctx.set_obj_register_type(dst.0, tn);
-        }
-        return Ok(());
-    }
-    if func_name == "Heap.is_valid" && args.count == 1 {
-        let i64_type = ctx.types().i64_type();
-        ctx.set_register(dst.0, i64_type.const_int(1, false).into());
-        ctx.mark_bool_register(dst.0);
-        return Ok(());
-    }
-
     // The unchecked factory copies UTF-8 bytes validated by its caller.
     // Checked and lossy decoding execute their Verum bodies on every target.
     if func_name == "Text.from_utf8_unchecked" && args.count == 1 {
@@ -15121,7 +15108,7 @@ fn lower_call_method<'ctx>(
         }
         vbc_mod.try_bound_instance_method(&declaration, StringId(method_id), args.count)
     } else if let Some(witness) = &call_witness {
-        vbc_mod.witnessed_instance_method(StringId(method_id), args.count, witness)
+        vbc_mod.witnessed_source_method(StringId(method_id), args.count, witness)
     } else {
         Ok(None)
     }.map_err(LlvmLoweringError::unsupported)?;
@@ -15131,6 +15118,13 @@ fn lower_call_method<'ctx>(
             .ok_or_else(|| LlvmLoweringError::unsupported(format!(
                 "missing exact bound method specialization for {:?} with {arguments:?}", function
             )))?;
+        if target.params.len() == usize::from(args.count) {
+            let name = vbc_mod.get_string(target.name).or_internal("static method has no name")?;
+            return lower_selected_method(
+                ctx, dst, receiver, args, name, Some(target),
+                Some(target.return_type.clone()), Some(&arguments), false,
+            );
+        }
         method_id = target.name.0;
         call_witness = Some(arguments);
     }
@@ -15887,155 +15881,16 @@ fn lower_call_method<'ctx>(
         return Ok(());
     }
 
-    // Intercept Heap.new(inner) → transparent pass-through.
-    // VBC compiler treats Heap<T> as transparent: `node.keys` compiles to
-    // GetF(node, 0) without a Deref. So Heap.new must NOT add indirection.
-    // Structs are already heap-allocated via NewG; Heap.new just passes through.
-    // Also handle "dyn:Heap.new" prefix from compiled modules where
-    // VBC codegen adds dyn: for generic-context constructor calls.
-    let is_heap_new = bare_method_early == "new"
-        && args.count == 1
-        && (receiver_type_name.as_deref() == Some(WKT::Heap.as_str())
-            || method_name_str == "dyn:Heap.new"
-            || method_name_str == "Heap.new");
-    if is_heap_new {
-        // Pass through inner value — Heap<T> is transparent in VBC.
-        let inner_val = ctx.get_register(args.start.0)?;
-        ctx.set_register(dst.0, inner_val);
-        // Mark as pass-through so Deref(*h) also passes through.
-        // Without this, `*h` would do an actual memory load through
-        // the variant pointer, reading CBGR header bytes instead of
-        // the boxed value.
-        ctx.mark_pass_through_ref(dst.0);
-        // Propagate type tracking through Heap wrapper
-        if ctx.is_list_register(args.start.0) {
-            ctx.mark_list_register(dst.0);
-        }
-        if ctx.is_map_register(args.start.0) {
-            ctx.mark_map_register(dst.0);
-        }
-        if ctx.is_set_register(args.start.0) {
-            ctx.mark_set_register(dst.0);
-        }
-        if let Some(tn) = ctx
-            .get_obj_register_type(args.start.0)
-            .map(|s| s.to_string())
-        {
-            ctx.set_obj_register_type(dst.0, tn);
-        }
-        return Ok(());
-    }
-
-    // **HEAP-INTORAW-1 (AOT twin)** — under the Tier-1 transparent-Heap
-    // model (`Heap.new` above passes the inner value through; no CBGR
-    // allocation exists), the wrapper's raw-pointer round-trip is the
-    // identity and validity is statically TRUE (tier-1 checked-ref
-    // semantics: safety was proven at compile time, the runtime check
-    // is zero-cost by design).  Letting these calls reach the COMPILED
-    // `core/base/memory.vr` bodies misreads the transparent value as a
-    // 3-field `Heap` record (`self.ptr` on an Int → garbage), which is
-    // exactly the interpreter-side defect class fixed in
-    // `wrapper_runtime.rs` — this is its AOT mirror.
+    // Current producers select the complete source declaration with its generic
+    // arguments above. A legacy selector without that evidence cannot allocate,
+    // borrow or transfer the nominal Heap object.
+    let legacy_heap = method_name_str.strip_prefix("dyn:").unwrap_or(&method_name_str);
+    if legacy_heap.starts_with("Heap.")
+        || (bare_method_early == "new" && receiver_type_name.as_deref() == Some(WKT::Heap.as_str()))
     {
-        // Instance form: `boxed.into_raw()` — CallM receiver carries
-        // the transparent value, args.count == 0.
-        let is_heap_into_raw = bare_method_early == "into_raw"
-            && args.count == 0
-            && (method_name_str == "Heap.into_raw"
-                || method_name_str == "dyn:Heap.into_raw");
-        // Static form: `Heap.from_raw(raw)` — the raw pointer is arg 0
-        // (the receiver register holds the "Heap" type marker).
-        let is_heap_from_raw = bare_method_early == "from_raw"
-            && args.count == 1
-            && (method_name_str == "Heap.from_raw"
-                || method_name_str == "dyn:Heap.from_raw"
-                || receiver_type_name.as_deref() == Some(WKT::Heap.as_str()));
-        if is_heap_into_raw || is_heap_from_raw {
-            let src_reg = if is_heap_into_raw { receiver.0 } else { args.start.0 };
-            let inner_val = ctx.get_register(src_reg)?;
-            ctx.set_register(dst.0, inner_val);
-            // The round-trip stays transparent: `from_raw(into_raw(h))`
-            // must deref exactly like the original `Heap.new` result.
-            ctx.mark_pass_through_ref(dst.0);
-            if let Some(tn) = ctx
-                .get_obj_register_type(src_reg)
-                .map(|s| s.to_string())
-            {
-                ctx.set_obj_register_type(dst.0, tn);
-            }
-            return Ok(());
-        }
-        // **HEAP-ACCESSORS-TRANSPARENT-1 (T1489)** — the same contract,
-        // for the accessors that HAND BACK the inner value.
-        //
-        // `Heap.as_ref`, `deref` and `into_inner` all read `self.ptr`,
-        // and under the transparent model there is no record to read it
-        // from. Measured on the
-        // six-line programme: `*h` printed 41 while `h.as_ref()` and
-        // `h.into_inner()` both SIGSEGV'd, and the emitted IR said why
-        // in three lines —
-        //
-        //     define internal fastcc i64 @Heap.as_ref()     <- no self
-        //       store i64 41, ptr %r0_slot                  <- the VALUE
-        //       %p = inttoptr i64 41 to ptr
-        //       getelementptr i8, ptr %p, i64 24; load      <- address 65
-        //
-        // `Heap.new` had already been folded away, so the callee's
-        // receiver WAS the transparent 41 and its `self.ptr` read 24
-        // bytes past it. Under transparency every one of these is the
-        // IDENTITY, exactly as `into_raw` above is.
-        //
-        // The reference-returning ones carry `pass_through_ref` so a
-        // following `*` passes through instead of loading — the same
-        // mark and the same reason as `Heap.new`. `into_inner` does not:
-        // it yields the T itself, not a reference to it.
-        //
-        // THE MUTABLE FAMILY IS DELIBERATELY ABSENT, and it was in the
-        // first landing. `as_mut`/`deref_mut`/`leak` return `&mut T`,
-        // and under transparency there is no storage for a write to
-        // reach — the identity hands back a COPY. Measured: `*m.as_mut()`
-        // went from SIGTRAP (rc=133) to printing `6165946680`, a heap
-        // address. Trading a crash for a silent wrong answer is the one
-        // direction this must not move; those three keep the behaviour
-        // they had. Tier 0 refuses them outright with a diagnostic that
-        // names T1189, which is where the carrier substitution lives.
-        let heap_accessor = matches!(bare_method_early, "as_ref" | "deref" | "into_inner")
-            && args.count == 0
-            && (method_name_str == format!("Heap.{bare_method_early}")
-                || method_name_str == format!("dyn:Heap.{bare_method_early}"));
-        if heap_accessor {
-            let inner_val = ctx.get_register(receiver.0)?;
-            ctx.set_register(dst.0, inner_val);
-            if bare_method_early != "into_inner" {
-                ctx.mark_pass_through_ref(dst.0);
-            }
-            if ctx.is_list_register(receiver.0) {
-                ctx.mark_list_register(dst.0);
-            }
-            if ctx.is_map_register(receiver.0) {
-                ctx.mark_map_register(dst.0);
-            }
-            if ctx.is_set_register(receiver.0) {
-                ctx.mark_set_register(dst.0);
-            }
-            if let Some(tn) = ctx.get_obj_register_type(receiver.0).map(|s| s.to_string()) {
-                ctx.set_obj_register_type(dst.0, tn);
-            }
-            return Ok(());
-        }
-        let is_heap_is_valid = bare_method_early == "is_valid"
-            && (method_name_str == "Heap.is_valid"
-                || method_name_str == "dyn:Heap.is_valid");
-        if is_heap_is_valid && ctx.is_pass_through_ref(receiver.0) {
-            // Transparent Heap value — statically valid (tier-1
-            // checked-ref semantics; the safety proof happened at
-            // compile time and the wrapper carries no runtime header
-            // to consult).
-            let i64_type = ctx.types().i64_type();
-            ctx.set_register(dst.0, i64_type.const_int(1, false).into());
-            ctx.mark_bool_register(dst.0);
-            return Ok(());
-        }
+        return Err(LlvmLoweringError::unsupported(format!(
+            "native Heap operation '{method_name_str}' requires its qualified source declaration and payload witness; rebuild the VBC producer"
+        )));
     }
 
     // Map/Set/Deque: compiled from .vr via VBC→LLVM pipeline (Phase 2C).

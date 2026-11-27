@@ -805,6 +805,18 @@ impl<'a> Validator<'a> {
                 self.check_reg(*counter, max_reg, &func_name);
                 self.validate_type_ref(type_ref, 0);
             }
+            Instruction::DerefWideRef { dst, reference } => {
+                self.check_reg(*dst, max_reg, &func_name);
+                self.check_reg(*reference, max_reg, &func_name);
+            }
+            Instruction::HeapSlot { dst, address, action, type_ref } => {
+                self.check_reg(*dst, max_reg, &func_name);
+                self.check_reg(*address, max_reg, &func_name);
+                if let crate::instruction::HeapSlotAction::Init(value) = action {
+                    self.check_reg(*value, max_reg, &func_name);
+                }
+                self.validate_type_ref(type_ref, 0);
+            }
             Instruction::DropTyped { src, type_ref } => {
                 self.check_reg(*src, max_reg, &func_name);
                 self.validate_type_ref(type_ref, 0);

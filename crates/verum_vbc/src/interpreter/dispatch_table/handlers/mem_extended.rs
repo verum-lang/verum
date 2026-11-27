@@ -162,6 +162,40 @@ fn mem_extended_body(
         0x08..=0x0A => super::list_storage::access(state, sub_op),
         0x0C..=0x0F | 0x50..=0x51 => super::deque_storage::access(state, sub_op),
         0x0B => super::list_storage::resize(state),
+        0x28 => super::cbgr::handle_deref(state),
+        0x26 | 0x27 | 0x29 | 0x2A => {
+            let dst = read_reg(state)?;
+            let address_reg = read_reg(state)?;
+            let pointer = state.get_reg(address_reg);
+            let address = if pointer.is_regular_ptr() {
+                pointer.as_ptr::<Value>() as usize
+            } else if let Some(address) = pointer.try_as_i64() {
+                address as usize
+            } else {
+                return Err(InterpreterError::InvalidOperand { message: "Heap slot requires an allocation address".into() });
+            };
+            let slot = address as *mut Value;
+            let extent = super::cbgr::bridge_extent(state, address)
+                .filter(|(base, length)| *base == address && *length >= size_of::<Value>() && slot.is_aligned());
+            let Some((_, length)) = extent else {
+                return Err(InterpreterError::InvalidOperand { message: "Heap slot requires its complete live allocation".into() });
+            };
+            let source = if sub_op == crate::instruction::MemSubOpcode::HeapSlotInit.to_byte() { Some(read_reg(state)?) } else { None };
+            let _element = read_type_ref(state)?;
+            let result = if let Some(source) = source {
+                // SAFETY: the producer owns this vacant, aligned Value slot in a live allocation.
+                unsafe { slot.write(state.get_reg(source)) };
+                Value::unit()
+            } else if sub_op == crate::instruction::MemSubOpcode::HeapSlotTake.to_byte() {
+                // SAFETY: the owner transfers the initialized Value out of its checked slot.
+                unsafe { slot.replace(Value::nil()) }
+            } else {
+                let mutable = sub_op == crate::instruction::MemSubOpcode::HeapSlotBorrowMut.to_byte();
+                super::wrapper_runtime::borrow_live_heap_slot(state, address, length, crate::value::Capabilities::FULL, mutable)?
+            };
+            state.set_reg(dst, result);
+            Ok(DispatchResult::Continue)
+        }
         // Alloc: [dst, size, align]
         0x00 => {
             let dst = read_reg(state)?;

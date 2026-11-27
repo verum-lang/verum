@@ -549,9 +549,22 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                 | I::New { dst, .. }
                 | I::NewG { dst, .. } => write = Some((*dst, R::Value)),
                 I::TypeResource { dst, .. } => write = Some((*dst, R::Value)),
-                I::Not { dst, src } => {
+                I::Not { dst, src } | I::CvtToI { dst, src } => {
                     use_input(*src, 8, &state);
                     write = Some((*dst, R::Value));
+                }
+                I::AtomicLoad { dst, ptr, .. } => {
+                    use_input(*ptr, 2, &state);
+                    write = Some((*dst, R::Value));
+                }
+                I::CbgrExtended { sub_op, operands }
+                    if *sub_op == verum_vbc::instruction::CbgrSubOpcode::ToRawPtr.to_byte() => {
+                    let mut pos = 0;
+                    let mut reg = || verum_vbc::encoding::decode_reg(operands, &mut pos);
+                    let (Ok(dst), Ok(src)) = (reg(), reg()) else { return BodyFacts::unknown(instructions.len()) };
+                    if pos != operands.len() { return BodyFacts::unknown(instructions.len()); }
+                    use_input(src, 8, &state);
+                    write = Some((dst, R::Unknown));
                 }
                 I::TextExtended { sub_op, operands }
                     if TextSubOpcode::from_byte(*sub_op)
@@ -788,6 +801,24 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                     may_write = true;
                     state.invalidate_storage();
                     write = Some((*dst, R::Value));
+                }
+                I::DerefWideRef { dst, reference } => {
+                    use_input(*reference, 2, &state);
+                    write = Some((*dst, R::Value));
+                }
+                I::HeapSlot { dst, address, action, .. } => {
+                    use verum_vbc::instruction::HeapSlotAction;
+                    use_input(*address, 2, &state);
+                    if matches!(action, HeapSlotAction::Borrow { .. }) {
+                        let slot = sites.get(&pc).is_some_and(|sites|
+                            sites.contains(&ReferenceSiteKind::SlotOutput(dst.0)));
+                        write = Some((*dst, if slot { R::Slot } else { R::Unknown }));
+                    } else {
+                        if let HeapSlotAction::Init(value) = action { use_input(*value, 4, &state); }
+                        may_write = true;
+                        state.invalidate_storage();
+                        write = Some((*dst, R::Unknown));
+                    }
                 }
                 I::Deref { dst, ref_reg } => {
                     let identity = sites.get(&pc).is_some_and(|sites| {

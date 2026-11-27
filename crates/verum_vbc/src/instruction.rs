@@ -5094,6 +5094,16 @@ pub enum MemSubOpcode {
     RawLoadI64 = 0x24,
     /// Store i64 (addr, value).
     RawStoreI64 = 0x25,
+    /// Initialize a language value in its owning allocation (unit, address, value).
+    HeapSlotInit = 0x26,
+    /// Transfer its initialized value to a register (destination, address).
+    HeapSlotTake = 0x27,
+    /// Read a managed reference to a complete 128-bit integer (dst, reference).
+    DerefWideRef = 0x28,
+    /// Borrow the complete value slot in an owning allocation.
+    HeapSlotBorrow = 0x29,
+    /// Mutably borrow the complete value slot in an owning allocation.
+    HeapSlotBorrowMut = 0x2A,
     // -- Byte/typed array primitives (0x30-0x3F), carried over from
     //    SystemSubOpcode 0x49-0x4E / 0x5E / 0x5F.
     /// Allocate a packed byte array (dst, len).
@@ -5164,6 +5174,11 @@ impl MemSubOpcode {
             0x23 => Some(Self::RawStoreI32),
             0x24 => Some(Self::RawLoadI64),
             0x25 => Some(Self::RawStoreI64),
+            0x26 => Some(Self::HeapSlotInit),
+            0x27 => Some(Self::HeapSlotTake),
+            0x28 => Some(Self::DerefWideRef),
+            0x29 => Some(Self::HeapSlotBorrow),
+            0x2A => Some(Self::HeapSlotBorrowMut),
             0x30 => Some(Self::NewByteArray),
             0x31 => Some(Self::ByteArrayElementAddr),
             0x32 => Some(Self::ByteArrayLoad),
@@ -10598,6 +10613,17 @@ impl TypeInspection {
     }
 }
 
+/// Access to the one declared language value in a Heap allocation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum HeapSlotAction {
+    /// Initialize vacant storage by transferring the source register's value.
+    Init(Reg),
+    /// Transfer the stored value and vacate the slot.
+    Take,
+    /// Issue a reference tied to the live allocation.
+    Borrow { mutable: bool },
+}
+
 /// Full instruction with opcode and operands.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Instruction {    // ========================================================================
@@ -11267,6 +11293,15 @@ pub enum Instruction {    // ===================================================
         /// Live mutable reference to the associated UInt32 strong counter.
         counter: Reg,
         /// Exact handle declaration, including generic arguments.
+        type_ref: TypeRef,
+    },
+    /// Dereference a managed 128-bit numeric place at its physical width.
+    DerefWideRef { dst: Reg, reference: Reg },
+    /// Access the complete declared value in a Heap allocation.
+    HeapSlot {
+        dst: Reg,
+        address: Reg,
+        action: HeapSlotAction,
         type_ref: TypeRef,
     },
     /// Destroy a value using its declaration-owned type and clear its register.
@@ -17325,7 +17360,7 @@ mod tests {
         );
         assert_eq!(
             sweep(MemSubOpcode::from_byte, MemSubOpcode::to_byte),
-            44, // Includes declared-width scalar reference loads.
+            49, // Includes owned Heap slots and wide reference loads.
             "MemSubOpcode variant count drift"
         );
     }

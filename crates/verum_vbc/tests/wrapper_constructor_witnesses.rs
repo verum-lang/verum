@@ -284,6 +284,10 @@ fn managed_cell_retires_its_named_payload_once_after_a_generic_handoff() {
                 let guard = Guard { counter: &mut counter };
                 let cell: Heap<Guard> = wrap(guard);
             }
+            {
+                let guard = Guard { counter: &mut counter };
+                let inferred = Heap.new(guard);
+            }
             counter
         }
     "#;
@@ -297,8 +301,19 @@ fn managed_cell_retires_its_named_payload_once_after_a_generic_handoff() {
     let wire = verum_vbc::serialize::serialize_module(&archive).unwrap();
     let archive = verum_vbc::deserialize::deserialize_module(&wire).unwrap();
     let entry = archive.find_function_by_name("managed_cell.check").unwrap();
+    let descriptor = archive.get_function(entry).unwrap();
+    let start = descriptor.bytecode_offset as usize;
+    let instructions = verum_vbc::bytecode::decode_instructions(
+        &archive.bytecode[start..start + descriptor.bytecode_length as usize],
+    ).unwrap();
+    let heap_drops = instructions.iter().filter(|instruction| matches!(instruction,
+        verum_vbc::Instruction::DropTyped {
+            type_ref: verum_vbc::types::TypeRef::Instantiated { base, args }, ..
+        } if *base == verum_vbc::types::TypeId::HEAP && args.len() == 1
+    )).count();
+    assert_eq!(heap_drops, 2, "{instructions:?}");
     let result = Interpreter::new(Arc::new(archive)).execute_function(entry).unwrap();
-    assert_eq!(result.try_as_i64(), Some(1));
+    assert_eq!(result.try_as_i64(), Some(2));
 }
 
 #[test]

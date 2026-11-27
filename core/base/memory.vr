@@ -27,8 +27,7 @@
 )
 module core.base.memory;
 mount super.super.mem.allocator.{
-    cbgr_alloc, cbgr_alloc_zeroed, cbgr_dealloc, cbgr_realloc,
-    get_header_from_ptr, AllocError,
+    cbgr_alloc, cbgr_alloc_zeroed, cbgr_dealloc, cbgr_realloc, AllocError,
 };
 // HEADER_SIZE is the byte offset from a CBGR user-pointer to its
 // AllocationHeader.  Pre-fix this file hardcoded `- 32` at 7 sites
@@ -189,8 +188,8 @@ implement<T> Heap<T> {
 
     /// Panics if allocation fails (out of memory).
     public fn new(value: T) -> Heap<T> {
-        let size = T.size;
-        let align = T.alignment;
+        let size = if T.size < UInt64.size { UInt64.size } else { T.size };
+        let align = if T.alignment < UInt64.alignment { UInt64.alignment } else { T.alignment };
 
         let (ptr, gen, epoch) = match cbgr_alloc(size, align) {
             Result.Ok(result) => result,
@@ -201,7 +200,7 @@ implement<T> Heap<T> {
 
         // Write the value to allocated memory
         unsafe {
-            ptr_write(typed_ptr, value);
+            @intrinsic("heap_slot_init", typed_ptr, value);
         }
 
         Heap {
@@ -227,8 +226,8 @@ implement<T> Heap<T> {
     /// The type T must be valid when all bits are zero. This is
     /// typically true for primitive types and simple aggregates.
     public fn new_zeroed() -> Heap<T> {
-        let size = T.size;
-        let align = T.alignment;
+        let size = if T.size < UInt64.size { UInt64.size } else { T.size };
+        let align = if T.alignment < UInt64.alignment { UInt64.alignment } else { T.alignment };
 
         let (ptr, gen, epoch) = match cbgr_alloc_zeroed(size, align) {
             Result.Ok(result) => result,
@@ -247,14 +246,14 @@ implement<T> Heap<T> {
 
     /// This is the non-panicking version of `new`.
     public fn try_new(value: T) -> Result<Heap<T>, AllocError> {
-        let size = T.size;
-        let align = T.alignment;
+        let size = if T.size < UInt64.size { UInt64.size } else { T.size };
+        let align = if T.alignment < UInt64.alignment { UInt64.alignment } else { T.alignment };
 
         let (ptr, gen, epoch) = cbgr_alloc(size, align)?;
         let typed_ptr = ptr as &unsafe mut T;
 
         unsafe {
-            ptr_write(typed_ptr, value);
+            @intrinsic("heap_slot_init", typed_ptr, value);
         }
 
         Result.Ok(Heap {
@@ -271,7 +270,7 @@ implement<T> Heap<T> {
     /// Cost: ~15ns (Tier 0), 0ns if compiler-proven safe (Tier 1).
     public fn as_ref(&self) -> &T {
         self.validate_cbgr();
-        unsafe { &*self.ptr }
+        unsafe { @intrinsic("heap_slot_ref", self.ptr) }
     }
 
     /// Get mutable reference to the value.
@@ -281,7 +280,7 @@ implement<T> Heap<T> {
     /// Cost: ~15ns (Tier 0), 0ns if compiler-proven safe (Tier 1).
     public fn as_mut(&mut self) -> &mut T {
         self.validate_cbgr();
-        unsafe { &mut *self.ptr }
+        unsafe { @intrinsic("heap_slot_mut", self.ptr) }
     }
 
     /// Validate CBGR generation and epoch against the allocation header.
@@ -316,7 +315,7 @@ implement<T> Heap<T> {
     /// This moves the value out of the heap allocation and frees
     /// the memory. The Heap wrapper is consumed.
     public fn into_inner(self) -> T {
-        let value = unsafe { ptr_read(self.ptr) };
+        let value = unsafe { @intrinsic("heap_slot_take", self.ptr) };
 
         // Deallocate the memory (increments generation for CBGR)
         match cbgr_dealloc(self.ptr as &unsafe Byte) {
@@ -356,9 +355,10 @@ implement<T> Heap<T> {
     /// The pointer must have been obtained from `into_raw` on a Heap<T>.
     /// The generation and epoch are read from the allocation header.
     public unsafe fn from_raw(ptr: &unsafe mut T) -> Heap<T> {
-        let header = get_header_from_ptr(ptr as &unsafe Byte);
-        let gen = header.load_generation();
-        let epoch = header.load_epoch();
+        let header_addr = ptr as Int - HEADER_SIZE;
+        let gen = atomic_load_u32((header_addr + GEN_OFFSET) as *const UInt32, ORDERING_ACQUIRE);
+        let epoch_caps = atomic_load_u32((header_addr + EPOCH_CAPS_OFFSET) as *const UInt32, ORDERING_ACQUIRE);
+        let epoch = (epoch_caps & 0xFFFF) as UInt16;
 
         Heap {
             ptr: ptr,
@@ -384,22 +384,13 @@ implement<T> Heap<T> {
 
     /// Returns true if the reference is still valid (no use-after-free).
     public fn is_valid(&self) -> Bool {
-        let header = get_header_from_ptr(self.ptr as &unsafe Byte);
-        let actual_gen = header.load_generation();
-        let actual_epoch = header.load_epoch();
-        self.generation == actual_gen && self.epoch == actual_epoch
+        self.generation == self.header_generation() && self.epoch == self.current_epoch()
     }
 
-    /// Consume the Heap, returning a raw pointer without deallocating.
-    ///
-
-    /// The caller is responsible for eventually freeing the memory.
-    /// This is useful for creating static references or transferring
-    /// ownership to FFI code.
+    /// Consume the Heap and return a mutable reference to its allocation.
+    /// The allocation stays live after the owner leaves scope.
     public fn leak(self) -> &mut T {
-        let ptr = self.ptr;
-        forget(self);
-        unsafe { &mut *ptr }
+        unsafe { @intrinsic("heap_slot_mut", self.into_raw()) }
     }
 
     /// Get the CBGR generation counter from the allocation header.
@@ -493,8 +484,11 @@ implement<T> DerefMut for Heap<T> {
 implement<T> Drop for Heap<T> {
     fn drop(&mut self) {
         unsafe {
-            // Run destructor for the contained value
-            drop_in_place(&mut *self.ptr);
+            // The allocation owns the value stored by new or try_new. Move it
+            // out and run its declared destructor before releasing its storage.
+            {
+                let payload: T = @intrinsic("heap_slot_take", self.ptr);
+            }
             // Free the memory (increments generation for CBGR invalidation)
             match cbgr_dealloc(self.ptr as &unsafe Byte) {
                 Result.Ok(()) => {}

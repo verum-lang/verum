@@ -795,6 +795,7 @@ impl IntrinsicLowering {
         match seq_id {
             // This query is defined for VBC runtime carriers, not MLIR values.
             InlineSequenceId::ListStorageStride | InlineSequenceId::ListStorageRead
+            | InlineSequenceId::HeapSlotInit | InlineSequenceId::HeapSlotTake | InlineSequenceId::HeapSlotBorrow { .. }
             | InlineSequenceId::ListStorageWrite | InlineSequenceId::ListStorageMove
             | InlineSequenceId::ListStorageResize | InlineSequenceId::DequeStorageTake
             | InlineSequenceId::DequeStorageWrite | InlineSequenceId::DequeStorageRef

@@ -301,6 +301,28 @@ impl VbcCodegen {
         })
     }
 
+    /// A canonical Heap borrows the value stored in its allocation. The
+    /// nominal receiver and the method signature must identify the same T.
+    pub(super) fn heap_borrow_projection(
+        &self, owner: &crate::types::TypeRef, mutable: bool,
+    ) -> Option<ProjectionMethod> {
+        use crate::types::{Mutability, TypeId, TypeRef};
+        let TypeRef::Instantiated { base: TypeId::HEAP, args } = owner else {
+            return None;
+        };
+        let [target] = args.as_slice() else { return None };
+        let method_name = if mutable { "as_mut" } else { "as_ref" };
+        let mut method = self.projection_method(owner, method_name, None)?;
+        let TypeRef::Reference { inner, mutability, .. } = &method.result else {
+            return None;
+        };
+        if inner.as_ref() != target || mutable != (*mutability == Mutability::Mutable) {
+            return None;
+        }
+        method.name = self.declared_callable_name(method.id)?.into_string();
+        Some(method)
+    }
+
     /// A user projection used for mutation must return a mutable reference.
     /// The callable and its witnesses come from the same declaration as the
     /// selected target, including inherited owner parameters.
@@ -380,6 +402,12 @@ impl VbcCodegen {
             if let Some(carrier) = self.declared_runtime_carrier(id).filter(|kind| kind.is_smart_pointer()) {
                 if mutable && carrier != WKT::Heap {
                     return None;
+                }
+                if let Some(borrow) = self.heap_borrow_projection(&owner, mutable) {
+                    let TypeRef::Reference { inner, .. } = &borrow.result else { return None };
+                    owner = (**inner).clone();
+                    adjustments.push(ReceiverAdjustment::Method(borrow));
+                    continue;
                 }
                 let TypeRef::Instantiated { args, .. } = owner else { return None };
                 let [target] = args.as_slice() else { return None };
@@ -533,6 +561,12 @@ impl VbcCodegen {
             if nominal.is_some_and(|kind| kind.is_smart_pointer())
                 && (!mutable || nominal == Some(WKT::Heap))
             {
+                if let Some(borrow) = self.heap_borrow_projection(&owner, mutable) {
+                    let TypeRef::Reference { inner, .. } = &borrow.result else { return None };
+                    owner = (**inner).clone();
+                    adjustments.push(ReceiverAdjustment::Method(borrow));
+                    continue;
+                }
                 let [target] = args else {
                     return None;
                 };

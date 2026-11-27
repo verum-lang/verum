@@ -11773,7 +11773,10 @@ impl TypeChecker {
         if let Some(operation) = super::callable_properties::intrinsic_operation_name(name.name.as_str(), args)
             .and_then(|operation| verum_vbc::intrinsics::lookup_intrinsic(&operation))
         {
-            use verum_vbc::{instruction::TypeInspection, intrinsics::registry::CodegenStrategy};
+            use verum_vbc::{
+                instruction::TypeInspection,
+                intrinsics::registry::{CodegenStrategy, InlineSequenceId},
+            };
             if let Some(carrier) = operation.intrinsic.owned_slot_write_carrier() {
                 return self.check_slot_intrinsic(operation.intrinsic, carrier, args, expr);
             }
@@ -11781,6 +11784,39 @@ impl TypeChecker {
                 return self.check_slot_read(operation.intrinsic, carrier, take, args, expr);
             }
             match operation.intrinsic.strategy {
+                CodegenStrategy::InlineSequence(
+                    slot @ (InlineSequenceId::HeapSlotInit | InlineSequenceId::HeapSlotTake
+                        | InlineSequenceId::HeapSlotBorrow { .. }),
+                ) => {
+                    let operation = operation.intrinsic.name;
+                    let invalid = |message: &str, span| TypeError::OtherWithCodeSpanned {
+                        code: "E0444".into(),
+                        msg: format!("{operation} {message}").into(),
+                        span,
+                    };
+                    if !self.in_unsafe_context {
+                        return Err(invalid("requires unsafe ownership of the allocation", expr.span));
+                    }
+                    let (address, value) = match (slot, args.as_slice()) {
+                        (InlineSequenceId::HeapSlotInit, [_, address, value]) => (address, Some(value)),
+                        (InlineSequenceId::HeapSlotTake | InlineSequenceId::HeapSlotBorrow { .. }, [_, address]) => (address, None),
+                        _ => return Err(invalid("received the wrong number of operands", expr.span)),
+                    };
+                    let address_ty = self.synth_expr(address)?.ty;
+                    let element = match self.unifier.apply(&address_ty) {
+                        Type::UnsafeReference { inner, mutable } | Type::Pointer { inner, mutable }
+                            if mutable || matches!(slot, InlineSequenceId::HeapSlotBorrow { mutable: false }) => *inner,
+                        _ => return Err(invalid("requires a mutable raw pointer", address.span)),
+                    };
+                    if let Some(value) = value {
+                        self.check_expr(value, &element)?;
+                        return Ok(Type::unit());
+                    }
+                    if let InlineSequenceId::HeapSlotBorrow { mutable } = slot {
+                        return Ok(Type::Reference { mutable, inner: Box::new(element) });
+                    }
+                    return Ok(element);
+                }
                 CodegenStrategy::RetainCopy => {
                     if !self.in_unsafe_context {
                         return Err(TypeError::OtherWithCodeSpanned {

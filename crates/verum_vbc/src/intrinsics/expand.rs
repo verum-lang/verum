@@ -421,6 +421,7 @@ fn expand_sequence(
             let [scalar] = args else { return false };
             e.emit(crate::unicode_category::instruction(dest, *scalar));
         }
+        InlineSequenceId::HeapSlotInit | InlineSequenceId::HeapSlotTake | InlineSequenceId::HeapSlotBorrow { .. } => return false,
         InlineSequenceId::DequeStorageTake
         | InlineSequenceId::DequeStorageWrite
         | InlineSequenceId::DequeStorageRef

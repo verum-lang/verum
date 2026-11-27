@@ -1236,6 +1236,11 @@ pub enum InlineSequenceId {
     // =========================================================================
     // Heap Memory Allocation Intrinsics
     // =========================================================================
+    /// Initialize or transfer a language value in storage belonging to Heap.
+    HeapSlotInit,
+    HeapSlotTake,
+    /// Reborrow the allocated payload with the requested access.
+    HeapSlotBorrow { mutable: bool },
     /// Query the physical element width of an existing List carrier.
     ListStorageStride,
     /// Read an initialized element using its owner's physical encoding.
@@ -1424,6 +1429,7 @@ impl Intrinsic {
             CodegenStrategy::InlineSequence(InlineSequenceId::Forget) => Some(0),
             CodegenStrategy::InlineSequence(
                 InlineSequenceId::Replace
+                | InlineSequenceId::HeapSlotInit
                 | InlineSequenceId::PtrWriteRaw
                 | InlineSequenceId::PtrWriteVolatile,
             ) | CodegenStrategy::DirectOpcode(Opcode::DerefMut) => Some(1),
@@ -2610,6 +2616,46 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     // =========================================================================
     // Heap Memory Allocation Intrinsics
     // =========================================================================
+    Intrinsic {
+        name: "heap_slot_init",
+        category: IntrinsicCategory::Memory,
+        hints: &[IntrinsicHint::Unsafe, IntrinsicHint::MemoryEffect, IntrinsicHint::Generic, IntrinsicHint::Inline],
+        param_count: 2,
+        return_count: 0,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::HeapSlotInit),
+        mlir_op: None,
+        doc: "Move a language value into its vacant Heap allocation",
+    },
+    Intrinsic {
+        name: "heap_slot_take",
+        category: IntrinsicCategory::Memory,
+        hints: &[IntrinsicHint::Unsafe, IntrinsicHint::MemoryEffect, IntrinsicHint::Generic, IntrinsicHint::Inline],
+        param_count: 1,
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::HeapSlotTake),
+        mlir_op: None,
+        doc: "Move the stored language value out of its Heap allocation",
+    },
+    Intrinsic {
+        name: "heap_slot_ref",
+        category: IntrinsicCategory::Memory,
+        hints: &[IntrinsicHint::Unsafe, IntrinsicHint::MemoryEffect, IntrinsicHint::Generic, IntrinsicHint::Inline],
+        param_count: 1,
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::HeapSlotBorrow { mutable: false }),
+        mlir_op: None,
+        doc: "Borrow the declared payload from its live Heap allocation",
+    },
+    Intrinsic {
+        name: "heap_slot_mut",
+        category: IntrinsicCategory::Memory,
+        hints: &[IntrinsicHint::Unsafe, IntrinsicHint::MemoryEffect, IntrinsicHint::Generic, IntrinsicHint::Inline],
+        param_count: 1,
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::HeapSlotBorrow { mutable: true }),
+        mlir_op: None,
+        doc: "Mutably borrow the declared payload from its live Heap allocation",
+    },
     Intrinsic {
         name: "list_storage_stride",
         category: IntrinsicCategory::Memory,

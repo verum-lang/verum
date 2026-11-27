@@ -619,6 +619,10 @@ impl super::VbcCodegen {
                 || matches!(ty, TypeRef::Concrete(base) | TypeRef::Instantiated { base, .. }
                     if self.type_by_id(*base).is_some_and(|declaration|
                         (!base.is_builtin() && !base.is_semantic_type())
+                        || (*base == crate::types::TypeId::HEAP
+                            && matches!(ty, TypeRef::Instantiated { args, .. } if args.len() == 1)
+                            && self.declared_runtime_carrier(*base)
+                                == Some(verum_common::well_known_types::WellKnownType::Heap))
                         || (*base == crate::types::TypeId::DEQUE && declaration.drop_fn.is_some())
                         || declaration.kind == crate::types::TypeKind::Sum)))
         {
