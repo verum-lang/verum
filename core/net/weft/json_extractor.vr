@@ -337,9 +337,9 @@ public fn extract_json<T>(req: &WeftRequest, cfg: &JsonExtractorConfig)
     }
     // Gate 3: UTF-8 validation. core.encoding.json.parse takes
     // a Text but we have List<Byte>; convert + validate.
-    let text = match Text.from_utf8(&req.body) {
+    let text = match Text.from_utf8(req.body.as_slice()) {
         Result.Ok(t) => t,
-        Result.Err(offset) => return Result.Err(JsonExtractError.InvalidUtf8 { offset: offset }),
+        Result.Err(error) => return Result.Err(JsonExtractError.InvalidUtf8 { offset: error.valid_up_to() }),
     };
     // Gate 4: syntax parse.
     let value = match core.encoding.json.parse(&text) {

@@ -1,0 +1,20 @@
+mount core.base.maybe.Maybe;
+mount core.base.result.Result;
+mount core.collections.map.Map;
+mount core.net.http.{Headers, Method};
+mount core.net.weft.handler.WeftRequest;
+mount core.net.weft.json_extractor.{extract_json, JsonExtractError, JsonExtractorConfig};
+
+@test
+fn test_invalid_utf8_reports_the_first_bad_byte_in_the_body() {
+    let req = WeftRequest {
+        method: Method.Post, path: "/", raw_query: Maybe.None, headers: Headers.new(),
+        body: [0x22_u8, 0xc3_u8, 0xa9_u8, 0xff_u8, 0x22_u8],
+        path_params: Map.new(), peer_addr: Maybe.None,
+    };
+    let cfg = JsonExtractorConfig.default().relaxed_content_type();
+    match extract_json<Int>(&req, &cfg) {
+        Result.Err(JsonExtractError.InvalidUtf8 { offset }) => assert_eq(offset, 3),
+        _ => panic("expected a UTF-8 error in the request body"),
+    }
+}
