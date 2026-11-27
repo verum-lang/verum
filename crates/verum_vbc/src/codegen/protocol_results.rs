@@ -440,13 +440,12 @@ impl VbcCodegen {
 
     /// Synchronous static members return a type instantiated with the actual
     /// caller's binder, including occurrences of Self inside the result.
-    pub(super) fn bounded_static_output(
+    pub(super) fn bounded_static_method(
         &self, receiver: &TypeRef, member: &str, arity: usize,
-    ) -> Option<TypeRef> {
+    ) -> Maybe<CodegenResult<ProtocolMethod>> {
         let subject = self.protocol_bound_subject(receiver)?;
         let bounds = self.current_protocol_bounds.get(&subject)?.clone();
-        let selected = self.protocol_method(bounds, member, arity, Receiver::Static(&subject))?.ok()?;
-        (!selected.is_async).then_some(selected.output)
+        self.protocol_method(bounds, member, arity, Receiver::Static(&subject))
     }
 
     pub(super) fn bounded_binary_method(

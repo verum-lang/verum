@@ -72,39 +72,11 @@ fn declared_protocol_method(
         pc: state.pc() as usize,
         message,
     };
-    let owner = state.module.get_type(receiver)
-        .ok_or_else(|| invalid(format!("protocol call has unknown receiver {receiver:?}")))?;
-    let mut selected = None;
-    for implementation in &owner.protocols {
-        let Some(protocol) = state.module.get_type(TypeId(implementation.protocol.0)) else {
-            return Err(invalid("protocol implementation has no declaration".into()));
-        };
-        let Some(name) = state.module.get_string(protocol.name) else {
-            return Err(invalid("protocol declaration has no name".into()));
-        };
-        let origin = protocol.origin_module
-            .and_then(|id| state.module.get_string(id))
-            .unwrap_or(&state.module.name);
-        let identity = crate::module::qualify_module_name(origin, name);
-        if !qualifiers.split('+').map(str::trim)
-            .any(|qualifier| qualifier == identity || (!qualifier.contains('.') && qualifier == name))
-        {
-            continue;
-        }
-        if !protocol.variants.iter().any(|member| state.module.get_string(member.name) == Some(method)) {
-            continue;
-        }
-        if selected.is_some_and(|(previous, _)| previous != implementation.protocol) {
-            return Err(invalid(format!(
-                "ambiguous declared protocol call `{qualifiers}.{method}` for {receiver:?}",
-            )));
-        }
-        selected = Some((implementation.protocol, !protocol.type_params.is_empty()));
-    }
     let missing = || invalid(format!(
         "no implementation of declared protocol member `{qualifiers}.{method}` for {receiver:?}",
     ));
-    let (protocol, parameterized) = selected.ok_or_else(missing)?;
+    let (protocol, parameterized) = state.module.protocol_member_owner(receiver, Some(qualifiers), method, false)
+        .map_err(invalid)?.ok_or_else(missing)?;
     // Only a parameterized protocol can have distinct applications on this
     // receiver. A fixed Byte parameter shares its immediate carrier with Int.
     let operand = if parameterized && args.count > 0 {
@@ -790,24 +762,20 @@ fn execute_method_call(
 
     // #44-B: STATIC dispatch on a TYPE value receiver. A `CallM` whose
     // receiver register holds a TypeRef value is a static method call
-    // on that type — the shape `T.default()` compiles to once the
+    // on that type. Generic static calls take this path once the
     // generic witness is resolved (`LoadT(Generic)` + `CallM`), and the
     // general `SomeType.method()` dynamic form. Resolve
     // "{TypeName}.{method}" through the canonical body-preferring
     // suffix walker and invoke WITHOUT a self argument. Unresolvable →
-    // fall through to the legacy paths (nil-receiver fallbacks keep
-    // erased-T behavior unchanged).
+    // fall through to the remaining declared or builtin dispatch paths.
     if receiver.is_type_ref() {
         let type_id = receiver.as_type_id();
-        let resolved: Option<(crate::module::FunctionId, u16, bool)> = state
-            .module
-            .get_type(type_id)
+        let selected = state.module.static_protocol_method(type_id, &method_name, args.count)
+            .map_err(|message| InterpreterError::InvalidBytecode { pc: state.pc() as usize, message })?;
+        let selected = selected.or_else(|| state.module.get_type(type_id)
             .and_then(|td| state.module.strings.get(td.name))
-            .map(|n| n.to_string())
-            .and_then(|type_name| {
-                let qualified = format!("{}.{}", type_name, bare_method_name);
-                state.module.find_function_by_name(&qualified)
-            })
+            .and_then(|name| state.module.find_function_by_name(&format!("{name}.{bare_method_name}"))));
+        let resolved = selected
             .and_then(|fid| state.module.get_function(fid).map(|f| (fid, f)))
             .and_then(|(fid, func)| {
                 let takes_self = func
@@ -845,25 +813,6 @@ fn execute_method_call(
             state.set_pc(0);
             state.record_call();
             return Ok(DispatchResult::Continue);
-        }
-    }
-
-    // #44-B legacy fallback: a `T.default()`-class call whose generic
-    // witness was unavailable (caller reached the shared body through a
-    // plain `Call`, so `LoadT(Generic)` loaded nil). Preserve the
-    // historical erased-T identity — `default`/`zero` → 0, `one` → 1 —
-    // exactly what the pre-witness codegen hardcoded at these sites.
-    if receiver.is_nil() && args.count == 0 {
-        match bare_method_name.as_str() {
-            "default" | "zero" => {
-                state.set_reg(dst, Value::from_i64(0));
-                return Ok(DispatchResult::Continue);
-            }
-            "one" => {
-                state.set_reg(dst, Value::from_i64(1));
-                return Ok(DispatchResult::Continue);
-            }
-            _ => {}
         }
     }
 

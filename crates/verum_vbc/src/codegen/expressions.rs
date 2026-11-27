@@ -6583,82 +6583,14 @@ impl VbcCodegen {
             return self.compile_variant_constructor_hinted(&func_name, args, Some(&owner));
         }
 
-        // #44-B: `T.method(args)` — a static call on a GENERIC TYPE PARAM
-        // (typechecker stamp `StaticCall{"T.default"}`). No registered
-        // function can ever match a type-param prefix, so pre-fix the
-        // resolution miss collapsed the WHOLE call into the bare-`T`
-        // LoadNil stub (compile_simple_path's generic-param arm) — e.g.
-        // Maybe.flatten's None arm compiled to `LoadNil` and returned nil.
-        // Emit the witness form instead: LoadT{Generic(idx)} + CallM. At
-        // runtime a CallG-delivered witness resolves T and the CallM
-        // dispatches {ConcreteType}.method statically; with no witness
-        // LoadT yields nil and the dispatcher's nil fallback keeps the
-        // erased-T identity for default/zero/one.
+        // A resolved call path and a method expression on a type parameter
+        // both use the receiver's declaration and its lexical type witness.
         if let ExprKind::Path(path) = &func.kind
-            && path.segments.len() == 2
-            && let (PathSegment::Name(tp_ident), PathSegment::Name(method_ident)) =
-                (&path.segments[0], &path.segments[1])
-            // Constrained to the identity-fallback-covered set: for OTHER
-            // `T.method()` shapes the legacy behavior is a silent
-            // LoadNil-collapse of the whole call; replacing that with a
-            // CallM would turn silent nils into runtime panics wherever no
-            // witness reaches the frame (cycle-4 regression fingerprint).
-            && matches!(method_ident.name.as_str(), "default" | "zero" | "one")
+            && let [PathSegment::Name(parameter), PathSegment::Name(method)] = path.segments.as_slice()
         {
-            let tp_name = tp_ident.name.as_str();
-            if let Some(param_id) = self.ctx.current_generic_param_id(tp_name) {
-                if std::env::var_os("VERUM_TRACE_TPCALL").is_some() {
-                    eprintln!("[tpcall] compile_call intercept: {}.{} idx={}", tp_name, method_ident.name.as_str(), param_id.0);
-                }
-                let recv = self.ctx.alloc_temp();
-                self.ctx.emit(Instruction::LoadT {
-                    dst: recv,
-                    type_ref: crate::types::TypeRef::Generic(param_id),
-                });
-                // Compile arguments into a contiguous block.
-                let mut arg_regs: Vec<Reg> = Vec::with_capacity(args.len());
-                for a in args.iter() {
-                    let r = self
-                        .compile_expr(a)?
-                        .or_internal("type-param method call: arg has no value")?;
-                    arg_regs.push(r);
-                }
-                let args_start = if !arg_regs.is_empty() {
-                    let first = self.ctx.registers.alloc_fresh();
-                    for _ in 1..arg_regs.len() {
-                        self.ctx.registers.alloc_fresh();
-                    }
-                    for (i, &src) in arg_regs.iter().enumerate() {
-                        let dst = Reg(first.0 + i as u16);
-                        if src != dst {
-                            self.ctx.emit(Instruction::Mov { dst, src });
-                        }
-                    }
-                    first
-                } else {
-                    Reg(0)
-                };
-                // Bare BY CONSTRUCTION: the receiver is a type PARAMETER
-                // resolved by a CallG-delivered witness, so there is no
-                // type to qualify with. Counted anyway — "legitimately
-                // bare" explains why the type is absent, not what the
-                // archive's graph does with the result, and a witness
-                // call whose name matches many impls fans out like any
-                // other (T0753).
-                crate::codegen::bare_method::record("<witness>", method_ident.name.as_str());
-                let method_id = self.ctx.intern_string_raw(method_ident.name.as_str());
-                let result = self.ctx.alloc_temp();
-                self.ctx.emit(Instruction::CallM {
-                    dst: result,
-                    receiver: recv,
-                    method_id,
-                    args: crate::instruction::RegRange {
-                        start: args_start,
-                        count: args.len() as u8,
-                    },
-                });
-                self.ctx.free_temp(recv);
-                return Ok(Some(result));
+            let receiver = Expr::path(Path::from_ident(parameter.clone()));
+            if self.type_parameter_static_receiver(&receiver)?.is_some() {
+                return self.compile_method_call(&receiver, method, args, None, type_args);
             }
         }
 
@@ -13635,6 +13567,14 @@ impl VbcCodegen {
         // Static calls on declaration-owned type parameters and associated
         // projections use the same witness as a type annotation in this frame.
         if let Some(type_ref) = self.type_parameter_static_receiver(receiver)? {
+            let selector = match self.bounded_static_method(&type_ref, method.as_str(), args.len()).transpose()? {
+                Some(member) => {
+                    let owner = self.type_by_id(member.owner).and_then(|ty| self.type_declaration_identity(ty))
+                        .or_internal("bounded static member has no protocol declaration identity")?;
+                    format!("dyn:{owner}.{}", method.name)
+                }
+                None => method.name.to_string(),
+            };
             let recv_reg = self.ctx.alloc_temp();
             self.ctx.emit(Instruction::LoadT {
                 dst: recv_reg,
@@ -13664,7 +13604,7 @@ impl VbcCodegen {
                 }
                 first
             };
-            let method_id = self.ctx.intern_string_raw(method.name.as_str());
+            let method_id = self.ctx.intern_string_raw(&selector);
             let result = self.ctx.alloc_temp();
             self.ctx.emit(Instruction::CallM {
                 dst: result,
@@ -17142,46 +17082,6 @@ impl VbcCodegen {
         // because static method calls like `Time.now()` should resolve to Time.now,
         // not treat `Time` as a value.
         //
-
-        // Task #17 — surgical intercept for `T.default()` on an in-scope
-        // generic type-param. MUST run BEFORE the qualified-name lookup
-        // because the protocol registry seeds a `T.default` stub when
-        // processing `protocol Default`, and that stub miscompiles every
-        // primitive-T call site to a broken CallM dispatch. At Tier-0
-        // generic-erasure there is no runtime type-witness for T, so the
-        // existing stub's `dyn:Default.default` resolution is
-        // unpredictable. For primitive T (the only T that can satisfy
-        // `where T: Default` AND have a known zero-default — Int, Float,
-        // Bool, Byte etc.), emit a zero-int constant inline. Non-primitive
-        // T still gets a zero Int payload; the caller's let-binding type
-        // annotation handles retag on deref. Closes the entire
-        // `Heap.new_default<Int>` / `Shared.new_default<Int>` /
-        // `Result<Int,_>.unwrap_or_default()` / `Maybe<Int>.unwrap_or_default()`
-        // class of primitive-default tests.
-        // The parenthetical above is FALSE and this is where it costs:
-        // `Text` satisfies `where T: Default` and has a known default, as
-        // does every type with a Default impl.  Non-primitive T does not
-        // "still get a zero Int payload" harmlessly — retagged as Text it
-        // reaches the caller as the nil sentinel 0x7ff9…, which is what
-        // `Maybe<Text>.unwrap_or_default()` returned.  T0622 landed the
-        // witness channel that answers this; the Phase 0 site above uses
-        // it and this one does not.
-        let task17_primitive_identity = match method_name.as_str() {
-            "default" | "zero" => Some(0i64),
-            "one" => Some(1i64),
-            _ => None,
-        };
-        if let Some(value) = task17_primitive_identity
-            && args.is_empty()
-            && self.ctx.generic_type_params.contains(&type_name)
-        {
-            let result = self.ctx.alloc_temp();
-            self.ctx.emit(Instruction::LoadI {
-                dst: result,
-                value,
-            });
-            return Ok(Some(Some(result)));
-        }
 
         // Variants are a special case: `Maybe.Some(42)`, `Result.Ok(x)`, etc.
         // are registered under the qualified name too (variant_tag set), but they

@@ -1576,6 +1576,73 @@ impl VbcModule {
         Some((id, args))
     }
 
+    /// Identify the protocol owning a member among this receiver's declared
+    /// implementations. A bare selector in an older image must be unambiguous.
+    pub(crate) fn protocol_member_owner(
+        &self, receiver: TypeId, qualifiers: Option<&str>, method: &str, static_only: bool,
+    ) -> Result<Option<(ProtocolId, bool)>, String> {
+        let owner = self.get_type(receiver)
+            .ok_or_else(|| format!("protocol call has unknown receiver {receiver:?}"))?;
+        let mut selected = None;
+        for implementation in &owner.protocols {
+            let protocol = self.get_type(TypeId(implementation.protocol.0))
+                .ok_or_else(|| "protocol implementation has no declaration".to_owned())?;
+            if let Some(qualifiers) = qualifiers {
+                let name = self.get_string(protocol.name)
+                    .ok_or_else(|| "protocol declaration has no name".to_owned())?;
+                let origin = protocol.origin_module.and_then(|id| self.get_string(id)).unwrap_or(&self.name);
+                let identity = qualify_module_name(origin, name);
+                if !qualifiers.split('+').map(str::trim)
+                    .any(|qualifier| qualifier == identity || (!qualifier.contains('.') && qualifier == name))
+                {
+                    continue;
+                }
+            }
+            if !protocol.variants.iter().any(|member| self.get_string(member.name) == Some(method)
+                && (!static_only || member.method_dispatch.is_none_or(|dispatch|
+                    dispatch.receiver == verum_ast::method_dispatch::ReceiverKind::None)))
+            {
+                continue;
+            }
+            if selected.is_some_and(|(previous, _)| previous != implementation.protocol) {
+                return Err(format!("ambiguous declared protocol member `{method}` for {receiver:?}"));
+            }
+            selected = Some((implementation.protocol, !protocol.type_params.is_empty()));
+        }
+        Ok(selected)
+    }
+
+    /// A static type token supplies no self argument. Its lexical protocol
+    /// selects the implementation from persisted metadata in either tier.
+    pub(crate) fn static_protocol_method(
+        &self, receiver: TypeId, selector: &str, argc: u8,
+    ) -> Result<Option<FunctionId>, String> {
+        let (qualifier, member) = if let Some(token) = selector.strip_prefix("dyn:") {
+            let (qualifier, member) = token.rsplit_once('.')
+                .ok_or_else(|| format!("invalid static protocol selector `{selector}`"))?;
+            (Some(qualifier), member)
+        } else if selector.contains('.') {
+            return Ok(None);
+        } else {
+            (None, selector)
+        };
+        if qualifier.is_none() && self.get_type(receiver).is_none() {
+            return Ok(None);
+        }
+        let missing = || format!("no static implementation of `{selector}` for {receiver:?}");
+        let Some((protocol, _)) = self.protocol_member_owner(receiver, qualifier, member, true)? else {
+            return if qualifier.is_some() { Err(missing()) } else { Ok(None) };
+        };
+        let id = self.implementation_method(receiver, protocol, member, None)?.ok_or_else(missing)?;
+        let function = self.get_function(id).ok_or_else(missing)?;
+        if function.params.len() != usize::from(argc)
+            || function.params.first().is_some_and(|p| self.get_string(p.name) == Some("self"))
+        {
+            return Err(format!("static protocol member `{selector}` has a different parameter convention"));
+        }
+        Ok(Some(id))
+    }
+
     /// Select a protocol member by its declaring vtable and actual receiver.
     /// The optional operand type separates repeated protocol implementations.
     pub fn implementation_method(

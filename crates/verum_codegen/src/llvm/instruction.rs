@@ -59,6 +59,17 @@ pub(super) fn emit_runtime_abort(ctx: &FunctionContext<'_, '_>, message: &str, n
     emit_panic_bytes(ctx, message_ptr.as_pointer_value(), length)
 }
 
+/// A shared generic template has no native frame witness. Reaching an
+/// operation that depends on it must fail before the result is observed.
+fn refuse_unresolved_witness(ctx: &mut FunctionContext<'_, '_>, dst: Reg) -> Result<()> {
+    emit_runtime_abort(ctx, "native operation requires a concrete type witness", "type_witness")?;
+    ctx.builder().build_unreachable().or_llvm_err()?;
+    let dead = ctx.llvm_context().append_basic_block(ctx.function(), "missing_witness_dead");
+    ctx.builder().position_at_end(dead);
+    ctx.set_register(dst.0, ctx.types().i64_type().get_undef().into());
+    Ok(())
+}
+
 fn emit_panic_bytes<'ctx>(
     ctx: &FunctionContext<'_, 'ctx>,
     message: verum_llvm::values::PointerValue<'ctx>,
@@ -2632,29 +2643,14 @@ fn lower_instruction_impl<'ctx>(
             // it is a VALUE, not runtime type info.
             if let TypeRef::ConstValue(v) = type_ref {
                 let llvm_val = ctx.types().i64_type().const_int(*v as u64, true);
-                // `set_register` clears the generic mark (T1194); the
-                // explicit `remove` that used to stand here is now
-                // redundant and was, before that clear existed, the only
-                // thing keeping this arm honest.
                 ctx.set_register(dst.0, llvm_val.into());
                 return Ok(());
             }
-            // Type references are lowered as pointer type (runtime type info)
-            // #44-B: a Generic payload has no witness at AOT (frames are
-            // native, no witness table) — track the register so CallM
-            // const-folds the erased-T identity instead of dispatching
-            // through the null receiver below.
-            let llvm_val = ctx.types().ptr_type().const_null();
-            // ORDER IS THE SUBSTANCE (T1194): the mark must be applied
-            // AFTER the store, because `set_register` now clears it with
-            // every other per-value fact. It used to be inserted BEFORE,
-            // and that worked only because the clear was missing — which
-            // is what let a reused register keep a stale mark and have
-            // its `default`/`zero`/`one` const-folded.
-            ctx.set_register(dst.0, llvm_val.into());
-            if matches!(type_ref, TypeRef::Generic(_)) {
-                ctx.mark_loadt_generic(dst.0);
+            if type_ref.is_generic() {
+                return refuse_unresolved_witness(ctx, *dst);
             }
+            let llvm_val = ctx.types().ptr_type().const_null();
+            ctx.set_register(dst.0, llvm_val.into());
             Ok(())
         }
 
@@ -6152,7 +6148,7 @@ fn lower_instruction_impl<'ctx>(
             // stores, no early `return`, so one place after all of them
             // suffices.
             //
-            // Same reorder `loadt_generic_regs` needed (9a37f9278), and
+            // Apply the metadata after the register write, and
             // the reason those two fields were held back from the four
             // cleared in 80cc648ec.
 
@@ -15091,21 +15087,12 @@ fn lower_call_method<'ctx>(
     // 3. Search functions by name suffix ".{method_name}"
 
     let mut method_id = method_id;
+    if receiver_declaration.as_ref().is_some_and(TypeRef::is_generic)
+        || call_witness.as_ref().is_some_and(|arguments| arguments.iter().any(TypeRef::is_generic))
+    {
+        return refuse_unresolved_witness(ctx, dst);
+    }
     let selection = if let Some(declaration) = receiver_declaration {
-        if declaration.is_generic() {
-            emit_runtime_abort(
-                ctx,
-                "missing generic receiver declaration at native call",
-                "method_receiver",
-            )?;
-            ctx.builder().build_unreachable().or_llvm_err()?;
-            let dead = ctx
-                .llvm_context()
-                .append_basic_block(ctx.function(), "method_receiver_dead");
-            ctx.builder().position_at_end(dead);
-            ctx.set_register(dst.0, ctx.types().i64_type().get_undef().into());
-            return Ok(());
-        }
         vbc_mod.try_bound_instance_method(&declaration, StringId(method_id), args.count)
     } else if let Some(witness) = &call_witness {
         vbc_mod.witnessed_source_method(StringId(method_id), args.count, witness)
@@ -15191,31 +15178,6 @@ fn lower_call_method<'ctx>(
         }
         _ => method_name_str,
     };
-
-    // #44-B: erased-T identity const-fold. The receiver register holds
-    // a `LoadT { Generic(_) }` result — at AOT there is no generic
-    // witness (frames are native), the register is a null pointer, and
-    // dispatching through it would trap. Reproduce the historical
-    // erased-T semantics statically: default/zero → 0, one → 1.
-    // (When AOT monomorphization is enabled, the specializer rewrites
-    // the LoadT to a concrete type before lowering and this branch
-    // never fires for the specialized bodies.)
-    if ctx.is_loadt_generic(receiver.0) && args.count == 0 {
-        let bare = method_name_str
-            .rsplit('.')
-            .next()
-            .unwrap_or(method_name_str.as_str());
-        let identity: Option<u64> = match bare {
-            "default" | "zero" => Some(0),
-            "one" => Some(1),
-            _ => None,
-        };
-        if let Some(v) = identity {
-            let llvm_val = ctx.types().i64_type().const_int(v, false);
-            ctx.set_register(dst.0, llvm_val.into());
-            return Ok(());
-        }
-    }
 
     // Coherent reference model: the built-in `deref` on a reference is the
     // identity on the reference value — it yields the reference; the following

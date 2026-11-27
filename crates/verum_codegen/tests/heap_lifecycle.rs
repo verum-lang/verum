@@ -11,7 +11,7 @@ use verum_vbc::{
     interpreter::Interpreter,
 };
 
-fn heap_program() -> verum_vbc::VbcModule {
+fn heap_program(client: &str) -> verum_vbc::VbcModule {
     let parser = FastParser::new();
     let mut inputs = List::new();
     // Mounts and complete selected function bodies retain their source ownership.
@@ -22,6 +22,8 @@ fn heap_program() -> verum_vbc::VbcModule {
                 "Heap",
                 "new",
                 "try_new",
+                "new_default",
+                "default",
                 "validate_cbgr",
                 "as_ref",
                 "as_mut",
@@ -37,7 +39,10 @@ fn heap_program() -> verum_vbc::VbcModule {
                 "EPOCH_CAPS_OFFSET",
             ],
         ),
-        (include_str!("../../../core/base/protocols.vr"), &["Drop"]),
+        (
+            include_str!("../../../core/base/protocols.vr"),
+            &["Drop", "Default"],
+        ),
         (include_str!("../../../core/base/result.vr"), &["Result"]),
         (
             include_str!("../../../core/mem/allocator.vr"),
@@ -69,6 +74,7 @@ fn heap_program() -> verum_vbc::VbcModule {
             ItemKind::Mount(_) => true,
             ItemKind::Const(item) => names.contains(&item.name.as_str()),
             ItemKind::Type(item) => names.contains(&item.name.as_str()),
+            ItemKind::Protocol(item) => names.contains(&item.name.as_str()),
             ItemKind::Function(item) => names.contains(&item.name.as_str()),
             ItemKind::Impl(implementation) => {
                 use verum_ast::{TypeKind, decl::ImplKind};
@@ -104,8 +110,26 @@ fn heap_program() -> verum_vbc::VbcModule {
     }
     inputs.push(
         parser
-            .parse_module_str(
-                r#"
+            .parse_module_str(client, FileId::new(inputs.len() as u32))
+            .unwrap(),
+    );
+    let units = inputs.iter().collect::<List<_>>();
+    let mut compiler = VbcCodegen::with_config(CodegenConfig::new(""));
+    compiler.initialize();
+    compiler.collect_unit_declarations(&units).unwrap();
+    compiler.resolve_pending_imports();
+    compiler
+        .compile_unit_items(&units, ItemFailurePolicy::Strict)
+        .unwrap();
+    let mut module = compiler.finalize_module().unwrap();
+    module.resolve_protocol_dispatch();
+    module
+}
+
+#[test]
+fn actual_heap_moves_and_borrows_its_declared_payload_in_both_tiers() {
+    let source = heap_program(
+        r#"
         module owning_heap;
         mount core.base.memory.Heap;
         mount core.base.protocols.Drop;
@@ -145,26 +169,7 @@ fn heap_program() -> verum_vbc::VbcModule {
             unsafe { RELEASED }
         }
     "#,
-                FileId::new(inputs.len() as u32),
-            )
-            .unwrap(),
     );
-    let units = inputs.iter().collect::<List<_>>();
-    let mut compiler = VbcCodegen::with_config(CodegenConfig::new(""));
-    compiler.initialize();
-    compiler.collect_unit_declarations(&units).unwrap();
-    compiler.resolve_pending_imports();
-    compiler
-        .compile_unit_items(&units, ItemFailurePolicy::Strict)
-        .unwrap();
-    let mut module = compiler.finalize_module().unwrap();
-    module.resolve_protocol_dispatch();
-    module
-}
-
-#[test]
-fn actual_heap_moves_and_borrows_its_declared_payload_in_both_tiers() {
-    let source = heap_program();
     let bytes = verum_vbc::serialize::serialize_module(&source).unwrap();
     let wire = verum_vbc::deserialize::deserialize_module_validated(&bytes).unwrap();
     for image in [source, wire.clone()] {
@@ -191,6 +196,112 @@ fn a_foreign_heap_constructor_retains_its_source_declaration() {
         }
     "#,
     );
+}
+
+#[test]
+fn heap_default_and_static_protocol_methods_use_the_selected_implementation() {
+    let module = heap_program(
+        r#"
+        module static_identities;
+        mount core.base.memory.Heap;
+        mount core.base.protocols.Default;
+        type Values is protocol { fn zero() -> Self; fn one() -> Self; };
+        type Alternate is protocol { fn zero() -> Self; };
+        type Mark is { number: Int };
+        type Other is { number: Int };
+        implement Default for Mark { fn default() -> Mark { Mark { number: 11 } } }
+        implement Default for Other { fn default() -> Other { Other { number: 59 } } }
+        implement Values for Mark {
+            fn zero() -> Mark { Mark { number: 23 } }
+            fn one() -> Mark { Mark { number: 39 } }
+        }
+        implement Alternate for Mark { fn zero() -> Mark { Mark { number: 83 } } }
+        implement Values for Other {
+            fn zero() -> Other { Other { number: 7 } }
+            fn one() -> Other { Other { number: 5 } }
+        }
+        fn initial<T: Default>() -> T { T.default() }
+        fn zero<T: Values>() -> T { T.zero() }
+        fn one<T: Values>() -> T { T.one() }
+        fn alternate<T: Alternate>() -> T { T.zero() }
+        fn main() -> Int {
+            let a: Mark = initial();
+            let b: Mark = zero();
+            let c: Mark = one();
+            let x: Other = initial();
+            let y: Other = zero();
+            let z: Other = one();
+            let fourth: Mark = alternate();
+            if fourth.number != 83 { return 3; }
+            let boxed: Heap<Mark> = Heap.new_default();
+            let other: Heap<Other> = Heap.default();
+            if boxed.number != 11 || other.number != 59 { return 1; }
+            if x.number != 59 || y.number != 7 || z.number != 5 { return 2; }
+            a.number + b.number + c.number
+        }
+    "#,
+    );
+    let bytes = verum_vbc::serialize::serialize_module(&module).unwrap();
+    let wire = verum_vbc::deserialize::deserialize_module_validated(&bytes).unwrap();
+    for image in [module, wire.clone()] {
+        let main = image
+            .find_function_by_name("static_identities.main")
+            .unwrap();
+        let mut vm = Interpreter::try_new_validated(std::sync::Arc::new(image)).unwrap();
+        assert_eq!(vm.execute_function(main).unwrap().try_as_i64(), Some(73));
+    }
+    source_image::run_module(wire, |_| {});
+}
+
+#[test]
+fn entering_a_generic_static_call_without_its_type_argument_fails_in_both_tiers() {
+    use verum_vbc::{
+        Instruction,
+        bytecode::{decode_instructions, encode_instructions},
+    };
+    let mut wire = source_image::module(
+        r#"
+        module missing;
+        type Make is protocol { fn default() -> Self; };
+        type Mark is { value: Int };
+        implement Make for Mark { fn default() -> Mark { Mark { value: 73 } } }
+        fn produce<T: Make>() -> Int { let marker: T = T.default(); 73 }
+        fn main() -> Int { produce<Mark>() }
+    "#,
+    );
+    let main = wire.find_function_by_name("missing.main").unwrap();
+    let entry = &mut wire.functions[main.0 as usize];
+    let start = entry.bytecode_offset as usize;
+    let body = &wire.bytecode[start..start + entry.bytecode_length as usize];
+    let mut instructions = decode_instructions(body).unwrap();
+    let mut removed = 0;
+    for instruction in &mut instructions {
+        if let Instruction::CallG {
+            dst, func_id, args, ..
+        } = instruction
+        {
+            *instruction = Instruction::Call {
+                dst: *dst,
+                func_id: *func_id,
+                args: *args,
+            };
+            removed += 1;
+        }
+    }
+    assert_eq!(removed, 1);
+    let mut bytes = Vec::new();
+    encode_instructions(&instructions, &mut bytes);
+    entry.bytecode_offset = wire.bytecode.len() as u32;
+    entry.bytecode_length = bytes.len() as u32;
+    wire.bytecode.extend_from_slice(&bytes);
+
+    let mut vm = Interpreter::try_new_validated(std::sync::Arc::new(wire.clone())).unwrap();
+    let error = vm.execute_function(main).unwrap_err();
+    assert!(error.to_string().contains("witness"), "{error}");
+    let run = source_image::execute_module(wire, |_| {});
+    assert!(!run.status.success());
+    let stderr = verum_common::Text::from_utf8_lossy(&run.stderr);
+    assert!(stderr.contains("concrete type witness"), "{stderr}");
 }
 
 #[test]

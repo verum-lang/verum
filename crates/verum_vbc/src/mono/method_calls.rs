@@ -3,7 +3,7 @@
 
 use super::{TypeSubstitution, discovery};
 use crate::instruction::{Instruction as I, RegRange};
-use crate::module::{FunctionDescriptor, VbcModule};
+use crate::module::{FunctionDescriptor, FunctionId, VbcModule};
 use crate::types::{StringId, TypeId, TypeRef};
 use std::collections::HashMap;
 
@@ -117,23 +117,12 @@ fn field_type(module: &VbcModule, mut receiver: &TypeRef, index: u32) -> Option<
 fn static_call(
     module: &VbcModule,
     receiver: &TypeRef,
-    method: u32,
+    id: FunctionId,
     args: RegRange,
     values: &HashMap<u16, TypeRef>,
     witness: Option<&[TypeRef]>,
 ) -> Option<(u32, Vec<TypeRef>, TypeRef)> {
     let base = receiver.base_type_id()?;
-    let name = module.get_string(StringId(method))?;
-    let bare = name
-        .strip_prefix("dyn:")
-        .map(|n| n.rsplit('.').next().unwrap_or(n))
-        .unwrap_or(name);
-    // Qualified CallM tokens have their own authority; do not reinterpret
-    // a foreign owner as a method on this receiver.
-    if bare.contains('.') {
-        return None;
-    }
-    let id = module.resolve_protocol_method_by_name(base.0, bare)?;
     let target = module.get_function(id)?;
     if target.params.len() != args.count as usize {
         return None;
@@ -182,7 +171,7 @@ pub(super) fn resolve_type_methods(
     substitution: &TypeSubstitution,
     entries: &[bool],
     instructions: &mut [I],
-) -> Result<(), super::SubstitutionError> {
+) -> Result<(), super::SpecializationError> {
     let mut values: HashMap<u16, TypeRef> = function
         .params
         .iter()
@@ -256,16 +245,17 @@ pub(super) fn resolve_type_methods(
             } => {
                 let witness = pending.take();
                 let sidecar = pending_index.take();
-                let target = tokens.get(&receiver.0).and_then(|receiver| {
-                    static_call(
-                        module,
-                        receiver,
-                        *method_id,
-                        *args,
-                        &values,
-                        witness.as_deref(),
-                    )
-                });
+                let mut target = None;
+                if let Some(receiver) = tokens.get(&receiver.0)
+                    && let Some(base) = receiver.base_type_id()
+                    && let Some(name) = module.get_string(StringId(*method_id))
+                {
+                    let selected = module.static_protocol_method(base, name, args.count)
+                        .map_err(super::SpecializationError::InvalidWitness)?
+                        .or_else(|| (!name.contains('.')).then(||
+                            module.resolve_protocol_method_by_name(base.0, name)).flatten());
+                    target = selected.and_then(|id| static_call(module, receiver, id, *args, &values, witness.as_deref()));
+                }
                 // Instance calls keep their existing receiver ABI. Qualify
                 // only a receiver with a carried concrete type and an exact
                 // dispatch-map entry; never substitute an arbitrary slot 0.

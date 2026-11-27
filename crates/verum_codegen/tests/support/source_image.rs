@@ -32,9 +32,23 @@ pub fn run_with(source: &str, configure: impl FnOnce(&verum_llvm::module::Module
 
 /// Execute an already admitted module through the same complete native path.
 pub fn run_module(
-    mut wire: verum_vbc::VbcModule,
+    wire: verum_vbc::VbcModule,
     configure: impl FnOnce(&verum_llvm::module::Module<'_>),
 ) {
+    let run = execute_module(wire, configure);
+    assert_eq!(
+        run.status.code(),
+        Some(73),
+        "{}",
+        Text::from_utf8_lossy(&run.stderr)
+    );
+}
+
+/// Return the linked program's actual status and diagnostics for refusal tests.
+pub fn execute_module(
+    mut wire: verum_vbc::VbcModule,
+    configure: impl FnOnce(&verum_llvm::module::Module<'_>),
+) -> std::process::Output {
     for function in &mut wire.functions {
         function.is_generic = !function.type_params.is_empty();
         let start = function.bytecode_offset as usize;
@@ -90,11 +104,5 @@ pub fn run_module(
         "{}",
         Text::from_utf8_lossy(&link.stderr)
     );
-    let run = Command::new(executable).output().expect("native execution");
-    assert_eq!(
-        run.status.code(),
-        Some(73),
-        "{}",
-        Text::from_utf8_lossy(&run.stderr)
-    );
+    Command::new(executable).output().expect("native execution")
 }

@@ -64,7 +64,7 @@ const EPOCH_CAPS_OFFSET: Int = 12;
 // core.action, which declares no Hasher at all: the name resolved
 // ambiently while the ring gate read the spelled path as an upward
 // edge base(r0) -> action(r3).
-mount core.base.protocols.{Hasher};
+mount core.base.protocols.{Default, Hasher};
 mount core.intrinsics.atomic.{
     MemoryOrder,
     ORDERING_RELAXED, ORDERING_ACQUIRE, ORDERING_RELEASE,
@@ -214,7 +214,7 @@ implement<T> Heap<T> {
     ///
     public fn new_default() -> Heap<T>
     where T: Default {
-        Heap.new(0)
+        Heap.new(T.default())
     }
 
     /// Allocate zeroed memory (for types where zero bits are valid).
@@ -587,7 +587,7 @@ implement<T: Hash> Hash for Heap<T> {
 // Default if T is Default
 implement<T: Default> Default for Heap<T> {
     fn default() -> Heap<T> {
-        Heap.new(0)
+        Heap.new_default()
     }
 }
 

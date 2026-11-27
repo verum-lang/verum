@@ -339,8 +339,9 @@ impl VbcCodegen {
                 }
                 if let Some(witness) = self.type_parameter_static_receiver(receiver).ok()? {
                     if type_args.is_empty()
-                        && let Some(result) = self.bounded_static_output(&witness, method.name.as_str(), args.len()) {
-                        return Some(result);
+                        && let Some(member) = self.bounded_static_method(&witness, method.name.as_str(), args.len()).transpose().ok()?
+                        && !member.is_async {
+                        return Some(member.output);
                     }
                     if matches!(witness, TypeRef::Generic(_)) { return None; }
                     let owner = self.resolve_declared_associated_types(&witness)?;
