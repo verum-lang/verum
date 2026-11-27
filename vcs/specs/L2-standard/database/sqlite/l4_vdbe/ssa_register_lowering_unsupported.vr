@@ -1,0 +1,20 @@
+// @test: run-interpreter-panic
+// @tier: 0
+// @level: L2
+// @tags: sqlite, vdbe, ssa, aggregate
+// @timeout: 15000
+// @expected-panic: unsupported SQLite SSA instruction in register lowering
+
+module core.database.sqlite.native.l4_vdbe.ssa.tests.register_lowering_unsupported;
+
+mount collections.List;
+mount core.database.sqlite.native.l4_vdbe.ssa.block.block_id;
+mount core.database.sqlite.native.l4_vdbe.ssa.inst.SsaInst;
+mount core.database.sqlite.native.l4_vdbe.ssa.program.ssa_program_new;
+mount core.database.sqlite.native.l4_vdbe.ssa.to_register_vm.lower_ssa_to_vdbe;
+
+fn main() {
+    let mut ssa = ssa_program_new("unsupported aggregate");
+    ssa.graph_mut().get_mut(&block_id(0)).push_inst(SsaInst.IAggStep("count", List.new(), 0));
+    let _ = lower_ssa_to_vdbe(&ssa);
+}

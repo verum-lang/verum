@@ -33,7 +33,7 @@ mount collections.List;
 mount base.{Text, Maybe};
 mount core.database.sqlite.native.l4_vdbe.program.{
     ConstantPool, ResultColumn, CursorDecl,
-    constant_pool_new
+    constant_pool_new, VdbeProgram, program_new
 };
 mount core.database.sqlite.native.l4_vdbe.ssa.value.{ValueId, value_id};
 mount core.database.sqlite.native.l4_vdbe.ssa.cfg.{Cfg, cfg_new};
@@ -71,6 +71,12 @@ implement SsaProgram {
     public fn graph(&self) -> &Cfg { &self.cfg }
 
     public(in core.database.sqlite.native.l4_vdbe.ssa) fn graph_mut(&mut self) -> &mut Cfg { &mut self.cfg }
+
+    public(in core.database.sqlite.native.l4_vdbe.ssa) fn register_program(&self, registers: Int) -> VdbeProgram {
+        program_new(self.sql.clone(), registers).with_metadata(self.constants, self.result_columns, self.cursors)
+    }
+
+    public(in core.database.sqlite.native.l4_vdbe.ssa) fn constant_count(&self) -> Int { self.constants.len() }
 
     /// Allocate a fresh ValueId.  Used by `SsaBuilder` and by
     /// peephole optimisations that introduce new computations.

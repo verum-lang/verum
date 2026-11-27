@@ -1,0 +1,30 @@
+// @test: run-interpreter-panic
+// @tier: 0
+// @level: L2
+// @tags: sqlite, vdbe, ssa, control-flow
+// @timeout: 15000
+// @expected-panic: SQLite SSA phi must cover every incoming edge
+
+module core.database.sqlite.native.l4_vdbe.ssa.tests.register_lowering_bad_phi;
+
+mount collections.List;
+mount core.database.sqlite.native.l4_vdbe.ssa.block.block_id;
+mount core.database.sqlite.native.l4_vdbe.ssa.inst.{SsaInst, PhiOperand};
+mount core.database.sqlite.native.l4_vdbe.ssa.program.ssa_program_new;
+mount core.database.sqlite.native.l4_vdbe.ssa.value.{ssa_value, SValueKind};
+mount core.database.sqlite.native.l4_vdbe.ssa.to_register_vm.lower_ssa_to_vdbe;
+
+fn main() {
+    let mut ssa = ssa_program_new("missing backedge input");
+    let src = ssa_value(ssa.fresh_value_id(), SValueKind.SkInt);
+    let dst = ssa_value(ssa.fresh_value_id(), SValueKind.SkInt);
+    let cfg = ssa.graph_mut();
+    let header = cfg.new_block();
+    cfg.get_mut(&block_id(0)).push_inst(SsaInst.IIntImm(src, 1_i64));
+    cfg.get_mut(&block_id(0)).set_terminator(SsaInst.IJump(header));
+    cfg.get_mut(&header).set_terminator(SsaInst.IJump(header));
+    let mut inputs: List<PhiOperand> = List.new();
+    inputs.push(PhiOperand { pred: block_id(0), value: src });
+    cfg.get_mut(&header).push_phi(SsaInst.IPhi(dst, inputs));
+    let _ = lower_ssa_to_vdbe(&ssa);
+}

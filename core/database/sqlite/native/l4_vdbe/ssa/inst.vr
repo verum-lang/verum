@@ -160,7 +160,7 @@ public type SsaInst is
     | ITransactionRollback(Int)                          // savepoint_id (-1 for full)
 
     // ---- Control flow (terminators) ---------------------------------------
-    /// Conditional branch.  `cond.kind` MUST be `SkBool`.
+    /// Conditional branch using register-VM truthiness. Comparisons produce SkBool.
     | IBranch(SsaValue, BlockId, BlockId)                // cond, then_blk, else_blk
 
     /// Unconditional jump.

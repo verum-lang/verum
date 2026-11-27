@@ -1,0 +1,129 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L2
+// @tags: sqlite, vdbe, ssa, control-flow
+// @timeout: 15000
+// @expected-exit: 0
+
+module core.database.sqlite.native.l4_vdbe.ssa.tests.register_lowering;
+
+mount collections.List;
+mount core.database.sqlite.native.l4_vdbe.register.Register;
+mount core.database.sqlite.native.l4_vdbe.program.VdbeProgram;
+mount core.database.sqlite.native.l4_vdbe.interpreter.{VdbeState, StepResult, vdbe_state_new, run_until_row};
+mount core.database.sqlite.native.l4_vdbe.ssa.value.{SsaValue, SValueKind, ssa_value};
+mount core.database.sqlite.native.l4_vdbe.ssa.inst.{SsaInst, CmpKind, PhiOperand};
+mount core.database.sqlite.native.l4_vdbe.ssa.block.block_id;
+mount core.database.sqlite.native.l4_vdbe.ssa.cfg.Cfg;
+mount core.database.sqlite.native.l4_vdbe.ssa.program.{SsaProgram, ssa_program_new};
+mount core.database.sqlite.native.l4_vdbe.ssa.to_register_vm.lower_ssa_to_vdbe;
+
+fn integer(prog: &mut SsaProgram, n: Int64) -> SsaValue {
+    let d = ssa_value(prog.fresh_value_id(), SValueKind.SkInt);
+    prog.graph_mut().get_mut(&block_id(0)).push_inst(SsaInst.IIntImm(d, n));
+    d
+}
+
+fn connect(cfg: &mut Cfg, pred: Int, dest: Int) {
+    cfg.get_mut(&block_id(pred)).set_terminator(SsaInst.IJump(block_id(dest)));
+}
+
+fn merge(cfg: &mut Cfg, dest: Int, result_value: SsaValue, p: Int, x: SsaValue, q: Int, y: SsaValue) {
+    let mut inputs: List<PhiOperand> = List.new();
+    inputs.push(PhiOperand { pred: block_id(p), value: x });
+    inputs.push(PhiOperand { pred: block_id(q), value: y });
+    cfg.get_mut(&block_id(dest)).push_phi(SsaInst.IPhi(result_value, inputs));
+}
+
+fn emit_pair(cfg: &mut Cfg, block: Int, first: SsaValue, second: SsaValue) {
+    let mut values: List<SsaValue> = List.new();
+    values.push(first);
+    values.push(second);
+    cfg.get_mut(&block_id(block)).push_inst(SsaInst.IResultRow(values));
+}
+
+fn read_int(state: &VdbeState, reg: Int) -> Int64 {
+    match state.reg(reg) {
+        Register.RInt(n) => n,
+        _ => panic("expected integer register"),
+    }
+}
+
+fn check_row(state: &mut VdbeState, program: &VdbeProgram, first: Int64, second: Int64) {
+    match run_until_row(state, program, 100) {
+        StepResult.Row(start, count) => {
+            assert(count == 2, "expected two result columns");
+            assert_eq(read_int(state, start), first);
+            assert_eq(read_int(state, start + 1), second);
+        }
+        _ => panic("expected a result row within the instruction budget"),
+    }
+}
+
+fn check_done(state: &mut VdbeState, program: &VdbeProgram) {
+    assert(run_until_row(state, program, 100) is StepResult.Done, "expected successful halt");
+}
+
+// The true arm is a critical edge directly into the join. Neither arm is
+// adjacent to the branch, and the false arm must jump backward to the join.
+fn diamond(n: Int64, expected: Int64, test_result: Int64) {
+    let mut ssa = ssa_program_new("diamond");
+    let left = integer(&mut ssa, 22_i64);
+    let right = integer(&mut ssa, n);
+    let cond = ssa_value(ssa.fresh_value_id(), SValueKind.SkBool);
+    let total = ssa_value(ssa.fresh_value_id(), SValueKind.SkInt);
+    let selected = ssa_value(ssa.fresh_value_id(), SValueKind.SkInt);
+    let cfg = ssa.graph_mut();
+    while cfg.block_count() < 5 { let _ = cfg.new_block(); }
+    cfg.get_mut(&block_id(0)).push_inst(SsaInst.ICmp(cond, CmpKind.CkEq, left, right));
+    cfg.get_mut(&block_id(0)).set_terminator(SsaInst.IBranch(cond, block_id(3), block_id(4)));
+    cfg.get_mut(&block_id(1)).set_terminator(SsaInst.IHalt(1, "unreachable"));
+    cfg.get_mut(&block_id(2)).set_terminator(SsaInst.IHalt(1, "unreachable"));
+    cfg.get_mut(&block_id(4)).push_inst(SsaInst.IAdd(total, left, right));
+    connect(cfg, 4, 3);
+    merge(cfg, 3, selected, 4, total, 0, left);
+    emit_pair(cfg, 3, selected, cond);
+    cfg.get_mut(&block_id(3)).set_terminator(SsaInst.IHalt(0, ""));
+    let program = lower_ssa_to_vdbe(&ssa);
+    let mut state = vdbe_state_new(&program);
+    check_row(&mut state, &program, expected, test_result);
+    check_done(&mut state, &program);
+}
+
+fn loop_swap() {
+    let mut ssa = ssa_program_new("parallel loop phis");
+    let left = integer(&mut ssa, 17_i64);
+    let right = integer(&mut ssa, 29_i64);
+    let zero = integer(&mut ssa, 0_i64);
+    let one = integer(&mut ssa, 1_i64);
+    let limit = integer(&mut ssa, 2_i64);
+    let x = ssa_value(ssa.fresh_value_id(), SValueKind.SkInt);
+    let y = ssa_value(ssa.fresh_value_id(), SValueKind.SkInt);
+    let counter = ssa_value(ssa.fresh_value_id(), SValueKind.SkInt);
+    let next_count = ssa_value(ssa.fresh_value_id(), SValueKind.SkInt);
+    let again = ssa_value(ssa.fresh_value_id(), SValueKind.SkBool);
+    let cfg = ssa.graph_mut();
+    while cfg.block_count() < 4 { let _ = cfg.new_block(); }
+    connect(cfg, 0, 1);
+    merge(cfg, 1, x, 0, left, 3, y);
+    merge(cfg, 1, y, 3, x, 0, right);
+    merge(cfg, 1, counter, 0, zero, 3, next_count);
+    emit_pair(cfg, 1, x, y);
+    cfg.get_mut(&block_id(1)).push_inst(SsaInst.ICmp(again, CmpKind.CkLt, counter, limit));
+    cfg.get_mut(&block_id(1)).set_terminator(SsaInst.IBranch(again, block_id(3), block_id(2)));
+    cfg.get_mut(&block_id(3)).push_inst(SsaInst.IAdd(next_count, counter, one));
+    connect(cfg, 3, 1);
+    cfg.get_mut(&block_id(2)).set_terminator(SsaInst.IHalt(0, ""));
+    let program = lower_ssa_to_vdbe(&ssa);
+    let mut state = vdbe_state_new(&program);
+    check_row(&mut state, &program, 17_i64, 29_i64);
+    check_row(&mut state, &program, 29_i64, 17_i64);
+    check_row(&mut state, &program, 17_i64, 29_i64);
+    check_done(&mut state, &program);
+}
+
+fn main() {
+    diamond(22_i64, 22_i64, 1_i64);
+    diamond(11_i64, 33_i64, 0_i64);
+    loop_swap();
+}
