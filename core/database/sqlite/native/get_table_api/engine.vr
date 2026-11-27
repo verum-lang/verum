@@ -35,7 +35,7 @@ public fn sqlite3_get_table(
     let mut m = new_matrix(header);
     let mut i: Int = 0;
     while i < rows.len() {
-        if !m.push_row(rows.get(i).clone()) {
+        if !m.push_row(rows[i]) {
             return GtoError("row/column count mismatch".clone());
         }
         i = i + 1;

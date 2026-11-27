@@ -25,13 +25,13 @@ module core.database.sqlite.native.exec.engine;
 mount base.{Bool, Text};
 mount collections.List;
 mount core.database.sqlite.native.iter.outcome.{
-    RawStepOutcome, has_row, is_terminal, RawError,
+    RawStepOutcome, has_row, is_terminal,
 };
 mount core.database.sqlite.native.exec.row.{
     ExecRow,
 };
 mount core.database.sqlite.native.exec.callback.{
-    CallbackDecision, CdContinue, CdAbort, decision_aborts,
+    CallbackDecision, decision_aborts,
 };
 
 public type ExecOutcome is
@@ -72,7 +72,7 @@ public fn exec_statement(
             continue;
         }
         match &o {
-            RawError(msg) => {
+            RawStepOutcome.RawError(msg) => {
                 outcome = EoError(msg.clone());
                 break;
             }
@@ -98,7 +98,7 @@ public fn exec_many(
     let mut i: Int = 0;
     let n = statements.len();
     while i < n {
-        let sql = statements.get(i).clone();
+        let sql = statements[i];
         let outcome = exec_statement(
             sql, prepare_fn, step_fn, read_row_fn, finalize_fn, callback,
         );

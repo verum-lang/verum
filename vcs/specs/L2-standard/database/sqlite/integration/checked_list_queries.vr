@@ -1,0 +1,165 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L2
+// @tags: sqlite, query, list, bounds, ownership
+// @expected-exit: 0
+// @description: Bounded SQLite queries and updates preserve missing results and stored state.
+
+mount core.base.maybe.Maybe;
+mount core.collections.list.List;
+mount core.database.sqlite.native.bind_parameter_api.table.new_table;
+mount core.database.sqlite.native.bind_parameter_api.descriptor.{ParamKind, new_spec};
+mount core.database.sqlite.native.txn_state_api.state.{TxnStateApiState, connection_state, to_code};
+mount core.database.sqlite.native.keyword_api.engine.{
+    sqlite3_keyword_count, sqlite3_keyword_name, sqlite3_keyword_check,
+};
+mount core.database.sqlite.native.version_api.compile_option.{new_registry as new_options};
+mount core.database.sqlite.native.vtab_in_first_next_api.iter.{VtabInPosition, current_value};
+mount core.database.sqlite.native.vtab_nochange_api.detect.{ColumnState, count_unchanged};
+mount core.database.sqlite.native.fts5_offsets_fn_api.auxdata.{
+    new_hit, empty_result, append_hit, well_formed_result,
+};
+mount core.database.sqlite.native.pcache_api.cache.new_cache;
+mount core.database.sqlite.native.value_dup_api.registry.{new_registry as new_dups};
+mount core.database.sqlite.native.vfs_api.registry.{new_registry as new_vfs};
+mount core.database.sqlite.native.get_table_api.engine.{GetTableOutcome, sqlite3_get_table};
+mount core.database.sqlite.native.exec.engine.{ExecOutcome, exec_many};
+mount core.database.sqlite.native.exec.row.{ExecRow, new_row};
+mount core.database.sqlite.native.exec.callback.CallbackDecision;
+mount core.database.sqlite.native.iter.outcome.RawStepOutcome;
+
+fn test_names() {
+    let mut params = new_table();
+    assert(params.sqlite3_bind_parameter_name(1) is Maybe.None);
+    params.push(new_spec(1, ParamKind.PkAnonymous));
+    params.push(new_spec(2, ParamKind.PkColon("name")));
+    assert(params.sqlite3_bind_parameter_name(-1) is Maybe.None);
+    assert(params.sqlite3_bind_parameter_name(0) is Maybe.None);
+    assert(params.sqlite3_bind_parameter_name(1) is Maybe.None);
+    assert_eq(params.sqlite3_bind_parameter_name(2).unwrap(), ":name");
+    assert(params.sqlite3_bind_parameter_name(3) is Maybe.None);
+    assert_eq(params.sqlite3_bind_parameter_index(&":name"), 2);
+    assert_eq(params.sqlite3_bind_parameter_index(&":missing"), 0);
+
+    let mut options = new_options();
+    assert(options.get(0) is Maybe.None);
+    options.add("ENABLE_FTS5");
+    assert_eq(options.get(0).unwrap(), "ENABLE_FTS5");
+    assert(options.get(-1) is Maybe.None);
+    assert(options.get(1) is Maybe.None);
+    assert(options.used(&"SQLITE_enable_fts5"));
+
+    assert(sqlite3_keyword_name(-1) is Maybe.None);
+    assert(sqlite3_keyword_name(sqlite3_keyword_count()) is Maybe.None);
+    let first_keyword = sqlite3_keyword_name(0).unwrap();
+    assert_eq(sqlite3_keyword_check(&first_keyword, first_keyword.len()), 1);
+    assert_eq(sqlite3_keyword_check(&"abort", 5), 1);
+}
+
+fn test_states() {
+    let mut states: List<TxnStateApiState> = List.new();
+    assert_eq(to_code(&connection_state(&states)), 0);
+    states.push(TxnStateApiState.StRead);
+    states.push(TxnStateApiState.StWrite);
+    states.push(TxnStateApiState.StNone);
+    assert_eq(to_code(&connection_state(&states)), 2);
+
+    let columns: List<ColumnState> = [
+        ColumnState.CsUnchanged, ColumnState.CsExplicitNull, ColumnState.CsUnchanged,
+    ];
+    assert_eq(count_unchanged(&columns), 2);
+    let values: List<Int64> = [0_i64, -5_i64];
+    assert_eq(current_value(&VtabInPosition.PAtRow(0), &values), 0_i64);
+    assert_eq(current_value(&VtabInPosition.PAtRow(1), &values), -5_i64);
+    assert_eq(current_value(&VtabInPosition.PAtRow(-1), &values), 0_i64);
+    assert_eq(current_value(&VtabInPosition.PAtRow(2), &values), 0_i64);
+    assert_eq(current_value(&VtabInPosition.PFresh, &values), 0_i64);
+    assert_eq(current_value(&VtabInPosition.PExhausted, &values), 0_i64);
+
+    let good = append_hit(empty_result(), new_hit(0, 1, 3_i64, 2_i64));
+    assert(well_formed_result(&good));
+    let invalid = append_hit(good, new_hit(0, 1, 3_i64, 0_i64));
+    assert(!well_formed_result(&invalid));
+}
+
+fn test_mutations() {
+    let mut dup = new_dups();
+    let saved = dup.sqlite3_value_dup(73_i64);
+    assert_eq(dup.outstanding_count(), 1);
+    assert(!dup.sqlite3_value_free(0_i64));
+    assert(dup.sqlite3_value_free(saved));
+    assert(!dup.sqlite3_value_free(saved));
+    assert_eq(dup.outstanding_count(), 0);
+
+    let mut cache = new_cache(2);
+    assert(!cache.unpin_page(9_i64));
+    assert(!cache.pin_page(7_i64));
+    assert(cache.pin_page(7_i64));
+    assert(cache.unpin_page(7_i64));
+    assert_eq(cache.pin_count(), 1);
+    assert(cache.unpin_page(7_i64));
+    assert_eq(cache.pin_count(), 0);
+    assert(cache.mark_dirty_page(7_i64));
+    assert(!cache.pin_page(8_i64));
+    assert(cache.unpin_page(8_i64));
+    assert(!cache.pin_page(9_i64));
+    assert(!cache.mark_clean_page(8_i64));
+    assert(cache.pin_page(7_i64));
+    assert_eq(cache.truncate(7_i64), 1);
+    assert_eq(cache.len(), 1);
+
+    let mut vfs = new_vfs();
+    assert_eq(vfs.sqlite3_vfs_find(&Maybe.None), 0_i64);
+    assert_eq(vfs.sqlite3_vfs_register("alpha", 11_i64, true), 0);
+    assert_eq(vfs.sqlite3_vfs_register("beta", 22_i64, false), 0);
+    assert_eq(vfs.sqlite3_vfs_register("beta", 99_i64, false), 1);
+    assert_eq(vfs.sqlite3_vfs_find(&Maybe.Some("beta")), 22_i64);
+    assert_eq(vfs.sqlite3_vfs_find(&Maybe.Some("absent")), 0_i64);
+    assert_eq(vfs.sqlite3_vfs_unregister(11_i64), 0);
+    assert_eq(vfs.sqlite3_vfs_find(&Maybe.None), 22_i64);
+    assert_eq(vfs.sqlite3_vfs_unregister(11_i64), 1);
+}
+
+fn prepare(s: &Text) -> Int64 { if *s == "SELECT 1" { 1_i64 } else { -1_i64 } }
+fn step(_id: Int64) -> RawStepOutcome { RawStepOutcome.RawDone }
+fn failed_step(_id: Int64) -> RawStepOutcome { RawStepOutcome.RawError("disk") }
+fn row_step(_id: Int64) -> RawStepOutcome { RawStepOutcome.RawRow }
+fn finalize(_id: Int64) {}
+fn accept_row(_row: &ExecRow) -> CallbackDecision { CallbackDecision.CdContinue }
+fn abort_row(_row: &ExecRow) -> CallbackDecision { CallbackDecision.CdAbort }
+
+fn test_rows() {
+    let head: List<Text> = ["x", "y"];
+    let rows: List<List<Text>> = [["a", "b"], ["c", "d"]];
+    match sqlite3_get_table(head, rows) {
+        GetTableOutcome.GtoOk(m) => {
+            assert_eq(m.n_row(), 2);
+            assert_eq(m.n_column(), 2);
+        },
+        GetTableOutcome.GtoError(_) => assert(false),
+    }
+    let bad: List<List<Text>> = [["a"]];
+    assert(sqlite3_get_table(["x", "y"], bad) is GetTableOutcome.GtoError(_));
+    let blank = new_row();
+    let read_row = move |_id: Int64| blank;
+    let empty: List<Text> = List.new();
+    assert(exec_many(&empty, prepare, step, read_row, finalize, accept_row) is ExecOutcome.EoOk);
+    let statements: List<Text> = ["SELECT 1", "INVALID"];
+    match exec_many(&statements, prepare, step, read_row, finalize, accept_row) {
+        ExecOutcome.EoError(message) => assert_eq(message, "prepare failed"),
+        _ => assert(false),
+    }
+    match exec_many(&statements, prepare, failed_step, read_row, finalize, accept_row) {
+        ExecOutcome.EoError(message) => assert_eq(message, "disk"),
+        _ => assert(false),
+    }
+    let aborted = exec_many(&statements, prepare, row_step, read_row, finalize, abort_row);
+    assert(aborted is ExecOutcome.EoAborted);
+}
+
+fn main() {
+    test_names();
+    test_states();
+    test_mutations();
+    test_rows();
+}

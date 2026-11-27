@@ -79,8 +79,7 @@ public fn count_unchanged(states: &List<ColumnState>) -> Int {
     let mut c = 0;
     let n = states.len() as Int;
     while i < n {
-        let s = states.get(i);
-        if skips_write(&xupdate_action(&s)) { c = c + 1; }
+        if skips_write(&xupdate_action(&states[i])) { c = c + 1; }
         i = i + 1;
     }
     c

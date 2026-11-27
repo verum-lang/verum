@@ -47,7 +47,7 @@ implement PCache {
     fn find_index(&self, page_no: Int64) -> Int {
         let mut i: Int = 0;
         while i < self.slots.len() {
-            if self.slots.get(i).page_no == page_no { return i; }
+            if self.slots[i].page_no == page_no { return i; }
             i = i + 1;
         }
         -1
@@ -59,7 +59,7 @@ implement PCache {
         let idx = self.find_index(page_no);
         let gen = self.tick();
         if idx >= 0 {
-            pin(self.slots.get_mut(idx), gen);
+            pin(&mut self.slots[idx], gen);
             self.hits = self.hits + 1_i64;
             return true;
         }
@@ -74,21 +74,21 @@ implement PCache {
     public fn unpin_page(&mut self, page_no: Int64) -> Bool {
         let idx = self.find_index(page_no);
         if idx < 0 { return false; }
-        unpin(self.slots.get_mut(idx));
+        unpin(&mut self.slots[idx]);
         true
     }
 
     public fn mark_dirty_page(&mut self, page_no: Int64) -> Bool {
         let idx = self.find_index(page_no);
         if idx < 0 { return false; }
-        mark_dirty(self.slots.get_mut(idx));
+        mark_dirty(&mut self.slots[idx]);
         true
     }
 
     public fn mark_clean_page(&mut self, page_no: Int64) -> Bool {
         let idx = self.find_index(page_no);
         if idx < 0 { return false; }
-        mark_clean(self.slots.get_mut(idx));
+        mark_clean(&mut self.slots[idx]);
         true
     }
 
@@ -97,7 +97,7 @@ implement PCache {
         let mut best_gen: Int64 = 9223372036854775807 as Int64;
         let mut i: Int = 0;
         while i < self.slots.len() {
-            let s = self.slots.get(i);
+            let s = &self.slots[i];
             if is_evictable(s) && s.generation < best_gen {
                 best = i;
                 best_gen = s.generation;
@@ -115,7 +115,7 @@ implement PCache {
         let mut removed: Int = 0;
         let mut i: Int = 0;
         while i < self.slots.len() {
-            if self.slots.get(i).page_no > watermark {
+            if self.slots[i].page_no > watermark {
                 let _ = self.slots.remove(i);
                 removed = removed + 1;
                 continue;
@@ -129,7 +129,7 @@ implement PCache {
         let mut n: Int = 0;
         let mut i: Int = 0;
         while i < self.slots.len() {
-            if is_pinned(self.slots.get(i)) { n = n + 1; }
+            if is_pinned(&self.slots[i]) { n = n + 1; }
             i = i + 1;
         }
         n

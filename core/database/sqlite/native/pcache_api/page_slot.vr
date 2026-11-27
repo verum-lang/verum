@@ -14,10 +14,12 @@ module core.database.sqlite.native.pcache_api.page_slot;
 mount base.{Bool};
 
 public type PageSlot is {
-    page_no: Int64,         // 1-based database page number
+    /// 1-based database page number.
+    public(in core.database.sqlite.native.pcache_api) page_no: Int64,
     pin_count: Int,         // > 0 ⇒ pinned / not evictable
     dirty: Bool,
-    generation: Int64,      // bumped on every pin/unpin — LRU key
+    /// Generation used to select the least recently used page.
+    public(in core.database.sqlite.native.pcache_api) generation: Int64,
 }
 
 public fn new_slot(page_no: Int64, generation: Int64) -> PageSlot {

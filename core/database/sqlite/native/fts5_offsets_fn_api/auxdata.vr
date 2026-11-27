@@ -96,7 +96,7 @@ public fn well_formed_result(r: &OffsetsResult) -> Bool {
     let mut i = 0;
     let n = r.hits.len() as Int;
     while i < n {
-        if !is_well_formed(&r.hits.get(i)) { return false; }
+        if !is_well_formed(&r.hits[i]) { return false; }
         i = i + 1;
     }
     true

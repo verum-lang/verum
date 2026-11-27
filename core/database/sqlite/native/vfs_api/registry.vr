@@ -38,7 +38,7 @@ implement VfsApiRegistry {
     public fn sqlite3_vfs_register(&mut self, name: Text, handle: Int64, make_default: Bool) -> Int {
         let mut i: Int = 0;
         while i < self.entries.len() {
-            if entry_matches(self.entries.get(i), &name) {
+            if entry_matches(&self.entries[i], &name) {
                 return 1;
             }
             i = i + 1;
@@ -56,11 +56,11 @@ implement VfsApiRegistry {
     public fn sqlite3_vfs_unregister(&mut self, handle: Int64) -> Int {
         let mut i: Int = 0;
         while i < self.entries.len() {
-            if self.entries.get(i).handle == handle {
+            if self.entries[i].handle == handle {
                 let _ = self.entries.remove(i);
                 if self.default_handle == handle {
                     self.default_handle = if self.entries.len() > 0 {
-                        self.entries.get(0).handle
+                        self.entries[0].handle
                     } else {
                         0 as Int64
                     };
@@ -79,8 +79,9 @@ implement VfsApiRegistry {
             Maybe.Some(n) => {
                 let mut i: Int = 0;
                 while i < self.entries.len() {
-                    if entry_matches(self.entries.get(i), n) {
-                        return self.entries.get(i).handle;
+                    let entry = &self.entries[i];
+                    if entry_matches(entry, n) {
+                        return entry.handle;
                     }
                     i = i + 1;
                 }

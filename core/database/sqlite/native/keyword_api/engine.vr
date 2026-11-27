@@ -25,8 +25,7 @@ public fn sqlite3_keyword_count() -> Int {
 /// integer return" pair.
 public fn sqlite3_keyword_name(index: Int) -> Maybe<Text> {
     let kw = keywords();
-    if index < 0 || index >= kw.len() { return Maybe.None; }
-    Maybe.Some(kw.get(index).clone())
+    kw.get(index)
 }
 
 /// Case-insensitive membership test. Byte length `n` matches
@@ -38,7 +37,7 @@ public fn sqlite3_keyword_check(name: &Text, n: Int) -> Int {
     let kw = keywords();
     let mut i: Int = 0;
     while i < kw.len() {
-        let kb = kw.get(i).as_bytes();
+        let kb = kw[i].as_bytes();
         if kb.len() == take {
             let mut j: Int = 0;
             let mut eq = true;

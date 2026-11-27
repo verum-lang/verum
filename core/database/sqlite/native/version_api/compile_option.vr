@@ -47,8 +47,7 @@ implement OptionRegistry {
     }
 
     public fn get(&self, index: Int) -> Maybe<Text> {
-        if index < 0 || index >= self.flags.len() { return Maybe.None; }
-        Maybe.Some(self.flags.get(index).clone())
+        self.flags.get(index)
     }
 
     public fn len(&self) -> Int { self.flags.len() }
@@ -59,8 +58,7 @@ implement OptionRegistry {
         let stripped = strip_sqlite_prefix(needle);
         let mut i: Int = 0;
         while i < self.flags.len() {
-            let entry = self.flags.get(i);
-            let entry_stripped = strip_sqlite_prefix(entry);
+            let entry_stripped = strip_sqlite_prefix(&self.flags[i]);
             if ci_eq(&entry_stripped, &stripped) { return true; }
             i = i + 1;
         }

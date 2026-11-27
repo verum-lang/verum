@@ -61,7 +61,7 @@ public fn connection_state(states: &List<TxnStateApiState>) -> TxnStateApiState 
     let n = states.len() as Int;
     let mut i = 0;
     while i < n {
-        acc = upgrade(acc, states.get(i));
+        acc = upgrade(acc, states[i]);
         i = i + 1;
     }
     acc

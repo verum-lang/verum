@@ -74,9 +74,10 @@ public fn next_call(p: &VtabInPosition, values: &List<Int64>) -> VtabInFirstStep
     }
 }
 
+/// Returns zero when the position does not identify a current row.
 public fn current_value(p: &VtabInPosition, values: &List<Int64>) -> Int64 {
     match p {
-        PAtRow(i)   => values.get(i.clone()),
+        PAtRow(i)   => values.get(*i).unwrap_or(0_i64),
         _ => 0 as Int64,
     }
 }

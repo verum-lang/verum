@@ -43,7 +43,7 @@ implement DupRegistry {
     fn find(&self, id: Int64) -> Int {
         let mut i: Int = 0;
         while i < self.handles.len() {
-            if self.handles.get(i).id == id { return i; }
+            if self.handles[i].id == id { return i; }
             i = i + 1;
         }
         -1
@@ -52,11 +52,11 @@ implement DupRegistry {
     public fn sqlite3_value_free(&mut self, id: Int64) -> Bool {
         let idx = self.find(id);
         if idx < 0 { return false; }
-        if !is_live(self.handles.get(idx)) {
+        if !is_live(&self.handles[idx]) {
             self.double_frees = self.double_frees + 1_i64;
             return false;
         }
-        free(self.handles.get_mut(idx));
+        free(&mut self.handles[idx]);
         true
     }
 
@@ -64,7 +64,7 @@ implement DupRegistry {
         let mut n: Int = 0;
         let mut i: Int = 0;
         while i < self.handles.len() {
-            if is_live(self.handles.get(i)) { n = n + 1; }
+            if is_live(&self.handles[i]) { n = n + 1; }
             i = i + 1;
         }
         n

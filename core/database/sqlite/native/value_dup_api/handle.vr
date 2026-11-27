@@ -18,7 +18,7 @@ module core.database.sqlite.native.value_dup_api.handle;
 mount base.{Bool};
 
 public type DupHandle is {
-    id: Int64,
+    public(in core.database.sqlite.native.value_dup_api) id: Int64,
     /// The source sqlite3_value that was dup'd (opaque id).
     source_id: Int64,
     freed: Bool,

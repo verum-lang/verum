@@ -19,7 +19,7 @@ mount base.{Bool, Text};
 
 public type VfsEntry is {
     name: Text,
-    handle: Int64,
+    public(in core.database.sqlite.native.vfs_api) handle: Int64,
     made_default: Bool,
 }
 
