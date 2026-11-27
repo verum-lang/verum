@@ -40,6 +40,58 @@ fn assert_roundtrip(instr: &Instruction) {
     assert_eq!(&decoded, instr, "Roundtrip failed for {:?}", instr);
 }
 
+#[test]
+fn all_control_targets_survive_wire_offsets_and_varint_width_changes() {
+    use Instruction as I;
+    use verum_vbc::bytecode::{
+        decode_instructions, encode_instructions_with_fixup, jump_offsets_to_instr_indices,
+    };
+
+    let mut body = vec![
+        I::LoadI {
+            dst: Reg(256),
+            value: 8193
+        };
+        150
+    ];
+    body[0] = I::TryBegin {
+        handler_offset: 149,
+    };
+    body[1] = I::CtxProvide {
+        ctx_type: 91,
+        value: Reg(256),
+        body_offset: 149,
+    };
+    body[2] = I::JmpIf {
+        cond: Reg(1),
+        offset: 80,
+    };
+    body[3] = I::Guard {
+        reg: Reg(1),
+        expected_type: 300,
+        deopt_offset: 146,
+    };
+    body[82] = I::Switch {
+        value: Reg(270),
+        default_offset: -82,
+        cases: vec![
+            (1, -81),
+            (18, -80),
+            (20, -80),
+            (127, 0),
+            (280, 1),
+            (4000, 68),
+        ],
+    };
+    body[149] = I::Jmp { offset: -147 };
+    let mut bytes = Vec::new();
+    encode_instructions_with_fixup(&body, &mut bytes);
+    let mut decoded = decode_instructions(&bytes).unwrap();
+    assert_ne!(decoded[82], body[82]);
+    jump_offsets_to_instr_indices(&mut decoded);
+    assert_eq!(decoded, body);
+}
+
 // =============================================================================
 // Data Movement Roundtrips
 // =============================================================================

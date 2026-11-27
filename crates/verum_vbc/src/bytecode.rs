@@ -6691,6 +6691,30 @@ pub fn instruction_size(instr: &Instruction) -> usize {
     encode_instruction(instr, &mut buf)
 }
 
+/// Transform each relative destination in wire order, including every switch arm.
+pub(crate) fn map_control_offsets(instruction: &mut Instruction, mut map: impl FnMut(i32) -> i32) {
+    match instruction {
+        Instruction::Jmp { offset }
+        | Instruction::JmpIf { offset, .. }
+        | Instruction::JmpNot { offset, .. }
+        | Instruction::JmpCmp { offset, .. } => *offset = map(*offset),
+        Instruction::TryBegin { handler_offset } => *handler_offset = map(*handler_offset),
+        Instruction::Guard { deopt_offset, .. } => *deopt_offset = map(*deopt_offset),
+        Instruction::CtxProvide { body_offset, .. } => *body_offset = map(*body_offset),
+        Instruction::Switch {
+            default_offset,
+            cases,
+            ..
+        } => {
+            *default_offset = map(*default_offset);
+            for (_, offset) in cases {
+                *offset = map(*offset);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Converts BYTE-level jump offsets back to instruction-INDEX offsets —
 /// the exact inverse of [`fixup_jump_offsets`].
 ///
@@ -6710,13 +6734,12 @@ pub fn jump_offsets_to_instr_indices(instructions: &mut [Instruction]) {
         return;
     }
     let mut byte_offsets: Vec<usize> = Vec::with_capacity(instructions.len() + 1);
-    let mut instr_sizes: Vec<usize> = Vec::with_capacity(instructions.len());
+    let mut scratch = Vec::new();
     let mut cur = 0usize;
     for instr in instructions.iter() {
         byte_offsets.push(cur);
-        let sz = instruction_size(instr);
-        instr_sizes.push(sz);
-        cur += sz;
+        scratch.clear();
+        cur += encode_instruction(instr, &mut scratch);
     }
     byte_offsets.push(cur); // end sentinel: "jump past last instruction"
     let byte_to_idx = |byte: i64| -> Option<i32> {
@@ -6729,31 +6752,13 @@ pub fn jump_offsets_to_instr_indices(instructions: &mut [Instruction]) {
             .map(|idx| idx as i32)
     };
     for idx in 0..instructions.len() {
-        let instr_end = (byte_offsets[idx] + instr_sizes[idx]) as i64;
+        let instr_end = byte_offsets[idx + 1] as i64;
         let convert = |byte_off: i32| -> Option<i32> {
             byte_to_idx(instr_end + byte_off as i64).map(|t| t - idx as i32)
         };
-        match &mut instructions[idx] {
-            Instruction::Jmp { offset }
-            | Instruction::JmpIf { offset, .. }
-            | Instruction::JmpNot { offset, .. }
-            | Instruction::JmpCmp { offset, .. } => {
-                if let Some(v) = convert(*offset) {
-                    *offset = v;
-                }
-            }
-            Instruction::CtxProvide { body_offset, .. } => {
-                if let Some(v) = convert(*body_offset) {
-                    *body_offset = v;
-                }
-            }
-            Instruction::TryBegin { handler_offset } => {
-                if let Some(v) = convert(*handler_offset) {
-                    *handler_offset = v;
-                }
-            }
-            _ => {}
-        }
+        map_control_offsets(&mut instructions[idx], |offset| {
+            convert(offset).unwrap_or(offset)
+        });
     }
 }
 
@@ -6766,127 +6771,58 @@ pub fn jump_offsets_to_instr_indices(instructions: &mut [Instruction]) {
 /// This uses an iterative approach because changing jump offsets can change
 /// instruction sizes (varints), which in turn affects other offsets.
 pub fn fixup_jump_offsets(instructions: &mut [Instruction]) {
-    let trace = std::env::var("VBC_FIXUP_TRACE").is_ok();
-
-    // Store original instruction-level target indices for all jumps
-    // This allows us to recalculate byte offsets after sizes change
-    let mut jump_targets: Vec<Option<usize>> = vec![None; instructions.len()];
-
-    for (idx, instr) in instructions.iter().enumerate() {
-        let target_idx = match instr {
-            Instruction::Jmp { offset } => Some((idx as i32 + *offset) as usize),
-            Instruction::JmpIf { offset, .. } | Instruction::JmpNot { offset, .. } => {
-                Some((idx as i32 + *offset) as usize)
-            }
-            Instruction::JmpCmp { offset, .. } => Some((idx as i32 + *offset) as usize),
-            Instruction::CtxProvide { body_offset, .. } => {
-                Some((idx as i32 + *body_offset) as usize)
-            }
-            Instruction::TryBegin { handler_offset } => {
-                Some((idx as i32 + *handler_offset) as usize)
-            }
-            _ => None,
-        };
-        jump_targets[idx] = target_idx;
+    // Start valid displacements at their shortest encoding. Increasing any
+    // instruction's width can only increase the magnitude of a displacement
+    // spanning it. Every signed i32 varint has at most five bytes.
+    let count = instructions.len();
+    let mut targets = Vec::new();
+    for (pc, instruction) in instructions.iter_mut().enumerate() {
+        map_control_offsets(instruction, |offset| {
+            let target = pc
+                .checked_add_signed(offset as isize)
+                .filter(|target| *target <= count);
+            targets.push(target);
+            if target.is_some() { 0 } else { offset }
+        });
     }
-
-    // Iterate until sizes stabilize (max 10 iterations to prevent infinite loops)
-    for iteration in 0..10 {
-        // Calculate byte offsets based on current instruction sizes
-        let mut byte_offsets = Vec::with_capacity(instructions.len() + 1);
-        let mut instr_sizes = Vec::with_capacity(instructions.len());
-        let mut current_offset = 0usize;
-
-        for instr in instructions.iter() {
-            byte_offsets.push(current_offset);
-            let size = instruction_size(instr);
-            instr_sizes.push(size);
-            current_offset += size;
+    if targets.is_empty() {
+        return;
+    }
+    let mut scratch = Vec::new();
+    let mut widths: Vec<usize> = instructions
+        .iter()
+        .map(|instruction| {
+            scratch.clear();
+            encode_instruction(instruction, &mut scratch)
+        })
+        .collect();
+    let mut positions = Vec::with_capacity(count + 1);
+    loop {
+        positions.clear();
+        positions.push(0usize);
+        for width in &widths {
+            positions.push(positions.last().copied().unwrap() + width);
         }
-        byte_offsets.push(current_offset); // End position
-
-        if trace && iteration == 0 {
-            eprintln!(
-                "FIXUP: {} instructions, initial {} bytes",
-                instructions.len(),
-                current_offset
-            );
-        }
-
-        // Track if any offset changed
-        let mut changed = false;
-
-        // Update jump offsets to byte offsets
-        for (idx, instr) in instructions.iter_mut().enumerate() {
-            let instr_end_byte = byte_offsets[idx] + instr_sizes[idx];
-
-            if let Some(target_idx) = jump_targets[idx]
-                && target_idx < byte_offsets.len()
-            {
-                let target_byte = byte_offsets[target_idx];
-                let new_offset = target_byte as i32 - instr_end_byte as i32;
-
-                match instr {
-                    Instruction::Jmp { offset } if *offset != new_offset => {
-                        if trace {
-                            eprintln!(
-                                "FIXUP[{}] Jmp[{}]: target_idx={} -> byte_offset={} (was {}, instr_end={})",
-                                iteration, idx, target_idx, new_offset, *offset, instr_end_byte
-                            );
-                        }
-                        *offset = new_offset;
-                        changed = true;
-                    }
-                    Instruction::JmpIf { offset, .. } | Instruction::JmpNot { offset, .. }
-                        if *offset != new_offset =>
-                    {
-                        if trace {
-                            eprintln!(
-                                "FIXUP[{}] JmpIf/Not[{}]: target_idx={} -> byte_offset={} (was {}, instr_end={})",
-                                iteration, idx, target_idx, new_offset, *offset, instr_end_byte
-                            );
-                        }
-                        *offset = new_offset;
-                        changed = true;
-                    }
-                    Instruction::JmpCmp { offset, .. } if *offset != new_offset => {
-                        *offset = new_offset;
-                        changed = true;
-                    }
-                    Instruction::CtxProvide { body_offset, .. } if *body_offset != new_offset => {
-                        *body_offset = new_offset;
-                        changed = true;
-                    }
-                    Instruction::TryBegin { handler_offset } if *handler_offset != new_offset => {
-                        if trace {
-                            eprintln!(
-                                "FIXUP[{}] TryBegin[{}]: target_idx={} -> byte_offset={} (was {}, instr_end={})",
-                                iteration,
-                                idx,
-                                target_idx,
-                                new_offset,
-                                *handler_offset,
-                                instr_end_byte
-                            );
-                        }
-                        *handler_offset = new_offset;
-                        changed = true;
-                    }
-                    _ => {}
+        let mut targets = targets.iter();
+        let mut wider = false;
+        for (pc, instruction) in instructions.iter_mut().enumerate() {
+            map_control_offsets(instruction, |prior| {
+                let Some(&Some(target)) = targets.next() else {
+                    return prior;
+                };
+                // Executable VBC bytecode is bounded below the signed-PC domain.
+                let offset = (positions[target] as i64 - positions[pc + 1] as i64) as i32;
+                let previous_width = crate::encoding::signed_varint_size(i64::from(prior));
+                let width = crate::encoding::signed_varint_size(i64::from(offset));
+                if width > previous_width {
+                    widths[pc] += width - previous_width;
+                    wider = true;
                 }
-            }
+                offset
+            });
         }
-
-        // If no offsets changed, we've converged
-        if !changed {
-            if trace {
-                eprintln!(
-                    "FIXUP: converged after {} iteration(s), final {} bytes",
-                    iteration + 1,
-                    current_offset
-                );
-            }
-            break;
+        if !wider {
+            return;
         }
     }
 }
