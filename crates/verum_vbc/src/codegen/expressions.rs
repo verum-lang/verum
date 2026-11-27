@@ -3597,13 +3597,9 @@ impl VbcCodegen {
             let receiver = if selected.receiver.meta().is_by_value {
                 self.emit_declared_call_argument(Some(left_type), left, left_reg, Some(left_type))?
             } else { left_reg };
-            let argument = if selected.borrows_operator_operand(right_type) {
-                let borrowed = self.ctx.alloc_temp();
-                self.emit_ref_instruction(borrowed, right_reg, CbgrTier::Tier0, false);
-                borrowed
-            } else {
-                self.emit_declared_call_argument(selected.inputs.first(), right, right_reg, Some(right_type))?
-            };
+            let argument = self.emit_declared_call_argument(
+                selected.inputs.first(), right, right_reg, Some(right_type),
+            )?;
             let method_id = self.intern_string(&format!("dyn:{identity}.{method}"));
             self.ctx.emit(Instruction::CallM {
                 dst: dest, receiver, method_id,
