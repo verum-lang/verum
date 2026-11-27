@@ -667,10 +667,8 @@ fn format_comparator(c: &SemVerComparator) -> Text {
 // =============================================================================
 
 fn slice_text(bytes: &[Byte], start: Int, end: Int) -> Text {
-    let mut buf: List<Byte> = List.new();
-    let mut i = start;
-    while i < end { buf.push(bytes[i]); i = i + 1; }
-    Text.from_bytes(&buf).unwrap_or(Text.new())
+    if start >= end { return Text.new(); }
+    Text.from_utf8(&bytes[start..end]).unwrap_or(Text.new())
 }
 
 fn split_suffix(s: &Text, delimiter: Byte) -> (Text, Maybe<Text>) {
