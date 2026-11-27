@@ -61,14 +61,13 @@
 )
 module core.security.transparency_log;
 
-mount collections.{List, Map};
-mount base.{Result, Ok, Err, Maybe, Some, None, Text};
+mount collections.List;
+mount base.{Result, Maybe};
 mount core.security.merkle.{
     MerkleTree, MerkleError, InclusionProof,
-    leaf_hash, node_hash,
-    verify_inclusion_proof,
+    leaf_hash,
+    verify_inclusion_proof, verify_consistency_path,
 };
-mount core.hash.crypto.sha256.{Sha256};
 mount core.security.ecc.ed25519.{
     Ed25519Seed, Ed25519PublicKey, Ed25519Signature, Ed25519Error,
     sign,
@@ -193,13 +192,13 @@ public fn sign_current_tree_head(log: &TransparencyLog, timestamp_ms: Int) -> Re
     let mut root_bytes: List<Byte> = List.new();
     let mut i = 0; while i < HASH_SIZE { root_bytes.push(root[i]); i = i + 1; }
     let msg = canonical_sth_message(log.leaves.len(), &root_bytes, timestamp_ms);
-    let sig = security.ecc.ed25519.sign(&log.operator_seed, &msg);
+    let sig = security.ecc.ed25519.sign(&log.operator_seed, msg.as_slice());
     Result.Ok(SignedTreeHead {
         tree_size: log.leaves.len(),
         root_hash: root_bytes,
         timestamp_ms: timestamp_ms,
         signature: sig,
-        operator_pubkey: log.operator_pubkey.clone(),
+        operator_pubkey: log.operator_pubkey,
     })
 }
 
@@ -210,7 +209,7 @@ public fn verify_sth(sth: &SignedTreeHead) -> Result<(), LogError> {
         return Result.Err(LogError.TreeSizeMismatch { expected: HASH_SIZE, found: sth.root_hash.len() });
     }
     let msg = canonical_sth_message(sth.tree_size, &sth.root_hash, sth.timestamp_ms);
-    match security.ecc.ed25519.verify(&sth.operator_pubkey, &msg, &sth.signature) {
+    match security.ecc.ed25519.verify(&sth.operator_pubkey, msg.as_slice(), &sth.signature) {
         Result.Ok(_)  => Result.Ok(()),
         Result.Err(e) => Result.Err(LogError.SignatureFailed(e)),
     }
@@ -241,176 +240,53 @@ public fn verify_inclusion(
     sth: &SignedTreeHead,
 ) -> Bool {
     if sth.root_hash.len() != HASH_SIZE { return false; }
-    let mut root_arr: [Byte; 32] = [0_u8; 32];
-    let mut i = 0;
-    while i < HASH_SIZE { root_arr[i] = sth.root_hash.get(i).unwrap(); i = i + 1; }
-    security.merkle.verify_inclusion_proof(&leaf.bytes, index, sth.tree_size, proof, &root_arr)
+    let root_arr = bytes_to_arr(&sth.root_hash);
+    security.merkle.verify_inclusion_proof(leaf.bytes.as_slice(), index, sth.tree_size, proof, &root_arr)
 }
 
 // =============================================================================
 // Consistency proofs
 // =============================================================================
 
-/// Produce a consistency proof witnessing that the log of size `old_size`
-/// is a prefix of the current log of size `new_size`. Per RFC 6962 §2.1.2.
+/// Produce the bottom-up consistency path from an earlier prefix to a selected head.
 public fn consistency_proof(
-    log: &TransparencyLog,
-    old_size: Int,
-    new_size: Int,
+    log: &TransparencyLog, old_size: Int, new_size: Int,
 ) -> Result<List<List<Byte>>, LogError> {
-    if old_size < 0 || new_size < old_size || new_size > log.leaves.len() {
+    if old_size < 0 || old_size > new_size || new_size > log.leaves.len() {
         return Result.Err(LogError.TreeSizeMismatch { expected: log.leaves.len(), found: new_size });
     }
-    if old_size == 0 || old_size == new_size { return Result.Ok(List.new()); }
-    // Per RFC 6962 §2.1.2 — construct the consistency proof as a list
-    // of node hashes that the verifier hashes alongside its own old root
-    // to reconstruct both the old and new roots.
-    let truncated = take_leaves(&log.leaves, new_size);
-    let proof_arrays = subproof(&truncated, old_size, true);
-    let mut out: List<List<Byte>> = List.new();
+    let mut out: List<List<Byte>> = [];
+    if old_size == 0 || old_size == new_size { return Result.Ok(out); }
+    let tree = tree_for_range(&log.leaves, 0, new_size);
+    let path = match tree.consistency_path(old_size) {
+        Result.Ok(nodes) => nodes,
+        Result.Err(error) => return Result.Err(LogError.Merkle(error)),
+    };
     let mut i = 0;
-    while i < proof_arrays.len() {
-        let h = proof_arrays.get(i).unwrap();
-        let mut buf: List<Byte> = List.new();
-        let mut k = 0; while k < HASH_SIZE { buf.push(h[k]); k = k + 1; }
-        out.push(buf);
-        i = i + 1;
-    }
+    while i < path.len() { out.push(arr_to_list(&path[i])); i = i + 1; }
     Result.Ok(out)
 }
 
-// Recursive helper per RFC 6962 §2.1.2.
-// `b` true: the path enters the right subtree; false: left subtree.
-fn subproof(leaves: &List<LogLeaf>, m: Int, b: Bool) -> List<[Byte; 32]> {
-    let n = leaves.len();
-    if m == n {
-        if b {
-            // The whole subtree is the old log; no further proof needed.
-            return List.new();
-        } else {
-            let mut out: List<[Byte; 32]> = List.new();
-            out.push(merkle_tree_hash_for(leaves));
-            return out;
-        }
-    }
-    // Find the largest power of 2 ≤ n; split point.
-    let k = largest_pow2_leq(n);
-    let left  = take_leaves(leaves, k);
-    let right = drop_leaves(leaves, k);
-    if m <= k {
-        let mut out = subproof(&left, m, b);
-        out.push(merkle_tree_hash_for(&right));
-        out
-    } else {
-        let mut out = subproof(&right, m - k, false);
-        out.push(merkle_tree_hash_for(&left));
-        out
-    }
-}
-
-fn largest_pow2_leq(n: Int) -> Int {
-    if n <= 1 { return n; }
-    let mut k = 1;
-    while k * 2 < n { k = k * 2; }
-    k
-}
-
-/// Verify a consistency proof: that `old_sth.root_hash` is a prefix
-/// commitment of `new_sth.root_hash`.
-public fn verify_consistency(
-    old_sth: &SignedTreeHead,
-    new_sth: &SignedTreeHead,
-    proof: &List<List<Byte>>,
-) -> Bool {
+/// Verify the complete path, including the lengths of all wire hashes.
+public fn verify_consistency(old_sth: &SignedTreeHead, new_sth: &SignedTreeHead, proof: &List<List<Byte>>) -> Bool {
     let m = old_sth.tree_size;
     let n = new_sth.tree_size;
-    if m == 0 || m > n { return false; }
-    if m == n { return old_sth.root_hash == new_sth.root_hash; }
-    if old_sth.root_hash.len() != HASH_SIZE || new_sth.root_hash.len() != HASH_SIZE {
-        return false;
+    if m < 0 || n < m { return false; }
+    if old_sth.root_hash.len() != HASH_SIZE || new_sth.root_hash.len() != HASH_SIZE { return false; }
+    // At most one node per level and one seed. Reject oversized wire paths
+    // before copying them into fixed-size digests.
+    let mut levels = 1;
+    let mut last = if n > 0 { n - 1 } else { 0 };
+    while last > 0 { levels = levels + 1; last = last / 2; }
+    if proof.len() > levels { return false; }
+    let mut nodes: List<[Byte; 32]> = [];
+    let mut i = 0;
+    while i < proof.len() {
+        if proof[i].len() != HASH_SIZE { return false; }
+        nodes.push(bytes_to_arr(&proof[i]));
+        i = i + 1;
     }
-    // Reconstruct old_root and new_root from the proof per RFC 6962 §2.1.2.
-    // Verification logic: walk the path identifying split indices, fold
-    // proof hashes into both old and new accumulators.
-    let mut old_acc = bytes_to_arr(&old_sth.root_hash);
-    let mut new_acc = bytes_to_arr(&old_sth.root_hash);
-    // (Production-grade implementation: walk path explicitly per RFC.)
-    let proof_arrs: List<[Byte; 32]> = {
-        let mut arrs: List<[Byte; 32]> = List.new();
-        let mut i = 0;
-        while i < proof.len() { arrs.push(bytes_to_arr(proof.get(i).unwrap())); i = i + 1; }
-        arrs
-    };
-    let result = verify_consistency_walk(m, n, &proof_arrs, old_acc, new_acc);
-    match result {
-        Maybe.Some((computed_old, computed_new)) => {
-            arr_eq(&computed_old, &bytes_to_arr(&old_sth.root_hash))
-                && arr_eq(&computed_new, &bytes_to_arr(&new_sth.root_hash))
-        }
-        Maybe.None => false,
-    }
-}
-
-// Reconstruct (old_root, new_root) from the proof per RFC 6962.
-fn verify_consistency_walk(
-    m: Int, n: Int,
-    proof: &List<[Byte; 32]>,
-    initial_old: [Byte; 32],
-    initial_new: [Byte; 32],
-) -> Maybe<([Byte; 32], [Byte; 32])> {
-    let _ = initial_old;
-    let _ = initial_new;
-    // Detect "complete subtree" prefix (when m is a power of 2 and the
-    // proof first element is the root hash of the right subtree).
-    let mut node = m - 1;
-    let mut last_node = n - 1;
-    while node % 2 == 1 {
-        node = node / 2;
-        last_node = last_node / 2;
-    }
-    let mut idx = 0;
-    let mut old_acc: [Byte; 32];
-    let mut new_acc: [Byte; 32];
-    if node > 0 {
-        if proof.len() == 0 { return Maybe.None; }
-        old_acc = proof.get(idx).unwrap().clone();
-        new_acc = old_acc.clone();
-        idx = idx + 1;
-    } else {
-        // m is a complete tree: old root is the first proof element... no
-        // wait — when node==0 the old root must be supplied separately.
-        // We use the placeholder convention: caller supplies old root via
-        // STH. Here we treat old_acc as the STH-provided old root (set
-        // outside; we don't have direct access, so this branch returns
-        // Maybe.None to require explicit handling).
-        return Maybe.None;
-    }
-    while node > 0 {
-        if node % 2 == 1 || node == last_node {
-            if idx >= proof.len() { return Maybe.None; }
-            let p = proof.get(idx).unwrap().clone();
-            old_acc = node_hash(&p, &old_acc);
-            new_acc = node_hash(&p, &new_acc);
-            while node % 2 == 0 { node = node / 2; last_node = last_node / 2; }
-            idx = idx + 1;
-        } else {
-            if idx >= proof.len() { return Maybe.None; }
-            let p = proof.get(idx).unwrap().clone();
-            new_acc = node_hash(&new_acc, &p);
-            idx = idx + 1;
-        }
-        node = node / 2;
-        last_node = last_node / 2;
-    }
-    while last_node > 0 {
-        if idx >= proof.len() { return Maybe.None; }
-        let p = proof.get(idx).unwrap().clone();
-        new_acc = node_hash(&new_acc, &p);
-        idx = idx + 1;
-        last_node = last_node / 2;
-    }
-    if idx != proof.len() { return Maybe.None; }
-    Maybe.Some((old_acc, new_acc))
+    verify_consistency_path(m, n, &bytes_to_arr(&old_sth.root_hash), &bytes_to_arr(&new_sth.root_hash), &nodes)
 }
 
 // =============================================================================
@@ -440,47 +316,31 @@ public fn tiles_for_inclusion(index: Int, tree_size: Int) -> List<TileCoord> {
     tiles
 }
 
-/// Read all leaves whose index falls into a single tile.
+/// Return the available nodes of a tile at the requested tree level.
 public fn tile_at(log: &TransparencyLog, coord: TileCoord) -> Result<Tile, LogError> {
-    if coord.level < 0 || coord.index < 0 {
-        return Result.Err(LogError.InvalidTile(coord));
+    let total = log.leaves.len();
+    if total == 0 || coord.level < 0 || coord.index < 0 { return Result.Err(LogError.InvalidTile(coord)); }
+    let mut level = 0;
+    let mut nodes = total;
+    let mut width = 1;
+    while level < coord.level {
+        if nodes <= 1 { return Result.Err(LogError.InvalidTile(coord)); }
+        nodes = nodes / 2 + nodes % 2;
+        width = if width > total - width { total } else { width * 2 };
+        level = level + 1;
     }
-    let start = coord.index * TILE_SIZE;
-    if coord.level == 0 {
-        let end_cap = log.leaves.len();
-        if start >= end_cap { return Result.Err(LogError.InvalidTile(coord)); }
-        let end = if start + TILE_SIZE < end_cap { start + TILE_SIZE } else { end_cap };
-        let mut hashes: List<List<Byte>> = List.new();
-        let mut i = start;
-        while i < end {
-            let h = leaf_hash(&log.leaves.get(i).unwrap().bytes);
-            let mut buf: List<Byte> = List.new();
-            let mut k = 0; while k < HASH_SIZE { buf.push(h[k]); k = k + 1; }
-            hashes.push(buf);
-            i = i + 1;
-        }
-        return Result.Ok(Tile { coord: coord, hashes: hashes });
+    if coord.index > (nodes - 1) / TILE_SIZE { return Result.Err(LogError.InvalidTile(coord)); }
+    let mut i = coord.index * TILE_SIZE;
+    let limit = i + (nodes - i).min(TILE_SIZE);
+    let mut hashes: List<List<Byte>> = [];
+    while i < limit {
+        let start = i * width;
+        let end = start + (total - start).min(width);
+        let root = tree_for_range(&log.leaves, start, end).root();
+        hashes.push(arr_to_list(&root));
+        i = i + 1;
     }
-    // Higher-level tile: pair-hash from the level below.
-    let lower = tile_at(log, TileCoord { level: coord.level - 1, index: coord.index * 2 })?;
-    let lower2 = tile_at(log, TileCoord { level: coord.level - 1, index: coord.index * 2 + 1 });
-    let mut combined: List<List<Byte>> = List.new();
-    let n_lower = lower.hashes.len();
-    let n_lower2 = match &lower2 { Result.Ok(t) => t.hashes.len(), Result.Err(_) => 0 };
-    let mut i = 0;
-    while i + 1 < n_lower {
-        let l = lower.hashes.get(i).unwrap();
-        let r = lower.hashes.get(i + 1).unwrap();
-        let h = node_hash(&bytes_to_arr(l), &bytes_to_arr(r));
-        combined.push(arr_to_list(&h));
-        i = i + 2;
-    }
-    if i < n_lower {
-        // Odd leaf: promote unchanged (RFC 6962 odd-leaf handling).
-        combined.push(lower.hashes.get(i).unwrap().clone());
-    }
-    let _ = n_lower2;
-    Result.Ok(Tile { coord: coord, hashes: combined })
+    Result.Ok(Tile { coord: coord, hashes: hashes })
 }
 
 // =============================================================================
@@ -516,49 +376,23 @@ fn push_be_int64(out: &mut List<Byte>, v: Int) {
 
 fn build_tree_for_leaves(leaves: &List<LogLeaf>) -> Result<MerkleTree, LogError> {
     if leaves.is_empty() { return Result.Err(LogError.EmptyLog); }
-    let mut leaf_lists: List<List<Byte>> = List.new();
-    let mut i = 0;
-    while i < leaves.len() {
-        leaf_lists.push(leaves.get(i).unwrap().bytes.clone());
-        i = i + 1;
-    }
-    match MerkleTree.from_leaves(&leaf_lists) {
-        Result.Ok(t)  => Result.Ok(t),
-        Result.Err(e) => Result.Err(LogError.Merkle(e)),
-    }
+    Result.Ok(tree_for_range(leaves, 0, leaves.len()))
 }
 
-fn merkle_tree_hash_for(leaves: &List<LogLeaf>) -> [Byte; 32] {
-    match build_tree_for_leaves(leaves) {
-        Result.Ok(t)  => t.root(),
-        Result.Err(_) => [0_u8; 32],
-    }
-}
-
-fn take_leaves(leaves: &List<LogLeaf>, n: Int) -> List<LogLeaf> {
-    let mut out: List<LogLeaf> = List.new();
-    let mut i = 0;
-    while i < n && i < leaves.len() {
-        out.push(leaves.get(i).unwrap().clone());
+fn tree_for_range(leaves: &List<LogLeaf>, start: Int, end: Int) -> MerkleTree {
+    let mut hashes: List<[Byte; 32]> = List.with_capacity(end - start);
+    let mut i = start;
+    while i < end {
+        hashes.push(leaf_hash(leaves[i].bytes.as_slice()));
         i = i + 1;
     }
-    out
-}
-
-fn drop_leaves(leaves: &List<LogLeaf>, n: Int) -> List<LogLeaf> {
-    let mut out: List<LogLeaf> = List.new();
-    let mut i = n;
-    while i < leaves.len() {
-        out.push(leaves.get(i).unwrap().clone());
-        i = i + 1;
-    }
-    out
+    MerkleTree.from_leaf_hashes(hashes)
 }
 
 fn bytes_to_arr(bytes: &List<Byte>) -> [Byte; 32] {
     let mut a: [Byte; 32] = [0_u8; 32];
     let mut i = 0;
-    while i < HASH_SIZE && i < bytes.len() { a[i] = bytes.get(i).unwrap(); i = i + 1; }
+    while i < HASH_SIZE { a[i] = bytes[i]; i = i + 1; }
     a
 }
 
@@ -566,12 +400,6 @@ fn arr_to_list(a: &[Byte; 32]) -> List<Byte> {
     let mut out: List<Byte> = List.new();
     let mut i = 0; while i < HASH_SIZE { out.push(a[i]); i = i + 1; }
     out
-}
-
-fn arr_eq(a: &[Byte; 32], b: &[Byte; 32]) -> Bool {
-    let mut i = 0;
-    while i < HASH_SIZE { if a[i] != b[i] { return false; } i = i + 1; }
-    true
 }
 
 // =============================================================================

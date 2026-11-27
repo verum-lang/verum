@@ -1,0 +1,58 @@
+module core.security.merkle_conformance;
+
+mount core.security.merkle.{MerkleTree, verify_consistency_path};
+
+// Fixed SHA-256 commitments for the one-byte leaves 0 through 6.
+@test
+fn historical_commitments_bind_both_roots_and_every_sibling() {
+    let mut leaves: List<List<Byte>> = [];
+    let mut i = 0;
+    while i < 7 {
+        let leaf: List<Byte> = [i as Byte];
+        leaves.push(leaf);
+        i = i + 1;
+    }
+    let tree = MerkleTree.from_leaves(&leaves);
+    let root3: [Byte; 32] = [
+        0x3b_u8, 0x6c_u8, 0xcc_u8, 0xd7_u8, 0xe3_u8, 0xe0_u8, 0x23_u8, 0xff_u8,
+        0x39_u8, 0x30_u8, 0x06_u8, 0xf0_u8, 0x30_u8, 0x31_u8, 0x5e_u8, 0xe7_u8,
+        0xad_u8, 0x9e_u8, 0xb1_u8, 0x11_u8, 0xb0_u8, 0x22_u8, 0xb4_u8, 0x1f_u8,
+        0xba_u8, 0x7e_u8, 0x5b_u8, 0x7a_u8, 0x39_u8, 0x73_u8, 0xf6_u8, 0x88_u8,
+    ];
+    let root4: [Byte; 32] = [
+        0x9b_u8, 0xcd_u8, 0x51_u8, 0x24_u8, 0x0a_u8, 0xf4_u8, 0x00_u8, 0x51_u8,
+        0x68_u8, 0xf0_u8, 0x33_u8, 0x12_u8, 0x1b_u8, 0xa8_u8, 0x5b_u8, 0xe5_u8,
+        0xa6_u8, 0xed_u8, 0x4f_u8, 0x0e_u8, 0x6a_u8, 0x5f_u8, 0xac_u8, 0x26_u8,
+        0x20_u8, 0x66_u8, 0x72_u8, 0x9b_u8, 0x8f_u8, 0xbf_u8, 0xde_u8, 0xcb_u8,
+    ];
+    let root7: [Byte; 32] = [
+        0x35_u8, 0x60_u8, 0x19_u8, 0x18_u8, 0x03_u8, 0x02_u8, 0x84_u8, 0x44_u8,
+        0xb2_u8, 0x32_u8, 0x01_u8, 0x8a_u8, 0xc0_u8, 0x47_u8, 0xfd_u8, 0xb5_u8,
+        0x61_u8, 0xc0_u8, 0x9c_u8, 0x23_u8, 0xa7_u8, 0xa6_u8, 0x87_u8, 0x6c_u8,
+        0x85_u8, 0xe0_u8, 0x8b_u8, 0x5e_u8, 0x4d_u8, 0x48_u8, 0xe9_u8, 0xf3_u8,
+    ];
+    let sibling: [Byte; 32] = [
+        0x89_u8, 0xc9_u8, 0x29_u8, 0x83_u8, 0x4e_u8, 0xd1_u8, 0x45_u8, 0x9b_u8,
+        0x07_u8, 0xf6_u8, 0x5b_u8, 0x5e_u8, 0x1a_u8, 0x21_u8, 0x43_u8, 0xa8_u8,
+        0xcf_u8, 0x5d_u8, 0x8e_u8, 0xfd_u8, 0xf3_u8, 0x0f_u8, 0x49_u8, 0xff_u8,
+        0xff_u8, 0xa3_u8, 0x28_u8, 0xbb_u8, 0x1d_u8, 0x91_u8, 0x33_u8, 0xbb_u8,
+    ];
+    let mut path = tree.consistency_path(4).unwrap();
+    assert_eq(path.len(), 1);
+    i = 0;
+    while i < 32 {
+        assert_eq(path[0][i], sibling[i]);
+        i = i + 1;
+    }
+    assert(verify_consistency_path(4, 7, &root4, &root7, &path));
+    assert(!verify_consistency_path(4, 7, &root3, &root7, &path));
+    assert(!verify_consistency_path(4, 7, &root4, &root3, &path));
+    path.push(sibling);
+    assert(!verify_consistency_path(4, 7, &root4, &root7, &path));
+    let ragged = tree.consistency_path(3).unwrap();
+    assert(verify_consistency_path(3, 7, &root3, &root7, &ragged));
+    let equal = tree.consistency_path(7).unwrap();
+    assert(verify_consistency_path(7, 7, &root7, &root7, &equal));
+    assert(!verify_consistency_path(7, 7, &root4, &root7, &equal));
+    assert(!verify_consistency_path(0, 7, &root4, &root7, &equal));
+}

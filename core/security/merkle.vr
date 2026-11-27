@@ -149,8 +149,42 @@ implement MerkleTree {
             leaf_hashes.push(leaf_hash(leaves[i].as_slice()));
             i = i + 1;
         }
-        let root = compute_root(&leaf_hashes);
+        MerkleTree.from_leaf_hashes(leaf_hashes)
+    }
+
+    // The caller owns the hashes and supplies them in leaf order.
+    public(in core.security) fn from_leaf_hashes(leaf_hashes: List<[Byte; 32]>) -> MerkleTree {
+        let root = range_root(&leaf_hashes, 0, leaf_hashes.len());
         MerkleTree { leaf_hashes: leaf_hashes, root: root }
+    }
+
+    // RFC 9162 §2.1.4.1. Each sibling covers a disjoint range. Collect them
+    // while descending, then return them in the verifier's leaf-to-root order.
+    public(in core.security) fn consistency_path(&self, old_size: Int) -> Result<List<[Byte; 32]>, MerkleError> {
+        let mut width = self.len();
+        if old_size < 0 || old_size > width { return Result.Err(MerkleError.IndexOutOfRange(old_size)); }
+        let mut path: List<[Byte; 32]> = [];
+        if old_size == 0 || old_size == width { return Result.Ok(path); }
+        let mut start = 0;
+        let mut prefix = old_size;
+        let mut known_root = true;
+        while prefix < width {
+            let mut split = 1;
+            while split <= (width - 1) / 2 { split = split * 2; }
+            if prefix <= split {
+                path.push(range_root(&self.leaf_hashes, start + split, start + width));
+                width = split;
+            } else {
+                path.push(range_root(&self.leaf_hashes, start, start + split));
+                start = start + split;
+                prefix = prefix - split;
+                width = width - split;
+                known_root = false;
+            }
+        }
+        if !known_root { path.push(range_root(&self.leaf_hashes, start, start + width)); }
+        path.reverse();
+        Result.Ok(path)
     }
 
     /// Number of leaves.
@@ -242,13 +276,69 @@ public fn node_hash(left: &[Byte; 32], right: &[Byte; 32]) -> [Byte; 32] {
 // Internals
 // =============================================================================
 
-fn compute_root(leaf_hashes: &List<[Byte; 32]>) -> [Byte; 32] {
-    if leaf_hashes.len() == 0 { return Sha256.digest(b""); }
-    let mut level: List<[Byte; 32]> = clone_hash_list(leaf_hashes);
-    while level.len() > 1 {
-        level = combine_level(&level);
+// Verify a prefix commitment against the two supplied roots (RFC 9162 §2.1.4.2).
+public(in core.security) fn verify_consistency_path(
+    old_size: Int, new_size: Int, old_root: &[Byte; 32], new_root: &[Byte; 32],
+    path: &List<[Byte; 32]>,
+) -> Bool {
+    if old_size < 0 || new_size < old_size { return false; }
+    if old_size == new_size {
+        return path.is_empty() && hash_eq(old_root, new_root)
+            && (old_size != 0 || hash_eq(old_root, &Sha256.digest(b"")));
     }
-    clone_hash(&level[0])
+    if old_size == 0 { return path.is_empty() && hash_eq(old_root, &Sha256.digest(b"")); }
+    if path.is_empty() { return false; }
+
+    let mut first = old_size - 1;
+    let mut last = new_size - 1;
+    while (first & 1) == 1 { first = first / 2; last = last / 2; }
+    let mut index = 0;
+    let mut old = clone_hash(old_root);
+    if first != 0 {
+        old = clone_hash(&path[0]);
+        index = 1;
+    }
+    let mut new = clone_hash(&old);
+    while index < path.len() {
+        if last == 0 { return false; }
+        let node = &path[index];
+        if (first & 1) == 1 || first == last {
+            old = node_hash(node, &old);
+            new = node_hash(node, &new);
+            while first != 0 && (first & 1) == 0 { first = first / 2; last = last / 2; }
+        } else {
+            new = node_hash(&new, node);
+        }
+        first = first / 2;
+        last = last / 2;
+        index = index + 1;
+    }
+    last == 0 && hash_eq(&old, old_root) && hash_eq(&new, new_root)
+}
+
+// Carry complete subtrees as in binary addition. The frontier contains one
+// hash per set bit in the number of consumed leaves, in descending size order.
+fn range_root(hashes: &List<[Byte; 32]>, start: Int, end: Int) -> [Byte; 32] {
+    if start == end { return Sha256.digest(b""); }
+    let mut frontier: List<[Byte; 32]> = [];
+    let mut i = start;
+    while i < end {
+        let mut hash = clone_hash(&hashes[i]);
+        let mut occupied = i - start;
+        while (occupied & 1) == 1 {
+            let left = frontier.pop().unwrap();
+            hash = node_hash(&left, &hash);
+            occupied = occupied / 2;
+        }
+        frontier.push(hash);
+        i = i + 1;
+    }
+    let mut root = frontier.pop().unwrap();
+    while !frontier.is_empty() {
+        let left = frontier.pop().unwrap();
+        root = node_hash(&left, &root);
+    }
+    root
 }
 
 fn combine_level(level: &List<[Byte; 32]>) -> List<[Byte; 32]> {
