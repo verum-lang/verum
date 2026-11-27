@@ -10988,6 +10988,7 @@ impl VbcCodegen {
         if let Some(info) = intrinsic_name.as_deref().and_then(crate::intrinsics::lookup_intrinsic)
             && let Some(message) = info.intrinsic.opcode_signature_error(
                 semantic_params.iter().map(Option::as_ref), return_type.as_ref(),
+                |id| self.declared_runtime_carrier(id),
             )
         {
             return Err(CodegenError::unsupported_expr(message));

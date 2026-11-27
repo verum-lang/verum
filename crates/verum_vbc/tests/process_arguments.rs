@@ -71,6 +71,9 @@ fn declared_argument_operations_read_the_invocation_and_preserve_source_function
 #[test]
 fn process_argument_signatures_are_checked_before_lowering() {
     for decl in [
+        r#"type List<T> is { fake: T }; @intrinsic("process_environment_bytes") fn snapshot() -> List<Byte>;"#,
+        r#"@intrinsic("process_environment_bytes") fn snapshot() -> List<Int>;"#,
+        r#"@intrinsic("process_environment_bytes") fn snapshot() -> &[Byte];"#,
         r#"@intrinsic("process_arg_count") fn count(n: Int) -> Int;"#,
         r#"@intrinsic("process_arg_count") fn count() -> Text;"#,
         r#"@intrinsic("process_arg_bytes") fn read(n: Bool) -> &[Byte];"#,
@@ -105,5 +108,36 @@ fn argument_bytes_cannot_be_loaded_as_an_owned_text_result() {
         let encoded = serialize_module(&module).unwrap();
         let error = deserialize_module_validated(&encoded).unwrap_err();
         assert!(error.to_string().contains("requires (Int) -> &[Byte]"), "{error}");
+    }
+}
+
+#[test]
+fn environment_bytes_read_an_isolated_child_process() {
+    const CHILD: &str = "VERUM_ENVIRONMENT_SNAPSHOT_FIXTURE";
+    if std::env::var_os(CHILD).is_none() {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "environment_bytes_read_an_isolated_child_process"])
+            .env_clear()
+            .env(CHILD, "1")
+            .env("A", "")
+            .env("B", "x=y")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            Text::from_utf8_lossy(&output.stdout)
+        );
+        return;
+    }
+    let ast = Parser::new(include_str!("fixtures/process_environment.vr"))
+        .parse_module()
+        .unwrap();
+    let module = VbcCodegen::new().compile_module(&ast).unwrap();
+    let wire = deserialize_module_validated(&serialize_module(&module).unwrap()).unwrap();
+    for module in [module, wire] {
+        let main = module.find_function_by_name("program.main").unwrap();
+        let mut vm = Interpreter::try_new_validated(module.into()).unwrap();
+        assert_eq!(vm.execute_function(main).unwrap().try_as_i64(), Some(73));
     }
 }

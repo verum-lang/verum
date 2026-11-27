@@ -1393,13 +1393,20 @@ pub enum IntrinsicCallBound {
 pub enum OpcodeResult {
     Scalar(crate::types::TypeId),
     ByteSlice,
+    ByteList,
 }
 
 impl OpcodeResult {
-    fn accepts(self, result: Option<&crate::types::TypeRef>) -> bool {
+    fn accepts(
+        self, result: Option<&crate::types::TypeRef>,
+        carrier: impl Fn(crate::types::TypeId) -> Option<verum_common::well_known_types::WellKnownType>,
+    ) -> bool {
         use crate::types::{CbgrTier, Mutability, TypeId, TypeRef};
         match (self, result) {
             (Self::Scalar(id), Some(TypeRef::Concrete(actual))) => *actual == id,
+            (Self::ByteList, Some(TypeRef::Instantiated { base, args })) =>
+                (*base == TypeId::LIST || carrier(*base) == Some(verum_common::well_known_types::WellKnownType::List))
+                    && args.as_slice() == [TypeRef::Concrete(TypeId::BYTE)],
             (Self::ByteSlice, Some(TypeRef::Reference {
                 inner, mutability: Mutability::Immutable, tier: CbgrTier::Tier0,
             })) => matches!(inner.as_ref(), TypeRef::Slice(element) if **element == TypeRef::Concrete(TypeId::BYTE)),
@@ -1411,6 +1418,7 @@ impl OpcodeResult {
         match self {
             Self::Scalar(id) => id.well_known_name().expect("fixed scalar has a source name"),
             Self::ByteSlice => "&[Byte]",
+            Self::ByteList => "List<Byte>",
         }
     }
 }
@@ -1423,6 +1431,7 @@ impl Intrinsic {
         match self.strategy {
             CodegenStrategy::SystemRegisters(SysSubOpcode::ArgumentCount) => Some((&[], OpcodeResult::Scalar(TypeId::INT))),
             CodegenStrategy::SystemRegisters(SysSubOpcode::ArgumentBytes) => Some((&[TypeId::INT], OpcodeResult::ByteSlice)),
+            CodegenStrategy::SystemRegisters(SysSubOpcode::EnvironmentBytes) => Some((&[], OpcodeResult::ByteList)),
             CodegenStrategy::LinuxSignal(_) => Some((&[TypeId::INT], OpcodeResult::Scalar(TypeId::INT))),
             CodegenStrategy::InlineSequence(InlineSequenceId::CharGeneralCategory) =>
                 Some((&[TypeId::CHAR], OpcodeResult::Scalar(TypeId::INT))),
@@ -1435,6 +1444,7 @@ impl Intrinsic {
         &self,
         parameters: impl Iterator<Item = Option<&'a crate::types::TypeRef>>,
         result: Option<&crate::types::TypeRef>,
+        carrier: impl Fn(crate::types::TypeId) -> Option<verum_common::well_known_types::WellKnownType>,
     ) -> Option<verum_common::Text> {
         use crate::types::TypeRef;
         let (arguments, ret) = self.opcode_signature()?;
@@ -1442,23 +1452,24 @@ impl Intrinsic {
             TypeRef::Concrete(id) => Some(*id),
             _ => None,
         })).eq(arguments.iter().copied().map(Some));
-        if signature_matches && ret.accepts(result) { return None; }
+        if signature_matches && ret.accepts(result, carrier) { return None; }
         let args = arguments.iter().map(|ty| ty.well_known_name().unwrap()).collect::<verum_common::List<_>>().join(", ");
         Some(format!("{} requires ({args}) -> {}", self.name, ret.name()).into())
     }
 
     /// Validate the complete callable ABI on the wire.
     pub fn opcode_declaration_error(
-        &self, declaration: &crate::module::FunctionDescriptor,
+        &self, module: &crate::module::VbcModule, declaration: &crate::module::FunctionDescriptor,
     ) -> Option<verum_common::Text> {
         let abi = || declaration.params.iter().map(|p| Some(&p.type_ref));
         let result = Some(&declaration.return_type);
-        self.opcode_signature_error(abi(), result).or_else(|| {
+        let carrier = |id| module.declared_runtime_carrier(id);
+        self.opcode_signature_error(abi(), result, carrier).or_else(|| {
             let result = declaration.semantic_return.as_ref().or(result);
             if let Some(parameters) = declaration.semantic_parameter_types() {
-                self.opcode_signature_error(parameters.iter().map(Option::as_ref), result)
+                self.opcode_signature_error(parameters.iter().map(Option::as_ref), result, carrier)
             } else {
-                self.opcode_signature_error(abi(), result)
+                self.opcode_signature_error(abi(), result, carrier)
             }
         })
     }
@@ -1552,6 +1563,7 @@ impl Intrinsic {
             | CodegenStrategy::InlineSequence(InlineSequenceId::MakeSlice)
             // Reads process state and constructs the result on the calling stack.
             | CodegenStrategy::InlineSequence(InlineSequenceId::EnvGetSeq)
+            | CodegenStrategy::SystemRegisters(crate::instruction::SysSubOpcode::EnvironmentBytes)
             | CodegenStrategy::DirectOpcode(Opcode::Panic | Opcode::AtomicFence) => IntrinsicCallBound::Synchronous,
             _ => IntrinsicCallBound::Unknown,
         }
@@ -6185,6 +6197,16 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         strategy: CodegenStrategy::SystemRegisters(crate::instruction::SysSubOpcode::ArgumentBytes),
         mlir_op: None,
         doc: "Immutable program argument bytes at an in-range index",
+    },
+    Intrinsic {
+        name: "process_environment_bytes",
+        category: IntrinsicCategory::Platform,
+        hints: &[],
+        param_count: 0,
+        return_count: 1,
+        strategy: CodegenStrategy::SystemRegisters(crate::instruction::SysSubOpcode::EnvironmentBytes),
+        mlir_op: None,
+        doc: "Owned snapshot of the current process environment as NUL-terminated entries",
     },
     Intrinsic {
         name: "get_env_impl",

@@ -44,6 +44,8 @@
 )
 module core.intrinsics.runtime.os;
 
+mount core.collections.list.{List};
+
 // =============================================================================
 // File I/O
 // =============================================================================
@@ -353,6 +355,10 @@ public fn __args_count_raw() -> Int;
 /// Original process argument bytes at a checked index.
 @intrinsic("process_arg_bytes")
 public fn __arg_bytes_raw(index: Int) -> &[Byte];
+
+/// Owned snapshot of NUL-terminated KEY=VALUE entries from this process.
+@intrinsic("process_environment_bytes")
+public fn __environment_bytes_raw() -> List<Byte>;
 
 // =============================================================================
 // Concurrency primitives — mutex

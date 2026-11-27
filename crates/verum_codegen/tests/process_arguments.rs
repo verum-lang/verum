@@ -56,3 +56,19 @@ fn linked_argv_preserves_empty_unicode_and_non_unicode_byte_sequences() {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+#[test]
+fn linked_program_reads_its_own_environment() {
+    let module = source_image::module(include_str!(
+        "../../verum_vbc/tests/fixtures/process_environment.vr"
+    ));
+    let output = source_image::execute_with_command(module, |_| {}, |command| {
+        command.env_clear().env("A", "").env("B", "x=y");
+    });
+    assert_eq!(
+        output.status.code(),
+        Some(73),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

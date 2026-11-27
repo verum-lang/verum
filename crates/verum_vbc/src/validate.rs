@@ -445,7 +445,7 @@ impl<'a> Validator<'a> {
         if let Some(info) = desc.intrinsic_name
             .and_then(|id| self.module.get_string(id))
             .and_then(crate::intrinsics::lookup_intrinsic)
-            && let Some(message) = info.intrinsic.opcode_declaration_error(desc)
+            && let Some(message) = info.intrinsic.opcode_declaration_error(self.module, desc)
         {
             let owner = self.module.get_string(desc.name).unwrap_or("<unnamed>");
             let carrier = self.module.display_type_ref(&desc.return_type);

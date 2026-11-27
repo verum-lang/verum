@@ -5296,7 +5296,9 @@ pub enum SysSubOpcode {
     ArgumentCount = 0x33,
     /// Read the original bytes of an in-range program argument.
     ArgumentBytes = 0x34,
-    // 0x35-0x3F  RESERVED for environment / process metadata.
+    /// Owned bytes of the current process environment, each entry terminated by NUL.
+    EnvironmentBytes = 0x35,
+    // 0x36-0x3F  RESERVED for environment / process metadata.
     // 0x40-0xFF  RESERVED.
 }
 
@@ -5320,6 +5322,7 @@ impl SysSubOpcode {
             0x32 => Some(Self::EnvUnset),
             0x33 => Some(Self::ArgumentCount),
             0x34 => Some(Self::ArgumentBytes),
+            0x35 => Some(Self::EnvironmentBytes),
             _ => None,
         }
     }

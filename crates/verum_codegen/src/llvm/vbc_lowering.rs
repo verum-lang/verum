@@ -1260,7 +1260,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     .and_then(verum_vbc::intrinsics::lookup_intrinsic)
                     && intr.intrinsic.opcode_signature().is_some()
                 {
-                    if let Some(message) = intr.intrinsic.opcode_declaration_error(func_desc) {
+                    if let Some(message) = intr.intrinsic.opcode_declaration_error(vbc_module, func_desc) {
                         return Err(LlvmLoweringError::TypeLowering(message));
                     }
                     let body = verum_vbc::intrinsics::expand::expand_intrinsic_wrapper(intr.intrinsic)

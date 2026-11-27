@@ -261,7 +261,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         Ok(list)
     }
 
-    fn lower_new_list_storage(
+    pub(super) fn lower_new_list_storage(
         &self,
         builder: &Builder<'ctx>,
         module: &Module<'ctx>,
@@ -295,7 +295,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
             .into_pointer_value())
     }
 
-    fn list_field_address(
+    pub(super) fn list_field_address(
         &self,
         builder: &Builder<'ctx>,
         list: PointerValue<'ctx>,

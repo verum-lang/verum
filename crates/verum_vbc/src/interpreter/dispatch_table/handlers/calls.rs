@@ -1481,7 +1481,7 @@ fn try_dispatch_intrinsic_function(
                     ),
                 });
             }
-            if let Some(message) = intrinsic.opcode_declaration_error(descriptor) {
+            if let Some(message) = intrinsic.opcode_declaration_error(&state.module, descriptor) {
                 return Err(InterpreterError::InvalidBytecode {
                     pc: state.pc() as usize, message: message.into_string(),
                 });

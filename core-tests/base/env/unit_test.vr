@@ -21,6 +21,7 @@ mount core.base.{
     home_dir, user, path, temp_dir, shell, locale,
 };
 mount core.{Maybe, Result, List, Text, Byte};
+mount core.base.env.{vars};
 
 // =============================================================================
 // Section 1: VarError Type Tests
@@ -396,11 +397,31 @@ fn test_remove_nonexistent() {
 // Section 9: Environment Variable Edge Cases
 // =============================================================================
 
+@cfg(target_os = "macos")
 @test
-fn test_var_with_equals_in_value() {
-    // Variables can have '=' in their value
-    // This is parsed correctly from the environ array
-    // Can't easily test setting this, but we can test retrieval logic
+fn test_vars_keeps_the_environment_at_creation() {
+    let empty = "__VERUM_ITERATOR_EMPTY__";
+    let equals = "__VERUM_ITERATOR_EQUALS__";
+    set_var(&empty, &"");
+    set_var(&equals, &"left=right");
+    let mut iter = vars();
+    remove_var(&empty);
+    remove_var(&equals);
+
+    let mut found_empty = 0;
+    let mut found_equals = 0;
+    loop {
+        match iter.next() {
+            Maybe.Some((key, value)) => {
+                if key == empty && value == "" { found_empty = found_empty + 1; }
+                if key == equals && value == "left=right" { found_equals = found_equals + 1; }
+            }
+            Maybe.None => break,
+        }
+    }
+    assert_eq(found_empty, 1);
+    assert_eq(found_equals, 1);
+    assert(iter.next().is_none());
 }
 
 @test

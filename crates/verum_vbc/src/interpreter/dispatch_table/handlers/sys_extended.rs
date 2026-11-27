@@ -381,6 +381,29 @@ fn sys_extended_body(
             state.set_reg(dst, Value::from_ptr(span.as_ptr()));
             Ok(DispatchResult::Continue)
         }
+        Some(SysSubOpcode::EnvironmentBytes) => {
+            let dst = read_reg(state)?;
+            let mut bytes = verum_common::List::new();
+            for (key, value) in std::env::vars_os() {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::ffi::OsStrExt;
+                    bytes.extend_from_slice(key.as_bytes());
+                    bytes.push(b'=');
+                    bytes.extend_from_slice(value.as_bytes());
+                }
+                #[cfg(not(unix))]
+                {
+                    bytes.extend_from_slice(key.to_string_lossy().as_bytes());
+                    bytes.push(b'=');
+                    bytes.extend_from_slice(value.to_string_lossy().as_bytes());
+                }
+                bytes.push(0);
+            }
+            let snapshot = super::heap_helpers::alloc_byte_list(state, bytes.as_slice())?;
+            state.set_reg(dst, snapshot);
+            Ok(DispatchResult::Continue)
+        }
         Some(SysSubOpcode::EnvGet) => {
             let dst = read_reg(state)?;
             let name_reg = read_reg(state)?;

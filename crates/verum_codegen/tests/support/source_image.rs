@@ -53,9 +53,20 @@ pub fn execute_module(
 }
 
 pub fn execute_with_arguments(
-    mut wire: verum_vbc::VbcModule,
+    wire: verum_vbc::VbcModule,
     configure: impl FnOnce(&verum_llvm::module::Module<'_>),
     arguments: &[&std::ffi::OsStr],
+) -> std::process::Output {
+    execute_with_command(wire, configure, |command| {
+        command.args(arguments);
+    })
+}
+
+/// Configure the linked child process before invoking the actual program entry.
+pub fn execute_with_command(
+    mut wire: verum_vbc::VbcModule,
+    configure: impl FnOnce(&verum_llvm::module::Module<'_>),
+    configure_command: impl FnOnce(&mut Command),
 ) -> std::process::Output {
     for function in &mut wire.functions {
         function.is_generic = !function.type_params.is_empty();
@@ -112,5 +123,7 @@ pub fn execute_with_arguments(
         "{}",
         Text::from_utf8_lossy(&link.stderr)
     );
-    Command::new(executable).args(arguments).output().expect("native execution")
+    let mut child = Command::new(executable);
+    configure_command(&mut child);
+    child.output().expect("native execution")
 }

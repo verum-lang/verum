@@ -1,0 +1,26 @@
+module program;
+
+@intrinsic("process_environment_bytes")
+fn snapshot() -> List<Byte>;
+
+fn main() -> Int {
+    let entries = snapshot();
+    let mut found_empty = 0;
+    let mut found_equals = 0;
+    let mut start = 0;
+    let mut end = 0;
+    while end < entries.len() {
+        if entries[end] == 0 as Byte {
+            if end == start + 2 && entries[start] == 65 as Byte && entries[start + 1] == 61 as Byte {
+                found_empty = found_empty + 1;
+            }
+            if end == start + 5 && entries[start] == 66 as Byte && entries[start + 1] == 61 as Byte &&
+                entries[start + 2] == 120 as Byte && entries[start + 3] == 61 as Byte && entries[start + 4] == 121 as Byte {
+                found_equals = found_equals + 1;
+            }
+            start = end + 1;
+        }
+        end = end + 1;
+    }
+    if start == end && found_empty == 1 && found_equals == 1 { 73 } else { 1 }
+}

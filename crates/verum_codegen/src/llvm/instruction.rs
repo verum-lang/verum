@@ -33,6 +33,7 @@ mod retain_copy;
 mod copy_typed;
 mod callable_lifecycle;
 mod target_query;
+mod environment;
 mod field_carrier;
 
 /// Emit a diagnosable runtime abort for an operation that has no honest
@@ -33186,6 +33187,18 @@ fn lower_sys_extended<'ctx>(
             Ok(())
         }
 
+        Some(SysSubOpcode::EnvironmentBytes) => {
+            let mut pos = 0;
+            let dst = read_reg_varlen(operands, &mut pos)?;
+            if pos != operands.len() {
+                return Err(LlvmLoweringError::internal("invalid environment snapshot operands"));
+            }
+            let list = environment::snapshot(ctx)?;
+            ctx.set_register(dst, list.into());
+            ctx.mark_list_register(dst);
+            Ok(())
+        }
+
         Some(SysSubOpcode::EnvGet) => {
             let mut pos = 0usize;
             let dst = read_reg_varlen(operands, &mut pos)?;
@@ -33202,6 +33215,7 @@ fn lower_sys_extended<'ctx>(
             // libSystem's `getenv` and Windows kernel32, both allowed
             // boundaries.  The decision reads the TARGET triple, never
             // a host `cfg!`.
+            environment::darwin_lock(ctx, true)?;
             let env_fn_name = if super::target_triple::target_is_linux(&module) {
                 "verum_getenv_linux"
             } else {
@@ -33277,6 +33291,7 @@ fn lower_sys_extended<'ctx>(
             ctx.builder().position_at_end(merge_bb);
             let phi = ctx.builder().build_phi(i64_ty, "envget_out").or_llvm_err()?;
             phi.add_incoming(&[(&some_v, some_end), (&none_v, none_end)]);
+            environment::darwin_lock(ctx, false)?;
             ctx.set_register(dst, phi.as_basic_value());
             Ok(())
         }
@@ -33292,6 +33307,7 @@ fn lower_sys_extended<'ctx>(
             let i8p = ctx.types().ptr_type();
             let i32_ty = ctx.types().i32_type();
             let setenv_ty = i32_ty.fn_type(&[i8p.into(), i8p.into(), i32_ty.into()], false);
+            environment::darwin_lock(ctx, true)?;
             let setenv_fn =
                 super::error::get_or_declare_function(&module, "setenv", setenv_ty);
             ctx.builder()
@@ -33301,6 +33317,7 @@ fn lower_sys_extended<'ctx>(
                     "",
                 )
                 .or_llvm_err()?;
+            environment::darwin_lock(ctx, false)?;
             let ok = emit_env_variant(ctx, TypeId::RESULT.0, 0, Some(ctx.types().i64_type().const_zero()), "envset_ok")?;
             ctx.set_register(dst, ok.into());
             Ok(())
@@ -33315,11 +33332,13 @@ fn lower_sys_extended<'ctx>(
             let i8p = ctx.types().ptr_type();
             let i32_ty = ctx.types().i32_type();
             let unsetenv_ty = i32_ty.fn_type(&[i8p.into()], false);
+            environment::darwin_lock(ctx, true)?;
             let unsetenv_fn =
                 super::error::get_or_declare_function(&module, "unsetenv", unsetenv_ty);
             ctx.builder()
                 .build_call(unsetenv_fn, &[name_c.into()], "")
                 .or_llvm_err()?;
+            environment::darwin_lock(ctx, false)?;
             let ok = emit_env_variant(ctx, TypeId::RESULT.0, 0, Some(ctx.types().i64_type().const_zero()), "envunset_ok")?;
             ctx.set_register(dst, ok.into());
             Ok(())
