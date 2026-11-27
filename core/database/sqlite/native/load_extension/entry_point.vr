@@ -34,6 +34,12 @@ public fn with_symbol(ep: &mut EntryPoint, symbol: Text) {
     ep.symbol = Maybe.Some(symbol);
 }
 
+implement EntryPoint {
+    public(in super) fn matches_file(&self, file: &Text) -> Bool {
+        self.file == *file
+    }
+}
+
 fn push_text(dst: &mut Text, s: &Text) {
     let bs = s.as_bytes();
     let mut i: Int = 0;

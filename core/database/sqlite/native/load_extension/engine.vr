@@ -45,7 +45,7 @@ implement AutoExtensionRegistry {
     public fn cancel_auto_extension(&mut self, file: &Text) -> Bool {
         let mut i: Int = 0;
         while i < self.entries.len() {
-            if self.entries.get(i).file == *file {
+            if self.entries[i].matches_file(file) {
                 let _ = self.entries.remove(i);
                 return true;
             }
