@@ -39,6 +39,12 @@ pub(super) struct EvaluatedValueOrigins {
     fields: Option<RecordFieldOrigins>,
 }
 
+/// Loans carried on the early exit from the innermost lexical try expression.
+pub(super) struct ResidualLoanTarget {
+    region: usize,
+    origins: List<RecordReceiver>,
+}
+
 pub(super) struct CopiedCapture {
     name: verum_common::Text,
     scheme: crate::context::TypeScheme,
@@ -257,13 +263,13 @@ impl TypeChecker {
         if !self.carries_stored_loan(ty) {
             return found;
         }
-        if matches!(unparen(value).kind,
-            ExprKind::Tuple(_) | ExprKind::Array(_) | ExprKind::Record { .. })
+        let value = unparen(value);
+        if matches!(value.kind, ExprKind::Tuple(_) | ExprKind::Array(_) | ExprKind::Record { .. })
             && let Some(origins) = self.evaluated_value_origins.get(&value.span).and_then(|observed| observed.origins.as_ref())
         {
             return origins.clone();
         }
-        match (&unparen(value).kind, ty) {
+        match (&value.kind, ty) {
             (ExprKind::Tuple(values), Type::Tuple(types)) if values.len() == types.len() => {
                 for (value, ty) in values.iter().zip(types) {
                     for origin in self.aggregate_origins(value, ty) {
@@ -792,6 +798,47 @@ impl TypeChecker {
         Some(origins)
     }
 
+    pub(super) fn with_residual_loan_target<T>(
+        &mut self, check: impl FnOnce(&mut Self) -> crate::Result<T>,
+    ) -> crate::Result<(T, List<RecordReceiver>)> {
+        let outer = self.residual_loan_target.replace(ResidualLoanTarget {
+            region: self.borrow_tracker.scope_depth(),
+            origins: List::new(),
+        });
+        let result = check(self);
+        let target = std::mem::replace(&mut self.residual_loan_target, outer)
+            .expect("scoped residual destination");
+        result.map(|value| (value, target.origins))
+    }
+
+    pub(super) fn check_residual_loans(
+        &mut self, operand: &Expr, carrier: &Type, residual: &Type, target_residual: &Type,
+    ) -> crate::Result<()> {
+        if !self.carries_stored_loan(residual) || !self.carries_stored_loan(target_residual) {
+            return Ok(());
+        }
+        let Some(region) = self.residual_loan_target.as_ref().map(|target| target.region) else {
+            return self.check_aggregate_escape(operand, carrier, true);
+        };
+        let origins = self.aggregate_origins(operand, carrier);
+        self.retain_origins_in_region(&origins, region, operand.span)?;
+        let target = self.residual_loan_target.as_mut().expect("active residual destination");
+        for origin in origins {
+            if !target.origins.contains(&origin) { target.origins.push(origin); }
+        }
+        Ok(())
+    }
+
+    pub(super) fn observe_control_result(
+        &mut self, span: verum_ast::Span, value: &Expr, result: &Type,
+        mut origins: List<RecordReceiver>,
+    ) {
+        for origin in self.aggregate_origins(value, result) {
+            if !origins.contains(&origin) { origins.push(origin); }
+        }
+        self.record_evaluated_origins(span, Some(origins));
+    }
+
     /// The success payload of a core sum is moved out of the evaluated
     /// operand. A user-defined Try implementation can compute another value,
     /// so its input loans are candidates, never an exhaustive receipt.
@@ -799,24 +846,19 @@ impl TypeChecker {
         &mut self, operand: &Expr, carrier: &Type, output: &Type, span: verum_ast::Span,
     ) {
         if !self.carries_stored_loan(output) { return; }
-        use verum_common::well_known_types::WellKnownType;
-        let projection = self.conversion_nominal_head(carrier).is_some_and(|(name, args)| {
-            let Some((module, leaf)) = name.rsplit_once('.') else { return false };
-            let first = match (WellKnownType::from_declaration(leaf, module), args) {
-                (Some(WellKnownType::Result), [first, _]) | (Some(WellKnownType::Maybe), [first]) => first,
-                _ => return false,
-            };
-            self.types_equivalent(first, output)
-        });
+        let projection = crate::protocol::TryProtocolResolution::core_sum_arguments(carrier, false)
+            .is_some_and(|arguments| self.types_equivalent(&arguments[0], output));
         let origins = self.aggregate_origins(operand, carrier);
         let complete = projection && self.complete_slot_value_origins(operand);
         self.record_owned_value_origins(span, Some(origins), complete);
     }
 
     fn evaluated_result_origins(&self, value: &Expr) -> Option<&List<RecordReceiver>> {
-        match &unparen(value).kind {
+        let value = unparen(value);
+        match &value.kind {
             ExprKind::Call { .. } | ExprKind::MethodCall { .. } | ExprKind::MetaFunction { .. } | ExprKind::Closure { .. }
-            | ExprKind::Tuple(_) | ExprKind::Array(_) | ExprKind::Record { .. } | ExprKind::Try(_) =>
+            | ExprKind::Tuple(_) | ExprKind::Array(_) | ExprKind::Record { .. } | ExprKind::Try(_) | ExprKind::TryBlock(_)
+            | ExprKind::TryRecover { .. } | ExprKind::TryRecoverFinally { .. } =>
                 self.evaluated_value_origins.get(&value.span)?.origins.as_ref(),
             _ => None,
         }

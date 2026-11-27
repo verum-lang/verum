@@ -2038,8 +2038,6 @@ fn substitute_refinement_binder(
             }
         };
 
-        self.observe_try_output(inner_expr, &inner_ty, &inner_try.output, try_span);
-
         // Step 3: Get the function's return type
         // If the function has a throws clause, treat the return type as Result<T, E>
         let function_return_type = match &self.current_function_return_type {
@@ -2123,6 +2121,12 @@ fn substitute_refinement_binder(
             }
         };
 
+        let finish = |checker: &mut Self| {
+            checker.check_residual_loans(inner_expr, &inner_ty, &inner_try.residual, &outer_try.residual)?;
+            checker.observe_try_output(inner_expr, &inner_ty, &inner_try.output, try_span);
+            Ok(InferResult::new(inner_try.output))
+        };
+
         // Step 5: Check residual type compatibility via FromResidual
         // The function's return type must implement FromResidual<inner.Residual>
         //
@@ -2144,7 +2148,7 @@ fn substitute_refinement_binder(
                 Self::text_to_path(&protocol), List::from(vec![residual]),
             );
             self.prove_associated_bounds(&target, &[bound], &[], &Map::new(), try_span)?;
-            return Ok(InferResult::new(inner_try.output));
+            return finish(self);
         }
         let gate1 = self.protocol_checker.read()
             .can_convert_residual(&function_return_type, &inner_try.residual);
@@ -2185,7 +2189,7 @@ fn substitute_refinement_binder(
                     }
                     if gate3 {
                         // From conversion exists, residuals are compatible
-                        return Ok(InferResult::new(inner_try.output));
+                        return finish(self);
                     }
                 }
 
@@ -2213,7 +2217,7 @@ fn substitute_refinement_binder(
                                 eprintln!("[trygate] 4 throws_union = {}", inner_compatible);
                             }
                             if inner_compatible {
-                                return Ok(InferResult::new(inner_try.output));
+                                return finish(self);
                             }
                         }
                     }
@@ -2241,7 +2245,7 @@ fn substitute_refinement_binder(
         }
 
         // Step 6: Return the output type (success value)
-        Ok(InferResult::new(inner_try.output))
+        finish(self)
     }
 
     /// Infer type for a plain try block: try { expr } -> Result<T, E>
@@ -2266,7 +2270,7 @@ fn substitute_refinement_binder(
         // Step 2: Temporarily set function return type to Result<T, E> so that
         // the ? operator inside the try block passes type checking.
         let try_ok_var = Type::Var(crate::ty::TypeVar::fresh());
-        let block_result = self.synth_in_try_target(inner_block, Type::result(try_ok_var, error_type.clone()))?;
+        let block_result = self.synth_in_try_target(inner_block, Type::result(try_ok_var, error_type.clone()), try_span)?;
         let success_type = block_result.ty;
 
         // Step 3: Determine result type using PROTOCOL-BASED detection
@@ -2295,13 +2299,16 @@ fn substitute_refinement_binder(
         &mut self,
         body: &Expr,
         return_type: Type,
+        span: Span,
     ) -> Result<InferResult> {
         let previous = self.current_function_return_type.replace(return_type);
         self.affine_tracker.enter_residual_target();
-        let result = self.synth_expr(body);
+        let result = self.with_residual_loan_target(|checker| checker.synth_expr(body));
         self.affine_tracker.exit_residual_target();
         self.current_function_return_type = previous;
-        result
+        let (success, residuals) = result?;
+        self.observe_control_result(span, body, &success.ty, residuals);
+        Ok(success)
     }
 
     /// Check if two residual types are compatible for ? operator.

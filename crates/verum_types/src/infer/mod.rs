@@ -1058,6 +1058,7 @@ pub struct TypeChecker {
     /// Depth counter for try/recover blocks. When > 0, throw is allowed
     /// even if the enclosing function doesn't return Result<T, E>.
     try_recover_depth: usize,
+    residual_loan_target: Option<reference_origin::ResidualLoanTarget>,
     /// Current function's throws clause error types (resolved from AST).
     /// When Some, the enclosing function has a `throws(E1 | E2)` clause and
     /// `throw expr` must produce a value matching one of these types.

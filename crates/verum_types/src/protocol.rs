@@ -1732,6 +1732,28 @@ pub struct TryProtocolResolution {
     pub residual: Type,
 }
 
+impl TryProtocolResolution {
+    /// Applied arguments of a core sum whose success payload is moved by `?`.
+    /// Bootstrap resolves unqualified built-ins before their owners are loaded.
+    /// Ownership evidence requires the fully qualified declaration.
+    pub(crate) fn core_sum_arguments(ty: &Type, allow_bootstrap: bool) -> Option<&[Type]> {
+        let (name, arguments): (std::borrow::Cow<'_, str>, _) = match ty {
+            Type::Generic { name, args } => (name.as_str().into(), args.as_slice()),
+            Type::Named { path, args } => (crate::ty::nominal_path_name(path)?, args.as_slice()),
+            _ => return None,
+        };
+        let role = match name.rsplit_once('.') {
+            Some((owner, leaf)) => WKT::from_declaration(leaf, owner),
+            None if allow_bootstrap => WKT::from_name(&name),
+            None => return None,
+        };
+        match (role, arguments) {
+            (Some(WKT::Result), [_, _]) | (Some(WKT::Maybe), [_]) => Some(arguments),
+            _ => None,
+        }
+    }
+}
+
 /// Result of resolving the IntoIterator protocol for a type
 ///
 /// Used by for-loop type inference to determine the element type of iteration.
@@ -8925,20 +8947,9 @@ impl ProtocolChecker {
 
         // Bootstrap can supply the two core carriers before loading their
         // protocol declarations. A qualified source type must own that role.
-        let (name, arguments): (std::borrow::Cow<'_, str>, _) = match ty {
-            Type::Generic { name, args } => (name.as_str().into(), args),
-            Type::Named { path, args } => (crate::ty::nominal_path_name(path)?, args),
-            _ => return None,
-        };
-        let carrier = match name.rsplit_once('.') {
-            Some((owner, leaf)) => WKT::from_declaration(leaf, owner),
-            None => WKT::from_name(&name),
-        };
-        let mut residual = arguments.clone();
-        let output = match (carrier, arguments.as_slice()) {
-            (Some(WKT::Result), [output, _]) | (Some(WKT::Maybe), [output]) => output.clone(),
-            _ => return None,
-        };
+        let arguments = TryProtocolResolution::core_sum_arguments(ty, true)?;
+        let output = arguments[0].clone();
+        let mut residual = List::from_iter(arguments.iter().cloned());
         residual[0] = Type::Never;
         Some(TryProtocolResolution { output, residual: ty.clone().apply_arguments(residual) })
     }

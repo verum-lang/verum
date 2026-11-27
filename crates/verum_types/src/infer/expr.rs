@@ -308,11 +308,11 @@ impl TypeChecker {
         &mut self,
         error_type: &Type,
         check: impl FnOnce(&mut Self) -> Result<T>,
-    ) -> Result<T> {
+    ) -> Result<(T, List<crate::ty::RecordReceiver>)> {
         let return_type = Type::result(Type::Var(TypeVar::fresh()), error_type.clone());
         let previous_return = self.current_function_return_type.replace(return_type);
         self.try_recover_depth += 1;
-        let result = check(self);
+        let result = self.with_residual_loan_target(check);
         self.try_recover_depth -= 1;
         self.current_function_return_type = previous_return;
         result
@@ -766,7 +766,7 @@ impl TypeChecker {
             // and recover arm bodies. This enables bidirectional resolution for `None`/`Some`
             // in try { Some(r) } recover { ... => None } with expected Maybe<T>.
             TryRecover { try_block, recover } => {
-                self.check_try_recover_expr(expected, try_block, recover)
+                self.check_try_recover_expr(expr.span, expected, try_block, recover)
             }
 
             // Match expression with expected type: propagate expected type to each arm body.
@@ -832,15 +832,17 @@ impl TypeChecker {
 
     fn check_try_recover_expr(
         &mut self,
+        span: Span,
         expected: &Type,
         try_block: &Expr,
         recover: &verum_ast::expr::RecoverBody,
     ) -> Result<InferResult> {
         let error_type = self.extract_try_block_error_type(try_block)?;
-        self.with_try_recover_context(&error_type, |checker| {
+        let (success, residuals) = self.with_try_recover_context(&error_type, |checker| {
             checker.check_expr(try_block, expected)
         })?;
-        self.check_recover_body(recover, &error_type, Some(expected))?;
+        self.observe_control_result(span, try_block, &success.ty, List::new());
+        self.check_recover_body(recover, &error_type, Some(expected), &residuals, span)?;
         Ok(InferResult::new(expected.clone()))
     }
 
@@ -909,7 +911,7 @@ impl TypeChecker {
         // the ? operator inside the try block passes type checking.
         // Without this, ? checks the enclosing function's return type (e.g. Int)
         // and emits E0205.
-        let block_result = self.synth_in_try_target(inner_block, expected.clone())?;
+        let block_result = self.synth_in_try_target(inner_block, expected.clone(), expr.span)?;
         let block_ty = &block_result.ty;
 
         // Resolve type variables to get the actual structure
@@ -4507,6 +4509,8 @@ impl TypeChecker {
             current_expr = inner;
         }
 
+        // Resolution and loan receipts belong to the operation inside the parentheses.
+        let span = current_expr.span;
         match mode {
             InferMode::Check(expected_var) => {
                 // Get expected type from context
@@ -4522,10 +4526,10 @@ impl TypeChecker {
                 Path(_) => self.infer_expr_path(current_expr),
 
                 // Binary operations
-                Binary { op, left, right } => self.infer_binop(*op, left, right, expr.span),
+                Binary { op, left, right } => self.infer_binop(*op, left, right, span),
 
                 // Unary operations
-                Unary { op, expr: inner } => self.infer_unop(*op, inner, expr.span),
+                Unary { op, expr: inner } => self.infer_unop(*op, inner, span),
 
                 // Function calls
                 Call { .. } => self.infer_expr_call(current_expr),
@@ -4535,7 +4539,7 @@ impl TypeChecker {
 
                 // Range expressions: start..end or start..=end
                 // Syntax grammar: recursive-descent parseable (LL(k), k<=3), reserved keywords only let/fn/is, unified "type X is" definitions — Range expressions
-                Range { .. } => self.infer_expr_range(current_expr, expr.span),
+                Range { .. } => self.infer_expr_range(current_expr, span),
 
                 // Block expressions
                 Block(block) => self.with_block_scope(block, false, true, Self::infer_block_inner),
@@ -4546,7 +4550,7 @@ impl TypeChecker {
 
                 // Lambda synthesis: create fresh type variables for parameters
                 // Pi types (dependent functions): (x: A) -> B(x) where return type depends on input value, non-dependent functions are special case — Pi types (dependent functions)
-                Closure { .. } => self.infer_closure_expr(current_expr, expr.span),
+                Closure { .. } => self.infer_closure_expr(current_expr, span),
 
                 // Field access (including GAT access like Iterator.Item)
                 // Generic Associated Types (GATs): associated types with their own type parameters, enabling lending iterators and monadic abstractions — .1-1.4 - GAT syntax
@@ -4583,7 +4587,7 @@ impl TypeChecker {
                     type_args,
                     args,
                 } => {
-                    self.infer_method_chain_iterative(receiver, method, type_args, args, expr.span)
+                    self.infer_method_chain_iterative(receiver, method, type_args, args, span)
                 }
 
                 // Array expressions
@@ -4595,15 +4599,15 @@ impl TypeChecker {
                 // Try operator (? operator) for error propagation
                 // Try operator type checking: ? operator desugars to match with From conversion, requires Result/Maybe return type — Error propagation with ?
                 // Implements E0203, E0204, E0205 diagnostics
-                Try(inner_expr) => self.infer_try_operator(inner_expr, expr.span),
+                Try(inner_expr) => self.infer_try_operator(inner_expr, span),
 
                 // Plain try block: try { expr } -> Result<T, E>
                 // Error handling: Result<T, E> and Maybe<T> types, try (?) operator with automatic From conversion, error propagation — Section 6.3 - Try blocks
                 // Auto-wraps the block's value in Ok() and captures error type from ? operators
-                TryBlock(inner_block) => self.infer_try_block(inner_block, expr.span),
+                TryBlock(inner_block) => self.infer_try_block(inner_block, span),
 
                 // Loop expressions
-                Loop { .. } => self.with_repeated_body(|tc| tc.infer_expr_loop(current_expr, expr.span)),
+                Loop { .. } => self.with_repeated_body(|tc| tc.infer_expr_loop(current_expr, span)),
 
                 // Refinement types enhancement: flow-sensitive refinement propagation, evidence tracking for verified predicates — Refinement Evidence Propagation
                 While { .. } => self.with_repeated_body(|tc| tc.infer_while_loop(current_expr)),
@@ -4659,11 +4663,11 @@ impl TypeChecker {
 
                 // Tensor literal: tensor<2, 3>Float { [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]] }
                 // Expression grammar: precedence levels, associativity rules, all constructs are expressions — .12 - Tensor literals
-                TensorLiteral { .. } => self.infer_expr_tensor_literal(current_expr, expr.span),
+                TensorLiteral { .. } => self.infer_expr_tensor_literal(current_expr, span),
 
                 // Interpolated strings: f"Sum: {sum}", sql"SELECT * FROM {table}"
                 // Syntax grammar: recursive-descent parseable (LL(k), k<=3), reserved keywords only let/fn/is, unified "type X is" definitions — #1.4.2 - Text interpolation with injection protection
-                InterpolatedString { .. } => self.infer_expr_interpolation(current_expr, expr.span),
+                InterpolatedString { .. } => self.infer_expr_interpolation(current_expr, span),
 
                 // List comprehension: [x * 2 for x in list if x > 0]
                 // Expression grammar: precedence levels, associativity rules, all constructs are expressions — .10 - Comprehension expressions
@@ -4700,7 +4704,7 @@ impl TypeChecker {
 
                 // Try-recover-finally: try { ... } recover { ... } finally { ... }
                 // Combines both recover and finally behaviors
-                TryRecoverFinally { .. } => self.infer_expr_try_recover_finally(current_expr, expr.span),
+                TryRecoverFinally { .. } => self.infer_expr_try_recover_finally(current_expr, span),
 
                 // Parenthesized expressions are unwrapped at the top of infer_expr
                 // to avoid stack overflow on deeply nested parens
@@ -4728,7 +4732,7 @@ impl TypeChecker {
 
                 // Context usage: using Context with handler { body }
                 // Context system: capability-based dependency injection with "context" declarations, "using" requirements, "provide" injection, ~5-30ns runtime overhead via task-local storage — Context usage expressions
-                UseContext { .. } => self.infer_expr_use_context(current_expr, expr.span),
+                UseContext { .. } => self.infer_expr_use_context(current_expr, span),
 
                 // Capability attenuation: context.attenuate(capabilities)
                 // Context system core: "context Name { fn method(...) }" declarations, "using [Ctx1, Ctx2]" on functions, "provide Ctx = impl" for injection — 0 - Capability Attenuation
@@ -4737,12 +4741,12 @@ impl TypeChecker {
                 // Type property expressions: T.size, T.alignment, T.stride, T.min, T.max, T.bits, T.name
                 // Spec: grammar/verum.ebnf Section 2.17 - Type Properties
                 // These provide compile-time access to type metadata
-                TypeProperty { ty, property } => self.infer_type_property(ty, property, expr.span),
+                TypeProperty { ty, property } => self.infer_type_property(ty, property, span),
 
                 // For-await loop: for await pattern in async_iterable { body }
                 // Spec: grammar/verum.ebnf - for_await_loop production (v2.10)
                 // Iterates over an async iterator, awaiting each value
-                ForAwait { .. } => self.with_repeated_body(|tc| tc.infer_expr_for_await(current_expr, expr.span)),
+                ForAwait { .. } => self.with_repeated_body(|tc| tc.infer_expr_for_await(current_expr, span)),
 
                 // Throw expression: throw error_value
                 // Spec: grammar/verum.ebnf - throw_expr production
@@ -4764,7 +4768,7 @@ impl TypeChecker {
                 // Is expression: expr is Pattern or expr is not Pattern
                 // "x is Pattern" operator: replaces Rust matches!() macro for pattern testing, returns Bool
                 // Tests if an expression matches a pattern, returns Bool
-                Is { .. } => self.infer_expr_is(current_expr, expr.span),
+                Is { .. } => self.infer_expr_is(current_expr, span),
 
                 // Meta block: meta { ... }
                 // Meta system: unified compile-time computation via "meta fn", "meta" parameters, @derive macros, tagged literals, all under single "meta" concept — Compile-time evaluation
@@ -4795,7 +4799,7 @@ impl TypeChecker {
                 // Quote expression: quote { ... } or quote(N) { ... }
                 // Spec: grammar/verum.ebnf - quote_expr production
                 // Quote expressions produce a TokenStream that can be spliced into generated code
-                Quote { .. } => self.infer_expr_quote(current_expr, expr.span),
+                Quote { .. } => self.infer_expr_quote(current_expr, span),
 
                 // StageEscape expression: $(stage N){ expr }
                 // Spec: grammar/verum.ebnf - stage_escape production
@@ -4977,11 +4981,12 @@ impl TypeChecker {
         // Extract error type from ? operators inside try block before type checking
         let error_type = self.extract_try_block_error_type(try_block)?;
 
-        let try_result =
+        let (try_result, residuals) =
             self.with_try_recover_context(&error_type, |checker| checker.synth_expr(try_block))?;
 
         // Infer type of recovery body with error type for pattern binding
-        let recover_ty = self.check_recover_body(recover, &error_type, None)?;
+        self.observe_control_result(expr.span, try_block, &try_result.ty, List::new());
+        let recover_ty = self.check_recover_body(recover, &error_type, None, &residuals, expr.span)?;
 
         // Recovery body must have the same type as try block
         self.unifier.unify(&try_result.ty, &recover_ty, span)?;
@@ -5545,6 +5550,15 @@ impl TypeChecker {
                     }
     }
 
+    pub(super) fn temporary_pattern_subject(
+        &mut self, ty: &Type, span: Span,
+    ) -> Result<crate::ty::RecordReceiver> {
+        let temporary = "<temporary match subject>";
+        self.ctx.env.insert_mono(temporary, ty.clone());
+        self.ctx.env.set_binding_loan_region(temporary, self.borrow_tracker.scope_depth());
+        self.ctx.env.record_source(temporary, false).ok_or(TypeError::UnknownRecordOrigin { span })
+    }
+
     fn open_branch_pattern(
         &mut self, pattern: &verum_ast::Pattern, scrutinee: &Expr,
         scrutinee_ty: &Type, scrutinee_name: Option<&Text>, sources: &[crate::ty::RecordReceiver],
@@ -5578,10 +5592,7 @@ impl TypeChecker {
             if !ref_bindings.is_empty() && borrowed_sources.is_empty() {
                 // A computed subject owns storage only for this match arm.
                 // Its payload can be inspected but a reference cannot escape.
-                let temporary = "<temporary match subject>";
-                self.ctx.env.insert_mono(temporary, scrutinee_ty.clone());
-                self.ctx.env.set_binding_loan_region(temporary, self.borrow_tracker.scope_depth());
-                borrowed_sources.extend(self.ctx.env.record_source(temporary, false));
+                borrowed_sources.push(self.temporary_pattern_subject(scrutinee_ty, pattern.span)?);
             }
             if ref_bindings.iter().any(|binding| binding.mutable) {
                 self.with_checked_write(scrutinee, |_| Ok(()))?;
@@ -6074,7 +6085,7 @@ impl TypeChecker {
                             args: vec![].into(),
                         };
 
-                        let recover_ty = self.check_recover_body(recover_body, &error_type, None)?;
+                        let recover_ty = self.check_recover_body(recover_body, &error_type, None, &[], *nursery_span)?;
                         // Recover block must return the same type as the body
                         self.unifier
                             .unify(&recover_ty, &body_result.ty, *nursery_span)?;
@@ -6204,6 +6215,7 @@ impl TypeChecker {
         };
         let (closure_id, copied) = self.enter_closure_capture_tracking(expression.span, body, params, *move_)?;
         let saved = (
+            self.residual_loan_target.take(),
             self.closure_return_depth.replace(self.ctx.env.scope_depth() + 1),
             std::mem::replace(&mut self.in_call_arg_context, false),
             self.current_function_return_type.take(),
@@ -6239,6 +6251,7 @@ impl TypeChecker {
             self.borrow_tracker.cancel_closure(closure_id);
         }
         (
+            self.residual_loan_target,
             self.closure_return_depth,
             self.in_call_arg_context,
             self.current_function_return_type,
@@ -11022,12 +11035,13 @@ impl TypeChecker {
         // This ensures we have a concrete error type for pattern binding
         let error_type = self.extract_try_block_error_type(try_block)?;
 
-        let try_result = self.with_try_recover_context(&error_type, |checker| {
+        let (try_result, residuals) = self.with_try_recover_context(&error_type, |checker| {
             checker.synth_expr(try_block)
         })?;
 
         // Infer type of recovery body with error type for pattern binding
-        let recover_ty = self.check_recover_body(recover, &error_type, None)?;
+        self.observe_control_result(expr.span, try_block, &try_result.ty, List::new());
+        let recover_ty = self.check_recover_body(recover, &error_type, None, &residuals, expr.span)?;
 
         // Recovery body must have the same type as try block
         self.unifier.unify(&try_result.ty, &recover_ty, expr.span)?;

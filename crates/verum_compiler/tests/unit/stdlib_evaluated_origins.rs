@@ -26,12 +26,51 @@ fn propagated_success_preserves_the_ownership_of_its_payload() {
     for escaping in [
         "fn leak() -> Result<&Int, Int> { let local = 7;
             let r: Result<&Int, Int> = Result.Ok(&local); Result.Ok(r?) }",
+        "fn leak() -> Result<&Int, Int> { let local = 7;
+            let r: Result<&Int, Int> = Result.Ok(&local); Result.Ok(((r?))) }",
         "fn leak() -> Maybe<Maybe<&Int>> { let local = 7;
             let r: Maybe<Maybe<&Int>> = Maybe.Some(Maybe.Some(&local)); Maybe.Some(r?) }",
     ] {
-        let errors = check(escaping).expect_err("a reference to expired storage escaped through ?");
+        let errors = check(escaping).expect_err(escaping);
         assert!(errors.iter().any(|error| error.code() == Some("E312")
             && error.message().contains("local")), "{escaping}: {errors:#?}");
+    }
+}
+
+#[test]
+fn propagated_residual_keeps_loans_until_its_actual_destination() {
+    let session = crate::Session::new(crate::options::CompilerOptions::default());
+    let (registry, phase) = release_stdlib_graph(&session);
+    for (escapes, body) in [
+        (false, "fn keep(source: &Int) -> Result<Int, &Int> { let r: Result<Int, &Int> = Result.Err(source); Result.Ok(r?) }"),
+        (false, "fn consume() -> Int { let local = 7; let r: Result<Int, &Int> = Result.Err(&local);
+            let held: Result<Int, &Int> = try { r? }; match held { Result.Ok(v) => v, Result.Err(e) => *e } }"),
+        (false, "fn consume() -> Int { let local = 7; let r: Result<Int, &Int> = Result.Err(&local);
+            try { r? } recover |e| { *e } }"),
+        (false, "fn keep(source: &Int) -> &Int { let local = 7; let r: Result<Int, &Int> = Result.Err(&local);
+            try { r?; source } recover |e| { let value = *e; source } }"),
+        (false, "fn keep(source: &Int, r: Result<Int, Int>) -> &Int {
+            try { r?; source } recover { ref e => { let value = *e; source } } }"),
+        (true, "fn leak(source: &Int, r: Result<Int, Int>) -> &Int {
+            try { r?; source } recover { ref e => e } }"),
+        (true, "fn leak() -> Result<Int, &Int> { let local = 7; let r: Result<Int, &Int> = Result.Err(&local); Result.Ok(r?) }"),
+        (true, "fn leak() -> Result<Int, &Int> { let local = 7; let r: Result<Int, &Int> = Result.Err(&local);
+            let held: Result<Int, &Int> = try { r? }; held }"),
+        (true, "fn leak() -> Result<Int, &Int> { let caught: Result<Int, &Int> = try {
+            let local = 7; let r: Result<Int, &Int> = Result.Err(&local); r? }; caught }"),
+        (true, "fn leak(source: &Int) -> &Int { let local = 7; let r: Result<Int, &Int> = Result.Err(&local);
+            try { r?; source } recover |e| { e } }"),
+    ] {
+        let source = format!("module loan_probe; mount core.base.result.Result; {body}");
+        let module = Parser::new(&source).parse_module().unwrap();
+        let result = check_source_module(&mut phase.configured_checker(), "loan_probe", &module, &registry);
+        if escapes {
+            let errors = result.expect_err("propagated reference outlived its storage");
+            assert!(errors.iter().any(|error| error.code() == Some("E312")
+                && (error.message().contains("local") || error.message().contains("temporary match subject"))), "{body}: {errors:#?}");
+        } else {
+            result.unwrap_or_else(|errors| panic!("{body}: {errors:#?}"));
+        }
     }
 }
 

@@ -1053,6 +1053,7 @@ impl TypeChecker {
             property_inferrer: crate::computational_properties::PropertyInferrer::new(),
             in_async_context: false,
             try_recover_depth: 0,
+            residual_loan_target: None,
             current_function_throws: Maybe::None,
             context_checker: ContextChecker::new(),
             stage_checker: StageChecker::with_defaults(),
@@ -1216,6 +1217,7 @@ impl TypeChecker {
             property_inferrer: crate::computational_properties::PropertyInferrer::new(),
             in_async_context: false,
             try_recover_depth: 0,
+            residual_loan_target: None,
             current_function_throws: Maybe::None,
             context_checker: ContextChecker::new(),
             stage_checker: StageChecker::with_defaults(),
@@ -1380,6 +1382,7 @@ impl TypeChecker {
             property_inferrer: crate::computational_properties::PropertyInferrer::new(),
             in_async_context: false,
             try_recover_depth: 0,
+            residual_loan_target: None,
             current_function_throws: Maybe::None,
             context_checker: ContextChecker::new(),
             stage_checker: StageChecker::with_defaults(),
@@ -10153,6 +10156,8 @@ impl TypeChecker {
         recover: &verum_ast::expr::RecoverBody,
         error_type: &Type,
         expected: Option<&Type>,
+        residuals: &[crate::ty::RecordReceiver],
+        result_span: Span,
     ) -> Result<Type> {
         use verum_ast::expr::RecoverBody;
 
@@ -10166,6 +10171,8 @@ impl TypeChecker {
                         &arm.body,
                         error_type,
                         expected,
+                        residuals,
+                        result_span,
                     )?;
                     if expected.is_none() {
                         if let Some(previous) = &result_ty {
@@ -10178,7 +10185,7 @@ impl TypeChecker {
                 Ok(result_ty.unwrap_or_else(Type::unit))
             }
             RecoverBody::Closure { param, body, .. } => {
-                self.check_recover_handler(&param.pattern, None, body, error_type, expected)
+                self.check_recover_handler(&param.pattern, None, body, error_type, expected, residuals, result_span)
             }
         }
     }
@@ -10190,9 +10197,27 @@ impl TypeChecker {
         body: &Expr,
         error_type: &Type,
         expected: Option<&Type>,
+        residuals: &[crate::ty::RecordReceiver],
+        result_span: Span,
     ) -> Result<Type> {
         self.with_lexical_scope(|checker| {
             checker.bind_pattern(pattern, error_type)?;
+            let bindings = checker.collect_pattern_bindings(pattern, error_type)?;
+            let (_, borrowed) = checker.match_pattern_use(pattern, &bindings);
+            let temporary = (!borrowed.is_empty())
+                .then(|| checker.temporary_pattern_subject(error_type, pattern.span)).transpose()?;
+            for (name, ty) in &bindings {
+                if let Some(binding) = borrowed.iter().find(|binding| &binding.name == name) {
+                    if let Some(source) = &temporary {
+                        let mut field = source.clone();
+                        field.fields.extend(binding.fields.iter().cloned());
+                        checker.ctx.env.set_reference_origin(name, crate::context::ReferenceOrigin::Exact(field));
+                    }
+                } else if !residuals.is_empty() && checker.carries_stored_loan(ty) {
+                    checker.ctx.env.set_reference_origin(name,
+                        crate::context::ReferenceOrigin::Candidates(residuals.into()));
+                }
+            }
             if let Some(guard) = guard {
                 checker.check_expr(guard, &Type::Bool)?;
             }
@@ -10200,6 +10225,8 @@ impl TypeChecker {
                 Some(expected) => checker.check_expr(body, expected),
                 None => checker.synth_expr(body),
             }?;
+            checker.check_aggregate_escape(body, &result.ty, false)?;
+            checker.observe_control_result(result_span, body, &result.ty, List::new());
             Ok(result.ty)
         })
     }
