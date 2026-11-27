@@ -15816,11 +15816,14 @@ impl VbcCodegen {
                                             })
                                         })
                                         .collect::<CodegenResult<_>>()?;
-                                (
-                                    crate::types::VariantKind::Tuple,
-                                    types.len() as u8,
-                                    fds,
-                                )
+                                let arity = u8::try_from(types.len()).map_err(|_| {
+                                    let message = format!(
+                                        "tuple variant {type_name}.{variant_name} exceeds 255 payload slots"
+                                    );
+                                    CodegenError::new(CodegenErrorKind::InvalidSourceSignature(message))
+                                        .at_source(variant.span)
+                                })?;
+                                (crate::types::VariantKind::Tuple, arity, fds)
                             }
                         }
                         verum_common::Maybe::Some(VariantData::Record(fields)) => {
@@ -15868,6 +15871,26 @@ impl VbcCodegen {
                         kind,
                         arity,
                         fields: fields_desc,
+                    });
+                }
+                // Ordinary sums have one tag/count slot and one Value slot for
+                // each field of the active variant. The type must fit the largest
+                // alternative. ObjectHeader belongs to the allocation, as for records.
+                let explicit_layout = type_decl.attributes.iter().any(|attr| {
+                    matches!(attr.name.as_str(), "repr" | "align" | "bitfield")
+                });
+                if !explicit_layout
+                    && variants.iter().all(|variant| variant.path_endpoints.is_none())
+                    && let Some(max_fields) =
+                        sum_desc.variants.iter().map(|variant| variant.fields.len()).max()
+                {
+                    use verum_common::layout::{
+                        VALUE_SLOT_SIZE, VARIANT_PAYLOAD_OFFSET, VARIANT_TAG_OFFSET,
+                    };
+                    sum_desc.declared_layout = Some(crate::types::DeclaredTypeLayout {
+                        size: VARIANT_PAYLOAD_OFFSET - VARIANT_TAG_OFFSET
+                            + max_fields as u64 * VALUE_SLOT_SIZE,
+                        alignment: VALUE_SLOT_SIZE,
                     });
                 }
                 tracing::debug!(

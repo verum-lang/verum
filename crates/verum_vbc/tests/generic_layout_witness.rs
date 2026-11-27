@@ -117,6 +117,54 @@ fn roundtrip(module: &VbcModule) -> VbcModule {
 }
 
 #[test]
+fn ordinary_sums_reserve_the_tag_and_the_largest_payload() {
+    let source = "
+        type Mark is First | Second;
+        type Row<T> is Missing | Pair(x: T, y: T) | Triple { a: Int, b: T, c: Bool };
+        fn size<T>() -> Int { T.size }
+        fn alignment<T>() -> Int { T.alignment }
+        fn stride<T>() -> Int { T.stride }
+        fn unit_size() -> Int { Mark.size }
+        fn row_size() -> Int { size<Row<Byte>>() }
+        fn row_alignment() -> Int { alignment<Row<Byte>>() }
+        fn row_stride() -> Int { stride<Row<Byte>>() }";
+    let module = compile(source);
+    for tested in [roundtrip(&module), module] {
+        assert_eq!(run(tested.clone(), "unit_size"), 8);
+        assert_eq!(run(tested.clone(), "row_size"), 32);
+        assert_eq!(run(tested.clone(), "row_alignment"), 8);
+        assert_eq!(run(tested, "row_stride"), 32);
+    }
+}
+
+#[test]
+fn explicit_sum_representations_do_not_inherit_the_default_layout() {
+    for attribute in ["@repr(C)", "@repr(UInt8)", "@align(32)"] {
+        let source = format!(
+            "{attribute} type Choice is First | Second(Int);
+             fn size<T>() -> Int {{ T.size }} fn probe() -> Int {{ size<Choice>() }}"
+        );
+        let module = roundtrip(&compile(&source));
+        let descriptor = module.types.iter()
+            .find(|ty| module.get_string(ty.name) == Some("Choice")).unwrap();
+        assert!(descriptor.declared_layout.is_none(), "{attribute}");
+        let probe = module.find_function_by_name("probe").unwrap();
+        let error = Interpreter::new(Arc::new(module))
+            .execute_function(probe).expect_err("no layout for this representation");
+        assert!(error.to_string().contains("unresolved declared type layout"), "{attribute}: {error}");
+    }
+}
+
+#[test]
+fn tuple_variant_arity_must_fit_its_wire_descriptor() {
+    let fields = std::iter::repeat_n("Int", 256).collect::<verum_common::List<_>>().join(",");
+    let source = format!("type Choice is Empty | Wide({fields});");
+    let ast = Parser::new(&source).parse_module().expect("source grammar");
+    let error = VbcCodegen::new().compile_module(&ast).expect_err("unrepresentable arity");
+    assert!(error.to_string().contains("exceeds 255 payload slots"), "{error}");
+}
+
+#[test]
 fn nominal_byte_does_not_acquire_primitive_layout_by_spelling() {
     let module = compile(
         "type Byte is { first: Int, second: Int }; fn size<T>() -> Int { T.size } fn direct() -> Int { Byte.size } fn probe() -> Int { size<Byte>() }",
