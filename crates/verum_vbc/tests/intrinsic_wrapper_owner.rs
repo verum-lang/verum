@@ -73,13 +73,31 @@ fn missing_constructor_never_uses_another_types_new() {
 #[test]
 fn declared_constructor_still_resolves_before_wrapper_fallback() {
     let mut module = VbcModule::new("declared_constructor".into());
-    constant(&mut module, "ArenaPool.new", 99, true);
+    let foreign = constant(&mut module, "AtomicU64.new", 99, true);
+    let foreign_owner = module.intern_string("app.atomic");
+    module.get_function_mut(foreign).unwrap().origin_module = Some(foreign_owner);
     let actual = constant(&mut module, "AtomicU64.new", 17, true);
+    let owner = module.intern_string("core.sync.atomic");
+    module.get_function_mut(actual).unwrap().origin_module = Some(owner);
     let main = call(&mut module, "core.sync.atomic.AtomicU64.new", 1);
     assert!(module.resolve_external_bands().is_empty());
     assert_eq!(module.synthesize_intrinsic_band_wrappers(), 0);
     assert_eq!(module.resolve_band_id(BAND), Some(actual));
     assert_eq!(Interpreter::new(Shared::new(module).into_arc()).execute_function(main).unwrap().as_i64(), 17);
+}
+
+#[test]
+fn constructor_without_the_requested_module_owner_remains_unresolved() {
+    for origin in [None, Some("app.atomic")] {
+        let mut module = VbcModule::new("declared_constructor".into());
+        let id = constant(&mut module, "AtomicU64.new", 99, true);
+        let owner = origin.map(|name| module.intern_string(name));
+        module.get_function_mut(id).unwrap().origin_module = owner;
+        call(&mut module, "core.sync.atomic.AtomicU64.new", 1);
+        assert_eq!(module.resolve_external_bands().len(), 1);
+        assert_eq!(module.synthesize_intrinsic_band_wrappers(), 0);
+        assert_eq!(module.resolve_band_id(BAND), None);
+    }
 }
 
 #[test]
