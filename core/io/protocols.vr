@@ -21,6 +21,7 @@
     lifecycle: Lifecycle.Definition
 )
 module core.io.protocols;
+mount core.collections.slice.*;
 mount core.sys.common.{OSError};
 
 // =============================================================================
@@ -622,7 +623,7 @@ public type BufRead is protocol extends Read {
 
     // Check if buffer has data.
     fn has_data_left(&mut self) -> IoResult<Bool> {
-        Result.Ok(!self.fill_buf()?.is_empty())
+        Result.Ok(!(self.fill_buf()?).is_empty())
     }
 
     // Read until delimiter.
@@ -714,6 +715,16 @@ public type LinesIter<R: BufRead> is {
     reader: R,
 };
 
+/// Remove a single LF or CRLF terminator from a line read by the I/O APIs.
+public(in core.io) fn strip_line_ending(line: &mut Text) {
+    if line.ends_with("\n") {
+        line.pop();
+        if line.ends_with("\r") {
+            line.pop();
+        }
+    }
+}
+
 implement<R: BufRead> Iterator for LinesIter<R> {
     type Item = IoResult<Text>;
 
@@ -722,13 +733,7 @@ implement<R: BufRead> Iterator for LinesIter<R> {
         match self.reader.read_line(&mut line) {
             Result.Ok(0) => Maybe.None,
             Result.Ok(_) => {
-                // Remove trailing newline
-                if line.ends_with("\n") {
-                    line.pop();
-                    if line.ends_with("\r") {
-                        line.pop();
-                    }
-                }
+                strip_line_ending(&mut line);
                 Maybe.Some(Result.Ok(line))
             }
             Result.Err(e) => Maybe.Some(Result.Err(e)),

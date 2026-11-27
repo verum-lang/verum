@@ -213,13 +213,7 @@ implement Iterator for StdinLines {
         match self.stdin.read_line(&mut line) {
             Result.Ok(0) => Maybe.None,
             Result.Ok(_) => {
-                // Remove trailing newline
-                if line.ends_with("\n") {
-                    line.pop();
-                    if line.ends_with("\\") {
-                        line.pop();
-                    }
-                }
+                strip_line_ending(&mut line);
                 Maybe.Some(Result.Ok(line))
             }
             Result.Err(e) => Maybe.Some(Result.Err(e)),
@@ -237,12 +231,12 @@ public type Stdout is ();
 implement Stdout {
     // Create stdout handle.
     fn new() -> Stdout {
-        Stdout {}
+        Stdout
     }
 
     // Lock stdout for exclusive access.
     public fn lock(&self) -> StdoutLock {
-        StdoutLock {}
+        StdoutLock
     }
 }
 
@@ -290,12 +284,12 @@ public type Stderr is ();
 implement Stderr {
     // Create stderr handle.
     fn new() -> Stderr {
-        Stderr {}
+        Stderr
     }
 
     // Lock stderr for exclusive access.
     public fn lock(&self) -> StderrLock {
-        StderrLock {}
+        StderrLock
     }
 }
 
@@ -400,21 +394,14 @@ public fn read_line() -> IoResult<Text> {
     let mut line = Text.new();
     s.read_line(&mut line)?;
 
-    // Remove trailing newline
-    if line.ends_with("\n") {
-        line.pop();
-        if line.ends_with("\r") {
-            line.pop();
-        }
-    }
-
+    strip_line_ending(&mut line);
     Result.Ok(line)
 }
 
 // Read integer from stdin.
 public fn read_int() -> IoResult<Int> {
     let line = read_line()?;
-    match line.trim().parse<Int>() {
+    match line.trim().parse_int() {
         Result.Ok(n) => Result.Ok(n),
         Result.Err(_) => Result.Err(StreamError.new(IoErrorKind.InvalidData)),
     }
@@ -423,7 +410,7 @@ public fn read_int() -> IoResult<Int> {
 // Read float from stdin.
 public fn read_float() -> IoResult<Float> {
     let line = read_line()?;
-    match line.trim().parse<Float>() {
+    match line.trim().parse_float() {
         Result.Ok(f) => Result.Ok(f),
         Result.Err(_) => Result.Err(StreamError.new(IoErrorKind.InvalidData)),
     }
