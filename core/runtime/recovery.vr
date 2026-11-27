@@ -388,7 +388,7 @@ implement ErrorPredicate {
     fn counts<E: Display>(&self, error: &E) -> Bool {
         match self {
             AllErrors => true,
-            Specific(types) => types.contains(&TypeId.of_val(error)),
+            Specific(types) => types.contains(&TypeId.of<E>()),
             Custom(predicate) => {
                 let message: Text = f"{error}";
                 predicate(&message)

@@ -1391,13 +1391,7 @@ implement TypeId {
 
     /// The identifier of a type named at the call site.
     ///
-    fn of<T>() -> TypeId {
-        TypeId(T.id)
-    }
-
-    /// The identifier of the type of a VALUE, for call sites that hold
-    /// one rather than a type name.
-    fn of_val<T>(_value: &T) -> TypeId {
+    public fn of<T>() -> TypeId {
         TypeId(T.id)
     }
 }
