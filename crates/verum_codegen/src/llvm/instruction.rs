@@ -13350,32 +13350,9 @@ fn lower_call<'ctx>(
         return Ok(());
     }
 
-    // Text.from_utf8_unchecked / Text.from_utf8_lossy → AOT body.
-    //
-    // These two stdlib factories are registered as EMPTY stub
-    // functions in the VBC archive (see `verum_vbc::codegen::mod`
-    // CLASS-1 pre-registration list) on the contract that "LLVM
-    // lowering intercepts calls by name and routes to runtime
-    // functions". The interpreter honours that contract via
-    // `text_static_runtime.rs::from_utf8_*`, but the AOT path had no
-    // matching intercept — so lowering the empty stub body left the
-    // entry block terminator-less, `cleanup_orphan_blocks_in_function`
-    // appended `unreachable`, and every AOT caller of `Text.from(text)`
-    // (which the VBC codegen rewrites to `AsBytes` + this call) trapped
-    // with `brk #1`. This block closes the contract for the AOT tier.
-    //
-    // ABI: the single argument is a `&[Byte]` slice produced by `AsBytes`
-    // — a `Pack` object `[24-byte header][ptr:i64][len:i64]`. We read the
-    // (ptr, len) pair and route through the canonical `verum_text_alloc`
-    // text constructor, which copies `len` bytes into a fresh, NUL-
-    // terminated allocation (same primitive `Bool→Text` / parse paths
-    // use). `from_utf8_lossy` shares this byte-copy: for already-valid
-    // UTF-8 (the overwhelming case, and all inputs that flow from
-    // `Text.from`/`AsBytes`) it is identical to the interpreter's
-    // `String::from_utf8_lossy` result.
-    if (func_name == "Text.from_utf8_unchecked" || func_name == "Text.from_utf8_lossy")
-        && args.count >= 1
-    {
+    // The unchecked factory copies UTF-8 bytes validated by its caller.
+    // Checked and lossy decoding execute their Verum bodies on every target.
+    if func_name == "Text.from_utf8_unchecked" && args.count == 1 {
         let i64_type = ctx.types().i64_type();
         let ptr_type = ctx.types().ptr_type();
 

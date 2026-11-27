@@ -96,71 +96,41 @@ fn utf8_decode_char_len(bytes: &[Byte], byte_idx: Int) -> (Char, Int) {
     (ch, len)
 }
 
+/// Inspect one nonempty prefix. Its width covers one scalar or the maximal
+/// subpart to replace. A byte that cannot continue it starts the next prefix.
+@inline
+fn utf8_sequence(bytes: &[Byte], start: Int) -> (Int, Bool) {
+    let lead = bytes[start] as Int;
+    if lead < 0x80 { return (1, true); }
+    if lead < 0xC2 || lead > 0xF4 { return (1, false); }
+
+    let width = if lead < 0xE0 { 2 } else if lead < 0xF0 { 3 } else { 4 };
+    let remaining = bytes.len() - start;
+    if remaining == 1 { return (1, false); }
+    let second = bytes[start + 1] as Int;
+    let low = if lead == 0xE0 { 0xA0 } else if lead == 0xF0 { 0x90 } else { 0x80 };
+    let high = if lead == 0xED { 0x9F } else if lead == 0xF4 { 0x8F } else { 0xBF };
+    if second < low || second > high { return (1, false); }
+
+    let mut used = 2;
+    while used < width {
+        if used == remaining { return (used, false); }
+        let next = bytes[start + used] as Int;
+        if next < 0x80 || next > 0xBF { return (used, false); }
+        used = used + 1;
+    }
+    (width, true)
+}
+
 /// Byte index of the first invalid UTF-8 sequence, or the buffer length.
 public fn utf8_valid_prefix_len(bytes: &[Byte]) -> Int {
     let len = bytes.len();
-    let mut i = 0;
-
-    while i < len {
-        let b = bytes[i] as Int;
-
-        if (b & 0x80) == 0 {
-            // ASCII byte (0xxxxxxx)
-            i = i + 1;
-        } else if (b & 0xE0) == 0xC0 {
-            // 2-byte sequence (110xxxxx 10xxxxxx)
-            if i + 1 >= len {
-                return i;
-            }
-            let b1 = bytes[i + 1] as Int;
-            if (b1 & 0xC0) != 0x80 {
-                return i;
-            }
-            // Overlong check: must be > 0x7F
-            let codepoint = ((b & 0x1F) << 6) | (b1 & 0x3F);
-            if codepoint < 0x80 {
-                return i;
-            }
-            i = i + 2;
-        } else if (b & 0xF0) == 0xE0 {
-            // 3-byte sequence (1110xxxx 10xxxxxx 10xxxxxx)
-            if i + 2 >= len {
-                return i;
-            }
-            let b1 = bytes[i + 1] as Int;
-            let b2 = bytes[i + 2] as Int;
-            if (b1 & 0xC0) != 0x80 || (b2 & 0xC0) != 0x80 {
-                return i;
-            }
-            // Overlong check && surrogate check
-            let codepoint = ((b & 0x0F) << 12) | ((b1 & 0x3F) << 6) | (b2 & 0x3F);
-            if codepoint < 0x800 || (codepoint >= 0xD800 && codepoint <= 0xDFFF) {
-                return i;
-            }
-            i = i + 3;
-        } else if (b & 0xF8) == 0xF0 {
-            // 4-byte sequence (11110xxx 10xxxxxx 10xxxxxx 10xxxxxx)
-            if i + 3 >= len {
-                return i;
-            }
-            let b1 = bytes[i + 1] as Int;
-            let b2 = bytes[i + 2] as Int;
-            let b3 = bytes[i + 3] as Int;
-            if (b1 & 0xC0) != 0x80 || (b2 & 0xC0) != 0x80 || (b3 & 0xC0) != 0x80 {
-                return i;
-            }
-            // Overlong check && range check (max U+10FFFF)
-            let codepoint = ((b & 0x07) << 18) | ((b1 & 0x3F) << 12) | ((b2 & 0x3F) << 6) | (b3 & 0x3F);
-            if codepoint < 0x10000 || codepoint > 0x10FFFF {
-                return i;
-            }
-            i = i + 4;
-        } else {
-            // Invalid leading byte (10xxxxxx or 11111xxx)
-            return i;
-        }
+    let mut pos = 0;
+    while pos < len {
+        let (width, valid) = utf8_sequence(bytes, pos);
+        if !valid { return pos; }
+        pos = pos + width;
     }
-
     len
 }
 
@@ -372,96 +342,36 @@ implement Text {
         Text.from_utf8_lossy(bytes.as_slice())
     }
 
-    /// Create text from a byte slice, replacing any invalid UTF-8
-    /// sequences with the Unicode replacement character (U+FFFD).
-    /// Mirrors Rust's `String.from_utf8_lossy` semantics: well-formed
-    /// inputs pass through verbatim; ill-formed inputs decode lossily
-    /// rather than raise an error. Used by `core.io.process.Output`'s
-    /// `stdout()` / `stderr()` accessors and by any caller that needs
-    /// best-effort textification of arbitrary byte streams.
+    /// Copy well-formed UTF-8 and replace each maximal subpart of an
+    /// ill-formed sequence with one U+FFFD (Unicode §3.9).
     public fn from_utf8_lossy(bytes: &[Byte]) -> Text {
-        if utf8_valid_prefix_len(bytes) == bytes.len() {
-            return Text.from_utf8_unchecked(bytes);
-        }
-        // Slow path: walk the bytes, replacing invalid sequences.
-        // Each invalid byte (or maximal subpart of an invalid
-        // sequence) becomes a single U+FFFD replacement character
-        // (3 bytes UTF-8 = 0xEF 0xBF 0xBD). This matches the
-        // WHATWG Encoding Standard's "replacement" behaviour, which
-        // is what `String.from_utf8_lossy` implements.
-        let mut buf: List<Byte> = [];
-        let mut i: Int = 0;
         let len = bytes.len();
-        while i < len {
-            let b = bytes[i];
-            // 1-byte ASCII: 0xxxxxxx.
-            if b < 0x80 as Byte {
-                buf.push(b);
-                i = i + 1;
-                continue;
-            }
-            // 2-byte: 110xxxxx 10xxxxxx.
-            if b >= 0xC2 as Byte && b <= 0xDF as Byte && i + 1 < len {
-                let b1 = bytes[i + 1];
-                if b1 >= 0x80 as Byte && b1 <= 0xBF as Byte {
-                    buf.push(b);
-                    buf.push(b1);
-                    i = i + 2;
-                    continue;
-                }
-            }
-            // 3-byte: 1110xxxx 10xxxxxx 10xxxxxx (with surrogate
-            // exclusion + overlong rejection).
-            if b >= 0xE0 as Byte && b <= 0xEF as Byte && i + 2 < len {
-                let b1 = bytes[i + 1];
-                let b2 = bytes[i + 2];
-                let valid_b1 = if b == 0xE0 as Byte {
-                    b1 >= 0xA0 as Byte && b1 <= 0xBF as Byte
-                } else if b == 0xED as Byte {
-                    b1 >= 0x80 as Byte && b1 <= 0x9F as Byte
-                } else {
-                    b1 >= 0x80 as Byte && b1 <= 0xBF as Byte
-                };
-                if valid_b1 && b2 >= 0x80 as Byte && b2 <= 0xBF as Byte {
-                    buf.push(b);
-                    buf.push(b1);
-                    buf.push(b2);
-                    i = i + 3;
-                    continue;
-                }
-            }
-            // 4-byte: 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx (with
-            // overlong + > U+10FFFF rejection).
-            if b >= 0xF0 as Byte && b <= 0xF4 as Byte && i + 3 < len {
-                let b1 = bytes[i + 1];
-                let b2 = bytes[i + 2];
-                let b3 = bytes[i + 3];
-                let valid_b1 = if b == 0xF0 as Byte {
-                    b1 >= 0x90 as Byte && b1 <= 0xBF as Byte
-                } else if b == 0xF4 as Byte {
-                    b1 >= 0x80 as Byte && b1 <= 0x8F as Byte
-                } else {
-                    b1 >= 0x80 as Byte && b1 <= 0xBF as Byte
-                };
-                if valid_b1
-                    && b2 >= 0x80 as Byte && b2 <= 0xBF as Byte
-                    && b3 >= 0x80 as Byte && b3 <= 0xBF as Byte
-                {
-                    buf.push(b);
-                    buf.push(b1);
-                    buf.push(b2);
-                    buf.push(b3);
-                    i = i + 4;
-                    continue;
-                }
-            }
-            // Invalid byte / truncated sequence — emit U+FFFD.
-            buf.push(0xEF as Byte);
-            buf.push(0xBF as Byte);
-            buf.push(0xBD as Byte);
-            i = i + 1;
+        let first_invalid = utf8_valid_prefix_len(bytes);
+        if first_invalid == len {
+            return unsafe { Text.from_utf8_unchecked(bytes) };
         }
-        Text.from_utf8_unchecked(&buf)
+        let mut buf: List<Byte> = List.with_capacity(len);
+        let mut pos = 0;
+        while pos < first_invalid {
+            buf.push(bytes[pos]);
+            pos = pos + 1;
+        }
+        while pos < len {
+            let (width, valid) = utf8_sequence(bytes, pos);
+            let end = pos + width;
+            if valid {
+                while pos < end {
+                    buf.push(bytes[pos]);
+                    pos = pos + 1;
+                }
+            } else {
+                buf.push(0xEF as Byte);
+                buf.push(0xBF as Byte);
+                buf.push(0xBD as Byte);
+                pos = end;
+            }
+        }
+        unsafe { Text.from_utf8_unchecked(buf.as_slice()) }
     }
 
     /// Create text from bytes without validation.
@@ -4162,6 +4072,9 @@ implement Utf8Error {
     fn new(valid_up_to: Int) -> Utf8Error {
         Utf8Error { valid_up_to: valid_up_to }
     }
+
+    /// Number of bytes before the first ill-formed UTF-8 sequence.
+    public fn valid_up_to(&self) -> Int { self.valid_up_to }
 
     /// Render this error as a Text (matches Display.fmt output).
     public fn to_text(&self) -> Text {
