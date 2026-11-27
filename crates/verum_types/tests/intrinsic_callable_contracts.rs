@@ -66,6 +66,37 @@ fn unknown_intrinsic_properties_do_not_satisfy_a_callback_bound() {
 }
 
 #[test]
+fn process_environment_reads_satisfy_synchronous_callbacks_without_proving_purity() {
+    let declarations = r#"
+        type Maybe<T> is None | Some(T);
+        fn read(key: &[Byte]) -> Maybe<Text> { @intrinsic("get_env_impl", key) }
+        fn invoke<F: fn() -> Maybe<Text>>(callback: F) -> Maybe<Text> { callback() }
+    "#;
+    let accepted = errors(&format!(
+        "{declarations} fn lookup(key: &[Byte]) -> Maybe<Text> {{ invoke(|| read(key)) }}"
+    ));
+    assert!(accepted.is_empty(), "{accepted:?}");
+
+    let impure = errors(&format!(
+        "{declarations} pure fn lookup(key: &[Byte]) -> Maybe<Text> {{ read(key) }}"
+    ));
+    assert!(
+        impure.iter().any(|error| error.contains("ImpurePureFunction")),
+        "{impure:?}"
+    );
+
+    let open = errors(&format!(
+        "{declarations} fn lookup(key: &[Byte], next: async fn() -> Maybe<Text>) -> Maybe<Text> {{
+            invoke(|| {{ read(key); next() }})
+        }}"
+    ));
+    assert!(
+        open.iter().any(|error| error.contains("excludes {Async}") && error.contains("unrestricted")),
+        "{open:?}"
+    );
+}
+
+#[test]
 fn registered_constants_satisfy_meta_purity() {
     for source in [
         "meta fn mode() -> Bool { @intrinsic(\"is_debug\") }",

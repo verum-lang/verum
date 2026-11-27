@@ -1550,6 +1550,8 @@ impl Intrinsic {
             // Constructs a slice descriptor from pointer and length on the
             // calling stack. This bound establishes only absence of suspension.
             | CodegenStrategy::InlineSequence(InlineSequenceId::MakeSlice)
+            // Reads process state and constructs the result on the calling stack.
+            | CodegenStrategy::InlineSequence(InlineSequenceId::EnvGetSeq)
             | CodegenStrategy::DirectOpcode(Opcode::Panic | Opcode::AtomicFence) => IntrinsicCallBound::Synchronous,
             _ => IntrinsicCallBound::Unknown,
         }
