@@ -90,6 +90,44 @@ fn a_selected_protocol_method_preserves_its_receiver_permission_on_a_field() {
 }
 
 #[test]
+fn self_dispatch_keeps_the_receiver_declared_by_the_selected_method() {
+    let methods = r#"
+        type Access is protocol { fn read(&self) -> Int; fn write(&mut self) -> Int; };
+        implement Access for Boxed {
+            fn read(&self) -> Int { self.value }
+            fn write(&mut self) -> Int { self.value += 1; self.value }
+        }
+    "#;
+    for (body, valid) in [
+        ("fn inspect(&self) -> Int { self.read() }", true),
+        ("fn increment(&mut self) -> Int { self.write() }", true),
+        ("fn increment(&self) -> Int { self.write() }", false),
+    ] {
+        let diagnostics = errors(&format!("{methods} implement Boxed {{ {body} }}"));
+        if valid {
+            assert!(diagnostics.is_empty(), "{body}: {diagnostics:?}");
+        } else {
+            assert!(diagnostics.iter().any(|error| error.contains("cannot write through a shared reference")), "{body}: {diagnostics:?}");
+        }
+    }
+}
+
+#[test]
+fn self_value_and_self_type_select_different_members_of_the_same_name() {
+    let source = r#"
+        type Factory is protocol { fn sample() -> Bool; };
+        implement Factory for Boxed { fn sample() -> Bool { true } }
+        implement Boxed {
+            fn sample(&self) -> Int { self.value }
+            fn inspect(&self) -> Int { self.sample() }
+            fn make() -> Bool { Self.sample() }
+        }
+    "#;
+    let diagnostics = errors(source);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+}
+
+#[test]
 fn helpers_cannot_write_or_reborrow_shared_referents() {
     for body in [
         "fn change(p: &Boxed, y: Boxed) { *p = y; }",

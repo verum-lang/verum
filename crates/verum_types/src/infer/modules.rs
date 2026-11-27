@@ -23930,27 +23930,9 @@ impl TypeChecker {
             && let ExprKind::Path(path) = &receiver.kind
             && path.segments.len() == 1
         {
-            // Get the type name - either from a Name segment or from Self resolution
+            // Only a type designator can select a static member. Lowercase
+            // `self` is the receiver value, with the permission of its binding.
             let type_name: Option<String> = match &path.segments[0] {
-                // SELF-STATIC-RECEIVER (T1087).  The arm below resolves
-                // the VALUE keyword `self`; capital `Self` is lexed as an
-                // ordinary Name and fell through unresolved, so the
-                // qualified key became the literal `Self.new` and no
-                // registry holds that.  Measured on a 7-line probe whose
-                // two lines differ in nothing else:
-                //
-                //     implement Opt2 { fn new() -> Self { … }
-                //           fn default() -> Self { Self.new() }   E400
-                //           fn default() -> Self { Opt2.new() }   clean
-                //
-                // The trace named the site rather than a guess: the
-                // healthy call emits `path-static ENV-QUALIFIED
-                // Opt2.new -> Opt2` and the failing one emits nothing
-                // there at all.  Three earlier placements — the
-                // empty-candidates retry, the variant-constructor
-                // branch, the pre-receiver resolver — were each inert,
-                // because none of them is where the qualified key is
-                // built.
                 verum_ast::ty::PathSegment::Name(ident)
                     if ident.name.as_str() == "Self"
                         && matches!(self.current_self_type, Maybe::Some(_)) =>
@@ -23961,12 +23943,6 @@ impl TypeChecker {
                         .filter(|n| n != "Self")
                 }
                 verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.as_str().to_string()),
-                verum_ast::ty::PathSegment::SelfValue => {
-                    // Resolve Self to the actual type name from current_self_type
-                    self.current_self_type
-                        .as_ref()
-                        .map(|self_ty| self.type_to_name(self_ty).to_string())
-                }
                 _ => None,
             };
 
