@@ -188,16 +188,28 @@ fn public_watch_and_its_real_errno_path_run_from_wire() {
         ItemKind::Type(t) => t.name.as_str() == "OSError",
         ItemKind::Impl(i) => matches!(&i.kind, ImplKind::Inherent(t)
             if matches!(&t.kind, TypeKind::Path(p) if p.last_segment_name() == "OSError")),
-        ItemKind::Function(f) => f.name.as_str() == "errno_to_message",
-        ItemKind::Module(_) => true,
+        ItemKind::Module(_) | ItemKind::Mount(_) => true,
         _ => false,
     });
     let errno = Parser::new(include_str!("../../../core/sys/linux/errno.vr"))
         .parse_module()
         .unwrap();
+    let classification = Parser::new(include_str!("../../../core/sys/error.vr"))
+        .parse_module()
+        .unwrap();
+    let mut result = Parser::new(include_str!("../../../core/base/result.vr"))
+        .parse_module()
+        .unwrap();
+    result.items.retain(|item| match &item.kind {
+        ItemKind::Type(t) => t.name.as_str() == "Result",
+        ItemKind::Module(m) => m.items.is_none(),
+        _ => false,
+    });
     let files = [
-        ("core.sys.common", &errors),
+        ("core.base.result", &result),
         ("core.sys.linux.errno", &errno),
+        ("core.sys.error", &classification),
+        ("core.sys.common", &errors),
         ("core.sys.linux.signal_watch", &ast),
     ];
     let mut codegen = VbcCodegen::with_config(config);
