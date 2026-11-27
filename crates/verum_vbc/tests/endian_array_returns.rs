@@ -47,6 +47,25 @@ fn literal_fixed_bytes_are_the_positive_layout_control() {
 }
 
 #[test]
+fn returned_array_pointers_address_the_same_elements_as_subslices() {
+    let module = compile_source(r#"module endian_arrays;
+        fn bytes(n: UInt32) -> [Byte; 4] { @intrinsic("to_le_bytes_4", n) }
+        fn probe() -> Int {
+            let mut b: [Byte; 4] = bytes(12);
+            let start = b.as_mut_ptr() as Int;
+            if start == 0 || start != ((&mut b[..]).as_mut_ptr() as Int) { return 0; }
+            if (b.as_ptr() as Int) != start { return 0; }
+            ((&b[3..]).as_ptr() as Int) - start
+        }"#);
+    let wire = deserialize_module(&serialize_module(&module).unwrap()).unwrap();
+    for module in [module, wire] {
+        let entry = module.find_function_by_name("endian_arrays.probe").unwrap();
+        let mut vm = Interpreter::new(Arc::new(module));
+        assert_eq!(vm.execute_function(entry).unwrap().try_as_i64(), Some(3));
+    }
+}
+
+#[test]
 fn dynamic_big_endian_has_the_declared_fixed_byte_carrier() {
     assert_packed_bytes(compile("let number: UInt64 = 0x0102030405060708; number.to_be_bytes()", ""), &[1,2,3,4,5,6,7,8]);
 }

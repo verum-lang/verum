@@ -3036,13 +3036,25 @@ fn cbgr_extended_body(
                 // For ThinRef, extract the pointer directly
                 let thin_ref = slice.raw_thin_ref()?;
                 Value::from_ptr(thin_ref.ptr)
-            } else if let Some((p, _len)) = heap::value_as_byte_slice(&slice) {
-                // BYTE_SLICE byte view (ARCH-P5): the underlying data
-                // pointer is payload slot 0, NOT the object base.
-                Value::from_ptr(p)
-            } else if slice.is_ptr() {
-                // Already a raw pointer, just pass through
-                slice
+            } else if slice.is_regular_ptr() {
+                let base = slice.as_ptr::<u8>();
+                let data = if state.heap.contains(base.cast()) {
+                    // SAFETY: exact membership proves this is a live header.
+                    // A byte view stores a pointer; packed arrays store their
+                    // elements inline immediately after the header.
+                    unsafe {
+                        match (*base.cast::<heap::ObjectHeader>()).type_id {
+                            TypeId::BYTE_SLICE => heap::byte_slice_payload(base).0,
+                            tid if heap::typed_array_element_spec(tid).is_some() => {
+                                base.add(heap::OBJECT_HEADER_SIZE)
+                            }
+                            _ => base,
+                        }
+                    }
+                } else {
+                    base
+                };
+                Value::from_ptr(data)
             } else {
                 // For non-reference types, return null pointer
                 Value::from_ptr(std::ptr::null_mut::<u8>())
