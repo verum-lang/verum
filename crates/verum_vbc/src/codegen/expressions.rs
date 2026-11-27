@@ -1380,6 +1380,17 @@ impl VbcCodegen {
             }
             self.ctx.declared_result_types.insert(expr.span, declaration);
         }
+        if demand == ResultDemand::Discarded
+            && matches!(expr.kind, ExprKind::Call { .. } | ExprKind::MethodCall { .. })
+            && let Ok(Some(reg)) = &result
+            && let Some(declared) = self.declared_expression_result(
+                expr, Some(*reg), start, self.ctx.instructions.len(),
+            )
+            && self.declaration_requires_drop(&declared)
+        {
+            self.emit_local_drop(*reg, Some(&declared));
+            self.ctx.emit(Instruction::LoadUnit { dst: *reg });
+        }
         self.ctx.selected_call_result_span = outer;
         result.map_err(|error| error.at_source(expr.span))
     }

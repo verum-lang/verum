@@ -601,7 +601,7 @@ impl super::VbcCodegen {
     /// Both generic and concrete transfers require the same active declaration.
     /// Borrowed aliases, captured cells and raw views never acquire its ownership.
     /// Instantiated destructor bodies receive the lexical type arguments used
-    /// at construction. Semantic IDs retain their native runtime cleanup.
+    /// at construction. Native sum producers use the same declared tags and payloads.
     /// An erased heap header only identifies the declaration.
     fn local_drop_declaration(&self, declared: &TypeRef) -> TypeRef {
         self.expand_declared_alias_while(declared.clone(), |alias| {
@@ -617,8 +617,9 @@ impl super::VbcCodegen {
                 || matches!(ty, TypeRef::Concrete(base)
                     if crate::drop_plan::builtin_drop_plan(*base).is_some())
                 || matches!(ty, TypeRef::Concrete(base) | TypeRef::Instantiated { base, .. }
-                    if !base.is_builtin() && !base.is_semantic_type()
-                    && self.type_by_id(*base).is_some()))
+                    if self.type_by_id(*base).is_some_and(|declaration|
+                        (!base.is_builtin() && !base.is_semantic_type())
+                        || declaration.kind == crate::types::TypeKind::Sum)))
         {
             // Structural owners need their declaration even without explicit
             // Drop glue: a sum's active payload and generic owned fields cannot
@@ -819,7 +820,7 @@ impl super::VbcCodegen {
     /// Duplication discipline does not describe storage lifetime: an ordinary
     /// copyable value may own Text or invoke Drop. Only the shared primitive
     /// storage plan and an explicit reference establish trivial cleanup here.
-    fn declaration_requires_drop(&self, declaration: &TypeRef) -> bool {
+    pub(super) fn declaration_requires_drop(&self, declaration: &TypeRef) -> bool {
         !crate::drop_plan::has_trivial_cleanup(&self.local_drop_declaration(declaration))
     }
     /// Emit the exit edge without popping compile-time scopes shared with

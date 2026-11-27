@@ -123,6 +123,67 @@ fn probe() -> Int {
 }
 
 #[test]
+fn discarded_call_results_retire_the_selected_owned_payload() {
+    run(
+        r#"
+fn make(drops: &mut Int) -> Maybe<Guard> {
+    Maybe.Some(Guard { drops: drops, marker: 7 })
+}
+type Factory is {};
+implement Factory {
+    fn make(&self, drops: &mut Int) -> Maybe<Guard> { make(drops) }
+}
+fn borrow<T>(value: &T) -> &T { value }
+fn probe() -> Int {
+    let mut drops = 0;
+    let factory = Factory {};
+    make(&mut drops);
+    if drops == 1 { factory.make(&mut drops) } else { make(&mut drops) };
+    let owner = Guard { drops: &mut drops, marker: 9 };
+    borrow(&owner);
+    drops
+}
+"#,
+        2,
+    );
+}
+
+#[test]
+fn discarded_standard_sum_runs_only_its_active_payload_destructor() {
+    let parser = verum_fast_parser::FastParser::new();
+    let mut maybe = parser.parse_module_str(include_str!("../../../core/base/maybe.vr"), verum_ast::FileId::new(1)).unwrap();
+    maybe.items.retain(|item| matches!(&item.kind, verum_ast::ItemKind::Module(m) if m.items.is_none())
+        || matches!(&item.kind, verum_ast::ItemKind::Type(decl) if decl.name.name == "Maybe"));
+    let source = parser.parse_module_str(r#"
+        module consumer;
+        mount core.base.maybe.Maybe;
+        mount core.base.protocols.Drop;
+        type affine Guard is { drops: &mut Int };
+        implement Drop for Guard { fn drop(&mut self) { *self.drops = *self.drops + 1; } }
+        fn acquire(drops: &mut Int) -> Maybe<Guard> { Maybe.Some(Guard { drops: drops }) }
+        fn empty() -> Maybe<Guard> { Maybe.None }
+        fn probe() -> Int {
+            let mut drops = 0;
+            acquire(&mut drops);
+            empty();
+            drops
+        }
+    "#, verum_ast::FileId::new(2)).unwrap();
+    let mut compiler = VbcCodegen::new();
+    canonical_drop::initialize(&mut compiler);
+    let units = [&maybe, &source];
+    compiler.collect_unit_declarations(&units).unwrap();
+    compiler.resolve_pending_imports();
+    compiler.compile_unit_items(&units, ItemFailurePolicy::Strict).unwrap();
+    let module = compiler.finalize_module().unwrap();
+    let module = deserialize_module(&serialize_module(&module).unwrap()).unwrap();
+    let entry = module.find_function_by_name("consumer.probe").unwrap();
+    let value = Interpreter::try_new_validated(Arc::new(module)).unwrap().execute_function(entry).unwrap();
+    assert!(value.is_int());
+    assert_eq!(value.as_i64(), 1);
+}
+
+#[test]
 fn empty_record_and_unit_have_valid_cleanup_without_payloads() {
     run(
         r#"
