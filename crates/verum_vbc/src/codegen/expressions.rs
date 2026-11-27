@@ -38276,8 +38276,9 @@ impl VbcCodegen {
             }
 
             // Text operations
-            InlineSequenceId::TextAdoptOwned | InlineSequenceId::TextReleaseStorage => {
+            InlineSequenceId::TextCopy | InlineSequenceId::TextAdoptOwned | InlineSequenceId::TextReleaseStorage => {
                 let operation = match seq_id {
+                    InlineSequenceId::TextCopy => crate::instruction::TextSubOpcode::Copy,
                     InlineSequenceId::TextAdoptOwned => crate::instruction::TextSubOpcode::AdoptOwned,
                     _ => crate::instruction::TextSubOpcode::ReleaseStorage,
                 };
@@ -38288,11 +38289,6 @@ impl VbcCodegen {
                 }
                 self.ctx.emit(Instruction::TextExtended { sub_op: operation as u8, operands });
             }
-            InlineSequenceId::TextFromStatic => {
-                // Create Text from static string
-                self.emit_intrinsic_library_call("verum_text_from_static", args, dest)?;
-            }
-
             InlineSequenceId::Utf8DecodeChar => {
                 // Decode UTF-8 character
                 self.emit_intrinsic_library_call("verum_utf8_decode_char", args, dest)?;
@@ -41575,10 +41571,6 @@ impl VbcCodegen {
             }),
 
             // Text Operations → TextExtended (0x79)
-            "verum_text_from_static" => self.ctx.emit(Instruction::TextExtended {
-                sub_op: TextSubOpcode::FromStatic as u8,
-                operands: encode_operands(dest, args),
-            }),
             "verum_text_parse_int" => self.ctx.emit(Instruction::TextExtended {
                 sub_op: TextSubOpcode::ParseInt as u8,
                 operands: encode_operands(dest, args),

@@ -23,13 +23,10 @@ module core.intrinsics.runtime.text;
 // SECTION 1: Text Creation
 // =============================================================================
 
-/// Create Text from a static string literal.
-///
-
-/// Requires: Text type (allocation)
-@intrinsic("text_from_static")
+/// Copy the UTF-8 content of a borrowed Text into an independent value.
+@intrinsic("text_copy")
 @inline(always)
-public fn text_from_static(s: &Text) -> Text;
+public fn text_copy(source: &Text) -> Text;
 
 /// Transfer ownership of a complete allocator-produced byte buffer into Text.
 /// The caller owns exactly capacity + 1 bytes, with len <= capacity and an

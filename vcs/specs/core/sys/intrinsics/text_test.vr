@@ -19,7 +19,7 @@ mount core.intrinsics.{
     char_to_uppercase, char_to_lowercase,
     text_parse_int, text_parse_float,
     int_to_text, float_to_text,
-    text_from_static,
+    text_copy,
 };
 
 // =============================================================================
@@ -225,33 +225,33 @@ fn test_char_case() {
 @test
 fn test_text_parse_int() {
     // Positive integers
-    let text1 = text_from_static("42");
+    let text1 = text_copy("42");
     let result1 = text_parse_int(&text1);
     assert(result1 is Some(_));
 
-    let text2 = text_from_static("0");
+    let text2 = text_copy("0");
     let result2 = text_parse_int(&text2);
     assert(result2 is Some(_));
 
-    let text3 = text_from_static("123456789");
+    let text3 = text_copy("123456789");
     let result3 = text_parse_int(&text3);
     assert(result3 is Some(_));
 
     // Negative integers
-    let text4 = text_from_static("-42");
+    let text4 = text_copy("-42");
     let result4 = text_parse_int(&text4);
     assert(result4 is Some(_));
 
     // Invalid
-    let text5 = text_from_static("abc");
+    let text5 = text_copy("abc");
     let result5 = text_parse_int(&text5);
     assert(result5 is None);
 
-    let text6 = text_from_static("");
+    let text6 = text_copy("");
     let result6 = text_parse_int(&text6);
     assert(result6 is None);
 
-    let text7 = text_from_static("12.34");
+    let text7 = text_copy("12.34");
     let result7 = text_parse_int(&text7);
     assert(result7 is None);
 
@@ -261,26 +261,26 @@ fn test_text_parse_int() {
 @test
 fn test_text_parse_float() {
     // Simple floats
-    let text1 = text_from_static("3.14");
+    let text1 = text_copy("3.14");
     let result1 = text_parse_float(&text1);
     assert(result1 is Some(_));
 
-    let text2 = text_from_static("0.0");
+    let text2 = text_copy("0.0");
     let result2 = text_parse_float(&text2);
     assert(result2 is Some(_));
 
     // Scientific notation
-    let text3 = text_from_static("1.5e10");
+    let text3 = text_copy("1.5e10");
     let result3 = text_parse_float(&text3);
     assert(result3 is Some(_));
 
     // Negative
-    let text4 = text_from_static("-2.5");
+    let text4 = text_copy("-2.5");
     let result4 = text_parse_float(&text4);
     assert(result4 is Some(_));
 
     // Invalid
-    let text5 = text_from_static("abc");
+    let text5 = text_copy("abc");
     let result5 = text_parse_float(&text5);
     assert(result5 is None);
 
@@ -295,15 +295,15 @@ fn test_text_parse_float() {
 @test
 fn test_text_parse_float_inf_nan_parity() {
     // Bare "inf" → Some(+Inf).
-    let t_inf = text_from_static("inf");
+    let t_inf = text_copy("inf");
     assert(text_parse_float(&t_inf) is Some(_));
 
     // "INFINITY" (case-insensitive long form) → Some.
-    let t_infinity = text_from_static("INFINITY");
+    let t_infinity = text_copy("INFINITY");
     assert(text_parse_float(&t_infinity) is Some(_));
 
     // "-inf" → Some(-Inf); verify the sign made it through.
-    match text_parse_float(&text_from_static("-inf")) {
+    match text_parse_float(&text_copy("-inf")) {
         Some(x) => assert(x < -1.0e308),
         None => panic("expected Some(-inf)"),
     }
@@ -311,17 +311,17 @@ fn test_text_parse_float_inf_nan_parity() {
     // "nan" → Some(NaN); NaN is the only value not equal to itself.  This
     // also checks the NaN is boxed to the canonical Value (NAN_NAN_HEADER),
     // not the raw 0x7FF8 pattern that would collide with the pointer tag.
-    match text_parse_float(&text_from_static("nan")) {
+    match text_parse_float(&text_copy("nan")) {
         Some(x) => assert(x != x),
         None => panic("expected Some(nan)"),
     }
 
     // Full-token rule: trailing junk after "inf" is NOT special → None.
-    let t_infx = text_from_static("infx");
+    let t_infx = text_copy("infx");
     assert(text_parse_float(&t_infx) is None);
 
     // Overflow still reaches +Inf through the numeric path (bounded scaling).
-    match text_parse_float(&text_from_static("1e400")) {
+    match text_parse_float(&text_copy("1e400")) {
         Some(x) => assert(x > 1.0e308),
         None => panic("expected Some(+inf) for 1e400"),
     }

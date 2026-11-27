@@ -9423,14 +9423,8 @@ impl LogSubOpcode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum TextSubOpcode {
-    /// Create Text from static string data.
-    ///
-    /// Format: `dst:reg, s:reg`
-    /// Creates a Text value from the single string argument register the
-    /// emitter packs (`[dst][s]`). The earlier `dst, ptr:reg, len:reg` shape
-    /// was stale relative to both the intrinsic registry and the emitter —
-    /// it made the handler over-read one register and desync `pc` (T0426).
-    FromStatic = 0x00,
+    /// Copy the borrowed Text into an independent value: dst:reg, source:reg.
+    Copy = 0x00,
     /// Transfer a complete CBGR allocation into Text: dst, ptr, len, capacity.
     /// The unsafe caller owns capacity+1 bytes (or null for empty storage).
     AdoptOwned = 0x01,
@@ -9527,7 +9521,7 @@ pub enum TextSubOpcode {
 /// Functional band a `TextSubOpcode` belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TextCategory {
-    /// `FromStatic` — Text constructors.
+    /// `Copy` — Text constructors.
     Construction,
     /// `ParseInt` / `ParseFloat`.
     ParseFromText,
@@ -9558,7 +9552,7 @@ pub struct TextOpMeta {
     /// Functional band the variant belongs to.
     pub category: TextCategory,
     /// True for ops that produce a `Text` result
-    /// (`FromStatic` / `IntToText` / `FloatToText`).
+    /// (`Copy` / `IntToText` / `FloatToText`).
     pub returns_text: bool,
     /// True for parse-from-text ops (`ParseInt` / `ParseFloat`).
     pub is_parse_operation: bool,
@@ -9568,7 +9562,7 @@ impl TextSubOpcode {
     /// Creates a Text sub-opcode from a byte value.
     pub fn from_byte(byte: u8) -> Option<Self> {
         match byte {
-            0x00 => Some(Self::FromStatic),
+            0x00 => Some(Self::Copy),
             0x01 => Some(Self::AdoptOwned),
             0x02 => Some(Self::ReleaseStorage),
             0x10 => Some(Self::ParseInt),
@@ -9606,7 +9600,7 @@ impl TextSubOpcode {
         }
         match self {
             // ===== Construction (0x00-0x0F) =====
-            Self::FromStatic   => m!("TEXT_FROM_STATIC",    Construction,   rtext=true,  parse=false),
+            Self::Copy   => m!("TEXT_COPY",    Construction,   rtext=true,  parse=false),
             Self::AdoptOwned => m!("TEXT_ADOPT_OWNED", Construction, rtext=true, parse=false),
             Self::ReleaseStorage => m!("TEXT_RELEASE_STORAGE", Manipulation, rtext=false, parse=false),
 
@@ -13623,7 +13617,7 @@ pub enum Instruction {    // ===================================================
     /// Text extended operations.
     ///
     /// Uses TextSubOpcode for zero-cost dispatch (~2ns) of text operations:
-    /// - Text creation (FromStatic)
+    /// - Text creation (Copy)
     /// - Parsing (ParseInt, ParseFloat)
     /// - Conversion (IntToText, FloatToText)
     /// - Properties (ByteLen, CharLen, IsEmpty, IsUtf8)
@@ -17883,7 +17877,7 @@ mod tests {
     }
 
     const TEXT_WIRE_SUB_OPS: [(TextSubOpcode, u8); 13] = [
-        (TextSubOpcode::FromStatic, 0x00),
+        (TextSubOpcode::Copy, 0x00),
         (TextSubOpcode::AdoptOwned, 0x01),
         (TextSubOpcode::ReleaseStorage, 0x02),
         (TextSubOpcode::ParseInt, 0x10),
@@ -17915,7 +17909,7 @@ mod tests {
     fn text_meta_category_follows_operation_contract() {
         for_every_text_sub_opcode(|op| {
             let expected = match op {
-                TextSubOpcode::FromStatic | TextSubOpcode::AdoptOwned => TextCategory::Construction,
+                TextSubOpcode::Copy | TextSubOpcode::AdoptOwned => TextCategory::Construction,
                 TextSubOpcode::ParseInt | TextSubOpcode::ParseFloat => TextCategory::ParseFromText,
                 TextSubOpcode::IntToText | TextSubOpcode::FloatToText | TextSubOpcode::UIntToText => TextCategory::ConvertToText,
                 // Releasing storage returns Unit and leaves an empty live

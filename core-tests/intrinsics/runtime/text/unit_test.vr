@@ -13,13 +13,12 @@
 //   * char conversion — to_uppercase / to_lowercase
 //
 // text_as_bytes / utf8_decode_char / char_encode_utf8 are exercised in
-// integration_test.vr (they need byte-slice plumbing); text_from_static is
-// compiler-internal (literal lowering) and audited, not unit-tested.
+// integration_test.vr against byte slices.
 // =============================================================================
 
 mount core.prelude.*;
 mount core.intrinsics.runtime.text.{
-    text_byte_len, text_parse_int, text_parse_float,
+    text_copy, text_byte_len, text_parse_int, text_parse_float,
     int_to_text, float_to_text,
     char_is_alphabetic, char_is_numeric, char_is_alphanumeric,
     char_is_whitespace, char_is_control, char_is_uppercase, char_is_lowercase,
@@ -29,6 +28,15 @@ mount core.intrinsics.runtime.text.{
 // =============================================================================
 // Section 1: text_byte_len
 // =============================================================================
+
+@test
+fn a_copy_preserves_a_borrowed_values_content() {
+    let mut original = "a\0π with more than six bytes";
+    let copy = text_copy(&original);
+    original = "replacement";
+    assert_eq(copy, "a\0π with more than six bytes");
+    assert_eq(original, "replacement");
+}
 
 @test
 fn test_text_byte_len_ascii() {

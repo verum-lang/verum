@@ -196,7 +196,7 @@ public mount .runtime.tls.{
 
 // --- From runtime/text ---
 public mount .runtime.text.{
-    text_from_static,
+    text_copy,
     utf8_decode_char,
     utf8_decode_char_len,
     text_parse_int,

@@ -23,14 +23,6 @@ are unaffected.  The regression suite pins the canonical
 `float_to_text`/`text_parse_float` round-trip as the cleanup's conformance
 anchor.
 
-### Signature honesty — `text_from_static(s: &'static str)`
-
-The declaration uses `str`, a non-semantic type name absent from the
-grammar's type table (Verum's semantic type is `Text`).  It is
-compiler-internal (literal lowering) and not user-callable; audited, not
-unit-tested.  Candidate cleanup: mark `@internal` or move it out of the
-public surface.
-
 ### CHAR/TEXT-GHOST-SYMBOLS-1 + TEXT-HANDLER-STUBS-1 — FIXED (d31878ee8)
 
 First run: 21/48.  Root causes, both closed:
@@ -87,7 +79,6 @@ the law now uses structural `assert_eq(back, Maybe.Some(*x))`.
 
 **Deferred (tracked)**
 * task #15 cleanup (re-export shims + sqlite mount repoint + repo guard).
-* `text_from_static` signature honesty.
 * `char_encode_utf8` / `char_escape_debug` sub-ops (still library-call
   ghosts; integration tests for encode pass via the CharExtended
   `EncodeUtf8` MIR route — verify AOT).

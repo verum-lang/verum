@@ -8,7 +8,7 @@ multi-line group, the new line landed INSIDE the group:
 
     mount core.intrinsics.runtime.text.{
     mount core.intrinsics.memory.{ptr_offset};      <- here
-        text_from_static, ...
+        text_copy, ...
     };
 
 `core/text/text.vr` and `core/mem/heap.vr` stopped parsing.  An

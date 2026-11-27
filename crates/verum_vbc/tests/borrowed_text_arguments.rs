@@ -2,11 +2,15 @@
 #![cfg(feature = "codegen")]
 
 use std::sync::Arc;
+use verum_ast::{FileId, ItemKind};
 use verum_fast_parser::Parser;
-use verum_vbc::codegen::VbcCodegen;
+use verum_vbc::codegen::{ItemFailurePolicy, VbcCodegen};
 use verum_vbc::interpreter::Interpreter;
+use verum_vbc::module::VbcModule;
 
 const HELPERS: &str = r#"
+module text_arguments;
+mount core.base.maybe.Maybe;
 type Fields is { padding: Int, word: Text };
 fn snapshot_text(source: &Text) -> Text {
     let mut result = "";
@@ -15,23 +19,55 @@ fn snapshot_text(source: &Text) -> Text {
 }
 fn borrowed_field(source: &Fields) -> Text { snapshot_text(&source.word) }
 fn forwarded(source: &Text) -> Text { snapshot_text(source) }
+fn duplicate(source: &Text) -> Text { @intrinsic("text_copy", source) }
 "#;
 
+#[test]
+fn copied_text_outlives_its_original_and_preserves_all_bytes() {
+    for (body, expected) in [
+        (r#"duplicate(&"")"#, ""),
+        (r#"duplicate(&"a\0b")"#, "a\0b"),
+        (r#"let mut value = Fields { padding: 2, word: "π\0original long text" };
+            let copy = duplicate(&value.word); value.word = "replaced"; copy"#, "π\0original long text"),
+    ] { check(body, expected); }
+}
+
+#[test]
+fn copy_refuses_a_non_text_runtime_operand() {
+    let module = compile(HELPERS);
+    let wire = verum_vbc::serialize::serialize_module(&module).unwrap();
+    for module in [module, verum_vbc::deserialize::deserialize_module(&wire).unwrap()] {
+        let entry = module.find_function_by_name("text_arguments.duplicate").unwrap();
+        let mut interpreter = Interpreter::try_new_validated(Arc::new(module)).unwrap();
+        let error = interpreter.execute_function_with_args(entry, &[verum_vbc::value::Value::from_bool(true)]).unwrap_err();
+        assert!(error.to_string().contains("Text"), "{error}");
+    }
+}
+
+fn compile(source: &str) -> VbcModule {
+    let parser = verum_fast_parser::FastParser::new();
+    let mut maybe = parser.parse_module_str(include_str!("../../../core/base/maybe.vr"), FileId::new(1)).unwrap();
+    maybe.items.retain(|item| matches!(&item.kind, ItemKind::Module(_))
+        || matches!(&item.kind, ItemKind::Type(declaration) if declaration.name.as_str() == "Maybe"));
+    let ast = Parser::new(source).parse_module().expect("fixture grammar");
+    let units = [&maybe, &ast];
+    let mut compiler = VbcCodegen::new();
+    compiler.initialize();
+    compiler.collect_unit_declarations(&units).unwrap();
+    compiler.resolve_pending_imports();
+    compiler.compile_unit_items(&units, ItemFailurePolicy::Strict).unwrap();
+    compiler.finalize_module().unwrap()
+}
+
 fn check(body: &str, expected: &str) {
-    let source = format!("{HELPERS}\nfn probe() -> Text {{ {body} }}");
-    let ast = Parser::new(&source)
-        .parse_module()
-        .expect("fixture grammar");
-    let module = VbcCodegen::new()
-        .compile_module(&ast)
-        .expect("source codegen");
+    let module = compile(&format!("{HELPERS}\nfn probe() -> Text {{ {body} }}"));
     let wire = verum_vbc::deserialize::deserialize_module(
         &verum_vbc::serialize::serialize_module(&module).expect("serialize"),
     )
     .expect("decode wire");
     let mut failures = Vec::new();
     for (route, module) in [("source", module), ("wire", wire)] {
-        let entry = module.find_function_by_name("probe").expect("probe");
+        let entry = module.find_function_by_name("text_arguments.probe").expect("probe");
         let mut interpreter = Interpreter::new(Arc::new(module));
         let actual = interpreter.execute_function(entry).expect("execute");
         let actual = interpreter.read_text(actual);
@@ -209,6 +245,24 @@ fn reserve_from_tracked_field_preserves_partial_utf8_bytes() {
     reserve.register_count = 2;
     encode_instruction(&Instruction::RetV, &mut module.bytecode);
     module.functions.push(reserve);
+    let mut field = FunctionDescriptor::new(module.intern_string("field"));
+    field.id = FunctionId(2);
+    field.register_count = 2;
+    field.bytecode_offset = module.bytecode.len() as u32;
+    encode_instruction(&Instruction::CbgrExtended {
+        sub_op: CbgrSubOpcode::RefField as u8, operands: vec![1, 0, 1],
+    }, &mut module.bytecode);
+    encode_instruction(&Instruction::Ret { value: Reg(1) }, &mut module.bytecode);
+    field.bytecode_length = module.bytecode.len() as u32 - field.bytecode_offset;
+    module.functions.push(field);
+    let mut read = FunctionDescriptor::new(module.intern_string("read"));
+    read.id = FunctionId(3);
+    read.register_count = 2;
+    read.bytecode_offset = module.bytecode.len() as u32;
+    encode_instruction(&Instruction::Deref { dst: Reg(1), ref_reg: Reg(0) }, &mut module.bytecode);
+    encode_instruction(&Instruction::Ret { value: Reg(1) }, &mut module.bytecode);
+    read.bytecode_length = module.bytecode.len() as u32 - read.bytecode_offset;
+    module.functions.push(read);
 
     let wire = verum_vbc::deserialize::deserialize_module(
         &verum_vbc::serialize::serialize_module(&module).expect("serialize fixture"),
@@ -245,7 +299,13 @@ fn reserve_from_tracked_field_preserves_partial_utf8_bytes() {
                 &[Value::from_ptr(holder.as_ptr().cast::<u8>())],
             )
             .expect("dispatch RefField, RefMut and static Text.reserve");
-        assert!(interpreter.state.cbgr_mutable_ptrs.contains(&field_address));
+        let reference = interpreter.execute_function_with_args(
+            FunctionId(2), &[Value::from_ptr(holder.as_ptr().cast::<u8>())],
+        ).unwrap();
+        assert!(reference.is_thin_ref(), "{route}: projected field carries lifetime and permissions");
+        let observed = interpreter.execute_function_with_args(FunctionId(3), &[reference]).unwrap();
+        assert_eq!(observed.bits(), result.bits(), "{route}: the projected reference reads the replaced field");
+        assert!(!interpreter.state.cbgr_mutable_ptrs.contains(&field_address), "{route}: no raw write grant");
         // SAFETY: the Holder allocation remains live during this execution.
         assert_eq!(
             unsafe { *slots.add(1) }.bits(),

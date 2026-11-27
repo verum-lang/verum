@@ -42,6 +42,8 @@ struct Native {
     replace: unsafe extern "C" fn(u64, u64),
     literal: Literal,
     duplicate: Duplicate,
+    copy: Duplicate,
+    copy_wide: Duplicate,
     from_cstr: unsafe extern "C" fn(*const u8) -> u64,
     snapshot: Snapshot,
     arm: unsafe extern "C" fn(),
@@ -62,6 +64,8 @@ impl Native {
                 replace: *library.get(b"replace").unwrap(),
                 literal: *library.get(b"literal").unwrap(),
                 duplicate: *library.get(b"duplicate").unwrap(),
+                copy: *library.get(b"copy").unwrap(),
+                copy_wide: *library.get(b"copy_wide").unwrap(),
                 from_cstr: *library.get(b"from_cstr").unwrap(),
                 snapshot: *library.get(b"snapshot").unwrap(),
                 arm: *library.get(b"arm").unwrap(),
@@ -125,9 +129,11 @@ fn operations<'ctx>(context: &'ctx Context, module: &Module<'ctx>, wire: &VbcMod
         for (name, operation, arity) in [
             (if base == 0 { "adopt" } else { "adopt_wide" }, TextSubOpcode::AdoptOwned, 3),
             (if base == 0 { "release" } else { "release_wide" }, TextSubOpcode::ReleaseStorage, 1),
+            (if base == 0 { "copy" } else { "copy_wide" }, TextSubOpcode::Copy, 1),
         ] {
             let params = [context.ptr_type(Default::default()).into(), word.into(), word.into()];
-            let ty = if arity == 3 { word.fn_type(&params, false) }
+            let ty = if operation == TextSubOpcode::Copy { word.fn_type(&[word.into()], false) }
+                else if arity == 3 { word.fn_type(&params, false) }
                 else { context.void_type().fn_type(&[word.into()], false) };
             let function = module.add_function(name, ty, None);
             let mut ctx = FunctionContext::with_vbc_module(context, module, wire, function, name);
@@ -140,8 +146,15 @@ fn operations<'ctx>(context: &'ctx Context, module: &Module<'ctx>, wire: &VbcMod
             verum_vbc::encoding::encode_reg(destination, &mut operands);
             for index in 0..arity { verum_vbc::encoding::encode_reg(Reg(base + index), &mut operands); }
             lower_instruction(&mut ctx, &Instruction::TextExtended { sub_op: operation as u8, operands }).unwrap();
-            if arity == 3 { ctx.builder().build_return(Some(&ctx.get_register(destination.0).unwrap())).unwrap(); }
-            else { ctx.builder().build_return(None).unwrap(); }
+            if operation == TextSubOpcode::ReleaseStorage {
+                ctx.builder().build_return(None).unwrap();
+            } else {
+                let result = ctx.get_register(destination.0).unwrap();
+                let address = if result.is_pointer_value() {
+                    ctx.builder().build_ptr_to_int(result.into_pointer_value(), word, "result_word").unwrap()
+                } else { result.into_int_value() };
+                ctx.builder().build_return(Some(&address)).unwrap();
+            }
         }
     }
     for (name, parameters, instruction) in [
@@ -253,7 +266,7 @@ fn with_native(run: impl FnOnce(&Native, &Path)) {
     machine.write_to_file(module, FileType::Object, &object).unwrap();
     let mut linker = Command::new("cc");
     linker.arg(&object).args(["-dynamiclib", "-nostdlib", "-lSystem", "-Wl,-dead_strip"]);
-    for name in ["allocate", "adopt", "adopt_wide", "release", "release_wide", "destroy", "destroy_helper", "replace", "literal", "duplicate", "from_cstr", "snapshot", "arm"] {
+    for name in ["allocate", "adopt", "adopt_wide", "release", "release_wide", "destroy", "destroy_helper", "replace", "literal", "duplicate", "copy", "copy_wide", "from_cstr", "snapshot", "arm"] {
         linker.arg(format!("-Wl,-exported_symbol,_{name}"));
     }
     let output = linker.arg("-o").arg(&image).output().unwrap();
@@ -326,22 +339,24 @@ fn native_literal_wrappers_preserve_their_pooled_bytes() {
 #[test]
 fn native_typed_text_copy_releases_its_os_descriptor_and_cbgr_bytes() {
     with_native(|native, _| {
-        // SAFETY: CloneTyped reads a live producer-issued Text and returns its
-        // own descriptor/backing. Each independent owner is destroyed once.
-        unsafe {
-            let source = (native.literal)();
-            let copy = (native.duplicate)(source);
-            assert_ne!(copy, source);
-            assert_ne!(*(copy as *const u64), *(source as *const u64));
-            let data = *(copy as *const u64);
-            (native.destroy)(source);
-            assert_eq!(std::slice::from_raw_parts(data as *const u8, 6), b"pooled");
-            let before = native.counts();
-            (native.release)(copy);
-            assert_eq!(native.counts(), [before[0] + 1, before[1] + 1, before[2]]);
-            (native.destroy)(copy);
-            assert_eq!(native.counts(), [before[0] + 1, before[1] + 1, before[2] + 1]);
-            assert_eq!((native.last(7), native.last(8)), (copy, DESCRIPTOR_BYTES));
+        for duplicate in [native.duplicate, native.copy, native.copy_wide] {
+            // SAFETY: Each operation reads a live producer-issued Text and returns its
+            // own descriptor/backing. Each independent owner is destroyed once.
+            unsafe {
+                let source = (native.literal)();
+                let copy = duplicate(source);
+                assert_ne!(copy, source);
+                assert_ne!(*(copy as *const u64), *(source as *const u64));
+                let data = *(copy as *const u64);
+                (native.destroy)(source);
+                assert_eq!(std::slice::from_raw_parts(data as *const u8, 6), b"pooled");
+                let before = native.counts();
+                (native.release)(copy);
+                assert_eq!(native.counts(), [before[0] + 1, before[1] + 1, before[2]]);
+                (native.destroy)(copy);
+                assert_eq!(native.counts(), [before[0] + 1, before[1] + 1, before[2] + 1]);
+                assert_eq!((native.last(7), native.last(8)), (copy, DESCRIPTOR_BYTES));
+            }
         }
     });
 }

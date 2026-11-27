@@ -23,7 +23,6 @@
 //!    informational at Tier-0; the heap grows on demand)
 //!  * `Text.try_with_capacity(cap)`     — `Result<Text, AllocError>`,
 //!    always `Ok` at Tier-0 (panic-on-OOM allocator)
-//!  * `Text.from_static(s: &Text)`      — clone arg
 //!  * `Text.from_str(s: &Text)`         — `Result<Text, Utf8Error>`,
 //!    always `Ok` at Tier-0 (Verum `Text` is UTF-8 by construction)
 //!  * `Text.from_char(ch: Char)`        — single-char Text
@@ -171,11 +170,6 @@ pub(in super::super) fn try_intercept_text_static_runtime(
                 state.registers.set(caller_base, Reg(args_start_reg), new_val);
             }
             Ok(Some(Value::unit()))
-        }
-        "from_static" if arg_count == 1 => {
-            let value = read_arg(state, args_start_reg, 0, caller_base).unwrap_or_else(empty_text);
-            let bytes = super::string_helpers::extract_text_bytes(&value, state);
-            Ok(Some(super::string_helpers::alloc_text_bytes_value(state, &bytes)?))
         }
         "from_str" if arg_count == 1 => {
             // `Result<Text, Utf8Error>` — Verum `Text` is

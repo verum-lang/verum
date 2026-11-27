@@ -552,8 +552,8 @@ pub enum InlineSequenceId {
     SliceSubslice,
     /// slice_split_at: split slice into two parts
     SliceSplitAt,
-    /// text_from_static: create Text from static string
-    TextFromStatic,
+    /// Copy the value of a borrowed Text using its declared storage contract.
+    TextCopy,
     /// Transfer an owned CBGR byte buffer into a Text descriptor.
     TextAdoptOwned,
     /// Release Text contents through its actual storage receipt.
@@ -1386,7 +1386,7 @@ impl Intrinsic {
             )
             // Reading the stored length never visits the buffer. A full-width
             // Int result may require boxing in the interpreter.
-            | CodegenStrategy::InlineSequence(InlineSequenceId::TextByteLen)
+            | CodegenStrategy::InlineSequence(InlineSequenceId::TextByteLen | InlineSequenceId::TextCopy)
             // Both tiers read the argument and allocate a fresh byte view; the
             // interpreter also copies inline Text bytes into fresh storage.
             // Neither lowering mutates the input or calls user code.
@@ -2378,18 +2378,14 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         doc: "Release Text contents, retaining its empty descriptor",
     },
     Intrinsic {
-        name: "text_from_static",
+        name: "text_copy",
         category: IntrinsicCategory::Memory,
-        hints: &[
-            IntrinsicHint::Pure,
-            IntrinsicHint::ConstEval,
-            IntrinsicHint::Inline,
-        ],
-        param_count: 1,  // static str
+        hints: &[IntrinsicHint::Inline],
+        param_count: 1,  // &Text
         return_count: 1, // Text
-        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::TextFromStatic),
-        mlir_op: Some("verum.text.from_static"),
-        doc: "Create Text from static string literal",
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::TextCopy),
+        mlir_op: Some("verum.text.copy"),
+        doc: "Copy a borrowed Text into an independent owned value",
     },
     Intrinsic {
         name: "text_parse_int",

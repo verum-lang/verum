@@ -5,7 +5,7 @@
 // `core/runtime/text.vr` (78 LOC) — runtime-layer text + char intrinsic
 // surface.  16 forward-declared free fns covering:
 //
-//   * text_from_static(ptr, len) -> Text
+//   * text_copy(source: &Text) -> Text
 //   * utf8_decode_char(bytes) / utf8_decode_char_len(byte)
 //   * text_parse_int / text_parse_float
 //   * int_to_text / float_to_text

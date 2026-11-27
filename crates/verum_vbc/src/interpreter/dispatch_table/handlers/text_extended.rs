@@ -12,7 +12,7 @@ use crate::value::Value;
 /// Format: `[0x79] [sub_opcode:u8] [operands...]`
 ///
 /// Sub-opcodes:
-/// - 0x00: FromStatic - Create Text from static string data
+/// - 0x00: Copy - Copy a borrowed Text value
 /// - 0x10: ParseInt - Parse integer from Text
 /// - 0x11: ParseFloat - Parse float from Text
 /// - 0x20: IntToText - Convert integer to Text
@@ -60,24 +60,12 @@ fn text_extended_body(
             }
             state.set_reg(dst, Value::unit());
         }
-        Some(TextSubOpcode::FromStatic) => {
-            // FROMSTATIC-ARITY-1 (T0426): the emitter packs `[dst][s]` — ONE
-            // source register holding the string argument (uniform intrinsic
-            // arg packing; the confirmed-correct sibling `AsBytes`, also a
-            // single `&Text` arg, packs the same 2 registers). The old
-            // handler read TWO here (`ptr_reg` + `len_reg`, an obsolete
-            // ptr/len shape matching only the now-stale instruction.rs doc
-            // comment), so `len_reg` consumed a register belonging to the
-            // NEXT instruction → wrong Text AND a pc desync for the rest of
-            // the function on EVERY `text_from_static` call, and it truncated
-            // any result to a 6-char small string. Read the single arg and
-            // materialise through the canonical helpers (all three Text
-            // representations + CBGR-deref, small-OR-heap, no truncation) —
-            // exactly as the ParseInt / IntToText siblings fixed 2026-07-03.
-            let s_reg = read_reg(state)?;
-            let s_val = state.get_reg(s_reg);
-            let s = super::string_helpers::extract_string(&s_val, state);
-            let text_val = super::string_helpers::alloc_string_value(state, &s)?;
+        Some(TextSubOpcode::Copy) => {
+            let src = read_reg(state)?;
+            let value = super::cbgr_helpers::resolve_receiver(state, state.get_reg(src))?;
+            let text_val = super::copy_typed::copy_declared(
+                state, value, &crate::types::TypeRef::Concrete(crate::types::TypeId::TEXT),
+            )?;
             state.set_reg(dst, text_val);
         }
         // The parse / render / byte-len handlers below were small-string-only

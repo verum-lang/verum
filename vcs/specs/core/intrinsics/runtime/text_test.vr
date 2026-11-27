@@ -10,7 +10,7 @@
 //               classification/conversion functions.
 //
 // Coverage:
-// - Text creation: text_from_static
+// - Text creation: text_copy
 // - Parsing: text_parse_int, text_parse_float
 // - Formatting: int_to_text, float_to_text
 // - UTF-8: utf8_decode_char, utf8_decode_char_len, char_encode_utf8

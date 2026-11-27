@@ -408,13 +408,7 @@ pub(in super::super) fn handle_call(
                 state.set_reg(dst, result);
                 return Ok(DispatchResult::Continue);
             }
-            // `Text.*` static factories (`Text.new`,
-            // `Text.with_capacity`, `Text.from_static`,
-            // `Text.from_str`, `Text.from_char`, …).  Same
-            // architectural pattern as path_ops_runtime: closes
-            // the stub-returns-Unit failure mode for canonical
-            // stdlib Text constructors that downstream code
-            // expects to return a Text value.
+            // Remaining runtime Text operations.
             if let Some(result) = super::text_static_runtime::try_intercept_text_static_runtime(
                 state,
                 &func_name,

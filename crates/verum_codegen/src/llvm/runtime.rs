@@ -12130,7 +12130,7 @@ pub fn define_text_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
             .basic_value_or("call returned void")?
             .into_int_value();
         // Foreign C bytes retain their caller's lifetime. Copy before returning.
-        let copy = super::error::get_or_declare_function(module, "verum_text_from_static",
+        let copy = super::error::get_or_declare_function(module, "verum_text_copy_bytes",
             i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false));
         let result = builder
             .build_call(copy, &[s.into(), len.into()], "text")
@@ -12139,11 +12139,11 @@ pub fn define_text_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
         builder.build_return(Some(&result)).or_llvm_err()?;
     }
 
-    // --- verum_text_from_static(ptr: ptr, len: i64) -> i64 ---
+    // --- verum_text_copy_bytes(ptr: ptr, len: i64) -> i64 ---
     // Create Text from static string data (copies to new buffer)
-    if module.get_function("verum_text_from_static").is_none_or(|function| function.count_basic_blocks() == 0) {
+    if module.get_function("verum_text_copy_bytes").is_none_or(|function| function.count_basic_blocks() == 0) {
         let fn_type = i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
-        let func = super::error::get_or_declare_function(module, "verum_text_from_static", fn_type);
+        let func = super::error::get_or_declare_function(module, "verum_text_copy_bytes", fn_type);
         func.set_linkage(verum_llvm::module::Linkage::Internal);
         let entry = context.append_basic_block(func, "entry");
         let builder = context.create_builder();

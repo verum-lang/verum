@@ -48,7 +48,7 @@ Drift surfaces across `crates/`:
 | `crates/verum_vbc/src/codegen/...` | `Text` field layout `{ptr, len, cap}` | Field offsets reserved at codegen time; cross-mount race fixed by task #9 (commit `78bda63dc`) |
 | `crates/verum_vbc/src/codegen/expressions.rs` | format-literal lowering of `f"...{x}..."` | Hardcoded routing through `Display.fmt` / `Debug.fmt_debug` per format spec |
 | `crates/verum_compiler/src/precompile.rs` | `text` module precompiled on every build | The `runtime.vbca` archive ships the Text body; archive-load remap can desync function-ids (§D) |
-| `crates/verum_vbc/src/intrinsics/runtime/text.rs` | `text_from_static`, `text_byte_len`, `text_as_bytes`, `intrinsic_utf8_decode_char`, `text_parse_int`, `text_parse_float`, `int_to_text`, `char_to_uppercase`, `char_to_lowercase` | The intrinsic surface that text.vr calls; if any one of these isn't registered for the runtime context, every dependent stdlib body fails |
+| `crates/verum_vbc/src/intrinsics/runtime/text.rs` | `text_copy`, `text_byte_len`, `text_as_bytes`, `intrinsic_utf8_decode_char`, `text_parse_int`, `text_parse_float`, `int_to_text`, `char_to_uppercase`, `char_to_lowercase` | The intrinsic surface that text.vr calls; if any one of these isn't registered for the runtime context, every dependent stdlib body fails |
 | `crates/verum_runtime/src/runtime/value.rs` | `Value::Text { kind: Static \| Inline(SSO) \| Heap }` | The runtime kind names that surface in the `not found on receiver of runtime kind 'Text<small>'` panic |
 
 When `Text` gains a method on the source side (e.g. `slice_unchecked`),

@@ -45,7 +45,7 @@ mount core.intrinsics.runtime.mem_raw.{memset_addr};
 // Import intrinsics as functions
 mount core.intrinsics.memory.{ptr_offset};
 mount core.intrinsics.runtime.text.{
-    text_from_static, utf8_decode_char as intrinsic_utf8_decode_char,
+    text_copy, utf8_decode_char as intrinsic_utf8_decode_char,
     text_parse_int, text_parse_float, int_to_text,
     char_to_uppercase, char_to_lowercase,
     text_byte_len,
@@ -286,19 +286,9 @@ implement Text {
         unsafe { text_adopt_owned(null_ptr(), 0, 0) }
     }
 
-    /// Inherent static-method form of the `From<&str> for Text`
-    /// protocol implementation — used at call sites that prefer the
-    /// `Text.from(literal)` shape over `From.from(literal)` or
-    /// protocol dispatch (which lenient-stubs in the current
-    /// codegen when the receiver type cannot be tracked).
-    ///
-    /// `Text.from("literal")` is the canonical empty-or-clone
-    /// constructor when the source is already a string literal /
-    /// `&Text`. For other source types use the specialised
-    /// `Text.from_utf8` / `.from_char` / `.from_int` / `.from_float` /
-    /// `.from_bool` factories.
+    /// Copy the UTF-8 content of an existing text into independently owned storage.
     public fn from(s: &Text) -> Text {
-        unsafe { Text.from_utf8_unchecked(s.as_bytes()) }
+        text_copy(s)
     }
 
     /// Create text with a given capacity.
@@ -513,12 +503,6 @@ implement Text {
         }
         memset_addr(ptr_offset(ptr, len) as Int, 0 as Byte, 1);
         text_adopt_owned(ptr, len, len)
-    }
-
-    /// Create text from a static string literal.
-    meta fn from_static(s: &Text) -> Text {
-        // String literals are compile-time evaluated
-        text_from_static(s)
     }
 
     /// Create a Text containing a single character.
@@ -3720,11 +3704,7 @@ implement AddAssign<Text> for Text {
 
 implement Clone for Text {
     fn clone(&self) -> Text {
-        let bytes = self.as_bytes();
-        if bytes.is_empty() {
-            return Text.new();
-        }
-        unsafe { Text.from_utf8_unchecked(bytes) }
+        Text.from(self)
     }
 }
 
@@ -3836,7 +3816,7 @@ implement AsRef<[Byte]> for Text {
 
 implement From<&Text> for Text {
     fn from(s: &Text) -> Text {
-        unsafe { Text.from_utf8_unchecked(s.as_bytes()) }
+        Text.from(s)
     }
 }
 

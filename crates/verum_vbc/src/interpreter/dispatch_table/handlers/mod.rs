@@ -77,7 +77,7 @@ pub(super) mod stdio_runtime;
 pub(super) mod path_ops_runtime;
 
 // High-level Rust intercepts for `Text.*` static factory methods
-// (`Text.new`, `Text.with_capacity`, `Text.from_static`,
+// (`Text.new`,
 // `Text.from_str`, `Text.from_char`, `Text.from_utf8`, …).
 // Sibling to `path_ops_runtime` — closes the same architectural
 // gap for the canonical stdlib-Text static surface.  When a user

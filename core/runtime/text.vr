@@ -11,7 +11,7 @@ module core.runtime.text;
 // thin re-export of the canonical, wired declarations in
 // `core.intrinsics.runtime.text` — one source of truth, both tiers.
 public mount core.intrinsics.runtime.text.{
-    text_from_static,
+    text_copy,
     utf8_decode_char,
     utf8_decode_char_len,
     text_parse_int,

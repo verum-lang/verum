@@ -123,7 +123,7 @@ The intrinsics test suite is organized into 24 test modules covering 200+ intrin
 - `syscall0` through `syscall6`
 
 ### Text (~15 intrinsics)
-- `text_from_static`, `text_parse_int`, `text_parse_float`, `int_to_text`, `float_to_text`
+- `text_copy`, `text_parse_int`, `text_parse_float`, `int_to_text`, `float_to_text`
 - `utf8_decode_char`, `utf8_decode_char_len`, `char_encode_utf8`
 - `char_is_alphabetic/numeric/alphanumeric/whitespace/control/uppercase/lowercase`
 - `char_to_uppercase`, `char_to_lowercase`, `char_general_category`, `char_escape_debug`

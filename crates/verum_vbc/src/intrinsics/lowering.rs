@@ -1769,25 +1769,14 @@ impl IntrinsicLowering {
             }),
 
             // Text operations
-            InlineSequenceId::TextFromStatic => {
-                self.emit(MlirOp {
-                    name: "llvm.call".to_string(),
-                    attrs: vec![MlirAttr {
-                        name: "callee".to_string(),
-                        value: MlirAttrValue::String("verum_text_from_static".to_string()),
-                    }],
-                    result_types: vec![MlirType::Ptr], // Text struct ptr
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-            InlineSequenceId::TextAdoptOwned | InlineSequenceId::TextReleaseStorage => self.emit(MlirOp {
+            InlineSequenceId::TextCopy | InlineSequenceId::TextAdoptOwned | InlineSequenceId::TextReleaseStorage => self.emit(MlirOp {
                 name: match seq_id {
+                    InlineSequenceId::TextCopy => "verum.text.copy",
                     InlineSequenceId::TextAdoptOwned => "verum.text.adopt_owned",
                     _ => "verum.text.release_storage",
                 }.into(),
                 attrs: vec![],
-                result_types: if matches!(seq_id, InlineSequenceId::TextAdoptOwned) {
+                result_types: if !matches!(seq_id, InlineSequenceId::TextReleaseStorage) {
                     vec![MlirType::I64]
                 } else { vec![] },
                 operands: operands.to_vec(),

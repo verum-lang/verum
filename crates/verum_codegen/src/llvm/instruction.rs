@@ -24288,62 +24288,14 @@ fn lower_text_extended<'ctx>(
             Ok(())
         }
         0x00 => {
-            // FromStatic: create Text from static data
-            if operands.len() < 2 {
-                return Ok(());
+            let mut cursor = 0;
+            let dst = Reg(read_reg_varlen(operands, &mut cursor)?);
+            let src = Reg(read_reg_varlen(operands, &mut cursor)?);
+            if cursor != operands.len() {
+                return Err(LlvmLoweringError::internal("Text copy requires a destination and a source"));
             }
-            let dst = op_reg(operands, 0);
-            // Support both 3-operand (dst, ptr, len) and 2-operand (dst, text_ref) forms
-            let (ptr, len) = if operands.len() >= 3 {
-                (
-                    ctx.get_register(op_reg(operands, 1))?,
-                    ctx.get_register(op_reg(operands, 2))?,
-                )
-            } else {
-                // 2-operand form: operand 1 is a Text struct ref, extract ptr and len
-                let text_val = ctx.get_register(op_reg(operands, 1))?;
-                let text_ptr = as_ptr(ctx, text_val, "from_static_text_ptr")?;
-                let i64_ty = ctx.types().i64_type();
-                let i8_ty = ctx.types().i8_type();
-                let ptr_field = ctx
-                    .builder()
-                    .build_load(i64_ty, text_ptr, "text_data_ptr")
-                    .or_llvm_err()?;
-                // SAFETY: GEP into the Text object (flat layout {ptr, len, cap}) to read the length field at offset 8
-                let len_slot = unsafe {
-                    ctx.builder()
-                        .build_in_bounds_gep(
-                            i8_ty,
-                            text_ptr,
-                            &[i64_ty.const_int(8, false)],
-                            "text_len_slot",
-                        )
-                        .or_llvm_err()?
-                };
-                let len_field = ctx
-                    .builder()
-                    .build_load(i64_ty, len_slot, "text_len_val")
-                    .or_llvm_err()?;
-                let ptr_type = ctx.types().ptr_type();
-                let data_ptr = ctx
-                    .builder()
-                    .build_int_to_ptr(ptr_field.into_int_value(), ptr_type, "data_ptr")
-                    .or_llvm_err()?;
-                (data_ptr.into(), len_field)
-            };
-            let module = ctx.get_module();
-            let ptr_ty = ctx.types().ptr_type();
-            let i64_ty = ctx.types().i64_type();
-            let fn_type = ptr_ty.fn_type(&[ptr_ty.into(), i64_ty.into()], false);
-            let from_fn = module
-                .get_function("verum_text_from_static")
-                .unwrap_or_else(|| module.add_function("verum_text_from_static", fn_type, None));
-            let result = ctx
-                .builder()
-                .build_call(from_fn, &[ptr.into(), len.into()], "text_from_static")
-                .or_llvm_err()?
-                    .basic_value_or("FromStatic: expected return value")?;
-            ctx.set_register(dst, result);
+            copy_typed::lower(ctx, dst, src, &TypeRef::Concrete(TypeId::TEXT))?;
+            ctx.mark_owned_text_register(dst.0);
             Ok(())
         }
         0x20 => {
