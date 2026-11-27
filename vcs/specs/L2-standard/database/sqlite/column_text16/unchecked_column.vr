@@ -1,0 +1,12 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L2
+// @tags: sqlite, column_text16, collections
+// @expected-error: E400
+
+mount core.collections.list.List;
+mount core.database.sqlite.native.column_text16.view.U16ColumnView;
+
+fn unchecked_column(columns: &List<U16ColumnView>, index: Int) -> U16ColumnView {
+    columns.get(index)
+}

@@ -18,7 +18,7 @@ mount core.database.sqlite.native.utf16_codec.byte_order.{
 };
 
 public type U16ColumnView is {
-    bytes: List<u8>,
+    public(in core.database.sqlite.native.column_text16) bytes: List<u8>,
     order: ByteOrder,
 }
 

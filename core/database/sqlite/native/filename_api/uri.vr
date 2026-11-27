@@ -65,8 +65,9 @@ implement UriParameters {
     public fn parameter(&self, name: &Text) -> Maybe<Text> {
         let mut i: Int = 0;
         while i < self.params.len() {
-            if self.params.get(i).name == *name {
-                return Maybe.Some(self.params.get(i).value.clone());
+            let candidate = &self.params[i];
+            if candidate.name == *name {
+                return Maybe.Some(candidate.value.clone());
             }
             i = i + 1;
         }
@@ -74,8 +75,10 @@ implement UriParameters {
     }
 
     public fn key(&self, index: Int) -> Maybe<Text> {
-        if index < 0 || index >= self.params.len() { return Maybe.None; }
-        Maybe.Some(self.params.get(index).name.clone())
+        match self.params.get(index) {
+            Maybe.Some(candidate) => Maybe.Some(candidate.name),
+            Maybe.None => Maybe.None,
+        }
     }
 
     public fn len(&self) -> Int { self.params.len() }

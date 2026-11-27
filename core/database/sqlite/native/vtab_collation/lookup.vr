@@ -41,8 +41,9 @@ implement CollationTable {
     public fn lookup(&self, idx: Int) -> Maybe<Text> {
         let mut i: Int = 0;
         while i < self.entries.len() {
-            if self.entries.get(i).constraint_index == idx {
-                return Maybe.Some(self.entries.get(i).collation_name.clone());
+            let candidate = &self.entries[i];
+            if candidate.constraint_index == idx {
+                return Maybe.Some(candidate.collation_name.clone());
             }
             i = i + 1;
         }

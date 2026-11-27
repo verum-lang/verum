@@ -7,7 +7,7 @@
 )
 module core.database.sqlite.native.bind_parameter_name_api.reverse;
 
-mount base.{Bool, Text};
+mount base.{Bool, Maybe, Text};
 mount core.collections.list.{List};
 
 public type BindNameSlot is { index: Int, name: Text };
@@ -40,11 +40,11 @@ public fn name_text(o: &BindNameOutcome) -> Text {
 // Reverse lookup. BindNameSlot list is the same shape as in
 // `bind_parameter_index_api`. An anonymous slot is encoded with name = "".
 public fn name_for(idx: Int, slots: &List<BindNameSlot>) -> BindNameOutcome {
-    let n = slots.len() as Int;
-    if idx < 1 || idx > n { return OkNullOutOfRange; }
-    let s = slots.get(idx - 1);
-    if s.name == "".clone() { return OkNullAnonymous; }
-    OkName(s.name.clone())
+    if idx < 1 { return OkNullOutOfRange; }
+    match slots.get(idx - 1) {
+        Maybe.Some(slot) => if slot.name.is_empty() { OkNullAnonymous } else { OkName(slot.name) },
+        Maybe.None => OkNullOutOfRange,
+    }
 }
 
 // Sigil classification — useful for pretty-printing ALL parameters.
