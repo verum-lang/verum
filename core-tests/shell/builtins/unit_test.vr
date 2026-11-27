@@ -1,0 +1,28 @@
+module shell_builtins_test;
+
+mount core.base.env.{temp_dir};
+mount core.base.result.{Result};
+mount core.id.nanoid.{generate_len};
+mount core.io.fs.{metadata, remove_file};
+mount core.io.path.{Path};
+mount core.shell.builtins.{append};
+
+@test
+fn append_creates_files_preserves_length_and_reports_open_errors() {
+    let suffix = generate_len(12);
+    let name = f"{temp_dir()}/verum-shell-append-{suffix}";
+    let path = Path.new(&name);
+    let first: [Byte; 2] = [0_u8, 255_u8];
+    let second: [Byte; 3] = [97_u8, 0_u8, 98_u8];
+    let created = append(&path, &first[..]).is_ok();
+    let appended = append(&path, &second[..]).is_ok();
+    let length = match metadata(&path) {
+        Result.Ok(info) => info.len(),
+        Result.Err(_) => -1,
+    };
+    let invalid = Path.new(&f"{name}/child");
+    let rejected = append(&invalid, &second[..]).is_err();
+    let removed = remove_file(&path).is_ok();
+    assert(created && appended && rejected && removed);
+    assert_eq(length, 5);
+}

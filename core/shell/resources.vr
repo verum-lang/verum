@@ -137,16 +137,17 @@ public type TempFile is {
 implement TempFile {
     /// Create a temp file in the system temp directory with a unique name.
     public fn new() -> Result<TempFile, ShellError> {
-        TempFile.new_in(&PathBuf.from(core.base.env.temp_dir()))
+        TempFile.new_in(&PathBuf.from(&core.base.env.temp_dir()))
     }
 
     /// Create a temp file in `dir`. Name uses a fast random suffix.
     public fn new_in(dir: &PathBuf) -> Result<TempFile, ShellError> {
         let suffix = generate_suffix();
         let mut p = dir.clone();
-        p.push(&PathBuf.from(f"verum-tmp-{suffix}"));
-        let opts = OpenOptions.new().write(true).create_new(true).read(true);
-        match opts.open(p.as_path()) {
+        p.push_str(&f"verum-tmp-{suffix}");
+        let mut opts = OpenOptions.new();
+        opts.write(true).create_new(true).read(true);
+        match opts.open(p.to_str()) {
             Result.Ok(file) => Result.Ok(TempFile { path: p, file: Maybe.Some(file), persisted: false }),
             Result.Err(io)  => Result.Err(ShellError.SpawnFailed {
                 command: f"<temp file in {dir}>",
@@ -186,9 +187,8 @@ implement Debug for TempFile {
 }
 
 fn generate_suffix() -> Text {
-    // Reuse the snowflake/nanoid generator in base for unique short ids.
-    // 12 base62 chars give >7e21 unique values — collision-free in practice.
-    core.id.nanoid.generate(12)
+    // Twelve characters from the Nano ID URL-safe alphabet.
+    core.id.nanoid.generate_len(12)
 }
 
 // =============================================================================

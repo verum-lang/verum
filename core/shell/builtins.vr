@@ -26,7 +26,7 @@ module core.shell.builtins;
 mount core.collections.slice.*;
 
 mount core.{Maybe, Result, List, Text};
-mount core.base.env.{var_opt, temp_dir, args, exit};
+mount core.base.env.{var_opt, temp_dir as process_temp_dir};
 mount core.io.path.{Path, PathBuf};
 mount core.io.fs.{
     metadata as fs_metadata,
@@ -44,8 +44,10 @@ mount core.io.fs.{
     write as fs_write,
     write_str as fs_write_str,
 };
-mount core.io.{IoError};
+mount core.io.file.{OpenOptions};
+mount core.io.protocols.{Write};
 mount core.shell.context.{ShellContext};
+mount core.shell.resources.{TempFile};
 mount core.shell.result.{ShellError};
 
 // =============================================================================
@@ -145,15 +147,19 @@ public fn write_str(path: &Path, content: &Text) -> Result<(), ShellError> {
 
 /// Append bytes to a file (creates if missing).
 public fn append(path: &Path, content: &[Byte]) -> Result<(), ShellError> {
-    let mut existing: List<Byte> = match fs_read(path) {
-        Result.Ok(v) => v,
-        Result.Err(_) => [],  // file may not exist yet
+    let mut options = OpenOptions.new();
+    options.write(true).append(true).create(true);
+    let result = match options.open(path.as_str()) {
+        Result.Ok(mut file) => file.write_all(content),
+        Result.Err(error) => Result.Err(error),
     };
-    for b in content.iter() { existing.push(*b); }
-    fs_write(path, &existing).map_err(|io| ShellError.SpawnFailed {
-        command: f"append {path}",
-        reason:  f"{io}",
-    })
+    match result {
+        Result.Ok(()) => Result.Ok(()),
+        Result.Err(error) => Result.Err(ShellError.SpawnFailed {
+            command: f"append {path}",
+            reason: f"{error}",
+        }),
+    }
 }
 
 // =============================================================================
@@ -175,24 +181,24 @@ public fn is_dir(path: &Path) -> Bool {
 /// Locate a program in PATH (cross-platform `which`).
 /// Returns the absolute path of the first match or Maybe.None.
 public fn which(program: &Text) -> Maybe<PathBuf> {
-    let path_var = match core.base.env.var_opt(&"PATH".into()) {
+    let path_var = match var_opt(&"PATH") {
         Maybe.Some(p) => p,
         Maybe.None    => return Maybe.None,
     };
     let separator: Char = path_separator();
-    for entry in path_var.split(separator) {
-        let mut candidate = PathBuf.from(entry);
-        candidate.push(&PathBuf.from(program));
+    for entry in path_var.split_char(separator) {
+        let mut candidate = PathBuf.from(&entry);
+        candidate.push_str(program);
         // On Windows also check .exe / .cmd / .bat suffixes
         @cfg(target_os = "windows") {
-            let suffixes: List<Text> = [".exe".into(), ".cmd".into(), ".bat".into()];
+            let suffixes: List<Text> = ["exe", "cmd", "bat"];
             for suffix in suffixes.iter() {
                 let mut with_suf = candidate.clone();
-                with_suf.set_extension(suffix.trim_start_matches_char('.'));
-                if is_file(with_suf.as_path()) { return Maybe.Some(with_suf); }
+                with_suf.set_extension(suffix);
+                if is_file(&with_suf.as_path()) { return Maybe.Some(with_suf); }
             }
         }
-        if is_file(candidate.as_path()) { return Maybe.Some(candidate); }
+        if is_file(&candidate.as_path()) { return Maybe.Some(candidate); }
     }
     Maybe.None
 }
@@ -207,13 +213,13 @@ public fn command_exists(program: &Text) -> Bool {
 // =============================================================================
 
 public fn temp_dir() -> PathBuf {
-    PathBuf.from(core.base.env.temp_dir())
+    PathBuf.from(&process_temp_dir())
 }
 
 /// Convenience that re-exports `core.shell.resources.TempFile.new()`
 /// without callers needing to import resources.
-public fn temp_file() -> Result<core.shell.resources.TempFile, ShellError> {
-    core.shell.resources.TempFile.new()
+public fn temp_file() -> Result<TempFile, ShellError> {
+    TempFile.new()
 }
 
 @cfg(target_os = "windows")
