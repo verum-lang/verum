@@ -39,6 +39,7 @@ mount super.libsystem.{
     pthread_self,
     safe_getpid,
     safe_gettid,
+    random_u64,
     mmap_ffi,
     munmap,
     PROT_READ, PROT_WRITE, PROT_NONE,
@@ -241,7 +242,7 @@ public fn init_tls_key() -> Result<(), SysTlsError> {
 
         let result = pthread_key_create(&mut TLS_KEY, tcb_destructor);
         if result != 0 {
-            return Result.Err(PthreadError { code: result });
+            return Result.Err(SysTlsError.PthreadError { code: result });
         }
 
         TLS_KEY_INITIALIZED = true;
@@ -286,7 +287,7 @@ public fn create_thread_tls() -> Result<&mut DarwinThreadControlBlock, SysTlsErr
     };
 
     if base == -1 {
-        return Result.Err(AllocationFailed { code: errno() });
+        return Result.Err(SysTlsError.AllocationFailed { code: errno() });
     }
 
     // Make guard page inaccessible
@@ -294,7 +295,7 @@ public fn create_thread_tls() -> Result<&mut DarwinThreadControlBlock, SysTlsErr
         let guard_result = super.libsystem.mprotect(base, GUARD_PAGE_SIZE, PROT_NONE);
         if guard_result != 0 {
             munmap(base, total_size);
-            return Result.Err(AllocationFailed { code: errno() });
+            return Result.Err(SysTlsError.AllocationFailed { code: errno() });
         }
     };
 
@@ -307,7 +308,7 @@ public fn create_thread_tls() -> Result<&mut DarwinThreadControlBlock, SysTlsErr
     tcb.tid = safe_gettid();
     tcb.pid = safe_getpid();
     tcb.errno_value = 0;
-    tcb.stack_canary = generate_stack_canary();
+    tcb.stack_canary = random_u64();
     tcb.user_data = 0 as &unsafe Byte;
 
     // Initialize all context slots
@@ -323,7 +324,7 @@ public fn create_thread_tls() -> Result<&mut DarwinThreadControlBlock, SysTlsErr
     let set_result = unsafe { pthread_setspecific(TLS_KEY, tcb_addr as &unsafe Byte) };
     if set_result != 0 {
         unsafe { munmap(base, total_size) };
-        return Result.Err(PthreadError { code: set_result });
+        return Result.Err(SysTlsError.PthreadError { code: set_result });
     }
 
     Result.Ok(tcb)
@@ -455,7 +456,7 @@ public fn ctx_get_mut(slot: Int) -> Maybe<&unsafe Byte> {
 /// Set a context value in a slot.
 public fn ctx_set(slot: Int, value: &unsafe Byte) -> Result<(), SysTlsError> {
     if slot < 0 || slot >= MAX_CONTEXT_SLOTS {
-        return Result.Err(InvalidSlot { slot: slot });
+        return Result.Err(SysTlsError.InvalidSlot { slot: slot });
     }
 
     match get_context_slots() {
@@ -478,7 +479,7 @@ public fn ctx_clear(slot: Int) -> Result<(), SysTlsError> {
 /// The previous value is saved and can be restored with ctx_pop.
 public fn ctx_push(slot: Int, value: &unsafe Byte) -> Result<(), SysTlsError> {
     if slot < 0 || slot >= MAX_CONTEXT_SLOTS {
-        return Result.Err(InvalidSlot { slot: slot });
+        return Result.Err(SysTlsError.InvalidSlot { slot: slot });
     }
 
     match get_context_slots() {
@@ -507,14 +508,14 @@ public fn ctx_push(slot: Int, value: &unsafe Byte) -> Result<(), SysTlsError> {
 /// Restores the previous value that was saved by ctx_push.
 public fn ctx_pop(slot: Int) -> Result<&unsafe Byte, SysTlsError> {
     if slot < 0 || slot >= MAX_CONTEXT_SLOTS {
-        return Result.Err(InvalidSlot { slot: slot });
+        return Result.Err(SysTlsError.InvalidSlot { slot: slot });
     }
 
     match get_context_slots() {
         Maybe.Some(slots) => {
             let entry = &mut slots.slots[slot];
             if entry.depth == 0 {
-                return Result.Err(StackUnderflow { slot: slot });
+                return Result.Err(SysTlsError.StackUnderflow { slot: slot });
             }
 
             // Get popped value
@@ -610,19 +611,6 @@ public fn ctx_depth(slot: Int) -> Maybe<Int> {
 // =============================================================================
 // Utility Functions
 // =============================================================================
-
-/// Generate a random stack canary value.
-fn generate_stack_canary() -> UInt64 {
-    let mut buf: [Byte; 8] = [0; 8];
-    unsafe { super.libsystem.arc4random_buf(&mut buf as &unsafe Byte, 8) };
-
-    // Convert bytes to UInt64
-    let mut canary: UInt64 = 0;
-    for i in 0..8 {
-        canary |= (buf[i] as UInt64) << (i * 8);
-    }
-    canary
-}
 
 /// Check if TLS is initialized for the current thread.
 public fn is_tls_initialized() -> Bool {

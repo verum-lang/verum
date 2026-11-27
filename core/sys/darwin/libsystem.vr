@@ -1522,6 +1522,13 @@ public fn safe_gettid() -> UInt64 {
     tid
 }
 
+/// Draw a full-width word from Darwin's system random generator.
+pub(in core.sys.darwin) fn random_u64() -> UInt64 {
+    let high = unsafe { arc4random() };
+    let low = unsafe { arc4random() };
+    ((high as UInt64) << 32) | (low as UInt64)
+}
+
 /// Get entropy (cryptographic random bytes)
 @intrinsic("sys_getentropy")
 public fn safe_getentropy(buf: &unsafe Byte, len: Int) -> Result<(), OSError> {

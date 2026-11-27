@@ -4,7 +4,7 @@
 
 mount core.prelude.*;
 mount core.sys.darwin.tls.{
-    SysTlsError,
+    SysTlsError, ctx_clear, ctx_pop,
     TCB_MAGIC, MAX_CONTEXT_SLOTS, CONTEXT_STACK_DEPTH,
 };
 
@@ -56,3 +56,16 @@ fn regression_tls_errors_never_retryable() {
 }
 
 fn main() {}
+
+@cfg(target_os = "macos")
+@test
+fn invalid_slot_errors_preserve_the_requested_index() {
+    match ctx_clear(MAX_CONTEXT_SLOTS) {
+        Result.Err(SysTlsError.InvalidSlot { slot }) => assert(slot == MAX_CONTEXT_SLOTS),
+        _ => panic("clearing a slot outside the table must report its index"),
+    }
+    match ctx_pop(-1) {
+        Result.Err(SysTlsError.InvalidSlot { slot }) => assert(slot == -1),
+        _ => panic("popping a negative slot must report its index"),
+    }
+}
