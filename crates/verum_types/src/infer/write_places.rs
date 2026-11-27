@@ -375,6 +375,36 @@ impl TypeChecker {
         self.borrow_place_projection(place).map(|(root, path, _)| (root, path))
     }
 
+    /// Permission of the root reference when the first projection addresses its
+    /// referent. Borrowing the reference slot itself has no such projection.
+    pub(super) fn projected_referent_mode(&self, place: &Expr) -> Option<bool> {
+        let mut step = unparen(place);
+        while let Some((operand, _)) = place_operand(step) {
+            let operand = unparen(operand);
+            if let ExprKind::Path(path) = &operand.kind {
+                let ty = &self.ctx.env.lookup(&path.as_ident()?.name)?.ty;
+                let head = self.place_reference_head(ty, operand.span).ok()?;
+                let (inner, mode, _) = head.reference_parts()?;
+                let referent = self.place_reference_head(inner, operand.span).ok()?;
+                let through_reference = match &step.kind {
+                    ExprKind::Field { field, .. } if referent.reference_parts().is_none() => {
+                        self.lookup_field_type(&self.record_conversion_head(&referent), &field.name)
+                            .is_some()
+                    }
+                    ExprKind::TupleIndex { index, .. } => {
+                        matches!(referent, Type::Tuple(ref fields) if (*index as usize) < fields.len())
+                    }
+                    ExprKind::Index { .. } => matches!(referent, Type::Array { .. } | Type::Slice { .. }),
+                    ExprKind::Unary { op: UnOp::Deref, .. } => true,
+                    _ => false,
+                };
+                return through_reference.then_some(mode);
+            }
+            step = operand;
+        }
+        None
+    }
+
     /// A coarsened place still protects its enclosing storage, but must not be
     /// refined with a payload path belonging to the original computed place.
     pub(super) fn borrow_place_projection(

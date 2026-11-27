@@ -957,7 +957,7 @@ impl TypeChecker {
     ) {
         if let Some((root, path)) = self.borrow_place(expr) {
             let referents = self.ctx.env.reference_candidates(&root);
-            let slot = if !referents.is_empty() && self.borrows_referent_field(expr) {
+            let slot = if !referents.is_empty() && self.projected_referent_mode(expr).is_some() {
                 None
             } else {
                 self.ctx.env.record_source(&root, false)
@@ -1515,22 +1515,6 @@ impl TypeChecker {
             }
             _ => None,
         }
-    }
-
-    /// The roots of an established field projection are the possible referents
-    /// of its receiver. A computed place with no such evidence keeps its slot.
-    fn borrows_referent_field(&self, place: &Expr) -> bool {
-        let ExprKind::Field { expr, field } = &unparen(place).kind else {
-            return false;
-        };
-        let ExprKind::Path(path) = &unparen(expr).kind else {
-            return false;
-        };
-        let Some(binding) = path.as_ident().and_then(|name| self.ctx.env.lookup(&name.name)) else {
-            return false;
-        };
-        self.reference_mode(&binding.ty, expr.span).is_ok_and(|mode| mode.is_some())
-            && self.lookup_field_type(&self.record_conversion_head(&binding.ty), &field.name).is_some()
     }
 
     pub(super) fn borrowed_record_place(&mut self, expr: &Expr) -> Option<(RecordReceiver, Type)> {

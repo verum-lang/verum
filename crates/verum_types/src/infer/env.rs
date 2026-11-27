@@ -12054,6 +12054,40 @@ with .to_float() or .to_int() (at {:?})",
         ) {
             return Err(err);
         }
+        if !mutable && self.projected_referent_mode(expr) == Some(false) {
+            let sources = self.ctx.env.reference_candidates(&root);
+            if !sources.is_empty() {
+                // Reading the handle required the lexical permission above. The
+                // projected address continues to borrow its original storage
+                // even when another reference is assigned to that handle.
+                let mut places = List::with_capacity(sources.len());
+                for source in sources {
+                    let target = self.ctx.env.record_storage_name(source.binding)
+                        .ok_or(TypeError::UnknownRecordOrigin { span })?;
+                    let mut fields = source.fields;
+                    if let Some(projection) = &projection {
+                        fields.push(projection.as_str().into());
+                    }
+                    let path = (!fields.is_empty()).then(|| fields.join("."));
+                    if let Some(err) = self.borrow_tracker.check_place_borrow(
+                        &target, path.as_deref(), false, span,
+                    ) {
+                        return Err(err);
+                    }
+                    places.push((target, path));
+                }
+                for (target, path) in places {
+                    self.activate_reference_borrow(target, path.as_deref(), false, span)?;
+                }
+                return Ok(());
+            }
+        }
+        self.activate_reference_borrow(root, projection.as_deref(), mutable, span)
+    }
+
+    fn activate_reference_borrow(
+        &mut self, root: Text, projection: Option<&str>, mutable: bool, span: Span,
+    ) -> Result<()> {
         if self.in_call_arg_context {
             return Ok(());
         }

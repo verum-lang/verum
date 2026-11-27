@@ -270,6 +270,41 @@ fn a_match_retains_the_value_selected_by_each_live_arm() {
 }
 
 #[test]
+fn rebinding_a_shared_reference_preserves_the_projected_storage() {
+    let declarations = "type Block is { public items: [Int; 2] };";
+    for body in [
+        "fn read(start: &Node, next: &Node) -> Int {
+            let mut cursor = start; let saved = &cursor.n; cursor = next; *saved + cursor.n }",
+        "fn read(start: &Block, next: &Block, i: Int) -> Int {
+            let mut cursor = start; let saved = &cursor.items[i]; cursor = next; *saved }",
+        "fn read(start: &Block, next: &Block) -> Int {
+            let mut cursor = start; let saved = &checked cursor.items[0]; cursor = next; *saved }",
+    ] {
+        let diagnostics = errors(&format!("{declarations} {body}"));
+        assert!(diagnostics.is_empty(), "{body}: {diagnostics:?}");
+    }
+    for (body, expected) in [
+        ("fn bad(start: &Node, next: &Node) -> Int {
+            let mut cursor = start; let slot = &cursor; cursor = next; (*slot).n }", "borrow"),
+        ("fn bad(start: &Node, next: &Node) -> Int {
+            let mut cursor = start; let slot = &mut cursor; let saved = &cursor.n;
+            *slot = next; *saved }", "borrow"),
+        ("fn bad(next: &Node) -> Int {
+            let mut original = Node { n: 7 }; let mut cursor = &original;
+            let saved = &cursor.n; cursor = next; original.n = 11; *saved }", "borrow"),
+        ("fn bad(start: &Node) -> &Int {
+            let local = Node { n: 7 }; let mut cursor = &local;
+            let saved = &cursor.n; cursor = start; saved }", "does not live long enough"),
+        ("fn bad(start: &Node, pick: Bool) -> &Int {
+            let local = Node { n: 7 }; let mut cursor = if pick { start } else { &local };
+            let saved = &cursor.n; cursor = start; saved }", "does not live long enough"),
+    ] {
+        let diagnostics = errors(body);
+        assert!(diagnostics.iter().any(|d| d.contains(expected)), "{body}: {diagnostics:?}");
+    }
+}
+
+#[test]
 fn borrowing_a_projected_field_preserves_every_possible_referent() {
     let declarations = "
         fn select(a: &Node, b: &Node, c: Bool) -> &Node { if c { a } else { b } }
