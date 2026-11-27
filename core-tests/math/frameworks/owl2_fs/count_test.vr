@@ -1,0 +1,37 @@
+mount core.math.frameworks.owl2_fs.types.{Individual};
+mount core.math.frameworks.owl2_fs.count.{count_o, count_o_unbounded};
+
+type Person is { named: Bool };
+
+implement Individual for Person {
+    fn is_named(self) -> Bool { self.named }
+}
+
+pure fn named(person: Person) -> Bool { person.named }
+
+@test
+fn count_mixed_individuals() {
+    let people: List<Person> = [
+        Person { named: true }, Person { named: false }, Person { named: true },
+    ];
+    assert_eq(count_o(people, named), 2);
+}
+
+@test
+fn count_empty_domain() {
+    let people: List<Person> = [];
+    assert_eq(count_o(people, named), 0);
+}
+
+@test
+fn count_with_witness() {
+    let people: List<Person> = [Person { named: false }, Person { named: true }];
+    let witness: Maybe<List<Person>> = Maybe.Some(people);
+    assert(count_o_unbounded(witness, named) is Maybe.Some(1));
+}
+
+@test
+fn count_without_witness() {
+    let witness: Maybe<List<Person>> = Maybe.None;
+    assert(count_o_unbounded(witness, named) is Maybe.None);
+}
