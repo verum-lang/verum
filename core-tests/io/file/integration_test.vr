@@ -2,12 +2,12 @@
 // core-tests/io/file/integration_test.vr
 // =============================================================================
 //
-// Cross-stdlib integration for `core.io.file`. Live I/O is gated by #io-1
-// + temp-dir harness availability. Structural tests only.
+// File opening modes and asynchronous ownership across the system boundary.
 // =============================================================================
 
-mount core.io.file.{File, OpenOptions, O_RDONLY, O_WRONLY, O_CREAT};
+mount core.io.file.{AsyncFile, File, OpenOptions, O_RDONLY, O_WRONLY, O_CREAT};
 mount core.collections.list.List;
+mount core.io.protocols.StreamError;
 
 // =============================================================================
 // §1 — OpenOptions can be configured for read-only access pattern
@@ -47,6 +47,29 @@ fn integration_o_rdonly_or_nothing_is_rdonly() {
     // O_RDONLY is 0, so OR doesn't add anything to it.
     let combined = O_RDONLY | O_CREAT;
     assert_eq(combined, O_CREAT);
+}
+
+@cfg(unix)
+async fn exercise_async_handles(path: &Text) -> Result<(), StreamError> {
+    let mut buf: [Byte; 1] = [0_u8];
+    let mut read_file = AsyncFile.open(path).await?;
+    assert(read_file.read(&mut buf[..]).await? == 0);
+
+    let mut write_file = AsyncFile.create(path).await?;
+    assert(write_file.write(&buf[..]).await? == 1);
+
+    let mut options = OpenOptions.new();
+    let _ = options.write(true);
+    let mut configured = AsyncFile.open_with_options(path, &options).await?;
+    assert(configured.write(&buf[..]).await? == 1);
+    Result.Ok(())
+}
+
+@cfg(unix)
+@test
+async fn asynchronous_constructors_return_live_handles() {
+    let result: Result<(), StreamError> = exercise_async_handles(&"/dev/null").await;
+    assert(result.is_ok());
 }
 
 fn main() {}

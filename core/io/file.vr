@@ -557,21 +557,17 @@ public type AsyncFile is {
 implement AsyncFile {
     /// Open a file asynchronously for reading.
     public async fn open(path: &Text) -> IoResult<AsyncFile> {
-        // Opening itself is synchronous, but we wrap in async File
-        let file = File.open(path)?;
-        Result.Ok(AsyncFile { inner: file })
+        Result.Ok(AsyncFile { inner: File.open(path)? })
     }
 
     /// Create a file asynchronously for writing.
     public async fn create(path: &Text) -> IoResult<AsyncFile> {
-        let file = File.create(path)?;
-        Result.Ok(AsyncFile { inner: file })
+        Result.Ok(AsyncFile { inner: File.create(path)? })
     }
 
     /// Open with custom options.
     public async fn open_with_options(path: &Text, options: &OpenOptions) -> IoResult<AsyncFile> {
-        let file = options.open(path)?;
-        Result.Ok(AsyncFile { inner: file })
+        Result.Ok(AsyncFile { inner: options.open(path)? })
     }
 
     /// Read bytes into the supplied buffer.
