@@ -12,13 +12,14 @@ use verum_ast::{Stmt, StmtKind};
 impl VbcCodegen {
     /// Compiles a statement and returns the result register (if any).
     pub fn compile_stmt(&mut self, stmt: &Stmt) -> CodegenResult<Option<Reg>> {
-        self.compile_stmt_with_demand(stmt, ResultDemand::Used)
+        self.compile_stmt_with_demand(stmt, ResultDemand::Used, None)
     }
 
     pub(super) fn compile_stmt_with_demand(
         &mut self,
         stmt: &Stmt,
         demand: ResultDemand,
+        binding_result: Option<&crate::types::TypeRef>,
     ) -> CodegenResult<Option<Reg>> {
         // @cfg statement-level filtering
         // Skip statements with non-matching @cfg attributes for the target platform.
@@ -39,7 +40,7 @@ impl VbcCodegen {
 
         match &stmt.kind {
             StmtKind::Let { pattern, ty, value } => {
-                let result = self.compile_let(pattern, ty.as_ref(), value.as_ref())?;
+                let result = self.compile_let(pattern, ty.as_ref(), value.as_ref(), binding_result)?;
                 // T0262: enforce the annotation's refinement predicates
                 // at runtime, the same way parameter entry, return sites
                 // and record-field writes already do. Emitted here rather
@@ -490,7 +491,14 @@ impl VbcCodegen {
         pattern: &verum_ast::Pattern,
         ty: Option<&verum_ast::Type>,
         value: Option<&verum_ast::Expr>,
+        binding_result: Option<&crate::types::TypeRef>,
     ) -> CodegenResult<Option<Reg>> {
+        // A result constrains a selected call only through its real signature,
+        // including its explicit arguments and the types of its operands.
+        let inferred_result = binding_result.and_then(|expected| {
+            self.source_call_declaration(Self::normalized_place(value?), Some(expected), 0)
+                .filter(|declared| declared == expected)
+        });
         // T1615: collect declaration-owned facts before lowering the initializer,
         // then attach them to the NEW binding. Initializers may compile closures
         // or shadow a same-named outer array; neither owns this declaration's ID.
@@ -540,7 +548,7 @@ impl VbcCodegen {
         // The annotation describes exactly this initializer, not awaits inside
         // its arguments or nested blocks. Parentheses preserve that authority.
         let saved_expected_span = self.ctx.expected_value_span.take();
-        self.ctx.expected_value_span = ty.and_then(|_| value).map(|value| {
+        self.ctx.expected_value_span = value.filter(|_| ty.is_some() || inferred_result.is_some()).map(|value| {
             let mut value = value;
             while let verum_ast::ExprKind::Paren(inner) = &value.kind { value = inner; }
             value.span
@@ -549,7 +557,7 @@ impl VbcCodegen {
         // match's scrutinee. Inheriting that hint could grant a payload's local
         // field reference the ownership type of the entire surrounding sum.
         let saved_scrutinee = self.ctx.match_scrutinee_type.take();
-        let result = self.compile_let_inner(pattern, ty, value);
+        let result = self.compile_let_inner(pattern, ty, value, inferred_result.as_ref());
         self.ctx.match_scrutinee_type = saved_scrutinee;
         self.ctx.expected_value_span = saved_expected_span;
         if result.is_ok()
@@ -559,6 +567,8 @@ impl VbcCodegen {
             // Packed allocations return before the inner function's epilogue.
             if let Some(ty) = ty {
                 self.publish_binding_type(name.name.as_str(), ty);
+            } else if let Some(declared) = &inferred_result {
+                self.publish_resolved_binding_type(name.as_str(), declared);
             }
             if let Some(element) = element_name {
                 self.ctx.set_array_element_type_name(&name.name, element);
@@ -590,6 +600,7 @@ impl VbcCodegen {
         pattern: &verum_ast::Pattern,
         ty: Option<&verum_ast::Type>,
         value: Option<&verum_ast::Expr>,
+        inferred_result: Option<&crate::types::TypeRef>,
     ) -> CodegenResult<Option<Reg>> {
         // A LOCAL BINDING CAN HOLD A REFERENCE TOO (T1442).
         //
@@ -1357,7 +1368,7 @@ impl VbcCodegen {
             // callee projects it through its signature to its own operands.
             let expected = ty.filter(|_| Self::admits_constructor_context(expr))
                 .and_then(|ty| self.source_type_in_current_scope(ty));
-            self.compile_call_operand(expr, expected.as_ref())?
+            self.compile_call_operand(expr, expected.as_ref().or(inferred_result))?
         } else {
             // No initializer - use unit
             let reg = self.ctx.alloc_temp();
@@ -1376,7 +1387,7 @@ impl VbcCodegen {
                 let name = Self::literal_default_type_name(value?)?;
                 self.semantic_type_in_current_scope(&name)
             });
-        let open_list = if ty.is_none() && inferred_copy_type.is_none() {
+        let open_list = if ty.is_none() && inferred_result.is_none() && inferred_copy_type.is_none() {
             value.zip(init_reg).and_then(|(expr, reg)| self.unbound_list_allocation(expr, reg, copy_start))
         } else {
             None

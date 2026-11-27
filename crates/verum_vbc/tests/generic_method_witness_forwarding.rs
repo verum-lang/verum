@@ -276,6 +276,49 @@ fn probe() -> Int {
 }
 
 #[test]
+fn returned_local_constrains_its_selected_generic_factory() {
+    let source = r#"
+        type Stamp<T> is { owner: UInt64 };
+        implement<T> Stamp<T> {
+            fn blank() -> Stamp<T> { Stamp { owner: T.id } }
+            fn accepts(&self, sample: T) -> Bool { self.owner == T.id }
+        }
+        fn build<T>(sample: T) -> Stamp<T> {
+            let result = Stamp.blank();
+            if !result.accepts(sample) { panic("factory lost its witness"); }
+            result
+        }
+        fn early<T>(sample: T) -> Stamp<T> {
+            if true {
+                let result = Stamp.blank();
+                if !result.accepts(sample) { panic("return lost its witness"); }
+                return result;
+            }
+            build(sample)
+        }
+        fn shadow<T>(sample: T) -> Stamp<T> {
+            let result: Stamp<Bool> = Stamp.blank();
+            if result.owner != Bool.id { panic("wrong shadowed witness"); }
+            let result = Stamp.blank();
+            if !result.accepts(sample) { panic("wrong shadowing witness"); }
+            result
+        }
+        fn probe() -> Int {
+            let a = build(true);
+            let b = early(42);
+            let c = shadow(13);
+            if a.owner == Bool.id && b.owner == Int.id && c.owner == Int.id { 1 } else { 0 }
+        }
+    "#;
+    run(source);
+    let mismatch = source.replace("result.accepts(sample)", "result.accepts(true)");
+    let ast = Parser::new(&format!("{TYPES}\n{mismatch}")).parse_module().unwrap();
+    for bootstrap in [false, true] {
+        assert!(lower(&ast, bootstrap).is_err(), "a rigid caller parameter cannot be specialized to Bool");
+    }
+}
+
+#[test]
 fn concrete_generic_clone_keeps_its_method_witnesses() {
     run(r#"
 type Handle<T> is { marker: Int };

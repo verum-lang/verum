@@ -42,6 +42,46 @@ impl Pattern {
         let span = lit.span;
         Self::new(PatternKind::Literal(lit), span)
     }
+
+    /// Does this pattern introduce the name into the enclosing lexical scope?
+    /// A field label binds only in shorthand form. Paths and guard expressions
+    /// refer to existing names and do not shadow a preceding declaration.
+    pub fn binds_name(&self, sought: &str) -> bool {
+        use PatternKind as P;
+        let mut pending: smallvec::SmallVec<[&Pattern; 8]> = smallvec::smallvec![self];
+        while let Some(pattern) = pending.pop() {
+            match &pattern.kind {
+                P::Ident { name, subpattern, .. } => {
+                    if name.as_str() == sought { return true; }
+                    pending.extend(subpattern.as_deref());
+                }
+                P::Tuple(items) | P::Array(items) | P::Or(items) | P::And(items)
+                | P::Active { bindings: items, .. }
+                | P::Variant { data: Some(VariantPatternData::Tuple(items)), .. } => pending.extend(items),
+                P::Record { fields, .. } | P::Variant { data: Some(VariantPatternData::Record { fields, .. }), .. } => {
+                    for field in fields {
+                        if let Some(pattern) = &field.pattern { pending.push(pattern); }
+                        else if field.name.as_str() == sought { return true; }
+                    }
+                }
+                P::Slice { before, rest, after } => {
+                    pending.extend(before);
+                    pending.extend(rest.as_deref());
+                    pending.extend(after);
+                }
+                P::Paren(inner) | P::Reference { inner, .. } | P::View { pattern: inner, .. }
+                | P::Guard { pattern: inner, .. } => pending.push(inner),
+                P::TypeTest { binding, .. } => { if binding.as_str() == sought { return true; } }
+                P::Stream { head_patterns, rest } => {
+                    if rest.as_ref().is_some_and(|name| name.as_str() == sought) { return true; }
+                    pending.extend(head_patterns);
+                }
+                P::Cons { head, tail } => { pending.push(head); pending.push(tail); }
+                P::Wildcard | P::Rest | P::Literal(_) | P::Range { .. } | P::Variant { data: None, .. } => {}
+            }
+        }
+        false
+    }
 }
 
 impl Spanned for Pattern {

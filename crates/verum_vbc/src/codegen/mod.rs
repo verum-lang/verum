@@ -20421,6 +20421,38 @@ impl VbcCodegen {
         self.in_constant_scope(block, |cg| cg.compile_block_contents(block, demand))
     }
 
+    /// A block returning a local directly constrains the initializer of that
+    /// particular binding. A later destructuring or typed binding shadows it.
+    fn result_binding_statement(&self, block: &Block, demand: ResultDemand) -> Option<(usize, TypeRef)> {
+        use verum_ast::{ExprKind, PatternKind, StmtKind};
+        let tail = block.expr.as_deref().or_else(|| {
+            let stmt = block.stmts.iter().rev().find(|stmt| self.should_compile_stmt(stmt))?;
+            match &stmt.kind {
+                StmtKind::Expr { expr, has_semi }
+                    if !has_semi || matches!(Self::normalized_place(expr).kind, ExprKind::Return(_)) => Some(expr),
+                _ => None,
+            }
+        })?;
+        let (value, expected) = match &Self::normalized_place(tail).kind {
+            ExprKind::Return(Some(value)) => (value.as_ref(), self.ctx.function_return_declaration.as_ref()?),
+            _ if self.ctx.expected_value_span == Some(block.span) => (tail, self.ctx.expected_value_type.as_ref()?),
+            _ if demand.is_callable_return() => (tail, self.ctx.function_return_declaration.as_ref()?),
+            _ => return None,
+        };
+        let name = Self::named_place_binding(value)?;
+        for (index, stmt) in block.stmts.iter().enumerate().rev() {
+            let pattern = match &stmt.kind {
+                StmtKind::Let { pattern, .. } | StmtKind::LetElse { pattern, .. } => pattern,
+                _ => continue,
+            };
+            if !pattern.binds_name(name) || !self.should_compile_stmt(stmt) { continue; }
+            return (matches!(stmt.kind, StmtKind::Let { ty: None, value: Some(_), .. })
+                && matches!(&pattern.kind, PatternKind::Ident { name: bound, by_ref: false, subpattern: None, .. }
+                    if bound.as_str() == name)).then(|| (index, expected.clone()));
+        }
+        None
+    }
+
     fn compile_block_contents(&mut self, block: &Block, demand: ResultDemand) -> CodegenResult<Option<Reg>> {
         let outer_type_names = (self.ctx.registers.scope_level() > 0)
             .then(|| self.ctx.variable_type_names.clone());
@@ -20428,6 +20460,7 @@ impl VbcCodegen {
 
         let mut result = None;
         let block_start = self.ctx.instructions.len();
+        let result_binding = self.result_binding_statement(block, demand);
 
         // Compile statements.
         // Only update result when a statement produces a value (Some).
@@ -20439,7 +20472,10 @@ impl VbcCodegen {
             } else {
                 ResultDemand::Discarded
             };
-            if let Some(reg) = self.compile_stmt_with_demand(stmt, statement_demand)? {
+            let binding_result = result_binding.as_ref()
+                .filter(|(binding, _)| *binding == index)
+                .map(|(_, ty)| ty);
+            if let Some(reg) = self.compile_stmt_with_demand(stmt, statement_demand, binding_result)? {
                 result = Some(reg);
             }
         }
