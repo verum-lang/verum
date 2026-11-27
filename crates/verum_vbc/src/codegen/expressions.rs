@@ -11851,7 +11851,15 @@ impl VbcCodegen {
     /// A local binding shadows an unrooted namespace; spelling alone is not
     /// evidence that its field denotes a variant constructor.
     pub(super) fn is_declared_unit_constructor_value(&self, expression: &Expr) -> bool {
-        let Some(parts) = self.try_flatten_module_path_resolved(expression) else { return false; };
+        let parts = self.try_flatten_module_path_resolved(expression).or_else(|| {
+            // Namespace flattening can skip a type receiver. Its declaration
+            // still determines whether the selected member is a unit constructor.
+            let ExprKind::Field { expr: base, field } = &expression.kind else { return None; };
+            let owner = Self::named_place_binding(base)?;
+            (!self.is_value_receiver_binding(owner))
+                .then(|| vec![owner.to_owned(), field.name.to_string()])
+        });
+        let Some(parts) = parts else { return false; };
         if !self.path_was_rooted_module_path(expression)
             && parts.first().is_some_and(|head| self.ctx.registers.contains(head)) {
             return false;

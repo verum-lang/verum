@@ -36,6 +36,53 @@ fn run_module(ast: &verum_ast::Module) -> i64 {
 }
 
 #[test]
+fn mounted_unit_constructor_owns_an_empty_affine_payload() {
+    use verum_ast::ItemKind;
+    use verum_vbc::codegen::ItemFailurePolicy;
+
+    let mut maybe = Parser::new(include_str!("../../../core/base/maybe.vr"))
+        .parse_module().unwrap();
+    maybe.items.retain(|item| matches!(&item.kind, ItemKind::Module(module) if module.items.is_none())
+        || item.kind.type_or_protocol_name().is_some_and(|name| name.as_str() == "Maybe"));
+    let facade = Parser::new("module core.base; public mount core.base.maybe.Maybe;")
+        .parse_module().unwrap();
+    for mount in ["core.base.maybe.Maybe", "core.base.Maybe"] {
+        let source = format!(r#"
+            module client;
+            mount {mount};
+            type affine Ticket is {{ value: Int }};
+            type Holder is {{ choice: Maybe<Ticket> }};
+            fn probe() -> Int {{
+                let holder = Holder {{ choice: Maybe.None }};
+                match holder.choice {{ Maybe.None => 73, Maybe.Some(_) => 0 }}
+            }}
+        "#);
+        let compile = |source: &str| {
+            let client = Parser::new(source).parse_module().unwrap();
+            let units = [&maybe, &facade, &client];
+            let mut generator = VbcCodegen::with_config(CodegenConfig::new(""));
+            generator.initialize();
+            generator.collect_unit_declarations(&units)?;
+            generator.resolve_pending_imports();
+            generator.compile_unit_items(&units, ItemFailurePolicy::Strict)?;
+            generator.finalize_module()
+        };
+        let module = compile(&source).expect("fresh empty variant");
+        let wire = verum_vbc::serialize::serialize_module(&module).unwrap();
+        for module in [module, verum_vbc::deserialize::deserialize_module(&wire).unwrap()] {
+            let probe = module.find_function_by_name("client.probe").unwrap();
+            assert_eq!(Interpreter::new(Arc::new(module)).execute_function(probe).unwrap().try_as_i64(), Some(73));
+        }
+
+        let shadow = format!("{source}
+            type Source is {{ None: Maybe<Ticket> }};
+            fn copy(Maybe: &Source) -> Holder {{ Holder {{ choice: Maybe.None }} }}");
+        let error = compile(&shadow).expect_err("a shadowing value owns its field");
+        assert!(error.to_string().contains("exclusive borrowed owner"), "{mount}: {error}");
+    }
+}
+
+#[test]
 fn record_field_owns_bare_unit_constructor_in_a_named_module() {
     for types in [
         "type ErrorKind is InvalidByte | InvalidLength; type Other is InvalidLength | Valid;",
