@@ -3108,17 +3108,20 @@ impl VbcCodegen {
         let Some(reg) = result else {
             return Ok(result);
         };
+        use crate::types::TypeRef;
         use verum_common::well_known_types::type_names;
-        let Some(name) = self.infer_expr_type_name(left) else {
+        let declaration = self.declared_expression_result(left, None, 0, 0)
+            .and_then(|ty| self.expand_declared_alias(ty));
+        let Some(TypeRef::Concrete(id)) = declaration else {
             return Ok(Some(reg));
         };
-        let signed = type_names::is_signed_integer_type(&name);
-        if !(signed || type_names::is_unsigned_integer_type(&name)) {
+        let Some(name) = id.well_known_name().filter(|_| id.is_integer()) else {
             return Ok(Some(reg));
-        }
-        match type_names::numeric_bit_width(&name) {
-            Some(w) if w < 64 => {
-                let dst = self.emit_truncate_to_width(reg, w, signed)?;
+        };
+        match type_names::numeric_bit_width(name) {
+            Some(width) if width < 64 => {
+                let signed = type_names::is_signed_integer_type(name);
+                let dst = self.emit_truncate_to_width(reg, width, signed)?;
                 self.ctx.free_temp(reg);
                 Ok(Some(dst))
             }

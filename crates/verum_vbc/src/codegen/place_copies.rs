@@ -224,6 +224,13 @@ impl VbcCodegen {
                 let right = nested(right, None)?;
                 let primitive_left = self.expand_declared_alias(left.clone())?;
                 let primitive_right = self.expand_declared_alias(right.clone())?;
+                // A primitive shift takes its result width from the shifted value.
+                // The integer count can have an independent declaration.
+                if matches!(op, verum_ast::expr::BinOp::Shl | verum_ast::expr::BinOp::Shr)
+                    && let (TypeRef::Concrete(value), TypeRef::Concrete(count)) = (&primitive_left, &primitive_right)
+                    && value.is_integer() && count.is_integer() {
+                    return Some(primitive_left);
+                }
                 if primitive_left == primitive_right {
                     if op.category() == BinOpCategory::Logical && primitive_left == boolean {
                         return Some(boolean);
