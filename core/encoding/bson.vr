@@ -411,20 +411,27 @@ public fn encode_canonical(doc: &BsonDocument) -> List<Byte> {
     out
 }
 
-fn encode_document_into(out: &mut List<Byte>, doc: &BsonDocument) {
+fn begin_document(out: &mut List<Byte>) -> Int {
     let start = out.len() as Int;
-    // Length placeholder — backfilled at the end.
     put_i32_le(out, 0);
+    start
+}
+
+fn finish_document(out: &mut List<Byte>, start: Int) {
+    out.push(0x00_u8);
+    let size = out.len() as Int - start;
+    backfill_i32_le(out, start, size);
+}
+
+fn encode_document_into(out: &mut List<Byte>, doc: &BsonDocument) {
+    let start = begin_document(out);
     let mut i: Int = 0;
     while i < doc.fields.len() as Int {
         let pair = &doc.fields[i];
         encode_element(out, &pair.0, &pair.1);
         i = i + 1;
     }
-    out.push(0x00_u8);     // document terminator
-    let end = out.len() as Int;
-    let length = end - start;
-    backfill_i32_le(out, start, length);
+    finish_document(out, start);
 }
 
 fn encode_document_canonical_into(out: &mut List<Byte>, doc: &BsonDocument) {
@@ -450,18 +457,14 @@ fn encode_document_canonical_into(out: &mut List<Byte>, doc: &BsonDocument) {
         order[j] = key_idx;
         i = i + 1;
     }
-    let start = out.len() as Int;
-    put_i32_le(out, 0);
+    let start = begin_document(out);
     let mut p: Int = 0;
     while p < n {
         let pair = &doc.fields[order[p]];
         encode_element(out, &pair.0, &pair.1);
         p = p + 1;
     }
-    out.push(0x00_u8);
-    let end = out.len() as Int;
-    let length = end - start;
-    backfill_i32_le(out, start, length);
+    finish_document(out, start);
 }
 
 fn compare_keys(a: &[Byte], b: &[Byte]) -> Int {
@@ -501,33 +504,33 @@ fn encode_element(out: &mut List<Byte>, key: &Text, v: &BsonValue) {
         BsonV_Document(d)       => {
             put_u8_le(out, BSON_DOCUMENT as Int);
             let _ = put_cstring(out, key);
-            encode_document_into(out, &*d);
+            encode_document_into(out, d.as_ref());
         }
         BsonV_Array(items)      => {
             put_u8_le(out, BSON_ARRAY as Int);
             let _ = put_cstring(out, key);
             // Arrays are encoded as documents with numeric string
             // keys "0", "1", "2", ... in element order.
-            let mut adoc = BsonDocument.empty();
+            let start = begin_document(out);
             let mut i: Int = 0;
             let n = items.len() as Int;
             while i < n {
-                adoc.fields.push((index_key(i), items[i].clone()));
+                encode_element(out, &i.to_text(), &items[i]);
                 i = i + 1;
             }
-            encode_document_into(out, &adoc);
+            finish_document(out, start);
         }
         BsonV_Binary(b)         => {
             put_u8_le(out, BSON_BINARY as Int);
             let _ = put_cstring(out, key);
             put_i32_le(out, b.data.len() as Int);
             put_u8_le(out, b.subtype as Int);
-            put_bytes(out, &b.data);
+            put_bytes(out, b.data.as_slice());
         }
         BsonV_ObjectId(oid)     => {
             put_u8_le(out, BSON_OBJECT_ID as Int);
             let _ = put_cstring(out, key);
-            put_bytes(out, &oid.bytes);
+            put_bytes(out, oid.bytes.as_slice());
         }
         BsonV_Bool(b)           => {
             put_u8_le(out, BSON_BOOLEAN as Int);
@@ -595,53 +598,6 @@ fn encode_element(out: &mut List<Byte>, key: &Text, v: &BsonValue) {
             put_u8_le(out, BSON_MAX_KEY as Int);
             let _ = put_cstring(out, key);
         }
-    }
-}
-
-// =============================================================================
-// Array index-key cache — avoids `f"{i}"` allocation on the encode hot
-// path for the overwhelmingly common case of small arrays.
-// =============================================================================
-//
-// BSON encodes arrays as documents whose keys are the stringified
-// element index ("0", "1", "2", …). Producing those keys with
-// `f"{i}"` costs one heap allocation per element. For arrays under
-// `ARRAY_KEY_CACHE_SIZE` elements we look the key up in a static
-// table; only larger arrays pay the allocation.
-
-const ARRAY_KEY_CACHE_SIZE: Int = 256;
-
-/// Stringify a non-negative integer for use as an array index key.
-/// `index_key(0) = "0"`, `index_key(123) = "123"`. Uses a static
-/// cache for `i < ARRAY_KEY_CACHE_SIZE`; falls back to formatted
-/// allocation for larger arrays.
-fn index_key(i: Int) -> Text {
-    if i < 0 || i >= ARRAY_KEY_CACHE_SIZE {
-        return f"{i}";
-    }
-    array_key_cache_lookup(i)
-}
-
-/// Build the small string for an in-range index without any
-/// formatter machinery. Hand-written ASCII conversion — faster
-/// than `f"..."` and known to be allocation-free past the
-/// resulting Text.
-fn array_key_cache_lookup(i: Int) -> Text {
-    if i < 10 {
-        let mut buf: List<Byte> = List.with_capacity(1);
-        buf.push((0x30 + i) as Byte);
-        Text.from_utf8(buf).unwrap_or("0".clone())
-    } else if i < 100 {
-        let mut buf: List<Byte> = List.with_capacity(2);
-        buf.push((0x30 + (i / 10)) as Byte);
-        buf.push((0x30 + (i % 10)) as Byte);
-        Text.from_utf8(buf).unwrap_or("00".clone())
-    } else {
-        let mut buf: List<Byte> = List.with_capacity(3);
-        buf.push((0x30 + (i / 100))       as Byte);
-        buf.push((0x30 + ((i / 10) % 10)) as Byte);
-        buf.push((0x30 + (i % 10))        as Byte);
-        Text.from_utf8(buf).unwrap_or("000".clone())
     }
 }
 
@@ -724,13 +680,11 @@ fn decode_value(tag: Byte, bytes: &[Byte], off: &mut Int, depth: Int) -> Result<
         return Result.Ok(BsonV_Document(Heap.new(d)));
     }
     if t == (BSON_ARRAY as Int) {
-        let d = decode_document(bytes, off, depth)?;
+        let BsonDocument { fields } = decode_document(bytes, off, depth)?;
         // Discard the numeric keys; preserve element order.
-        let mut items: List<BsonValue> = List.with_capacity(d.fields.len() as Int);
-        let mut i: Int = 0;
-        while i < d.fields.len() as Int {
-            items.push(d.fields[i].1.clone());
-            i = i + 1;
+        let mut items: List<BsonValue> = List.with_capacity(fields.len());
+        for (_, item) in fields {
+            items.push(item);
         }
         return Result.Ok(BsonV_Array(items));
     }
@@ -1109,7 +1063,7 @@ public fn bson_value_equals(a: &BsonValue, b: &BsonValue) -> Bool {
     match (a, b) {
         (BsonV_Double(x),    BsonV_Double(y))     => x.to_bits() == y.to_bits(),
         (BsonV_String(x),    BsonV_String(y))     => x == y,
-        (BsonV_Document(x),  BsonV_Document(y))   => (&*x).equals(&*y),
+        (BsonV_Document(x),  BsonV_Document(y))   => x.as_ref().equals(y.as_ref()),
         (BsonV_Array(x),     BsonV_Array(y))      => {
             if x.len() != y.len() { return false; }
             let mut i: Int = 0;

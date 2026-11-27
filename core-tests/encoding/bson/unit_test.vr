@@ -12,7 +12,7 @@
 // Wire decoding covers document field names and strings.
 // =============================================================================
 
-mount core.encoding.bson.{BsonDocument, BsonError, BsonValue, decode};
+mount core.encoding.bson.{BsonDocument, BsonError, BsonValue, decode, encode};
 mount core.encoding.bson.{
     BSON_DOUBLE, BSON_STRING, BSON_DOCUMENT, BSON_ARRAY,
     BSON_BINARY, BSON_UNDEFINED, BSON_OBJECT_ID, BSON_BOOLEAN,
@@ -212,6 +212,20 @@ fn test_bson_error_document_too_large_payload_round_trip() {
 }
 
 fn main() {}
+
+@test
+fn test_nested_array_wire_round_trip() {
+    let original: [Byte; 30] = [0x1e_u8, 0x00_u8, 0x00_u8, 0x00_u8, 0x04_u8, 0x61_u8, 0x00_u8, 0x16_u8, 0x00_u8, 0x00_u8, 0x00_u8, 0x10_u8, 0x30_u8, 0x00_u8, 0x01_u8, 0x00_u8, 0x00_u8, 0x00_u8, 0x02_u8, 0x31_u8, 0x00_u8, 0x03_u8, 0x00_u8, 0x00_u8, 0x00_u8, 0xc3_u8, 0xa9_u8, 0x00_u8, 0x00_u8, 0x00_u8];
+    match decode(&original[..]) {
+        Ok(BsonValue.BsonV_Document(doc)) => {
+            let bytes = encode(doc.as_ref());
+            assert_eq(bytes.len(), original.len());
+            let mut i = 0;
+            while i < bytes.len() { assert_eq(bytes[i], original[i]); i = i + 1; }
+        },
+        _ => panic("expected a BSON document containing an integer and a UTF-8 string in an array"),
+    }
+}
 
 @test
 fn test_string_payload_rejects_invalid_utf8() {
