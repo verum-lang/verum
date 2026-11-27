@@ -121,9 +121,11 @@ fn nested_callback_diagnostics_keep_their_own_bounds() {
     let (_, rendered) = mismatch(&actual, &expected);
     assert_eq!(
         rendered,
-        "(&fn() -> Int [bound: unrestricted; observed: unknown])"
+        "(&fn() -> Int [bound: unrestricted; observed: unknown],)"
     );
-    assert_eq!(actual.to_string(), "(&async fn() -> Int)");
+    assert_eq!(actual.to_string(), "(&async fn() -> Int,)");
+    let source = format!("fn first(value: {}) -> &async fn() -> Int {{ value.0 }}", actual);
+    assert!(check(&source).is_empty(), "{source}");
 }
 
 #[test]
