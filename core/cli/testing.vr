@@ -143,7 +143,7 @@ public fn fuzz_one(spec: &CommandSpec, argv: List<Text>) -> SimResult {
         Result.Err(e) => SimResult {
             exit_code: e.exit_code().code(),
             stdout: "".clone(),
-            stderr: e.message.clone(),
+            stderr: e.message().clone(),
             outcome: Maybe.None,
             parse_err: Maybe.Some(e),
         },

@@ -57,38 +57,38 @@ mount core.cli.error.{ParseError, ParseErrorKind, ParseDiagnostic};
 /// A captured flag value as raw Text (typing happens in runtime layer).
 public type CapturedFlag is {
     /// Flag long-name (preferred) or short-letter rendered as Text.
-    name:    Text,
+    public(in core.cli) name:    Text,
     /// All values captured for this flag (length matches arity).
     /// For switches (arity Exactly(0)) this is empty and the count reflects occurrences.
-    values:  List<Text>,
+    public(in core.cli) values:  List<Text>,
     /// Number of times the flag appeared (for counter / repeated tracking).
-    occurrences: Int,
+    public(in core.cli) occurrences: Int,
 };
 
 /// A captured positional argument.
 public type CapturedArg is {
-    name:   Text,            // declared arg-spec name
-    values: List<Text>,
+    public(in core.cli) name:   Text,            // declared arg-spec name
+    public(in core.cli) values: List<Text>,
 };
 
 /// Outcome of parsing argv against a CommandSpec.
 public type ParseOutcome is {
     /// Sequence of subcommand names traversed, root-first.
     /// Example: argv `app deploy prod --env=staging` → ["app", "deploy", "prod"].
-    command_path: List<Text>,
+    public(in core.cli) command_path: List<Text>,
     /// Flags captured at every level along the path. Persistent flags appear
     /// at the level they were declared; non-persistent at the level they
     /// were given.
-    flags:        Map<Text, CapturedFlag>,
+    public(in core.cli) flags:        Map<Text, CapturedFlag>,
     /// Positional arguments captured at the leaf command.
-    args:         List<CapturedArg>,
+    public(in core.cli) args:         List<CapturedArg>,
     /// Argv tokens after `--` (passed verbatim to the leaf handler).
-    trailing:     List<Text>,
+    public(in core.cli) trailing:     List<Text>,
     /// Non-fatal diagnostics gathered during recovery.
-    warnings:     List<ParseError>,
+    public(in core.cli) warnings:     List<ParseError>,
     /// Whether help / version flag was seen — runtime short-circuits dispatch.
-    help_requested:    Bool,
-    version_requested: Bool,
+    public(in core.cli) help_requested:    Bool,
+    public(in core.cli) version_requested: Bool,
 };
 
 // =============================================================================

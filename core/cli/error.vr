@@ -212,6 +212,12 @@ public type ParseError is {
 };
 
 implement ParseError {
+    /// Short diagnostic suitable for a command-line summary.
+    public fn message(&self) -> &Text { &self.message }
+
+    /// Hints in the order produced by the parser.
+    public fn diagnostics(&self) -> &[ParseDiagnostic] { self.diagnostics.as_slice() }
+
     /// Build an error with no field/value attached.
     public fn bare(kind: ParseErrorKind, message: Text) -> ParseError {
         ParseError {

@@ -42,7 +42,6 @@ module core.cli.runtime;
 mount core.{Maybe, Result, List, Map, Text, Heap};
 mount core.base.env;
 mount core.io.stdio;
-mount core.text.builder.TextBuilder;
 mount core.cli.spec.{CommandSpec, FlagSpec, HandlerRef};
 mount core.cli.parser.{parse_argv, ParseOutcome, CapturedArg, CapturedFlag};
 mount core.cli.help.{render_help, HelpStyle};
@@ -150,6 +149,8 @@ public type App is {
 };
 
 implement App {
+    public(in core.cli) fn command_spec(&self) -> &CommandSpec { &self.spec }
+
     /// Build an `App` from a fully-described `CommandSpec`. The handler
     /// registry starts empty — populate via `.register("name", fn)`.
     public fn from_spec(spec: CommandSpec) -> App {
@@ -325,18 +326,18 @@ fn apply_env_for_command(cmd: &CommandSpec, outcome: &mut ParseOutcome) {
 
 /// Render a `ParseError` as a multi-line styled block for stderr.
 fn render_error(e: &ParseError) -> Text {
-    let mut b = TextBuilder.new();
-    b.push("\x1b[31;1merror\x1b[0m: ");
-    b.push(&e.message);
-    b.push("\n");
+    let mut text = Text.from("\x1b[31;1merror\x1b[0m: ");
+    text.push_str(e.message());
+    text.push_str("\n");
+    let hints = e.diagnostics();
     let mut i: Int = 0;
-    while i < e.diagnostics.len() {
-        b.push("       ");
-        b.push(&e.diagnostics[i].to_text());
-        b.push("\n");
+    while i < hints.len() {
+        text.push_str("       ");
+        text.push_str(&hints[i].to_text());
+        text.push_str("\n");
         i = i + 1;
     }
-    b.build()
+    text
 }
 
 // =============================================================================

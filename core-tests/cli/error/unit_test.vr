@@ -10,7 +10,20 @@
 //   * ParseErrorKind 13-variant + to_exit() → ExitCode + tag() → stable text
 // =============================================================================
 
-mount core.cli.error.{ExitCode, ParseDiagnostic, ParseErrorKind};
+mount core.cli.error.{ExitCode, ParseDiagnostic, ParseError, ParseErrorKind};
+
+@test
+fn test_error_summary_preserves_hint_order_and_exit_code() {
+    let error = ParseError.bare(ParseErrorKind.UnknownFlag, "unknown --colour")
+        .with_diagnostic(ParseDiagnostic.Note("first"))
+        .with_diagnostic(ParseDiagnostic.Note("second"));
+    assert(error.message() == &"unknown --colour");
+    let hints = error.diagnostics();
+    assert(hints.len() == 2);
+    assert(hints[0] is ParseDiagnostic.Note("first"));
+    assert(hints[1] is ParseDiagnostic.Note("second"));
+    assert(error.exit_code().code() == 2);
+}
 
 // =============================================================================
 // Section 1: ExitCode 18-variant construction

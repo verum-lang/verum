@@ -178,7 +178,7 @@ public fn run(app: &App, cfg: ReplConfig) -> ExitCode {
             LineAction.Quit => break,
             LineAction.Skip => continue,
             LineAction.ShowHelp => {
-                let txt = render_help(&app.spec, &style);
+                let txt = render_help(app.command_spec(), &style);
                 stdio.println(&txt);
             },
             LineAction.ShowHistory => {
@@ -193,7 +193,7 @@ public fn run(app: &App, cfg: ReplConfig) -> ExitCode {
 
                 // Build a synthetic argv with argv[0] = app name.
                 let mut argv = List.new();
-                argv.push(app.spec.name.clone());
+                argv.push(app.command_spec().name.clone());
                 let mut i: Int = 0;
                 while i < tokens.len() {
                     argv.push(tokens[i].clone());
@@ -204,7 +204,7 @@ public fn run(app: &App, cfg: ReplConfig) -> ExitCode {
                     Result.Ok(code) => { last_code = code; },
                     Result.Err(e) => {
                         let mut msg = Text.from("error: ");
-                        msg.push_str(&e.message);
+                        msg.push_str(e.message());
                         stdio.eprintln(&msg);
                         last_code = e.exit_code();
                     },
