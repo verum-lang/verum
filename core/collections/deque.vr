@@ -747,11 +747,10 @@ implement<T> Deque<T> {
     }
 
     /// Truncate deque to given length, dropping excess elements from the back.
+    /// A negative length empties the deque.
     public fn truncate(&mut self, new_len: Int) {
-        if new_len >= self.len {
-            return;
-        }
-        while self.len > new_len {
+        let end = if new_len < 0 { 0 } else { new_len };
+        while self.len > end {
             self.pop_back();
         }
     }

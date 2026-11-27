@@ -68,6 +68,7 @@ fn test_clear_and_drop_release_the_remaining_affine_values_once() {
     check_compaction_drops_each_affine_element_once();
     check_into_list_moves_wrapped_affine_values();
     check_split_moves_wrapped_affine_values();
+    check_truncation_drops_the_wrapped_suffix();
 }
 
 @test
@@ -197,6 +198,26 @@ fn check_split_moves_wrapped_affine_values() {
         assert(unsafe { DESTROYED } == 25);
     }
     assert(unsafe { DESTROYED } == 31);
+}
+
+fn check_truncation_drops_the_wrapped_suffix() {
+    unsafe { DESTROYED = 0; }
+    {
+        let mut ring: Deque<Guard> = Deque.with_capacity(4);
+        ring.push_front(Guard { weight: 2 });
+        ring.push_back(Guard { weight: 4 });
+        ring.push_back(Guard { weight: 8 });
+        ring.truncate(5);
+        assert(ring.len() == 3 && unsafe { DESTROYED } == 0);
+        ring.truncate(2);
+        assert(ring.len() == 2 && ring.front_mut().unwrap().weight == 2);
+        assert(unsafe { DESTROYED } == 8);
+        ring.truncate(-1);
+        assert(ring.is_empty() && ring.capacity() == 4 && unsafe { DESTROYED } == 14);
+        ring.truncate(-3);
+        ring.push_back(Guard { weight: 16 });
+    }
+    assert(unsafe { DESTROYED } == 30);
 }
 
 @test
