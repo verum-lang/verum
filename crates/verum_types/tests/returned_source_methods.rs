@@ -1456,6 +1456,38 @@ fn refined_carriers_inherit_read_operations_without_granting_write_permission() 
 }
 
 #[test]
+fn imported_associated_functions_publish_the_selected_input_and_body_in_both_orders() {
+    let declarations = "
+        public type Source is { public number: Int };
+        public type Reader is { public number: Int };
+        public type Decode<T> is protocol { fn read(input: T) -> Int; };";
+    let inherent = "implement Reader { public fn read(input: &Source) -> Int { input.number } }";
+    let protocol = "implement Decode<Char> for Reader { fn read(input: Char) -> Int { 2 } }";
+    let imports = "mount demo.reader.{Reader, Source};";
+    let call = "Reader.read(input)";
+    let consumer = format!("{imports} fn invoke(input: &Source) -> Int {{
+        let read: fn() -> Int = || {call};
+        read()
+    }}");
+    for implementations in [format!("{inherent} {protocol}"), format!("{protocol} {inherent}")] {
+        let provider = format!("{declarations} {implementations}");
+        let graph = [("demo.reader", provider.as_str())];
+        let (checker, errors) = check_with_checker(&consumer, &graph);
+        assert!(errors.is_empty(), "{errors:?}");
+        let offset = consumer.find(call).unwrap() as u32;
+        let span = verum_ast::Span::new(offset, offset + call.len() as u32, FileId::new(1));
+        let target = checker.type_registry.lookup_call_target(span);
+        assert!(matches!(target, Some(Type::Function { params, property_requirement, .. })
+            if matches!(params.as_slice(), [Type::Reference { inner, mutable: false }]
+                if inner.to_string() == "demo.reader.Source")
+                && !property_requirement.may_be_async()), "{target:?}");
+        let invalid = format!("{imports} fn wrong() -> Int {{ Reader.read(false) }}");
+        let errors = check(&invalid, &graph);
+        assert!(errors.iter().any(|error| error.contains("Mismatch")), "{errors:?}");
+    }
+}
+
+#[test]
 fn a_static_call_uses_the_receivers_declared_protocol_arguments() {
     let declarations = r#"
         type ReadFrom<S> is protocol { fn read_from(value: S) -> Self; };

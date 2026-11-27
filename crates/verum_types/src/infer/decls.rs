@@ -5090,25 +5090,9 @@ impl TypeChecker {
                                     publish_domain(&mut func_scheme);
 
 
-                                    checker.ctx
-                                        .env
-                                        .insert(qualified_name.as_str(), func_scheme.clone());
-
-                                    // Also register in inherent_methods for cross-pass visibility
-                                    // Use "$static$" prefix to distinguish from instance methods
-                                    let static_key = verum_common::Text::from(format!(
-                                        "$static${}",
-                                        func.name.name.as_str()
-                                    ));
-                                    let type_name_text =
-                                        verum_common::Text::from(type_name_str.as_str());
-                                    checker.record_method_publication(&type_name_text, &static_key, &func_scheme);
-                                    {
-                                        let mut methods = checker.inherent_methods.write();
-                                        let type_methods =
-                                            methods.entry(type_name_text).or_default();
-                                        type_methods.insert(static_key, func_scheme);
-                                    }
+                                    checker.register_static_method(
+                                        &Text::from(type_name_str.as_str()), &func.name.name, func_scheme, false,
+                                    );
 
                                     tracing::debug!(
                                         "Registered static method signature: {}",
@@ -5741,20 +5725,9 @@ impl TypeChecker {
                                     self.ctx.remove_type(&param_name);
                                 }
 
-                                // Register in inherent_methods for cross-pass visibility
-                                // CRITICAL FIX: Use $static$ prefix to distinguish static methods
-                                // from instance methods, matching the lookup code in method resolution.
-                                let static_key = verum_common::Text::from(format!(
-                                    "$static${}",
-                                    func.name.name.as_str()
-                                ));
-                                self.record_method_publication(&type_name_text, &static_key, &method_scheme);
-                                {
-                                    let mut methods_guard = self.inherent_methods.write();
-                                    let type_methods =
-                                        methods_guard.entry(type_name_text.clone()).or_default();
-                                    type_methods.insert(static_key, method_scheme);
-                                }
+                                self.register_static_method(
+                                    &type_name_text, &func.name.name, method_scheme, true,
+                                );
 
                                 tracing::debug!(
                                     "Registered protocol STATIC method: {}.{} (from {})",

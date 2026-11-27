@@ -5712,11 +5712,7 @@ impl TypeChecker {
                     )?;
                     for (name, scheme) in declared_methods {
                         if scheme.receiver_kind == Some(crate::core_metadata::ReceiverKind::None) {
-                            let key = format!("$static${name}").into();
-                            checker.record_method_publication(&method_owner, &key, &scheme);
-                            checker.inherent_methods.write().entry(method_owner.clone()).or_default()
-                                .insert(key, scheme.clone());
-                            static_method_registrations.push((format!("{method_owner}.{name}"), scheme));
+                            static_method_registrations.push((method_owner.clone(), name, scheme));
                         } else {
                             checker.register_inherent_method_guarded(method_owner.clone(), name, scheme, true);
                         }
@@ -5743,12 +5739,8 @@ impl TypeChecker {
             // Exit the scope we entered for this impl block's type parameters
             self.ctx.exit_scope();
 
-            // NOW register static methods in the outer scope (after exiting the temporary scope)
-            // This ensures the registrations persist and are visible during type checking
-            for (qualified_name, method_scheme) in static_method_registrations {
-                self.ctx.env.insert(qualified_name.as_str(), method_scheme);
-
-                tracing::debug!("Registered static method {} in outer scope", qualified_name);
+            for (owner, name, scheme) in static_method_registrations {
+                self.register_static_method(&owner, &name, scheme, true);
             }
 
             // Register associated constants in the outer scope

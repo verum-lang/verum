@@ -134,11 +134,30 @@ impl TypeChecker {
             // protocol method happens to have the same callable type.
             methods.insert(method_name, scheme);
         } else if !existing.declared_inherent
-            && (existing.ty != scheme.ty || existing.impl_self_type != scheme.impl_self_type)
+            && (existing.ty != scheme.ty || existing.impl_self_type != scheme.impl_self_type
+                || existing.callable_source != scheme.callable_source)
         {
             methods.remove(&method_name);
             drop(methods_guard);
             self.inherent_overloaded_methods.insert(overload_key);
+        }
+    }
+
+    /// Publish the qualified value and the method slot from the same selection.
+    /// A protocol implementation cannot overwrite an inherent associated function.
+    pub(super) fn register_static_method(
+        &mut self,
+        owner: &Text,
+        name: &Text,
+        scheme: TypeScheme,
+        from_protocol_impl: bool,
+    ) {
+        let key = Text::from(format!("$static${name}"));
+        self.register_inherent_method_guarded(owner.clone(), key.clone(), scheme, from_protocol_impl);
+        let qualified = format!("{owner}.{name}");
+        match self.inherent_methods.read().get(owner).and_then(|methods| methods.get(&key)) {
+            Some(selected) => self.ctx.env.insert(qualified, selected.clone()),
+            None => { self.ctx.env.remove(&qualified); }
         }
     }
 
