@@ -76,6 +76,31 @@ type Slot<K, V> is {
 };
 
 implement<K, V> Slot<K, V> {
+    // The caller owns this freshly allocated table. Only the control fields
+    // of an empty bucket are initialized before its first key and value arrive.
+    unsafe fn initialize_table(entries: &unsafe Slot<K, V>, capacity: Int) {
+        let mut index = 0;
+        while index < capacity {
+            let address = unsafe { entries.offset(index) as *mut Slot<K, V> };
+            unsafe {
+                (*address).hash = EMPTY;
+                (*address).psl = 0;
+            };
+            index = index + 1;
+        }
+    }
+
+    fn try_allocate_table(capacity: Int) -> Result<&unsafe Slot<K, V>, AllocError> {
+        let size = capacity * Slot<K, V>.stride;
+        let raw = try_alloc(size, Slot<K, V>.alignment)?;
+        let entries = raw as &unsafe Slot<K, V>;
+        if entries.is_null() {
+            return Result.Err(AllocError.OutOfMemory { requested: size });
+        }
+        unsafe { Slot<K, V>.initialize_table(entries, capacity); };
+        Result.Ok(entries)
+    }
+
     fn is_empty(&self) -> Bool {
         self.hash == EMPTY
     }
@@ -398,11 +423,8 @@ implement<K: Hash + Eq, V> Map<K, V> {
             }
             buckets = buckets * 2;
         }
-        let mut map: Map<K, V> = Map.new();
-        match map.try_resize(buckets) {
-            Result.Ok(()) => Result.Ok(map),
-            Result.Err(e) => Result.Err(e),
-        }
+        let entries = Slot<K, V>.try_allocate_table(buckets)?;
+        Result.Ok(Map { len: 0, cap: buckets, entries: entries, tombstones: 0 })
     }
 
     /// Create a Map from a list of key-value pairs.
@@ -639,12 +661,15 @@ implement<K: Hash + Eq, V> Map<K, V> {
 
         // Drop all entries
         for i in range(0, self.cap) {
-            let entry = unsafe { &mut *self.entries.offset(i) };
-            if (entry.hash > 0) {
+            let address = unsafe { self.entries.offset(i) as *mut Slot<K, V> };
+            if unsafe { (*address).hash } > 0 {
                 let _removed = unsafe { take_slot(self.entries, i, EMPTY) };
+            } else {
+                unsafe {
+                    (*address).hash = EMPTY;
+                    (*address).psl = 0;
+                };
             }
-            entry.hash = EMPTY;
-            entry.psl = 0;
         }
 
         self.len = 0;
@@ -754,8 +779,9 @@ implement<K: Hash + Eq, V> Map<K, V> {
     // Read one occupied bucket without transferring either stored owner.
     fn occupied_pair_at(&self, index: Int) -> Maybe<(&K, &V)> {
         if index < 0 || index >= self.cap { return Maybe.None; }
-        let entry = unsafe { &*self.entries.offset(index) };
-        if entry.hash > 0 { Maybe.Some((&entry.key, &entry.value)) } else { Maybe.None }
+        if unsafe { (*self.entries.offset(index)).hash } > 0 {
+            unsafe { Maybe.Some((&(*self.entries.offset(index)).key, &(*self.entries.offset(index)).value)) }
+        } else { Maybe.None }
     }
 
     // Iterator over keys.
@@ -1716,6 +1742,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
         if new_entries.is_null() {
             panic(f"Map.resize: allocator returned null for {size} bytes (new_cap={new_cap}, old_cap={self.cap})");
         }
+        unsafe { Slot<K, V>.initialize_table(new_entries, new_cap); };
         self.swap_in_table(new_entries, new_cap);
     }
 
@@ -1723,12 +1750,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
     // `Result.Err(AllocError)` on alloc failure rather than panicking.
     // Load-bearing primitive for every try_<op> method.
     fn try_resize(&mut self, new_cap: Int) -> Result<Unit, AllocError> {
-        let size = new_cap * Slot<K, V>.stride;
-        let raw = try_alloc(size, Slot<K, V>.alignment)?;
-        let new_entries = raw as &unsafe Slot<K, V>;
-        if new_entries.is_null() {
-            return Result.Err(AllocError.OutOfMemory { requested: size });
-        }
+        let new_entries = Slot<K, V>.try_allocate_table(new_cap)?;
         self.swap_in_table(new_entries, new_cap);
         Result.Ok(())
     }
@@ -1738,16 +1760,6 @@ implement<K: Hash + Eq, V> Map<K, V> {
     // must guarantee `new_entries` is a non-null pointer to an allocated
     // buffer for `new_cap` slots with the alignment declared by Slot<K, V>.
     fn swap_in_table(&mut self, new_entries: &unsafe Slot<K, V>, new_cap: Int) {
-        // Only occupied slots own a key and value. Initialize the control
-        // fields through their declared types before publishing the table.
-        let mut index = 0;
-        while index < new_cap {
-            let slot = unsafe { &mut *new_entries.offset(index) };
-            slot.hash = EMPTY;
-            slot.psl = 0;
-            index = index + 1;
-        }
-
         let old_entries = self.entries;
         let old_cap = self.cap;
 

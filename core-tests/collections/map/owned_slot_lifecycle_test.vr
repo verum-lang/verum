@@ -1,5 +1,6 @@
 module core.collections.tests.map_owned_slots;
 mount core.collections.map.{Map, MapEntry};
+mount core.mem.allocator.AllocError;
 mount core.base.protocols.{Drop, Eq, Hash, Hasher, PartialEq};
 
 static mut VALUE_DROPS: Int = 0;
@@ -249,3 +250,27 @@ fn test_vacant_entry_returns_ownership_of_the_key() {
 }
 
 fn main() {}
+
+@test
+fn test_fallible_table_initializes_only_empty_slots() {
+    let result = Map<Int, Int>.try_with_capacity(17);
+    match result {
+        Result.Ok(mut table) => {
+            assert(table.capacity() == 32);
+            assert(table.len() == 0);
+            assert(table.get(4) is Maybe.None);
+            table.insert(4, 21);
+            let mut pairs = table.iter();
+            match pairs.next() {
+                Maybe.Some(pair) => { assert(*pair.0 == 4); assert(*pair.1 == 21); }
+                Maybe.None => panic("missing initialized entry"),
+            }
+        }
+        Result.Err(_) => panic("small table allocation failed"),
+    }
+    let overflow = Map<Int, Int>.try_with_capacity(Int.MAX);
+    match overflow {
+        Result.Err(AllocError.CapacityOverflow { requested }) => assert(requested == Int.MAX),
+        _ => panic("missing capacity overflow"),
+    }
+}
