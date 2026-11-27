@@ -909,19 +909,13 @@ fn read_string(bytes: &[Byte], off: &mut Int) -> Result<Text, BsonError> {
     if *off + len > bytes.len() as Int {
         return Result.Err(BsonE_Truncated(*off + len));
     }
-    // payload = (len - 1) UTF-8 bytes + NUL terminator.
-    let body_len = len - 1;
-    let mut body: List<Byte> = List.with_capacity(body_len);
-    let mut i: Int = 0;
-    while i < body_len {
-        body.push(bytes[*off + i]);
-        i = i + 1;
-    }
-    if (bytes[*off + body_len] as Int) != 0 {
+    let start = *off;
+    let end = start + len - 1;
+    if bytes[end] != 0_u8 {
         return Result.Err(BsonE_BadLength(len));
     }
-    *off = *off + len;
-    match Text.from_utf8(body) {
+    *off = end + 1;
+    match Text.from_utf8(&bytes[start..end]) {
         Result.Ok(s)  => Result.Ok(s),
         Result.Err(_) => Result.Err(BsonE_BadUtf8),
     }
@@ -938,14 +932,8 @@ fn read_cstring(bytes: &[Byte], off: &mut Int) -> Result<Text, BsonError> {
     if i >= n {
         return Result.Err(BsonE_Truncated(i));
     }
-    let mut body: List<Byte> = List.with_capacity(i - start);
-    let mut j = start;
-    while j < i {
-        body.push(bytes[j]);
-        j = j + 1;
-    }
     *off = i + 1;       // skip NUL
-    match Text.from_utf8(body) {
+    match Text.from_utf8(&bytes[start..i]) {
         Result.Ok(s)  => Result.Ok(s),
         Result.Err(_) => Result.Err(BsonE_BadUtf8),
     }

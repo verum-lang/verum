@@ -9,13 +9,10 @@
 //   * BsonError 10-variant ADT (scalar + carrier variants)
 //   * Variant disjointness + scalar payload preservation
 //
-// BsonObjectId / BsonBinary / BsonRegex / BsonTimestamp /
-// BsonDocument record types and the BsonValue 18-variant ADT are
-// gated behind the record-destructure + recursive-ADT defect
-// classes; tracked in audit.md.
+// Wire decoding covers document field names and strings.
 // =============================================================================
 
-mount core.encoding.bson.{BsonError};
+mount core.encoding.bson.{BsonDocument, BsonError, BsonValue, decode};
 mount core.encoding.bson.{
     BSON_DOUBLE, BSON_STRING, BSON_DOCUMENT, BSON_ARRAY,
     BSON_BINARY, BSON_UNDEFINED, BSON_OBJECT_ID, BSON_BOOLEAN,
@@ -215,3 +212,44 @@ fn test_bson_error_document_too_large_payload_round_trip() {
 }
 
 fn main() {}
+
+@test
+fn test_string_payload_rejects_invalid_utf8() {
+    let wire: [Byte; 14] = [0x0e_u8, 0x00_u8, 0x00_u8, 0x00_u8, 0x02_u8, 0x61_u8, 0x00_u8, 0x02_u8, 0x00_u8, 0x00_u8, 0x00_u8, 0xff_u8, 0x00_u8, 0x00_u8];
+    assert(decode(&wire[..]) is Err(BsonError.BsonE_BadUtf8));
+}
+
+fn assert_unicode_field(doc: &BsonDocument) {
+    assert_eq(doc.fields[0].0, "λ");
+    match &doc.fields[0].1 {
+        BsonValue.BsonV_String(value) => assert_eq(*value, "é"),
+        _ => panic("expected a BSON string"),
+    }
+}
+
+@test
+fn test_utf8_field_name_and_value() {
+    let wire: [Byte; 16] = [
+        16_u8, 0_u8, 0_u8, 0_u8, 2_u8, 0xce_u8, 0xbb_u8, 0_u8,
+        3_u8, 0_u8, 0_u8, 0_u8, 0xc3_u8, 0xa9_u8, 0_u8, 0_u8,
+    ];
+    match decode(&wire[..]) {
+        Ok(BsonValue.BsonV_Document(owner)) => assert_unicode_field(owner.as_ref()),
+        _ => panic("expected a BSON document"),
+    }
+}
+
+@test
+fn test_cstring_rejects_invalid_utf8() {
+    let wire: [Byte; 8] = [8_u8, 0_u8, 0_u8, 0_u8, 0x0a_u8, 0xff_u8, 0_u8, 0_u8];
+    assert(decode(&wire[..]) is Err(BsonError.BsonE_BadUtf8));
+}
+
+@test
+fn test_string_requires_its_declared_nul_terminator() {
+    let wire: [Byte; 15] = [
+        15_u8, 0_u8, 0_u8, 0_u8, 2_u8, 97_u8, 0_u8, 3_u8,
+        0_u8, 0_u8, 0_u8, 111_u8, 107_u8, 3_u8, 0_u8,
+    ];
+    assert(decode(&wire[..]) is Err(BsonError.BsonE_BadLength(3)));
+}
