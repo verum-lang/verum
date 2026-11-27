@@ -75,7 +75,7 @@ public type Money is {
 
 /// Errors surfaced by the Money API.
 public type MoneyError is
-      CurrencyMismatch { public left: Text, public right: Text }
+    | CurrencyMismatch { public left: Text, public right: Text }
     | ScaleMismatch    { public expected: Int, public actual: Int }
     | DivByZero
     | InvalidSplit     { public reason: Text }
