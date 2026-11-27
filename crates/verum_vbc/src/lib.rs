@@ -55,6 +55,7 @@
 #![allow(clippy::doc_lazy_continuation)]
 #![allow(clippy::doc_overindented_list_items)]
 
+pub mod allocation_result;
 pub mod archive;
 pub mod associated_types;
 pub mod array_storage;

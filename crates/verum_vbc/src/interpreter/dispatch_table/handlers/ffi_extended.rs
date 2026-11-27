@@ -2073,96 +2073,16 @@ pub(in crate::interpreter::dispatch_table) fn value_as_addr(v: Value) -> usize {
 // Public CBGR bridge helpers (header-model allocation)
 // ==============================================================
 
-/// Failure cases of the allocator ABI implemented by the CBGR VM operations.
-pub(super) enum AllocationFailure {
-    InvalidSize,
-    OutOfMemory,
-}
+pub(super) use crate::allocation_result::{AllocatingOperation, AllocationFailure};
 
-#[derive(Clone, Copy, Debug)]
-pub(super) enum AllocatingOperation<'a> {
-    Intrinsic(&'a str),
-    MapMethod(&'a str),
-}
-
-/// The selected operation's Result<_, E> declares the owner of its error
-/// payload. Read E's actual discriminant and field layout in the same module.
 pub(super) fn make_alloc_err(
     state: &mut InterpreterState,
     operation: AllocatingOperation<'_>,
     error: AllocationFailure,
     field_value: i64,
 ) -> InterpreterResult<Value> {
-    use crate::types::{TypeKind, TypeRef, VariantKind};
-    use verum_common::well_known_types::WellKnownType;
-    let (variant, field) = match error {
-        AllocationFailure::InvalidSize => ("InvalidSize", "size"),
-        AllocationFailure::OutOfMemory => ("OutOfMemory", "requested"),
-    };
-    let module = &state.module;
-    let mut owners = module.functions.iter().filter_map(|function| {
-        match operation {
-            AllocatingOperation::Intrinsic(name) => {
-                if function.intrinsic_name.and_then(|id| module.get_string(id)) != Some(name) {
-                    return None;
-                }
-            }
-            AllocatingOperation::MapMethod(method) => {
-                if module.get_string(function.name)?.rsplit('.').next()? != method {
-                    return None;
-                }
-                let parent = module.get_type(function.parent_type?)?;
-                let owner = parent
-                    .origin_module
-                    .and_then(|id| module.get_string(id))
-                    .unwrap_or(&module.name);
-                if WellKnownType::from_declaration(module.get_string(parent.name)?, owner)
-                    != Some(WellKnownType::Map)
-                {
-                    return None;
-                }
-            }
-        }
-        let TypeRef::Instantiated {
-            base: TypeId::RESULT,
-            args,
-        } = &function.return_type
-        else {
-            return None;
-        };
-        let [_, TypeRef::Concrete(owner)] = args.as_slice() else {
-            return None;
-        };
-        Some(*owner)
-    });
-    let invalid = || InterpreterError::InvalidOperand {
-        message: format!(
-            "{operation:?} has no unique Result error declaring {variant} {{ {field}: Int }}"
-        ),
-    };
-    let owner = owners.next().ok_or_else(invalid)?;
-    if owners.any(|id| id != owner) {
-        return Err(invalid());
-    }
-    let declaration = module
-        .get_type(owner)
-        .filter(|ty| ty.kind == TypeKind::Sum)
-        .ok_or_else(invalid)?;
-    let case = declaration
-        .variants
-        .iter()
-        .find(|case| module.get_string(case.name) == Some(variant))
-        .ok_or_else(invalid)?;
-    let [payload] = case.fields.as_slice() else {
-        return Err(invalid());
-    };
-    if case.kind != VariantKind::Record
-        || module.get_string(payload.name) != Some(field)
-        || payload.type_ref != TypeRef::Concrete(TypeId::INT)
-    {
-        return Err(invalid());
-    }
-    let tag = case.tag;
+    let (owner, tag) = crate::allocation_result::error_variant(&state.module, operation, error)
+        .map_err(|reason| InterpreterError::InvalidOperand { message: reason.to_string() })?;
     let payload = super::method_dispatch::alloc_variant_with_payload(
         state,
         owner,

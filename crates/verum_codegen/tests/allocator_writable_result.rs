@@ -25,15 +25,18 @@ fn operations(source: &str, file: u32, names: &[&str]) -> verum_ast::Module {
 }
 
 fn allocated_blocks() -> verum_vbc::VbcModule {
+    allocator_client(concat!(
+        include_str!("../../../core-tests/mem/allocator/fresh_storage_test.vr"),
+        "\nfn main() -> Int { allocation_control() }",
+    ))
+}
+
+fn allocator_client(source: &str) -> verum_vbc::VbcModule {
     use verum_vbc::{
         codegen::{CodegenConfig, ItemFailurePolicy, VbcCodegen},
         deserialize::deserialize_module,
         serialize::serialize_module,
     };
-    let source = concat!(
-        include_str!("../../../core-tests/mem/allocator/fresh_storage_test.vr"),
-        "\nfn main() -> Int { allocation_control() }",
-    );
     let source = verum_fast_parser::FastParser::new()
         .parse_module_str(source, verum_ast::FileId::new(0))
         .expect("source grammar");
@@ -85,4 +88,57 @@ fn default_allocator_supplies_distinct_writable_blocks_in_vm() {
 #[cfg(target_os = "macos")]
 fn default_allocator_supplies_distinct_writable_blocks_in_native_image() {
     source_image::run_module(allocated_blocks(), |_| {});
+}
+
+const FAILURE_CLIENT: &str = r#"
+    module allocation_errors;
+    mount core.base.result.Result;
+    mount core.mem.allocator.{AllocError, cbgr_alloc, cbgr_alloc_zeroed};
+
+    type StorageIssue is Other | OutOfMemory { requested: Int } | InvalidSize { size: Int };
+    @intrinsic("cbgr_realloc")
+    fn resize(ptr: &unsafe Byte, old: Int, size: Int, alignment: Int)
+        -> Result<(&unsafe Byte, UInt32, UInt16), StorageIssue>;
+
+    fn main() -> Int {
+        let invalid = match cbgr_alloc(-13, 8) {
+            Result.Err(AllocError.InvalidSize { size }) => size, _ => 0,
+        };
+        let exhausted = match cbgr_alloc_zeroed(19, 8) {
+            Result.Err(AllocError.OutOfMemory { requested }) => requested, _ => 0,
+        };
+        let refused = match resize(0 as &unsafe Byte, 0, -7, 8) {
+            Result.Err(StorageIssue.InvalidSize { size }) => size, _ => 0,
+        };
+        let exhausted_resize = match resize(0 as &unsafe Byte, 0, 34, 8) {
+            Result.Err(StorageIssue.OutOfMemory { requested }) => requested, _ => 0,
+        };
+        if invalid == -13 && exhausted == 19 && refused == -7 && exhausted_resize == 34 { 73 } else { 0 }
+    }
+"#;
+
+#[test]
+fn allocation_failures_use_each_declared_error_in_vm() {
+    let module = allocator_client(FAILURE_CLIENT);
+    let entry = module
+        .find_function_by_name("allocation_errors.main")
+        .unwrap();
+    let mut vm = verum_vbc::interpreter::Interpreter::new(module.into());
+    vm.state.cbgr_generation_counter = u64::from(verum_common::cbgr::GEN_MAX);
+    assert_eq!(vm.execute_function(entry).unwrap().try_as_i64(), Some(73));
+    assert!(vm.state.cbgr_allocations.is_empty());
+}
+
+#[test]
+#[cfg(target_os = "macos")]
+fn allocation_failures_use_each_declared_error_in_native_image() {
+    source_image::run_module(allocator_client(FAILURE_CLIENT), |module| {
+        let counter = module.get_global("verum_ir_generation_counter").unwrap();
+        let word = counter
+            .get_initializer()
+            .unwrap()
+            .into_int_value()
+            .get_type();
+        counter.set_initializer(&word.const_int(u64::from(verum_common::cbgr::GEN_MAX), false));
+    });
 }

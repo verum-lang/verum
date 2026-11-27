@@ -1675,6 +1675,21 @@ impl<'ctx> RuntimeLowering<'ctx> {
         Ok(variant_ptr)
     }
 
+    /// Allocate a nominal variant with the same storage receipt and extent as MakeVariant.
+    pub fn lower_make_typed_variant(
+        &self,
+        builder: &Builder<'ctx>,
+        module: &Module<'ctx>,
+        owner: verum_vbc::types::TypeId,
+        tag: u32,
+        fields: u32,
+    ) -> Result<PointerValue<'ctx>> {
+        let variant = self.lower_make_variant(builder, module, tag, fields)?;
+        builder.build_store(variant, self.context.i32_type().const_int(u64::from(owner.0), false))
+            .or_llvm_err()?;
+        Ok(variant)
+    }
+
     /// Stamp a freshly-built variant's ObjectHeader with its type id
     /// (u32 @0) and complete extent (u32 @12) — the AOT-XMODULE-VALUESEM-1
     /// discipline. A zeroed header makes `verum_generic_eq`'s

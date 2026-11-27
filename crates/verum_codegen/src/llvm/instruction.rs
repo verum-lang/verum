@@ -27,6 +27,7 @@ use super::vbc_lowering::is_primitive_type_name;
 use super::well_known_types::{WellKnownType as WKT, WellKnownTypeExt};
 use verum_common::well_known_types::type_names as tn;
 
+mod allocation_result;
 mod drop_typed;
 mod retain_copy;
 mod copy_typed;
@@ -4784,14 +4785,9 @@ fn lower_instruction_impl<'ctx>(
                 }
             }
             let runtime = RuntimeLowering::new(ctx.llvm_context());
-            let variant_ptr =
-                runtime.lower_make_variant(ctx.builder(), ctx.get_module(), *tag, *field_count)?;
-            // AOT-XMODULE-VALUESEM-1: stamp type_id (u32 @0) + size
-            // (u32 @12) into the variant header — same discipline as
-            // `New`. Variants had fully zeroed headers, so
-            // `verum_generic_eq`'s `first==0` early-out equated
-            // DISTINCT enum variants before ever reading the tag.
-            runtime.stamp_variant_header(ctx.builder(), variant_ptr, *type_id, *field_count)?;
+            let variant_ptr = runtime.lower_make_typed_variant(
+                ctx.builder(), ctx.get_module(), TypeId(*type_id), *tag, *field_count,
+            )?;
             ctx.set_register(dst.0, variant_ptr.into());
             ctx.mark_variant_register(dst.0);
             // CLONE-AOT-ALIAS-1: static size = header + tag word + fields.
@@ -27063,7 +27059,6 @@ fn lower_cbgr_extended<'ctx>(
             let i64_ty = ctx.types().i64_type();
             let module = ctx.get_module();
             let builder = ctx.builder();
-            let runtime = RuntimeLowering::new(ctx.llvm_context());
 
             let size_val = as_i64(ctx, ctx.get_register(size_reg)?, "cbgr_alloc_size")?;
             let align_val = as_i64(ctx, ctx.get_register(align_reg)?, "cbgr_alloc_align")?;
@@ -27075,7 +27070,7 @@ fn lower_cbgr_extended<'ctx>(
             let alloc_bb = ctx.llvm_context().append_basic_block(current_fn, "cbgr_alloc_go");
             let err_bb = ctx.llvm_context().append_basic_block(current_fn, "cbgr_alloc_err");
             let ok_bb = ctx.llvm_context().append_basic_block(current_fn, "cbgr_alloc_ok");
-            let done_bb = ctx.llvm_context().append_basic_block(current_fn, "cbgr_alloc_done");
+            let oom_bb = ctx.llvm_context().append_basic_block(current_fn, "cbgr_alloc_exhausted");
 
             // Validation mirrors the Tier-0 handler bit for bit:
             // 0 < size <= MAX_ALLOCATION_SIZE, 0 < align <= 4096,
@@ -27117,19 +27112,6 @@ fn lower_cbgr_extended<'ctx>(
                 .build_conditional_branch(valid, alloc_bb, err_bb)
                 .or_llvm_err()?;
 
-            // Err — both for rejected arguments and for OOM, matching
-            // the Tier-0 handler: `Err(AllocError.InvalidSize{size})`,
-            // a real two-level variant (the OOM leg is unreachable in
-            // practice — verum_checked_malloc aborts — so the rejected
-            // arguments are what this arm actually reports).
-            builder.position_at_end(err_bb);
-            let err_int = build_alloc_err_value(ctx, 1, size_val, "cbgr_err")?;
-            let builder = ctx.builder();
-            builder.build_unconditional_branch(done_bb).or_llvm_err()?;
-            let err_end_bb = builder
-                .get_insert_block()
-                .or_internal("cbgr_alloc: err block vanished")?;
-
             // Allocate through the ONE aligned body.
             builder.position_at_end(alloc_bb);
             let ptr_ty = ctx.types().ptr_type();
@@ -27148,51 +27130,14 @@ fn lower_cbgr_extended<'ctx>(
                 .build_is_null(ptr, "cbgr_alloc_oom")
                 .or_llvm_err()?;
             builder
-                .build_conditional_branch(is_null, err_bb, ok_bb)
+                .build_conditional_branch(is_null, oom_bb, ok_bb)
                 .or_llvm_err()?;
 
             // Ok((ptr, gen, epoch)) — gen and epoch READ BACK from the
             // header the allocator wrote, so tuple and header cannot
             // drift.
             builder.position_at_end(ok_bb);
-            let (generation, epoch) = runtime.lower_header_gen_epoch(builder, ptr)?;
-            let ptr_int = builder
-                .build_ptr_to_int(ptr, i64_ty, "cbgr_user_int")
-                .or_llvm_err()?;
-            let tuple_ptr = runtime.lower_pack_typed(
-                builder,
-                module,
-                &[ptr_int, generation, epoch],
-                verum_vbc::types::TypeId::TUPLE.0,
-            )?;
-            let tuple_int = builder
-                .build_ptr_to_int(tuple_ptr, i64_ty, "cbgr_tuple_int")
-                .or_llvm_err()?;
-            let ok_variant = runtime.lower_make_variant(
-                builder,
-                module,
-                verum_common::well_known_types::result_success_tag(),
-                1,
-            )?;
-            runtime.lower_set_variant_data(builder, ok_variant, 0, tuple_int)?;
-            let ok_int = builder
-                .build_ptr_to_int(ok_variant, i64_ty, "cbgr_ok_int")
-                .or_llvm_err()?;
-            builder.build_unconditional_branch(done_bb).or_llvm_err()?;
-            let ok_end_bb = builder
-                .get_insert_block()
-                .or_internal("cbgr_alloc: ok block vanished")?;
-
-            builder.position_at_end(done_bb);
-            let result = builder
-                .build_phi(i64_ty, "cbgr_alloc_result")
-                .or_llvm_err()?;
-            result.add_incoming(&[(&err_int, err_end_bb), (&ok_int, ok_end_bb)]);
-            let result_val = result.as_basic_value().into_int_value();
-            ctx.set_register(dst, result_val.into());
-            ctx.mark_variant_register(dst);
-            ctx.set_obj_alloc_size(dst, RuntimeLowering::OBJECT_HEADER_SIZE + 8 + 8);
-            Ok(())
+            allocation_result::finish(ctx, dst, if sub_op == 0x60 { "cbgr_alloc" } else { "cbgr_alloc_zeroed" }, ptr, size_val, err_bb, oom_bb)
         }
         0x62 => {
             if operands.len() < 4 {
@@ -27270,7 +27215,6 @@ fn lower_cbgr_extended<'ctx>(
             let ptr_ty = ctx.types().ptr_type();
             let module = ctx.get_module();
             let builder = ctx.builder();
-            let runtime = RuntimeLowering::new(ctx.llvm_context());
 
             let old_ptr = as_ptr(ctx, ctx.get_register(ptr_reg)?, "cbgr_realloc_old")?;
             let old_size = as_i64(ctx, ctx.get_register(old_size_reg)?, "cbgr_realloc_oldsz")?;
@@ -27284,7 +27228,7 @@ fn lower_cbgr_extended<'ctx>(
             let go_bb = ctx.llvm_context().append_basic_block(current_fn, "cbgr_re_go");
             let err_bb = ctx.llvm_context().append_basic_block(current_fn, "cbgr_re_err");
             let ok_bb = ctx.llvm_context().append_basic_block(current_fn, "cbgr_re_ok");
-            let done_bb = ctx.llvm_context().append_basic_block(current_fn, "cbgr_re_done");
+            let oom_bb = ctx.llvm_context().append_basic_block(current_fn, "cbgr_re_exhausted");
 
             let zero = i64_ty.const_zero();
             let max_alloc =
@@ -27313,14 +27257,6 @@ fn lower_cbgr_extended<'ctx>(
                 .build_conditional_branch(valid, go_bb, err_bb)
                 .or_llvm_err()?;
 
-            builder.position_at_end(err_bb);
-            let err_int = build_alloc_err_value(ctx, 1, new_size, "cbgr_re_err")?;
-            let builder = ctx.builder();
-            builder.build_unconditional_branch(done_bb).or_llvm_err()?;
-            let err_end_bb = builder
-                .get_insert_block()
-                .or_internal("cbgr_realloc: err block vanished")?;
-
             builder.position_at_end(go_bb);
             let alloc_fn = module
                 .get_function("verum_cbgr_allocate_aligned")
@@ -27337,7 +27273,7 @@ fn lower_cbgr_extended<'ctx>(
                 .build_is_null(new_ptr, "cbgr_re_oom")
                 .or_llvm_err()?;
             builder
-                .build_conditional_branch(is_null, err_bb, ok_bb)
+                .build_conditional_branch(is_null, oom_bb, ok_bb)
                 .or_llvm_err()?;
 
             builder.position_at_end(ok_bb);
@@ -27370,44 +27306,7 @@ fn lower_cbgr_extended<'ctx>(
             builder
                 .build_call(dealloc_fn, &[old_ptr.into()], "")
                 .or_llvm_err()?;
-            let (generation, epoch) = runtime.lower_header_gen_epoch(builder, new_ptr)?;
-            let ptr_int = builder
-                .build_ptr_to_int(new_ptr, i64_ty, "cbgr_re_user_int")
-                .or_llvm_err()?;
-            let tuple_ptr = runtime.lower_pack_typed(
-                builder,
-                module,
-                &[ptr_int, generation, epoch],
-                verum_vbc::types::TypeId::TUPLE.0,
-            )?;
-            let tuple_int = builder
-                .build_ptr_to_int(tuple_ptr, i64_ty, "cbgr_re_tuple_int")
-                .or_llvm_err()?;
-            let ok_variant = runtime.lower_make_variant(
-                builder,
-                module,
-                verum_common::well_known_types::result_success_tag(),
-                1,
-            )?;
-            runtime.lower_set_variant_data(builder, ok_variant, 0, tuple_int)?;
-            let ok_int = builder
-                .build_ptr_to_int(ok_variant, i64_ty, "cbgr_re_ok_int")
-                .or_llvm_err()?;
-            builder.build_unconditional_branch(done_bb).or_llvm_err()?;
-            let ok_end_bb = builder
-                .get_insert_block()
-                .or_internal("cbgr_realloc: ok block vanished")?;
-
-            builder.position_at_end(done_bb);
-            let result = builder
-                .build_phi(i64_ty, "cbgr_re_result")
-                .or_llvm_err()?;
-            result.add_incoming(&[(&err_int, err_end_bb), (&ok_int, ok_end_bb)]);
-            let result_val = result.as_basic_value().into_int_value();
-            ctx.set_register(dst, result_val.into());
-            ctx.mark_variant_register(dst);
-            ctx.set_obj_alloc_size(dst, RuntimeLowering::OBJECT_HEADER_SIZE + 8 + 8);
-            Ok(())
+            allocation_result::finish(ctx, dst, "cbgr_realloc", new_ptr, new_size, err_bb, oom_bb)
         }
 
         0x65 => {
@@ -36508,56 +36407,6 @@ fn lower_try_end<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>) -> Result<()> {
 /// are untagged, so guessing here would be exactly the suffix-heuristic
 /// dispatch the design invariants forbid. Wrong programs fail loudly;
 /// they never answer wrongly.
-/// Build the `Err(AllocError.<variant>{field})` value for the CBGR
-/// allocation arms — a REAL two-level variant whose `.message()`
-/// dispatches, replacing the old `Err` with a 0 payload that read as a
-/// null variant and exploded on any method call (T0846 layer 2, the
-/// nil-payload ledger row).
-///
-/// The `AllocError` type id is resolved AT LOWERING TIME from the VBC
-/// type table; a module compiled without the declaring type falls back
-/// to the old 0 payload — the exception with a stated reason, no longer
-/// the rule. Variant tags follow the declaration order in
-/// `core/mem/allocator.vr` (`OutOfMemory = 0 | InvalidSize = 1 | ...`).
-fn build_alloc_err_value<'ctx>(
-    ctx: &mut FunctionContext<'_, 'ctx>,
-    variant_tag: u32,
-    field_value: verum_llvm::values::IntValue<'ctx>,
-    what: &str,
-) -> Result<verum_llvm::values::IntValue<'ctx>> {
-    let i64_ty = ctx.types().i64_type();
-    let alloc_err_tid: Option<u32> = ctx.vbc_module().and_then(|vbc| {
-        vbc.types.iter().find_map(|t| {
-            let name = vbc.get_string(t.name).unwrap_or("");
-            (name == "AllocError" || name.ends_with(".AllocError")).then_some(t.id.0)
-        })
-    });
-    let module = ctx.get_module();
-    let runtime = RuntimeLowering::new(ctx.llvm_context());
-    let builder = ctx.builder();
-    let payload: verum_llvm::values::IntValue<'ctx> = match alloc_err_tid {
-        Some(tid) => {
-            let inner = runtime.lower_make_variant(builder, module, variant_tag, 1)?;
-            runtime.stamp_variant_header(builder, inner, tid, 1)?;
-            runtime.lower_set_variant_data(builder, inner, 0, field_value)?;
-            builder
-                .build_ptr_to_int(inner, i64_ty, &format!("{what}_payload_int"))
-                .or_llvm_err()?
-        }
-        None => i64_ty.const_zero(),
-    };
-    let err_variant = runtime.lower_make_variant(
-        builder,
-        module,
-        verum_common::well_known_types::result_error_tag(),
-        1,
-    )?;
-    runtime.lower_set_variant_data(builder, err_variant, 0, payload)?;
-    Ok(builder
-        .build_ptr_to_int(err_variant, i64_ty, &format!("{what}_int"))
-        .or_llvm_err()?)
-}
-
 /// Pick the dispatch entry that belongs to THIS receiver, not the first one.
 ///
 /// Both type-switch builders mark their result from an entry's declared
