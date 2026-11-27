@@ -1,15 +1,3 @@
-// =============================================================================
-// datetime/instant.vr — DatetimeInstant (julian-day-based common form)
-// =============================================================================
-// Spec: sqlite-native.md §15.6
-//
-
-// `DatetimeInstant` is the canonical internal representation: integer julian
-// day + fractional day in [0.0, 1.0). All datetime operations
-// route through DatetimeInstant (the storage forms TEXT/REAL/INTEGER convert
-// on entry and exit).
-// =============================================================================
-
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LFnd,
@@ -17,113 +5,100 @@
 )
 module core.database.sqlite.native.datetime.instant;
 
-mount base.{Bool};
-mount collections.List;
-mount core.database.sqlite.native.datetime.julian.{
-    Ymd, ymd,
-    julian_day_int, julian_to_gregorian,
-    time_to_day_fraction, day_fraction_to_time, weekday_for,
-};
+mount core.database.sqlite.native.datetime.julian.{Ymd, julian_day_int, julian_to_gregorian, weekday_for};
 
-public type DatetimeInstant is {
-    /// Integer julian day (noon UTC of the date).
-    jd_int: Int64,
-    /// Fractional day in [0.0, 1.0) — 0.0 = noon UTC of jd_int.
-    /// Storage convention follows SQLite: REAL julian day is the sum
-    /// `jd_int + frac_day`.
-    frac_day: Float64,
-}
+const DAY_MS: Int64 = 86400000_i64;
+const HALF_DAY_MS: Int64 = 43200000_i64;
+const EPOCH_MS: Int64 = 210866760000000_i64;
+const MAX_MS: Int64 = 464269060799999_i64;
 
-public fn instant_at(jd_int: Int64, frac_day: Float64) -> DatetimeInstant {
-    DatetimeInstant { jd_int: jd_int, frac_day: normalise(frac_day, jd_int).1.frac_day }
-}
+/// Milliseconds since Julian day zero, whose epoch is noon UTC.
+public type DatetimeInstant is { julian_ms: Int64 };
 
-/// Normalise a (jd_int, frac_day) pair so that frac_day ∈ [-0.5, +0.5].
-/// SQLite uses noon-anchored julian days; midnight UTC of day N
-/// becomes (jd_for_noon_of_N, -0.5).
-public fn normalise(frac_day: Float64, jd_int: Int64) -> (Float64, DatetimeInstant) {
-    let mut f = frac_day;
-    let mut j = jd_int;
-    while f >= (1.0 as Float64) { f = f - (1.0 as Float64); j = j + 1_i64; }
-    while f < (0.0 as Float64) { f = f + (1.0 as Float64); j = j - 1_i64; }
-    (f, DatetimeInstant { jd_int: j, frac_day: f })
-}
-
-implement DatetimeInstant {
-    /// Render as REAL julian day (matches storage form).
-    public fn julian_real(&self) -> Float64 {
-        (self.jd_int as Float64) + self.frac_day
-    }
-
-    /// Render as Unix epoch seconds.
-    /// Unix epoch = JD 2440587.5 (1970-01-01 00:00:00 UTC).
-    public fn unix_seconds(&self) -> Int64 {
-        let unix_jd_int: Int64 = 2440587 as Int64;
-        let day_diff = self.jd_int - unix_jd_int;
-        let secs_in_day = (self.frac_day * (86400.0 as Float64)) as Int64;
-        day_diff * 86400_i64 + secs_in_day - 43200_i64
-    }
-
-    public fn ymd_view(&self) -> Ymd { julian_to_gregorian(self.jd_int) }
-
-    public fn weekday(&self) -> Int { weekday_for(self.jd_int) }
-
-    /// Add `delta_days` to the instant. Returns a fresh DatetimeInstant.
-    public fn shift_days(&self, delta_days: Int64) -> DatetimeInstant {
-        DatetimeInstant { jd_int: self.jd_int + delta_days, frac_day: self.frac_day }
-    }
-
-    public fn shift_seconds(&self, delta_secs: Int64) -> DatetimeInstant {
-        let added = (delta_secs as Float64) / (86400.0 as Float64);
-        let raw_frac = self.frac_day + added;
-        let (norm_frac, _i) = normalise(raw_frac, self.jd_int);
-        let jd_offset = days_carried(raw_frac);
-        DatetimeInstant {
-            jd_int: self.jd_int + jd_offset,
-            frac_day: norm_frac,
-        }
-    }
-}
-
-fn days_carried(raw_frac: Float64) -> Int64 {
-    if raw_frac >= (1.0 as Float64) {
-        let n = raw_frac as Int64;
-        n
-    } else if raw_frac < (0.0 as Float64) {
-        let r = raw_frac - (1.0 as Float64);
-        r as Int64
-    } else { 0 as Int64 }
-}
-
-// -----------------------------------------------------------------------------
-// Constructors
-// -----------------------------------------------------------------------------
-
-public fn from_ymd(year: Int, month: Int, day: Int) -> DatetimeInstant {
-    DatetimeInstant { jd_int: julian_day_int(year, month, day), frac_day: 0.0 as Float64 }
-}
-
-public fn from_ymd_hms(year: Int, month: Int, day: Int, h: Int, m: Int, s: Int, ms: Int) -> DatetimeInstant {
-    let jd = julian_day_int(year, month, day);
-    let frac = time_to_day_fraction(h, m, s, ms);
-    DatetimeInstant { jd_int: jd, frac_day: frac }
-}
-
-public fn from_unix_seconds(secs: Int64) -> DatetimeInstant {
-    let unix_jd_int: Int64 = 2440587 as Int64;
-    let days = secs / 86400_i64;
-    let day_remainder = secs - days * 86400_i64;
-    let frac = (day_remainder as Float64) / (86400.0 as Float64) + (0.5 as Float64);
-    let (norm_frac, _i) = normalise(frac, unix_jd_int + days);
-    let jd_offset = days_carried(frac);
-    DatetimeInstant {
-        jd_int: unix_jd_int + days + jd_offset,
-        frac_day: norm_frac,
-    }
+/// SQLite accepts nonnegative Julian days through the last millisecond of year 9999.
+public fn try_from_julian_real(jd: Float64) -> Maybe<DatetimeInstant> {
+    if !(jd >= 0.0 && jd < 5373484.5) { return Maybe.None; }
+    let ms = (jd * 86400000.0 + 0.5) as Int64;
+    if ms > MAX_MS { return Maybe.None; }
+    Maybe.Some(DatetimeInstant { julian_ms: ms })
 }
 
 public fn from_julian_real(jd: Float64) -> DatetimeInstant {
-    let int_part: Int64 = jd as Int64;
-    let frac = jd - (int_part as Float64);
-    DatetimeInstant { jd_int: int_part, frac_day: frac }
+    match try_from_julian_real(jd) {
+        Maybe.Some(instant) => instant,
+        Maybe.None => panic("SQLite Julian day out of range"),
+    }
+}
+
+public fn instant_at(jd_int: Int64, frac_day: Float64) -> DatetimeInstant {
+    from_julian_real((jd_int as Float64) + frac_day)
+}
+
+/// Normalize the Julian day and return its noon-based fractional part in [0, 1).
+public fn normalise(frac_day: Float64, jd_int: Int64) -> (Float64, DatetimeInstant) {
+    let instant = instant_at(jd_int, frac_day);
+    let fraction = ((instant.julian_ms % DAY_MS) as Float64) / 86400000.0;
+    (fraction, instant)
+}
+
+implement DatetimeInstant {
+    public fn julian_real(&self) -> Float64 { (self.julian_ms as Float64) / 86400000.0 }
+
+    /// Whole Unix seconds rounded down, including dates before 1970.
+    public fn unix_seconds(&self) -> Int64 { self.julian_ms / 1000_i64 - EPOCH_MS / 1000_i64 }
+
+    fn civil_day(&self) -> Int64 { (self.julian_ms + HALF_DAY_MS) / DAY_MS }
+
+    public fn ymd_view(&self) -> Ymd { julian_to_gregorian(self.civil_day()) }
+
+    public fn weekday(&self) -> Int { weekday_for(self.civil_day()) }
+
+    public fn clock_parts(&self) -> (Int, Int, Int, Int) {
+        let ms = ((self.julian_ms + HALF_DAY_MS) % DAY_MS) as Int;
+        (ms / 3600000, (ms / 60000) % 60, (ms / 1000) % 60, ms % 1000)
+    }
+
+    public(in core.database.sqlite.native.datetime) fn try_shift(&self, amount: Int64, unit_ms: Int64) -> Maybe<DatetimeInstant> {
+        if unit_ms <= 0_i64 || amount < -(self.julian_ms / unit_ms) || amount > (MAX_MS - self.julian_ms) / unit_ms {
+            return Maybe.None;
+        }
+        Maybe.Some(DatetimeInstant { julian_ms: self.julian_ms + amount * unit_ms })
+    }
+
+    public fn shift_days(&self, delta: Int64) -> DatetimeInstant {
+        self.try_shift(delta, DAY_MS).expect("SQLite date shift out of range")
+    }
+
+    public fn try_shift_seconds(&self, delta: Int64) -> Maybe<DatetimeInstant> { self.try_shift(delta, 1000_i64) }
+
+    public fn shift_seconds(&self, delta: Int64) -> DatetimeInstant {
+        self.try_shift_seconds(delta).expect("SQLite date shift out of range")
+    }
+}
+
+/// SQLite normalizes day numbers 1 through 31 from the first of the month.
+public fn try_from_ymd_hms(year: Int, month: Int, day: Int, h: Int, m: Int, s: Int, ms: Int) -> Maybe<DatetimeInstant> {
+    if year < -4713 || year > 9999 || month < 1 || month > 12 || day < 1 || day > 31 { return Maybe.None; }
+    if h < 0 || h > 24 || m < 0 || m > 59 || s < 0 || s > 59 || ms < 0 || ms > 999 { return Maybe.None; }
+    if h == 24 && (m != 0 || s != 0 || ms != 0) { return Maybe.None; }
+    let subday = (((h * 60 + m) * 60 + s) * 1000 + ms) as Int64;
+    let value = julian_day_int(year, month, day) * DAY_MS - HALF_DAY_MS + subday;
+    if value < 0_i64 || value > MAX_MS { return Maybe.None; }
+    Maybe.Some(DatetimeInstant { julian_ms: value })
+}
+
+public fn from_ymd_hms(year: Int, month: Int, day: Int, h: Int, m: Int, s: Int, ms: Int) -> DatetimeInstant {
+    match try_from_ymd_hms(year, month, day, h, m, s, ms) {
+        Maybe.Some(instant) => instant,
+        Maybe.None => panic("SQLite UTC date out of range"),
+    }
+}
+
+public fn from_ymd(year: Int, month: Int, day: Int) -> DatetimeInstant {
+    from_ymd_hms(year, month, day, 0, 0, 0, 0)
+}
+
+public fn from_unix_seconds(secs: Int64) -> DatetimeInstant {
+    assert(secs >= -210866760000_i64 && secs <= 253402300799_i64, "SQLite Unix timestamp out of range");
+    DatetimeInstant { julian_ms: EPOCH_MS + secs * 1000_i64 }
 }

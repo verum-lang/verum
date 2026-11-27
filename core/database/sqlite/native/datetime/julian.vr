@@ -20,6 +20,8 @@
 )
 module core.database.sqlite.native.datetime.julian;
 
+mount core.time.julian.{julian_from_ymd, ymd_from_julian};
+
 mount base.{Bool};
 mount collections.List;
 
@@ -30,18 +32,7 @@ mount collections.List;
 /// Returns the integer Julian Day number at noon UTC of (year, month, day).
 /// Year is the Gregorian (proleptic) year; month is 1..12; day is 1..31.
 public fn julian_day_int(year: Int, month: Int, day: Int) -> Int64 {
-    let y = year as Int64;
-    let m = month as Int64;
-    let d = day as Int64;
-    let a = (14_i64 - m) / 12_i64;
-    let yp = y + 4800_i64 - a;
-    let mp = m + 12_i64 * a - 3_i64;
-    d + (153_i64 * mp + 2_i64) / 5_i64
-        + 365_i64 * yp
-        + yp / 4_i64
-        - yp / 100_i64
-        + yp / 400_i64
-        - 32045_i64
+    (julian_from_ymd(year, month, day) + 0.5) as Int64
 }
 
 // -----------------------------------------------------------------------------
@@ -54,18 +45,13 @@ public fn ymd(year: Int, month: Int, day: Int) -> Ymd {
     Ymd { year: year, month: month, day: day }
 }
 
+implement Ymd {
+    public fn parts(&self) -> (Int, Int, Int) { (self.year, self.month, self.day) }
+}
+
 public fn julian_to_gregorian(jd: Int64) -> Ymd {
-    // Reverse Fliegel/Van Flandern.
-    let a = jd + 32044_i64;
-    let b = (4_i64 * a + 3_i64) / 146097_i64;
-    let c = a - (146097_i64 * b) / 4_i64;
-    let d = (4_i64 * c + 3_i64) / 1461_i64;
-    let e = c - (1461_i64 * d) / 4_i64;
-    let m = (5_i64 * e + 2_i64) / 153_i64;
-    let day = e - (153_i64 * m + 2_i64) / 5_i64 + 1_i64;
-    let month = m + 3_i64 - 12_i64 * (m / 10_i64);
-    let year = 100_i64 * b + d - 4800_i64 + (m / 10_i64);
-    ymd(year as Int, month as Int, day as Int)
+    let (year, month, day) = ymd_from_julian(jd as Float64);
+    ymd(year, month, day)
 }
 
 // -----------------------------------------------------------------------------

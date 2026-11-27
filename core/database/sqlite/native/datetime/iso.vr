@@ -1,21 +1,3 @@
-// =============================================================================
-// datetime/iso.vr — ISO-8601 parser + renderer
-// =============================================================================
-// Spec: sqlite-native.md §15.6
-//
-
-// Two grammars accepted:
-//
-
-//  `YYYY-MM-DD` (date only)
-//  `YYYY-MM-DD HH:MM[:SS[.SSS]]` (date + time, sep=space|'T')
-//  `HH:MM:SS[.SSS]` (time only)
-//
-
-// Renderer: emits canonical `YYYY-MM-DD HH:MM:SS.SSS` (always 23 chars
-// for date+time form).
-// =============================================================================
-
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LFnd,
@@ -23,11 +5,9 @@
 )
 module core.database.sqlite.native.datetime.iso;
 
-mount base.{Text, Bool};
-mount collections.List;
-mount core.database.sqlite.native.datetime.instant.{
-    DatetimeInstant as Instant, from_ymd, from_ymd_hms,
-};
+mount base.Text;
+mount core.database.sqlite.native.datetime.instant.{DatetimeInstant, try_from_ymd_hms};
+mount core.database.sqlite.native.datetime.format.strftime;
 
 // -----------------------------------------------------------------------------
 // IsoParseResult
@@ -86,155 +66,91 @@ public fn parse_error_name(e: &IsoParseError) -> Text {
     }
 }
 
-// -----------------------------------------------------------------------------
-// Parse
-// -----------------------------------------------------------------------------
-
-public fn parse(text: &Text) -> Result<Instant, IsoParseError> {
+/// Parse SQLite calendar text, including time-only values anchored at 2000-01-01.
+public fn parse(text: &Text) -> Result<DatetimeInstant, IsoParseError> {
     let bs = text.as_bytes();
     if bs.len() < 5 { return Result.Err(IpeBadFormat); }
-
-    // Date-only: 10 bytes "YYYY-MM-DD".
-    if bs.len() == 10 {
-        return parse_date(&bs);
+    let mut year = 2000;
+    let mut month = 1;
+    let mut day = 1;
+    let mut start = 0;
+    if bs[2] != 58_u8 {
+        let negative = bs[0] == 45_u8;
+        let off = if negative { 1 } else { 0 };
+        let end = off + 10;
+        if bs.len() < end || bs[off + 4] != 45_u8 || bs[off + 7] != 45_u8 { return Result.Err(IpeBadFormat); }
+        year = match digits(bs, off, 4) { Maybe.Some(v) => v, Maybe.None => return Result.Err(IpeBadDate) };
+        if negative { year = -year; }
+        month = match digits(bs, off + 5, 2) { Maybe.Some(v) => v, Maybe.None => return Result.Err(IpeBadDate) };
+        day = match digits(bs, off + 8, 2) { Maybe.Some(v) => v, Maybe.None => return Result.Err(IpeBadDate) };
+        if bs.len() == end { return make_utc(year, month, day, 0, 0, 0, 0, 0); }
+        if bs[end] != 32_u8 && bs[end] != 84_u8 { return Result.Err(IpeBadFormat); }
+        start = end + 1;
     }
-    // Date + time: ≥ 16 bytes "YYYY-MM-DD HH:MM".
-    if bs.len() >= 16 && (bs[10] == (32 as Byte) || bs[10] == (84 as Byte)) {
-        return parse_datetime(&bs);
-    }
-    // Time-only — first byte is a digit and there's a `:` at offset 2.
-    if bs.len() >= 5 && is_digit(bs[0]) && bs[2] == (58 as Byte) {
-        return parse_time_only(&bs);
-    }
-    Result.Err(IpeBadFormat)
-}
-
-fn parse_date(bs: &List<Byte>) -> Result<Instant, IsoParseError> {
-    if bs[4] != (45 as Byte) || bs[7] != (45 as Byte) { return Result.Err(IpeBadFormat); }
-    let year = match parse_int_at(bs, 0, 4) { Maybe.Some(v) => v, Maybe.None => return Result.Err(IpeBadDate) };
-    let month = match parse_int_at(bs, 5, 2) { Maybe.Some(v) => v, Maybe.None => return Result.Err(IpeBadDate) };
-    let day = match parse_int_at(bs, 8, 2) { Maybe.Some(v) => v, Maybe.None => return Result.Err(IpeBadDate) };
-    if !valid_ymd(year, month, day) { return Result.Err(IpeOutOfRange); }
-    Result.Ok(from_ymd(year, month, day))
-}
-
-fn parse_datetime(bs: &List<Byte>) -> Result<Instant, IsoParseError> {
-    if bs[4] != (45 as Byte) || bs[7] != (45 as Byte) { return Result.Err(IpeBadFormat); }
-    if bs[13] != (58 as Byte) { return Result.Err(IpeBadFormat); }
-    let year = match parse_int_at(bs, 0, 4) { Maybe.Some(v) => v, Maybe.None => return Result.Err(IpeBadDate) };
-    let month = match parse_int_at(bs, 5, 2) { Maybe.Some(v) => v, Maybe.None => return Result.Err(IpeBadDate) };
-    let day = match parse_int_at(bs, 8, 2) { Maybe.Some(v) => v, Maybe.None => return Result.Err(IpeBadDate) };
-    let h = match parse_int_at(bs, 11, 2) { Maybe.Some(v) => v, Maybe.None => return Result.Err(IpeBadTime) };
-    let m = match parse_int_at(bs, 14, 2) { Maybe.Some(v) => v, Maybe.None => return Result.Err(IpeBadTime) };
-    let mut s: Int = 0;
-    let mut ms: Int = 0;
-    if bs.len() >= 19 && bs[16] == (58 as Byte) {
-        match parse_int_at(bs, 17, 2) {
-            Maybe.Some(v) => { s = v; }
-            Maybe.None    => return Result.Err(IpeBadTime),
+    if start + 5 > bs.len() || bs[start + 2] != 58_u8 { return Result.Err(IpeBadFormat); }
+    let h = match digits(bs, start, 2) { Maybe.Some(v) => v, Maybe.None => return Result.Err(IpeBadTime) };
+    let m = match digits(bs, start + 3, 2) { Maybe.Some(v) => v, Maybe.None => return Result.Err(IpeBadTime) };
+    let mut s = 0;
+    let mut ms = 0;
+    let mut pos = start + 5;
+    if pos < bs.len() && bs[pos] == 58_u8 {
+        s = match digits(bs, pos + 1, 2) { Maybe.Some(v) => v, Maybe.None => return Result.Err(IpeBadTime) };
+        pos = pos + 3;
+        if pos < bs.len() && bs[pos] == 46_u8 {
+            pos = pos + 1;
+            let first = pos;
+            let mut place = 100;
+            while pos < bs.len() && bs[pos] >= 48_u8 && bs[pos] <= 57_u8 {
+                let digit = (bs[pos] - 48_u8) as Int;
+                if place > 0 { ms = ms + digit * place; place = place / 10; }
+                else if pos == first + 3 && digit >= 5 && ms < 999 { ms = ms + 1; }
+                pos = pos + 1;
+            }
+            if first == pos { return Result.Err(IpeBadTime); }
         }
     }
-    if bs.len() >= 23 && bs[19] == (46 as Byte) {
-        match parse_int_at(bs, 20, 3) {
-            Maybe.Some(v) => { ms = v; }
-            Maybe.None    => {}
+    let mut offset = 0;
+    if pos < bs.len() {
+        if bs[pos] == 90_u8 || bs[pos] == 122_u8 {
+            pos = pos + 1;
+        } else if bs[pos] == 43_u8 || bs[pos] == 45_u8 {
+            if pos + 6 != bs.len() || bs[pos + 3] != 58_u8 { return Result.Err(IpeBadFormat); }
+            let oh = match digits(bs, pos + 1, 2) { Maybe.Some(v) => v, Maybe.None => return Result.Err(IpeBadTime) };
+            let om = match digits(bs, pos + 4, 2) { Maybe.Some(v) => v, Maybe.None => return Result.Err(IpeBadTime) };
+            if oh > 14 || om > 59 { return Result.Err(IpeOutOfRange); }
+            offset = oh * 3600 + om * 60;
+            if bs[pos] == 45_u8 { offset = -offset; }
+            pos = pos + 6;
         }
     }
-    if !valid_ymd(year, month, day) { return Result.Err(IpeOutOfRange); }
-    if !valid_hms(h, m, s) { return Result.Err(IpeOutOfRange); }
-    Result.Ok(from_ymd_hms(year, month, day, h, m, s, ms))
+    if pos != bs.len() { return Result.Err(IpeBadFormat); }
+    make_utc(year, month, day, h, m, s, ms, offset)
 }
 
-fn parse_time_only(bs: &List<Byte>) -> Result<Instant, IsoParseError> {
-    if bs[2] != (58 as Byte) { return Result.Err(IpeBadFormat); }
-    let h = match parse_int_at(bs, 0, 2) { Maybe.Some(v) => v, Maybe.None => return Result.Err(IpeBadTime) };
-    let m = match parse_int_at(bs, 3, 2) { Maybe.Some(v) => v, Maybe.None => return Result.Err(IpeBadTime) };
-    let mut s: Int = 0;
-    let mut ms: Int = 0;
-    if bs.len() >= 8 && bs[5] == (58 as Byte) {
-        match parse_int_at(bs, 6, 2) {
-            Maybe.Some(v) => { s = v; }
-            Maybe.None    => return Result.Err(IpeBadTime),
-        }
-    }
-    if bs.len() >= 12 && bs[8] == (46 as Byte) {
-        match parse_int_at(bs, 9, 3) {
-            Maybe.Some(v) => { ms = v; }
-            Maybe.None    => {}
-        }
-    }
-    if !valid_hms(h, m, s) { return Result.Err(IpeOutOfRange); }
-    // Date-less times anchor at 2000-01-01.
-    Result.Ok(from_ymd_hms(2000, 1, 1, h, m, s, ms))
-}
-
-fn parse_int_at(bs: &List<Byte>, off: Int, width: Int) -> Maybe<Int> {
-    // Defence-in-depth — same as datetime_fns.parse_uint: callers
-    // pass small `width` for ISO date fields, but reject any width
-    // that could wrap `acc * 10 + d` past Int.MAX.
-    if width > 19 { return Maybe.None; }
-    let mut acc: Int = 0;
-    let mut i: Int = 0;
-    while i < width {
-        if off + i >= bs.len() { return Maybe.None; }
-        let b = bs[off + i];
-        if !is_digit(b) { return Maybe.None; }
-        if acc > 922_337_203_685_477_580 { return Maybe.None; }
-        acc = acc * 10 + ((b - (48 as Byte)) as Int);
-        if acc < 0 { return Maybe.None; }
+fn digits(bs: &[Byte], off: Int, count: Int) -> Maybe<Int> {
+    if off + count > bs.len() { return Maybe.None; }
+    let mut acc = 0;
+    let mut i = off;
+    while i < off + count {
+        let b = bs[i];
+        if b < 48_u8 || b > 57_u8 { return Maybe.None; }
+        acc = acc * 10 + ((b - 48_u8) as Int);
         i = i + 1;
     }
     Maybe.Some(acc)
 }
 
-fn is_digit(b: Byte) -> Bool {
-    b >= (48 as Byte) && b <= (57 as Byte)
-}
-
-fn valid_ymd(y: Int, m: Int, d: Int) -> Bool {
-    if y < 1 || y > 9999 { return false; }
-    if m < 1 || m > 12 { return false; }
-    if d < 1 || d > 31 { return false; }
-    true
-}
-
-fn valid_hms(h: Int, m: Int, s: Int) -> Bool {
-    h >= 0 && h <= 23 && m >= 0 && m <= 59 && s >= 0 && s <= 60
-}
-
-// -----------------------------------------------------------------------------
-// Render
-// -----------------------------------------------------------------------------
-
-public fn render(instant: &Instant) -> Text {
-    let ymd = instant.ymd_view();
-    let (h, m, s, ms) = core.database.sqlite.native.datetime.julian.day_fraction_to_time(instant.frac_day);
-    let mut out = Text.new();
-    push_int_padded(&mut out, ymd.year, 4);
-    out.push_byte(45 as Byte);
-    push_int_padded(&mut out, ymd.month, 2);
-    out.push_byte(45 as Byte);
-    push_int_padded(&mut out, ymd.day, 2);
-    out.push_byte(32 as Byte);
-    push_int_padded(&mut out, h, 2);
-    out.push_byte(58 as Byte);
-    push_int_padded(&mut out, m, 2);
-    out.push_byte(58 as Byte);
-    push_int_padded(&mut out, s, 2);
-    out.push_byte(46 as Byte);
-    push_int_padded(&mut out, ms, 3);
-    out
-}
-
-fn push_int_padded(dst: &mut Text, n: Int, width: Int) {
-    let mut digits: List<Byte> = List.new();
-    let mut x: Int = if n < 0 { 0 } else { n };
-    if x == 0 { digits.push(48 as Byte); }
-    while x > 0 {
-        digits.push(((x % 10) as Byte) + (48 as Byte));
-        x = x / 10;
+fn make_utc(y: Int, m: Int, d: Int, h: Int, mi: Int, s: Int, ms: Int, offset: Int) -> Result<DatetimeInstant, IsoParseError> {
+    match try_from_ymd_hms(y, m, d, h, mi, s, ms) {
+        Maybe.Some(local) => match local.try_shift_seconds(-(offset as Int64)) {
+            Maybe.Some(utc) => Result.Ok(utc),
+            Maybe.None => Result.Err(IpeOutOfRange),
+        },
+        Maybe.None => Result.Err(IpeOutOfRange),
     }
-    while digits.len() < width { digits.push(48 as Byte); }
-    let mut i: Int = digits.len() - 1;
-    while i >= 0 { dst.push_byte(digits[i]); i = i - 1; }
+}
+
+/// Render UTC with millisecond precision.
+public fn render(instant: &DatetimeInstant) -> Text {
+    strftime("%Y-%m-%d %H:%M:%f", instant).expect("valid SQLite timestamp format")
 }

@@ -19,20 +19,21 @@ mount core.database.sqlite.native.datetime.julian.{
     is_leap_year, days_in_month, weekday_for,
 };
 mount core.database.sqlite.native.datetime.instant.{
-    Instant, from_ymd, from_ymd_hms, from_unix_seconds, from_julian_real,
+    from_ymd, from_ymd_hms, from_unix_seconds, from_julian_real,
 };
 mount core.database.sqlite.native.datetime.iso.{
     parse, render,
     IsoParseError, IpeBadFormat, IpeBadDate, IpeBadTime, IpeOutOfRange,
 };
 mount core.database.sqlite.native.datetime.modifier.{
-    Modifier, MNow, MAddDays, MAddMonths, MStartOfMonth, MStartOfYear, MWeekday,
+    MNow, MAddDays, MAddMonths, MStartOfMonth, MStartOfYear, MWeekday,
     parse as parse_modifier,
     apply as apply_modifier,
     modifier_kind_name,
 };
 mount core.database.sqlite.native.datetime.format.{strftime};
-mount base.{Ok, Err, Some, None, Maybe, Bool, Text};
+mount core.base.result.{Ok, Err};
+mount core.base.maybe.{Some, None};
 
 // -----------------------------------------------------------------------------
 // Julian
@@ -40,17 +41,17 @@ mount base.{Ok, Err, Some, None, Maybe, Bool, Text};
 
 fn test_julian_round_trip_2000_jan_1() {
     let jd = julian_day_int(2000, 1, 1);
-    let r = julian_to_gregorian(jd);
-    assert_eq(r.year, 2000);
-    assert_eq(r.month, 1);
-    assert_eq(r.day, 1);
+    let (y, m, d) = julian_to_gregorian(jd).parts();
+    assert_eq(y, 2000);
+    assert_eq(m, 1);
+    assert_eq(d, 1);
 }
 
 fn test_julian_round_trip_leap_day() {
     let jd = julian_day_int(2024, 2, 29);
-    let r = julian_to_gregorian(jd);
-    assert_eq(r.month, 2);
-    assert_eq(r.day, 29);
+    let (y, m, d) = julian_to_gregorian(jd).parts();
+    assert_eq(m, 2);
+    assert_eq(d, 29);
 }
 
 fn test_is_leap_year() {
@@ -71,23 +72,20 @@ fn test_days_in_month() {
 // Instant
 // -----------------------------------------------------------------------------
 
-fn test_from_ymd_zero_fraction() {
+fn test_midnight_julian_boundary() {
     let i = from_ymd(2024, 4, 24);
-    assert_eq(i.frac_day, 0.0 as Float64);
+    assert_eq(i.julian_real(), 2460424.5);
 }
 
-fn test_from_ymd_hms_has_fraction() {
+fn test_noon_julian_boundary() {
     let i = from_ymd_hms(2024, 4, 24, 12, 0, 0, 0);
-    assert(i.frac_day > (0.0 as Float64));
+    assert_eq(i.julian_real(), 2460425.0);
 }
 
 fn test_unix_round_trip() {
     let i = from_unix_seconds(1000000_i64);
     let s = i.unix_seconds();
-    // Tolerate ±1s drift from sub-day arithmetic.
-    let diff = s - 1000000_i64;
-    let abs = if diff < 0_i64 { -diff } else { diff };
-    assert(abs <= 1_i64);
+    assert_eq(s, 1000000_i64);
 }
 
 fn test_julian_real_combines_int_and_frac() {
@@ -103,42 +101,42 @@ fn test_julian_real_combines_int_and_frac() {
 // -----------------------------------------------------------------------------
 
 fn test_parse_date_only() {
-    match parse(&"2024-04-24".clone()) {
+    match parse("2024-04-24") {
         Ok(_)  => {},
         Err(_) => panic("date parses"),
     }
 }
 
 fn test_parse_date_time_space_separated() {
-    match parse(&"2024-04-24 12:30:45".clone()) {
+    match parse("2024-04-24 12:30:45") {
         Ok(_)  => {},
         Err(_) => panic("date+time parses"),
     }
 }
 
 fn test_parse_date_time_t_separated() {
-    match parse(&"2024-04-24T12:30:45".clone()) {
+    match parse("2024-04-24T12:30:45") {
         Ok(_)  => {},
         Err(_) => panic("ISO T form parses"),
     }
 }
 
 fn test_parse_with_milliseconds() {
-    match parse(&"2024-04-24 12:30:45.123".clone()) {
+    match parse("2024-04-24 12:30:45.123") {
         Ok(_)  => {},
         Err(_) => panic("ms form parses"),
     }
 }
 
 fn test_parse_rejects_bad_format() {
-    match parse(&"foo".clone()) {
+    match parse("foo") {
         Err(_) => {},
         Ok(_)  => panic("garbage rejected"),
     }
 }
 
 fn test_parse_rejects_out_of_range_day() {
-    match parse(&"2024-04-32".clone()) {
+    match parse("2024-04-32") {
         Err(_) => {},
         Ok(_)  => panic("day=32 rejected"),
     }
@@ -159,42 +157,42 @@ fn test_render_format_length() {
 // -----------------------------------------------------------------------------
 
 fn test_parse_now() {
-    match parse_modifier(&"now".clone()) {
+    match parse_modifier("now") {
         Some(MNow) => {},
         _          => panic("now"),
     }
 }
 
 fn test_parse_add_days_positive() {
-    match parse_modifier(&"+5 days".clone()) {
+    match parse_modifier("+5 days") {
         Some(MAddDays(n)) => assert_eq(n, 5 as Int64),
         _                  => panic("+5 days"),
     }
 }
 
 fn test_parse_add_days_negative() {
-    match parse_modifier(&"-3 days".clone()) {
+    match parse_modifier("-3 days") {
         Some(MAddDays(n)) => assert_eq(n, -3 as Int64),
         _                  => panic("-3 days"),
     }
 }
 
 fn test_parse_start_of_month() {
-    match parse_modifier(&"start of month".clone()) {
+    match parse_modifier("start of month") {
         Some(MStartOfMonth) => {},
         _                   => panic("start of month"),
     }
 }
 
 fn test_parse_weekday() {
-    match parse_modifier(&"weekday 0".clone()) {
+    match parse_modifier("weekday 0") {
         Some(MWeekday(n)) => assert_eq(n, 0),
         _                  => panic("weekday 0"),
     }
 }
 
 fn test_parse_unknown_returns_none() {
-    match parse_modifier(&"galaxy brain".clone()) {
+    match parse_modifier("galaxy brain") {
         None => {},
         _    => panic("unknown rejected"),
     }
@@ -206,24 +204,24 @@ fn test_parse_unknown_returns_none() {
 
 fn test_apply_add_days_advances_jd() {
     let i = from_ymd(2024, 4, 24);
-    let i2 = apply_modifier(&i, &MAddDays(7_i64), 0 as Int64);
-    assert_eq(i2.jd_int - i.jd_int, 7 as Int64);
+    let i2 = apply_modifier(&i, &MAddDays(7_i64), 0_i64).expect("valid day offset");
+    assert_eq(i2.unix_seconds() - i.unix_seconds(), 604800_i64);
 }
 
 fn test_apply_add_months() {
     let i = from_ymd(2024, 1, 31);
-    let i2 = apply_modifier(&i, &MAddMonths(1), 0 as Int64);
-    let r = i2.ymd_view();
-    assert_eq(r.month, 2);
-    assert_eq(r.day, 29);    // Feb 2024 (leap) clamps from 31
+    let i2 = apply_modifier(&i, &MAddMonths(1), 0_i64).expect("valid month offset");
+    let (_, m, d) = i2.ymd_view().parts();
+    assert_eq(m, 3);
+    assert_eq(d, 2);
 }
 
 fn test_apply_start_of_year() {
     let i = from_ymd(2024, 4, 24);
-    let i2 = apply_modifier(&i, &MStartOfYear, 0 as Int64);
-    let r = i2.ymd_view();
-    assert_eq(r.month, 1);
-    assert_eq(r.day, 1);
+    let i2 = apply_modifier(&i, &MStartOfYear, 0_i64).expect("valid start of year");
+    let (_, m, d) = i2.ymd_view().parts();
+    assert_eq(m, 1);
+    assert_eq(d, 1);
 }
 
 // -----------------------------------------------------------------------------
@@ -232,29 +230,55 @@ fn test_apply_start_of_year() {
 
 fn test_strftime_year_month_day() {
     let i = from_ymd(2024, 4, 24);
-    let s = strftime(&"%Y-%m-%d".clone(), &i);
+    let s = strftime("%Y-%m-%d", &i).expect("supported substitution");
     assert(s == "2024-04-24".clone());
 }
 
 fn test_strftime_literal_passthrough() {
     let i = from_ymd(2024, 4, 24);
-    let s = strftime(&"abc".clone(), &i);
+    let s = strftime("abc", &i).expect("supported substitution");
     assert(s == "abc".clone());
 }
 
 fn test_strftime_percent_literal() {
     let i = from_ymd(2024, 1, 1);
-    let s = strftime(&"%%".clone(), &i);
+    let s = strftime("%%", &i).expect("supported substitution");
     assert(s == "%".clone());
 }
 
+fn test_utc_offset_and_julian_precision() {
+    let instant = parse("2024-03-01 00:15:00+01:30").expect("valid timestamp");
+    let text = strftime("%Y-%m-%d %H:%M:%f | %J | %s | %w | %j", &instant).expect("known format");
+    assert_eq(text, "2024-02-29 22:45:00.000 | 2460370.447916667 | 1709246700 | 4 | 060");
+    assert(strftime("%Q", &instant) is None);
+}
+
+fn test_instant_modifier_bounds() {
+    let epoch = from_unix_seconds(0_i64);
+    assert(apply_modifier(&epoch, &MAddDays(0x7fff_ffff_ffff_ffff_i64), 0_i64) is None);
+    assert(apply_modifier(&epoch, &MWeekday(7), 0_i64) is None);
+    let before = apply_modifier(&epoch, &MNow, -1_i64).expect("one nanosecond before the epoch");
+    assert_eq(before.unix_seconds(), -1_i64);
+    assert_eq(strftime("%f", &before).expect("seconds"), "59.999");
+}
+
+fn test_julian_text_boundaries() {
+    let first = from_julian_real(1.0 / 86400000.0);
+    assert_eq(strftime("%J", &first).expect("Julian date"), "1.157407407407407e-08");
+    let last = parse("9999-12-31 23:59:59.999").expect("last timestamp");
+    assert_eq(strftime("%J", &last).expect("Julian date"), "5373484.499999989");
+}
+
 fn main() {
+    test_utc_offset_and_julian_precision();
+    test_instant_modifier_bounds();
+    test_julian_text_boundaries();
     test_julian_round_trip_2000_jan_1();
     test_julian_round_trip_leap_day();
     test_is_leap_year();
     test_days_in_month();
-    test_from_ymd_zero_fraction();
-    test_from_ymd_hms_has_fraction();
+    test_midnight_julian_boundary();
+    test_noon_julian_boundary();
     test_unix_round_trip();
     test_julian_real_combines_int_and_frac();
     test_parse_date_only();

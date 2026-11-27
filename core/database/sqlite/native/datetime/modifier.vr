@@ -14,8 +14,8 @@
 //  '-N hours' — subtract N hours
 //  '+N minutes' — etc.
 //  '+N seconds'
-//  '+N months' — calendar month add (with day clamping)
-//  '+N years' — calendar year add (with leap-day clamping)
+//  '+N months' — calendar month add (overflow carries into the following month)
+//  '+N years' — calendar year add (overflow carries into the following month)
 //  'start of month' — set day = 1, time = 00:00:00
 //  'start of year' — set month = 1, day = 1, time = 00:00:00
 //  'start of day' — set time = 00:00:00
@@ -31,14 +31,9 @@
 )
 module core.database.sqlite.native.datetime.modifier;
 
-mount base.{Text, Bool, Maybe};
-mount collections.List;
+mount core.base.maybe.Maybe;
 mount core.database.sqlite.native.datetime.instant.{
-    DatetimeInstant as Instant, from_ymd_hms, from_unix_seconds,
-};
-mount core.database.sqlite.native.datetime.julian.{
-    julian_day_int, julian_to_gregorian, day_fraction_to_time, weekday_for,
-    days_in_month,
+    DatetimeInstant as Instant, try_from_ymd_hms, from_unix_seconds,
 };
 
 // -----------------------------------------------------------------------------
@@ -151,61 +146,52 @@ public fn parse(text: &Text) -> Maybe<DatetimeModifier> {
 // apply — shift an Instant by a DatetimeModifier
 // -----------------------------------------------------------------------------
 
-public fn apply(inst: &Instant, m: &DatetimeModifier, now_ns: Int64) -> Instant {
+/// Apply an instant-domain transformation. Input interpretation (unixepoch)
+/// needs a numeric input and timezone conversions need a zone provider.
+public fn apply(inst: &Instant, m: &DatetimeModifier, now_ns: Int64) -> Maybe<Instant> {
     match m {
-        MNow => from_unix_seconds(now_ns / 1_000_000_000_i64),
-        MAddDays(n)     => Instant { jd_int: inst.jd_int + (*n), frac_day: inst.frac_day },
-        MAddHours(n)    => inst.shift_seconds((*n) * 3600_i64),
-        MAddMinutes(n)  => inst.shift_seconds((*n) * 60_i64),
-        MAddSeconds(n)  => inst.shift_seconds(*n),
-        MAddMonths(n)   => add_months(inst, *n),
-        MAddYears(n)    => add_months(inst, (*n) * 12),
-        MStartOfDay     => Instant { jd_int: inst.jd_int, frac_day: 0.0 as Float64 },
-        MStartOfMonth   => start_of_month(inst),
-        MStartOfYear    => start_of_year(inst),
-        MWeekday(target)=> shift_to_weekday(inst, *target),
-        MUnixEpoch      => clone_instant(inst),
-        MUtc            => clone_instant(inst),
-        MLocaltime      => clone_instant(inst),
+        MNow => {
+            let ms = now_ns / 1_000_000_i64;
+            let floor_ms = if now_ns % 1_000_000_i64 < 0_i64 { ms - 1_i64 } else { ms };
+            from_unix_seconds(0_i64).try_shift(floor_ms, 1_i64)
+        },
+        MAddDays(n) => inst.try_shift(*n, 86400000_i64),
+        MAddHours(n) => inst.try_shift(*n, 3600000_i64),
+        MAddMinutes(n) => inst.try_shift(*n, 60000_i64),
+        MAddSeconds(n) => inst.try_shift_seconds(*n),
+        MAddMonths(n) => add_months(inst, *n, 1),
+        MAddYears(n) => add_months(inst, *n, 12),
+        MStartOfDay => {
+            let (y, mo, d) = inst.ymd_view().parts();
+            try_from_ymd_hms(y, mo, d, 0, 0, 0, 0)
+        },
+        MStartOfMonth => {
+            let (y, mo, _) = inst.ymd_view().parts();
+            try_from_ymd_hms(y, mo, 1, 0, 0, 0, 0)
+        },
+        MStartOfYear => {
+            let (y, _, _) = inst.ymd_view().parts();
+            try_from_ymd_hms(y, 1, 1, 0, 0, 0, 0)
+        },
+        MWeekday(target) => {
+            if *target < 0 || *target > 6 { return Maybe.None; }
+            let delta = (*target - inst.weekday() + 7) % 7;
+            inst.try_shift(delta as Int64, 86400000_i64)
+        },
+        MUnixEpoch | MUtc | MLocaltime => Maybe.None,
     }
 }
 
-fn clone_instant(i: &Instant) -> Instant {
-    Instant { jd_int: i.jd_int, frac_day: i.frac_day }
-}
-
-fn add_months(inst: &Instant, delta_months: Int) -> Instant {
-    let ymd = inst.ymd_view();
-    let total = ymd.year * 12 + (ymd.month - 1) + delta_months;
-    let new_year = total / 12;
-    let new_month = total - new_year * 12 + 1;
-    let dim = days_in_month(new_year, new_month);
-    let new_day = if ymd.day > dim { dim } else { ymd.day };
-    let (h, m, s, ms) = day_fraction_to_time(inst.frac_day);
-    from_ymd_hms(new_year, new_month, new_day, h, m, s, ms)
-}
-
-fn start_of_month(inst: &Instant) -> Instant {
-    let ymd = inst.ymd_view();
-    Instant {
-        jd_int: julian_day_int(ymd.year, ymd.month, 1),
-        frac_day: 0.0 as Float64,
-    }
-}
-
-fn start_of_year(inst: &Instant) -> Instant {
-    let ymd = inst.ymd_view();
-    Instant {
-        jd_int: julian_day_int(ymd.year, 1, 1),
-        frac_day: 0.0 as Float64,
-    }
-}
-
-fn shift_to_weekday(inst: &Instant, target: Int) -> Instant {
-    let cur = weekday_for(inst.jd_int);
-    let mut delta = target - cur;
-    if delta < 0 { delta = delta + 7; }
-    Instant { jd_int: inst.jd_int + (delta as Int64), frac_day: inst.frac_day }
+fn add_months(inst: &Instant, count: Int, months_per_unit: Int) -> Maybe<Instant> {
+    let (year, month, day) = inst.ymd_view().parts();
+    let origin = year * 12 + month - 1;
+    if count < (-4713 * 12 - origin) / months_per_unit ||
+       count > (9999 * 12 + 11 - origin) / months_per_unit { return Maybe.None; }
+    let total = origin + count * months_per_unit;
+    let month_index = ((total % 12) + 12) % 12;
+    let new_year = (total - month_index) / 12;
+    let (h, m, s, ms) = inst.clock_parts();
+    try_from_ymd_hms(new_year, month_index + 1, day, h, m, s, ms)
 }
 
 // -----------------------------------------------------------------------------
