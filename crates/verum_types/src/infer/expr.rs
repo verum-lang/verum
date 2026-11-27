@@ -7724,6 +7724,9 @@ impl TypeChecker {
                     checker.specialize_call_parameter(param_ty, i, args, &dep_param_names)?;
                 checker.check_expr(arg, &check_ty)?;
             }
+            for arg in args.iter().skip(params.len()) {
+                checker.infer_expr(arg, InferMode::Synth)?;
+            }
             Ok(())
         })
     }
@@ -7914,9 +7917,11 @@ impl TypeChecker {
             None
         };
 
-        // Variadic functions can accept any number of args (including zero).
-        // This includes: format, print, println, panic, assert, assert_eq
-        let is_variadic = func_name
+        let declaration = self.type_registry.callable_declaration(expr.span);
+        let foreign_variadic = declaration.and_then(|(_, source)| {
+            source.extern_abi.as_ref().map(|_| source.is_variadic)
+        });
+        let builtin_variadic = declaration.is_none() && func_name
             .as_ref()
             .map(|name| {
                 matches!(
@@ -7951,7 +7956,11 @@ impl TypeChecker {
             })
             .unwrap_or(false);
 
-        let required_params = {
+        let required_params = if foreign_variadic.is_some() {
+            params.len()
+        } else if builtin_variadic {
+            0
+        } else {
             let from_registry = func_name
                 .as_ref()
                 .and_then(|name| {
@@ -7971,9 +7980,7 @@ impl TypeChecker {
                         .or_else(|| self.required_params_from_metadata(name.as_str()))
                 })
                 .unwrap_or(params.len());
-            let capped = from_registry.min(params.len());
-            // Variadic functions accept 0 or more args
-            if is_variadic { 0 } else { capped }
+            from_registry.min(params.len())
         };
 
         let total_params = params.len();
@@ -7999,7 +8006,7 @@ impl TypeChecker {
             });
         }
 
-        if provided_args > total_params && !is_variadic {
+        if provided_args > total_params && foreign_variadic != Some(true) && !builtin_variadic {
             return Err(TypeError::OtherWithCodeSpanned {
                 code: verum_common::Text::from("E102"),
                 msg: verum_common::Text::from(format!(

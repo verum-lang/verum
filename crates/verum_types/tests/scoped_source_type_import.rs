@@ -286,3 +286,35 @@ fn private_named_binding_still_precedes_an_unrelated_public_glob() {
         denied("outside.client", "mount realm.component.api.Packet; fn probe() {}", &providers, "Packet");
     }
 }
+
+#[test]
+fn mounted_foreign_calls_retain_their_declared_fixed_prefix_and_variadic_tail() {
+    let foreign = r#"@ffi("system") extern {
+        public fn query(code: Int32, ...) -> Int32;
+        public fn fixed(code: Int32) -> Int32;
+    }"#;
+    allowed("realm.native", &format!("{foreign}
+        fn direct() -> Int32 {{ unsafe {{ query(1_i32, 2_i32) }} }}"), &[]);
+    let facade = "public mount realm.native.{query as relay};";
+    let providers = [("realm.native", foreign), ("realm.api", facade)];
+    let imports = "mount realm.native.{query as local, fixed as fixed_call};
+                   mount realm.api.{relay};";
+    let body = "fn test_calls() -> Int32 {
+        unsafe { local(1_i32) + relay(2_i32, 7_i32) + realm.native.query(3_i32, 4_i32, 5_i32) }
+    }";
+    allowed("realm.user", &format!("{imports} {body}"), &providers);
+
+    for (call, diagnostic) in [
+        ("local()", "E102"),
+        ("relay()", "E102"),
+        ("realm.native.query()", "E102"),
+        ("fixed_call(1_i32, 2_i32)", "E102"),
+        ("local(true, 2_i32)", "Mismatch"),
+        ("relay(1_i32, missing_argument)", "missing_argument"),
+    ] {
+        let source = format!("{imports} fn probe()->Int32 {{ unsafe {{ {call} }} }}");
+        let rejected = errors("realm.user", &source, &providers);
+        assert!(rejected.iter().any(|error| error.contains(diagnostic)),
+            "{call}: expected {diagnostic}, got {rejected:?}");
+    }
+}
