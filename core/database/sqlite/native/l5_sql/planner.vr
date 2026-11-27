@@ -843,6 +843,19 @@ fn plan_insert_with_schema(
     ))
 }
 
+fn resolve_optional_expr(expr: &Maybe<Expr>, scopes: &List<ColumnScope>, error: Text) -> Result<Maybe<Expr>, PlanError> {
+    match expr {
+        Maybe.Some(ref e) => {
+            let resolved: Expr = match resolve_expr(e, scopes) {
+                Result.Ok(value) => value,
+                Result.Err(_) => { return Result.Err(plan_error(error)); }
+            };
+            Result.Ok(Maybe.Some(resolved))
+        }
+        Maybe.None => Result.Ok(Maybe.None),
+    }
+}
+
 fn plan_update_with_schema(
     upd: &UpdateStmt,
     schema: &SchemaCache,
@@ -863,18 +876,10 @@ fn plan_update_with_schema(
     let mut i: Int = 0;
     while i < upd.assignments.len() {
         let a = &upd.assignments[i];
-        let mut col_idx: Int = -1;
-        let mut k: Int = 0;
-        while k < meta.columns.len() {
-            if meta.columns[k].name == a.column.clone() {
-                col_idx = k;
-                break;
-            }
-            k = k + 1;
-        }
-        if col_idx < 0 {
-            return Result.Err(plan_error("SET references unknown column".clone()));
-        }
+        let col_idx = match meta.column_index(&a.column) {
+            Maybe.Some(index) => index,
+            Maybe.None => { return Result.Err(plan_error("SET references unknown column")); }
+        };
         let value = match resolve_expr(&a.value, &scopes) {
             Result.Ok(e)  => e,
             Result.Err(_) => { return Result.Err(plan_error("SET value resolution failed".clone())); }
@@ -887,20 +892,12 @@ fn plan_update_with_schema(
         i = i + 1;
     }
 
-    let pred: Maybe<Expr> = match upd.where_clause {
-        Maybe.Some(ref e) => {
-            match resolve_expr(e, &scopes) {
-                Result.Ok(r)  => Maybe.Some(r),
-                Result.Err(_) => { return Result.Err(plan_error("UPDATE WHERE resolve failed".clone())); }
-            }
-        }
-        Maybe.None => Maybe.None,
-    };
+    let pred = resolve_optional_expr(&upd.where_clause, &scopes, "UPDATE WHERE resolve failed")?;
 
     Result.Ok(PnUpdate(
         clone_table_ref(&upd.table),
         cursor_id,
-        meta.columns.len(),
+        meta.column_count(),
         resolved,
         pred,
     ))
@@ -919,15 +916,7 @@ fn plan_delete_with_schema(
     let mut scopes: List<ColumnScope> = List.new();
     scopes.push(scope);
 
-    let pred: Maybe<Expr> = match del.where_clause {
-        Maybe.Some(ref e) => {
-            match resolve_expr(e, &scopes) {
-                Result.Ok(r)  => Maybe.Some(r),
-                Result.Err(_) => { return Result.Err(plan_error("DELETE WHERE resolve failed".clone())); }
-            }
-        }
-        Maybe.None => Maybe.None,
-    };
+    let pred = resolve_optional_expr(&del.where_clause, &scopes, "DELETE WHERE resolve failed")?;
 
     Result.Ok(PnDelete(clone_table_ref(&del.table), cursor_id, pred))
 }
@@ -952,19 +941,19 @@ fn plan_from_for_select(
             };
             let mut scopes: List<ColumnScope> = List.new();
             scopes.push(scope_from_table_meta(0, t.alias.clone(), &meta));
-            let node = PnTableScan(clone_table_ref(t), 0, meta.columns.len());
+            let node = PnTableScan(clone_table_ref(t), 0, meta.column_count());
             Result.Ok((node, scopes, meta, 0))
         }
         FiJoin(ref left_fi, ref jc) => {
-            let lt_orig = match left_fi {
+            let left: &FromItem = left_fi.as_ref();
+            let lt_orig: &TableRef = match left {
                 FiTable(ref x) => x,
                 _ => { return Result.Err(plan_error("nested JOINs pending in v1".clone())); }
             };
-            let rt_orig = match jc.right {
-                ref right_fi => match right_fi {
-                    FiTable(ref x) => x,
-                    _ => { return Result.Err(plan_error("JOIN right side must be a table in v1".clone())); }
-                }
+            let right: &FromItem = jc.right.as_ref();
+            let rt_orig: &TableRef = match right {
+                FiTable(ref x) => x,
+                _ => { return Result.Err(plan_error("JOIN right side must be a table in v1")); }
             };
             // RIGHT OUTER JOIN normalizes to LEFT OUTER with sides
             // swapped (the preserved side becomes the outer loop).
@@ -985,16 +974,10 @@ fn plan_from_for_select(
                 let mut scopes_l: List<ColumnScope> = List.new();
                 scopes_l.push(scope_from_table_meta(0, lt_orig.alias.clone(), &lmeta_full));
                 scopes_l.push(scope_from_table_meta(1, rt_orig.alias.clone(), &rmeta_full));
-                let on_l: Maybe<Expr> = match jc.on {
-                    Maybe.Some(ref e) => match resolve_expr(e, &scopes_l) {
-                        Result.Ok(r)  => Maybe.Some(r),
-                        Result.Err(_) => { return Result.Err(plan_error("FULL OUTER JOIN ON resolve (left side) failed".clone())); }
-                    },
-                    Maybe.None => Maybe.None,
-                };
+                let on_l = resolve_optional_expr(&jc.on, &scopes_l, "FULL OUTER JOIN ON resolve (left side) failed")?;
                 let left_join = PnNestedLoopJoin(
-                    clone_table_ref(lt_orig), 0, lmeta_full.columns.len(),
-                    clone_table_ref(rt_orig), 1, rmeta_full.columns.len(),
+                    clone_table_ref(lt_orig), 0, lmeta_full.column_count(),
+                    clone_table_ref(rt_orig), 1, rmeta_full.column_count(),
                     on_l, true,
                 );
 
@@ -1002,16 +985,10 @@ fn plan_from_for_select(
                 let mut scopes_r: List<ColumnScope> = List.new();
                 scopes_r.push(scope_from_table_meta(0, rt_orig.alias.clone(), &rmeta_full));
                 scopes_r.push(scope_from_table_meta(1, lt_orig.alias.clone(), &lmeta_full));
-                let on_r: Maybe<Expr> = match jc.on {
-                    Maybe.Some(ref e) => match resolve_expr(e, &scopes_r) {
-                        Result.Ok(r)  => Maybe.Some(r),
-                        Result.Err(_) => { return Result.Err(plan_error("FULL OUTER JOIN ON resolve (right side) failed".clone())); }
-                    },
-                    Maybe.None => Maybe.None,
-                };
+                let on_r = resolve_optional_expr(&jc.on, &scopes_r, "FULL OUTER JOIN ON resolve (right side) failed")?;
                 let swapped = PnNestedLoopJoin(
-                    clone_table_ref(rt_orig), 0, rmeta_full.columns.len(),
-                    clone_table_ref(lt_orig), 1, lmeta_full.columns.len(),
+                    clone_table_ref(rt_orig), 0, rmeta_full.column_count(),
+                    clone_table_ref(lt_orig), 1, lmeta_full.column_count(),
                     on_r, true,
                 );
 
@@ -1019,14 +996,12 @@ fn plan_from_for_select(
                 // (LEFT JOIN nullifies ALL right-side cols on no-match, so
                 // any one column suffices as the sentinel). A is at cursor
                 // 1 in the swapped scope.
-                if lmeta_full.columns.len() == 0 {
+                if lmeta_full.column_count() == 0 {
                     return Result.Err(plan_error("FULL OUTER JOIN with empty-column left table".clone()));
                 }
-                let null_filter = EBinary(
-                    BIs,
-                    Heap.new(EColumnRef(1, 0)),
-                    Heap.new(ELit(LNull)),
-                );
+                let unmatched: Expr = EColumnRef(1, 0);
+                let null_value: Expr = ELit(SqlLiteral.LNull);
+                let null_filter: Expr = EBinary(BIs, Heap.new(unmatched), Heap.new(null_value));
                 let filtered = PnFilter(Heap.new(swapped), null_filter);
 
                 // PnProject: reorder swapped output [B.cols..., A.cols...]
@@ -1034,17 +1009,17 @@ fn plan_from_for_select(
                 // matching column shape.
                 let mut project_cols: List<PlanColumn> = List.new();
                 let mut ai: Int = 0;
-                while ai < lmeta_full.columns.len() {
+                while ai < lmeta_full.column_count() {
                     project_cols.push(PlanColumn {
-                        alias: lmeta_full.columns[ai].name.clone(),
+                        alias: lmeta_full.column_name(ai).clone(),
                         expr:  EColumnRef(1, ai),    // A is at cursor 1
                     });
                     ai = ai + 1;
                 }
                 let mut bj: Int = 0;
-                while bj < rmeta_full.columns.len() {
+                while bj < rmeta_full.column_count() {
                     project_cols.push(PlanColumn {
-                        alias: rmeta_full.columns[bj].name.clone(),
+                        alias: rmeta_full.column_name(bj).clone(),
                         expr:  EColumnRef(0, bj),    // B is at cursor 0
                     });
                     bj = bj + 1;
@@ -1078,16 +1053,10 @@ fn plan_from_for_select(
             let mut scopes: List<ColumnScope> = List.new();
             scopes.push(scope_from_table_meta(0, lt.alias.clone(), &lmeta));
             scopes.push(scope_from_table_meta(1, rt.alias.clone(), &rmeta));
-            let on_resolved: Maybe<Expr> = match jc.on {
-                Maybe.Some(ref e) => match resolve_expr(e, &scopes) {
-                    Result.Ok(r)  => Maybe.Some(r),
-                    Result.Err(_) => { return Result.Err(plan_error("JOIN ON resolve failed".clone())); }
-                },
-                Maybe.None => Maybe.None,
-            };
+            let on_resolved = resolve_optional_expr(&jc.on, &scopes, "JOIN ON resolve failed")?;
             let node = PnNestedLoopJoin(
-                clone_table_ref(lt), 0, lmeta.columns.len(),
-                clone_table_ref(rt), 1, rmeta.columns.len(),
+                clone_table_ref(lt), 0, lmeta.column_count(),
+                clone_table_ref(rt), 1, rmeta.column_count(),
                 on_resolved,
                 is_left_outer,
             );
@@ -1116,20 +1085,9 @@ fn plan_select_with_schema(root: &SelectStmt, schema: &SchemaCache) -> Result<Pl
 }
 
 fn plan_simple_select_with_schema(sel: &SelectStmt, simple: &SimpleSelect, schema: &SchemaCache) -> Result<PlanNode, PlanError> {
-    // No FROM → fall back to the schema-free planner.
-    match simple.from {
+    let (node_pre_where, scopes, meta, cursor_id) = match simple.from {
+        Maybe.Some(ref fi) => plan_from_for_select(fi, schema)?,
         Maybe.None => { return plan_simple_select(sel, simple); }
-        _ => {}
-    }
-
-    // Resolve FROM — single table, or single nested-loop JOIN of two.
-    let from_res = match simple.from {
-        Maybe.Some(ref fi) => plan_from_for_select(fi, schema),
-        Maybe.None => { return Result.Err(plan_error("unreachable".clone())); }
-    };
-    let (node_pre_where, scopes, meta, cursor_id) = match from_res {
-        Result.Ok(v)  => v,
-        Result.Err(e) => { return Result.Err(e); }
     };
     let mut node: PlanNode = node_pre_where;
 
@@ -1160,9 +1118,9 @@ fn plan_simple_select_with_schema(sel: &SelectStmt, simple: &SimpleSelect, schem
             RcStar => {
                 // Expand `*` into one EColumnRef per column.
                 let mut k: Int = 0;
-                while k < meta.columns.len() {
+                while k < meta.column_count() {
                     plan_cols.push(PlanColumn {
-                        alias: meta.columns[k].name.clone(),
+                        alias: meta.column_name(k).clone(),
                         expr: EColumnRef(cursor_id, k),
                     });
                     k = k + 1;
@@ -1170,9 +1128,9 @@ fn plan_simple_select_with_schema(sel: &SelectStmt, simple: &SimpleSelect, schem
             }
             RcTableStar(_) => {
                 let mut k: Int = 0;
-                while k < meta.columns.len() {
+                while k < meta.column_count() {
                     plan_cols.push(PlanColumn {
-                        alias: meta.columns[k].name.clone(),
+                        alias: meta.column_name(k).clone(),
                         expr: EColumnRef(cursor_id, k),
                     });
                     k = k + 1;
@@ -1196,13 +1154,7 @@ fn plan_simple_select_with_schema(sel: &SelectStmt, simple: &SimpleSelect, schem
             resolved_keys.push(resolved);
             g = g + 1;
         }
-        let having: Maybe<Expr> = match simple.having {
-            Maybe.Some(ref h) => match resolve_expr(h, &scopes) {
-                Result.Ok(e)  => Maybe.Some(e),
-                Result.Err(_) => { return Result.Err(plan_error("HAVING resolve failed".clone())); }
-            },
-            Maybe.None => Maybe.None,
-        };
+        let having = resolve_optional_expr(&simple.having, &scopes, "HAVING resolve failed")?;
         node = PnGroupBy(Heap.new(node), resolved_keys, plan_cols, having);
     } else {
         node = PnProject(Heap.new(node), plan_cols);

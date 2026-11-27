@@ -1,0 +1,102 @@
+module core.database.sqlite.native.l5_sql.tests.planner_columns;
+
+mount core.database.sqlite.native.l5_sql.ast.{
+    SqlStatement, SSelect, SUpdate, CreateTableStmt, TableRef, ColumnDef,
+    SelectStmt, SelectKind, SkSimple, SkCompound, SimpleSelect, CompoundOp, CoUnion,
+    ResultColumnItem, RcStar, FromItem, FiTable, Expr, EColumn, EColumnRef,
+    UpdateAssignment, UpdateStmt,
+};
+mount core.database.sqlite.native.l5_sql.planner.{
+    PlanNode, PnUpdate, PnUnion, PnProject, PnTableScan, plan_error, plan_statement_with_schema,
+};
+mount core.database.sqlite.native.l6_session.schema_cache.{SchemaCache, schema_cache_new, table_meta_from_create};
+
+fn table() -> TableRef { TableRef { name: "stock", schema: "", alias: "" } }
+
+fn catalogue() -> SchemaCache {
+    let mut columns: List<ColumnDef> = List.new();
+    columns.push(ColumnDef { name: "Code", declared_type: "TEXT", constraints: List.new() });
+    columns.push(ColumnDef { name: "Quantity", declared_type: "INT", constraints: List.new() });
+    let create = CreateTableStmt {
+        table: table(), if_not_exists: false, temporary: false, strict: false, without_rowid: false,
+        columns: columns, constraints: List.new(),
+    };
+    let mut cache = schema_cache_new();
+    assert(cache.register_table(table_meta_from_create(&create, 4, "")).is_ok());
+    cache
+}
+
+fn column(name: Text) -> Expr {
+    EColumn(TableRef { name: "", schema: "", alias: "" }, name)
+}
+
+fn update(name: Text, predicate: Maybe<Expr>) -> SqlStatement {
+    let assignment = UpdateAssignment { column: name, col_idx: -1, value: column("CODE") };
+    let mut assignments: List<UpdateAssignment> = List.new();
+    assignments.push(assignment);
+    SUpdate(UpdateStmt {
+        table: table(), assignments: assignments, from: Maybe.None,
+        where_clause: predicate, on_conflict: Maybe.None, returning: List.new(),
+    })
+}
+
+@test
+fn test_update_uses_catalogue_indices() {
+    let cache = catalogue();
+    match plan_statement_with_schema(&update("quantity", Maybe.Some(column("Quantity"))), &cache) {
+        Result.Ok(PnUpdate(_, 0, 2, ref assignments, ref predicate)) => {
+            assert_eq(assignments.len(), 1);
+            assert_eq(assignments[0].col_idx, 1);
+            assert(assignments[0].value is EColumnRef(0, 0));
+            assert(predicate is Maybe.Some(EColumnRef(0, 1)));
+        }
+        _ => panic("expected the resolved UPDATE"),
+    }
+    match plan_statement_with_schema(&update("missing", Maybe.None), &cache) {
+        Result.Err(err) => assert(err == plan_error("SET references unknown column")),
+        Result.Ok(_) => panic("expected an unknown column"),
+    }
+    match plan_statement_with_schema(&update("Code", Maybe.Some(column("missing"))), &cache) {
+        Result.Err(err) => assert(err == plan_error("UPDATE WHERE resolve failed")),
+        Result.Ok(_) => panic("expected a rejected WHERE expression"),
+    }
+}
+
+fn select_all() -> SelectStmt {
+    let columns: List<ResultColumnItem> = [RcStar];
+    let simple = SimpleSelect {
+        distinct: false, result_columns: columns, from: Maybe.Some(FiTable(table())),
+        where_clause: Maybe.None, group_by: List.new(), having: Maybe.None,
+    };
+    SelectStmt { kind: SkSimple(simple), order_by: List.new(), limit: Maybe.None }
+}
+
+fn check_projection(node: &PlanNode) {
+    match node {
+        PnProject(ref input, ref columns) => {
+            assert_eq(columns.len(), 2);
+            assert(columns[0].expression() is EColumnRef(0, 0));
+            assert(columns[1].expression() is EColumnRef(0, 1));
+            assert(input.as_ref() is PnTableScan(_, 0, 2));
+        }
+        _ => panic("expected the expanded SELECT list"),
+    }
+}
+
+@test
+fn test_compound_star_uses_resolved_width_on_both_sides() {
+    let cache = catalogue();
+    let query = SSelect(SelectStmt {
+        kind: SkCompound(CoUnion, Heap.new(select_all()), Heap.new(select_all())),
+        order_by: List.new(), limit: Maybe.None,
+    });
+    match plan_statement_with_schema(&query, &cache) {
+        Result.Ok(PnUnion(ref left, ref right, 2)) => {
+            check_projection(left.as_ref());
+            check_projection(right.as_ref());
+        }
+        _ => panic("expected a two-column UNION"),
+    }
+}
+
+fn main() {}

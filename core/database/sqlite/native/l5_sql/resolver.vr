@@ -216,7 +216,8 @@ public fn resolve_expr(e: &Expr, scopes: &List<ColumnScope>) -> Result<Expr, Res
 }
 
 fn resolve_child(child: &Heap<Expr>, scopes: &List<ColumnScope>) -> Result<Heap<Expr>, ResolveError> {
-    Result.Ok(Heap.new(resolve_expr(child.as_ref(), scopes)?))
+    let resolved: Expr = resolve_expr(child.as_ref(), scopes)?;
+    Result.Ok(Heap.new(resolved))
 }
 
 fn resolve_optional(child: &Maybe<Heap<Expr>>, scopes: &List<ColumnScope>) -> Result<Maybe<Heap<Expr>>, ResolveError> {
