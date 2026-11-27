@@ -3074,23 +3074,8 @@ impl VbcCodegen {
         self.ctx.free_temp(zero);
     }
 
-    /// Compiles a binary operation.
-    /// Compile a binary expression, then narrow the result to the
-    /// declared width of a sized integer type (T0611).
-    ///
-    /// The wrapper exists so that there is ONE place where the width is
-    /// applied. `compile_binary_inner` emits `BinaryI` from 56 distinct
-    /// sites; patching each is how a rule ends up holding on most paths
-    /// and silently not on the rest.
-    ///
-    /// Only the operations that can leave the declared range are
-    /// narrowed. `/`, `%`, `&`, `|`, `^` and `>>` cannot widen an
-    /// in-range operand, and comparisons yield `Bool`, so truncating
-    /// their results would be noise at best and wrong at worst.
-    ///
-    /// The width comes from the LEFT operand: Verum's arithmetic is
-    /// homogeneous, and for shifts the result type is the shifted
-    /// operand's, not the shift amount's.
+    /// Preserve the shifted operand's width for shifts and the homogeneous
+    /// operand width for other arithmetic. Comparisons produce Bool.
     fn compile_binary(
         &mut self,
         op: BinOp,
@@ -3098,35 +3083,121 @@ impl VbcCodegen {
         right: &Expr,
     ) -> CodegenResult<Option<Reg>> {
         let result = self.compile_binary_inner(op, left, right, None)?;
-        let widens = matches!(
-            op,
-            BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Pow | BinOp::Shl
-        );
-        if !widens {
-            return Ok(result);
+        let Some(reg) = result else { return Ok(None); };
+        if !Self::integer_result_can_widen(op) {
+            return Ok(Some(reg));
         }
-        let Some(reg) = result else {
-            return Ok(result);
-        };
-        use crate::types::TypeRef;
-        use verum_common::well_known_types::type_names;
         let declaration = self.declared_expression_result(left, None, 0, 0)
             .and_then(|ty| self.expand_declared_alias(ty));
-        let Some(TypeRef::Concrete(id)) = declaration else {
-            return Ok(Some(reg));
+        let narrowed = match declaration {
+            Some(crate::types::TypeRef::Concrete(id)) => self.narrow_numeric_result(op, id, reg)?,
+            _ => reg,
         };
-        let Some(name) = id.well_known_name().filter(|_| id.is_integer()) else {
-            return Ok(Some(reg));
-        };
-        match type_names::numeric_bit_width(name) {
-            Some(width) if width < 64 => {
-                let signed = type_names::is_signed_integer_type(name);
-                let dst = self.emit_truncate_to_width(reg, width, signed)?;
-                self.ctx.free_temp(reg);
-                Ok(Some(dst))
-            }
-            _ => Ok(Some(reg)),
+        if narrowed != reg {
+            self.ctx.free_temp(reg);
         }
+        Ok(Some(narrowed))
+    }
+
+    fn integer_result_can_widen(op: BinOp) -> bool {
+        matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Pow | BinOp::Shl)
+    }
+
+    fn narrow_numeric_result(
+        &mut self, op: BinOp, id: crate::types::TypeId, reg: Reg,
+    ) -> CodegenResult<Reg> {
+        if id.is_integer()
+            && let Some(name) = id.well_known_name()
+            && let Some(width) = type_names::numeric_bit_width(name)
+            && width < 64
+        {
+            let signed = type_names::is_signed_integer_type(name);
+            // Signed MIN / -1 can exceed the target width by one.
+            if op != BinOp::Div || signed {
+                return self.emit_truncate_to_width(reg, width, signed);
+            }
+        }
+        Ok(reg)
+    }
+
+    fn numeric_binary_instruction(
+        op: BinOp,
+        scalar: crate::types::TypeId,
+        dst: Reg,
+        a: Reg,
+        b: Reg,
+    ) -> CodegenResult<Instruction> {
+        let unsupported = || CodegenError::unsupported_expr(format!(
+            "numeric operation {op:?} on declaration {scalar:?}"
+        ));
+        if scalar.is_float() {
+            let op = match op {
+                BinOp::Add | BinOp::Concat => BinaryFloatOp::Add,
+                BinOp::Sub => BinaryFloatOp::Sub,
+                BinOp::Mul => BinaryFloatOp::Mul,
+                BinOp::Div => BinaryFloatOp::Div,
+                BinOp::Rem => BinaryFloatOp::Mod,
+                _ => return Err(unsupported()),
+            };
+            return Ok(Instruction::BinaryF { op, dst, a, b });
+        }
+        if !scalar.is_integer() {
+            return Err(unsupported());
+        }
+        let unsigned = scalar.well_known_name().is_some_and(type_names::is_unsigned_integer_type);
+        let bitwise = match op {
+            BinOp::BitAnd => Some(BitwiseOp::And),
+            BinOp::BitOr => Some(BitwiseOp::Or),
+            BinOp::BitXor => Some(BitwiseOp::Xor),
+            BinOp::Shl => Some(BitwiseOp::Shl),
+            BinOp::Shr if unsigned => Some(BitwiseOp::Ushr),
+            BinOp::Shr => Some(BitwiseOp::Shr),
+            _ => None,
+        };
+        if let Some(op) = bitwise {
+            return Ok(Instruction::Bitwise { op, dst, a, b });
+        }
+        let op = match op {
+            BinOp::Add | BinOp::Concat => BinaryIntOp::Add,
+            BinOp::Sub => BinaryIntOp::Sub,
+            BinOp::Mul => BinaryIntOp::Mul,
+            BinOp::Div if unsigned => BinaryIntOp::UDiv,
+            BinOp::Div => BinaryIntOp::Div,
+            BinOp::Rem if unsigned => BinaryIntOp::UMod,
+            BinOp::Rem => BinaryIntOp::Mod,
+            _ => return Err(unsupported()),
+        };
+        Ok(Instruction::BinaryI { op, dst, a, b })
+    }
+
+    fn emit_compound_numeric(
+        &mut self,
+        op: BinOp,
+        declaration: Option<&crate::types::TypeRef>,
+        span: verum_ast::Span,
+        dst: Reg,
+        left: Reg,
+        right: Reg,
+    ) -> CodegenResult<()> {
+        let Some(crate::types::TypeRef::Concrete(id)) = declaration else {
+            return Err(CodegenError::with_span(
+                CodegenErrorKind::InvalidSourceSignature(
+                    "compound operation requires its destination scalar declaration".into()
+                ),
+                span,
+            ));
+        };
+        let instruction = Self::numeric_binary_instruction(op, *id, dst, left, right)
+            .map_err(|error| error.at_source(span))?;
+        self.ctx.emit(instruction);
+        if Self::integer_result_can_widen(op) {
+            let narrowed = self.narrow_numeric_result(op, *id, dst)?;
+            if narrowed != dst {
+                self.ctx.emit(Instruction::Mov { dst, src: narrowed });
+                self.ctx.free_temp(narrowed);
+            }
+        }
+        Ok(())
     }
 
     fn compile_binary_inner(
@@ -3560,125 +3631,26 @@ impl VbcCodegen {
 
         // Emit appropriate instruction based on operator
         match op {
-            // Arithmetic - use type-appropriate instruction
-            BinOp::Add | BinOp::Concat => {
-                if is_text {
-                    // String concatenation via Concat instruction
-                    self.ctx.emit(Instruction::Concat {
-                        dst: dest,
-                        a: left_reg,
-                        b: right_reg,
-                    });
-                } else if is_float {
-                    self.ctx.emit(Instruction::BinaryF {
-                        op: BinaryFloatOp::Add,
-                        dst: dest,
-                        a: left_reg,
-                        b: right_reg,
-                    });
+            BinOp::Add | BinOp::Concat if is_text => self.ctx.emit(Instruction::Concat {
+                dst: dest, a: left_reg, b: right_reg,
+            }),
+            BinOp::Add | BinOp::Concat | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Rem
+            | BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr => {
+                let scalar = if is_float {
+                    crate::types::TypeId::FLOAT
+                } else if let Some(crate::types::TypeRef::Concrete(id)) = left_declaration.clone()
+                    .and_then(|ty| self.expand_declared_alias(ty))
+                    && (id.is_integer() || id.is_float())
+                {
+                    id
+                } else if matches!(op, BinOp::Div | BinOp::Rem | BinOp::Shr)
+                    && self.infer_expr_is_unsigned(left)
+                {
+                    crate::types::TypeId::U64
                 } else {
-                    self.ctx.emit(Instruction::BinaryI {
-                        op: BinaryIntOp::Add,
-                        dst: dest,
-                        a: left_reg,
-                        b: right_reg,
-                    });
-                }
-            }
-            BinOp::Sub => {
-                if is_float {
-                    self.ctx.emit(Instruction::BinaryF {
-                        op: BinaryFloatOp::Sub,
-                        dst: dest,
-                        a: left_reg,
-                        b: right_reg,
-                    });
-                } else {
-                    self.ctx.emit(Instruction::BinaryI {
-                        op: BinaryIntOp::Sub,
-                        dst: dest,
-                        a: left_reg,
-                        b: right_reg,
-                    });
-                }
-            }
-            BinOp::Mul => {
-                if is_float {
-                    self.ctx.emit(Instruction::BinaryF {
-                        op: BinaryFloatOp::Mul,
-                        dst: dest,
-                        a: left_reg,
-                        b: right_reg,
-                    });
-                } else {
-                    self.ctx.emit(Instruction::BinaryI {
-                        op: BinaryIntOp::Mul,
-                        dst: dest,
-                        a: left_reg,
-                        b: right_reg,
-                    });
-                }
-            }
-            BinOp::Div => {
-                if is_float {
-                    self.ctx.emit(Instruction::BinaryF {
-                        op: BinaryFloatOp::Div,
-                        dst: dest,
-                        a: left_reg,
-                        b: right_reg,
-                    });
-                } else {
-                    // Pick unsigned division when the left-operand type
-                    // is unsigned: signed and unsigned `/` disagree once
-                    // the high bit is set, e.g. `(u64::MAX) / 10 ≠
-                    // (i64)(-1) / 10`. Mirrors the `Shr`→`Ushr` precedent
-                    // a few branches up. `Text.parse_int_radix` and any
-                    // stdlib code with `UInt64` magnitudes ≥ 2^63 depend
-                    // on this — pre-fix it silently emitted signed `/`
-                    // and `(u64::MAX) / radix` collapsed to `0`.
-                    // One unsignedness authority (see `infer_expr_is_unsigned`);
-                    // also picks up nested-arithmetic unsigned dividends such as
-                    // `(a + b) / c`, which the former inline `infer_expr_type_name`
-                    // copy silently divided signed.
-                    let use_unsigned = self.infer_expr_is_unsigned(left);
-                    let op = if use_unsigned {
-                        BinaryIntOp::UDiv
-                    } else {
-                        BinaryIntOp::Div
-                    };
-                    self.ctx.emit(Instruction::BinaryI {
-                        op,
-                        dst: dest,
-                        a: left_reg,
-                        b: right_reg,
-                    });
-                }
-            }
-            BinOp::Rem => {
-                if is_float {
-                    self.ctx.emit(Instruction::BinaryF {
-                        op: BinaryFloatOp::Mod,
-                        dst: dest,
-                        a: left_reg,
-                        b: right_reg,
-                    });
-                } else {
-                    // Same unsignedness gate as `BinOp::Div` — `(u64::MAX)
-                    // % 10 = 5` whereas `(i64)(-1) % 10 = -1`.
-                    // Same one unsignedness authority as `BinOp::Div`.
-                    let use_unsigned = self.infer_expr_is_unsigned(left);
-                    let op = if use_unsigned {
-                        BinaryIntOp::UMod
-                    } else {
-                        BinaryIntOp::Mod
-                    };
-                    self.ctx.emit(Instruction::BinaryI {
-                        op,
-                        dst: dest,
-                        a: left_reg,
-                        b: right_reg,
-                    });
-                }
+                    crate::types::TypeId::INT
+                };
+                self.ctx.emit(Self::numeric_binary_instruction(op, scalar, dest, left_reg, right_reg)?);
             }
 
             // Comparison - use type-appropriate instruction
@@ -3877,66 +3849,6 @@ impl VbcCodegen {
                         b: right_reg,
                     });
                 }
-            }
-
-            // Bitwise
-            BinOp::BitAnd => self.ctx.emit(Instruction::Bitwise {
-                op: BitwiseOp::And,
-                dst: dest,
-                a: left_reg,
-                b: right_reg,
-            }),
-            BinOp::BitOr => self.ctx.emit(Instruction::Bitwise {
-                op: BitwiseOp::Or,
-                dst: dest,
-                a: left_reg,
-                b: right_reg,
-            }),
-            BinOp::BitXor => self.ctx.emit(Instruction::Bitwise {
-                op: BitwiseOp::Xor,
-                dst: dest,
-                a: left_reg,
-                b: right_reg,
-            }),
-            BinOp::Shl => self.ctx.emit(Instruction::Bitwise {
-                op: BitwiseOp::Shl,
-                dst: dest,
-                a: left_reg,
-                b: right_reg,
-            }),
-            BinOp::Shr => {
-                // Root fix for Issue #2:
-                //
-
-                // `>>` was hard-wired to `BitwiseOp::Shr`, which the interpreter
-                // dispatches to `handle_shr` — an *arithmetic* (sign-preserving)
-                // 64-bit shift. For any unsigned type whose representation has
-                // the high 32-bit sign bit set (e.g. a `UInt32` value loaded
-                // from a table whose entry is `0xEDB88320`), arithmetic right
-                // shift fills the top bits with ones and subsequent XORs then
-                // propagate sign-extended garbage. This shows up as a silent
-                // correctness bug (CRC32 test vectors diverge from zlib).
-                //
-
-                // The architecturally-correct behaviour is: `>>` on an unsigned
-                // operand is the C / Rust `>>` on the unsigned type — i.e. a
-                // logical shift. We detect the unsigned case from the left
-                // operand's inferred type name and emit `BitwiseOp::Ushr`
-                // (which the interpreter lowers to `handle_ushr`, the u64
-                // zero-filling shift).
-                // Same one unsignedness authority as `BinOp::Div`/`Rem`.
-                let use_logical = self.infer_expr_is_unsigned(left);
-                let op = if use_logical {
-                    BitwiseOp::Ushr
-                } else {
-                    BitwiseOp::Shr
-                };
-                self.ctx.emit(Instruction::Bitwise {
-                    op,
-                    dst: dest,
-                    a: left_reg,
-                    b: right_reg,
-                })
             }
 
             // Power operator
@@ -4571,19 +4483,12 @@ impl VbcCodegen {
 
                 let final_ref_reg = inner_ref_reg.unwrap_or(ref_reg);
 
-                // Check if this is a raw FFI pointer
-                if self.ctx.is_raw_pointer(final_ref_reg) {
-                    // Emit DerefMutRaw for raw FFI pointers - bypasses CBGR validation
-                    // Format: ptr:reg, value:reg, size:u8 (8 = 64-bit)
-                    let mut operands = Vec::<u8>::new();
-                    Self::write_reg(&mut operands, final_ref_reg.0);
-                    Self::write_reg(&mut operands, value_reg.0);
-                    operands.push(8); // Default to 8-byte write
-
-                    self.ctx.emit(Instruction::MemExtended {
-                        sub_op: 0x11, // crate::instruction::MemSubOpcode::DerefMutRaw
-                        operands,
-                    });
+                let narrow_native = inner_ref_reg.is_none()
+                    && matches!(destination_declaration.as_ref(), Some(crate::types::TypeRef::Concrete(id))
+                        if crate::module::CType::narrow_scalar(*id).is_some())
+                    && self.declared_native_referent(ref_expr);
+                if self.ctx.is_raw_pointer(final_ref_reg) || narrow_native {
+                    self.emit_raw_referent_store(final_ref_reg, value_reg, destination_declaration.as_ref());
                 } else {
                     // For Tier 0, validate before write
                     let tier = self.get_deref_tier_for_expr(ref_expr);
@@ -4648,31 +4553,41 @@ impl VbcCodegen {
         .unwrap_or(false)
     }
 
+    fn compound_binding_declaration(&self, name: &str, binding: Reg) -> Option<crate::types::TypeRef> {
+        let variable = self.ctx.lookup_var(name)?;
+        let declared = if variable.is_cell && variable.reg == binding {
+            // The following GetF reads the captured value, not the cell handle.
+            self.ctx.registers.value_uses.captured_declaration(variable)
+        } else {
+            self.declared_named_binding_type(name, binding)
+        };
+        declared.and_then(|ty| self.expand_declared_alias(ty))
+    }
+
+    fn load_compound_binding(&mut self, name: &str, binding: Reg) -> Reg {
+        if self.ctx.lookup_var(name).is_some_and(|variable| variable.is_cell) {
+            let value = self.ctx.alloc_temp();
+            self.ctx.emit(Instruction::GetF { dst: value, obj: binding, field_idx: 0 });
+            value
+        } else {
+            binding
+        }
+    }
+
+    fn store_compound_binding(&mut self, binding: Reg, value: Reg) {
+        if value != binding {
+            self.ctx.emit(Instruction::SetF { obj: binding, field_idx: 0, value });
+            self.ctx.free_temp(value);
+        }
+    }
+
     fn compile_compound_assignment(
         &mut self,
         op: BinOp,
         target: &Expr,
         value: &Expr,
     ) -> CodegenResult<Option<Reg>> {
-        // Convert compound op to binary int op
-        let binary_op = match op {
-            BinOp::AddAssign => Some(BinaryIntOp::Add),
-            BinOp::SubAssign => Some(BinaryIntOp::Sub),
-            BinOp::MulAssign => Some(BinaryIntOp::Mul),
-            BinOp::DivAssign => Some(BinaryIntOp::Div),
-            BinOp::RemAssign => Some(BinaryIntOp::Mod),
-            _ => None,
-        };
-
-        let bitwise_op = match op {
-            BinOp::BitAndAssign => Some(BitwiseOp::And),
-            BinOp::BitOrAssign => Some(BitwiseOp::Or),
-            BinOp::BitXorAssign => Some(BitwiseOp::Xor),
-            BinOp::ShlAssign => Some(BitwiseOp::Shl),
-            BinOp::ShrAssign => Some(BitwiseOp::Shr),
-            _ => None,
-        };
-
+        let operation = Self::compound_to_binary_op(&op)?;
         // For simple variables: x += y becomes x = x + y
         match &target.kind {
             ExprKind::Path(path) if path.segments.len() == 1 => {
@@ -4704,24 +4619,11 @@ impl VbcCodegen {
                         CodegenError::internal("compound assign value has no value")
                     })?;
 
-                    // Perform operation into current_reg
-                    if let Some(bop) = bitwise_op {
-                        self.ctx.emit(Instruction::Bitwise {
-                            op: bop,
-                            dst: current_reg,
-                            a: current_reg,
-                            b: right_reg,
-                        });
-                    } else if let Some(iop) = binary_op {
-                        self.ctx.emit(Instruction::BinaryI {
-                            op: iop,
-                            dst: current_reg,
-                            a: current_reg,
-                            b: right_reg,
-                        });
-                    } else {
-                        return Err(CodegenError::internal("not a compound assignment"));
-                    }
+                    let destination = self.projection_operand_declaration(target).or_else(||
+                        self.scoped_static_type_name(name)
+                            .and_then(|name| self.semantic_type_in_current_scope(&name)));
+                    self.emit_compound_numeric(operation, destination.as_ref(), target.span,
+                        current_reg, current_reg, right_reg)?;
 
                     // Store result back to TLS
                     self.ctx.emit(Instruction::TlsSet {
@@ -4755,7 +4657,6 @@ impl VbcCodegen {
                 }
 
                 let target_reg = self.ctx.get_var_reg(name)?;
-                let var_is_cell = self.ctx.lookup_var(name).is_some_and(|i| i.is_cell);
 
                 // Check mutability
                 if let Some(info) = self.ctx.lookup_var(name)
@@ -4766,8 +4667,8 @@ impl VbcCodegen {
                     )));
                 }
 
-                let destination = self.projection_operand_declaration(target)
-                    .and_then(|ty| self.expand_declared_alias(ty));
+                let destination = self.compound_binding_declaration(name, target_reg)
+                    .or_else(|| self.projection_operand_declaration(target));
                 // Evaluate right side, retaining its producer before the write.
                 let right_start = self.ctx.instructions.len();
                 let right_reg = self
@@ -4776,48 +4677,23 @@ impl VbcCodegen {
                 let right_declaration = self.copy_source_type(value, right_reg,
                     right_start, self.ctx.instructions.len());
 
-                // For cell variables, load current value from cell first
-                let op_reg = if var_is_cell {
-                    let temp = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::GetF {
-                        dst: temp,
-                        obj: target_reg,
-                        field_idx: 0,
-                    });
-                    temp
-                } else {
-                    target_reg
-                };
-
+                let op_reg = self.load_compound_binding(name, target_reg);
+                let var_is_cell = op_reg != target_reg;
                 let addassign_is_text = matches!(op, BinOp::AddAssign)
                     && destination.as_ref().and_then(crate::types::TypeRef::base_type_id)
                         .is_some_and(|id| self.declared_runtime_carrier(id) == Some(WKT::Text));
 
                 // Perform operation
-                let result_reg = if addassign_is_text { self.ctx.alloc_temp() }
-                    else if var_is_cell { op_reg } else { target_reg };
+                let result_reg = if addassign_is_text { self.ctx.alloc_temp() } else { op_reg };
                 if addassign_is_text {
                     self.ctx.emit(Instruction::Concat {
                         dst: result_reg,
                         a: op_reg,
                         b: right_reg,
                     });
-                } else if let Some(bop) = bitwise_op {
-                    self.ctx.emit(Instruction::Bitwise {
-                        op: bop,
-                        dst: result_reg,
-                        a: op_reg,
-                        b: right_reg,
-                    });
-                } else if let Some(iop) = binary_op {
-                    self.ctx.emit(Instruction::BinaryI {
-                        op: iop,
-                        dst: result_reg,
-                        a: op_reg,
-                        b: right_reg,
-                    });
                 } else {
-                    return Err(CodegenError::internal("not a compound assignment"));
+                    self.emit_compound_numeric(operation, destination.as_ref(), target.span,
+                        result_reg, op_reg, right_reg)?;
                 }
 
                 if addassign_is_text {
@@ -4829,13 +4705,8 @@ impl VbcCodegen {
                     self.ctx.free_temp(result_reg);
                     if var_is_cell { self.ctx.free_temp(op_reg); }
                     self.retire_observed_operand(value, right_reg, right_declaration.as_ref());
-                } else if var_is_cell {
-                    self.ctx.emit(Instruction::SetF {
-                        obj: target_reg,
-                        field_idx: 0,
-                        value: result_reg,
-                    });
-                    self.ctx.free_temp(result_reg);
+                } else {
+                    self.store_compound_binding(target_reg, result_reg);
                 }
 
                 if !addassign_is_text { self.ctx.free_temp(right_reg); }
@@ -4869,7 +4740,6 @@ impl VbcCodegen {
                     .ok_or_else(|| CodegenError::with_span(CodegenErrorKind::InvalidSourceSignature(
                         "compound field assignment has no declared carrier".into()), target.span))?;
                 let scalar = carrier.base_type_id();
-                let field_is_float = scalar.is_some_and(crate::types::TypeId::is_float);
                 let field_is_text = matches!(op, BinOp::AddAssign) && scalar.is_some_and(|id|
                     self.declared_runtime_carrier(id) == Some(WKT::Text));
 
@@ -4881,42 +4751,9 @@ impl VbcCodegen {
                         a: current_val,
                         b: right_reg,
                     });
-                } else if let Some(bop) = bitwise_op {
-                    self.ctx.emit(Instruction::Bitwise {
-                        op: bop,
-                        dst: result,
-                        a: current_val,
-                        b: right_reg,
-                    });
-                } else if let Some(iop) = binary_op {
-                    if field_is_float {
-                        let fop = match iop {
-                            BinaryIntOp::Add => BinaryFloatOp::Add,
-                            BinaryIntOp::Sub => BinaryFloatOp::Sub,
-                            BinaryIntOp::Mul => BinaryFloatOp::Mul,
-                            BinaryIntOp::Div => BinaryFloatOp::Div,
-                            BinaryIntOp::Mod => BinaryFloatOp::Mod,
-                            _ => BinaryFloatOp::Add,
-                        };
-                        self.ctx.emit(Instruction::BinaryF {
-                            op: fop,
-                            dst: result,
-                            a: current_val,
-                            b: right_reg,
-                        });
-                    } else {
-                        self.ctx.emit(Instruction::BinaryI {
-                            op: iop,
-                            dst: result,
-                            a: current_val,
-                            b: right_reg,
-                        });
-                    }
                 } else {
-                    self.ctx.free_temp(current_val);
-                    self.ctx.free_temp(right_reg);
-                    self.ctx.free_temp(obj_reg);
-                    return Err(CodegenError::internal("not a compound assignment"));
+                    self.emit_compound_numeric(operation, Some(&carrier), target.span,
+                        result, current_val, right_reg)?;
                 }
 
                 // REFINE-FIELD-DYNAMIC-BYPASS-1: the post-op value is
@@ -5027,27 +4864,9 @@ impl VbcCodegen {
 
                 // Perform operation
                 let result = self.ctx.alloc_temp();
-                if let Some(bop) = bitwise_op {
-                    self.ctx.emit(Instruction::Bitwise {
-                        op: bop,
-                        dst: result,
-                        a: current_val,
-                        b: right_reg,
-                    });
-                } else if let Some(iop) = binary_op {
-                    self.ctx.emit(Instruction::BinaryI {
-                        op: iop,
-                        dst: result,
-                        a: current_val,
-                        b: right_reg,
-                    });
-                } else {
-                    self.ctx.free_temp(current_val);
-                    self.ctx.free_temp(right_reg);
-                    self.ctx.free_temp(idx_reg);
-                    self.ctx.free_temp(arr_reg);
-                    return Err(CodegenError::internal("not a compound assignment"));
-                }
+                let destination = self.projection_operand_declaration(target);
+                self.emit_compound_numeric(operation, destination.as_ref(), target.span,
+                    result, current_val, right_reg)?;
 
                 // Store back to array element
                 if let Some(reference) = reference {
@@ -5118,26 +4937,9 @@ impl VbcCodegen {
 
                 // Perform operation
                 let result = self.ctx.alloc_temp();
-                if let Some(bop) = bitwise_op {
-                    self.ctx.emit(Instruction::Bitwise {
-                        op: bop,
-                        dst: result,
-                        a: current_val,
-                        b: right_reg,
-                    });
-                } else if let Some(iop) = binary_op {
-                    self.ctx.emit(Instruction::BinaryI {
-                        op: iop,
-                        dst: result,
-                        a: current_val,
-                        b: right_reg,
-                    });
-                } else {
-                    self.ctx.free_temp(current_val);
-                    self.ctx.free_temp(right_reg);
-                    self.ctx.free_temp(tuple_reg);
-                    return Err(CodegenError::internal("not a compound assignment"));
-                }
+                let destination = self.projection_operand_declaration(target);
+                self.emit_compound_numeric(operation, destination.as_ref(), target.span,
+                    result, current_val, right_reg)?;
 
                 // Store back to tuple element
                 self.ctx.emit(Instruction::SetF {
@@ -5167,7 +4969,19 @@ impl VbcCodegen {
                 // Read current value through reference
                 let current_val = self.ctx.alloc_temp();
                 let tier = self.get_deref_tier_for_expr(ref_expr);
-                self.emit_deref_instruction(current_val, ref_reg, tier);
+                let destination = self.projection_operand_declaration(target);
+                let native_pointer = self.ctx.is_raw_pointer(ref_reg)
+                    || self.declared_native_referent(ref_expr);
+                let narrow_load = match destination.as_ref() {
+                    Some(crate::types::TypeRef::Concrete(id)) =>
+                        Self::narrow_scalar_load(current_val, ref_reg, *id, native_pointer),
+                    _ => None,
+                };
+                if let Some(load) = narrow_load {
+                    self.ctx.emit(load);
+                } else {
+                    self.emit_deref_instruction(current_val, ref_reg, tier);
+                }
 
                 // Compile the right-hand side
                 let right_reg = self.compile_expr(value)?.ok_or_else(|| {
@@ -5176,42 +4990,14 @@ impl VbcCodegen {
 
                 // Perform the operation
                 let result = self.ctx.alloc_temp();
-                if let Some(bop) = bitwise_op {
-                    self.ctx.emit(Instruction::Bitwise {
-                        op: bop,
-                        dst: result,
-                        a: current_val,
-                        b: right_reg,
-                    });
-                } else if let Some(iop) = binary_op {
-                    self.ctx.emit(Instruction::BinaryI {
-                        op: iop,
-                        dst: result,
-                        a: current_val,
-                        b: right_reg,
-                    });
-                } else {
-                    self.ctx.free_temp(current_val);
-                    self.ctx.free_temp(right_reg);
-                    self.ctx.free_temp(ref_reg);
-                    return Err(CodegenError::internal("not a compound assignment"));
-                }
+                self.emit_compound_numeric(operation, destination.as_ref(), target.span,
+                    result, current_val, right_reg)?;
                 self.ctx.free_temp(current_val);
                 self.ctx.free_temp(right_reg);
 
                 // Write back through mutable reference using DerefMut
-                // Check if this is a raw FFI pointer
-                if self.ctx.is_raw_pointer(ref_reg) {
-                    // Emit DerefMutRaw for raw FFI pointers - bypasses CBGR validation
-                    let mut operands = Vec::<u8>::new();
-                    Self::write_reg(&mut operands, ref_reg.0);
-                    Self::write_reg(&mut operands, result.0);
-                    operands.push(8); // Default to 8-byte write
-
-                    self.ctx.emit(Instruction::MemExtended {
-                        sub_op: 0x11, // crate::instruction::MemSubOpcode::DerefMutRaw
-                        operands,
-                    });
+                if native_pointer {
+                    self.emit_raw_referent_store(ref_reg, result, destination.as_ref());
                 } else {
                     // For Tier 0, validate before write
                     if tier == CbgrTier::Tier0 {
@@ -6444,21 +6230,10 @@ impl VbcCodegen {
                     _ => None,
                 };
 
-                if let Some((id, native_pointer)) = typed_deref
-                    && let Some((storage, width)) = crate::module::CType::narrow_scalar(id)
+                if let Some(load) = typed_deref.and_then(|(id, native_pointer)|
+                    Self::narrow_scalar_load(dest, inner_reg, id, native_pointer))
                 {
-                    use crate::instruction::MemSubOpcode;
-                    let mut operands = Vec::with_capacity(5);
-                    Self::write_reg(&mut operands, dest.0);
-                    Self::write_reg(&mut operands, inner_reg.0);
-                    let operation = if native_pointer {
-                        operands.push(width);
-                        if storage.is_signed_integer() { MemSubOpcode::DerefRawSigned } else { MemSubOpcode::DerefRaw }
-                    } else {
-                        operands.push(id.0 as u8);
-                        MemSubOpcode::DerefScalarRef
-                    };
-                    self.ctx.emit(Instruction::MemExtended { sub_op: operation as u8, operands });
+                    self.ctx.emit(load);
                 } else if let Some(deref_qualified) = inner_type
                     .as_ref()
                     .and_then(|ty_name| {
@@ -23119,8 +22894,10 @@ impl VbcCodegen {
 
                     // Apply operation
                     let result_reg = self.ctx.alloc_temp();
-                    let bin_op = Self::compound_to_binary_op(op);
-                    self.emit_binary_int_op(result_reg, current_reg, value_reg, &bin_op)?;
+                    let destination = self.scoped_static_type_name(var_name)
+                        .and_then(|name| self.semantic_type_in_current_scope(&name));
+                    self.emit_compound_numeric(Self::compound_to_binary_op(op)?, destination.as_ref(),
+                        pattern.span, result_reg, current_reg, value_reg)?;
 
                     // Store back to TLS
                     self.ctx.emit(Instruction::TlsSet {
@@ -23152,24 +22929,12 @@ impl VbcCodegen {
                     self.ctx.free_temp(init_reg);
                 }
 
-                // Get the variable's register
-                let var_reg = self.ctx.get_var_reg(var_name)?;
-
-                // Allocate temp for result
-                let result_reg = self.ctx.alloc_temp();
-
-                // Emit the binary operation: result = var op value
-                // Convert compound op to binary op
-                let bin_op = Self::compound_to_binary_op(op);
-                self.emit_binary_int_op(result_reg, var_reg, value_reg, &bin_op)?;
-
-                // Store result back to variable
-                self.ctx.emit(Instruction::Mov {
-                    dst: var_reg,
-                    src: result_reg,
-                });
-
-                self.ctx.free_temp(result_reg);
+                let binding = self.ctx.get_var_reg(var_name)?;
+                let destination = self.compound_binding_declaration(var_name, binding);
+                let scalar = self.load_compound_binding(var_name, binding);
+                self.emit_compound_numeric(Self::compound_to_binary_op(op)?, destination.as_ref(),
+                    pattern.span, scalar, scalar, value_reg)?;
+                self.store_compound_binding(binding, scalar);
                 Ok(())
             }
 
@@ -23190,9 +22955,9 @@ impl VbcCodegen {
     }
 
     /// Converts a compound assignment operator to its binary equivalent.
-    fn compound_to_binary_op(op: &verum_ast::BinOp) -> verum_ast::BinOp {
+    fn compound_to_binary_op(op: &verum_ast::BinOp) -> CodegenResult<verum_ast::BinOp> {
         use verum_ast::BinOp;
-        match op {
+        Ok(match op {
             BinOp::AddAssign => BinOp::Add,
             BinOp::SubAssign => BinOp::Sub,
             BinOp::MulAssign => BinOp::Mul,
@@ -23203,115 +22968,8 @@ impl VbcCodegen {
             BinOp::BitXorAssign => BinOp::BitXor,
             BinOp::ShlAssign => BinOp::Shl,
             BinOp::ShrAssign => BinOp::Shr,
-            _ => BinOp::Add, // fallback, shouldn't happen
-        }
-    }
-
-    /// Emits a binary operation instruction for compound destructuring.
-    /// Uses BinaryI for arithmetic ops and Bitwise for bitwise ops.
-    fn emit_binary_int_op(
-        &mut self,
-        dst: Reg,
-        left: Reg,
-        right: Reg,
-        op: &verum_ast::BinOp,
-    ) -> CodegenResult<()> {
-        use crate::instruction::{BinaryIntOp, BitwiseOp};
-        use verum_ast::BinOp;
-
-        match op {
-            // Arithmetic operations use BinaryI instruction
-            BinOp::Add => {
-                self.ctx.emit(Instruction::BinaryI {
-                    op: BinaryIntOp::Add,
-                    dst,
-                    a: left,
-                    b: right,
-                });
-            }
-            BinOp::Sub => {
-                self.ctx.emit(Instruction::BinaryI {
-                    op: BinaryIntOp::Sub,
-                    dst,
-                    a: left,
-                    b: right,
-                });
-            }
-            BinOp::Mul => {
-                self.ctx.emit(Instruction::BinaryI {
-                    op: BinaryIntOp::Mul,
-                    dst,
-                    a: left,
-                    b: right,
-                });
-            }
-            BinOp::Div => {
-                self.ctx.emit(Instruction::BinaryI {
-                    op: BinaryIntOp::Div,
-                    dst,
-                    a: left,
-                    b: right,
-                });
-            }
-            BinOp::Rem => {
-                // Rem maps to Mod in VBC
-                self.ctx.emit(Instruction::BinaryI {
-                    op: BinaryIntOp::Mod,
-                    dst,
-                    a: left,
-                    b: right,
-                });
-            }
-            // Bitwise operations use Bitwise instruction
-            BinOp::BitAnd => {
-                self.ctx.emit(Instruction::Bitwise {
-                    op: BitwiseOp::And,
-                    dst,
-                    a: left,
-                    b: right,
-                });
-            }
-            BinOp::BitOr => {
-                self.ctx.emit(Instruction::Bitwise {
-                    op: BitwiseOp::Or,
-                    dst,
-                    a: left,
-                    b: right,
-                });
-            }
-            BinOp::BitXor => {
-                self.ctx.emit(Instruction::Bitwise {
-                    op: BitwiseOp::Xor,
-                    dst,
-                    a: left,
-                    b: right,
-                });
-            }
-            BinOp::Shl => {
-                self.ctx.emit(Instruction::Bitwise {
-                    op: BitwiseOp::Shl,
-                    dst,
-                    a: left,
-                    b: right,
-                });
-            }
-            BinOp::Shr => {
-                self.ctx.emit(Instruction::Bitwise {
-                    op: BitwiseOp::Shr,
-                    dst,
-                    a: left,
-                    b: right,
-                });
-            }
-            _ => {
-                return Err(crate::codegen::CodegenError::unsupported_expr(format!(
-                    "unsupported binary operation for compound destructuring: {:?}",
-                    op
-                )));
-            }
-        }
-
-        Ok(())
+            _ => return Err(CodegenError::internal("not a compound assignment")),
+        })
     }
 
     // ==================== Collections ====================
@@ -33401,6 +33059,48 @@ impl VbcCodegen {
         self.ctx.record_ref_tier(CbgrTier::Tier0);
         self.ctx.ref_pinned_regs.insert(src.0);
         self.ctx.emit(Instruction::RefLocal { dst, src });
+    }
+
+    /// Load a narrow pointee through its declared storage representation.
+    /// Register references use value slots; native addresses use the scalar width.
+    fn narrow_scalar_load(
+        dst: Reg, address: Reg, pointee: crate::types::TypeId, native_pointer: bool,
+    ) -> Option<Instruction> {
+        use crate::instruction::MemSubOpcode;
+        let (storage, width) = crate::module::CType::narrow_scalar(pointee)?;
+        let mut operands = Vec::with_capacity(5);
+        Self::write_reg(&mut operands, dst.0);
+        Self::write_reg(&mut operands, address.0);
+        let operation = if native_pointer {
+            operands.push(width);
+            if storage.is_signed_integer() { MemSubOpcode::DerefRawSigned } else { MemSubOpcode::DerefRaw }
+        } else {
+            operands.push(pointee.0 as u8);
+            MemSubOpcode::DerefScalarRef
+        };
+        Some(Instruction::MemExtended { sub_op: operation as u8, operands })
+    }
+
+    fn declared_native_referent(&self, reference: &Expr) -> bool {
+        matches!(self.projection_operand_declaration(reference),
+            Some(crate::types::TypeRef::Reference { tier: CbgrTier::Tier2, .. }))
+    }
+
+    fn emit_raw_referent_store(
+        &mut self, address: Reg, value: Reg, declaration: Option<&crate::types::TypeRef>,
+    ) {
+        let width = match declaration {
+            Some(crate::types::TypeRef::Concrete(id)) =>
+                crate::module::CType::narrow_scalar(*id).map(|(_, width)| width).unwrap_or(8),
+            _ => 8,
+        };
+        let mut operands = Vec::with_capacity(5);
+        Self::write_reg(&mut operands, address.0);
+        Self::write_reg(&mut operands, value.0);
+        operands.push(width);
+        self.ctx.emit(Instruction::MemExtended {
+            sub_op: crate::instruction::MemSubOpcode::DerefMutRaw as u8, operands,
+        });
     }
 
     /// Emits a dereference instruction based on tier.
@@ -45893,7 +45593,16 @@ impl FreeVarAnalyzer {
                 }
             }
             ExprKind::Is { expr: e, .. } => self.visit_expr(e),
-            ExprKind::DestructuringAssign { value, .. } => self.visit_expr(value),
+            ExprKind::DestructuringAssign { pattern, value, .. } => {
+                // These names are written in the enclosing scope, including
+                // when the assignment is their only use inside a closure.
+                for name in self.extract_pattern_bindings(pattern) {
+                    if !self.bound.contains(&name) {
+                        self.free.insert(name);
+                    }
+                }
+                self.visit_expr(value);
+            }
             ExprKind::MapLiteral { entries } => {
                 for (k, v) in entries.iter() {
                     self.visit_expr(k);

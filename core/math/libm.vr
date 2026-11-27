@@ -368,10 +368,10 @@ public fn ipow(x: Float, n: Int) -> Float {
     let mut exp = n.unsigned_abs();
     while exp > 0_u64 {
         if exp % 2_u64 == 1_u64 {
-            result = result * base;
+            result *= base;
         }
-        base = base * base;
-        exp = exp / 2_u64;
+        base *= base;
+        exp >>= 1;
     }
     if n < 0 { 1.0 / result } else { result }
 }
