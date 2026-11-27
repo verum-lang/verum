@@ -1139,6 +1139,58 @@ fn enumeration_binds_the_index_and_the_declared_borrowed_item() {
 }
 
 #[test]
+fn a_for_loop_acquires_and_retires_the_declared_cursor() {
+    let (mut iterator, maybe) = actual_enumeration();
+    let actual = parse(include_str!("../../../core/base/iterator.vr"));
+    iterator.items.extend(actual.items.into_iter().filter(|item| matches!(&item.kind,
+        ItemKind::Type(declaration) if declaration.name.as_str() == "IntoIterator")));
+    let mut protocols = parse(include_str!("../../../core/base/protocols.vr"));
+    protocols.items.retain(|item| matches!(&item.kind,
+        ItemKind::Module(declaration) if declaration.items.is_none()) || matches!(&item.kind,
+        ItemKind::Type(declaration) if declaration.name.as_str() == "Drop"));
+    let consumer = parse(r#"
+        module consumer;
+        mount core.base.iterator.{IntoIterator, Iterator};
+        mount core.base.maybe.Maybe;
+        mount core.base.protocols.Drop;
+        static mut RELEASED: Int = 0;
+        type Sequence is { seed: Int };
+        type Cursor is { remaining: Int };
+        implement Drop for Cursor { fn drop(&mut self) { RELEASED = RELEASED + 1; } }
+        implement IntoIterator for Sequence {
+            type Item = Int;
+            type IntoIter = Cursor;
+            fn into_iter(self) -> Cursor { Cursor { remaining: self.seed + 1 } }
+        }
+        implement Iterator for Cursor {
+            type Item = Int;
+            fn next(&mut self) -> Maybe<Int> {
+                if self.remaining == 0 { return Maybe.None; }
+                let value = self.remaining;
+                self.remaining = value - 1;
+                Maybe.Some(value)
+            }
+        }
+        fn first_value(source: Sequence) -> Int {
+            for value in source { return value; }
+            0
+        }
+        fn run() -> Int {
+            RELEASED = 0;
+            let mut total = 0;
+            let first = Sequence { seed: 2 };
+            let second = Sequence { seed: 3 };
+            for n in first { total = total * 10 + n; }
+            for n in second { total = total + n; break; }
+            total = total + first_value(Sequence { seed: 4 });
+            total * 10 + RELEASED
+        }
+    "#);
+    let module = compile(&[&protocols, &maybe, &iterator, &consumer]).unwrap();
+    execute_source_and_wire(module, 3303);
+}
+
+#[test]
 fn the_slice_iterator_keeps_its_borrow_through_enumerate() {
     use verum_ast::decl::{ImplItemKind, ImplKind};
 

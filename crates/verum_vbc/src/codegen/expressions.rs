@@ -33,7 +33,7 @@ use crate::instruction::{
 use crate::intrinsics::{IntrinsicInfo, lookup_intrinsic};
 use crate::module::FfiSymbolId;
 use crate::types::CbgrTier;
-use verum_common::method_to_protocol;
+use verum_common::{List, method_to_protocol};
 use verum_common::well_known_types::{
     WellKnownType as WKT, type_names,
     maybe_success_tag, result_success_tag,
@@ -19108,25 +19108,35 @@ impl VbcCodegen {
         pattern: &verum_ast::Pattern,
         iter: &Expr,
         body: &Block,
+        converted: Option<crate::types::TypeRef>,
     ) -> CodegenResult<Option<Reg>> {
         // Compile the iterator expression and store in a proper mutable variable.
         // This is critical: temp registers in alloca mode use stack slots, and
         // RefMut on a stack slot creates a pointer to the alloca (not the heap
         // object). By defining a named variable, the &mut self in next
         // correctly references the heap-allocated iterator object.
-        let iter_val = self
-            .compile_expr(iter)?
-            .or_internal("for iter has no value")?;
-        let iterator = self.source_expression_declaration(iter, None, 0);
+        let owns_cursor = converted.is_some();
+        let (iter_val, iterator) = if let Some(cursor) = converted {
+            let method = verum_ast::Ident::new("into_iter", iter.span);
+            let value = self.compile_method_call(iter, &method, &List::new(), None, &List::new())?;
+            (value, Some(cursor))
+        } else {
+            (self.compile_expr(iter)?, self.source_expression_declaration(iter, None, 0))
+        };
+        let iter_val = iter_val.or_internal("for iterator has no value")?;
         let item = iterator.as_ref().and_then(|ty| {
             self.proven_implementation_member(ty, verum_common::well_known_types::WellKnownProtocol::Iterator, "Item")
         });
-        let iter_reg = self.ctx.define_var("__for_iter", true);
+        self.ctx.enter_scope();
+        let iter_reg = self.ctx.define_var("$for_iter", true);
         self.ctx.emit(Instruction::Mov {
             dst: iter_reg,
             src: iter_val,
         });
         self.ctx.free_temp(iter_val);
+        if owns_cursor && let Some(cursor) = &iterator {
+            self.publish_resolved_binding_type("$for_iter", cursor);
+        }
 
         // FUNC-REGISTRY-QUALIFICATION-1: record the iterator's static type as
         // a register hint on `__for_iter`. The `next` CallM below is emitted
@@ -19137,8 +19147,8 @@ impl VbcCodegen {
         // resolves the right `<IterType>.next`. Derived exactly as
         // `is_custom_iterator_type` classified it; the interpreter ignores the
         // hint (it dispatches on the runtime object header).
-        if let Some(cls) = self
-            .infer_expr_type_name(iter)
+        if let Some(cls) = iterator.as_ref().map(|cursor| self.type_ref_to_name(cursor))
+            .or_else(|| self.infer_expr_type_name(iter))
             .or_else(|| self.extract_expr_type_name(iter))
         {
             let base = cls
@@ -19229,7 +19239,8 @@ impl VbcCodegen {
         self.ctx.define_label(&loop_ctx.break_label);
         self.ctx.exit_loop();
 
-        self.ctx.free_temp(iter_reg);
+        if owns_cursor { self.emit_local_drop(iter_reg, iterator.as_ref()); }
+        self.ctx.exit_scope(false);
         self.ctx.free_temp(opt_reg);
         self.ctx.free_temp(elem_reg);
 
@@ -19265,9 +19276,13 @@ impl VbcCodegen {
         iter: &Expr,
         body: &Block,
     ) -> CodegenResult<Option<Reg>> {
-        // Custom types use explicit has_next()/next() CallM calls
-        if self.is_custom_iterator_type(iter) {
-            return self.compile_for_custom_iterator(label, pattern, iter, body);
+        // An owned iterable controls the transfer of each element through its
+        // declared cursor. Reading its slots directly would leave two owners.
+        let converted = self.source_expression_declaration(iter, None, 0).and_then(|ty|
+            self.proven_implementation_member(&ty,
+                verum_common::well_known_types::WellKnownProtocol::IntoIterator, "IntoIter"));
+        if converted.is_some() || self.is_custom_iterator_type(iter) {
+            return self.compile_for_custom_iterator(label, pattern, iter, body, converted);
         }
 
         // Compile iterator (built-in collections: List, Map, Set, Deque, Range)
