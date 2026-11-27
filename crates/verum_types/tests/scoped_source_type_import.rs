@@ -121,6 +121,22 @@ fn outside_and_prefix_lookalikes_cannot_import_scoped_types() {
 }
 
 #[test]
+fn relative_method_scopes_follow_the_declaration_across_type_aliases() {
+    let model = "public type Packet is { value: Int };
+        implement Packet { public(in super) fn value(&self) -> Int { self.value } }";
+    let providers = [(PROVIDER, model), ("realm.api", "public mount realm.component.model.Packet as Ticket;")];
+    let client = "mount realm.api.Ticket; fn read(packet: &Ticket) -> Int { packet.value() }";
+    for owner in ["realm.component", "realm.component.client"] {
+        allowed(owner, client, &providers);
+    }
+    for owner in ["realm.api.client", "realm.component_extra", "foreign.component"] {
+        let failures = errors(owner, client, &providers);
+        assert!(failures.iter().any(|error| error.contains("MethodNotFound") && error.contains("value")),
+                "{owner}: {failures:#?}");
+    }
+}
+
+#[test]
 fn public_reexports_do_not_widen_the_source_type_scope() {
     let providers = [
         (PROVIDER, RECORD),

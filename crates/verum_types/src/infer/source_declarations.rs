@@ -1009,8 +1009,7 @@ impl TypeChecker {
             return Ok(());
         };
         let name = declaration.name.name.clone();
-        let caller = ModulePath::from_str(self.current_module_path.as_str());
-        let visibility = VisibilityChecker::new();
+        let owner: Text = module.path.to_string().into();
         for implementation in self.find_impl_blocks_for_type(&module.ast, name.as_str()) {
             if !matches!(implementation.kind, verum_ast::decl::ImplKind::Inherent(_)) {
                 continue;
@@ -1018,7 +1017,11 @@ impl TypeChecker {
             for item in &implementation.items {
                 if let ImplItemKind::Function(function) = &item.kind
                     && function.name.name.as_str() == method
-                    && !visibility.is_visible(item.visibility.clone(), &module.path, &caller)
+                    && (item.attributes.is_empty() || self.cfg_evaluator.should_include(&item.attributes))
+                    && self.check_declared_member_visibility(
+                        &owner, &function.name.name, &Some(item.visibility.clone()), span,
+                        || Some(function.name.span),
+                    ).is_err()
                 {
                     return Err(TypeError::MethodNotFound {
                         ty: self.get_type_name(receiver).unwrap_or(name),
