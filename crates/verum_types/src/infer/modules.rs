@@ -22703,6 +22703,7 @@ impl TypeChecker {
                         }
 
                         let resolved_return = self.unifier.apply(return_type);
+                        self.type_registry.register_call_target(span, self.unifier.apply(method_ty));
                         {
                             if crate::ctor_trace_enabled() {
                                 eprintln!(
@@ -22756,6 +22757,7 @@ impl TypeChecker {
                                     self.check_expr(arg, &resolved_param)?;
                                 }
                                 let resolved_return = self.unifier.apply(return_type);
+                                self.type_registry.register_call_target(span, self.unifier.apply(candidate));
                                 {
                             if crate::ctor_trace_enabled() {
                                 eprintln!(
@@ -22849,6 +22851,9 @@ impl TypeChecker {
                         {
                             resolved_return = self.unifier.apply(&resolved_return);
                         }
+                        self.type_registry.register_declared_static_target(
+                            span, self.unifier.apply(&instance.ty), &scheme,
+                        );
                         {
                             if crate::ctor_trace_enabled() {
                                 eprintln!(
@@ -22902,30 +22907,8 @@ impl TypeChecker {
                     if ctor.args.len() != args.len() {
                         return Err(self.arity_error(method_name.to_text(), ctor.args.len(), args.len(), span));
                     }
-                    // Type-check each argument against the
-                    // constructor's declared payload types.
-                    for (arg, param_ty_boxed) in
-                        args.iter().zip(ctor.args.iter())
-                    {
-                        let resolved_param =
-                            self.unifier.apply(param_ty_boxed.as_ref());
-                        self.check_expr(arg, &resolved_param)?;
-                    }
-                    // Return the constructor's result type
-                    // (the parent inductive type — already
-                    // generic-instantiated by the registry).
-                    let resolved_return =
-                        self.unifier.apply(ctor.return_type.as_ref());
-                    {
-                            if crate::ctor_trace_enabled() {
-                                eprintln!(
-                                    "[ctor-trace] pre-recv TYPEEXPR-ARM@{} {} -> {}",
-                                    line!(),
-                                    method.name, resolved_return
-                                );
-                            }
-                            return Ok(Some(InferResult::new(resolved_return)));
-                        }
+                    let params: List<_> = ctor.args.iter().map(|ty| self.unifier.apply(ty)).collect();
+                    return self.check_constructor_call(args, &params, &ctor.return_type, span).map(Some);
                 }
             }
         }

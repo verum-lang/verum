@@ -133,6 +133,7 @@ impl TypeChecker {
         checker.set_instance_search_enabled(self.instance_search_enabled);
         checker.set_coherence_check_depth(self.coherence_check_depth);
         checker.set_higher_kinded_protocols_enabled(self.higher_kinded_protocols_enabled());
+        checker.set_generic_associated_types_enabled(self.generic_associated_types_enabled());
         {
             let policy = self.protocol_checker.read();
             checker.set_protocol_resolution_strategy(policy.resolution_strategy().clone());

@@ -36,6 +36,51 @@ fn errors(source: &str, target: &str) -> List<Text> {
 }
 
 #[test]
+fn a_static_call_retains_its_contract_through_an_applied_type_or_alias() {
+    let declarations = r#"
+        type Boxed<T> is { public value:T };
+        implement<T> Boxed<T> {
+            public fn make(value:T)->Boxed<T> {Boxed {value:value}}
+            public async fn later(value:T)->Boxed<T> {Boxed {value:value}}
+        }
+        type Numbers is Boxed<Int>;
+    "#;
+    for receiver in ["Numbers", "Boxed<Int>"] {
+        for (member, accepts) in [("make", true), ("later", false)] {
+            let source = format!("{declarations}
+                fn mapped() {{
+                    let callback:fn(Int)->Boxed<Int> = |n| {receiver}.{member}(n);
+                }}");
+            let diagnostics = errors(&source, "aarch64-apple-darwin");
+            if accepts {
+                assert!(diagnostics.is_empty(), "{source}\n{diagnostics:?}");
+            } else {
+                assert!(diagnostics.iter().any(|error|
+                    error.contains("excludes {Async}") && error.contains("observed: {Async}")),
+                    "{source}\n{diagnostics:?}");
+            }
+        }
+    }
+}
+
+#[test]
+fn a_payload_constructor_through_an_applied_type_or_alias_checks_its_operands() {
+    for receiver in ["Numbers", "Entry<Int>"] {
+        let declarations = "type Entry<T> is Present(T) | Empty; type Numbers is Entry<Int>;";
+        let source = format!("{declarations}
+            fn build() {{ let make:fn(Int)->Entry<Int> = |n| {receiver}.Present(n); }}");
+        let accepted = errors(&source, "aarch64-apple-darwin");
+        assert!(accepted.is_empty(), "{source}\n{accepted:?}");
+        let source = format!("{declarations}
+            async fn pending(n:Int)->Int {{ n }}
+            fn build() {{ let make:fn(Int)->Entry<Int> = |n| {receiver}.Present(pending(n)); }}");
+        let rejected = errors(&source, "aarch64-apple-darwin");
+        assert!(rejected.iter().any(|error| error.contains("excludes {Async}")),
+            "{source}\n{rejected:?}");
+    }
+}
+
+#[test]
 fn excluded_calls_and_local_operations_do_not_contribute_properties() {
     for body in [
         "pending();",
