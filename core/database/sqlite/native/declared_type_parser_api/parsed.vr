@@ -47,7 +47,7 @@ fn is_ident_body(b: u8) -> Bool {
 // run > 19 chars overflows Int64 and the wrapped value would feed
 // SQLite's affinity logic. Cap at 19 digits + per-step overflow
 // guard, saturating at Int64.MAX on hostile input.
-fn parse_u32(bs: &List<u8>, i: Int) -> (Int64, Int) {
+fn parse_u32(bs: &[Byte], i: Int) -> (Int64, Int) {
     let mut j: Int = i;
     let mut v: Int64 = 0 as Int64;
     let mut digit_count: Int = 0;
@@ -102,7 +102,7 @@ public fn parse(raw: &Text) -> ParsedType {
         i = i + 1;
         while i < bs.len() && is_space(bs[i]) { i = i + 1; }
         if i < bs.len() && is_digit(bs[i]) {
-            let (v, next) = parse_u32(&bs, i);
+            let (v, next) = parse_u32(bs, i);
             result.size_hint = v;
             i = next;
         }
@@ -111,7 +111,7 @@ public fn parse(raw: &Text) -> ParsedType {
             i = i + 1;
             while i < bs.len() && is_space(bs[i]) { i = i + 1; }
             if i < bs.len() && is_digit(bs[i]) {
-                let (v2, _) = parse_u32(&bs, i);
+                let (v2, _) = parse_u32(bs, i);
                 result.scale_hint = v2;
             }
         }

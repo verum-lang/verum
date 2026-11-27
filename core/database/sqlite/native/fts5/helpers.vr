@@ -112,7 +112,7 @@ public fn snippet(
 // Word-boundary walkers
 // -----------------------------------------------------------------------------
 
-fn walk_words_back(bs: List<Byte>, from: Int, n_words: Int) -> Int {
+fn walk_words_back(bs: &[Byte], from: Int, n_words: Int) -> Int {
     let mut i: Int = if from > 0 { from - 1 } else { 0 };
     let mut counted: Int = 0;
     let mut in_word = false;
@@ -126,7 +126,7 @@ fn walk_words_back(bs: List<Byte>, from: Int, n_words: Int) -> Int {
     i
 }
 
-fn walk_words_forward(bs: List<Byte>, from: Int, n_words: Int) -> Int {
+fn walk_words_forward(bs: &[Byte], from: Int, n_words: Int) -> Int {
     let mut i: Int = from;
     let mut counted: Int = 0;
     let mut in_word = false;

@@ -194,7 +194,7 @@ fn parse_pair(
     Result.Ok(())
 }
 
-fn looks_like_file_scheme(bs: List<Byte>) -> Bool {
+fn looks_like_file_scheme(bs: &[Byte]) -> Bool {
     if bs.len() < 5 { return false; }
     bs[0] == (102 as Byte)         // f
         && bs[1] == (105 as Byte)  // i

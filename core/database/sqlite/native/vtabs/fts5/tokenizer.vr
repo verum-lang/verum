@@ -236,12 +236,12 @@ implement Fts5VtabTokenizer for Fts5VtabUnicode61Tokenizer {
         let mut start: Int = 0;
         let mut pos: Int = 0;
         while start < bs.len() {
-            while start < bs.len() && is_unicode_separator(&bs, start) {
+            while start < bs.len() && is_unicode_separator(bs, start) {
                 start = start + utf8_len(bs[start]);
             }
             if start >= bs.len() { break; }
             let mut end = start;
-            while end < bs.len() && !is_unicode_separator(&bs, end) {
+            while end < bs.len() && !is_unicode_separator(bs, end) {
                 end = end + utf8_len(bs[end]);
             }
             let mut term = Text.new();
@@ -285,7 +285,7 @@ fn utf8_len(b: Byte) -> Int {
     else { 4 }
 }
 
-fn is_unicode_separator(bs: &List<Byte>, idx: Int) -> Bool {
+fn is_unicode_separator(bs: &[Byte], idx: Int) -> Bool {
     let b = bs[idx];
     // ASCII separators or whitespace
     if b <= (32 as Byte) { return true; }

@@ -255,7 +255,7 @@ fn trim_with_chars(s: &Text, chars: &Text, left: Bool, right: Bool) -> Text {
     out
 }
 
-fn byte_in_set(b: Byte, set: &List<Byte>) -> Bool {
+fn byte_in_set(b: Byte, set: &[Byte]) -> Bool {
     let mut i: Int = 0;
     while i < set.len() {
         if set[i] == b { return true; }
@@ -351,8 +351,8 @@ fn instr_bytes(h: &Text, n: &Text) -> Int {
 
 public fn hex(v: &Register) -> Register {
     match v {
-        RBlob(b) => RText(hex_encode(b)),
-        RText(s) => RText(hex_encode_text(s)),
+        RBlob(b) => RText(hex_encode(b.as_slice())),
+        RText(s) => RText(hex_encode(s.as_bytes())),
         RNull    => RNull,
         _        => RNull,
     }
@@ -374,7 +374,7 @@ fn hex_nibble(b: Byte) -> Byte {
     else { b - (10 as Byte) + (65 as Byte) }
 }
 
-fn hex_encode(b: &List<Byte>) -> Text {
+fn hex_encode(b: &[Byte]) -> Text {
     let mut out = Text.new();
     let mut i: Int = 0;
     while i < b.len() {
@@ -384,13 +384,6 @@ fn hex_encode(b: &List<Byte>) -> Text {
         i = i + 1;
     }
     out
-}
-
-fn hex_encode_text(s: &Text) -> Text {
-    let bs = s.as_bytes();
-    let mut bl: List<Byte> = List.with_capacity(bs.len());
-    bl.extend_from_slice(bs);
-    hex_encode(&bl)
 }
 
 fn nibble_value(b: Byte) -> Maybe<Byte> {
@@ -707,16 +700,10 @@ fn like_rec(tb: &List<Byte>, ti: Int, pb: &List<Byte>, pi: Int, esc: Maybe<Byte>
 }
 
 fn glob_match(target: &Text, pattern: &Text) -> Bool {
-    let tb_bs = target.as_bytes();
-    let pb_bs = pattern.as_bytes();
-    let mut tb: List<Byte> = List.with_capacity(tb_bs.len());
-    tb.extend_from_slice(tb_bs);
-    let mut pb: List<Byte> = List.with_capacity(pb_bs.len());
-    pb.extend_from_slice(pb_bs);
-    glob_rec(&tb, 0, &pb, 0)
+    glob_rec(target.as_bytes(), 0, pattern.as_bytes(), 0)
 }
 
-fn glob_rec(tb: &List<Byte>, ti: Int, pb: &List<Byte>, pi: Int) -> Bool {
+fn glob_rec(tb: &[Byte], ti: Int, pb: &[Byte], pi: Int) -> Bool {
     if pi >= pb.len() { return ti >= tb.len(); }
     let pc = pb[pi];
     if pc == (42 as Byte) {  // '*'

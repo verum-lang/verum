@@ -20,7 +20,7 @@ fn fold_nocase(b: u8) -> u8 {
     b
 }
 
-fn rtrim_len(bs: &List<u8>) -> Int {
+fn rtrim_len(bs: &[Byte]) -> Int {
     let mut n: Int = bs.len();
     while n > 0 {
         if bs[n - 1] != 0x20 as u8 { return n; }
@@ -33,11 +33,11 @@ public fn compare(a: &Text, b: &Text, policy: &CollationPolicy) -> Int {
     let ab = a.as_bytes();
     let bb = b.as_bytes();
     let an = match policy {
-        CpRtrim => rtrim_len(&ab),
+        CpRtrim => rtrim_len(ab),
         _       => ab.len(),
     };
     let bn = match policy {
-        CpRtrim => rtrim_len(&bb),
+        CpRtrim => rtrim_len(bb),
         _       => bb.len(),
     };
     let mut i: Int = 0;

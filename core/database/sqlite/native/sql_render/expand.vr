@@ -40,34 +40,21 @@ fn is_ident_byte(b: u8) -> Bool {
         || b == (0x5F as u8)
 }
 
-fn parse_digits(bytes: &List<u8>, start: Int) -> Int {
-    // SQL `?N` parameter-index extraction during rendering. Caller
-    // is the SQL renderer feeding statement text — cap at 6 digits
-    // to match the SQL lexer's SQLITE_LIMIT_VARIABLE_NUMBER ceiling
-    // (32766) so a hostile statement can't smuggle an out-of-range
-    // index past the renderer.
-    let mut i: Int = start;
-    let mut out: Int = 0;
-    let mut digit_count: Int = 0;
+// Return the end of the token together with its index, even for oversized tokens.
+fn parameter_number(bytes: &[Byte], start: Int) -> (Int, Int) {
+    let mut i = start;
+    let mut index: Int = 0;
     while i < bytes.len() {
         let b = bytes[i];
-        if b < (0x30 as u8) || b > (0x39 as u8) { break; }
-        if digit_count >= 6 {
-            // Saturate at 32767 (one past the hard limit so the
-            // resolver rejects). Consume the rest of the digit run
-            // so the cursor advances past the malformed token.
-            while i < bytes.len() {
-                let bb = bytes[i];
-                if bb < (0x30 as u8) || bb > (0x39 as u8) { break; }
-                i = i + 1;
-            }
-            return 32767;
+        if b < (0x30 as Byte) || b > (0x39 as Byte) { break; }
+        if i - start < 6 {
+            index = index * 10 + (b - (0x30 as Byte)) as Int;
+        } else {
+            index = 32767;
         }
-        out = (out * 10) + ((b - (0x30 as u8)) as Int);
-        digit_count = digit_count + 1;
         i = i + 1;
     }
-    out
+    (index, i)
 }
 
 fn find_by_index(bindings: &List<BoundValue>, index: Int) -> Maybe<RenderLiteral> {
@@ -131,13 +118,9 @@ public fn expand(sql: &Text, bindings: &List<BoundValue>) -> Text {
             if i + 1 < bs.len() {
                 let nxt = bs[i + 1];
                 if nxt >= (0x30 as u8) && nxt <= (0x39 as u8) {
-                    index = parse_digits(&bytes_to_list(bs), i + 1);
-                    // Skip the digit run.
-                    let mut j = i + 1;
-                    while j < bs.len()
-                          && bs[j] >= (0x30 as u8)
-                          && bs[j] <= (0x39 as u8) { j = j + 1; }
-                    i = j;
+                    let (number, end) = parameter_number(bs, i + 1);
+                    index = number;
+                    i = end;
                     match find_by_index(bindings, index) {
                         Maybe.Some(lit) => render_literal(&mut out, &lit),
                         Maybe.None      => {
@@ -158,11 +141,5 @@ public fn expand(sql: &Text, bindings: &List<BoundValue>) -> Text {
         out.push_byte(b);
         i = i + 1;
     }
-    out
-}
-
-fn bytes_to_list(bytes: &List<u8>) -> List<u8> {
-    let mut out: List<u8> = List.with_capacity(bytes.len());
-    out.extend_from_slice(bytes.as_slice());
     out
 }
