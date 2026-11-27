@@ -29,6 +29,7 @@ mount core.math.tensor.{DynTensor, sub, mul, sum};
 mount core.math.nn.Module;
 mount core.math.agent.{ChatMessage, Role, MessageContent};
 mount core.encoding.value.Value;
+mount core.base.protocols.Clone;
 
 // =============================================================================
 // Document Types
@@ -94,6 +95,33 @@ implement Document {
     // Check if document has embedding
     public fn has_embedding(&self) -> Bool {
         self.embedding.is_some()
+    }
+}
+
+fn copy_metadata(source: &Map<Text, Value>) -> Map<Text, Value> {
+    let mut metadata: Map<Text, Value> = Map.with_capacity(source.len());
+    let mut entries = source.iter();
+    loop {
+        let pair: Maybe<(Text, Value)> = entries.next();
+        match pair {
+            Maybe.Some((key, value)) => { metadata.insert(key, value); },
+            Maybe.None => break,
+        }
+    }
+    metadata
+}
+
+implement Clone for Document {
+    fn clone(&self) -> Document {
+        Document {
+            id: self.id.clone(),
+            content: self.content.clone(),
+            metadata: copy_metadata(&self.metadata),
+            embedding: match &self.embedding {
+                Maybe.Some(vector) => Maybe.Some(vector.clone()),
+                Maybe.None => Maybe.None,
+            },
+        }
     }
 }
 
@@ -606,10 +634,7 @@ implement TextChunker {
         let total = chunks.len();
         let mut documents: List<Document> = List.with_capacity(total);
         for (i, chunk) in chunks.into_iter().enumerate() {
-            let mut metadata: Map<Text, Value> = Map.new();
-            for (key, value) in base_metadata.iter() {
-                metadata.insert(key, value);
-            }
+            let mut metadata = copy_metadata(base_metadata);
             metadata.insert("chunk_index".to_text(), Value.int_(i as Int));
             metadata.insert("total_chunks".to_text(), Value.int_(total as Int));
 

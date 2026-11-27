@@ -124,6 +124,19 @@ fn test_chunk_metadata_does_not_coerce_non_text_source() {
 }
 
 @test
+fn test_cloned_document_owns_its_metadata() {
+    let mut doc = Document.new("a", "hello");
+    doc.add_metadata("page", Value.int_(4));
+    let mut duplicate = doc.clone();
+    duplicate.add_metadata("page", Value.int_(7));
+    assert_eq(duplicate.id, doc.id);
+    assert_eq(duplicate.content, doc.content);
+    assert(!duplicate.has_embedding());
+    assert(value_equals(&doc.metadata.get("page").unwrap(), &Value.int_(4)));
+    assert(value_equals(&duplicate.metadata.get("page").unwrap(), &Value.int_(7)));
+}
+
+@test
 fn test_document_has_embedding_false() {
     let doc = Document.new("doc4", "No embedding");
     assert(!doc.has_embedding());
