@@ -39,8 +39,10 @@ module core.text.text;
 // rationale on the explicit mount.
 mount core.base.memory.{try_alloc, try_realloc};
 mount core.base.iterator.{FromIterator, Extend};
+mount core.collections.slice.*;
+mount core.text.char.*;
 mount core.mem.allocator.AllocError;
-mount core.intrinsics.runtime.mem_raw.{memset_addr};
+mount core.intrinsics.runtime.mem_raw.{memcpy_addr, memset_addr};
 
 // Import intrinsics as functions
 mount core.intrinsics.memory.{ptr_offset};
@@ -1110,7 +1112,7 @@ implement Text {
         }
         if self.len > 0 && !is_null(self.ptr) {
             unsafe {
-                memcpy_addr(new_ptr, self.ptr, self.len);
+                memcpy_addr(new_ptr as Int, self.ptr as Int, self.len);
             }
         }
         // Replacement uses ordinary owned-value cleanup. The new allocation's
@@ -3054,7 +3056,7 @@ implement Text {
         let mut buf: [Int; 2] = [0, 0];
         let mut iter = self.chars();
         while let Maybe.Some(ch) = iter.next() {
-            let count = ch.encode_utf16(&mut buf);
+            let count = ch.encode_utf16(&mut buf[..]);
             result.push(buf[0]);
             if count == 2 {
                 result.push(buf[1]);
