@@ -381,7 +381,7 @@ impl ArchiveHeader {
             version_minor: ARCHIVE_VERSION_MINOR,
             flags: ArchiveFlags::empty(),
             module_count: 0,
-            index_offset: 0,
+            index_offset: ARCHIVE_HEADER_SIZE as u64,
             index_size: 0,
         }
     }
@@ -752,6 +752,7 @@ impl ArchiveBuilder {
         }
 
         self.archive.header.index_offset = offset;
+        self.archive.header.index_size = encoded_index_size(&self.archive.index);
 
         self.archive
     }
@@ -763,6 +764,14 @@ impl Default for ArchiveBuilder {
     }
 }
 
+// Each entry has a name length, three u64 fields and a dependency count.
+fn encoded_index_size(entries: &[ModuleEntry]) -> u64 {
+    entries
+        .iter()
+        .map(|entry| 32 + entry.name.len() as u64 + 4 * entry.dependencies.len() as u64)
+        .sum()
+}
+
 /// Writes a VBC archive to a writer
 pub fn write_archive<W: Write>(archive: &VbcArchive, mut writer: W) -> io::Result<()> {
     // Write header
@@ -772,7 +781,7 @@ pub fn write_archive<W: Write>(archive: &VbcArchive, mut writer: W) -> io::Resul
     writer.write_all(&archive.header.flags.bits().to_le_bytes())?;
     writer.write_all(&archive.header.module_count.to_le_bytes())?;
     writer.write_all(&archive.header.index_offset.to_le_bytes())?;
-    writer.write_all(&archive.header.index_size.to_le_bytes())?;
+    writer.write_all(&encoded_index_size(&archive.index).to_le_bytes())?;
 
     // Write module data
     for data in &archive.module_data {
@@ -886,6 +895,32 @@ pub fn read_archive<R: Read + Seek>(mut reader: R) -> io::Result<VbcArchive> {
         ));
     }
 
+    let file_size = reader.seek(SeekFrom::End(0))?;
+    // A v1.0 VbcArchive::new() could be written without going through the
+    // builder. That empty archive had zero in both section fields.
+    let index_offset = if module_count == 0
+        && index_offset == 0
+        && index_size == 0
+        && file_size == ARCHIVE_HEADER_SIZE as u64
+    {
+        ARCHIVE_HEADER_SIZE as u64
+    } else {
+        index_offset
+    };
+    if index_offset < ARCHIVE_HEADER_SIZE as u64 || index_offset > file_size {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "archive index offset outside the file",
+        ));
+    }
+    let available_index_size = file_size - index_offset;
+    // Early v1.0 writers left this field zero. The index is the final section.
+    if index_size != 0 && index_size != available_index_size {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "archive index size does not match its section",
+        ));
+    }
     let header = ArchiveHeader {
         magic,
         version_major,
@@ -983,8 +1018,36 @@ pub fn read_archive<R: Read + Seek>(mut reader: R) -> io::Result<VbcArchive> {
         });
     }
 
+    if reader.stream_position()? != file_size {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "extra bytes in archive index",
+        ));
+    }
+    // Every stored payload must fit before the index. Bound aggregate allocation
+    // by real file bytes even when the entries are in a different physical order.
+    let mut payload_budget = index_offset - ARCHIVE_HEADER_SIZE as u64;
+    for entry in &index {
+        if entry.data_offset < ARCHIVE_HEADER_SIZE as u64
+            || entry.data_offset > index_offset
+            || entry.data_size > index_offset - entry.data_offset
+            || entry.data_size > payload_budget
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "archive module '{}' is outside the payload section",
+                    entry.name
+                ),
+            ));
+        }
+        payload_budget -= entry.data_size;
+    }
+
     let mut names = HashSet::with_capacity(index.len());
-    if let Some(entry) = index.iter().find(|entry| !names.insert(entry.name.as_str()))
+    if let Some(entry) = index
+        .iter()
+        .find(|entry| !names.insert(entry.name.as_str()))
     {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,

@@ -61,3 +61,42 @@ fn dependency_must_identify_an_entry_in_the_same_archive() {
     archive.index[1].dependencies[0] = archive.header.module_count;
     assert_refused(encode(&archive), "dependency index");
 }
+
+#[test]
+fn declared_index_extent_covers_the_writer_bytes_and_legacy_zero_is_readable() {
+    let archive = library();
+    let bytes = encode(&archive);
+    let extent = bytes.len() as u64 - archive.header.index_offset;
+    assert_eq!(archive.header.index_size, extent);
+    assert_eq!(
+        u64::from_le_bytes(bytes[24..32].try_into().unwrap()),
+        extent
+    );
+    let mut legacy = bytes.clone();
+    legacy[24..32].fill(0);
+    assert_eq!(read_archive(Cursor::new(legacy)).unwrap().index.len(), 2);
+    let mut short = bytes.clone();
+    short[24..32].copy_from_slice(&(extent - 1).to_le_bytes());
+    assert_refused(short, "index size");
+    let mut trailing = bytes;
+    trailing[24..32].fill(0);
+    trailing.push(0);
+    assert_refused(trailing, "extra bytes");
+}
+
+#[test]
+fn module_payloads_cannot_read_the_header_or_index() {
+    let mut archive = library();
+    archive.index[0].data_offset = 0;
+    assert_refused(encode(&archive), "payload section");
+    archive.index[0].data_offset = archive.header.index_offset;
+    assert_refused(encode(&archive), "payload section");
+}
+
+#[test]
+fn empty_archives_from_the_unfinished_v1_constructor_still_open() {
+    let mut empty = encode(&VbcArchive::new());
+    assert_eq!(u64::from_le_bytes(empty[16..24].try_into().unwrap()), 32);
+    empty[16..24].fill(0);
+    assert!(read_archive(Cursor::new(empty)).unwrap().index.is_empty());
+}
