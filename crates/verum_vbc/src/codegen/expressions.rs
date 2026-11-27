@@ -6078,7 +6078,7 @@ impl VbcCodegen {
                 // Mutable reference - check tier_context for promotion
                 let tier = self.get_ref_tier_for_expr(inner);
                 let stable_src = self.stabilize_ref_source(inner, inner_reg);
-                if tier == CbgrTier::Tier0 && self.borrows_handle_binding(inner, stable_src) {
+                if tier == CbgrTier::Tier0 && self.borrows_local_binding(inner, stable_src) {
                     self.emit_local_mut_borrow(dest, stable_src);
                 } else {
                     self.emit_ref_instruction(dest, stable_src, tier, true);
@@ -33003,7 +33003,7 @@ impl VbcCodegen {
             return Ok(src);
         }
         let dst = self.ctx.alloc_temp();
-        if self.borrows_handle_binding(expr, src) {
+        if self.borrows_local_binding(expr, src) {
             self.emit_local_mut_borrow(dst, src);
         } else {
             self.emit_ref_instruction(dst, src, CbgrTier::Tier0, true);

@@ -321,17 +321,17 @@ impl super::VbcCodegen {
         Self::named_place_binding(expr).is_some_and(|name| self.consumes_named_binding(name, reg))
     }
 
-    /// A binding owning an indirect value stores the handle itself. Borrow
-    /// that slot so replacing the entire value preserves its allocator data.
-    pub(super) fn borrows_handle_binding(&self, expr: &verum_ast::Expr, reg: Reg) -> bool {
+    /// Both an immediate value and an owned handle occupy the binding's slot.
+    /// Taking its mutable address must preserve that slot across calls.
+    pub(super) fn borrows_local_binding(&self, expr: &verum_ast::Expr, reg: Reg) -> bool {
         Self::named_place_binding(expr)
             .and_then(|name| self.named_ownership_carrier(name, reg))
             .and_then(|(ty, _)| ty.base_type_id())
-            .is_some_and(|id| match id.builtin_value_storage() {
-                Some(crate::types::BuiltinValueStorage::Text) => true,
-                Some(crate::types::BuiltinValueStorage::Immediate) => false,
-                None => self.type_by_id(id).is_some_and(|decl|
-                    matches!(decl.kind, crate::types::TypeKind::Record | crate::types::TypeKind::Sum)),
+            .is_some_and(|id| {
+                id.builtin_value_storage().is_some()
+                    || self.type_by_id(id).is_some_and(|decl| {
+                        matches!(decl.kind, crate::types::TypeKind::Record | crate::types::TypeKind::Sum)
+                    })
             })
     }
 

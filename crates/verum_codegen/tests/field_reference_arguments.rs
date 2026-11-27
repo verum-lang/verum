@@ -502,3 +502,48 @@ fn distinct_attenuation_destinations_receive_field_provenance_slots() {
         assert!(output.contains("refield_arg_addr"), "{output}");
     }
 }
+
+#[test]
+fn inferred_scalar_local_and_forwarded_reference_keep_their_own_storage() {
+    use verum_vbc::Instruction;
+
+    let source = r#"
+        type Cell is { padding: Int, value: Int };
+        fn advance(offset: &mut Int, amount: Int) { *offset = *offset + amount; }
+        fn forward(offset: &mut Int, amount: Int) { advance(offset, amount); }
+        fn walk(initial: &mut Int) -> Int {
+            let mut position = *initial + 4;
+            while position < 9 {
+                forward(&mut position, 2);
+            }
+            position
+        }
+        fn probe(cell: &mut Cell, choose: Bool) -> Int {
+            let selected = if choose { &mut cell.value } else { &mut cell.padding };
+            let result = walk(selected);
+            forward(selected, 3);
+            result
+        }
+    "#;
+    let ast = Parser::new(source).parse_module().unwrap();
+    let module = VbcCodegen::new().compile_module(&ast).unwrap();
+    let bytes = verum_vbc::serialize::serialize_module(&module).unwrap();
+    let wire = verum_vbc::deserialize::deserialize_module_validated(&bytes).unwrap();
+    for (name, expected_slot_borrows) in [("walk", 1), ("forward", 0), ("probe", 0)] {
+        let function = &wire.functions[wire.find_function_by_name(name).unwrap().0 as usize];
+        let start = function.bytecode_offset as usize;
+        let end = start + function.bytecode_length as usize;
+        let instructions =
+            verum_vbc::bytecode::decode_instructions(&wire.bytecode[start..end]).unwrap();
+        let slots = instructions.iter()
+            .filter(|op| matches!(op, Instruction::RefLocal { .. }))
+            .count();
+        assert_eq!(slots, expected_slot_borrows, "{name}: {instructions:?}");
+    }
+    let (result, fields) = execute(source, 1, 2, false);
+    assert_eq!(result, 9);
+    assert_eq!(&fields[3..], &[4, 2]);
+    let (result, fields) = execute(source, 1, 2, true);
+    assert_eq!(result, 10);
+    assert_eq!(&fields[3..], &[1, 5]);
+}
