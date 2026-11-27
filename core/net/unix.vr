@@ -283,10 +283,10 @@ const STREAM_CHUNK_SIZE: Int = 65536;
 fn serialize_unix_addr(path: &Text, addr: &mut [Byte; 110]) -> Result<Int, UnixError> {
     let bytes = path.as_bytes();
     let count = bytes.len();
-    if count == 0 { return Result.Err(UnixError.InvalidPath("empty path".into())); }
+    if count == 0 { return Result.Err(UnixError.InvalidPath("empty path")); }
     let abstract_name = bytes[0] == 0;
     @cfg(any(target_os = "macos", target_os = "windows"))
-    if abstract_name { return Result.Err(UnixError.InvalidPath("abstract sockets require Linux".into())); }
+    if abstract_name { return Result.Err(UnixError.InvalidPath("abstract sockets require Linux")); }
     let name_len = if abstract_name { count } else { count + 1 };
     if name_len > SUN_PATH_MAX {
         return Result.Err(UnixError.PathTooLong { limit: SUN_PATH_MAX, actual: count });
@@ -300,7 +300,7 @@ fn serialize_unix_addr(path: &Text, addr: &mut [Byte; 110]) -> Result<Int, UnixE
     while i < count {
         let byte = bytes[i];
         if byte == 0 && !abstract_name {
-            return Result.Err(UnixError.InvalidPath("embedded NUL in socket path".into()));
+            return Result.Err(UnixError.InvalidPath("embedded NUL in socket path"));
         }
         addr[2 + i] = byte;
         i = i + 1;
