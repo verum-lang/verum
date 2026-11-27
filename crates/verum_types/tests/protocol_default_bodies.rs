@@ -130,6 +130,32 @@ fn a_default_method_projects_through_its_own_protocol_on_a_concrete_receiver() {
     rejected(&format!("{definitions} fn ambiguous<T: Source + Other>(c: T) -> T.Item {{ c.flag() }}"));
 }
 #[test]
+fn associated_result_bounds_use_the_sibling_declared_on_the_source_owner() {
+    let declarations = "
+        type Reading is protocol { type Element; };
+        type Source is protocol {
+            type Element;
+            type Reader: Reading<Element = Self.Element>;
+            fn open(self) -> Self.Reader;
+            fn reader(self) -> Self.Reader { self.open() }
+        };
+        type Cell<T> is { value: T };
+        type Cursor<T> is { value: T };
+        implement<T> Reading for Cursor<T> { type Element = T; }
+        type Unrelated is protocol { type Element; };
+        implement<T> Unrelated for Cell<T> { type Element = Bool; }";
+    let implementation = "
+        implement<T> Source for Cell<T> {
+            type Element = T;
+            type Reader = Cursor<T>;
+            fn open(self) -> Cursor<T> { Cursor { value: self.value } }
+        }
+        fn nested(input: Cell<Cell<Int>>) -> Cursor<Cell<Int>> { input.reader() }";
+    accepted(&format!("{declarations} {implementation}"));
+    rejected(&format!("{declarations} {}", implementation.replace("type Element = T;", "type Element = Bool;")));
+}
+
+#[test]
 fn failed_body_does_not_publish_locals_or_owner_parameters() {
     let mut checker = checker();
     assert!(

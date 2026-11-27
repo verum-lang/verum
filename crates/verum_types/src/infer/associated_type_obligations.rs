@@ -367,11 +367,12 @@ impl TypeChecker {
                         .bounds
                         .iter()
                         .map(|bound| {
-                            instantiate_bound(
-                                bound,
-                                associated.binders.self_type,
-                                &values,
-                                &family_substitution,
+                            bound.instantiate_family_result(
+                                associated.binders.self_type, &family_substitution, |name| {
+                                    values.get(&Text::from(name)).cloned().ok_or_else(|| {
+                                        format!("Self projection `{name}` lacks a concrete declaration in this implementation").into()
+                                    })
+                                },
                             )
                         })
                         .collect::<std::result::Result<_, _>>()
@@ -444,104 +445,5 @@ fn refusal(span: Span, message: impl Into<Text>) -> TypeError {
         code: "E405".into(),
         msg: message.into(),
         span,
-    }
-}
-
-fn instantiate_bound(
-    bound: &ProtocolBound,
-    self_var: Option<TypeVar>,
-    values: &Map<Text, Type>,
-    substitution: &Substitution,
-) -> std::result::Result<ProtocolBound, Text> {
-    Ok(ProtocolBound {
-        protocol: bound.protocol.clone(),
-        is_negative: bound.is_negative,
-        args: bound
-            .args
-            .iter()
-            .map(|ty| instantiate_type(ty, self_var, values, substitution, 0))
-            .collect::<std::result::Result<_, _>>()?,
-        associated_types: bound
-            .associated_types
-            .iter()
-            .map(|(name, ty)| {
-                Ok((
-                    name.clone(),
-                    instantiate_type(ty, self_var, values, substitution, 0)?,
-                ))
-            })
-            .collect::<std::result::Result<_, Text>>()?,
-    })
-}
-
-/// Only a projection from this declaration's Self binder may consult its items.
-fn instantiate_type(
-    ty: &Type,
-    self_var: Option<TypeVar>,
-    values: &Map<Text, Type>,
-    substitution: &Substitution,
-    depth: usize,
-) -> std::result::Result<Type, Text> {
-    if depth > 64 {
-        return Err("associated projection substitution exceeds its depth budget".into());
-    }
-    let recurse = |ty: &Type| instantiate_type(ty, self_var, values, substitution, depth + 1);
-    match ty {
-        Type::Generic { name, args }
-            if name.starts_with("::")
-                && args.len() == 1
-                && self_var.is_some_and(|var| args[0] == Type::Var(var)) =>
-        {
-            values.get(&Text::from(&name[2..])).cloned().ok_or_else(|| {
-                format!(
-                    "Self projection `{}` lacks a concrete declaration in this implementation",
-                    &name[2..]
-                )
-                .into()
-            })
-        }
-        Type::Generic { name, args } => Ok(Type::Generic {
-            name: name.clone(),
-            args: args
-                .iter()
-                .map(recurse)
-                .collect::<std::result::Result<_, _>>()?,
-        }),
-        Type::Named { path, args } => Ok(Type::Named {
-            path: path.clone(),
-            args: args
-                .iter()
-                .map(recurse)
-                .collect::<std::result::Result<_, _>>()?,
-        }),
-        Type::Tuple(types) => Ok(Type::Tuple(
-            types
-                .iter()
-                .map(recurse)
-                .collect::<std::result::Result<_, _>>()?,
-        )),
-        Type::Reference { mutable, inner } => Ok(Type::Reference {
-            mutable: *mutable,
-            inner: Box::new(recurse(inner)?),
-        }),
-        Type::Slice { element } => Ok(Type::Slice {
-            element: Box::new(recurse(element)?),
-        }),
-        Type::Array { element, size } => Ok(Type::Array {
-            element: Box::new(recurse(element)?),
-            size: size.clone(),
-        }),
-        Type::TypeApp { constructor, args } => Ok(Type::TypeApp {
-            constructor: Box::new(recurse(constructor)?),
-            args: args
-                .iter()
-                .map(recurse)
-                .collect::<std::result::Result<_, _>>()?,
-        }),
-        Type::Var(_) => ty.try_apply_subst(substitution),
-        _ if self_var.is_some_and(|var| ty.free_vars().contains(&var)) => {
-            Err("Self projection substitution in this type form is not yet supported".into())
-        }
-        _ => ty.try_apply_subst(substitution),
     }
 }

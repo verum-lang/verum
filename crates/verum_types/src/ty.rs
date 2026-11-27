@@ -2815,11 +2815,19 @@ impl Type {
             .expect("internal type substitution must have been validated")
     }
 
+    const MAX_SUBST_DEPTH: usize = 30;
+
+    /// Identities to avoid when introducing a substitution slot into this type.
+    pub(crate) fn substitution_variables(&self) -> Result<Set<TypeVar>, Text> {
+        let mut variables = Set::new();
+        self.collect_type_variables(&mut variables, true, Some(Self::MAX_SUBST_DEPTH))?;
+        Ok(variables)
+    }
+
     /// Apply a substitution without losing failed universe constraints or a
     /// partially visited type when the structural budget is exceeded.
     pub fn try_apply_subst(&self, subst: &Substitution) -> Result<Type, Text> {
-        const MAX_SUBST_DEPTH: usize = 30;
-        type_substitution::apply(self, subst, MAX_SUBST_DEPTH)
+        type_substitution::apply(self, subst, Self::MAX_SUBST_DEPTH)
     }
 
     /// Restrict a simultaneous substitution to a binder's scope. Only a free

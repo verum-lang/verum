@@ -615,13 +615,31 @@ impl ProtocolChecker {
         if result.has_value_inference() || result.value_ids().iter().any(|id| !allowed_values.contains(id)) {
             return Err("associated family result contains an unbound declaration value".into());
         }
-        let bounds: List<_> = declaration
-            .bounds
-            .iter()
-            .map(|bound| bound.try_apply_subst(&declaration_scope))
-            .collect::<Result<_, _>>()?;
+        let bounds = self.family_result_bounds(
+            implementation, name, declaration, &declaration_scope, implementation_scope,
+        )?;
         self.check_universal_bounds_in(&result, &bounds, environment)?;
         Ok(FamilyApplication { arguments, result })
+    }
+
+    fn family_result_bounds(
+        &self, implementation: &ProtocolImpl, name: &Text, declaration: &AssociatedType,
+        declaration_scope: &Substitution, implementation_scope: &Substitution,
+    ) -> Result<List<ProtocolBound>, Text> {
+        declaration.bounds.iter().map(|bound| {
+            bound.instantiate_family_result(declaration.binders.self_type, declaration_scope, |member| {
+                // The implementation still owns its parameters here. Select the
+                // defining protocol before instantiating any concrete arguments.
+                let key = self.make_protocol_key(&implementation.protocol);
+                let owner = self.associated_declaration_application(
+                    &key, &implementation.protocol_args, &implementation.for_type, name, &mut Vec::new(),
+                )?.ok_or_else(|| Text::from("associated result bound has no declaring protocol"))?;
+                self.source_impl_projection(
+                    implementation, &owner.owner, &owner.arguments, &Text::from(member),
+                    &[], &implementation.where_clauses,
+                )?.try_apply_subst(implementation_scope)
+            })
+        }).collect()
     }
 }
 impl ProtocolChecker {
@@ -720,11 +738,9 @@ impl ProtocolChecker {
             });
         }
         let result = assignment.instantiate(&arguments, &Substitution::new())?;
-        let bounds: List<_> = declaration
-            .bounds
-            .iter()
-            .map(|bound| bound.try_apply_subst(&scope))
-            .collect::<Result<_, _>>()?;
+        let bounds = self.family_result_bounds(
+            implementation, name, &declaration, &scope, &Substitution::new(),
+        )?;
         for bound in bounds {
             self.check_universal_bounds(&result, std::slice::from_ref(&bound), &assumptions)
                 .map_err(|reason| AssignmentFailure {

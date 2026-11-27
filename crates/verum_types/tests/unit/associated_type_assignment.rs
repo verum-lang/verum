@@ -274,3 +274,34 @@ fn value_family_rejects_type_wrong_sort_and_unresolved_value() {
         one
     );
 }
+
+#[test]
+fn sibling_projections_preserve_lexical_binders_and_free_variables_of_their_images() {
+    let receiver = TypeVar::fresh();
+    let local = TypeVar::fresh();
+    let projection = Type::Generic {
+        name: "::Element".into(),
+        args: List::from_single(Type::Var(receiver)),
+    };
+    let quantified = |binder, body| Type::Forall {
+        vars: List::from_single(binder),
+        body: Box::new(body),
+    };
+    let shadowed = quantified(receiver, projection.clone());
+    let open = quantified(local, Type::function(List::from_single(Type::Var(local)), projection));
+    let mut substitution = Substitution::new();
+    substitution.insert(receiver, Type::Int);
+    let result = instantiate_result_type(&open, Some(receiver), &substitution, &|name| {
+        assert_eq!(name, "Element");
+        Ok(Type::Var(local))
+    }).unwrap();
+    let Type::Forall { vars, body } = result else { panic!("expected a quantified callable") };
+    assert_ne!(vars[0], local);
+    assert_eq!(*body, Type::function(List::from_single(Type::Var(vars[0])), Type::Var(local)));
+    assert_eq!(
+        instantiate_result_type(&shadowed, Some(receiver), &substitution, &|_| {
+            Err("a locally bound receiver has no enclosing implementation".into())
+        }).unwrap(),
+        shadowed
+    );
+}

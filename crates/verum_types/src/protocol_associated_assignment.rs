@@ -263,3 +263,76 @@ impl AssociatedTypeAssignment {
 #[cfg(test)]
 #[path = "../tests/unit/associated_type_assignment.rs"]
 mod tests;
+
+impl super::ProtocolBound {
+    /// Resolve siblings in the declaration telescope before substituting the receiver.
+    pub(crate) fn instantiate_family_result(
+        &self,
+        self_var: Option<TypeVar>,
+        substitution: &Substitution,
+        member: impl Fn(&str) -> Result<Type, Text>,
+    ) -> Result<Self, Text> {
+        Ok(Self {
+            protocol: self.protocol.clone(),
+            is_negative: self.is_negative,
+            args: self
+                .args
+                .iter()
+                .map(|ty| instantiate_result_type(ty, self_var, substitution, &member))
+                .collect::<Result<_, _>>()?,
+            associated_types: self
+                .associated_types
+                .iter()
+                .map(|(name, ty)| {
+                    Ok((
+                        name.clone(),
+                        instantiate_result_type(ty, self_var, substitution, &member)?,
+                    ))
+                })
+                .collect::<Result<_, Text>>()?,
+        })
+    }
+}
+
+/// Only a projection from this declaration's Self binder may consult its items.
+fn instantiate_result_type(
+    ty: &Type,
+    self_var: Option<TypeVar>,
+    substitution: &Substitution,
+    member: &impl Fn(&str) -> Result<Type, Text>,
+) -> Result<Type, Text> {
+    let Some(receiver) = self_var else { return ty.try_apply_subst(substitution) };
+    let sibling = |ty: &Type, receiver| {
+        ty.ordinary_projection().is_some_and(|(subject, _)| *subject == Type::Var(receiver))
+    };
+    if !ty.contains_type(|ty| sibling(ty, receiver)) {
+        return ty.try_apply_subst(substitution);
+    }
+
+    // Mark only free occurrences of the declaring receiver. A nested
+    // quantifier is allowed to bind that same identity in its own scope.
+    let mut occupied = ty.substitution_variables()?;
+    occupied.extend(substitution.keys().copied());
+    let mut fresh = || loop {
+        let variable = TypeVar::fresh();
+        if occupied.insert(variable) { break variable; }
+    };
+    let marker = fresh();
+    let mut marking = Substitution::new();
+    marking.insert(receiver, Type::Var(marker));
+    let mut scoped = ty.try_apply_subst(&marking)?;
+
+    // Resolve declaration-owned members into fresh slots. The ordinary
+    // simultaneous substitution inserts both the caller's arguments and
+    // member images without capturing their free variables under binders.
+    let mut arguments = substitution.clone();
+    arguments.insert(marker, substitution.get(&receiver).cloned().unwrap_or(Type::Var(receiver)));
+    scoped.try_replace_types(|node| {
+        let Some((subject, name)) = node.ordinary_projection() else { return Ok(None) };
+        if *subject != Type::Var(marker) { return Ok(None); }
+        let slot = fresh();
+        arguments.insert(slot, member(name)?);
+        Ok::<_, Text>(Some(Type::Var(slot)))
+    })?;
+    scoped.try_apply_subst(&arguments)
+}
