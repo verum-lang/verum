@@ -654,9 +654,12 @@ fn moving_a_pattern_payload_preserves_its_known_origins() {
         ("fn append<T>(mut out:List<T>, entry:Maybe<T>)->List<T> {match entry {Maybe.Some(value)=>out.push(value),Maybe.None=>{},} out}", None),
         ("fn append<T>(mut out:List<T>, value:Maybe<T>)->List<T> {if let Maybe.Some(value)=value {out.push(value);} out}", None),
         ("fn append<T>(mut out:List<T>, entries:Maybe<(T,Int)>)->List<T> {if let Maybe.Some((value,_))=entries {out.push(value);} out}", None),
+        ("fn append<T>(mut out:List<T>, entry:Maybe<T>)->List<T> {while let Maybe.Some(value)=entry {out.push(value);return out;} out}", None),
         ("fn append<T>(mut out:List<T>, callback:fn()->Maybe<T>)->List<T> {match callback() {Maybe.Some(value)=>out.push(value),Maybe.None=>{},} out}", Some("cannot establish the lifetime")),
+        ("fn append<T>(mut out:List<T>, callback:fn()->Maybe<T>)->List<T> {while let Maybe.Some(value)=callback() {out.push(value);} out}", Some("cannot establish the lifetime")),
         ("fn append(mut out:List<&Int>)->List<&Int> {let local=37;let entry=Maybe.Some(&local);if let Maybe.Some(value)=entry {out.push(value);} out}", Some("local")),
         ("fn append(mut out:List<&Int>, entry:Maybe<Int>)->List<&Int> {if let Maybe.Some(ref value)=entry {out.push(value);} out}", Some("cannot establish the lifetime")),
+        ("fn append(mut out:List<&Int>, entry:Maybe<Int>)->List<&Int> {while let Maybe.Some(ref value)=entry {out.push(value);return out;} out}", Some("cannot establish the lifetime")),
     ] {
         let found = registered_errors([
             ("core.collections.list", list.clone()),

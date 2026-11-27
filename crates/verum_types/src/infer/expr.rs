@@ -5284,61 +5284,35 @@ impl TypeChecker {
         })
     }
 
-    /// Type-check a `while` loop.
-    /// Checks while-is pattern bindings, body, and affine drop on exit.
+    /// Type-check a repeated condition and the bindings visible in its body.
     fn infer_while_loop(&mut self, expr: &Expr) -> Result<InferResult> {
-        use ExprKind::*;
-        let ExprKind::While { label: _, condition, body, invariants: _, decreases: _ } = &expr.kind
-            else { unreachable!() };
-                    // Enter loop context for affine tracking
-                    self.affine_tracker.enter_loop();
-
-                    // Check if condition is an `is` expression with pattern bindings
-                    // For `while value is Pattern(x)`, bind x in the body scope
-                    // Spec: L0-critical/builtin-syntax/is_operator.vr
-                    if let ExprKind::Is {
-                        expr: test_expr,
-                        pattern,
-                        negated,
-                    } = &condition.kind
-                    {
-                        // Type check the expression being tested
-                        let test_result = self.synth_expr(test_expr)?;
-
-                        // Enter scope for body with pattern bindings
-                        self.ctx.env.push_scope();
-                        self.refinement_evidence.push_scope();
-
-                        // For non-negated `is`, bind the pattern in body scope
-                        if !negated {
-                            self.bind_pattern(pattern, &test_result.ty)?;
-                            // Add pattern evidence for the matched pattern
-                            if let Maybe::Some(var_name) = self.extract_simple_var_name(test_expr) {
-                                self.add_pattern_evidence(pattern, var_name, test_expr.span);
-                            }
-                        }
-
-                        self.infer_block(body)?;
-
-                        self.refinement_evidence.pop_scope();
-                        self.ctx.env.pop_scope();
-                    } else {
-                        // Regular condition - must be Bool
-                        self.check_expr(condition, &Type::bool())?;
-
-                        // Add condition evidence for the loop body
-                        // Inside the loop, condition is true
-                        self.refinement_evidence.push_scope();
-                        self.observe_condition(condition, false);
-
-                        self.infer_block(body)?;
-                        self.refinement_evidence.pop_scope();
-                    }
-
-                    // Exit loop context
-                    self.affine_tracker.exit_loop();
-
-                    Ok(InferResult::new(Type::unit()))
+        let ExprKind::While { condition, body, .. } = &expr.kind else { unreachable!() };
+        self.affine_tracker.enter_loop();
+        let result = (|| -> Result<()> {
+            if let ExprKind::Is { expr: subject, pattern, negated: false } = &condition.kind {
+                let inferred = self.synth_borrowed_operand(subject)?;
+                let applied = self.unifier.try_apply(&inferred.ty, subject.span)?;
+                let ty = self.resolve_assoc_projections_deep(&applied);
+                let origins = self.aggregate_origins(subject, &ty);
+                let name = self.extract_simple_var_name(subject);
+                let scope = self.open_branch_pattern(pattern, subject, &ty, name.as_ref(), &origins)?;
+                let body_result = self.infer_block(body);
+                let errors = self.close_branch_pattern(scope, body.span, false);
+                body_result?;
+                if let Some(error) = errors.into_iter().next() { return Err(error); }
+            } else {
+                self.check_expr(condition, &Type::bool())?;
+                self.refinement_evidence.push_scope();
+                self.observe_condition(condition, false);
+                let body_result = self.infer_block(body);
+                self.refinement_evidence.pop_scope();
+                body_result?;
+            }
+            Ok(())
+        })();
+        self.affine_tracker.exit_loop();
+        result?;
+        Ok(InferResult::new(Type::unit()))
     }
 
     /// Type-check a `{k: v for (k, v) in iter if cond}` map comprehension.

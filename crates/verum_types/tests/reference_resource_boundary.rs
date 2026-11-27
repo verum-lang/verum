@@ -60,6 +60,18 @@ fn declared_reference_aliases_preserve_the_same_resource_boundary() {
 }
 
 #[test]
+fn while_patterns_borrow_each_iteration_and_reject_repeated_affine_moves() {
+    let declarations = "type affine Ticket is {value:Int}; type Batch is Empty | Entry(Ticket);";
+    let borrow = "fn get(batch:&Batch)->Int {while let Batch.Entry(ref ticket)=batch {return ticket.value;} 0}";
+    let found = errors(&format!("{declarations} {borrow}"));
+    assert!(found.is_empty(), "{found:?}");
+
+    let repeat = "fn consume(batch:Batch) {while let Batch.Entry(ticket)=batch {let spent=ticket;}}";
+    let found = errors(&format!("{declarations} {repeat}"));
+    assert!(found.iter().any(|error| error.contains("loop")), "{found:?}");
+}
+
+#[test]
 fn borrowing_does_not_allow_copying_the_owner_or_an_owning_aggregate() {
     for body in [
         "fn probe(value:Token) {let first=value; let second=value;}",

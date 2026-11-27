@@ -308,7 +308,7 @@ fn inferred_locals_can_retain_the_enclosing_receivers_associated_type() {
         type Feed is protocol {
             type Element;
             fn pull(&mut self) -> Slot<Self.Element>;
-            fn final_item(mut self) -> Slot<Self.Element> {
+            fn final_item(&mut self) -> Slot<Self.Element> {
                 let mut saved = Slot.Missing;
                 while let Slot.Found(x) = self.pull() { saved = Slot.Found(x); }
                 saved
@@ -321,6 +321,39 @@ fn inferred_locals_can_retain_the_enclosing_receivers_associated_type() {
     let unconstrained = "type Slot<T> is Missing | Found(T); type Probe is protocol { fn f(&self) -> Int { let loose = Slot.Missing; 0 } };";
     let errors = check(&mut checker(), unconstrained);
     assert!(errors.iter().any(|error| error.contains("E404")), "{errors:?}");
+}
+
+#[test]
+fn consuming_a_producer_cannot_return_an_item_borrowed_from_its_storage() {
+    let declarations = "
+        type Slot<T> is Missing | Found(T);
+        type Feed is protocol {
+            type Element;
+            fn pull(&mut self) -> Slot<Self.Element>;
+            fn final_item(mut self) -> Slot<Self.Element> {
+                let mut saved = Slot.Missing;
+                while let Slot.Found(x) = self.pull() { saved = Slot.Found(x); }
+                saved
+            }
+        };
+        type Pocket is { value: Int, has_value: Bool };
+        implement Feed for Pocket {
+            type Element = &Int;
+            fn pull(&mut self) -> Slot<&Int> {
+                if !self.has_value { return Slot.Missing; }
+                self.has_value = false;
+                Slot.Found(&self.value)
+            }
+        }
+        fn read() -> Slot<&Int> {
+            let item = Pocket { value: 29, has_value: true };
+            item.final_item()
+        }";
+    let errors = check(&mut checker(), declarations);
+    assert!(
+        errors.iter().any(|error| error.contains("DanglingReference") && error.contains("\"self\"")),
+        "{errors:?}"
+    );
 }
 
 #[test]
