@@ -2080,7 +2080,7 @@ implement Text {
     public fn parse_float(&self) -> Result<Float, ParseError> {
         let bytes = self.as_bytes();
         if bytes.len() == 0 {
-            return Result.Err(ParseError.new("empty string"));
+            return Result.Err(ParseError.from_message("empty string"));
         }
         // Validate that at least one digit appears so that silent
         // zeros don't mask junk input like "abc" or "".
@@ -2109,14 +2109,14 @@ implement Text {
                 i = i + 1;
             }
             if !exp_digits {
-                return Result.Err(ParseError.new("missing exponent digits"));
+                return Result.Err(ParseError.from_message("missing exponent digits"));
             }
         }
         if !seen_digit {
-            return Result.Err(ParseError.new("no digits"));
+            return Result.Err(ParseError.from_message("no digits"));
         }
         if i < n {
-            return Result.Err(ParseError.new("trailing characters"));
+            return Result.Err(ParseError.from_message("trailing characters"));
         }
         Result.Ok(self.to_float())
     }
@@ -2128,7 +2128,7 @@ implement Text {
         } else if *self == "false" {
             Result.Ok(false)
         } else {
-            Result.Err(ParseError.new("invalid boolean"))
+            Result.Err(ParseError.from_message("invalid boolean"))
         }
     }
 
@@ -3899,7 +3899,7 @@ implement FromStr for Int8 {
                 let converted = Int8.try_from(val);
                 match converted {
                     Result.Ok(v) => Result.Ok(v),
-                    Result.Err(_) => Result.Err(ParseError.new(&"value out of range for Int8")),
+                    Result.Err(_) => Result.Err(ParseError.from_message("value out of range for Int8")),
                 }
             },
         }
@@ -3917,7 +3917,7 @@ implement FromStr for Int16 {
                 let converted = Int16.try_from(val);
                 match converted {
                     Result.Ok(v) => Result.Ok(v),
-                    Result.Err(_) => Result.Err(ParseError.new(&"value out of range for Int16")),
+                    Result.Err(_) => Result.Err(ParseError.from_message("value out of range for Int16")),
                 }
             },
         }
@@ -3935,7 +3935,7 @@ implement FromStr for Int32 {
                 let converted = Int32.try_from(val);
                 match converted {
                     Result.Ok(v) => Result.Ok(v),
-                    Result.Err(_) => Result.Err(ParseError.new(&"value out of range for Int32")),
+                    Result.Err(_) => Result.Err(ParseError.from_message("value out of range for Int32")),
                 }
             },
         }
@@ -3953,7 +3953,7 @@ implement FromStr for UInt8 {
                 let converted = UInt8.try_from(val);
                 match converted {
                     Result.Ok(v) => Result.Ok(v),
-                    Result.Err(_) => Result.Err(ParseError.new(&"value out of range for UInt8")),
+                    Result.Err(_) => Result.Err(ParseError.from_message("value out of range for UInt8")),
                 }
             },
         }
@@ -3971,7 +3971,7 @@ implement FromStr for UInt16 {
                 let converted = UInt16.try_from(val);
                 match converted {
                     Result.Ok(v) => Result.Ok(v),
-                    Result.Err(_) => Result.Err(ParseError.new(&"value out of range for UInt16")),
+                    Result.Err(_) => Result.Err(ParseError.from_message("value out of range for UInt16")),
                 }
             },
         }
@@ -3989,7 +3989,7 @@ implement FromStr for UInt32 {
                 let converted = UInt32.try_from(val);
                 match converted {
                     Result.Ok(v) => Result.Ok(v),
-                    Result.Err(_) => Result.Err(ParseError.new(&"value out of range for UInt32")),
+                    Result.Err(_) => Result.Err(ParseError.from_message("value out of range for UInt32")),
                 }
             },
         }
@@ -4029,7 +4029,7 @@ implement FromStr for UInt128 {
             Result.Err(e) => Result.Err(e),
             Result.Ok(val) => {
                 if val < 0 {
-                    Result.Err(ParseError.new(&"value out of range for UInt128"))
+                    Result.Err(ParseError.from_message("value out of range for UInt128"))
                 } else {
                     Result.Ok(val as UInt128)
                 }

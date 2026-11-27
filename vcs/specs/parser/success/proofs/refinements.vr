@@ -423,7 +423,7 @@ fn parse_positive(s: Text) -> Result<Int{result > 0}, ParseError> {
     if n > 0 {
         Ok(n)
     } else {
-        Err(ParseError.new("Expected positive"))
+        Err(ParseError.from_message("Expected positive"))
     }
 }
 

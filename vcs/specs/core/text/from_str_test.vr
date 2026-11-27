@@ -183,7 +183,7 @@ fn check_positive(x: Int) -> Result<Int, ParseError> {
     if x > 0 {
         Ok(x)
     } else {
-        Err(ParseError.new("must be positive"))
+        Err(ParseError.from_message("must be positive"))
     }
 }
 
