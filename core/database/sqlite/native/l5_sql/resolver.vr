@@ -32,6 +32,7 @@ module core.database.sqlite.native.l5_sql.resolver;
 // =============================================================================
 
 mount collections.{List, Map};
+mount core.text.case_fold.equal_ascii_nocase;
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l5_sql.ast.{
     Expr, SqlLiteral, UnOp, BinOp, TableRef,
@@ -113,8 +114,8 @@ public fn scope_from_table_meta(
 ) -> ColumnScope {
     let mut m: Map<Text, Int> = Map.new();
     let mut i: Int = 0;
-    while i < meta.columns.len() {
-        let _ = m.insert(meta.columns[i].name.clone(), i);
+    while i < meta.column_count() {
+        let _ = m.insert(meta.column_name(i).to_ascii_lowercase(), i);
         i = i + 1;
     }
     ColumnScope {
@@ -122,7 +123,7 @@ public fn scope_from_table_meta(
         table: meta.name.clone(),
         alias: alias,
         name_to_idx: m,
-        n_cols: meta.columns.len(),
+        n_cols: meta.column_count(),
     }
 }
 
@@ -134,21 +135,20 @@ fn lookup_unqualified(
     scopes: &List<ColumnScope>,
     name: &Text,
 ) -> Result<(Int, Int), ResolveError> {
-    let mut found_cursor: Int = -1;
-    let mut found_idx: Int = -1;
-    let mut hits: Int = 0;
-    let mut i: Int = 0;
+    let key = name.to_ascii_lowercase();
+    let mut found: Maybe<(Int, Int)> = Maybe.None;
+    let mut i = 0;
     while i < scopes.len() {
-        if scopes[i].name_to_idx.contains_key(name.clone()) {
-            found_cursor = scopes[i].cursor_id;
-            found_idx = scopes[i].name_to_idx.get(name.clone());
-            hits = hits + 1;
+        if let Maybe.Some((_, index)) = scopes[i].name_to_idx.get_key_value(&key) {
+            if found.is_some() { return Result.Err(AmbiguousColumn(name.clone())); }
+            found = Maybe.Some((scopes[i].cursor_id, *index));
         }
         i = i + 1;
     }
-    if hits == 0 { return Result.Err(UnknownColumn(name.clone())); }
-    if hits > 1  { return Result.Err(AmbiguousColumn(name.clone())); }
-    Result.Ok((found_cursor, found_idx))
+    match found {
+        Maybe.Some(binding) => Result.Ok(binding),
+        Maybe.None => Result.Err(UnknownColumn(name.clone())),
+    }
 }
 
 fn lookup_qualified(
@@ -159,11 +159,10 @@ fn lookup_qualified(
     let mut i: Int = 0;
     while i < scopes.len() {
         let s = &scopes[i];
-        let match_name = s.table == table.clone();
-        let match_alias = s.alias.len() > 0 && s.alias == table.clone();
-        if match_name || match_alias {
-            if s.name_to_idx.contains_key(name.clone()) {
-                return Result.Ok((s.cursor_id, s.name_to_idx.get(name.clone())));
+        let qualifier = if s.alias.is_empty() { &s.table } else { &s.alias };
+        if equal_ascii_nocase(qualifier, table) {
+            if let Maybe.Some(index) = s.name_to_idx.get(name.to_ascii_lowercase()) {
+                return Result.Ok((s.cursor_id, index));
             }
             return Result.Err(UnknownColumn(name.clone()));
         }
@@ -176,149 +175,65 @@ fn lookup_qualified(
 // Expression rewrite
 // -----------------------------------------------------------------------------
 
-public fn resolve_expr(
-    e: &Expr,
-    scopes: &List<ColumnScope>,
-) -> Result<Expr, ResolveError> {
+public fn resolve_expr(e: &Expr, scopes: &List<ColumnScope>) -> Result<Expr, ResolveError> {
     match e {
-        EColumn(ref tref, ref name) => {
-            let (cid, idx) = if tref.name.len() == 0 {
-                match lookup_unqualified(scopes, name) {
-                    Result.Ok(p)  => p, Result.Err(err) => { return Result.Err(err); }
-                }
+        EColumn(ref table, ref name) => {
+            let binding = if table.name.is_empty() {
+                lookup_unqualified(scopes, name)?
             } else {
-                match lookup_qualified(scopes, &tref.name, name) {
-                    Result.Ok(p)  => p, Result.Err(err) => { return Result.Err(err); }
-                }
+                lookup_qualified(scopes, &table.name, name)?
             };
-            Result.Ok(EColumnRef(cid, idx))
+            Result.Ok(EColumnRef(binding.0, binding.1))
         }
-
-        // Structural recursion — rebuild with resolved children.
-        EUnary(op, ref inner) => {
-            let r = match resolve_expr(inner, scopes) {
-                Result.Ok(x)  => x, Result.Err(err) => { return Result.Err(err); }
-            };
-            Result.Ok(EUnary(op, Heap.new(r)))
-        }
-        EBinary(op, ref a, ref b) => {
-            let ra = match resolve_expr(a, scopes) {
-                Result.Ok(x)  => x, Result.Err(err) => { return Result.Err(err); }
-            };
-            let rb = match resolve_expr(b, scopes) {
-                Result.Ok(x)  => x, Result.Err(err) => { return Result.Err(err); }
-            };
-            Result.Ok(EBinary(op, Heap.new(ra), Heap.new(rb)))
-        }
-        EFunc(ref n, ref args, d) => {
-            let mut out: List<Expr> = List.new();
-            let mut i: Int = 0;
-            while i < args.len() {
-                let r = match resolve_expr(&args[i], scopes) {
-                    Result.Ok(x)  => x, Result.Err(err) => { return Result.Err(err); }
-                };
-                out.push(r);
-                i = i + 1;
-            }
-            Result.Ok(EFunc(n.clone(), out, d))
-        }
-        EBetween(ref x, ref lo, ref hi, neg) => {
-            let rx  = match resolve_expr(x, scopes)  { Result.Ok(r) => r, Result.Err(e) => { return Result.Err(e); } };
-            let rlo = match resolve_expr(lo, scopes) { Result.Ok(r) => r, Result.Err(e) => { return Result.Err(e); } };
-            let rhi = match resolve_expr(hi, scopes) { Result.Ok(r) => r, Result.Err(e) => { return Result.Err(e); } };
-            Result.Ok(EBetween(Heap.new(rx), Heap.new(rlo), Heap.new(rhi), neg))
-        }
-        ELike(ref s, ref p, ref esc, neg) => {
-            let rs = match resolve_expr(s, scopes) { Result.Ok(r) => r, Result.Err(e) => { return Result.Err(e); } };
-            let rp = match resolve_expr(p, scopes) { Result.Ok(r) => r, Result.Err(e) => { return Result.Err(e); } };
-            let resc: Maybe<Heap<Expr>> = match esc {
-                Maybe.Some(ref x) => {
-                    let r = match resolve_expr(x, scopes) { Result.Ok(r) => r, Result.Err(e) => { return Result.Err(e); } };
-                    Maybe.Some(Heap.new(r))
-                }
-                Maybe.None => Maybe.None,
-            };
-            Result.Ok(ELike(Heap.new(rs), Heap.new(rp), resc, neg))
-        }
-        ECast(ref x, ref t) => {
-            let r = match resolve_expr(x, scopes) { Result.Ok(r) => r, Result.Err(e) => { return Result.Err(e); } };
-            Result.Ok(ECast(Heap.new(r), t.clone()))
-        }
-        ECollate(ref x, ref n) => {
-            let r = match resolve_expr(x, scopes) { Result.Ok(r) => r, Result.Err(e) => { return Result.Err(e); } };
-            Result.Ok(ECollate(Heap.new(r), n.clone()))
-        }
-        EIn(ref x, ref xs, neg) => {
-            let rx = match resolve_expr(x, scopes) { Result.Ok(r) => r, Result.Err(e) => { return Result.Err(e); } };
-            let mut rxs: List<Expr> = List.new();
-            let mut i: Int = 0;
-            while i < xs.len() {
-                let r = match resolve_expr(&xs[i], scopes) { Result.Ok(r) => r, Result.Err(e) => { return Result.Err(e); } };
-                rxs.push(r);
-                i = i + 1;
-            }
-            Result.Ok(EIn(Heap.new(rx), rxs, neg))
-        }
-        ENullIf(ref a, ref b) => {
-            let ra = match resolve_expr(a, scopes) { Result.Ok(r) => r, Result.Err(e) => { return Result.Err(e); } };
-            let rb = match resolve_expr(b, scopes) { Result.Ok(r) => r, Result.Err(e) => { return Result.Err(e); } };
-            Result.Ok(ENullIf(Heap.new(ra), Heap.new(rb)))
-        }
-        ECoalesce(ref xs) => {
-            let mut rxs: List<Expr> = List.new();
-            let mut i: Int = 0;
-            while i < xs.len() {
-                let r = match resolve_expr(&xs[i], scopes) { Result.Ok(r) => r, Result.Err(e) => { return Result.Err(e); } };
-                rxs.push(r);
-                i = i + 1;
-            }
-            Result.Ok(ECoalesce(rxs))
-        }
-        // Subquery shapes remain unsupported at this v1 cut.
-        EInSubquery(_, _, _) | EExists(_, _) | ESubquery(_) => {
-            Result.Err(TooComplex("subquery in expression".clone()))
-        }
-        // ECase — its arms are (cond, body) pairs; recurse through.
-        ECase(ref scrut, ref arms, ref else_) => {
-            let rscrut: Maybe<Heap<Expr>> = match scrut {
-                Maybe.Some(ref x) => {
-                    let r = match resolve_expr(x, scopes) { Result.Ok(r) => r, Result.Err(e) => { return Result.Err(e); } };
-                    Maybe.Some(Heap.new(r))
-                }
-                Maybe.None => Maybe.None,
-            };
-            let mut rarms: List<(Expr, Expr)> = List.new();
-            let mut i: Int = 0;
+        EUnary(op, ref inner) => Result.Ok(EUnary(op, resolve_child(inner, scopes)?)),
+        EBinary(op, ref a, ref b) => Result.Ok(EBinary(op, resolve_child(a, scopes)?, resolve_child(b, scopes)?)),
+        EFunc(ref name, ref args, distinct) => Result.Ok(EFunc(name.clone(), resolve_list(args, scopes)?, distinct)),
+        EBetween(ref x, ref lo, ref hi, neg) => Result.Ok(EBetween(
+            resolve_child(x, scopes)?, resolve_child(lo, scopes)?, resolve_child(hi, scopes)?, neg)),
+        ELike(ref text, ref pattern, ref escape, neg) => Result.Ok(ELike(
+            resolve_child(text, scopes)?, resolve_child(pattern, scopes)?, resolve_optional(escape, scopes)?, neg)),
+        ECast(ref x, ref ty) => Result.Ok(ECast(resolve_child(x, scopes)?, ty.clone())),
+        ECollate(ref x, ref collation) => Result.Ok(ECollate(resolve_child(x, scopes)?, collation.clone())),
+        EIn(ref x, ref items, neg) => Result.Ok(EIn(resolve_child(x, scopes)?, resolve_list(items, scopes)?, neg)),
+        ENullIf(ref a, ref b) => Result.Ok(ENullIf(resolve_child(a, scopes)?, resolve_child(b, scopes)?)),
+        ECoalesce(ref items) => Result.Ok(ECoalesce(resolve_list(items, scopes)?)),
+        ECase(ref scrutinee, ref arms, ref fallback) => {
+            let resolved = resolve_optional(scrutinee, scopes)?;
+            let mut mapped: List<(Expr, Expr)> = List.with_capacity(arms.len());
+            let mut i = 0;
             while i < arms.len() {
-                let ra = match resolve_expr(&arms[i].0, scopes) { Result.Ok(r) => r, Result.Err(e) => { return Result.Err(e); } };
-                let rb = match resolve_expr(&arms[i].1, scopes) { Result.Ok(r) => r, Result.Err(e) => { return Result.Err(e); } };
-                rarms.push((ra, rb));
+                mapped.push((resolve_expr(&arms[i].0, scopes)?, resolve_expr(&arms[i].1, scopes)?));
                 i = i + 1;
             }
-            let relse: Maybe<Heap<Expr>> = match else_ {
-                Maybe.Some(ref x) => {
-                    let r = match resolve_expr(x, scopes) { Result.Ok(r) => r, Result.Err(e) => { return Result.Err(e); } };
-                    Maybe.Some(Heap.new(r))
-                }
-                Maybe.None => Maybe.None,
-            };
-            Result.Ok(ECase(rscrut, rarms, relse))
+            Result.Ok(ECase(resolved, mapped, resolve_optional(fallback, scopes)?))
         }
-
-        // Everything else is already resolved or doesn't bind a column.
-        _ => Result.Ok(clone_leaf(e)),
+        EInSubquery(_, _, _) | EExists(_, _) | ESubquery(_) => Result.Err(TooComplex("subquery in expression")),
+        ELit(ref literal) => Result.Ok(ELit(clone_literal(literal))),
+        EVar(ref name) => Result.Ok(EVar(name.clone())),
+        EPositional(index) => Result.Ok(EPositional(index)),
+        EColumnRef(cursor, index) => Result.Ok(EColumnRef(cursor, index)),
     }
 }
 
-fn clone_leaf(e: &Expr) -> Expr {
-    // Shallow clone for leaf variants that don't need recursion.
-    match e {
-        ELit(ref l)       => ELit(clone_literal(l)),
-        EVar(ref s)       => EVar(s.clone()),
-        EPositional(n)    => EPositional(n),
-        EColumnRef(c, i)  => EColumnRef(c, i),
-        _                 => ELit(LNull),  // defensive — should be unreachable
+fn resolve_child(child: &Heap<Expr>, scopes: &List<ColumnScope>) -> Result<Heap<Expr>, ResolveError> {
+    Result.Ok(Heap.new(resolve_expr(child.as_ref(), scopes)?))
+}
+
+fn resolve_optional(child: &Maybe<Heap<Expr>>, scopes: &List<ColumnScope>) -> Result<Maybe<Heap<Expr>>, ResolveError> {
+    match child {
+        Maybe.Some(ref item) => Result.Ok(Maybe.Some(resolve_child(item, scopes)?)),
+        Maybe.None => Result.Ok(Maybe.None),
     }
+}
+
+fn resolve_list(items: &List<Expr>, scopes: &List<ColumnScope>) -> Result<List<Expr>, ResolveError> {
+    let mut mapped: List<Expr> = List.with_capacity(items.len());
+    let mut i = 0;
+    while i < items.len() {
+        mapped.push(resolve_expr(&items[i], scopes)?);
+        i = i + 1;
+    }
+    Result.Ok(mapped)
 }
 
 fn clone_literal(l: &SqlLiteral) -> SqlLiteral {

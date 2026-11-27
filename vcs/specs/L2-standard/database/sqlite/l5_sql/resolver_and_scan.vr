@@ -1,153 +1,60 @@
 // @test: typecheck-pass
 // @level: L2
 // @tier: 0
-// @tags: sqlite, native, sql, resolver, codegen, table-scan
-// @timeout: 15000
-// @description: Resolver rewrites EColumn → EColumnRef; codegen emits TableScan
-//
-// Spec: sqlite-native spec §13.1 + §14
+// @tags: sqlite, native, sql, resolver
+// @expected-exit: 0
+// @description: SQL names resolve through the catalog, including aliases and nested expressions.
 
-mount core.*;
-mount collections.List;
-mount core.database.sqlite.native.l5_sql.{
-    Expr, Literal, TableRef, PlanNode, PlanColumn,
-    CodegenError, codegen, compile,
-    ColumnScope, resolve_expr, scope_from_table_meta,
-    build_single_table_scope,
-};
-mount core.database.sqlite.native.l2_record.Affinity;
-mount core.database.sqlite.native.l6_session.{
-    SchemaCache, schema_cache_new,
-    ColumnMeta, TableMeta, TableKind,
-};
+module core.database.sqlite.native.tests.resolver_and_scan;
 
-fn meta_users() -> TableMeta {
-    let cols: List<ColumnMeta> = [
-        ColumnMeta {
-            name: "id".clone(), declared_type: "INTEGER".clone(),
-            affinity: Integer, not_null: true, primary_key: true, collation: "".clone(),
-        },
-        ColumnMeta {
-            name: "name".clone(), declared_type: "TEXT".clone(),
-            affinity: Text, not_null: false, primary_key: false, collation: "".clone(),
-        },
-    ];
-    TableMeta {
-        schema: "".clone(),
-        name: "users".clone(),
-        kind: TkTable,
-        root_page: 2,
-        columns: cols,
-        primary_key_cols: ["id".clone()],
-        strict: false,
-        without_rowid: false,
-        created_sql: "".clone(),
-    }
+mount core.database.sqlite.native.l5_sql.ast.{BinOp, ColumnDef, CreateTableStmt, Expr, SqlLiteral, TableRef};
+mount core.database.sqlite.native.l5_sql.resolver.{ColumnScope, ResolveError, build_single_table_scope, resolve_expr, scope_from_table_meta};
+mount core.database.sqlite.native.l6_session.schema_cache.{schema_cache_new, table_meta_from_create};
+
+fn table(name: Text, alias: Text) -> TableRef {
+    TableRef { schema: "", name, alias }
 }
 
-fn resolve_unqualified_id() {
-    let meta = meta_users();
-    let scope = scope_from_table_meta(0, "".clone(), &meta);
-    let mut scopes: List<ColumnScope> = List.new();
-    scopes.push(scope);
-
-    let e = EColumn(TableRef { schema: "".clone(), name: "".clone(), alias: "".clone() }, "id".clone());
-    match resolve_expr(&e, &scopes) {
-        Ok(EColumnRef(cid, idx)) => {
-            assert_eq(cid, 0);
-            assert_eq(idx, 0);
-        }
-        _ => panic("id should resolve to (0,0)"),
-    }
-}
-
-fn resolve_unqualified_name() {
-    let meta = meta_users();
-    let scope = scope_from_table_meta(0, "".clone(), &meta);
-    let mut scopes: List<ColumnScope> = List.new();
-    scopes.push(scope);
-
-    let e = EColumn(TableRef { schema: "".clone(), name: "".clone(), alias: "".clone() }, "name".clone());
-    match resolve_expr(&e, &scopes) {
-        Ok(EColumnRef(cid, idx)) => {
-            assert_eq(cid, 0);
-            assert_eq(idx, 1);
-        }
-        _ => panic("name should resolve to (0,1)"),
-    }
-}
-
-fn resolve_unknown_column_errors() {
-    let meta = meta_users();
-    let scope = scope_from_table_meta(0, "".clone(), &meta);
-    let mut scopes: List<ColumnScope> = List.new();
-    scopes.push(scope);
-
-    let e = EColumn(TableRef { schema: "".clone(), name: "".clone(), alias: "".clone() }, "email".clone());
-    match resolve_expr(&e, &scopes) {
-        Ok(_) => panic("unknown column should error"),
-        Err(_) => {},
-    }
-}
-
-fn resolve_qualified_table_ref() {
-    let meta = meta_users();
-    let scope = scope_from_table_meta(0, "".clone(), &meta);
-    let mut scopes: List<ColumnScope> = List.new();
-    scopes.push(scope);
-
-    let e = EColumn(TableRef { schema: "".clone(), name: "users".clone(), alias: "".clone() }, "id".clone());
-    match resolve_expr(&e, &scopes) {
-        Ok(EColumnRef(cid, idx)) => { assert_eq(cid, 0); assert_eq(idx, 0); }
-        _ => panic("users.id"),
-    }
-}
-
-fn build_scope_from_cache() {
-    let mut sc = schema_cache_new();
-    let _ = sc.register_table(meta_users());
-    let tref = TableRef { schema: "".clone(), name: "users".clone(), alias: "".clone() };
-    match build_single_table_scope(&sc, &tref, 0) {
-        Ok(sl) => { assert_eq(sl.len(), 1); }
-        Err(_) => panic("build_single_table_scope"),
-    }
-}
-
-fn build_scope_unknown_table() {
-    let sc = schema_cache_new();
-    let tref = TableRef { schema: "".clone(), name: "ghost".clone(), alias: "".clone() };
-    match build_single_table_scope(&sc, &tref, 0) {
-        Ok(_) => panic("ghost table must reject"),
-        Err(_) => {},
-    }
-}
-
-fn resolve_recurses_binary_op() {
-    let meta = meta_users();
-    let scope = scope_from_table_meta(0, "".clone(), &meta);
-    let mut scopes: List<ColumnScope> = List.new();
-    scopes.push(scope);
-
-    // id = 1
-    let e = EBinary(BEq,
-        Heap.new(EColumn(TableRef { schema: "".clone(), name: "".clone(), alias: "".clone() }, "id".clone())),
-        Heap.new(ELit(LInt(1_i64))),
-    );
-    match resolve_expr(&e, &scopes) {
-        Ok(EBinary(_, ref lhs, _)) => {
-            match lhs { Heap.new(EColumnRef(_, _)) => {}, _ => panic("lhs should be EColumnRef"), }
-        }
-        _ => panic("resolve binary"),
-    }
+fn column(qualifier: Text, name: Text) -> Expr {
+    Expr.EColumn(table(qualifier, ""), name)
 }
 
 fn main() {
-    resolve_unqualified_id();
-    resolve_unqualified_name();
-    resolve_unknown_column_errors();
-    resolve_qualified_table_ref();
-    build_scope_from_cache();
-    build_scope_unknown_table();
-    resolve_recurses_binary_op();
-    print("resolver_and_scan typecheck ok");
+    let create = CreateTableStmt {
+        table: table("users", ""), if_not_exists: false, temporary: false,
+        columns: [
+            ColumnDef { name: "ID", declared_type: "INTEGER", constraints: [] },
+            ColumnDef { name: "Ä", declared_type: "TEXT", constraints: [] },
+        ],
+        constraints: [], strict: false, without_rowid: false,
+    };
+    let meta = table_meta_from_create(&create, 2, "");
+    let mut scopes: List<ColumnScope> = [scope_from_table_meta(3, "u", &meta)];
+
+    match resolve_expr(&column("", "id"), &scopes) {
+        Result.Ok(Expr.EColumnRef(3, 0)) => {},
+        _ => panic("unqualified column"),
+    }
+    match resolve_expr(&column("U", "Ä"), &scopes) {
+        Result.Ok(Expr.EColumnRef(3, 1)) => {},
+        _ => panic("qualified column"),
+    }
+    assert(resolve_expr(&column("u", "ä"), &scopes) is Result.Err(ResolveError.UnknownColumn(_)));
+    assert(resolve_expr(&column("users", "id"), &scopes) is Result.Err(ResolveError.UnknownTable(_)));
+
+    let nested = Expr.EBinary(BinOp.BEq, Heap.new(column("u", "ID")), Heap.new(Expr.ELit(SqlLiteral.LInt(1_i64))));
+    match resolve_expr(&nested, &scopes) {
+        Result.Ok(Expr.EBinary(_, ref left, _)) => assert(left.as_ref() is Expr.EColumnRef(3, 0)),
+        _ => panic("nested column"),
+    }
+    let absent = Expr.ECoalesce([column("", "id"), column("", "missing")]);
+    assert(resolve_expr(&absent, &scopes) is Result.Err(ResolveError.UnknownColumn(_)));
+
+    scopes.push(scope_from_table_meta(4, "other", &meta));
+    assert(resolve_expr(&column("", "id"), &scopes) is Result.Err(ResolveError.AmbiguousColumn(_)));
+
+    let mut cache = schema_cache_new();
+    cache.register_table(meta).unwrap();
+    assert(build_single_table_scope(&cache, &table("users", ""), 5).unwrap().len() == 1);
+    assert(build_single_table_scope(&cache, &table("absent", ""), 5) is Result.Err(ResolveError.UnknownTable(_)));
 }

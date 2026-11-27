@@ -35,6 +35,7 @@ module core.database.sqlite.native.l6_session.schema_cache;
 
 mount collections.{List, Map};
 mount base.{Result, Text, Maybe};
+mount core.text.case_fold.equal_ascii_nocase;
 mount core.base.protocols.{PartialEq, Eq, Hash, Hasher};
 mount core.database.sqlite.native.l2_record.affinity.Affinity;
 
@@ -64,6 +65,25 @@ public type TableMeta is {
     without_rowid: Bool,
     created_sql: Text,             // original CREATE TABLE text for sqlite_schema
 };
+
+implement TableMeta {
+    public(in core.database.sqlite.native) fn column_count(&self) -> Int { self.columns.len() }
+
+    public(in core.database.sqlite.native) fn column_name(&self, index: Int) -> &Text {
+        &self.columns[index].name
+    }
+
+    public(in core.database.sqlite.native) fn column_index(&self, name: &Text) -> Maybe<Int> {
+        let mut index = 0;
+        while index < self.columns.len() {
+            if equal_ascii_nocase(self.column_name(index), name) { return Maybe.Some(index); }
+            index = index + 1;
+        }
+        Maybe.None
+    }
+
+    public(in core.database.sqlite.native) fn root_page(&self) -> Int { self.root_page }
+}
 
 public type IndexMeta is {
     public(in core.database.sqlite.native) schema: Text,
