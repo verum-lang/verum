@@ -37,7 +37,7 @@ module core.database.sqlite.native.l4_vdbe.program;
 
 mount collections.List;
 mount base.{Text, Maybe};
-mount core.database.sqlite.native.l4_vdbe.opcode.{Opcode, clone_opcode};
+mount core.database.sqlite.native.l4_vdbe.opcode.Opcode;
 
 // -----------------------------------------------------------------------------
 // Constant pool
@@ -241,7 +241,6 @@ implement VdbeProgram {
         if idx < 0 || idx >= self.instructions.len() {
             return Maybe.None;
         }
-        // Return a copy via match on the variant.
-        Maybe.Some(clone_opcode(&self.instructions[idx]))
+        Maybe.Some(self.instructions[idx])
     }
 }

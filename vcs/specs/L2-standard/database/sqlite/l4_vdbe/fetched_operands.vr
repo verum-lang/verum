@@ -1,0 +1,53 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L2
+// @tags: sqlite, vdbe, bytecode
+// @expected-exit: 0
+
+mount core.database.sqlite.native.l4_vdbe.opcode.Opcode;
+mount core.database.sqlite.native.l4_vdbe.program.program_new;
+mount core.database.sqlite.native.l4_vdbe.optimizer.{eliminate_noops, thread_jumps};
+
+fn main() {
+    let mut program = program_new("CAST".clone(), 3);
+    let _ = program.emit(Opcode.CastVal(1, 2, 3));
+    match program.get_opcode(0).unwrap() {
+        Opcode.CastVal(src, kind, dst) => {
+            assert_eq(Text.from_int(src), "1");
+            assert_eq(Text.from_int(kind), "2");
+            assert_eq(Text.from_int(dst), "3");
+        }
+        _ => panic("wrong opcode"),
+    }
+    let _ = program.emit(Opcode.Gosub(7, 21));
+    match program.get_opcode(1).unwrap() {
+        Opcode.Gosub(link, target) => {
+            assert_eq(Text.from_int(link), "7");
+            assert_eq(Text.from_int(target), "21");
+        }
+        _ => panic("wrong branch opcode"),
+    }
+    assert(program.get_opcode(-1).is_none());
+    assert(program.get_opcode(2).is_none());
+
+    let mut jumps = program_new("relocate".clone(), 4);
+    let _ = jumps.emit(Opcode.Noop);
+    let _ = jumps.emit(Opcode.Gosub(7, 3));
+    let _ = jumps.emit(Opcode.CastVal(1, 2, 3));
+    let _ = jumps.emit(Opcode.Goto(4));
+    let _ = jumps.emit(Opcode.Goto(5));
+    let _ = jumps.emit(Opcode.Halt(0, 0));
+    assert_eq(eliminate_noops(&mut jumps), 1);
+    match jumps.get_opcode(0).unwrap() {
+        Opcode.Gosub(link, target) => {
+            assert_eq(Text.from_int(link), "7");
+            assert_eq(Text.from_int(target), "2");
+        }
+        _ => panic("wrong relocated call"),
+    }
+    assert_eq(thread_jumps(&mut jumps), 1);
+    match jumps.get_opcode(2).unwrap() {
+        Opcode.Goto(target) => assert_eq(Text.from_int(target), "4"),
+        _ => panic("wrong threaded target"),
+    }
+}

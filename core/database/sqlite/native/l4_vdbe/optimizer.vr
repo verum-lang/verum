@@ -32,7 +32,7 @@ module core.database.sqlite.native.l4_vdbe.optimizer;
 
 mount collections.List;
 mount core.base.maybe.Maybe;
-mount core.database.sqlite.native.l4_vdbe.opcode.{Opcode, clone_opcode, falls_through, jump_target};
+mount core.database.sqlite.native.l4_vdbe.opcode.{Opcode, falls_through, jump_target};
 mount core.database.sqlite.native.l4_vdbe.program.VdbeProgram;
 
 // -----------------------------------------------------------------------------
@@ -82,7 +82,7 @@ fn remap_one(target: Int, mapping: &List<Int>) -> Int {
 }
 
 fn remap_jumps(op: &Opcode, mapping: &List<Int>) -> Opcode {
-    match op {
+    match *op {
         Init(t)           => Init(remap_one(t, mapping)),
         Goto(t)           => Goto(remap_one(t, mapping)),
         Gosub(r, t)       => Gosub(r, remap_one(t, mapping)),
@@ -112,7 +112,7 @@ fn remap_jumps(op: &Opcode, mapping: &List<Int>) -> Opcode {
         IdxLT(c, t, k, n)    => IdxLT(c, remap_one(t, mapping), k, n),
         IdxLE(c, t, k, n)    => IdxLE(c, remap_one(t, mapping), k, n),
         SorterNext(c, t)     => SorterNext(c, remap_one(t, mapping)),
-        other => clone_opcode(other),
+        other => other,
     }
 }
 
@@ -129,7 +129,7 @@ public fn thread_jumps(program: &mut VdbeProgram) -> Int {
     let mut changed: Int = 0;
     let mut i: Int = 0;
     while i < n {
-        let op = clone_opcode(&program.instructions[i]);
+        let op = program.instructions[i];
         let new_op = match op {
             Goto(t)           => { let rt = resolve_goto(t, &program.instructions, n); if rt != t { changed = changed + 1; Goto(rt) } else { Goto(t) } }
             Eq(a, b, t)       => { let rt = resolve_goto(t, &program.instructions, n); if rt != t { changed = changed + 1; Eq(a, b, rt) } else { Eq(a, b, t) } }
