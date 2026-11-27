@@ -985,7 +985,7 @@ fn scalar_receiver_aliases_use_the_methods_of_the_same_language_type() {
 }
 
 #[test]
-fn a_public_type_alias_uses_its_targets_static_method_owner() {
+fn a_public_type_alias_uses_its_targets_static_and_instance_methods() {
     let modules = [
         ("demo.model", r#"
             public type Signal is { public code: Int };
@@ -993,6 +993,8 @@ fn a_public_type_alias_uses_its_targets_static_method_owner() {
             implement Signal {
                 public fn make(code: Int) -> Signal { Signal { code: code } }
                 public fn from_kind(kind: Kind) -> Signal { Signal { code: 1 } }
+                public fn kind(&self) -> Kind { Kind.First }
+                private fn detail(&self) -> Int { self.code }
                 private fn hidden() -> Int { 41 }
             }
         "#),
@@ -1004,6 +1006,8 @@ fn a_public_type_alias_uses_its_targets_static_method_owner() {
             public type Signal is { public code: Int };
             implement Signal {
                 public fn make(code: Bool) -> Signal { Signal { code: 0 } }
+                public fn kind(&self) -> Bool { false }
+                public fn unrelated(&self) -> Int { 99 }
                 public fn foreign() -> Int { 17 }
             }
         "#),
@@ -1015,6 +1019,17 @@ fn a_public_type_alias_uses_its_targets_static_method_owner() {
         let source = |body: &str| format!("{mounts} {body}");
         let errors = check(&source("fn use_it() -> Notice { Notice.make(7) }"), &modules);
         assert!(errors.is_empty(), "{mounts}: {errors:?}");
+        for body in [
+            "fn read(value: Notice) -> Kind { value.kind() }",
+            "fn borrow(value: &Notice) -> Kind { value.kind() }",
+        ] {
+            let errors = check(&source(body), &modules);
+            assert!(errors.is_empty(), "{mounts} {body}: {errors:?}");
+        }
+        let hidden = check(&source("fn read(value: Notice) -> Int { value.detail() }"), &modules);
+        assert!(!hidden.is_empty() && hidden.iter().any(|error| error.contains("detail")), "{hidden:?}");
+        let foreign = check(&source("fn read(value: &Notice) -> Int { value.unrelated() }"), &modules);
+        assert!(foreign.iter().any(|error| error.contains("MethodNotFound")), "{foreign:?}");
         let branch = "fn select_kind(flag: Bool) -> Notice {
             if flag { return Notice.from_kind(Kind.First); }
             Notice.from_kind(Kind.Second)

@@ -17706,8 +17706,6 @@ impl TypeChecker {
         });
 
         self.check_structural_method_import(recv_ty_raw, &method.name, method.span)?;
-        self.load_source_receiver_methods(recv_ty_raw)?;
-        self.check_source_method_visibility(recv_ty_raw, method.name.as_str(), span)?;
 
         let method_name_str = method.name.as_str();
 
@@ -17720,6 +17718,12 @@ impl TypeChecker {
         // retains qualified declaration owners and instantiated arguments
         // through alias chains without expanding nominal records structurally.
         let recv_ty = self.unifier.normalize_aliases(&recv_ty_derefed);
+        if recv_ty != recv_ty_derefed {
+            self.load_source_receiver_methods(&recv_ty_derefed)?;
+            self.check_source_method_visibility(&recv_ty_derefed, method.name.as_str(), span)?;
+        }
+        self.load_source_receiver_methods(&recv_ty)?;
+        self.check_source_method_visibility(&recv_ty, method.name.as_str(), span)?;
 
         // ============================================================
         // DYN PROTOCOL METHOD RESOLUTION
