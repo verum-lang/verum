@@ -66,7 +66,7 @@ implement TraceContext {
     /// — callers should synthesise a fresh context in that case.
     public fn parse_header(h: &Text) -> Maybe<TraceContext> {
         // Format: "00-<32 hex>-<16 hex>-<2 hex flags>"
-        let parts: List<Text> = h.split("-").collect();
+        let parts = h.split("-");
         if parts.len() != 4 {
             return Maybe.None;
         }
@@ -77,7 +77,7 @@ implement TraceContext {
         if version != "00" || tid.len() != 32 || sid.len() != 16 || flags.len() != 2 {
             return Maybe.None;
         }
-        let sampled = match flags.parse_hex_int() {
+        let sampled = match flags.parse_int_radix(16) {
             Result.Ok(n)  => (n & 0x01) == 0x01,
             Result.Err(_) => false,
         };
@@ -129,7 +129,7 @@ fn random_hex(n_chars: Int) -> Text {
         out.push_byte(HEX[(bytes[i] & 0x0F) as Int]);
         i = i + 1;
     }
-    out.finish()
+    out.into_text()
 }
 
 // =============================================================================

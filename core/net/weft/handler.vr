@@ -156,7 +156,7 @@ fn percent_decode(s: Text) -> Text {
         out.push_byte(b);
         i = i + 1;
     }
-    out.finish()
+    out.into_text()
 }
 
 fn hex_nibble(b: Byte) -> Maybe<Int> {

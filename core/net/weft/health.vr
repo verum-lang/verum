@@ -187,7 +187,7 @@ implement Readiness {
     pub async fn diagnostic_body(&self) -> Text {
         let mut out = TextBuilder.new();
         if self.draining.load(MemoryOrdering.Acquire) {
-            out.push_str("draining=true\n");
+            out.push(&"draining=true\n");
         }
         let checks_snap: List<Heap<dyn ReadinessCheck>> = {
             let g = self.checks.lock();
@@ -200,9 +200,9 @@ implement Readiness {
         for c in checks_snap.iter() {
             let ok = c.is_ready().await;
             let mark = if ok { "ok  " } else { "FAIL" };
-            out.push_str(f"{mark} {c.name()}\n");
+            out.push(&f"{mark} {c.name()}\n");
         }
-        out.finish()
+        out.into_text()
     }
 
     public fn clone_handle(&self) -> Readiness {

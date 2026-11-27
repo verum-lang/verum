@@ -356,10 +356,10 @@ fn match_node<'a>(
         let mut joined = TextBuilder.new();
         for (i, s) in segments.iter().enumerate() {
             if i < idx { continue; }
-            if i > idx { joined.push_str("/"); }
-            joined.push_str(s);
+            if i > idx { joined.push(&"/"); }
+            joined.push(s);
         }
-        captured.insert(wc.name.clone(), joined.finish());
+        captured.insert(wc.name.clone(), joined.into_text());
         return wc.handlers.get(method);
     }
 

@@ -1,0 +1,27 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L2
+// @tags: net, weft, request, tracing, text
+// @expected-exit: 0
+
+mount core.base.maybe.Maybe;
+mount core.collections.list.List;
+mount core.net.http.{Method, Headers};
+mount core.net.weft.handler.WeftRequest;
+mount core.net.weft.tracing.TraceContext;
+
+fn main() {
+    let req = WeftRequest.new(
+        Method.Get, "/", Maybe.Some("q=a+b%2B%E2%82%AC&raw=%zz%"),
+        Headers.new(), List.new(),
+    );
+    assert_eq(req.query_param(&"q").unwrap(), "a b+€");
+    assert_eq(req.query_param(&"raw").unwrap(), "%zz%");
+    assert(req.query_param(&"absent") is Maybe.None);
+
+    let prefix = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331";
+    let sampled = TraceContext.parse_header(&f"{prefix}-0f").unwrap();
+    let unsampled = TraceContext.parse_header(&f"{prefix}-fe").unwrap();
+    assert_eq(sampled.to_header(), f"{prefix}-01");
+    assert_eq(unsampled.to_header(), f"{prefix}-00");
+}

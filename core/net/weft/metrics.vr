@@ -228,29 +228,29 @@ implement WeftMetricsRegistry {
         // Counters.
         let cs = self.counters.lock().unwrap_or_else(|p| p.into_inner());
         for (name, counter) in cs.iter() {
-            out.push_str(f"# TYPE {name} counter\n");
-            out.push_str(f"{name} {counter.value()}\n");
+            out.push(&f"# TYPE {name} counter\n");
+            out.push(&f"{name} {counter.value()}\n");
         }
         // Histograms.
         let hs = self.histograms.lock().unwrap_or_else(|p| p.into_inner());
         for (name, hist) in hs.iter() {
-            out.push_str(f"# TYPE {name} histogram\n");
+            out.push(&f"# TYPE {name} histogram\n");
             let counts = hist.counts.lock().unwrap_or_else(|p| p.into_inner());
             let mut cumulative: Int = 0;
             let mut i: Int = 0;
             while i < hist.bounds_ms.len() {
                 cumulative = cumulative + counts[i];
-                out.push_str(f"{name}_bucket{{le=\"{hist.bounds_ms[i]}\"}} {cumulative}\n");
+                out.push(&f"{name}_bucket{{le=\"{hist.bounds_ms[i]}\"}} {cumulative}\n");
                 i = i + 1;
             }
             // #319: AtomicInt lock-free reads.
             let total = hist.count.load(MemoryOrdering.Relaxed);
             let sum_ms_val = hist.sum_ms.load(MemoryOrdering.Relaxed);
-            out.push_str(f"{name}_bucket{{le=\"+Inf\"}} {total}\n");
-            out.push_str(f"{name}_sum {sum_ms_val}\n");
-            out.push_str(f"{name}_count {total}\n");
+            out.push(&f"{name}_bucket{{le=\"+Inf\"}} {total}\n");
+            out.push(&f"{name}_sum {sum_ms_val}\n");
+            out.push(&f"{name}_count {total}\n");
         }
-        out.finish()
+        out.into_text()
     }
 }
 
