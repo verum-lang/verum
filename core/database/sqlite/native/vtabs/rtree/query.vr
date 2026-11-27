@@ -25,7 +25,7 @@ module core.database.sqlite.native.vtabs.rtree.query;
 
 mount base.{Maybe, Bool};
 mount collections.List;
-mount core.database.sqlite.native.vtabs.rtree.bbox.{BBox, MAX_DIMS};
+mount core.database.sqlite.native.vtabs.rtree.bbox.{BBox, MAX_DIMS, bbox_new};
 
 // -----------------------------------------------------------------------------
 // PredicateAtom — one WHERE clause atom on a single coordinate
@@ -54,71 +54,58 @@ public fn op_ge(dim: Int, is_max_slot: Bool, value: Float64) -> PredicateAtom {
 // QueryBuilder — accumulate atoms then build a probe bbox
 // -----------------------------------------------------------------------------
 
-public type QueryBuilder is {
-    n_dims: Int,
-    /// Per-dim accumulator: [lo, hi] tuples; default to (-inf, +inf).
-    lo: List<Float64>,
-    hi: List<Float64>,
-};
+type AxisBounds is { min_lo: Float64, min_hi: Float64, max_lo: Float64, max_hi: Float64 };
 
-const NEG_INF: Float64 = -1.0e308;
-const POS_INF: Float64 = 1.0e308;
+public type QueryBuilder is { axes: List<AxisBounds> };
 
 public fn builder_new(n_dims: Int) -> QueryBuilder {
-    let mut lo: List<Float64> = List.new();
-    let mut hi: List<Float64> = List.new();
-    let mut i: Int = 0;
-    while i < n_dims {
-        lo.push(NEG_INF);
-        hi.push(POS_INF);
-        i = i + 1;
+    assert(n_dims >= 1 && n_dims <= MAX_DIMS, "R-tree dimensions must be between one and five");
+    let mut axes: List<AxisBounds> = List.new();
+    while axes.len() < n_dims {
+        axes.push(AxisBounds {
+            min_lo: Float.NEG_INFINITY, min_hi: Float.INFINITY,
+            max_lo: Float.NEG_INFINITY, max_hi: Float.INFINITY,
+        });
     }
-    QueryBuilder { n_dims: n_dims, lo: lo, hi: hi }
+    QueryBuilder { axes: axes }
 }
 
 implement QueryBuilder {
     public fn add(&mut self, atom: PredicateAtom) {
-        if atom.dim < 0 || atom.dim >= self.n_dims { return; }
-        // SQLite-style: x_min <= 10 means "the row's lo bound ≤ 10",
-        // i.e. the column's upper-bound is at most 10. The SQLite
-        // R-tree grammar uses _min / _max suffixes per dimension.
-        // For the probe bbox:
-        //  * `_max OP value` constrains the *upper* slot
-        //  * `_min OP value` constrains the *lower* slot
-        match atom.op {
-            OpLE => {
-                if atom.is_max_slot {
-                    if atom.value < self.hi[atom.dim] { self.hi[atom.dim] = atom.value; }
-                } else {
-                    if atom.value < self.hi[atom.dim] { self.hi[atom.dim] = atom.value; }
-                }
-            }
-            OpGE => {
-                if atom.is_max_slot {
-                    if atom.value > self.lo[atom.dim] { self.lo[atom.dim] = atom.value; }
-                } else {
-                    if atom.value > self.lo[atom.dim] { self.lo[atom.dim] = atom.value; }
-                }
-            }
-            OpEq => {
-                if atom.value > self.lo[atom.dim] { self.lo[atom.dim] = atom.value; }
-                if atom.value < self.hi[atom.dim] { self.hi[atom.dim] = atom.value; }
-            }
+        assert(atom.dim >= 0 && atom.dim < self.axes.len(), "invalid R-tree predicate dimension");
+        assert(atom.value == atom.value, "R-tree coordinate is NaN");
+        let mut axis = self.axes[atom.dim];
+        let lower = !(atom.op is CoordOp.OpLE);
+        let upper = !(atom.op is CoordOp.OpGE);
+        if atom.is_max_slot {
+            if lower && atom.value > axis.max_lo { axis.max_lo = atom.value; }
+            if upper && atom.value < axis.max_hi { axis.max_hi = atom.value; }
+        } else {
+            if lower && atom.value > axis.min_lo { axis.min_lo = atom.value; }
+            if upper && atom.value < axis.min_hi { axis.min_hi = atom.value; }
         }
+        self.axes[atom.dim] = axis;
     }
 
+    /// Build an overlap probe that includes every qualifying box. The caller
+    /// applies residual predicates to the returned rows when an endpoint matters.
     public fn build(&self) -> BBox {
         let mut coords: List<Float64> = List.new();
-        let mut d: Int = 0;
-        while d < self.n_dims {
-            coords.push(self.lo[d]);
-            coords.push(self.hi[d]);
-            d = d + 1;
+        for axis in &self.axes {
+            if axis.min_lo > axis.min_hi || axis.max_lo > axis.max_hi || axis.min_lo > axis.max_hi {
+                coords.push(1.0); coords.push(0.0);
+            } else {
+                let lo = if axis.min_lo > axis.max_lo { axis.min_lo } else { axis.max_lo };
+                let hi = if axis.min_hi < axis.max_hi { axis.min_hi } else { axis.max_hi };
+                // A valid box required to span [hi, lo] necessarily contains hi.
+                coords.push(if lo > hi { hi } else { lo });
+                coords.push(hi);
+            }
         }
-        BBox { n_dims: self.n_dims, coords: coords }
+        bbox_new(self.axes.len(), coords)
     }
 
-    public fn dim_count(&self) -> Int { self.n_dims }
+    public fn dim_count(&self) -> Int { self.axes.len() }
 }
 
 // -----------------------------------------------------------------------------
@@ -129,17 +116,8 @@ public fn build_query(n_dims: Int, atoms: List<PredicateAtom>) -> BBox {
     let mut b = builder_new(n_dims);
     let mut i: Int = 0;
     while i < atoms.len() {
-        b.add(PredicateAtom {
-            dim: atoms[i].dim,
-            is_max_slot: atoms[i].is_max_slot,
-            op: clone_op(&atoms[i].op),
-            value: atoms[i].value,
-        });
+        b.add(atoms[i]);
         i = i + 1;
     }
     b.build()
-}
-
-fn clone_op(o: &CoordOp) -> CoordOp {
-    match o { OpLE => OpLE, OpGE => OpGE, OpEq => OpEq }
 }

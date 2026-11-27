@@ -1,0 +1,16 @@
+// @test: run-interpreter-panic
+// @tier: 0
+// @level: L2
+// @tags: sqlite, vtab, rtree, spatial
+// @timeout: 15000
+// @expected-panic: invalid R-tree insertion box
+
+module core.database.sqlite.native.vtabs.rtree.tests.invalid_dimension;
+
+mount core.database.sqlite.native.vtabs.rtree.bbox.bbox_2d;
+mount core.database.sqlite.native.vtabs.rtree.tree.rtree_new;
+
+fn main() {
+    let mut tree = rtree_new(1);
+    let _ = tree.insert(7_i64, bbox_2d(0.0, 1.0, 2.0, 3.0));
+}

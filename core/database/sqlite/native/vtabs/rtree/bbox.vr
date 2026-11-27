@@ -38,10 +38,25 @@ public type BBox is {
 
 /// Create a BBox from N pairs `[(min_d0, max_d0), (min_d1, max_d1), ...]`.
 public fn bbox_new(n_dims: Int, coords: List<Float64>) -> BBox {
+    assert(n_dims >= 1 && n_dims <= MAX_DIMS, "R-tree dimensions must be between one and five");
+    assert(coords.len() == 2 * n_dims, "R-tree box requires two coordinates per dimension");
+    for coordinate in &coords { assert(*coordinate == *coordinate, "R-tree coordinate is NaN"); }
     BBox { n_dims: n_dims, coords: coords }
 }
 
 implement BBox {
+    public fn dimensions(&self) -> Int { self.n_dims }
+
+    /// Reversed bounds represent an empty range, including contradictory query predicates.
+    public fn is_empty(&self) -> Bool {
+        let mut d = 0;
+        while d < self.n_dims {
+            if self.min_at(d) > self.max_at(d) { return true; }
+            d = d + 1;
+        }
+        false
+    }
+
     public fn min_at(&self, dim: Int) -> Float64 {
         self.coords[dim * 2]
     }
@@ -54,9 +69,10 @@ implement BBox {
         let mut v: Float64 = 1.0;
         let mut d: Int = 0;
         while d < self.n_dims {
-            let span = self.max_at(d) - self.min_at(d);
-            if span < 0.0 { return 0.0; }
-            v = v * span;
+            let lo = self.min_at(d);
+            let hi = self.max_at(d);
+            if hi <= lo { return 0.0; }
+            v = v * (hi - lo);
             d = d + 1;
         }
         v
@@ -65,6 +81,8 @@ implement BBox {
     /// True if `inner` is fully inside `self`.
     public fn contains(&self, inner: &BBox) -> Bool {
         if self.n_dims != inner.n_dims { return false; }
+        if inner.is_empty() { return true; }
+        if self.is_empty() { return false; }
         let mut d: Int = 0;
         while d < self.n_dims {
             if inner.min_at(d) < self.min_at(d) { return false; }
@@ -76,7 +94,7 @@ implement BBox {
 
     /// True if the two boxes share any point.
     public fn overlaps(&self, other: &BBox) -> Bool {
-        if self.n_dims != other.n_dims { return false; }
+        if self.n_dims != other.n_dims || self.is_empty() || other.is_empty() { return false; }
         let mut d: Int = 0;
         while d < self.n_dims {
             if other.max_at(d) < self.min_at(d) { return false; }
@@ -88,6 +106,9 @@ implement BBox {
 
     /// Smallest bbox containing both.
     public fn union(&self, other: &BBox) -> BBox {
+        assert(self.n_dims == other.n_dims, "R-tree box dimensions differ");
+        if self.is_empty() { return *other; }
+        if other.is_empty() { return *self; }
         let mut coords: List<Float64> = List.new();
         let mut d: Int = 0;
         while d < self.n_dims {
@@ -133,14 +154,14 @@ public fn bbox_equal(a: &BBox, b: &BBox) -> Bool {
 public fn bbox_1d(lo: Float64, hi: Float64) -> BBox {
     let mut c: List<Float64> = List.new();
     c.push(lo); c.push(hi);
-    BBox { n_dims: 1, coords: c }
+    bbox_new(1, c)
 }
 
 public fn bbox_2d(x_lo: Float64, x_hi: Float64, y_lo: Float64, y_hi: Float64) -> BBox {
     let mut c: List<Float64> = List.new();
     c.push(x_lo); c.push(x_hi);
     c.push(y_lo); c.push(y_hi);
-    BBox { n_dims: 2, coords: c }
+    bbox_new(2, c)
 }
 
 public fn bbox_3d(
@@ -152,5 +173,5 @@ public fn bbox_3d(
     c.push(x_lo); c.push(x_hi);
     c.push(y_lo); c.push(y_hi);
     c.push(z_lo); c.push(z_hi);
-    BBox { n_dims: 3, coords: c }
+    bbox_new(3, c)
 }

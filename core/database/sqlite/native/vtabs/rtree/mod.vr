@@ -7,8 +7,8 @@
 
 // N-dimensional R-tree (1..5 dimensions). Internal nodes carry
 // minimum bounding boxes (MBBs) of their children. Range queries
-// translate `WHERE x_min >= ? AND x_max <= ?` predicates into a
-// recursive MBB-overlap probe.
+// build an overlap probe for coordinate predicates and visit overlapping
+// children with an explicit work list.
 //
 
 // Modules:

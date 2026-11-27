@@ -1,8 +1,8 @@
-// @test: typecheck-pass
+// @test: run-interpreter
 // @tier: 0
 // @level: L2
 // @tags: sqlite, vtab, rtree, spatial
-// @timeout: 5000
+// @timeout: 120000
 // @expected-exit: 0
 //
 // R-Tree N-dim spatial index:
@@ -12,24 +12,13 @@
 //   * RTreeNode split when leaf exceeds RTREE_MAX_CELLS
 //   * QueryBuilder translates per-coord predicates into a probe bbox
 
-mount core.database.sqlite.native.vtabs.rtree.bbox.{
-    BBox, bbox_new, bbox_1d, bbox_2d, bbox_3d, bbox_equal, MAX_DIMS,
-};
-mount core.database.sqlite.native.vtabs.rtree.node.{
-    RTreeNode, Leaf, Internal, LeafEntry, InternalEntry,
-    leaf_new, internal_new, node_id, node_entry_count,
-    node_is_full, node_mbb,
-    RTREE_MAX_CELLS, RTREE_MIN_CELLS,
-};
-mount core.database.sqlite.native.vtabs.rtree.tree.{
-    VtabRTree, rtree_new,
-};
-mount core.database.sqlite.native.vtabs.rtree.query.{
-    CoordOp, OpLE, OpGE, OpEq,
-    PredicateAtom, op_le, op_ge,
-    QueryBuilder, builder_new, build_query,
-};
-mount base.{Some, None, Maybe, Bool};
+module core.database.sqlite.native.vtabs.rtree.tests.spatial;
+
+mount collections.List;
+mount core.database.sqlite.native.vtabs.rtree.bbox.{bbox_1d, bbox_2d, bbox_3d, bbox_equal};
+mount core.database.sqlite.native.vtabs.rtree.node.{RTreeNode, leaf_new, internal_new, node_id, node_entry_count, RTREE_MAX_CELLS};
+mount core.database.sqlite.native.vtabs.rtree.tree.rtree_new;
+mount core.database.sqlite.native.vtabs.rtree.query.{PredicateAtom, op_le, op_ge, builder_new, build_query};
 
 // -----------------------------------------------------------------------------
 // BBox geometry
@@ -75,7 +64,7 @@ fn test_bbox_enlargement() {
 fn test_bbox_3d() {
     let b = bbox_3d(0.0, 1.0, 0.0, 1.0, 0.0, 1.0);
     assert(b.volume() == 1.0);
-    assert_eq(b.n_dims, 3);
+    assert_eq(b.dimensions(), 3);
 }
 
 // -----------------------------------------------------------------------------
@@ -84,13 +73,9 @@ fn test_bbox_3d() {
 
 fn test_leaf_new_empty() {
     let l = leaf_new(0);
-    match l {
-        Leaf(c) => {
-            assert_eq(c.entries.len(), 0);
-            assert_eq(c.node_id, 0);
-        }
-        _ => panic("expected Leaf"),
-    }
+    assert(l is RTreeNode.Leaf(_));
+    assert_eq(node_entry_count(&l), 0);
+    assert_eq(node_id(&l), 0);
 }
 
 fn test_internal_new() {
@@ -107,9 +92,7 @@ fn test_node_full() {
         t.insert(i as Int64, bbox_2d(0.0, 1.0, 0.0, 1.0));
         i = i + 1;
     }
-    // RTREE_MAX_CELLS is the cap; constant value sanity check.
-    assert(RTREE_MAX_CELLS >= 8);
-    assert(t.node_count() >= 1);
+    assert_eq(t.node_count(), 1);
 }
 
 // -----------------------------------------------------------------------------
@@ -170,9 +153,8 @@ fn test_rtree_3d_index() {
 fn test_query_builder_default_is_unbounded() {
     let qb = builder_new(2);
     let bb = qb.build();
-    // Unbounded → very wide box; volume is enormous but finite.
-    assert_eq(bb.n_dims, 2);
-    assert(bb.coords.len() == 4);
+    assert_eq(bb.dimensions(), 2);
+    assert(bb.min_at(0) == Float.NEG_INFINITY && bb.max_at(1) == Float.INFINITY);
 }
 
 fn test_query_builder_le_max_clamps_upper() {
@@ -203,7 +185,65 @@ fn test_query_builder_2d_full_constraints() {
     assert(bb.max_at(1) == 5.0);
 }
 
+fn test_internal_splits_and_deletion() {
+    let mut tree = rtree_new(1);
+    let count = RTREE_MAX_CELLS * RTREE_MAX_CELLS + 1;
+    let mut i = 0;
+    while i < count {
+        let lo = (i * 3) as Float64;
+        let _ = tree.insert(i as Int64, bbox_1d(lo, lo + 1.0));
+        i = i + 1;
+    }
+    let all = tree.search(&builder_new(1).build());
+    assert_eq(all.len(), count);
+    let mut seen: List<Bool> = List.from_elem(false, count);
+    for row in &all {
+        let id = *row as Int;
+        assert(id >= 0 && id < count && !seen[id], "every inserted row appears exactly once");
+        seen[id] = true;
+    }
+    i = 0;
+    while i < count {
+        let boundary = (i * 3 + 1) as Float64;
+        let hits = tree.search(&bbox_1d(boundary, boundary));
+        assert_eq(hits.len(), 1);
+        assert_eq(hits[0], i as Int64);
+        assert(tree.delete(i as Int64));
+        assert(tree.search(&bbox_1d(boundary, boundary)).is_empty());
+        i = i + 1;
+    }
+    assert(tree.search(&builder_new(1).build()).is_empty());
+    assert_eq(tree.node_count(), 1);
+    let _ = tree.insert(999_i64, bbox_1d(2.0, 7.0));
+    assert_eq(tree.search(&bbox_1d(7.0, 7.0))[0], 999_i64);
+    i = 0;
+    while i < RTREE_MAX_CELLS {
+        let point = (100 + i) as Float64;
+        let _ = tree.insert(i as Int64, bbox_1d(point, point));
+        i = i + 1;
+    }
+    assert_eq(tree.node_count(), 3);
+    assert_eq(tree.search(&builder_new(1).build()).len(), RTREE_MAX_CELLS + 1);
+    assert_eq(tree.search(&bbox_1d(100.0, 100.0))[0], 0_i64);
+}
+
+fn test_endpoint_predicates() {
+    let mut tree = rtree_new(1);
+    let _ = tree.insert(77_i64, bbox_1d(-5.0, 15.0));
+    let mut spanning = builder_new(1);
+    spanning.add(op_le(0, false, 1.0));
+    spanning.add(op_ge(0, true, 10.0));
+    assert_eq(tree.search(&spanning.build())[0], 77_i64);
+    let mut impossible = builder_new(1);
+    impossible.add(op_ge(0, false, 10.0));
+    impossible.add(op_le(0, true, 1.0));
+    assert(impossible.build().is_empty());
+    assert(tree.search(&impossible.build()).is_empty());
+}
+
 fn main() {
+    test_internal_splits_and_deletion();
+    test_endpoint_predicates();
     test_bbox_2d_volume();
     test_bbox_contains();
     test_bbox_overlap();

@@ -9,9 +9,8 @@
 // `RTreeNode` — sum type with leaf / internal payloads
 //
 
-// Each node has a fixed capacity (16 entries by default — same as
-// SQLite's `RTREE_MAXCELLS`); when an insert would exceed it, the
-// node is split via the linear-cost heuristic in `tree.vr`.
+// Each node holds up to RTREE_MAX_CELLS entries. Overflowing leaf and
+// internal nodes split using the same bounding-box partition in tree.
 // =============================================================================
 
 @arch_module(
@@ -32,8 +31,14 @@ public const RTREE_MIN_CELLS: Int = 6;
 // Entries
 // -----------------------------------------------------------------------------
 
-public type LeafEntry is { rowid: Int64, bbox: BBox };
-public type InternalEntry is { child_node_id: Int, bbox: BBox };
+public type LeafEntry is {
+    public(in core.database.sqlite.native.vtabs.rtree) rowid: Int64,
+    public(in core.database.sqlite.native.vtabs.rtree) bbox: BBox,
+};
+public type InternalEntry is {
+    public(in core.database.sqlite.native.vtabs.rtree) child_node_id: Int,
+    public(in core.database.sqlite.native.vtabs.rtree) bbox: BBox,
+};
 
 // -----------------------------------------------------------------------------
 // RTreeNode
@@ -46,13 +51,13 @@ public type RTreeNode is
 public type LeafContent is {
     node_id: Int,
     parent: Maybe<Int>,
-    entries: List<LeafEntry>,
+    public(in core.database.sqlite.native.vtabs.rtree) entries: List<LeafEntry>,
 };
 
 public type InternalContent is {
     node_id: Int,
     parent: Maybe<Int>,
-    entries: List<InternalEntry>,
+    public(in core.database.sqlite.native.vtabs.rtree) entries: List<InternalEntry>,
 };
 
 public fn leaf_new(node_id: Int) -> RTreeNode {
@@ -103,7 +108,7 @@ public fn node_mbb(n: &RTreeNode) -> Maybe<BBox> {
 
 fn leaf_mbb(c: &LeafContent) -> Maybe<BBox> {
     if c.entries.len() == 0 { return Maybe.None; }
-    let mut acc = clone_bbox(&c.entries[0].bbox);
+    let mut acc = c.entries[0].bbox;
     let mut i: Int = 1;
     while i < c.entries.len() {
         acc = acc.union(&c.entries[i].bbox);
@@ -114,7 +119,7 @@ fn leaf_mbb(c: &LeafContent) -> Maybe<BBox> {
 
 fn internal_mbb(c: &InternalContent) -> Maybe<BBox> {
     if c.entries.len() == 0 { return Maybe.None; }
-    let mut acc = clone_bbox(&c.entries[0].bbox);
+    let mut acc = c.entries[0].bbox;
     let mut i: Int = 1;
     while i < c.entries.len() {
         acc = acc.union(&c.entries[i].bbox);
@@ -123,12 +128,10 @@ fn internal_mbb(c: &InternalContent) -> Maybe<BBox> {
     Maybe.Some(acc)
 }
 
-fn clone_bbox(b: &BBox) -> BBox {
-    let mut coords: List<Float64> = List.new();
-    let mut i: Int = 0;
-    while i < b.coords.len() {
-        coords.push(b.coords[i]);
-        i = i + 1;
-    }
-    BBox { n_dims: b.n_dims, coords: coords }
+public(in core.database.sqlite.native.vtabs.rtree) fn node_parent(n: &RTreeNode) -> Maybe<Int> {
+    match n { Leaf(c) => c.parent, Internal(c) => c.parent }
+}
+
+public(in core.database.sqlite.native.vtabs.rtree) fn set_node_parent(n: &mut RTreeNode, parent: Maybe<Int>) {
+    match n { Leaf(c) => { c.parent = parent; } Internal(c) => { c.parent = parent; } }
 }
