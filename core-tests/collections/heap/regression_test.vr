@@ -6,7 +6,7 @@
 // =============================================================================
 
 mount core.prelude.*;
-mount core.collections.heap.BinaryHeap;
+mount core.collections.heap.{BinaryHeap, Reverse};
 
 // =============================================================================
 // §A  Static-constructor name resolution — CLOSED.
@@ -96,6 +96,19 @@ fn regression_heap_len_zero_after_new() {
 fn regression_heap_is_empty_after_new() {
     let h: BinaryHeap<Int> = BinaryHeap.new();
     assert(h.is_empty());
+}
+
+@test
+fn regression_heap_uses_reverse_order_for_push_pop_and_sifting() {
+    let mut heap: BinaryHeap<Reverse<Int>> = BinaryHeap.new();
+    heap.push(Reverse.new(9));
+    heap.push(Reverse.new(4));
+    heap.push(Reverse.new(7));
+    assert_eq(heap.push_pop(Reverse.new(2)).into_inner(), 2);
+    assert_eq(heap.push_pop(Reverse.new(6)).into_inner(), 4);
+    assert_eq(heap.pop().unwrap().into_inner(), 6);
+    assert_eq(heap.pop().unwrap().into_inner(), 7);
+    assert_eq(heap.pop().unwrap().into_inner(), 9);
 }
 
 fn main() {}
