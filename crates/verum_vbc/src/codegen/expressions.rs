@@ -8534,6 +8534,13 @@ impl VbcCodegen {
                 sub_op: 0x10, // CallFfiC
                 operands,
             });
+            if let Some(span) = self.ctx.selected_call_result_span {
+                // Several Verum types share each C carrier. Only the selected
+                // foreign declaration can publish its source return type.
+                let result_type = func_info.foreign_declaration.as_ref()
+                    .and(func_info.return_type.clone());
+                self.ctx.declared_result_types.insert(span, result_type);
+            }
 
             // If FFI returns a pointer, mark result register as raw pointer
             // so dereferences use DerefRaw instead of CBGR-managed Deref

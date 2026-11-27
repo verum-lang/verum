@@ -85,3 +85,62 @@ fn native_operand_must_belong_to_its_own_entry() {
             .is_err()
     );
 }
+
+#[cfg(feature = "codegen")]
+#[test]
+fn selected_foreign_return_keeps_its_verum_declaration_through_an_unsafe_block() {
+    use verum_fast_parser::Parser;
+    use verum_vbc::codegen::{ItemFailurePolicy, VbcCodegen};
+    use verum_vbc::{deserialize::deserialize_module, serialize::serialize_module};
+
+    let native = Parser::new("module native_ids; extern { public fn getpid() -> Int32; }")
+        .parse_module()
+        .unwrap();
+    let local = Parser::new("module local_ids; public fn getpid() -> Int32 { -7_i32 }")
+        .parse_module()
+        .unwrap();
+    let app = Parser::new(
+        r#"
+        module inspect;
+        mount native_ids.getpid as host_id;
+        mount local_ids.getpid as local_id;
+        type Observation is Measured(Int32) | Missing;
+        fn probe() -> Int {
+            let first = unsafe { host_id() };
+            let local = local_id();
+            if local != -7_i32 { return -1; }
+            let observation = Observation.Measured(first);
+            match observation {
+                Observation.Measured(id) => id as Int,
+                Observation.Missing => -2,
+            }
+        }
+    "#,
+    )
+    .parse_module()
+    .unwrap();
+    let units = [&native, &local, &app];
+    let mut codegen = VbcCodegen::new();
+    codegen.initialize();
+    codegen.collect_unit_declarations(&units).unwrap();
+    codegen.resolve_pending_imports();
+    codegen
+        .compile_unit_items(&units, ItemFailurePolicy::Strict)
+        .unwrap();
+    let module = codegen.finalize_module().unwrap();
+    let decoded = deserialize_module(&serialize_module(&module).unwrap()).unwrap();
+    for (route, module) in [("source", module), ("serialized", decoded)] {
+        let probe = module
+            .functions
+            .iter()
+            .find(|f| module.get_string(f.name) == Some("inspect.probe"))
+            .unwrap()
+            .id;
+        let mut vm = Interpreter::try_new_validated(module.into()).unwrap();
+        assert_eq!(
+            vm.execute_function(probe).unwrap().as_i64(),
+            i64::from(std::process::id()),
+            "{route}"
+        );
+    }
+}
