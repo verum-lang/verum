@@ -764,31 +764,21 @@ implement<T> Deque<T> {
             self.grow();
         }
 
-        if idx == self.len {
-            // Insert at back
-            self.push_back(value);
-            return;
-        }
-
-        if idx == 0 {
-            // Insert at front
-            self.push_front(value);
-            return;
-        }
-
-        // Shift elements to make room
-        // Shift right from back: move [idx..len] to [idx+1..len+1]
-        let mut i = self.len;
-        while i > idx {
-            let src_phys = self.physical_index(i - 1);
-            let dst_phys = self.physical_index(i);
-            unsafe {
-                deque_move_slot(self, src_phys, dst_phys);
+        let phys = if idx == 0 && self.len > 0 {
+            self.head = self.wrap_index(self.head - 1);
+            self.head
+        } else {
+            // Shift the suffix towards the vacant tail, starting at the back.
+            let mut i = self.len;
+            while i > idx {
+                let source = self.physical_index(i - 1);
+                let destination = self.physical_index(i);
+                unsafe { deque_move_slot(self, source, destination); }
+                i = i - 1;
             }
-            i = i - 1;
-        }
+            self.physical_index(idx)
+        };
 
-        let phys = self.physical_index(idx);
         unsafe {
             deque_storage_write(self, phys, value);
         }

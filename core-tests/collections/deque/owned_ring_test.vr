@@ -178,15 +178,15 @@ fn check_split_moves_wrapped_affine_values() {
     unsafe { DESTROYED = 0; }
     {
         let mut ring: Deque<Guard> = Deque.with_capacity(4);
-        ring.push_back(Guard { weight: 1 });
-        ring.push_back(Guard { weight: 2 });
-        ring.push_back(Guard { weight: 4 });
-        ring.push_back(Guard { weight: 8 });
+        ring.insert(0, Guard { weight: 2 });
+        ring.insert(0, Guard { weight: 1 });
+        ring.insert(2, Guard { weight: 8 });
+        ring.insert(2, Guard { weight: 4 });
         match ring.pop_front() {
             Maybe.Some(first) => { assert(first.weight == 1); },
             Maybe.None => panic("missing first guard"),
         }
-        ring.push_back(Guard { weight: 16 });
+        ring.insert(ring.len(), Guard { weight: 16 });
         {
             let mut suffix = ring.split_off(2);
             assert(unsafe { DESTROYED } == 1);
@@ -210,6 +210,24 @@ fn test_split_at_either_end() {
     let mut suffix = ring.split_off(0);
     assert(ring.is_empty() && suffix.len() == 2);
     assert(suffix.pop_front().unwrap() == 2 && suffix.pop_front().unwrap() == 4);
+}
+
+@test
+fn test_insert_at_the_front_middle_and_back_of_a_wrapped_ring() {
+    let mut ring: Deque<Int> = Deque.with_capacity(4);
+    ring.insert(0, 2);
+    ring.insert(0, 1);
+    ring.insert(2, 4);
+    ring.insert(2, 3);
+    ring.insert(0, 0);
+    ring.insert(ring.len(), 5);
+    assert(ring.len() == 6);
+    let mut expected = 0;
+    while expected < 6 {
+        assert(ring.pop_front().unwrap() == expected);
+        expected = expected + 1;
+    }
+    assert(ring.is_empty());
 }
 
 @test
