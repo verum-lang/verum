@@ -28,7 +28,7 @@ module core.database.sqlite.native.l4_vdbe.ssa.block;
 mount collections.List;
 mount base.{Maybe};
 mount core.base.protocols.Clone;
-mount core.database.sqlite.native.l4_vdbe.ssa.inst.{SsaInst, inst_is_terminator, inst_terminator_targets};
+mount core.database.sqlite.native.l4_vdbe.ssa.inst.{SsaInst, PhiOperand, inst_is_terminator, inst_terminator_targets};
 
 // -----------------------------------------------------------------------------
 // BlockId
@@ -95,6 +95,12 @@ implement BasicBlock {
         self.phi_nodes.len() + self.insts.len() + 1   // +1 for terminator
     }
 
+    public(in core.database.sqlite.native.l4_vdbe.ssa) fn instructions(&self) -> &List<SsaInst> { &self.insts }
+
+    public(in core.database.sqlite.native.l4_vdbe.ssa) fn phis(&self) -> &List<SsaInst> { &self.phi_nodes }
+
+    public(in core.database.sqlite.native.l4_vdbe.ssa) fn terminator(&self) -> &SsaInst { &self.terminator }
+
     /// Append an ordinary instruction to the block body.
     public fn push_inst(&mut self, inst: SsaInst) {
         assert(!inst_is_terminator(&inst) && !(inst is SsaInst.IPhi(_, _)), "invalid SSA block body instruction");
@@ -130,5 +136,25 @@ implement BasicBlock {
     public fn push_phi(&mut self, phi: SsaInst) {
         assert(phi is SsaInst.IPhi(_, _), "SSA block entry requires a phi instruction");
         self.phi_nodes.push(phi);
+    }
+
+    /// A folded branch can remove an incoming edge while the other edges stay live.
+    public(in core.database.sqlite.native.l4_vdbe.ssa) fn remove_phi_predecessor(&mut self, pred: &BlockId) {
+        let mut i = 0;
+        while i < self.phi_nodes.len() {
+            self.phi_nodes[i] = match &self.phi_nodes[i] {
+                SsaInst.IPhi(dst, operands) => {
+                    let mut kept: List<PhiOperand> = List.new();
+                    let mut j = 0;
+                    while j < operands.len() {
+                        if !block_id_eq(&operands[j].pred, pred) { kept.push(operands[j]); }
+                        j = j + 1;
+                    }
+                    SsaInst.IPhi(dst.clone(), kept)
+                }
+                _ => unreachable(),
+            };
+            i = i + 1;
+        }
     }
 }

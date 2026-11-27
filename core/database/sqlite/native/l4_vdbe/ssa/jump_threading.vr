@@ -5,249 +5,174 @@
 )
 module core.database.sqlite.native.l4_vdbe.ssa.jump_threading;
 
-// =============================================================================
-// l4_vdbe/ssa/jump_threading.vr — SSA-level jump threading + branch fold
-// =============================================================================
-// Layer: 4
-// Spec: sqlite-native.md §4.4 ("SSA-форма разрешает ... peephole-
-//       optimization ... на уровне VDBE до emission")
-//
-// Two transformations:
-//
-//   1. **Jump threading** — when block A's terminator is `IJump(B)`
-//      and B's body is empty + B's terminator is `IJump(C)`, rewrite
-//      A's terminator to `IJump(C)`.  Iterate until stable.
-//
-//   2. **Constant-condition branch fold** — when an `IBranch(cond,
-//      then, else)` has `cond` produced by `IIntImm(0|1)` or `INull`,
-//      replace with `IJump(then|else)` per the truthiness of the
-//      constant.
-//
-// Both transformations preserve SSA semantics — they don't introduce
-// or remove SSA values, just rewrite terminators.  After the
-// pipeline runs, blocks made unreachable can be cleaned up by a
-// follow-up pass that walks reachability from the entry block.
-// =============================================================================
+// Fold constant branches and thread jumps through empty blocks. Phi operands
+// are keyed by the immediate predecessor. Keep the last jump into a phi block
+// in place, even when earlier jumps in the same chain can be bypassed.
 
 mount collections.{List, Map};
-mount base.{Result, Ok, Err, Text, Maybe};
-mount core.database.sqlite.native.l4_vdbe.ssa.value.{
-    SsaValue, ValueId, value_id_raw, value_id_eq,
-};
-mount core.database.sqlite.native.l4_vdbe.ssa.inst.{
-    SsaInst,
-    IIntImm, INull, IConst,
-    IBranch, IJump, IHalt, IReturn, IYield,
-    inst_dst, inst_is_terminator,
-};
-mount core.database.sqlite.native.l4_vdbe.ssa.block.{
-    BasicBlock, BlockId, block_id, block_id_raw, block_id_eq,
-};
+mount base.Maybe;
+mount core.database.sqlite.native.l4_vdbe.ssa.value.value_id_raw;
+mount core.database.sqlite.native.l4_vdbe.ssa.inst.SsaInst;
+mount core.database.sqlite.native.l4_vdbe.ssa.block.{BlockId, block_id, block_id_raw, block_id_eq};
 mount core.database.sqlite.native.l4_vdbe.ssa.cfg.Cfg;
 mount core.database.sqlite.native.l4_vdbe.ssa.program.SsaProgram;
 
-// -----------------------------------------------------------------------------
-// Public entry point
-// -----------------------------------------------------------------------------
-
 public type JumpThreadReport is {
-    threaded_jumps: Int,
-    folded_branches: Int,
+    public(in core.database.sqlite.native.l4_vdbe.ssa) threaded_jumps: Int,
+    public(in core.database.sqlite.native.l4_vdbe.ssa) folded_branches: Int,
     iterations: Int,
-}
+};
 
-/// Run jump threading + branch folding to fixed point (max 8 iter).
+/// Run both transformations until a round makes no edits.
 public fn run_jump_threading(prog: &mut SsaProgram) -> JumpThreadReport {
-    let mut report = JumpThreadReport {
-        threaded_jumps: 0,
-        folded_branches: 0,
-        iterations: 0,
-    };
-    let max_iter: Int = 8;
-    let mut iter: Int = 0;
-
-    while iter < max_iter {
-        iter = iter + 1;
-        let const_map = build_const_map(prog);
-        let mut iter_changes: Int = 0;
-
-        // Pass A — fold constant-condition branches.
-        let folded = fold_constant_branches(prog, &const_map);
+    let cfg = prog.graph_mut();
+    cfg.compute_preds();
+    let constants = branch_constants(cfg);
+    let mut report = JumpThreadReport { threaded_jumps: 0, folded_branches: 0, iterations: 0 };
+    loop {
+        let folded = fold_constant_branches(cfg, &constants);
+        let threaded = thread_empty_jumps(cfg);
+        report.iterations = report.iterations + 1;
         report.folded_branches = report.folded_branches + folded;
-        iter_changes = iter_changes + folded;
-
-        // Pass B — thread jumps through empty blocks.
-        let threaded = thread_empty_jumps(prog);
         report.threaded_jumps = report.threaded_jumps + threaded;
-        iter_changes = iter_changes + threaded;
-
-        if iter_changes == 0 { break; }
+        if folded == 0 && threaded == 0 { break; }
     }
-    report.iterations = iter;
+    if report.folded_branches > 0 || report.threaded_jumps > 0 { cfg.compute_preds(); }
     report
 }
 
-// -----------------------------------------------------------------------------
-// Constant map — ValueId → constant value (foundation handles
-// IIntImm + INull only; IConst payload requires constant-pool
-// inspection which we defer).
-// -----------------------------------------------------------------------------
-
-type ConstKind is CkInt(Int64) | CkNull;
-
-fn build_const_map(prog: &SsaProgram) -> Map<Int, ConstKind> {
-    let mut m: Map<Int, ConstKind> = Map.new();
-    let mut b: Int = 0;
-    while b < prog.cfg.blocks.len() {
-        let blk = &prog.cfg.blocks[b];
-        let mut i: Int = 0;
-        while i < blk.insts.len() {
-            match &blk.insts[i] {
-                IIntImm(d, v) => { m.insert(value_id_raw(&d.id), CkInt(v)); }
-                INull(d)      => { m.insert(value_id_raw(&d.id), CkNull); }
+fn branch_constants(cfg: &Cfg) -> Map<Int, Bool> {
+    let mut constants: Map<Int, Bool> = Map.new();
+    let mut b = 0;
+    while b < cfg.block_count() {
+        let insts = cfg.get(&block_id(b)).instructions();
+        let mut i = 0;
+        while i < insts.len() {
+            match &insts[i] {
+                SsaInst.IIntImm(dst, value) => { constants.insert(value_id_raw(&dst.id()), value != 0_i64); }
+                SsaInst.INull(dst) => { constants.insert(value_id_raw(&dst.id()), false); }
                 _ => {}
             }
             i = i + 1;
         }
         b = b + 1;
     }
-    m
+    constants
 }
 
-fn lookup_const(m: &Map<Int, ConstKind>, id: &ValueId) -> Maybe<ConstKind> {
-    m.get(&value_id_raw(id))
-}
-
-// -----------------------------------------------------------------------------
-// Pass A — fold branches whose condition is a constant
-// -----------------------------------------------------------------------------
-
-fn fold_constant_branches(prog: &mut SsaProgram, const_map: &Map<Int, ConstKind>) -> Int {
-    let mut count: Int = 0;
-    let mut b: Int = 0;
-    while b < prog.cfg.blocks.len() {
-        let new_term = match &prog.cfg.blocks[b].terminator {
-            IBranch(cond, then_blk, else_blk) => {
-                match lookup_const(const_map, &cond.id) {
-                    Maybe.Some(CkInt(v)) => {
-                        if v != 0_i64 {
-                            Maybe.Some(IJump(then_blk.clone()))
-                        } else {
-                            Maybe.Some(IJump(else_blk.clone()))
-                        }
-                    }
-                    Maybe.Some(CkNull) => {
-                        // Null is falsy in SQLite condition semantics.
-                        Maybe.Some(IJump(else_blk.clone()))
-                    }
-                    Maybe.None => Maybe.None,
-                }
+fn folded_edges(term: &SsaInst, constants: &Map<Int, Bool>) -> Maybe<(BlockId, BlockId)> {
+    match term {
+        SsaInst.IBranch(cond, on_true, on_false) => {
+            match constants.get(value_id_raw(&cond.id())) {
+                Maybe.Some(true) => Maybe.Some((on_true.clone(), on_false.clone())),
+                Maybe.Some(false) => Maybe.Some((on_false.clone(), on_true.clone())),
+                Maybe.None => Maybe.None,
             }
-            _ => Maybe.None,
-        };
-        match new_term {
-            Maybe.Some(t) => {
-                prog.cfg.blocks[b].terminator = t;
+        }
+        _ => Maybe.None,
+    }
+}
+
+fn fold_constant_branches(cfg: &mut Cfg, constants: &Map<Int, Bool>) -> Int {
+    let mut count = 0;
+    let mut b = 0;
+    while b < cfg.block_count() {
+        let source = block_id(b);
+        match folded_edges(cfg.get(&source).terminator(), constants) {
+            Maybe.Some((kept, dropped)) => {
+                if !block_id_eq(&kept, &dropped) {
+                    cfg.get_mut(&dropped).remove_phi_predecessor(&source);
+                }
+                cfg.get_mut(&source).set_terminator(SsaInst.IJump(kept));
                 count = count + 1;
             }
             Maybe.None => {}
         }
         b = b + 1;
     }
-    if count > 0 {
-        prog.cfg.compute_preds();
-    }
     count
 }
 
-// -----------------------------------------------------------------------------
-// Pass B — thread jumps through empty intermediate blocks
-// -----------------------------------------------------------------------------
-
-fn thread_empty_jumps(prog: &mut SsaProgram) -> Int {
-    let mut count: Int = 0;
-    let n = prog.cfg.blocks.len();
-
-    // Build a (block_no → eventual target via jump-chain) map.
-    let mut chain_target: List<Int> = List.new();
-    let mut k: Int = 0;
-    while k < n {
-        chain_target.push(k);
-        k = k + 1;
+// Return the next transparent edge. Crossing into a phi block would change
+// which predecessor supplies its value, so the preceding jump is an endpoint.
+fn next_target(cfg: &Cfg, source: Int) -> Maybe<Int> {
+    let block = cfg.get(&block_id(source));
+    if block.instr_count() == 1 {
+        match block.terminator() {
+            SsaInst.IJump(target) => {
+                if cfg.get(target).phis().len() == 0 { return Maybe.Some(block_id_raw(target)); }
+            }
+            _ => {}
+        }
     }
+    Maybe.None
+}
 
-    let mut i: Int = 0;
-    while i < n {
-        let resolved = resolve_jump_chain(prog, i);
-        chain_target[i] = resolved;
+// Resolve each path once. Leave cycles and the edges leading into them intact.
+fn chain_targets(cfg: &Cfg) -> List<Int> {
+    let unseen = -1;
+    let visiting = -2;
+    let cyclic = -3;
+    let mut targets: List<Int> = List.new();
+    while targets.len() < cfg.block_count() { targets.push(unseen); }
+    let mut start = 0;
+    while start < targets.len() {
+        if targets[start] == unseen {
+            let mut path: List<Int> = List.new();
+            let mut at = start;
+            while targets[at] == unseen {
+                path.push(at);
+                targets[at] = visiting;
+                match next_target(cfg, at) {
+                    Maybe.Some(next) => { at = next; }
+                    Maybe.None => { targets[at] = at; break; }
+                }
+            }
+            let endpoint = if targets[at] == visiting { cyclic } else { targets[at] };
+            for member in &path { targets[*member] = endpoint; }
+        }
+        start = start + 1;
+    }
+    let mut i = 0;
+    while i < targets.len() {
+        if targets[i] == cyclic { targets[i] = i; }
         i = i + 1;
     }
+    targets
+}
 
-    // Apply: rewrite IJump targets via the chain map.  IBranch arms
-    // also benefit (each arm threads independently).
-    let mut b: Int = 0;
-    while b < n {
-        let new_term = match &prog.cfg.blocks[b].terminator {
-            IJump(t) => {
-                let raw = block_id_raw(t);
-                if raw < 0 || raw >= n {
-                    Maybe.None
-                } else if chain_target[raw] != raw {
-                    Maybe.Some(IJump(block_id(chain_target[raw])))
-                } else {
-                    Maybe.None
-                }
+fn threaded_terminator(term: &SsaInst, targets: &List<Int>) -> Maybe<SsaInst> {
+    match term {
+        SsaInst.IJump(target) => {
+            let raw = block_id_raw(target);
+            if targets[raw] != raw { return Maybe.Some(SsaInst.IJump(block_id(targets[raw]))); }
+        }
+        SsaInst.IBranch(cond, on_true, on_false) => {
+            let left = block_id_raw(on_true);
+            let right = block_id_raw(on_false);
+            if targets[left] != left || targets[right] != right {
+                return Maybe.Some(SsaInst.IBranch(cond.clone(), block_id(targets[left]), block_id(targets[right])));
             }
-            IBranch(cond, then_blk, else_blk) => {
-                let then_raw = block_id_raw(then_blk);
-                let else_raw = block_id_raw(else_blk);
-                let then_thr = if then_raw >= 0 && then_raw < n { chain_target[then_raw] } else { then_raw };
-                let else_thr = if else_raw >= 0 && else_raw < n { chain_target[else_raw] } else { else_raw };
-                if then_thr != then_raw || else_thr != else_raw {
-                    Maybe.Some(IBranch(cond.clone(), block_id(then_thr), block_id(else_thr)))
-                } else {
-                    Maybe.None
-                }
-            }
-            _ => Maybe.None,
-        };
-        match new_term {
-            Maybe.Some(t) => {
-                prog.cfg.blocks[b].terminator = t;
+        }
+        _ => {}
+    }
+    Maybe.None
+}
+
+fn thread_empty_jumps(cfg: &mut Cfg) -> Int {
+    let targets = chain_targets(cfg);
+    let mut count = 0;
+    let mut b = 0;
+    while b < cfg.block_count() {
+        let source = block_id(b);
+        match threaded_terminator(cfg.get(&source).terminator(), &targets) {
+            Maybe.Some(term) => {
+                cfg.get_mut(&source).set_terminator(term);
                 count = count + 1;
             }
             Maybe.None => {}
         }
         b = b + 1;
     }
-
-    if count > 0 {
-        prog.cfg.compute_preds();
-    }
     count
-}
-
-/// Walk the jump chain from `start_block` until a non-empty block
-/// or a non-jump terminator is reached.  Returns the final block id.
-/// Cycle-safe: hard cap of 64 hops.
-fn resolve_jump_chain(prog: &SsaProgram, start_block: Int) -> Int {
-    let mut cur: Int = start_block;
-    let mut hops: Int = 0;
-    let max_hops: Int = 64;
-    while hops < max_hops {
-        let blk = &prog.cfg.blocks[cur];
-        // Block must be EMPTY (no phi/insts) for transparent threading.
-        if blk.phi_nodes.len() > 0 || blk.insts.len() > 0 { return cur; }
-        match &blk.terminator {
-            IJump(target) => {
-                let t = block_id_raw(target);
-                if t < 0 || t >= prog.cfg.blocks.len() { return cur; }
-                if t == cur { return cur; }
-                cur = t;
-            }
-            _ => return cur,
-        }
-        hops = hops + 1;
-    }
-    cur
 }

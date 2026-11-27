@@ -1,0 +1,160 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L2
+// @tags: sqlite, vdbe, ssa, optimizer
+// @timeout: 15000
+// @expected-exit: 0
+
+module core.database.sqlite.native.l4_vdbe.ssa.tests.jump_threading;
+
+mount collections.List;
+mount core.database.sqlite.native.l4_vdbe.ssa.value.{SsaValue, SValueKind, ssa_value, value_id_raw};
+mount core.database.sqlite.native.l4_vdbe.ssa.block.{block_id, block_id_raw};
+mount core.database.sqlite.native.l4_vdbe.ssa.cfg.Cfg;
+mount core.database.sqlite.native.l4_vdbe.ssa.inst.{SsaInst, CmpKind, PhiOperand};
+mount core.database.sqlite.native.l4_vdbe.ssa.program.{SsaProgram, ssa_program_new};
+mount core.database.sqlite.native.l4_vdbe.ssa.jump_threading.run_jump_threading;
+
+fn make_blocks(cfg: &mut Cfg, count: Int) {
+    while cfg.block_count() < count { let _ = cfg.new_block(); }
+}
+
+fn set_jump(cfg: &mut Cfg, source: Int, target: Int) {
+    cfg.get_mut(&block_id(source)).set_terminator(SsaInst.IJump(block_id(target)));
+}
+
+fn successor(cfg: &Cfg, source: Int, arm: Int) -> Int {
+    let targets = cfg.get(&block_id(source)).successors();
+    block_id_raw(&targets[arm])
+}
+
+fn input(pred: Int, value: SsaValue) -> PhiOperand {
+    PhiOperand { pred: block_id(pred), value: value }
+}
+
+fn check_phi(cfg: &Cfg, at: Int, dst: &SsaValue, expected: &List<PhiOperand>) {
+    let block = cfg.get(&block_id(at));
+    assert_eq(block.predecessor_count(), expected.len());
+    assert_eq(block.phis().len(), 1);
+    match &block.phis()[0] {
+        SsaInst.IPhi(result, inputs) => {
+            assert_eq(value_id_raw(&result.id()), value_id_raw(&dst.id()));
+            assert_eq(inputs.len(), expected.len());
+            let mut i = 0;
+            while i < expected.len() {
+                let pred = block_id_raw(&expected[i].pred);
+                assert_eq(block_id_raw(&inputs[i].pred), pred);
+                assert_eq(value_id_raw(&inputs[i].value.id()), value_id_raw(&expected[i].value.id()));
+                assert_eq(block_id_raw(&block.predecessor_at(i).unwrap()), pred);
+                i = i + 1;
+            }
+        }
+        _ => panic("missing phi"),
+    }
+}
+
+fn integer(prog: &mut SsaProgram, value: Int64) -> SsaValue {
+    let dst = ssa_value(prog.fresh_value_id(), SValueKind.SkInt);
+    prog.graph_mut().get_mut(&block_id(0)).push_inst(SsaInst.IIntImm(dst, value));
+    dst
+}
+
+fn diamond_with_backedge() {
+    let mut prog = ssa_program_new("diamond and loop");
+    let left = integer(&mut prog, 10_i64);
+    let right = integer(&mut prog, 20_i64);
+    let repeat = integer(&mut prog, 30_i64);
+    let cond = ssa_value(prog.fresh_value_id(), SValueKind.SkBool);
+    let merged = ssa_value(prog.fresh_value_id(), SValueKind.SkInt);
+    let cfg = prog.graph_mut();
+    make_blocks(cfg, 6);
+    cfg.get_mut(&block_id(0)).push_inst(SsaInst.ICmp(cond, CmpKind.CkEq, left, right));
+    cfg.get_mut(&block_id(0)).set_terminator(SsaInst.IBranch(cond, block_id(1), block_id(2)));
+    set_jump(cfg, 1, 3);
+    set_jump(cfg, 2, 3);
+    let mut operands: List<PhiOperand> = List.new();
+    operands.push(input(1, left));
+    operands.push(input(2, right));
+    operands.push(input(4, repeat));
+    cfg.get_mut(&block_id(3)).push_phi(SsaInst.IPhi(merged, operands));
+    cfg.get_mut(&block_id(3)).set_terminator(SsaInst.IBranch(cond, block_id(4), block_id(5)));
+    set_jump(cfg, 4, 3);
+    let report = run_jump_threading(&mut prog);
+    assert_eq(report.threaded_jumps + 0, 0);
+    assert_eq(successor(prog.graph(), 0, 0), 1);
+    assert_eq(successor(prog.graph(), 0, 1), 2);
+    assert_eq(successor(prog.graph(), 3, 0), 4);
+    check_phi(prog.graph(), 3, &merged, &operands);
+}
+
+fn folded_phi_edge() {
+    let mut prog = ssa_program_new("remove exactly one predecessor");
+    let first = integer(&mut prog, 10_i64);
+    let second = integer(&mut prog, 20_i64);
+    let merged = ssa_value(prog.fresh_value_id(), SValueKind.SkInt);
+    let cfg = prog.graph_mut();
+    make_blocks(cfg, 3);
+    cfg.get_mut(&block_id(0)).set_terminator(SsaInst.IBranch(first, block_id(1), block_id(2)));
+    set_jump(cfg, 1, 2);
+    let mut operands: List<PhiOperand> = List.new();
+    operands.push(input(0, first));
+    operands.push(input(1, second));
+    cfg.get_mut(&block_id(2)).push_phi(SsaInst.IPhi(merged, operands));
+    let report = run_jump_threading(&mut prog);
+    assert_eq(report.folded_branches + 0, 1);
+    assert_eq(successor(prog.graph(), 0, 0), 1);
+    let mut expected: List<PhiOperand> = List.new();
+    expected.push(input(1, second));
+    check_phi(prog.graph(), 2, &merged, &expected);
+}
+
+fn shared_branch_target() {
+    let mut prog = ssa_program_new("both arms have the same target");
+    let value = integer(&mut prog, 0_i64);
+    let merged = ssa_value(prog.fresh_value_id(), SValueKind.SkInt);
+    let cfg = prog.graph_mut();
+    make_blocks(cfg, 2);
+    cfg.get_mut(&block_id(0)).set_terminator(SsaInst.IBranch(value, block_id(1), block_id(1)));
+    let mut operands: List<PhiOperand> = List.new();
+    operands.push(input(0, value));
+    cfg.get_mut(&block_id(1)).push_phi(SsaInst.IPhi(merged, operands));
+    let report = run_jump_threading(&mut prog);
+    assert_eq(report.folded_branches + 0, 1);
+    check_phi(prog.graph(), 1, &merged, &operands);
+}
+
+fn chains_and_cycles() {
+    let mut prog = ssa_program_new("null branch, long chain and three-block cycle");
+    let cond = ssa_value(prog.fresh_value_id(), SValueKind.SkNull);
+    let cfg = prog.graph_mut();
+    make_blocks(cfg, 79);
+    cfg.get_mut(&block_id(0)).push_inst(SsaInst.INull(cond));
+    cfg.get_mut(&block_id(0)).set_terminator(SsaInst.IBranch(cond, block_id(73), block_id(1)));
+    let mut at = 1;
+    while at < 72 { set_jump(cfg, at, at + 1); at = at + 1; }
+    set_jump(cfg, 73, 74);
+    set_jump(cfg, 74, 75);
+    set_jump(cfg, 75, 73);
+    set_jump(cfg, 76, 77);
+    set_jump(cfg, 77, 78);
+    set_jump(cfg, 78, 78);
+    let first = run_jump_threading(&mut prog);
+    assert_eq(first.folded_branches + 0, 1);
+    assert(first.threaded_jumps > 0);
+    assert_eq(successor(prog.graph(), 0, 0), 72);
+    assert_eq(successor(prog.graph(), 73, 0), 74);
+    assert_eq(successor(prog.graph(), 74, 0), 75);
+    assert_eq(successor(prog.graph(), 75, 0), 73);
+    assert_eq(successor(prog.graph(), 76, 0), 77);
+    assert_eq(successor(prog.graph(), 78, 0), 78);
+    let stable = run_jump_threading(&mut prog);
+    assert_eq(stable.folded_branches + 0, 0);
+    assert_eq(stable.threaded_jumps + 0, 0);
+}
+
+fn main() {
+    diamond_with_backedge();
+    folded_phi_edge();
+    shared_branch_target();
+    chains_and_cycles();
+}

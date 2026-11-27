@@ -178,8 +178,8 @@ public type SsaInst is
 
 /// One incoming edge into a phi node.
 public type PhiOperand is {
-    pred: BlockId,
-    value: SsaValue,
+    public(in core.database.sqlite.native.l4_vdbe.ssa) pred: BlockId,
+    public(in core.database.sqlite.native.l4_vdbe.ssa) value: SsaValue,
 };
 
 // -----------------------------------------------------------------------------
