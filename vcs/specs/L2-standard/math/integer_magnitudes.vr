@@ -1,0 +1,69 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L2
+// @tags: integers, gcd, lcm, factorization
+// @expected-exit: 0
+
+mount core.math.integers.{gcd, gcd_binary, gcd_magnitude, lcm, try_gcd, try_lcm, try_lcm_magnitude};
+mount core.math.number_theory.{gcd as number_gcd, lcm as number_lcm, prime_factors, IntFraction};
+
+fn test_gcd() {
+    let limit = 9223372036854775808_u64;
+    assert_eq(gcd_magnitude(Int.MIN, 0), limit);
+    assert_eq(number_gcd(0, Int.MIN), limit);
+    assert_eq(number_gcd(Int.MIN, Int.MIN), limit);
+    assert(gcd(0, 0) == 0);
+    assert(gcd(Int.MIN, -12) == 4);
+    assert(gcd_binary(Int.MIN, -12) == 4);
+    assert(gcd_binary(0, -12) == 12);
+    assert_eq(try_gcd(Int.MIN, Int.MAX).unwrap(), 1);
+    assert(try_gcd(Int.MIN, Int.MIN).is_none());
+}
+
+fn test_lcm() {
+    assert(lcm(0, Int.MIN) == 0);
+    assert_eq(try_lcm(Int.MIN, 0).unwrap(), 0);
+    assert(number_lcm(-6, 15) == 30);
+    assert_eq(try_lcm(Int.MAX, Int.MAX).unwrap(), Int.MAX);
+    assert_eq(try_lcm_magnitude(Int.MIN, -1).unwrap(), 9223372036854775808_u64);
+    assert_eq(try_lcm_magnitude(Int.MAX, 2).unwrap(), 18446744073709551614_u64);
+    assert_eq(try_lcm_magnitude(4294967295, 4294967297).unwrap(), 18446744073709551615_u64);
+    assert(try_lcm(Int.MIN, 2).is_none());
+    assert(try_lcm(Int.MAX, 2).is_none());
+    assert(try_lcm_magnitude(Int.MIN, 3).is_none());
+    assert(try_lcm_magnitude(Int.MAX, Int.MAX - 1).is_none());
+}
+
+fn test_prime_factors() {
+    let factors = prime_factors(Int.MIN);
+    assert_eq(factors.len(), 63);
+    let mut i = 0;
+    while i < factors.len() {
+        assert_eq(factors[i], 2);
+        i = i + 1;
+    }
+    let other = prime_factors(-45);
+    assert_eq(other.len(), 3);
+    assert_eq(other[0], 3);
+    assert_eq(other[1], 3);
+    assert_eq(other[2], 5);
+    assert(prime_factors(0).is_empty());
+    assert(prime_factors(-1).is_empty());
+}
+
+fn test_fraction_reduction() {
+    assert(IntFraction.new(Int.MIN, Int.MIN).to_float() == 1.0);
+    assert(IntFraction.new(0, Int.MIN).to_float() == 0.0);
+    assert(IntFraction.new(12, -30).to_float() == -0.4);
+    assert(IntFraction.try_new(Int.MIN, 1).is_some());
+    assert(IntFraction.try_new(1, Int.MIN).is_none());
+    assert(IntFraction.try_new(Int.MIN, -1).is_none());
+    assert(IntFraction.try_new(1, 0).is_none());
+}
+
+fn main() {
+    test_gcd();
+    test_lcm();
+    test_prime_factors();
+    test_fraction_reduction();
+}

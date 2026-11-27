@@ -118,56 +118,7 @@ public fn divides(a: Int, b: Int) -> Bool {
 // 3. GCD and LCM
 // =============================================================================
 
-/// Greatest common divisor via the Euclidean algorithm.
-///
-
-/// Two's-complement-safe absolute value: the naive `0 - x` wraps
-/// back to Int.MIN for `x == Int.MIN`, leaving the Euclidean loop
-/// running with a negative operand. The mathematical identity
-/// `gcd(Int.MIN, b) = gcd(|Int.MIN|, |b|)` doesn't fit in Int, so
-/// we route the absolute-value computation through UInt64 and run
-/// the Euclidean loop in UInt64 too. Output fits in Int because
-/// gcd(a, b) ≤ min(|a|, |b|) ≤ Int.MAX (since gcd ≠ |Int.MIN|
-/// unless b also has magnitude > Int.MAX, which Int can't hold).
-public fn gcd(a: Int, b: Int) -> Int {
-    let mut x: UInt64 = if a < 0 { (((!a) as UInt64) + 1_u64) } else { a as UInt64 };
-    let mut y: UInt64 = if b < 0 { (((!b) as UInt64) + 1_u64) } else { b as UInt64 };
-    while y != 0_u64 {
-        let temp = y;
-        y = x % y;
-        x = temp;
-    }
-    x as Int
-}
-
-/// Least common multiple.
-///
-
-/// `a * b` may overflow signed Int even for moderate inputs; combined
-/// with the abs trick (`0 - product` overflows for product == Int.MIN
-/// or wraps to a value that the negation can't recover), the historical
-/// implementation produced wrong magnitudes for any pair where
-/// `|a * b| >= 2^63`. Compute the magnitude through UInt64 so wrap-
-/// around in the multiply manifests as a saturating large-magnitude
-/// value rather than a sign-flipped wrong result. Sign cancellation
-/// gives an unsigned magnitude regardless of input signs.
-public fn lcm(a: Int, b: Int) -> Int {
-    if a == 0 || b == 0 {
-        0
-    } else {
-        let abs_a: UInt64 = if a < 0 { (((!a) as UInt64) + 1_u64) } else { a as UInt64 };
-        let abs_b: UInt64 = if b < 0 { (((!b) as UInt64) + 1_u64) } else { b as UInt64 };
-        let g: UInt64 = if a < 0 || b < 0 {
-            // gcd already routes through UInt64 magnitude; cast back
-            // through the signed surface but coerce via UInt64.
-            (gcd(a, b) as UInt64)
-        } else {
-            (gcd(a, b) as UInt64)
-        };
-        if g == 0_u64 { return 0; }
-        ((abs_a / g) * abs_b) as Int
-    }
-}
+public mount core.math.integers.{gcd_magnitude as gcd, lcm, try_gcd, try_lcm, try_lcm_magnitude};
 
 /// Extended Euclidean algorithm: returns (g, x, y) with a*x + b*y = g = gcd(a, b).
 public fn extended_gcd(a: Int, b: Int) -> (Int, Int, Int) {
@@ -270,26 +221,22 @@ public fn primes_up_to(n: Int) -> List<Int> {
     result
 }
 
-/// Trial division factorization.
-///
-
-/// Two's-complement-safe magnitude — `0 - Int.MIN` wraps back to
-/// Int.MIN, leaving `x < 0` and the trial-division loop never
-/// terminates correctly. Sign is irrelevant for prime-factorisation,
-/// so route through UInt64 magnitude. Int.MIN's prime factors are
-/// the factors of |Int.MIN| = 2^63 = 2 × 62 — a single recursion of
-/// the loop catches that.
+/// Prime factors of the magnitude, in ascending order with multiplicity.
 public fn prime_factors(n: Int) -> List<Int> {
-    let mut factors = List.new();
-    let mag: UInt64 = if n < 0 { (((!n) as UInt64) + 1_u64) } else { n as UInt64 };
-    let mut x: UInt64 = mag;
-    let mut d: UInt64 = 2_u64;
-    while d * d <= x {
+    let mut factors: List<Int> = List.new();
+    let mut x = n.unsigned_abs();
+    if x < 2_u64 { return factors; }
+    while x % 2_u64 == 0_u64 {
+        factors.push(2);
+        x = x / 2_u64;
+    }
+    let mut d: UInt64 = 3_u64;
+    while d <= x / d {
         while x % d == 0_u64 {
             factors.push(d as Int);
             x = x / d;
         }
-        d = d + 1_u64;
+        d = d + 2_u64;
     }
     if x > 1_u64 {
         factors.push(x as Int);
@@ -463,14 +410,28 @@ public type IntFraction is {
 };
 
 implement IntFraction {
-    /// Create a rational in lowest terms.
+    /// Create a fraction in lowest terms with a positive denominator.
     public fn new(p: Int, q: Int) -> IntFraction {
-        let g = gcd(p, q);
-        let sign = if q < 0 { -1 } else { 1 };
-        IntFraction {
-            numerator: sign * p / g,
-            denominator: sign * q / g,
-        }
+        IntFraction.try_new(p, q).expect("fraction requires a nonzero denominator and representable components")
+    }
+
+    /// Returns None for a zero denominator or an unrepresentable reduced component.
+    public fn try_new(p: Int, q: Int) -> Maybe<IntFraction> {
+        if q == 0 { return Maybe.None; }
+        let divisor = gcd(p, q);
+        let denominator = q.unsigned_abs() / divisor;
+        let magnitude = p.unsigned_abs() / divisor;
+        if denominator > (Int.MAX as UInt64) { return Maybe.None; }
+        let negative = (p < 0) != (q < 0);
+        let numerator = if magnitude > (Int.MAX as UInt64) {
+            if !negative { return Maybe.None; }
+            Int.MIN
+        } else if negative {
+            -(magnitude as Int)
+        } else {
+            magnitude as Int
+        };
+        Maybe.Some(IntFraction { numerator: numerator, denominator: denominator as Int })
     }
 
     /// Addition of rationals.

@@ -174,17 +174,7 @@ public fn divmod(a: Int, b: Int{!= 0}) -> (Int, Int) {
 // Number-Theoretic Operations
 // =============================================================================
 
-// Internal: absolute value with explicit Int.MIN handling.
-//
-
-// `if x < 0 { -x } else { x }` silently wraps for x == Int.MIN
-// (-2^63): -Int.MIN overflows back to Int.MIN. The whole gcd / lcm
-// family normalizes inputs via abs, so this wrap historically
-// produced wrong results (and non-terminating loops in the binary
-// gcd) for Int.MIN inputs. |Int.MIN| = 2^63 is genuinely
-// unrepresentable in Int64 — there's no honest answer except to
-// reject. Callers that need to handle Int.MIN gracefully should
-// use the `try_*` variants which return `Maybe.None`.
+// Signed magnitude for the Euclidean remainder adjustment.
 @inline
 fn safe_abs_or_panic(x: Int, fn_name: &Text) -> Int {
     if x == Int.MIN {
@@ -193,84 +183,74 @@ fn safe_abs_or_panic(x: Int, fn_name: &Text) -> Int {
     if x < 0 { -x } else { x }
 }
 
-// Greatest common divisor using Euclidean algorithm
-// gcd(a, 0) = |a|, gcd(0, 0) = 0
-//
+/// Exact nonnegative greatest common divisor of two signed integers, including
+/// the magnitude 2^63. The gcd of two zeros is zero.
+public fn gcd_magnitude(a: Int, b: Int) -> UInt64 {
+    let mut x = a.unsigned_abs();
+    let mut y = b.unsigned_abs();
+    while y != 0_u64 {
+        let remainder = x % y;
+        x = y;
+        y = remainder;
+    }
+    x
+}
 
-// Panics if either input is `Int.MIN` (its absolute value is
-// unrepresentable). Use `try_gcd` for fallible failure handling.
+fn signed_magnitude(magnitude: UInt64) -> Maybe<Int> {
+    if magnitude > (Int.MAX as UInt64) { Maybe.None } else { Maybe.Some(magnitude as Int) }
+}
+
+/// Greatest common divisor in signed Int. Panics when the result is 2^63.
 public fn gcd(a: Int, b: Int) -> Int{>= 0} {
-    let mut a = safe_abs_or_panic(a, "gcd");
-    let mut b = safe_abs_or_panic(b, "gcd");
-
-    while b != 0 {
-        let t = b;
-        b = a % b;
-        a = t;
-    }
-    a
+    try_gcd(a, b).expect("gcd exceeds Int.MAX")
 }
 
-/// Fallible counterpart to `gcd`. Returns `Maybe.None` if either input
-/// is `Int.MIN` (its absolute value is unrepresentable in Int64).
+/// Returns None only when the greatest common divisor exceeds Int.MAX.
 public fn try_gcd(a: Int, b: Int) -> Maybe<Int> {
-    if a == Int.MIN || b == Int.MIN {
-        return Maybe.None;
-    }
-    Maybe.Some(gcd(a, b))
+    signed_magnitude(gcd_magnitude(a, b))
 }
 
-// Binary GCD (Stein's algorithm) - more efficient for large integers
-//
-
-// Panics if either input is `Int.MIN`. Use `try_gcd_binary` for
-// fallible failure handling.
+/// Binary greatest common divisor (Stein's algorithm), with the same signed
+/// result range as gcd.
 public fn gcd_binary(a: Int, b: Int) -> Int{>= 0} {
-    if a == 0 { return safe_abs_or_panic(b, "gcd_binary"); }
-    if b == 0 { return safe_abs_or_panic(a, "gcd_binary"); }
-
-    let mut u = safe_abs_or_panic(a, "gcd_binary");
-    let mut v = safe_abs_or_panic(b, "gcd_binary");
-
-    // Remove common factors of 2
-    let shift = super.bits.ctz(u as UInt64).min(super.bits.ctz(v as UInt64));
-    u >>= super.bits.ctz(u as UInt64);
-    v >>= super.bits.ctz(v as UInt64);
-
-    while u != v {
+    let mut u = a.unsigned_abs();
+    let mut v = b.unsigned_abs();
+    if u == 0_u64 || v == 0_u64 {
+        return signed_magnitude(u | v).expect("gcd exceeds Int.MAX");
+    }
+    let shift = (u | v).trailing_zeros();
+    u = u >> u.trailing_zeros();
+    while v != 0_u64 {
+        v = v >> v.trailing_zeros();
         if u > v {
-            u -= v;
-            u >>= super.bits.ctz(u as UInt64);
-        } else {
-            v -= u;
-            v >>= super.bits.ctz(v as UInt64);
+            let temp = u;
+            u = v;
+            v = temp;
         }
+        v = v - u;
     }
-
-    u << shift
+    signed_magnitude(u << shift).expect("gcd exceeds Int.MAX")
 }
 
-// Least common multiple
-// lcm(a, b) = |a * b| / gcd(a, b)
-//
+/// Least common multiple in UInt64. Returns None when the mathematical
+/// product exceeds UInt64.MAX. Either zero input yields zero.
+public fn try_lcm_magnitude(a: Int, b: Int) -> Maybe<UInt64> {
+    if a == 0 || b == 0 { return Maybe.Some(0_u64); }
+    let reduced = a.unsigned_abs() / gcd_magnitude(a, b);
+    reduced.checked_mul(b.unsigned_abs())
+}
 
-// Panics if either input is `Int.MIN`. Use `try_lcm` for
-// fallible failure handling.
+/// Least common multiple in signed Int. Panics when the result exceeds Int.MAX.
 public fn lcm(a: Int, b: Int) -> Int{>= 0} {
-    if a == 0 || b == 0 { return 0; }
-    let g = gcd(a, b);
-    let abs_a = safe_abs_or_panic(a, "lcm");
-    let abs_b = safe_abs_or_panic(b, "lcm");
-    (abs_a / g) * abs_b  // Divide first to avoid overflow
+    try_lcm(a, b).expect("lcm exceeds Int.MAX")
 }
 
-/// Fallible counterpart to `lcm`. Returns `Maybe.None` if either input
-/// is `Int.MIN`.
+/// Returns None only when the least common multiple exceeds Int.MAX.
 public fn try_lcm(a: Int, b: Int) -> Maybe<Int> {
-    if a == Int.MIN || b == Int.MIN {
-        return Maybe.None;
+    match try_lcm_magnitude(a, b) {
+        Maybe.Some(magnitude) => signed_magnitude(magnitude),
+        Maybe.None => Maybe.None,
     }
-    Maybe.Some(lcm(a, b))
 }
 
 // Extended Euclidean algorithm
@@ -280,7 +260,7 @@ public fn try_lcm(a: Int, b: Int) -> Maybe<Int> {
 // Panics if `a == Int.MIN` (its absolute value is needed for the
 // b == 0 fast path's normalization). Other Int.MIN handling
 // concerns are subsumed by the loop's arithmetic, but we conservatively
-// reject Int.MIN to align with `gcd` / `gcd_binary` / `lcm`.
+// reject Int.MIN for this signed-coefficient implementation.
 public fn gcd_extended(a: Int, b: Int) -> (Int, Int, Int) {
     if a == Int.MIN || b == Int.MIN {
         panic("gcd_extended: Int.MIN inputs are unsupported (|Int.MIN| unrepresentable); use try_gcd_extended");
