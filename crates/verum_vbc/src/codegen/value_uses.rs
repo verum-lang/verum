@@ -472,7 +472,7 @@ impl super::VbcCodegen {
         source: Reg,
         actual: Option<&TypeRef>,
     ) -> super::CodegenResult<Reg> {
-        if callable.is_generator || callable.intrinsic_name.is_some()
+        if callable.is_generator || callable.external_intrinsic().is_some()
             || callable.foreign_declaration.is_some() {
             return Ok(source);
         }

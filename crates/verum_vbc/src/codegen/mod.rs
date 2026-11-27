@@ -19187,11 +19187,9 @@ impl VbcCodegen {
         let parameter_types = self.source_semantic_parameters(
             func, &self.ctx.current_generic_param_ids, &receiver_generics, &declared_ids,
         );
-        // Async source bodies execute eagerly under the same call/return law.
-        // Only suspended generators and externally implemented operations have
-        // a different parameter lifecycle.
-        let owns_parameters = func.body.is_some()
-            && !func_info.is_generator && func_info.intrinsic_name.is_none();
+        // Every eager source body owns its value parameters. An intrinsic
+        // annotation can also describe a source body, including an empty one.
+        let owns_parameters = func.body.is_some() && !func_info.is_generator;
         for (index, (param, ty)) in func.params.iter().zip(parameter_types).enumerate() {
             let binding = self.extract_param_name_and_mutable(param)
                 .and_then(|(name, _)| self.ctx.lookup_var(&name).map(|binding| binding.reg));
@@ -19315,9 +19313,8 @@ impl VbcCodegen {
             verum_common::Maybe::None => None,
         };
 
-        // The owned convention copies once at the caller. Generator and
-        // intrinsic bodies retain their existing mutable-parameter copy
-        // convention until their separate lifecycle is implemented.
+        // The caller copies eager value parameters. Suspended generators
+        // establish their mutable parameters when their frames are entered.
         if !owns_parameters {
             for (i, ((param_name, is_mut), param)) in params_with_mutability
                 .iter()

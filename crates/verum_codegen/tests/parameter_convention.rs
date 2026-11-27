@@ -51,6 +51,35 @@ fn native_mixed_parameter_convention_is_refused_before_emission_of_the_call() {
 }
 
 #[test]
+fn annotated_source_bodies_own_their_parameters_on_both_sides_of_a_call() {
+    let module = compile(r#"
+        type Cell is { value: Int };
+        implement Cell {
+            @intrinsic("annotated_static") fn fresh(value: Int) -> Self { Cell { value } }
+            @intrinsic("annotated_method") fn read(&self) -> Int { self.value }
+        }
+        @intrinsic("annotated_source") fn adjust(mut cell: Cell) -> Int {
+            cell.value = cell.value + 1;
+            cell.read()
+        }
+        fn probe() -> Int {
+            let cell = Cell.fresh(31);
+            let adjusted = adjust(cell);
+            cell.value * 100 + adjusted
+        }
+    "#);
+    let entry = module.find_function_by_name("probe").unwrap();
+    let result = verum_vbc::interpreter::Interpreter::new(module.clone().into())
+        .execute_function(entry).unwrap();
+    assert_eq!(result.try_as_i64(), Some(3132));
+    native_library::with_library(&module, &[("probe", "invoke_probe")], |library| {
+        // SAFETY: the generated adapter exports the nullary Int signature under this name.
+        let result = unsafe { library.get::<unsafe extern "C" fn() -> i64>(b"invoke_probe").unwrap()() };
+        assert_eq!(result, 3132);
+    });
+}
+
+#[test]
 fn native_eager_async_calls_share_the_emitted_parameter_convention() {
     for source in [
         "async fn answer(value:Int)->Int {value} fn main()->Int {answer(73)}",

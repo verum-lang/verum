@@ -8031,8 +8031,7 @@ impl VbcCodegen {
         // Check if this function is an intrinsic (declared with @intrinsic("name"))
         // This is the primary intrinsic resolution path - intrinsic identity is established
         // at declaration time via @intrinsic attribute, not at call-site via name matching.
-        if !func_info.has_source_body
-            && let Some(intrinsic_name) = &func_info.intrinsic_name
+        if let Some(intrinsic_name) = func_info.external_intrinsic()
             && let Some(intrinsic_info) = lookup_intrinsic(intrinsic_name)
             && !intrinsic_info.is_runtime_call()
         {
@@ -12810,8 +12809,7 @@ impl VbcCodegen {
         let info = self.ctx.lookup_qualified_function(&candidate)?;
         (info.has_source_body
             && usize::from(info.param_count) == argument_count + 1
-            && info.variant_tag.is_none()
-            && info.intrinsic_name.is_none())
+            && info.variant_tag.is_none())
             .then_some(candidate)
     }
 
@@ -15086,7 +15084,7 @@ impl VbcCodegen {
                         .cloned()
                         && info.param_count == args.len()
                         && info.variant_tag.is_none()
-                        && info.intrinsic_name.is_none()
+                        && info.external_intrinsic().is_none()
                     {
                         return self.compile_static_method_call(&info, args, type_args);
                     }
@@ -16653,7 +16651,7 @@ impl VbcCodegen {
                 fi.id.0 != u32::MAX
                     && fi.id.0 != u32::MAX / 2
                     && fi.variant_tag.is_none()
-                    && fi.intrinsic_name.is_none()
+                    && fi.external_intrinsic().is_none()
             })
             .map(|info| info.id.0);
 
@@ -18482,8 +18480,7 @@ impl VbcCodegen {
         // resolved TypeDescriptor pins the record shape.
 
         // Check if this function is an intrinsic — resolve inline instead of emitting Call
-        if !func_info.has_source_body
-            && let Some(intrinsic_name) = &func_info.intrinsic_name
+        if let Some(intrinsic_name) = func_info.external_intrinsic()
             && let Some(intrinsic_info) = lookup_intrinsic(intrinsic_name)
             && !intrinsic_info.is_runtime_call()
         {

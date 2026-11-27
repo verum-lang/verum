@@ -1235,6 +1235,14 @@ pub struct FunctionInfo {
     pub type_param_ids: Vec<crate::types::TypeParamId>,
 }
 
+impl FunctionInfo {
+    /// Only a bodyless declaration delegates execution to the intrinsic registry.
+    pub(super) fn external_intrinsic(&self) -> Option<&str> {
+        if self.has_source_body { None } else { self.intrinsic_name.as_deref() }
+    }
+}
+
+
 /// Statistics collected during codegen.
 #[derive(Debug, Clone, Default)]
 pub struct CodegenStats {
