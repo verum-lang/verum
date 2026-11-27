@@ -1,129 +1,38 @@
-// =============================================================================
-// core-tests/cog/archive_error/unit_test.vr
-// =============================================================================
-//
-// `core/cog/archive.vr` — ArchiveError variants that don't require
-// the `[Byte; 4]` fixed-array payload.
-// =============================================================================
-
-// THE BRACES ARE LOAD-BEARING (A137): `mount core.a.b.Type;` binds
-// the type but refuses `Type.Variant(x)` — here `unbound`/`no method
-// named 'InvalidIndexEncoding'` — while the braced form constructs.
-// A COMPILE error, whole file down. Behind it sat a SECOND one
-// (A132): `ArchiveError.InvalidIndexEncoding(x)` is read as a method
-// call even with the braced mount, while the bare constructor works.
-// One field, so arity is not the rule — see A132's own controls.
 mount core.cog.archive.{ArchiveError};
-mount core.base.maybe.{Maybe, Some, None};
-mount core.base.result.{Result, Ok, Err};
-
-// =============================================================================
-// Section 1: ArchiveError variant ctor (excluding InvalidMagic — fixed-array)
-// =============================================================================
+mount core.io.protocols.{IoErrorKind, StreamError};
 
 @test
-fn test_archive_error_unsupported_version_variant() {
-    let e: ArchiveError = ArchiveError.UnsupportedVersion { major: 2, minor: 0 };
-    assert(e is ArchiveError.UnsupportedVersion);
+fn distinct_archive_failure_kinds() {
+    let version = ArchiveError.UnsupportedVersion { major: 2, minor: 0 };
+    let header = ArchiveError.TruncatedHeader { expected: 32, found: 16 };
+    let index = ArchiveError.TruncatedIndex { offset: 64, size: 128, total: 100 };
+    let payload = ArchiveError.TruncatedModule { module: "app", offset: 32, size: 9, total: 35 };
+    assert(version is ArchiveError.UnsupportedVersion);
+    assert(header is ArchiveError.TruncatedHeader);
+    assert(index is ArchiveError.TruncatedIndex);
+    assert(payload is ArchiveError.TruncatedModule);
+    assert(!(version is ArchiveError.IoFailure));
 }
 
 @test
-fn test_archive_error_truncated_header_variant() {
-    let e: ArchiveError = ArchiveError.TruncatedHeader {
-        expected: 64,
-        found: 32,
-    };
-    assert(e is ArchiveError.TruncatedHeader);
-}
-
-@test
-fn test_archive_error_truncated_index_variant() {
-    let e: ArchiveError = ArchiveError.TruncatedIndex {
-        offset: 256,
-        size: 128,
-        total: 200,
-    };
-    assert(e is ArchiveError.TruncatedIndex);
-}
-
-@test
-fn test_archive_error_truncated_module_variant() {
-    let e: ArchiveError = ArchiveError.TruncatedModule {
-        module: "core.base.maybe".to_text(),
-        offset: 1024,
-        size: 4096,
-        total: 2048,
-    };
-    assert(e is ArchiveError.TruncatedModule);
-}
-
-@test
-fn test_archive_error_invalid_index_encoding_variant() {
-    let e: ArchiveError = InvalidIndexEncoding(
-        "bad varint at offset 17".to_text(),
-    );
-    assert(e is ArchiveError.InvalidIndexEncoding);
-}
-
-@test
-fn test_archive_error_kernel_bridge_variant() {
-    let e: ArchiveError = KernelBridge(
-        "intrinsic signature mismatch".to_text(),
-    );
-    assert(e is ArchiveError.KernelBridge);
-}
-
-@test
-fn test_archive_error_io_error_variant() {
-    let e: ArchiveError = IoFailure(
-        "permission denied".to_text(),
-    );
-    assert(e is ArchiveError.IoFailure);
-}
-
-// =============================================================================
-// Section 2: Pairwise disjointness
-// =============================================================================
-
-@test
-fn test_archive_error_unsupported_version_disjoint() {
-    let e: ArchiveError = ArchiveError.UnsupportedVersion { major: 2, minor: 0 };
-    assert(!(e is ArchiveError.TruncatedHeader));
-    assert(!(e is ArchiveError.IoFailure));
-    assert(!(e is ArchiveError.KernelBridge));
-}
-
-@test
-fn test_archive_error_io_error_disjoint() {
-    let e: ArchiveError = IoFailure("x".to_text());
-    assert(!(e is ArchiveError.UnsupportedVersion));
-    assert(!(e is ArchiveError.TruncatedHeader));
-    assert(!(e is ArchiveError.KernelBridge));
-    assert(!(e is ArchiveError.InvalidIndexEncoding));
-}
-
-// =============================================================================
-// Section 3: Payload round-trip
-// =============================================================================
-
-@test
-fn test_archive_error_kernel_bridge_payload_round_trip() {
-    let e: ArchiveError = KernelBridge("axiom not registered".to_text());
-    match e {
-        KernelBridge(reason) =>
-            assert_eq(reason, "axiom not registered"),
-        _ => panic("expected KernelBridge"),
+fn invalid_index_retains_its_reason() {
+    let error = ArchiveError.InvalidIndexEncoding("invalid UTF-8 module name");
+    match error {
+        ArchiveError.InvalidIndexEncoding(message) => assert_eq(message, "invalid UTF-8 module name"),
+        _ => panic("expected an invalid index"),
     }
 }
 
 @test
-fn test_archive_error_io_error_payload_round_trip() {
-    let e: ArchiveError = IoFailure("ENOENT".to_text());
-    match e {
-        IoFailure(reason) =>
-            assert_eq(reason, "ENOENT"),
-        _ => panic("expected ArchiveError.IoFailure"),
+fn io_failure_retains_missing_and_denied_kinds() {
+    let missing = ArchiveError.IoFailure(StreamError.new(IoErrorKind.NotFound));
+    let denied = ArchiveError.IoFailure(StreamError.new(IoErrorKind.PermissionDenied));
+    match missing {
+        ArchiveError.IoFailure(error) => assert(error.kind() is IoErrorKind.NotFound),
+        _ => panic("expected missing file"),
+    }
+    match denied {
+        ArchiveError.IoFailure(error) => assert(error.kind() is IoErrorKind.PermissionDenied),
+        _ => panic("expected denied access"),
     }
 }
-
-fn main() {}

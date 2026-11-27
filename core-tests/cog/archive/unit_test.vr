@@ -1,112 +1,97 @@
-// =============================================================================
-// core-tests/cog/archive/unit_test.vr
-// =============================================================================
-//
-// `core/cog/archive.vr` — Cog VBC archive format constants.
-// =============================================================================
-
 mount core.cog.archive.{
     ARCHIVE_VERSION_MAJOR, ARCHIVE_VERSION_MINOR, ARCHIVE_HEADER_SIZE,
-    FLAG_COMPRESSED, FLAG_HAS_DEBUG_INFO, FLAG_HAS_SOURCE_MAP,
-    FLAG_STRIPPED, FLAG_SIGNED,
+    FLAG_IS_STDLIB, FLAG_COMPRESSED, FLAG_HAS_DEBUG_INFO, FLAG_HAS_SOURCE_MAP,
+    FLAG_STRIP_FIELD_NAMES, FLAG_STRIP_VARIANT_NAMES, FLAG_STRIP_CONSTRAINTS,
+    FLAG_STRIP_PROTOCOL_DETAILS, ArchiveError, read_header, read_archive_bytes,
+    is_stdlib, is_compressed, has_debug_info, has_source_map, is_stripped,
+    find_module, module_bytes, total_payload_size, topological_order,
 };
-mount core.base.maybe.{Maybe, Some, None};
-mount core.base.result.{Result, Ok, Err};
-
-// =============================================================================
-// Section 1: Archive version + header size
-// =============================================================================
 
 @test
-fn test_archive_version_major_canonical_value() {
-    // A REFINED-TYPE CONSTANT CANNOT REACH `assert_eq`. These are
-    // declared `public const ARCHIVE_VERSION_MAJOR: Int { >= 0, <=
-    // 65535 } = 1`, and the refinement does not unify with `Int` in
-    // argument position: `assert_eq(ARCHIVE_VERSION_MAJOR, 1)` is
-    // refused with `expected 'Unit', found 'Int'`, and `let m: Int =
-    // ARCHIVE_VERSION_MAJOR` with the mirror of it. Printing and `==`
-    // both work, so the value is fine and the unification is not.
-    // A COMPILE error, so no `@ignore` contains it — two lines took all
-    // 12 tests in this file down. Measured 2026-09-12.
-    assert(ARCHIVE_VERSION_MAJOR == 1);
-}
-
-@test
-fn test_archive_version_minor_canonical_value() {
-    // See the note above.
-    assert(ARCHIVE_VERSION_MINOR == 0);
-}
-
-@test
-fn test_archive_header_size_canonical_value() {
+fn archive_version_and_header_size_match_the_wire() {
+    assert(ARCHIVE_VERSION_MAJOR == 1 && ARCHIVE_VERSION_MINOR == 0);
     assert_eq(ARCHIVE_HEADER_SIZE, 32);
 }
 
-// =============================================================================
-// Section 2: Archive flag bits (bit-flag encoding)
-// =============================================================================
-
 @test
-fn test_flag_compressed_canonical_value() {
-    assert_eq(FLAG_COMPRESSED, 0x0001);
+fn storage_and_metadata_flags_match_the_writer() {
+    assert_eq(FLAG_IS_STDLIB, 1);
+    assert_eq(FLAG_COMPRESSED, 2);
+    assert_eq(FLAG_HAS_DEBUG_INFO, 4);
+    assert_eq(FLAG_HAS_SOURCE_MAP, 8);
+    assert_eq(FLAG_STRIP_FIELD_NAMES, 16);
+    assert_eq(FLAG_STRIP_VARIANT_NAMES, 32);
+    assert_eq(FLAG_STRIP_CONSTRAINTS, 64);
+    assert_eq(FLAG_STRIP_PROTOCOL_DETAILS, 128);
+}
+
+// ArchiveBuilder::stdlib() with DEBUG_INFO and STRIP_VARIANT_NAMES.
+// Stored "a" contains A5. Stored "b" contains 42 FF and depends on "a".
+fn compact_archive() -> List<Byte> {
+    [
+        0x56_u8, 0x42_u8, 0x43_u8, 0x41_u8, 0x01_u8, 0x00_u8, 0x00_u8, 0x00_u8, 0x25_u8, 0x00_u8,
+        0x00_u8, 0x00_u8, 0x02_u8, 0x00_u8, 0x00_u8, 0x00_u8, 0x23_u8, 0x00_u8, 0x00_u8, 0x00_u8,
+        0x00_u8, 0x00_u8, 0x00_u8, 0x00_u8, 0x46_u8, 0x00_u8, 0x00_u8, 0x00_u8, 0x00_u8, 0x00_u8,
+        0x00_u8, 0x00_u8, 0xa5_u8, 0x42_u8, 0xff_u8, 0x01_u8, 0x00_u8, 0x00_u8, 0x00_u8, 0x61_u8,
+        0x20_u8, 0x00_u8, 0x00_u8, 0x00_u8, 0x00_u8, 0x00_u8, 0x00_u8, 0x00_u8, 0x01_u8, 0x00_u8,
+        0x00_u8, 0x00_u8, 0x00_u8, 0x00_u8, 0x00_u8, 0x00_u8, 0x7e_u8, 0x7d_u8, 0x11_u8, 0x47_u8,
+        0xa5_u8, 0x51_u8, 0xb2_u8, 0xff_u8, 0x00_u8, 0x00_u8, 0x00_u8, 0x00_u8, 0x01_u8, 0x00_u8,
+        0x00_u8, 0x00_u8, 0x62_u8, 0x21_u8, 0x00_u8, 0x00_u8, 0x00_u8, 0x00_u8, 0x00_u8, 0x00_u8,
+        0x00_u8, 0x02_u8, 0x00_u8, 0x00_u8, 0x00_u8, 0x00_u8, 0x00_u8, 0x00_u8, 0x00_u8, 0x80_u8,
+        0xfd_u8, 0x39_u8, 0x29_u8, 0x61_u8, 0x6f_u8, 0x64_u8, 0x2a_u8, 0x01_u8, 0x00_u8, 0x00_u8,
+        0x00_u8, 0x00_u8, 0x00_u8, 0x00_u8, 0x00_u8,
+    ]
 }
 
 @test
-fn test_flag_has_debug_info_canonical_value() {
-    assert_eq(FLAG_HAS_DEBUG_INFO, 0x0002);
+fn reads_stored_payloads_and_dependency_order() {
+    let bytes = compact_archive();
+    let header = read_header(&bytes).unwrap();
+    assert(is_stdlib(&header) && has_debug_info(&header) && is_stripped(&header));
+    assert(!is_compressed(&header) && !has_source_map(&header));
+    let archive = read_archive_bytes(&bytes).unwrap();
+    assert_eq(total_payload_size(&archive), 3);
+    assert(archive.header().index_size == 70);
+    assert_eq(*archive.sha256(), "86c4c2e39bd617e69ccaac4a9446ae53efce8e018e336cdc9c3732f3d070cfcd");
+    let first = find_module(&archive, &"a").unwrap();
+    assert_eq(first.content_hash, 18424878795829902718_u64);
+    assert(find_module(&archive, &"missing") is Maybe.None);
+    let payload = module_bytes(&archive, &"b").unwrap();
+    assert_eq(payload.len(), 2);
+    assert_eq(payload[0], 0x42_u8);
+    assert_eq(payload[1], 0xff_u8);
+    let order = topological_order(&archive).unwrap();
+    assert_eq(order.len(), 2);
+    assert_eq(order[0], "a");
+    assert_eq(order[1], "b");
 }
 
 @test
-fn test_flag_has_source_map_canonical_value() {
-    assert_eq(FLAG_HAS_SOURCE_MAP, 0x0004);
+fn accepts_genuine_legacy_index_size_and_refuses_mismatched_extents() {
+    let mut bytes = compact_archive();
+    bytes[24] = 0_u8;
+    assert(read_archive_bytes(&bytes).is_ok());
+    bytes[24] = 69_u8;
+    assert(read_archive_bytes(&bytes) is Result.Err(ArchiveError.TruncatedIndex { offset: _, size: _, total: _ }));
 }
 
 @test
-fn test_flag_stripped_canonical_value() {
-    assert_eq(FLAG_STRIPPED, 0x0008);
+fn rejects_malformed_names_and_dependencies() {
+    let mut duplicate = compact_archive();
+    duplicate[72] = 0x61_u8;
+    assert(read_archive_bytes(&duplicate) is Result.Err(ArchiveError.InvalidIndexEncoding(_)));
+    let mut invalid_name = compact_archive();
+    invalid_name[39] = 0xff_u8;
+    assert(read_archive_bytes(&invalid_name) is Result.Err(ArchiveError.InvalidIndexEncoding(_)));
+    let mut foreign_dep = compact_archive();
+    foreign_dep[101] = 2_u8;
+    assert(read_archive_bytes(&foreign_dep) is Result.Err(ArchiveError.InvalidIndexEncoding(_)));
 }
 
 @test
-fn test_flag_signed_canonical_value() {
-    assert_eq(FLAG_SIGNED, 0x0010);
+fn reports_a_cycle_only_when_requesting_dependency_order() {
+    let mut bytes = compact_archive();
+    bytes[101] = 1_u8;
+    let archive = read_archive_bytes(&bytes).unwrap();
+    assert(topological_order(&archive) is Result.Err(_));
 }
-
-// =============================================================================
-// Section 3: Flag pairwise distinctness — single-bit flags
-// =============================================================================
-
-@test
-fn test_archive_flags_pairwise_distinct() {
-    assert(FLAG_COMPRESSED != FLAG_HAS_DEBUG_INFO);
-    assert(FLAG_HAS_DEBUG_INFO != FLAG_HAS_SOURCE_MAP);
-    assert(FLAG_HAS_SOURCE_MAP != FLAG_STRIPPED);
-    assert(FLAG_STRIPPED != FLAG_SIGNED);
-}
-
-@test
-fn test_archive_flags_no_overlap() {
-    // Single-bit flags must have no overlapping bits set.
-    assert_eq(FLAG_COMPRESSED & FLAG_HAS_DEBUG_INFO, 0);
-    assert_eq(FLAG_COMPRESSED & FLAG_STRIPPED, 0);
-    assert_eq(FLAG_HAS_DEBUG_INFO & FLAG_HAS_SOURCE_MAP, 0);
-    assert_eq(FLAG_STRIPPED & FLAG_SIGNED, 0);
-}
-
-@test
-fn test_archive_flags_full_mask() {
-    // All 5 flags OR'd == 0x1F.
-    let full = FLAG_COMPRESSED | FLAG_HAS_DEBUG_INFO |
-               FLAG_HAS_SOURCE_MAP | FLAG_STRIPPED | FLAG_SIGNED;
-    assert_eq(full, 0x1F);
-}
-
-@test
-fn test_archive_flags_positive() {
-    assert(FLAG_COMPRESSED > 0);
-    assert(FLAG_HAS_DEBUG_INFO > 0);
-    assert(FLAG_HAS_SOURCE_MAP > 0);
-    assert(FLAG_STRIPPED > 0);
-    assert(FLAG_SIGNED > 0);
-}
-
-fn main() {}
