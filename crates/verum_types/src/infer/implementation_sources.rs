@@ -10,6 +10,7 @@ pub(super) struct ImportedStructuralMethod {
     provider: Text,
     span: verum_ast::Span,
     receiver: Type,
+    permission: verum_ast::method_dispatch::ReceiverKind,
     scopes: verum_common::Set<Text>,
 }
 
@@ -223,6 +224,7 @@ impl TypeChecker {
                         provider: owner.clone(),
                         span: f.span,
                         receiver: receiver.clone(),
+                        permission: verum_ast::method_dispatch::ReceiverKind::from_declaration(f),
                         scopes: [self.current_module_path.clone()].into_iter().collect(),
                     });
                 }
@@ -285,20 +287,12 @@ impl TypeChecker {
         }
         if let Some(entry) = visible.first() {
             let pattern = &entry.receiver;
-            let view;
             let actual =
-                if let (Type::Slice { .. }, Type::Array { element, .. }) = (pattern, receiver) {
-                    view = Type::Slice {
-                        element: element.clone(),
-                    };
-                    &view
-                } else {
-                    receiver
-                };
+                crate::protocol::inherent_receiver_view(pattern, receiver, Some(entry.permission));
             if self
                 .protocol_checker
                 .read()
-                .try_match_type(pattern, actual)
+                .try_match_type(pattern, actual.as_ref())
                 .is_some()
             {
                 return Ok(());

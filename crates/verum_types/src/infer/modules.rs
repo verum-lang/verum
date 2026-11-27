@@ -22182,7 +22182,8 @@ impl TypeChecker {
             .ok_or_else(|| self.arity_error(method.name.clone(), params.len(), args.len(), span))?;
 
         let mut substitution = if let Some(pattern) = &impl_self_type {
-            self.unifier.unify(pattern, recv_ty, span)?
+            let receiver = crate::protocol::inherent_receiver_view(pattern, recv_ty, receiver_kind);
+            self.unifier.unify(pattern, receiver.as_ref(), span)?
         } else {
             let receiver_args = match recv_ty {
                 Type::Named { args, .. } | Type::Generic { args, .. } => args.clone(),

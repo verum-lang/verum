@@ -1,7 +1,26 @@
 //! One rigid implementation matcher shared by proof obligations and family applications.
 use super::{ProtocolChecker, ProtocolImpl, WhereClause};
 use crate::ty::{Substitution, Type};
+use std::borrow::Cow;
 use verum_ast::Span;
+use verum_ast::method_dispatch::ReceiverKind;
+
+/// A borrowed slice method can view fixed array storage without changing its
+/// element type. An owned receiver still has to match the declaration exactly.
+pub(crate) fn inherent_receiver_view<'a>(
+    pattern: &Type,
+    actual: &'a Type,
+    receiver: Option<ReceiverKind>,
+) -> Cow<'a, Type> {
+    match (pattern, actual, receiver) {
+        (
+            Type::Slice { .. },
+            Type::Array { element, .. },
+            Some(ReceiverKind::SelfRef | ReceiverKind::SelfMut),
+        ) => Cow::Owned(Type::Slice { element: element.clone() }),
+        _ => Cow::Borrowed(actual),
+    }
+}
 
 /// Checked lexical premises used by both candidate inference and final proof.
 /// Candidate-owned variables may be inferred; caller declarations remain rigid.
@@ -77,8 +96,9 @@ impl ProtocolChecker {
                 });
             }
         }
+        let actual = inherent_receiver_view(pattern, actual, scheme.receiver_kind);
         let Some((matcher, pattern, actual)) = self.receiver_matcher(
-            pattern, actual, rigid_variables,
+            pattern, actual.as_ref(), rigid_variables,
         ) else { return false; };
         if !self.matched_receiver_is_exact(&matcher, &pattern, &actual) { return false; }
         let receiver_values = pattern.value_ids();

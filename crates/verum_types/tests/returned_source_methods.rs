@@ -1079,6 +1079,28 @@ fn imported_structural_methods_keep_their_element_and_visibility() {
 }
 
 #[test]
+fn fixed_array_calls_borrow_the_declared_slice_with_the_original_element_type() {
+    let modules = [("demo.slices", r#"
+        implement<T> [T] {
+            public fn choose(&self, item: T) -> T { item }
+            public fn overwrite(&mut self, item: T) { self[0] = item; }
+            public fn consume(self) -> Int { 1 }
+        }
+    "#)];
+    for (body, accepted) in [
+        ("fn f(a: &[Int; 2]) -> Int { a.choose(7) }", true),
+        ("fn f(a: &mut [Bool; 3]) { a.overwrite(true); }", true),
+        ("fn f(a: &[Int; 0]) -> Bool { a.choose(true) }", false),
+        ("fn f(a: &[Bool; 2]) -> Int { a.choose(true) }", false),
+        ("fn f(a: &[Int; 2]) { a.overwrite(1); }", false),
+        ("fn f(a: [Int; 2]) -> Int { a.consume() }", false),
+    ] {
+        let errors = check(&format!("mount demo.slices.*; {body}"), &modules);
+        assert_eq!(errors.is_empty(), accepted, "{body}: {errors:?}");
+    }
+}
+
+#[test]
 fn structural_method_mounts_refuse_conflicts_and_incompatible_carriers() {
     let generic = "implement<T> [T] { public fn stamp(&self) -> Int { 1 } }";
     let numbers = "implement [Int] { public fn numeric(&self) -> Int { 1 } }";

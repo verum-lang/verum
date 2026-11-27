@@ -29,6 +29,7 @@
     lifecycle: Lifecycle.Definition
 )
 module core.math.integers;
+mount core.collections.slice.*;
 
 // =============================================================================
 // Division Modes

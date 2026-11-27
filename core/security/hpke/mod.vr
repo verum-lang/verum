@@ -62,6 +62,7 @@
     lifecycle: Lifecycle.Definition
 )
 module core.security.hpke;
+mount core.collections.slice.*;
 
 mount core.collections.list.{List};
 mount core.security.ecc.x25519.{
