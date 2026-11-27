@@ -96,6 +96,7 @@ pub mod encoding;
 pub mod reachability;
 pub mod serialize;
 pub mod signal_watch;
+pub mod unicode_category;
 mod source_signature_codec;
 mod declaration_bindings_codec;
 pub mod source_declaration_integrity;

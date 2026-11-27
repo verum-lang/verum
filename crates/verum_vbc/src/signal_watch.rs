@@ -25,20 +25,6 @@ impl SignalWatchOp {
         }
     }
 
-    /// ABI for a source-less declaration; matching register widths alone is insufficient.
-    pub fn accepts_declaration(self, decl: &crate::module::FunctionDescriptor) -> bool {
-        matches!(decl.params.as_slice(), [param] if self.accepts_signature(Some(&param.type_ref), Some(&decl.return_type)))
-    }
-
-    /// Both the source producer and consumers of decoded VBC enforce the ABI.
-    pub fn accepts_signature(
-        self,
-        arg: Option<&crate::types::TypeRef>,
-        ret: Option<&crate::types::TypeRef>,
-    ) -> bool {
-        let int = crate::types::TypeRef::Concrete(crate::types::TypeId::INT);
-        arg == Some(&int) && ret == Some(&int)
-    }
     /// Refuse unrecognized operations, including on the wire.
     pub fn decode(byte: u8) -> Option<Self> {
         match byte {

@@ -1293,13 +1293,13 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                 // from instructions or a private symbol supplied by the caller.
                 if let Some(intr) = func_desc.intrinsic_name.and_then(|id| vbc_module.strings.get(id))
                     .and_then(verum_vbc::intrinsics::lookup_intrinsic)
-                    && let verum_vbc::intrinsics::registry::CodegenStrategy::LinuxSignal(op) = intr.intrinsic.strategy
+                    && intr.intrinsic.unary_opcode_signature().is_some()
                 {
-                    if !op.accepts_declaration(func_desc) {
-                        return Err(LlvmLoweringError::TypeLowering(format!("{} requires (Int) -> Int", intr.intrinsic.name).into()));
+                    if let Some(message) = intr.intrinsic.unary_opcode_declaration_error(func_desc) {
+                        return Err(LlvmLoweringError::TypeLowering(message));
                     }
                     let body = verum_vbc::intrinsics::expand::expand_intrinsic_wrapper(intr.intrinsic)
-                        .ok_or_else(|| LlvmLoweringError::internal("missing signal opcode expansion"))?;
+                        .ok_or_else(|| LlvmLoweringError::internal("missing unary opcode expansion"))?;
                     let mut desc = func_desc.clone();
                     desc.register_count = body.register_count;
                     self.lower_vbc_function(vbc_module, &VbcFunction::new(desc, body.instructions))?;

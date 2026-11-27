@@ -417,6 +417,10 @@ fn expand_sequence(
     byte_width: u8,
 ) -> bool {
     match seq {
+        InlineSequenceId::CharGeneralCategory => {
+            let [scalar] = args else { return false };
+            e.emit(crate::unicode_category::instruction(dest, *scalar));
+        }
         InlineSequenceId::ListStorageRead
         | InlineSequenceId::ListStorageWrite
         | InlineSequenceId::ListStorageMove

@@ -38511,7 +38511,10 @@ impl VbcCodegen {
 
             // Unicode character category
             InlineSequenceId::CharGeneralCategory => {
-                self.emit_intrinsic_library_call("verum_char_general_category", args, dest)?;
+                let [scalar] = args else {
+                    return Err(CodegenError::unsupported_expr("char_general_category requires one Char"));
+                };
+                self.ctx.emit(crate::unicode_category::instruction(dest, *scalar));
             }
 
             // Global allocator
@@ -41719,10 +41722,6 @@ impl VbcCodegen {
             // Char Operations → CharExtended (0x2B)
             "verum_utf8_decode_char" => self.ctx.emit(Instruction::CharExtended {
                 sub_op: CharSubOpcode::DecodeUtf8 as u8,
-                operands: encode_operands(dest, args),
-            }),
-            "verum_char_general_category" => self.ctx.emit(Instruction::CharExtended {
-                sub_op: CharSubOpcode::GeneralCategory as u8,
                 operands: encode_operands(dest, args),
             }),
             "verum_char_is_alphabetic" => self.ctx.emit(Instruction::CharExtended {

@@ -1481,11 +1481,18 @@ fn try_dispatch_intrinsic_function(
                     ),
                 });
             }
+            if let Some(message) = intrinsic.unary_opcode_declaration_error(descriptor) {
+                return Err(InterpreterError::InvalidBytecode {
+                    pc: state.pc() as usize, message: message.into_string(),
+                });
+            }
+            if matches!(intrinsic.strategy, crate::intrinsics::registry::CodegenStrategy::InlineSequence(
+                crate::intrinsics::registry::InlineSequenceId::CharGeneralCategory))
+            {
+                let arg = state.registers.get(caller_base, args_start);
+                return super::char_extended::general_category(arg, state.pc() as usize).map(Some);
+            }
             if let crate::intrinsics::registry::CodegenStrategy::LinuxSignal(op) = intrinsic.strategy {
-                if !op.accepts_declaration(descriptor) {
-                    return Err(InterpreterError::InvalidBytecode { pc: state.pc() as usize,
-                        message: format!("intrinsic '{name}' requires (Int) -> Int") });
-                }
                 let arg = state.registers.get(caller_base, args_start);
                 return state.execute_signal_watch(op, arg).map(Some);
             }

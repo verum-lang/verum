@@ -121,15 +121,15 @@ the wrong base (perhaps `'A'` instead of `'a'`, or a stale offset).
 **Action**: read core/text/char.vr:251–268 carefully; one-line fix
 likely.
 
-### §D — `Char.general_category` misroutes
-**Symptom**: `'a'.general_category()` does not return `GeneralCategory.Ll`.
-Same for 'A' → Lu, '5' → Nd, ' ' → Zs.
-**Root cause hypothesis**: variant-tag stability under per-file
-compilation (MEMORY §22). The variant returned at construction time
-inside `general_category()` does not match the variant tag observed at
-the call-site `is GeneralCategory.Ll` check. Cross-pollution across
-test files compiled in the same archive.
-**Action**: shares root with task #22 — closes when that closes.
+### §D — Unicode general category
+
+The raw `char_general_category(Char) -> Int` operation reads the Unicode 17.0
+category code. The public `Char.general_category()` method maps that code to
+the variant declared in `core.text.char.GeneralCategory`. Earlier execution
+looked up a bare enum name in the module and classified only selected ranges.
+The source and bytecode regression covers all scalar categories in the VM and
+the native backend, including a second module declaring its own
+`GeneralCategory`. [Unicode data](https://www.unicode.org/Public/17.0.0/ucd/extracted/DerivedGeneralCategory.txt)
 
 ### §E — `AnyChar.matches` panics on Iterator.next dispatch
 **Symptom**: `char_any_of(&['a','b']).matches('a')` panics with

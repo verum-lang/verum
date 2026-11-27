@@ -1356,6 +1356,41 @@ pub enum IntrinsicCallBound {
 }
 
 impl Intrinsic {
+    /// Exact scalar types for operations with callable VBC wrappers.
+    pub fn unary_opcode_signature(&self) -> Option<(crate::types::TypeId, crate::types::TypeId)> {
+        use crate::types::TypeId;
+        match self.strategy {
+            CodegenStrategy::LinuxSignal(_) => Some((TypeId::INT, TypeId::INT)),
+            CodegenStrategy::InlineSequence(InlineSequenceId::CharGeneralCategory) =>
+                Some((TypeId::CHAR, TypeId::INT)),
+            _ => None,
+        }
+    }
+
+    /// Check the producer or decoded callable against the selected opcode declaration.
+    pub fn unary_opcode_signature_error(
+        &self,
+        parameter: Option<&crate::types::TypeRef>,
+        result: Option<&crate::types::TypeRef>,
+    ) -> Option<verum_common::Text> {
+        use crate::types::TypeRef;
+        let (arg, ret) = self.unary_opcode_signature()?;
+        (parameter != Some(&TypeRef::Concrete(arg)) || result != Some(&TypeRef::Concrete(ret)))
+            .then(|| format!("{} requires ({}) -> {}", self.name,
+                arg.well_known_name().unwrap(), ret.well_known_name().unwrap()).into())
+    }
+
+    /// Validate arity as well as parameter and result identities on the wire.
+    pub fn unary_opcode_declaration_error(
+        &self, declaration: &crate::module::FunctionDescriptor,
+    ) -> Option<verum_common::Text> {
+        let parameter = match declaration.params.as_slice() {
+            [arg] => Some(&arg.type_ref),
+            _ => None,
+        };
+        self.unary_opcode_signature_error(parameter, Some(&declaration.return_type))
+    }
+
     /// Source operand installed as a complete owned value by a memory operation.
     /// The exchange's first operand is the destination reference.
     pub(crate) fn stored_value_operand(&self) -> Option<usize> {
@@ -8881,10 +8916,10 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         category: IntrinsicCategory::Char,
         hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval],
         param_count: 1,  // char
-        return_count: 1, // category enum value
+        return_count: 1, // Unicode general-category code (Int)
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::CharGeneralCategory),
         mlir_op: None,
-        doc: "Get Unicode general category of character",
+        doc: "Get the Unicode general-category code of a character",
     },
     // =========================================================================
     // Float32 Intrinsics

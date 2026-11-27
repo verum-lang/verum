@@ -197,7 +197,39 @@ implement Char {
 
     /// Get Unicode general category.
     public fn general_category(self) -> GeneralCategory {
-        char_general_category(self)
+        match char_general_category(self) {
+            0 => GeneralCategory.Lu,
+            1 => GeneralCategory.Ll,
+            2 => GeneralCategory.Lt,
+            3 => GeneralCategory.Lm,
+            4 => GeneralCategory.Lo,
+            5 => GeneralCategory.Mn,
+            6 => GeneralCategory.Mc,
+            7 => GeneralCategory.Me,
+            8 => GeneralCategory.Nd,
+            9 => GeneralCategory.Nl,
+            10 => GeneralCategory.No,
+            11 => GeneralCategory.Pc,
+            12 => GeneralCategory.Pd,
+            13 => GeneralCategory.Ps,
+            14 => GeneralCategory.Pe,
+            15 => GeneralCategory.Pi,
+            16 => GeneralCategory.Pf,
+            17 => GeneralCategory.Po,
+            18 => GeneralCategory.Sm,
+            19 => GeneralCategory.Sc,
+            20 => GeneralCategory.Sk,
+            21 => GeneralCategory.So,
+            22 => GeneralCategory.Zs,
+            23 => GeneralCategory.Zl,
+            24 => GeneralCategory.Zp,
+            25 => GeneralCategory.Cc,
+            26 => GeneralCategory.Cf,
+            27 => GeneralCategory.Cs,
+            28 => GeneralCategory.Co,
+            29 => GeneralCategory.Cn,
+            _ => unreachable(),
+        }
     }
 
     /// Check if this is a valid Unicode scalar value.

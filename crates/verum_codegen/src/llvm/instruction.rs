@@ -53,7 +53,7 @@ mod field_carrier;
 /// The block is deliberately left UNTERMINATED: `verum_panic` never returns,
 /// so the fallthrough is dead code, and not emitting `unreachable` keeps the
 /// rest of the enclosing VBC basic block lowerable into well-formed IR.
-fn emit_runtime_abort(ctx: &FunctionContext<'_, '_>, message: &str, name: &str) -> Result<()> {
+pub(super) fn emit_runtime_abort(ctx: &FunctionContext<'_, '_>, message: &str, name: &str) -> Result<()> {
     let message_ptr = ctx.builder().build_global_string_ptr(message, name).or_llvm_err()?;
     let length = ctx.llvm_context().i64_type().const_int(message.len() as u64, false);
     emit_panic_bytes(ctx, message_ptr.as_pointer_value(), length)
@@ -3159,7 +3159,7 @@ fn lower_instruction_impl<'ctx>(
                 // below compares POINTERS: two equal unit variants from
                 // separate allocations came out unequal at Tier-1 only
                 // ('A' and 'Z' are both Lu, but
-                // char_general_category('A') == char_general_category('Z')
+                // 'A'.general_category() == 'Z'.general_category()
                 // was false — the CmpI twin of the aot-tuple-eq class).
                 // Route marked heap operands through verum_generic_eq, the
                 // same ONE structural authority CmpG uses.
@@ -29039,6 +29039,25 @@ fn lower_char_extended<'ctx>(
     sub_op: u8,
     operands: &[u8],
 ) -> Result<()> {
+    if verum_vbc::instruction::CharSubOpcode::from_byte(sub_op)
+        == Some(verum_vbc::instruction::CharSubOpcode::GeneralCategory)
+    {
+        let [dst, src] = exact_operand_registers(operands)?;
+        let scalar = ctx.get_register(src.0)?;
+        // A Char crosses a call in its declared carrier and its opcode producers
+        // use a 32-bit code point or a full register word.
+        let scalar_carrier = matches!(scalar, BasicValueEnum::PointerValue(_))
+            || matches!(scalar, BasicValueEnum::IntValue(word) if matches!(word.get_type().get_bit_width(), 32 | 64));
+        if !scalar_carrier || ctx.is_float_register(src.0) {
+            return Err(LlvmLoweringError::InvalidType(
+                "Unicode general category requires a Char scalar carrier".into(),
+            ));
+        }
+        let ch = as_i64(ctx, scalar, "category_scalar")?;
+        let code = super::unicode_data::emit_general_category(ctx, ch)?;
+        ctx.set_register(dst.0, code.into());
+        return Ok(());
+    }
     // Character classification: all return 0 or 1 in i64
     if operands.len() < 2 {
         return Ok(());
@@ -29717,100 +29736,6 @@ fn lower_char_extended<'ctx>(
                 return Ok(());
             }
             i64_ty.const_zero()
-        }
-        0x53 => {
-            // GeneralCategory (CHAR-CATEGORY-AOT-VARIANT-1).
-            //
-            // Pre-fix this returned a hardcoded 0 ("unknown category"),
-            // so *every* char mapped to the Lu tag — `'A'.general_category()
-            // == 'a'.general_category()` at Tier-1 (interp returns distinct
-            // Lu/Ll variants). Two roots, both closed here:
-            //
-            //   1. The category tag was never computed. Now emitted inline
-            //      (`emit_general_category`) mirroring the interpreter's
-            //      exact ASCII table + non-ASCII range cascade.
-            //   2. The result was a bare i64, not a `GeneralCategory`
-            //      variant. Tier-0's `GeneralCategory` handler wraps the
-            //      tag in a unit variant so `is`/`==`/`!=` see a real tag
-            //      payload; Tier-1 must do the same or the `is` operator
-            //      and structural equality diverge across tiers.
-            let tag = super::unicode_data::emit_general_category(ctx, ch)?;
-
-            // Resolve `GeneralCategory`'s TypeId (mirrors the interpreter's
-            // `lookup_type_id_by_name`). Absent (e.g. precompile before the
-            // user-side import) → fall back to the raw i64 tag, exactly as
-            // Tier-0 does.
-            let gc_type_id: Option<u32> = ctx.vbc_module().and_then(|m| {
-                m.types.iter().find_map(|d| {
-                    if m.get_string(d.name)
-                        .map(|s| s == "GeneralCategory")
-                        .unwrap_or(false)
-                    {
-                        Some(d.id.0)
-                    } else {
-                        None
-                    }
-                })
-            });
-
-            if let Some(type_id) = gc_type_id {
-                let runtime = RuntimeLowering::new(ctx.llvm_context());
-                // Unit variant: header + tag word, no payload. The tag
-                // slot is overwritten below with the runtime value.
-                let variant_ptr =
-                    runtime.lower_make_variant(ctx.builder(), ctx.get_module(), 0, 0)?;
-                let i32_ty = ctx.types().context().i32_type();
-                // Stamp type_id (u32 @0) so `verum_generic_eq` reads the
-                // tag rather than short-circuiting on a zero header.
-                ctx.builder()
-                    .build_store(variant_ptr, i32_ty.const_int(type_id as u64, false))
-                    .or_llvm_err()?;
-                // Stamp size@12 = 8 (the tag word) — verum_generic_eq's
-                // structural gate requires size != 0 (the aot-tuple-eq
-                // precedent, 84606e1f6); without it two EQUAL unit
-                // variants fell to the pointer-compare ret_neq:
-                // 'A' == 'Z' was false while both are Lu
-                // (test_char_general_category_uppercase_letters_consistent).
-                // With size=8 the structural loop compares exactly the
-                // tag slot.
-                let size_ptr = unsafe {
-                    ctx.builder()
-                        .build_in_bounds_gep(
-                            ctx.types().i8_type(),
-                            variant_ptr,
-                            &[i64_ty.const_int(12, false)],
-                            "gc_size_ptr",
-                        )
-                        .or_llvm_err()?
-                };
-                ctx.builder()
-                    .build_store(size_ptr, i32_ty.const_int(8, false))
-                    .or_llvm_err()?;
-                // Store the runtime tag (i64→i32) at VARIANT_TAG_OFFSET.
-                // SAFETY: in-bounds GEP within the just-allocated variant.
-                let tag_ptr = unsafe {
-                    ctx.builder()
-                        .build_in_bounds_gep(
-                            ctx.types().i8_type(),
-                            variant_ptr,
-                            &[i64_ty
-                                .const_int(RuntimeLowering::VARIANT_TAG_OFFSET, false)],
-                            "gc_tag_ptr",
-                        )
-                        .or_llvm_err()?
-                };
-                let tag_i32 = ctx
-                    .builder()
-                    .build_int_truncate(tag, i32_ty, "gc_tag32")
-                    .or_llvm_err()?;
-                ctx.builder().build_store(tag_ptr, tag_i32).or_llvm_err()?;
-                ctx.set_register(dst, variant_ptr.into());
-                ctx.mark_variant_register(dst);
-                ctx.set_obj_alloc_size(dst, RuntimeLowering::OBJECT_HEADER_SIZE + 8);
-            } else {
-                ctx.set_register(dst, tag.into());
-            }
-            return Ok(());
         }
         _ => {
             // Unknown char op: return input unchanged

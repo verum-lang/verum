@@ -1888,19 +1888,8 @@ impl IntrinsicLowering {
                 region: None,
             }),
 
-            // Unicode character classification
-            InlineSequenceId::CharGeneralCategory => {
-                self.emit(MlirOp {
-                    name: "llvm.call".to_string(),
-                    attrs: vec![MlirAttr {
-                        name: "callee".to_string(),
-                        value: MlirAttrValue::String("__verum_char_general_category".to_string()),
-                    }],
-                    result_types: vec![MlirType::I32], // UnicodeCategory enum
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
+            // The VBC CharExtended operation owns the Unicode table and its target lowering.
+            InlineSequenceId::CharGeneralCategory => None,
 
             // Global allocator access
             InlineSequenceId::GlobalAllocator => {

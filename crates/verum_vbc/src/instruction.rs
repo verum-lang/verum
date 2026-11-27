@@ -8986,7 +8986,7 @@ pub enum CharSubOpcode {
 
     /// Get Unicode general category.
     ///
-    /// Returns the Unicode general category (Lu, Ll, Nd, etc.).
+    /// Reads a Unicode scalar and writes its general-category code as an Int.
     /// Format: `dst:reg, src:reg`
     GeneralCategory = 0x53,
 }

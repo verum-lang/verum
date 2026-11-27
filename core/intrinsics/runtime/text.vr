@@ -177,7 +177,7 @@ public fn char_to_uppercase(ch: Char) -> Char;
 @inline(always)
 public fn char_to_lowercase(ch: Char) -> Char;
 
-/// Get Unicode general category of character.
+/// Unicode general-category code in 0..30, from Lu (0) through Cn (29).
 @intrinsic("char_general_category")
 public fn char_general_category(ch: Char) -> Int;
 

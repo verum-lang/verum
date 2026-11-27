@@ -10985,10 +10985,12 @@ impl VbcCodegen {
             func, &signature_scope, &dense, &Self::ordered_generic_param_ids(&dense, &shadow),
         );
         if let Some(intr) = intrinsic_name.as_deref().and_then(crate::intrinsics::lookup_intrinsic)
-            && let crate::intrinsics::registry::CodegenStrategy::LinuxSignal(op) = intr.intrinsic.strategy
-            && !(semantic_params.len() == 1 && op.accepts_signature(semantic_params[0].as_ref(), return_type.as_ref()))
+            && let Some(message) = intr.intrinsic.unary_opcode_signature_error(
+                match semantic_params.as_slice() { [arg] => arg.as_ref(), _ => None },
+                return_type.as_ref(),
+            )
         {
-            return Err(CodegenError::unsupported_expr(format!("{} requires (Int) -> Int", intr.intrinsic.name)));
+            return Err(CodegenError::unsupported_expr(message));
         }
         self.record_source_callable_bounds(id, func, &signature_scope, &semantic_params)?;
         self.ctx.semantic_fn_params.insert(id, semantic_params);
