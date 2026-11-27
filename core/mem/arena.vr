@@ -316,7 +316,7 @@ implement GenerationalArena {
         } else {
             // Round up to alignment boundary
             let mask = ARENA_ALIGNMENT - 1;
-            (capacity + mask) & (!mask)
+            (capacity + mask) & (~mask)
         };
 
         let buf = __alloc_zeroed_raw(actual_cap, 8);
@@ -339,7 +339,7 @@ implement GenerationalArena {
             ARENA_ALIGNMENT
         } else {
             let mask = ARENA_ALIGNMENT - 1;
-            (cap + mask) & (!mask)
+            (cap + mask) & (~mask)
         };
 
         let buf = __alloc_zeroed_raw(actual_cap, 8);
@@ -390,7 +390,7 @@ implement GenerationalArena {
         // bound is local-and-inspectable.
         let mask = ARENA_ALIGNMENT - 1;
         let aligned_offset = match self.used.checked_add(mask) {
-            Maybe.Some(v) => v & (!mask),
+            Maybe.Some(v) => v & (~mask),
             Maybe.None    => return 0,
         };
         let end = match aligned_offset.checked_add(size) {
@@ -492,7 +492,7 @@ implement GenerationalArena {
         let align = if alignment < ARENA_ALIGNMENT { ARENA_ALIGNMENT } else { alignment };
         let mask = align - 1;
         let aligned_offset = match self.used.checked_add(mask) {
-            Maybe.Some(v) => v & (!mask),
+            Maybe.Some(v) => v & (~mask),
             Maybe.None    => return 0,
         };
         let end = match aligned_offset.checked_add(size) {
