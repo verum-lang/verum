@@ -1275,6 +1275,7 @@ public const SO_SNDTIMEO: Int = 21;
 public const SO_ERROR: Int = 4;
 public const SO_BROADCAST: Int = 6;
 public const SO_SNDBUF: Int = 7;
+public const SO_PEERCRED: Int = 17;
 public const SO_RCVBUF: Int = 8;
 
 /// TCP options.
@@ -1579,14 +1580,20 @@ public fn getsockopt(
     optval: &mut [Byte],
     optlen: &mut UInt32
 ) -> Result<(), OSError> {
+    if (*optlen as Int) > optval.len() {
+        return Result.Err(OSError.from_code(EINVAL));
+    }
+    // syscall_raw accepts machine words, so it cannot marshal a managed
+    // reference as an in-out socklen_t. Supply its native bytes explicitly.
+    let mut length: [Byte; 4] = (*optlen).to_ne_bytes();
     let result = unsafe {
         syscall_raw(
             SYS_GETSOCKOPT,
             fd.as_raw(),
             level,
             optname,
-            optval.as_ptr() as Int,
-            optlen as &mut UInt32 as Int,
+            optval.as_mut_ptr() as Int,
+            (&mut length[..]).as_mut_ptr() as Int,
             0
         )
     };
@@ -1594,6 +1601,7 @@ public fn getsockopt(
     if result < 0 {
         Result.Err(OSError.from_code(-result as Int))
     } else {
+        *optlen = UInt32.from_ne_bytes(length);
         Result.Ok(())
     }
 }
