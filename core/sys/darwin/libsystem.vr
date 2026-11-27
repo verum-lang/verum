@@ -61,9 +61,7 @@ extern {
     /// Three different values from one constant is the proof it was read
     /// from the stack and not mis-converted.
     ///
-    /// `oflag` is `int` (Int32); the mode the caller passes is `mode_t`,
-    /// `uint32_t` on modern Darwin, and is promoted to `int` in the
-    /// variadic tail like every integer argument there.
+    /// Darwin mode_t is UInt16 and C promotes it to int in the variadic tail.
     /// Return is the new file descriptor (`int`, Int32).
     public fn open(path: &Byte, oflag: Int32, ...) -> Int32;
 
@@ -1146,7 +1144,7 @@ public const F_SETOWN: Int = 6;
 public const F_GETLK: Int = 7;
 public const F_SETLK: Int = 8;
 public const F_SETLKW: Int = 9;
-/// `fcntl(fd, F_FULLFSYNC, 0)` — Darwin-specific command that forces the
+/// `fcntl(fd, F_FULLFSYNC)` — Darwin-specific command that forces the
 /// disk to flush its write cache to persistent media. A plain `fsync`
 /// on Darwin only flushes the kernel's dirty-page list to the disk,
 /// which is insufficient for crash-safety on consumer-grade SSDs where
@@ -1358,7 +1356,7 @@ public fn safe_mmap(
     fd: FileDesc,
     offset: Int,
 ) -> Result<&unsafe Byte, OSError> {
-    let raw_result = unsafe { mmap_ffi(addr, len, prot.to_unix_flags(), flags.to_unix_flags(), fd.0, offset) };
+    let raw_result = unsafe { mmap_ffi(addr, len, prot.to_unix_flags() as Int32, flags.to_unix_flags() as Int32, fd.0 as Int32, offset) };
     // MAP_FAILED is (void *)-1 which is -1 as Int on 64-bit
     if raw_result == -1 {
         let err = errno();
@@ -1378,7 +1376,7 @@ public fn safe_mmap_raw(
     fd: FileDesc,
     offset: Int,
 ) -> Result<Int, OSError> {
-    let result = unsafe { mmap_ffi(addr, len, prot.to_unix_flags(), flags.to_unix_flags(), fd.0, offset) };
+    let result = unsafe { mmap_ffi(addr, len, prot.to_unix_flags() as Int32, flags.to_unix_flags() as Int32, fd.0 as Int32, offset) };
     if result == -1 {
         let err = errno();
         Result.Err(OSError.new(err, errno_to_message(err)))
@@ -1614,21 +1612,21 @@ public fn safe_clock_gettime(clock_id: Int) -> Result<DarwinTimespec, OSError> {
 
 /// Open a file using the start of a contiguous, NUL-terminated native path.
 public fn safe_open_raw(path: &Byte, flags: Int, mode: Int) -> Result<FileDesc, OSError> {
-    let result = unsafe { open(path, flags, mode) };
+    let result = unsafe { open(path, flags as Int32, mode as UInt16 as Int32) };
     if result < 0 {
         let err = errno();
         Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
-        Result.Ok(FileDesc(result))
+        Result.Ok(FileDesc(result as Int))
     }
 }
 
 /// Open a file using its complete byte path.
 public fn safe_open(path: &[Byte], flags: Int, mode: Int) -> Result<FileDesc, OSError> {
     // Copy path and null-terminate
-    let mut path_buf: [Byte; 4096] = [0 as Byte; 4096];
+    let mut path_buf: [Byte; 4096] = [0; 4096];
     copy_path_nul(&mut path_buf, path)?;
-    safe_open_raw((&path_buf[..]).as_ptr() as &Byte, flags, mode)
+    unsafe { safe_open_raw(path_buf[..].as_ptr() as &Byte, flags, mode) }
 }
 
 /// Seek file (safe wrapper)
@@ -1659,7 +1657,7 @@ public fn safe_fstat(fd: FileDesc, stat_buf: &mut DarwinStat) -> Result<(), OSEr
 /// cross-platform `core.sys.common.full_fsync` dispatcher instead of
 /// calling this directly.
 public fn safe_full_fsync(fd: FileDesc) -> Result<(), OSError> {
-    let result = unsafe { fcntl(fd.0, F_FULLFSYNC, 0) };
+    let result = unsafe { fcntl(fd.0 as Int32, F_FULLFSYNC as Int32) };
     if result < 0 {
         let err = errno();
         Result.Err(OSError.new(err, errno_to_message(err)))
@@ -2440,7 +2438,7 @@ public fn safe_getpeername(fd: FileDesc, addr_buf: &mut [Byte], addr_len: &mut U
 
 /// File control operations (safe wrapper)
 public fn safe_fcntl(fd: FileDesc, cmd: Int, arg: Int) -> Result<Int, OSError> {
-    let result = unsafe { fcntl(fd.0, cmd, arg) };
+    let result = unsafe { fcntl(fd.0 as Int32, cmd as Int32, arg) };
     if result < 0 {
         let err = errno();
         Result.Err(OSError.new(err, errno_to_message(err)))

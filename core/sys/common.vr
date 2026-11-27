@@ -337,7 +337,7 @@ implement MemProt {
     const READ_WRITE_EXEC: MemProt = MemProt { read: true, write: true, exec: true };
 
     /// Convert to Unix PROT_* flags.
-    fn to_unix_flags(&self) -> Int {
+    pub(in core.sys) fn to_unix_flags(&self) -> Int {
         let mut flags = 0;
         if self.read { flags = flags | 1; }   // PROT_READ
         if self.write { flags = flags | 2; }  // PROT_WRITE
@@ -412,7 +412,7 @@ implement MapFlags {
     };
 
     /// Convert to Unix MAP_* flags.
-    fn to_unix_flags(&self) -> Int {
+    pub(in core.sys) fn to_unix_flags(&self) -> Int {
         let mut flags = 0;
         if self.shared { flags = flags | 0x01; }        // MAP_SHARED
         if self.is_private { flags = flags | 0x02; }    // MAP_PRIVATE
