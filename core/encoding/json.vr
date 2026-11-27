@@ -589,7 +589,7 @@ fn parse_object(bytes: &[Byte], p: &mut Parser) -> Result<JsonValue, JsonError> 
         let key = parse_string_raw(bytes, p)?;
         // Compare after escape decoding, before insertion can discard evidence.
         // Each object owns its map, so equal keys in sibling objects are valid.
-        if p.reject_duplicate_keys && fields.contains_key(&key) {
+        if p.reject_duplicate_keys && fields.get_key_value(&key) is Maybe.Some(_) {
             return Result.Err(json_error_at(
                 key_position, DuplicateKey, f"duplicate object key: {key}",
             ));

@@ -242,6 +242,10 @@ fn test_strict_rejects_decoded_duplicate_and_preserves_legacy_parse() {
     let failure = strict_error(input.as_bytes(), input.len());
     assert(failure.kind is JsonErrorKind.DuplicateKey);
     assert_eq(failure.byte_offset, 9);
+    let malformed = "{\"key\":1,\"\\u006bey\":?}";
+    let repeated = strict_error(malformed.as_bytes(), malformed.len());
+    assert(repeated.kind is JsonErrorKind.DuplicateKey);
+    assert_eq(repeated.byte_offset, 9);
     let value = parse(&input).unwrap();
     assert_eq(value.as_object().unwrap().get("key").unwrap().as_int().unwrap(), 2);
     let siblings = "[{\"key\":1},{\"key\":2}]";
