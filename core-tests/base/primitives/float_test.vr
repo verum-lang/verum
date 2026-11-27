@@ -1042,3 +1042,13 @@ fn negation_preserves_ieee_signed_zero_across_aliases() {
     assert_eq(core.intrinsics.float.f64_to_bits(negative), 0x8000_0000_0000_0000_u64);
     assert_eq(core.intrinsics.float.f64_to_bits(twice), 0_u64);
 }
+
+@test
+fn test_precision_across_float_widths() {
+    let native: Float = 3.5;
+    let wide: Float64 = -2.25;
+    let narrow: Float32 = 3.5 as Float32;
+    assert_eq(native.to_precision(2), "3.50");
+    assert_eq(wide.to_precision(2), "-2.25");
+    assert_eq(narrow.to_precision(2), "3.50");
+}
