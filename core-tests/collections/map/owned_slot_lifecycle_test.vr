@@ -249,7 +249,6 @@ fn test_vacant_entry_returns_ownership_of_the_key() {
     assert(values.len() == 0);
 }
 
-fn main() {}
 
 @test
 fn test_fallible_table_initializes_only_empty_slots() {
@@ -262,7 +261,7 @@ fn test_fallible_table_initializes_only_empty_slots() {
             table.insert(4, 21);
             let mut pairs = table.iter();
             match pairs.next() {
-                Maybe.Some(pair) => { assert(*pair.0 == 4); assert(*pair.1 == 21); }
+                Maybe.Some(pair) => { assert(pair.0 == 4); assert(pair.1 == 21); }
                 Maybe.None => panic("missing initialized entry"),
             }
         }
@@ -274,3 +273,26 @@ fn test_fallible_table_initializes_only_empty_slots() {
         _ => panic("missing capacity overflow"),
     }
 }
+
+@test
+fn test_vacant_insert_transfers_the_key_and_returns_the_attached_value() {
+    unsafe { VALUE_DROPS = 0; KEY_DROPS = 0; }
+    {
+        let mut values: Map<OwnedKey, Guard> = Map.new();
+        {
+            let vacancy = match values.entry(OwnedKey { id: 31, weight: 7 }) {
+                MapEntry.Vacant(entry) => entry,
+                MapEntry.Occupied(_) => panic("expected a vacant entry"),
+            };
+            let result = vacancy.insert(Guard { weight: 3 });
+            assert(result.weight == 3);
+        }
+        assert(values.len() == 1);
+        assert(unsafe { KEY_DROPS } == 0);
+        assert(unsafe { VALUE_DROPS } == 0);
+    }
+    assert(unsafe { KEY_DROPS } == 7);
+    assert(unsafe { VALUE_DROPS } == 3);
+}
+
+fn main() {}

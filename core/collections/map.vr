@@ -307,7 +307,10 @@ implement<K: Hash + Eq, V> VacantEntry<K, V> {
     /// Take ownership of the key.
     @inline(always)
     public fn into_key(mut self) -> K {
-        self.take_key()
+        match take(&mut self.key) {
+            Maybe.Some(key) => key,
+            Maybe.None => unreachable(),
+        }
     }
 
     fn take_key(&mut self) -> K {
@@ -318,9 +321,10 @@ implement<K: Hash + Eq, V> VacantEntry<K, V> {
     }
 
     /// Insert a value, returning mutable reference to it.
-    public fn insert(mut self, value: V) -> &mut V {
+    public fn insert(self, value: V) -> &mut V {
         let map: &mut Map<K, V> = self.map;
-        map.insert_vacant_value(self.take_key(), value, self.hash)
+        let hash = self.hash;
+        map.insert_vacant_value(self.into_key(), value, hash)
     }
 }
 

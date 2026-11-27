@@ -94,6 +94,18 @@ fn exchanging_a_value_cannot_install_a_local_loan_in_caller_storage() {
 }
 
 #[test]
+fn exchanging_with_a_type_supplied_default_preserves_an_owned_payload() {
+    let errors = diagnostics(
+        r#"type Fresh is protocol { fn fresh()->Self; };
+        type Holder<T> is { public value:T };
+        fn exchange<T>(slot:&mut T, replacement:T)->T { @intrinsic("replace",slot,replacement) }
+        fn take<T:Fresh>(slot:&mut T)->T { exchange(slot,T.fresh()) }"#,
+        "fn select<T:Fresh>(mut owned:Holder<T>)->T { take(&mut owned.value) }",
+    );
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
 fn a_borrowed_receiver_can_return_its_own_type_with_different_provenance() {
     let declaration = "type Duplicate is protocol {fn duplicate(&self)->Self;};";
     let caller = "fn receive(input:&Int)->Payload {
