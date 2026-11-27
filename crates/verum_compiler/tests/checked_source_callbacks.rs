@@ -131,3 +131,18 @@ fn a_forward_static_method_keeps_the_declaring_sum_owner() {
         assert_eq!(result.try_as_i64(), Some(73));
     }
 }
+
+#[test]
+fn h3_callback_transfers_its_owned_chunks_to_the_stream_sink() {
+    use std::path::Path;
+    use verum_compiler::{CompilationPipeline, CompilerOptions, CoreConfig, Session};
+
+    let core = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../core");
+    let mut session = Session::new(CompilerOptions {
+        num_threads: 2,
+        ..Default::default()
+    });
+    CompilationPipeline::new_core(&mut session, CoreConfig::new(core))
+        .check_core_sources(&["core.net.h3.streaming".into()])
+        .expect("type-check the complete streaming writer and exclusive sink under their declarations");
+}

@@ -59,6 +59,7 @@
 module core.net.h3.streaming;
 
 mount core.collections.list.{List};
+mount core.base.memory.{replace, swap};
 mount core.async.cancellation.{CancellationToken};
 mount core.sync.atomic.{AtomicBool, AtomicInt, MemoryOrdering};
 mount core.sync.mutex.{Mutex};
@@ -134,13 +135,32 @@ implement H3DataSink {
     ///  * `Result.Err(H3Error.SendBufferFull)` — connection-level
     ///  buffer cap exceeded; caller should slow producer.
     pub async fn write(&mut self, bytes: &[Byte]) -> Result<(), H3Error> {
+        let need = bytes.len();
+        self.reserve_credit(need).await?;
+        let mut p = self.pending.lock().unwrap_or_else(|p| p.into_inner());
+        let mut i: Int = 0;
+        while i < need { p.push(bytes[i]); i = i + 1; }
+        let _ = self.bytes_written.fetch_add(need, MemoryOrdering.AcqRel);
+        Result.Ok(())
+    }
+
+    /// The callback transfers its chunk. An empty queue can adopt its allocation.
+    async fn write_chunk(&mut self, mut chunk: List<Byte>) -> Result<(), H3Error> {
+        let need = chunk.len();
+        self.reserve_credit(need).await?;
+        let mut pending = self.pending.lock().unwrap_or_else(|p| p.into_inner());
+        enqueue_owned_chunk(&mut *pending, &mut chunk);
+        let _ = self.bytes_written.fetch_add(need, MemoryOrdering.AcqRel);
+        Result.Ok(())
+    }
+
+    async fn reserve_credit(&mut self, need: Int) -> Result<(), H3Error> {
         if self.cancelled.load(MemoryOrdering.Acquire) {
             return Result.Err(H3Error.StreamCancelled);
         }
         if self.finished.load(MemoryOrdering.Acquire) {
             return Result.Err(H3Error.WriteAfterFinish);
         }
-        let need = bytes.len();
         // Flow-control credit gate. The integration layer's tx pump
         // is the producer that bumps `credit` on inbound
         // MAX_STREAM_DATA; here we await until at least `need` is
@@ -159,12 +179,8 @@ implement H3DataSink {
             // is < 1 RTT after MAX_STREAM_DATA arrives.
             core.async.timer.sleep_ms(5).await;
         }
-        // Decrement credit + push to the per-stream send queue.
+        // Reserve the credit before publishing any DATA bytes.
         let _ = self.credit.fetch_sub(need, MemoryOrdering.AcqRel);
-        let mut p = self.pending.lock().unwrap_or_else(|p| p.into_inner());
-        let mut i: Int = 0;
-        while i < bytes.len() { p.push(bytes[i]); i = i + 1; }
-        let _ = self.bytes_written.fetch_add(need, MemoryOrdering.AcqRel);
         Result.Ok(())
     }
 
@@ -224,6 +240,17 @@ implement H3DataSink {
 
     public fn is_cancelled(&self) -> Bool {
         self.cancelled.load(MemoryOrdering.Acquire)
+    }
+}
+
+// Append in order while holding the pending queue's mutex. The first chunk
+// can become the queue by exchanging the two owned buffers.
+fn enqueue_owned_chunk(pending: &mut List<Byte>, chunk: &mut List<Byte>) {
+    if chunk.is_empty() { return; }
+    if pending.is_empty() {
+        swap(pending, chunk);
+    } else {
+        pending.append(chunk);
     }
 }
 
@@ -361,8 +388,10 @@ implement<F: fn() -> Maybe<List<Byte>> + Send> H3StreamWriter for CallbackWriter
     async fn write_to(&mut self, sink: &mut H3DataSink) -> Result<(), H3Error> {
         loop {
             match (self.next_chunk)() {
-                Maybe.Some(chunk) => sink.write(chunk.as_slice()).await?,
-                Maybe.None        => break,
+                Maybe.Some(mut chunk) => {
+                    sink.write_chunk(replace(&mut chunk, List.new())).await?;
+                }
+                Maybe.None => break,
             }
         }
         Result.Ok(())
