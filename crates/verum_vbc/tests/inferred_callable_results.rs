@@ -72,6 +72,25 @@ fn callback_source(body: &str, result: &str) -> Text {
 }
 
 #[test]
+fn inlined_intrinsic_results_keep_their_source_type_at_indirect_calls() {
+    let source = r#"
+        @intrinsic("ctpop") fn count(value: Int) -> Int;
+        fn plus_one(value: Int) -> Int { value + 1 }
+        fn probe() -> Int {
+            let bits = count(15);
+            let callback = plus_one;
+            callback(bits) + callback(bits)
+        }
+    "#;
+    for module in modules(source) {
+        let entry = module.find_function_by_name("probe").unwrap();
+        let result = Interpreter::try_new_validated(module.into()).unwrap()
+            .execute_function(entry).unwrap();
+        assert_eq!(result.try_as_i64(), Some(10));
+    }
+}
+
+#[test]
 fn nonempty_unit_callbacks_preserve_their_complete_contract() {
     for body in [
         "let mut count = 0; count = count + 1;",

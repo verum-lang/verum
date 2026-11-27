@@ -8035,7 +8035,7 @@ impl VbcCodegen {
             && let Some(intrinsic_info) = lookup_intrinsic(intrinsic_name)
             && !intrinsic_info.is_runtime_call()
         {
-            return self.compile_imported_intrinsic_call(&intrinsic_info, args, func_info.return_type.as_ref());
+            return self.compile_declared_intrinsic_call(&intrinsic_info, &func_info, args, type_args, None);
         }
         // Intrinsic declared but not in registry — fall through to compile function body.
         // This allows @intrinsic functions with fallback bodies (e.g., process_spawn)
@@ -18484,7 +18484,10 @@ impl VbcCodegen {
             && let Some(intrinsic_info) = lookup_intrinsic(intrinsic_name)
             && !intrinsic_info.is_runtime_call()
         {
-            return self.compile_imported_intrinsic_call(&intrinsic_info, args, func_info.return_type.as_ref());
+            let receiver = owner.map(|receiver| match receiver {
+                FactoryReceiver::ExplicitSelf(ty) | FactoryReceiver::Enclosing(ty) => ty,
+            });
+            return self.compile_declared_intrinsic_call(&intrinsic_info, func_info, args, type_args, receiver);
         }
 
         // Check argument count
@@ -36296,6 +36299,28 @@ impl VbcCodegen {
             self.ctx.emit(Instruction::LoadUnit { dst: dest });
         }
         Ok(Some(dest))
+    }
+
+    /// An inlined declared call has no Call instruction from which a later
+    /// binding could recover its source result. Preserve the selected
+    /// declaration with its actual arguments just as for an ordinary call.
+    fn compile_declared_intrinsic_call(
+        &mut self,
+        intrinsic: &IntrinsicInfo,
+        function: &FunctionInfo,
+        args: &verum_common::List<Expr>,
+        type_args: &[verum_ast::ty::GenericArg],
+        receiver: Option<&crate::types::TypeRef>,
+    ) -> CodegenResult<Option<Reg>> {
+        let value = self.compile_imported_intrinsic_call(intrinsic, args, function.return_type.as_ref())?;
+        if value.is_some() && let Some(span) = self.ctx.selected_call_result_span
+            && let Some(ty) = self.source_call_result(
+                function, receiver, type_args, args, self.ctx.expected_value_type.as_ref(), 0,
+            )
+        {
+            self.ctx.declared_result_types.insert(span, Some(ty));
+        }
+        Ok(value)
     }
 
     fn compile_imported_intrinsic_call(
