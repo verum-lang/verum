@@ -8124,6 +8124,17 @@ impl VbcCodegen {
             return self.compile_record_call_form(&func_name, &func_info, args, None);
         }
 
+        self.compile_resolved_function_call(&func_info, &func_name, &resolved_name, args, type_args)
+    }
+
+    fn compile_resolved_function_call(
+        &mut self,
+        func_info: &FunctionInfo,
+        func_name: &str,
+        resolved_name: &str,
+        args: &verum_common::List<Expr>,
+        type_args: &verum_common::List<verum_ast::ty::GenericArg>,
+    ) -> CodegenResult<Option<Reg>> {
         // The selected declaration governs the native ABI for every stage of
         // this call, including aliases, callbacks and reference write-back.
         let ffi_symbol = if let Some(key) = func_info.foreign_declaration.as_deref() {
@@ -8131,7 +8142,7 @@ impl VbcCodegen {
                 format!("foreign declaration `{key}` has no symbol in this module"),
             ))?)
         } else if func_info.id.0 == u32::MAX {
-            self.get_ffi_symbol_id(&resolved_name).or_else(|| self.get_ffi_symbol_id(&func_name))
+            self.get_ffi_symbol_id(resolved_name).or_else(|| self.get_ffi_symbol_id(func_name))
         } else {
             None
         };
@@ -8139,7 +8150,9 @@ impl VbcCodegen {
             .is_some_and(|symbol| symbol.signature.is_variadic);
 
         // Check argument count — allow fewer args if function has default params
-        if args.len() > func_info.param_count && !callee_is_variadic_extern {
+        if (ffi_symbol.is_some() && args.len() < func_info.param_count)
+            || (args.len() > func_info.param_count && !callee_is_variadic_extern)
+        {
             // T0723 probe. This error is the visible end of the
             // bare-simple-name clobber: a later-compiled module overwrites
             // the bare slot, and a call inside the module that OWNS a
@@ -8174,7 +8187,7 @@ impl VbcCodegen {
             return Err(CodegenError::new(CodegenErrorKind::WrongArgumentCount {
                 expected: func_info.param_count,
                 found: args.len(),
-                function: func_name.clone(),
+                function: func_name.to_owned(),
             }));
         }
         // Compile arguments into consecutive registers
@@ -8273,8 +8286,8 @@ impl VbcCodegen {
             // For array element references, compile specially using ArrayToC marshalling
             // For function callbacks, compile using CreateCallback
             let mut arg_results: Vec<Reg> = Vec::with_capacity(args.len());
-            let contexts = self.contextual_call_parameters(&func_info, type_args, args)?;
-            self.stage_selected_closure_parameters(&func_info, args, type_args);
+            let contexts = self.contextual_call_parameters(func_info, type_args, args)?;
+            self.stage_selected_closure_parameters(func_info, args, type_args);
             for (i, arg) in args.iter().enumerate() {
                 // Check if this argument is an array element reference
                 let is_array_ref = array_ref_infos.iter().any(|info| info.arg_idx == i as u8);
@@ -8284,7 +8297,7 @@ impl VbcCodegen {
                 if let Some(symbol) = ffi_symbol.filter(|_| is_array_ref) {
                     // Compile array element reference specially for FFI
                     // This marshals the array to a temporary C buffer
-                    let arg_val = self.compile_ffi_array_ref(arg, symbol, &func_name, i)?;
+                    let arg_val = self.compile_ffi_array_ref(arg, symbol, func_name, i)?;
                     arg_results.push(arg_val);
                 } else if let Some(cb_info) = callback_info {
                     // Compile function callback using CreateCallback
@@ -8387,7 +8400,7 @@ impl VbcCodegen {
                         {
                             *slot = actual.clone();
                         }
-                        self.emit_owned_call_argument(&func_info, i, arg, arg_val, actual.as_ref())?
+                        self.emit_owned_call_argument(func_info, i, arg, arg_val, actual.as_ref())?
                     };
                     arg_results.push(arg_val);
                 }
@@ -8435,7 +8448,7 @@ impl VbcCodegen {
                     return Err(CodegenError::new(CodegenErrorKind::WrongArgumentCount {
                         expected: func_info.param_count,
                         found: args.len(),
-                        function: func_name.clone(),
+                        function: func_name.to_owned(),
                     }));
                 }
             }
@@ -8619,7 +8632,7 @@ impl VbcCodegen {
                         "[bad-call->trap] resolved_name={} func_name={} ffi_lookup={} param_count={} arg_count={}",
                         resolved_name,
                         func_name,
-                        self.get_ffi_symbol_id(&func_name).is_some(),
+                        self.get_ffi_symbol_id(func_name).is_some(),
                         func_info.param_count,
                         args.len(),
                     );
@@ -18412,6 +18425,10 @@ impl VbcCodegen {
         // staged vector can never leak into an unrelated later call.
         let staged_type_args: Option<Vec<crate::types::TypeRef>> =
             self.ctx.pending_static_call_type_args.take();
+        if let Some(key) = func_info.foreign_declaration.as_deref() {
+            // Imports and qualified calls retain the provider's ABI and marshalling.
+            return self.compile_resolved_function_call(func_info, key, key, args, type_args);
+        }
         // Variant constructors MUST be checked first — a variant's FunctionInfo
         // may share the sentinel ID with newtype constructors (u32::MAX / 2),
         // and mis-dispatching `Maybe.Some(42)` through the newtype pass-through

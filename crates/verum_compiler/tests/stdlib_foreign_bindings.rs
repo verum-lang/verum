@@ -63,7 +63,8 @@ fn public_wrapper_reexport_does_not_capture_the_local_or_explicitly_mounted_exte
         independent.join("mod.vr"),
         "module core.independent;
         mount core.platform.native.{query as raw, relay as send};
-        public fn cross_bundle() -> Int32 { unsafe { raw() + send(1, 2, 3) } }",
+        public fn cross_bundle() -> Int32 { unsafe { raw() + send(1, 2, 3) } }
+        public fn fixed_prefix_only() -> Int32 { unsafe { core.platform.native.relay(9) } }",
     )
     .unwrap();
     let output = root.path().join("runtime.vbca");
@@ -79,30 +80,29 @@ fn public_wrapper_reexport_does_not_capture_the_local_or_explicitly_mounted_exte
     check_bindings(&module);
 
     let independent = archive.load_module("core.independent").unwrap();
-    let cross = instructions(&independent, "core.independent.cross_bundle");
-    let calls: Vec<_> = cross
-        .iter()
-        .filter_map(|op| match op {
-            Instruction::FfiExtended {
-                sub_op: 0x10,
-                operands,
-            } => {
-                let id = u32::from_le_bytes(operands[..4].try_into().unwrap()) as usize;
-                let symbol = &independent.ffi_symbols[id];
-                Some((
-                    independent.get_string(symbol.name).unwrap(),
-                    operands[4],
-                    symbol.signature.is_variadic,
-                ))
-            }
-            _ => None,
-        })
-        .collect();
+    let calls = |name| {
+        instructions(&independent, name)
+            .into_iter()
+            .filter_map(|op| match op {
+                Instruction::FfiExtended { sub_op: 0x10, operands } => {
+                    let id = u32::from_le_bytes(operands[..4].try_into().unwrap()) as usize;
+                    let symbol = &independent.ffi_symbols[id];
+                    Some((
+                        independent.get_string(symbol.name).unwrap(),
+                        operands[4],
+                        symbol.signature.param_types.len(),
+                        symbol.signature.is_variadic,
+                    ))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
     assert_eq!(
-        calls,
-        [("provider_query", 0, false), ("relay", 3, true)],
-        "{cross:?}"
+        calls("core.independent.cross_bundle"),
+        [("provider_query", 0, 0, false), ("relay", 3, 1, true)],
     );
+    assert_eq!(calls("core.independent.fixed_prefix_only"), [("relay", 1, 1, true)]);
 
     let app = Parser::new(
         "module app; mount core.platform.{through_wrapper};
