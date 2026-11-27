@@ -1,0 +1,88 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L2
+// @tags: decimal, mysql, postgres, wire
+// @expected-exit: 0
+
+mount core.base.result.Result;
+mount core.database.common.arena.SpindleArena;
+mount core.database.common.types.{ArenaWireBuf, ArenaSlice};
+mount core.database.mysql.decimal_codec.{
+    encode_mysql_decimal, encode_mysql_decimal_from_bigdecimal,
+    decode_mysql_decimal_to_bigdecimal, mysql_decimal_byte_length,
+};
+mount core.database.postgres.wire.codec.encode_numeric_from_decimal;
+mount core.text.numeric.decimal.Decimal;
+mount core.text.numeric.bigdecimal.{BigDecimal, parse_bigdecimal};
+
+fn fixed(c: Int, s: Int) -> Decimal {
+    match Decimal.from_parts(c, s) { Result.Ok(v) => v, _ => panic("expected fixed decimal") }
+}
+
+fn same_bytes(output: &ArenaSlice, arena: &SpindleArena, expected: &[Byte]) {
+    assert_eq(output.len(), expected.len());
+    let mut i = 0;
+    while i < output.len() {
+        assert_eq(output.byte_at(i, arena).unwrap(), expected[i] as Int);
+        i = i + 1;
+    }
+}
+
+fn test_postgres() {
+    let mut arena = SpindleArena.new_connection(1);
+    let mut pg = ArenaWireBuf.empty();
+    assert(encode_numeric_from_decimal(&mut pg, &mut arena, &fixed(Int.MIN, 0)));
+    let bytes: [Byte; 18] = [0, 5, 0, 4, 64, 0, 0, 0, 3, 154, 13, 44, 1, 112, 21, 101, 22, 176];
+    same_bytes(&pg.as_slice(), &arena, &bytes[..]);
+    arena.destroy();
+}
+
+fn test_mysql() {
+    let mut arena = SpindleArena.new_connection(1);
+    let mut out = ArenaWireBuf.empty();
+    // MySQL decimal2bin's reference example for +/-1234567890.1234.
+    let pos: [Byte; 7] = [0x81, 0x0D, 0xFB, 0x38, 0xD2, 0x04, 0xD2];
+    let neg: [Byte; 7] = [0x7E, 0xF2, 0x04, 0xC7, 0x2D, 0xFB, 0x2D];
+    assert(encode_mysql_decimal(&mut out, &mut arena, &fixed(12345678901234, 4), 14, 4));
+    same_bytes(&out.as_slice(), &arena, &pos[..]);
+    out.truncate();
+    let negative = BigDecimal.from_decimal(&fixed(-12345678901234, 4));
+    assert(encode_mysql_decimal_from_bigdecimal(&mut out, &mut arena, &negative, 14, 4));
+    same_bytes(&out.as_slice(), &arena, &neg[..]);
+    let decoded = match decode_mysql_decimal_to_bigdecimal(&neg[..], 14, 4) {
+        Result.Ok(v) => v, _ => panic("expected a negative NEWDECIMAL field")
+    };
+    assert_eq(decoded.to_text(), "-1234567890.1234");
+
+    out.truncate();
+    assert(encode_mysql_decimal(&mut out, &mut arena, &fixed(-1, 3), 2, 2));
+    let zero: [Byte; 1] = [0x80];
+    same_bytes(&out.as_slice(), &arena, &zero[..]);
+    out.truncate();
+    assert(encode_mysql_decimal(&mut out, &mut arena, &fixed(0, 0), 2, 2));
+    same_bytes(&out.as_slice(), &arena, &zero[..]);
+
+    out.truncate();
+    let wide = match parse_bigdecimal(&"12345678901234567890.00100") {
+        Result.Ok(v) => v, _ => panic("expected an exact wide decimal")
+    };
+    assert(encode_mysql_decimal_from_bigdecimal(&mut out, &mut arena, &wide, 25, 5));
+    let raw = out.as_slice().to_owned(&arena).unwrap();
+    let restored = match decode_mysql_decimal_to_bigdecimal(raw.as_slice(), 25, 5) {
+        Result.Ok(v) => v, _ => panic("expected the wide NEWDECIMAL field")
+    };
+    assert_eq(restored.to_text(), "12345678901234567890.00100");
+
+    assert_eq(mysql_decimal_byte_length(66, 3), 0);
+    assert_eq(mysql_decimal_byte_length(30, 31), 0);
+    assert(!encode_mysql_decimal(&mut out, &mut arena, &fixed(1, 0), 0, 0));
+    assert(decode_mysql_decimal_to_bigdecimal(&neg[..6], 14, 4) is Result.Err(_));
+    let bad: [Byte; 1] = [0xFE];
+    assert(decode_mysql_decimal_to_bigdecimal(&bad[..], 2, 0) is Result.Err(_));
+    arena.destroy();
+}
+
+fn main() {
+    test_postgres();
+    test_mysql();
+}

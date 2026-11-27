@@ -1204,14 +1204,8 @@ public fn encode_numeric_from_decimal(
     arena: &mut SpindleArena,
     value: &Decimal,
 ) -> Bool {
-    let abs_d = value.abs();
-    let is_zero_val = abs_d.coefficient == 0;
-    let digits_text = if is_zero_val {
-        "0".clone()
-    } else {
-        decimal_magnitude_text(abs_d.coefficient)
-    };
-    encode_numeric_from_parts(buf, arena, value.is_negative(), &digits_text, value.scale, is_zero_val)
+    let exact = BigDecimal.from_decimal(value);
+    encode_numeric_from_bigdecimal(buf, arena, &exact)
 }
 
 /// Encode an arbitrary-precision `BigDecimal` value as PG NUMERIC
@@ -1229,9 +1223,9 @@ public fn encode_numeric_from_bigdecimal(
     let digits_text = if is_zero_val {
         "0".clone()
     } else {
-        value.coefficient.abs().to_text()
+        value.coefficient().abs().to_text()
     };
-    encode_numeric_from_parts(buf, arena, value.is_negative(), &digits_text, value.scale, is_zero_val)
+    encode_numeric_from_parts(buf, arena, value.is_negative(), &digits_text, value.scale(), is_zero_val)
 }
 
 /// Decode a NUMERIC binary payload into an arbitrary-precision
@@ -1450,15 +1444,6 @@ public fn encode_numeric_from_text(
         Result.Ok(bd) => encode_numeric_from_bigdecimal(buf, arena, &bd),
         Result.Err(_) => false,
     }
-}
-
-/// Render an i64 magnitude (must be ≥ 0) as decimal-digit Text (MS
-/// first).  Caller pre-extracts abs() — sign handling lives upstream.
-fn decimal_magnitude_text(n: Int) -> Text {
-    if n == 0 { return "0".clone(); }
-    // Use the stdlib helper for the common case.  abs always fits
-    // in Int (Verum Int = i64) per Decimal's own coefficient invariant.
-    Text.from_int(n)
 }
 
 // -----------------------------------------------------------------------------
