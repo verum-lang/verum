@@ -843,7 +843,7 @@ implement<T> Deque<T> {
     /// `self` retains elements from `0..at`.
     ///
 
-    /// Panics if `at > len`.
+    /// Moves the suffix in order. Panics if `at` is outside `0..=len`.
     ///
 
     /// # Example
@@ -857,22 +857,21 @@ implement<T> Deque<T> {
     /// let right = deque.split_off(1);
     /// // deque = [1], right = [2, 3]
     /// ```
-    public fn split_off(&mut self, at: Int) -> Deque<T>
-    where T: Clone
-    {
+    public fn split_off(&mut self, at: Int) -> Deque<T> {
         assert(at >= 0 && at <= self.len, "Deque split_off index out of bounds");
 
-        let mut other = Deque.with_capacity(self.len - at);
-        let mut i = at;
-        while i < self.len {
-            match self.get(i) {
-                Maybe.Some(v) => other.push_back(v.clone()),
-                Maybe.None => break,
-            }
-            i = i + 1;
+        let mut suffix: Deque<T> = Deque.with_capacity(self.len - at);
+        while self.len > at {
+            let last = self.len - 1;
+            let source = self.physical_index(last);
+            let destination = suffix.wrap_index(suffix.head - 1);
+            let value = unsafe { deque_storage_take(self, source) };
+            self.len = last;
+            unsafe { deque_storage_write(&mut suffix, destination, value); }
+            suffix.head = destination;
+            suffix.len = suffix.len + 1;
         }
-        self.truncate(at);
-        other
+        suffix
     }
 
     /// Moves all the elements of `other` into `self`, leaving `other` empty.

@@ -67,6 +67,7 @@ fn test_clear_and_drop_release_the_remaining_affine_values_once() {
     assert(unsafe { DESTROYED } == 7);
     check_compaction_drops_each_affine_element_once();
     check_into_list_moves_wrapped_affine_values();
+    check_split_moves_wrapped_affine_values();
 }
 
 @test
@@ -171,6 +172,59 @@ fn check_into_list_moves_wrapped_affine_values() {
         { let slot: &Guard = &values[3]; assert(slot.weight == 16); }
     }
     assert(unsafe { DESTROYED } == 31);
+}
+
+fn check_split_moves_wrapped_affine_values() {
+    unsafe { DESTROYED = 0; }
+    {
+        let mut ring: Deque<Guard> = Deque.with_capacity(4);
+        ring.push_back(Guard { weight: 1 });
+        ring.push_back(Guard { weight: 2 });
+        ring.push_back(Guard { weight: 4 });
+        ring.push_back(Guard { weight: 8 });
+        match ring.pop_front() {
+            Maybe.Some(first) => { assert(first.weight == 1); },
+            Maybe.None => panic("missing first guard"),
+        }
+        ring.push_back(Guard { weight: 16 });
+        {
+            let mut suffix = ring.split_off(2);
+            assert(unsafe { DESTROYED } == 1);
+            assert(ring.len() == 2 && suffix.len() == 2);
+            assert(ring.front_mut().unwrap().weight == 2 && ring.back_mut().unwrap().weight == 4);
+            assert(suffix.front_mut().unwrap().weight == 8 && suffix.back_mut().unwrap().weight == 16);
+        }
+        assert(unsafe { DESTROYED } == 25);
+    }
+    assert(unsafe { DESTROYED } == 31);
+}
+
+@test
+fn test_split_at_either_end() {
+    let mut ring: Deque<Int> = Deque.with_capacity(3);
+    assert(ring.split_off(0).is_empty());
+    ring.push_front(4);
+    ring.push_front(2);
+    assert(ring.split_off(ring.len()).is_empty());
+    assert(ring.len() == 2);
+    let mut suffix = ring.split_off(0);
+    assert(ring.is_empty() && suffix.len() == 2);
+    assert(suffix.pop_front().unwrap() == 2 && suffix.pop_front().unwrap() == 4);
+}
+
+@test
+@should_panic(expected = "Deque split_off index out of bounds")
+fn test_split_rejects_negative_index() {
+    let mut ring: Deque<Int> = Deque.new();
+    ring.split_off(-1);
+}
+
+@test
+@should_panic(expected = "Deque split_off index out of bounds")
+fn test_split_rejects_index_after_end() {
+    let mut ring: Deque<Int> = Deque.new();
+    ring.push_back(4);
+    ring.split_off(2);
 }
 
 fn main() {}
