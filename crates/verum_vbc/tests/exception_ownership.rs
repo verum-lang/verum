@@ -248,3 +248,44 @@ fn a_recovered_owned_value_can_escape_the_handler() {
     "#,
     );
 }
+
+#[test]
+fn copied_results_join_the_protected_body_and_every_returning_handler() {
+    check(r#"
+        fn select_value(fail: Bool) -> Int {
+            let selected = try {
+                if fail { throw 7; }
+                29
+            } recover {
+                7 => 44,
+                _ => 0,
+            } finally { () };
+            let copied = selected;
+            copied
+        }
+        fn probe() -> Int { select_value(false) + select_value(true) }
+    "#);
+    check("fn probe()->Int { let selected=try {throw 5} recover |_| {73}; let copied=selected; copied }");
+    check("fn probe()->Int { let selected=try {73} finally {19;}; let copied=selected; copied }");
+    check(r#"
+        type Cell is { value: Int };
+        fn probe()->Int {
+            let selected = try { Cell { value: 73 } } recover |_| { Cell { value: 0 } };
+            let mut copied = selected;
+            copied.value = 9;
+            selected.value
+        }
+    "#);
+}
+
+#[test]
+fn a_conflicting_or_unknown_recovery_value_cannot_authorize_a_copy() {
+    for handler in ["|_| {\"text\"}", "|error| {error}", "{ 1 => 73, _ => false }"] {
+        let source = format!(
+            "fn probe(flag:Bool)->Int {{let selected=try {{73}} recover {handler}; if flag {{selected}} else {{0}}}}"
+        );
+        let ast = Parser::new(&source).parse_module().unwrap();
+        let error = VbcCodegen::new().compile_module(&ast).unwrap_err();
+        assert!(error.to_string().contains("retained source declaration"), "{error}");
+    }
+}

@@ -114,6 +114,13 @@ impl VbcCodegen {
             && let Some(id) = crate::types::TypeId::from_well_known_scalar_name(&name) {
             return Some(TypeRef::Concrete(id.declared_scalar_identity(&name)));
         }
+        // A protected expression has several exits. Even a concrete producer
+        // from one arm cannot replace their checked result declaration.
+        if matches!(expr.kind, ExprKind::TryRecover { .. } | ExprKind::TryFinally { .. }
+            | ExprKind::TryRecoverFinally { .. }) {
+            if expr.span.start >= expr.span.end { return None; }
+            return self.ctx.declared_result_types.get(&expr.span)?.clone();
+        }
         // A selected intrinsic has the same semantic result at every syntax
         // boundary. Inspect its actual producer, never the method's spelling or
         // a register's machine representation. This also covers formatted Text.
@@ -175,7 +182,7 @@ impl VbcCodegen {
                 Some(TypeRef::Tuple(elements.iter()
                     .map(|element| nested(element, None)).collect::<Option<_>>()?))
             }
-            ExprKind::Return(_) | ExprKind::Break { .. } | ExprKind::Continue { .. } =>
+            ExprKind::Return(_) | ExprKind::Throw(_) | ExprKind::Break { .. } | ExprKind::Continue { .. } =>
                 Some(TypeRef::Concrete(crate::types::TypeId::NEVER)),
             ExprKind::Block(block) | ExprKind::Unsafe(block) =>
                 self.ctx.declared_result_types.get(&block.span).cloned().flatten(),

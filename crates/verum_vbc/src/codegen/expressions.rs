@@ -1618,19 +1618,19 @@ impl VbcCodegen {
             ExprKind::Throw(error_expr) => self.compile_throw(error_expr),
 
             ExprKind::TryRecover { try_block, recover } => {
-                self.compile_try_recover(try_block, recover, demand)
+                self.compile_try_recover(expr.span, try_block, recover, demand)
             }
 
             ExprKind::TryFinally {
                 try_block,
                 finally_block,
-            } => self.compile_try_finally(try_block, finally_block, demand),
+            } => self.compile_try_finally(expr.span, try_block, finally_block, demand),
 
             ExprKind::TryRecoverFinally {
                 try_block,
                 recover,
                 finally_block,
-            } => self.compile_try_recover_finally(try_block, recover, finally_block, demand),
+            } => self.compile_try_recover_finally(expr.span, try_block, recover, finally_block, demand),
 
             // === Async ===
             ExprKind::Spawn { expr, contexts: _ } => self.compile_spawn(expr),
@@ -33708,6 +33708,22 @@ impl VbcCodegen {
         Ok(None)
     }
 
+    /// Each normal or recovered exit supplies the enclosing expression's value.
+    /// Read its declaration while the branch's bindings and selected producers
+    /// are still in scope. Nursery cleanup uses its own result convention.
+    fn compile_recovery_value(
+        &mut self, owner: Option<verum_ast::Span>, expr: &Expr, demand: ResultDemand,
+    ) -> CodegenResult<(Option<Reg>, Option<crate::types::TypeRef>)> {
+        let Some(owner) = owner else {
+            return Ok((self.compile_expr_with_demand(expr, demand)?, None));
+        };
+        let start = self.ctx.instructions.len();
+        let value = self.with_forwarded_result(owner, Self::normalized_place(expr).span, |cg|
+            cg.compile_expr_with_demand(expr, demand))?;
+        let declaration = self.declared_expression_result(expr, value, start, self.ctx.instructions.len());
+        Ok((value, declaration))
+    }
+
     /// Shared recovery dispatch for try/recover and nurseries. Guards select
     /// a handler only after its pattern matched; exhaustion propagates the
     /// original error instead of manufacturing a result.
@@ -33718,7 +33734,9 @@ impl VbcCodegen {
         dest: Reg,
         demand: ResultDemand,
         pending: Option<usize>,
-    ) -> CodegenResult<()> {
+        owner: Option<verum_ast::Span>,
+    ) -> CodegenResult<Option<crate::types::TypeRef>> {
+        let mut declaration = Some(crate::types::TypeRef::Concrete(crate::types::TypeId::NEVER));
         match recover {
             verum_ast::RecoverBody::MatchArms { arms, .. } => {
                 let end = self.ctx.new_label("recover_end");
@@ -33747,10 +33765,12 @@ impl VbcCodegen {
                                 });
                             self.ctx.free_temp(condition);
                         }
-                        self.compile_expr_with_demand(&arm.body, demand)
+                        self.compile_recovery_value(owner, &arm.body, demand)
                     })();
                     let (_, defers) = self.ctx.exit_scope(false);
-                    if let Some(value) = result? {
+                    let (value, arm_type) = result?;
+                    declaration = super::place_copies::join_result_types(declaration, arm_type);
+                    if let Some(value) = value {
                         self.ctx.emit(Instruction::Mov {
                             dst: dest,
                             src: value,
@@ -33771,14 +33791,14 @@ impl VbcCodegen {
             }
             verum_ast::RecoverBody::Closure { param, body, .. } => {
                 self.ctx.enter_scope();
-                let result: CodegenResult<Option<Reg>> = (|| {
+                let result: CodegenResult<_> = (|| {
                     self.compile_pattern_bind(&param.pattern, error)?;
                     let observed = match &param.pattern.kind {
                         verum_ast::PatternKind::Ident { name, by_ref: false, subpattern: None, .. }
                             if pending.is_some() => self.ctx.registers.observe_binding_lookups(name.as_str()),
                         _ => None,
                     };
-                    let result = self.compile_expr_with_demand(body, demand)?;
+                    let result = self.compile_recovery_value(owner, body, demand)?;
                     if let Some(entry) = pending {
                         // A register lookup tracks the selected lexical binding even
                         // through captures and shadowing. Destructuring itself observes
@@ -33809,7 +33829,9 @@ impl VbcCodegen {
                     Ok(result)
                 })();
                 let (_, defers) = self.ctx.exit_scope(false);
-                if let Some(value) = result? {
+                let (value, arm_type) = result?;
+                declaration = arm_type;
+                if let Some(value) = value {
                     self.ctx.emit(Instruction::Mov {
                         dst: dest,
                         src: value,
@@ -33823,7 +33845,7 @@ impl VbcCodegen {
                 }
             }
         }
-        Ok(())
+        Ok(declaration)
     }
 
     /// Compiles try-recover: try { ... } recover { pattern => expr, ... }
@@ -33831,6 +33853,7 @@ impl VbcCodegen {
     /// Exception handling with pattern-based recovery for caught exceptions.
     fn compile_try_recover(
         &mut self,
+        span: verum_ast::Span,
         try_block: &Expr,
         recover: &verum_ast::RecoverBody,
         demand: ResultDemand,
@@ -33849,7 +33872,7 @@ impl VbcCodegen {
         self.ctx.try_recover_depth += 1;
 
         // Compile try block
-        let try_result = self.compile_expr_with_demand(try_block, demand)?;
+        let (try_result, normal_type) = self.compile_recovery_value(Some(span), try_block, demand)?;
         if let Some(try_reg) = try_result {
             self.ctx.emit(Instruction::Mov {
                 dst: dest,
@@ -33876,7 +33899,11 @@ impl VbcCodegen {
         self.ctx
             .emit(Instruction::GetException { dst: exception_reg });
 
-        self.compile_recover_body(recover, exception_reg, dest, demand, Some(pending))?;
+        let recovered_type = self.compile_recover_body(recover, exception_reg, dest, demand, Some(pending), Some(span))?;
+        if span.start < span.end {
+            let declaration = super::place_copies::join_result_types(normal_type, recovered_type);
+            self.ctx.declared_result_types.insert(span, declaration);
+        }
 
         self.ctx.free_temp(exception_reg);
         self.ctx.define_label(&end_label);
@@ -33887,6 +33914,7 @@ impl VbcCodegen {
     /// Compiles try-finally: try { ... } finally { ... }
     fn compile_try_finally(
         &mut self,
+        span: verum_ast::Span,
         try_block: &Expr,
         finally_block: &Expr,
         demand: ResultDemand,
@@ -33898,7 +33926,7 @@ impl VbcCodegen {
         self.ctx.emit(Instruction::TryBegin { handler_offset: 0 });
 
         // Compile try block
-        let try_result = self.compile_expr_with_demand(try_block, demand)?;
+        let (try_result, normal_type) = self.compile_recovery_value(Some(span), try_block, demand)?;
         if let Some(try_reg) = try_result {
             self.ctx.emit(Instruction::Mov {
                 dst: dest,
@@ -33912,6 +33940,9 @@ impl VbcCodegen {
         // Always execute finally (normal path)
         self.ctx.define_label(&finally_label);
         let _ = self.compile_expr_with_demand(finally_block, ResultDemand::Discarded)?;
+        if span.start < span.end {
+            self.ctx.declared_result_types.insert(span, normal_type);
+        }
 
         Ok(Some(dest))
     }
@@ -33919,13 +33950,14 @@ impl VbcCodegen {
     /// Compiles try-recover-finally
     fn compile_try_recover_finally(
         &mut self,
+        span: verum_ast::Span,
         try_block: &Expr,
         recover: &verum_ast::RecoverBody,
         finally_block: &Expr,
         demand: ResultDemand,
     ) -> CodegenResult<Option<Reg>> {
         // Compile try-recover first
-        let result = self.compile_try_recover(try_block, recover, demand)?;
+        let result = self.compile_try_recover(span, try_block, recover, demand)?;
 
         // Then always execute finally
         let _ = self.compile_expr_with_demand(finally_block, ResultDemand::Discarded)?;
@@ -34469,7 +34501,7 @@ impl VbcCodegen {
                 dst: error_reg,
             });
 
-            self.compile_recover_body(recover_body, error_reg, dest, demand, None)?;
+            self.compile_recover_body(recover_body, error_reg, dest, demand, None, None)?;
 
             self.ctx.free_temp(error_reg);
         } else {
