@@ -216,10 +216,8 @@ pub(super) fn bound_method_call(
     };
     let method = crate::types::StringId(*method_id);
     match witness {
-        Instruction::BindMethodReceiver { type_ref } => {
-            Ok(module.bound_instance_method(type_ref, method, args.count)
-                .filter(|(_, args)| !args.is_empty()))
-        }
+        Instruction::BindMethodReceiver { type_ref } if concrete(type_ref) =>
+            Ok(module.try_bound_method(type_ref, method, args.count)?.filter(|(_, args)| !args.is_empty())),
         Instruction::SetCallWitness { type_args } => {
             module.witnessed_source_method(method, args.count, type_args)
         }

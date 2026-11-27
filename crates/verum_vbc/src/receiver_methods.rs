@@ -4,6 +4,9 @@ use crate::types::{StringId, TypeId, TypeRef};
 use std::collections::HashMap;
 use verum_common::{Map, Set};
 
+/// VBC selector for a static protocol member with an adjacent full receiver declaration.
+pub(crate) const STATIC_PROTOCOL_PREFIX: &str = "static:";
+
 pub(crate) type MethodFamilies =
     HashMap<(TypeId, StringId, usize), smallvec::SmallVec<[FunctionId; 1]>>;
 

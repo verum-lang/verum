@@ -13,6 +13,36 @@ fn parse(source: &str) -> Module {
     Parser::new(source).parse_module().expect("parse source")
 }
 
+#[test]
+fn static_protocol_calls_bind_the_implementation_receiver_in_its_own_order() {
+    let source = parse(concat!("module consumer;\n", include_str!("fixtures/static_receiver_application.vr")));
+    let mut module = compile(&[&source]).unwrap();
+    execute_source_and_wire(module.clone(), 1441);
+
+    use verum_vbc::types::{StringId, TypeId, TypeRef};
+    module.resolve_protocol_dispatch();
+    let relay = module.get_function(module.find_function_by_name("consumer.relay").unwrap()).unwrap();
+    let start = relay.bytecode_offset as usize;
+    let body = decode_instructions(&module.bytecode[start..start + relay.bytecode_length as usize]).unwrap();
+    let method = body.iter().find_map(|op| match op {
+        Instruction::CallM { method_id, .. } => Some(StringId(*method_id)),
+        _ => None,
+    }).unwrap();
+    let pair = module.types.iter().find(|ty| module.get_string(ty.name) == Some("Pair")).unwrap().id;
+    let u8_ty = TypeRef::Concrete(TypeId::U8);
+    let u32_ty = TypeRef::Concrete(TypeId::U32);
+    let application = TypeRef::instantiated(pair, [u8_ty.clone(), u32_ty.clone()]);
+    let (target, arguments) = module.try_bound_method(&application, method, 0).unwrap().unwrap();
+    let parameters = &module.get_function(target).unwrap().type_params;
+    let bound = |name| parameters.iter().position(|p| module.get_string(p.name) == Some(name))
+        .and_then(|i| arguments.get(i));
+    assert_eq!(bound("A"), Some(&u8_ty));
+    assert_eq!(bound("B"), Some(&u32_ty));
+    assert!(module.try_bound_method(&TypeRef::Concrete(TypeId::INT), method, 0).is_err());
+    module.get_function_mut(target).unwrap().source_receiver = None;
+    assert!(module.try_bound_method(&application, method, 0).is_err());
+}
+
 fn compile(files: &[&Module]) -> CodegenResult<VbcModule> {
     let mut codegen = VbcCodegen::with_config(CodegenConfig::new("consumer"));
     codegen.collect_unit_declarations(files)?;

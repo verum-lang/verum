@@ -93,7 +93,7 @@ fn a_protocol_bound_uses_the_callers_concrete_receiver_on_each_invocation() {
     use verum_vbc::types::{TypeId, TypeRef};
     let target = |item| {
         let declared = TypeRef::instantiated(cell, [TypeRef::Concrete(item)]);
-        module.try_bound_instance_method(&declared, width, 0)
+        module.try_bound_method(&declared, width, 0)
     };
     let (integer, _) = target(TypeId::INT).unwrap().unwrap();
     let (boolean, _) = target(TypeId::BOOL).unwrap().unwrap();
@@ -145,7 +145,7 @@ fn monomorphized_bodies_do_not_become_competing_source_implementations() {
     for carrier in [TypeId::U8, TypeId::INT] {
         let arguments = vec![TypeRef::Concrete(carrier)];
         let receiver = TypeRef::instantiated(parent, arguments.clone());
-        let (selected, selected_arguments) = module.try_bound_instance_method(&receiver, method, 0)
+        let (selected, selected_arguments) = module.try_bound_method(&receiver, method, 0)
             .expect("one source implementation despite multiple compiled bodies")
             .expect("declared method");
         assert_eq!(selected, declaration);

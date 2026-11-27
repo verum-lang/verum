@@ -13574,15 +13574,10 @@ impl VbcCodegen {
                 Some(member) => {
                     let owner = self.type_by_id(member.owner).and_then(|ty| self.type_declaration_identity(ty))
                         .or_internal("bounded static member has no protocol declaration identity")?;
-                    format!("dyn:{owner}.{}", method.name)
+                    format!("{}{owner}.{}", crate::receiver_methods::STATIC_PROTOCOL_PREFIX, method.name)
                 }
                 None => method.name.to_string(),
             };
-            let recv_reg = self.ctx.alloc_temp();
-            self.ctx.emit(Instruction::LoadT {
-                dst: recv_reg,
-                type_ref,
-            });
             crate::codegen::bare_method::record("<witness>", method.name.as_str());
             // Arguments go in a contiguous block, as every CallM expects.
             let mut arg_regs: Vec<Reg> = Vec::with_capacity(args.len());
@@ -13612,6 +13607,15 @@ impl VbcCodegen {
             };
             let method_id = self.ctx.intern_string_raw(&selector);
             let result = self.ctx.alloc_temp();
+            let recv_reg = self.ctx.alloc_temp();
+            if member.is_some() {
+                // A static protocol member has no self operand. Its declared
+                // type application is the sole authority for this call.
+                self.ctx.emit(Instruction::LoadUnit { dst: recv_reg });
+                self.ctx.emit(Instruction::BindMethodReceiver { type_ref });
+            } else {
+                self.ctx.emit(Instruction::LoadT { dst: recv_reg, type_ref });
+            }
             self.ctx.emit(Instruction::CallM {
                 dst: result,
                 receiver: recv_reg,

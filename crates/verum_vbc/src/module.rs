@@ -1487,17 +1487,6 @@ impl VbcModule {
         bodies.next().is_none().then_some(target)
     }
 
-    /// Resolve the exact method for a declared receiver without inferring
-    /// type arguments from a runtime object header or a bare function name.
-    pub fn bound_instance_method(
-        &self,
-        receiver: &TypeRef,
-        method: StringId,
-        argc: u8,
-    ) -> Option<(FunctionId, Vec<TypeRef>)> {
-        self.try_bound_instance_method(receiver, method, argc).ok().flatten()
-    }
-
     /// A call witness identifies generic arguments. The complete source selector
     /// and its declared receiver convention identify the instance or static body.
     pub fn witnessed_source_method(
@@ -1544,9 +1533,12 @@ impl VbcModule {
 
     /// A competing family requires a unique declared receiver. Native lowering
     /// must propagate a refusal before considering ordinary protocol dispatch.
-    pub fn try_bound_instance_method(
+    pub fn try_bound_method(
         &self, receiver: &TypeRef, method: StringId, argc: u8,
     ) -> Result<Option<(FunctionId, Vec<TypeRef>)>, String> {
+        if let Some(selected) = self.bound_static_protocol_method(receiver, method, argc)? {
+            return Ok(Some(selected));
+        }
         let specialized = self.receiver_specialization(receiver, method, argc)?;
         let target = specialized.or_else(|| {
             let name = self.get_string(method)?.rsplit('.').next()?;
@@ -1557,6 +1549,26 @@ impl VbcModule {
             return Err(format!("receiver {receiver:?} does not establish the selected method's arguments"));
         }
         Ok(bound)
+    }
+
+    /// Static members have no self parameter. Only the selected implementation's
+    /// source receiver can bind its type parameters from a type application.
+    pub(crate) fn bound_static_protocol_method(
+        &self, receiver: &TypeRef, method: StringId, argc: u8,
+    ) -> Result<Option<(FunctionId, Vec<TypeRef>)>, String> {
+        let Some(selector) = self.get_string(method) else { return Ok(None) };
+        if !selector.starts_with(crate::receiver_methods::STATIC_PROTOCOL_PREFIX) { return Ok(None); }
+        let head = receiver.base_type_id().ok_or_else(||
+            format!("static method `{selector}` requires a nominal receiver, found {receiver:?}"))?;
+        let id = self.static_protocol_method(head, selector, argc)?
+            .ok_or_else(|| format!("missing static method `{selector}` for {receiver:?}"))?;
+        let function = self.get_function(id).ok_or_else(|| format!("missing static method {id:?}"))?;
+        if function.type_params.is_empty() { return Ok(Some((id, Vec::new()))); }
+        let arguments = function.source_receiver.as_ref()
+            .and_then(|pattern| function.arguments_from_receiver_pattern(pattern, receiver))
+            .ok_or_else(|| format!("receiver {receiver:?} does not establish the parameters of {}",
+                self.get_string(function.name).unwrap_or("<unnamed method>")))?;
+        Ok(Some((id, arguments)))
     }
 
     fn bind_instance_receiver(
@@ -1617,7 +1629,9 @@ impl VbcModule {
     pub(crate) fn static_protocol_method(
         &self, receiver: TypeId, selector: &str, argc: u8,
     ) -> Result<Option<FunctionId>, String> {
-        let (qualifier, member) = if let Some(token) = selector.strip_prefix("dyn:") {
+        let (qualifier, member) = if let Some(token) = selector.strip_prefix(crate::receiver_methods::STATIC_PROTOCOL_PREFIX)
+            .or_else(|| selector.strip_prefix("dyn:"))
+        {
             let (qualifier, member) = token.rsplit_once('.')
                 .ok_or_else(|| format!("invalid static protocol selector `{selector}`"))?;
             (Some(qualifier), member)
@@ -3486,6 +3500,10 @@ impl FunctionDescriptor {
             TypeRef::Reference { inner, .. } => inner.as_ref(),
             value => value,
         };
+        self.arguments_from_receiver_pattern(pattern, receiver)
+    }
+
+    fn arguments_from_receiver_pattern(&self, pattern: &TypeRef, receiver: &TypeRef) -> Option<Vec<TypeRef>> {
         let mut bindings = crate::mono::TypeSubstitution::empty();
         if !crate::mono::unify_declared_types(pattern, receiver, &mut bindings) {
             return None;

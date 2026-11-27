@@ -655,6 +655,13 @@ fn execute_method_call(
     // unrelated later calls by construction.
     let mut call_witness_sidecar: Option<Box<[crate::types::TypeRef]>> =
         state.pending_call_witness.take();
+    if let Some(application) = &declared_receiver
+        && let Some((target, arguments)) = state.module.bound_static_protocol_method(application, StringId(method_id), args.count)
+            .map_err(|message| InterpreterError::InvalidBytecode { pc: instruction_pc as usize, message })?
+    {
+        return enter_resolved_method(state, target, receiver, receiver_reg, args, dst,
+            (!arguments.is_empty()).then(|| arguments.into_boxed_slice()));
+    }
     if let Some(witness) = call_witness_sidecar.as_deref()
         && let Some((target, arguments)) = state.module
             .witnessed_source_method(StringId(method_id), args.count, witness)

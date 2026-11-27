@@ -634,7 +634,8 @@ impl<'a> Validator<'a> {
         while offset < func_end {
             let instr_start = offset;
             // A receiver prefix and the call it annotates share one entry.
-            if bound_call.take() != Some(offset) {
+            let has_receiver = bound_call.take() == Some(offset);
+            if !has_receiver {
                 instr_starts.insert(instr_start as u32);
             }
 
@@ -668,6 +669,14 @@ impl<'a> Validator<'a> {
                 return;
             }
 
+            if let Instruction::CallM { method_id, .. } = &instr
+                && !has_receiver
+                && self.module.get_string(crate::types::StringId(*method_id))
+                    .is_some_and(|s| s.starts_with(crate::receiver_methods::STATIC_PROTOCOL_PREFIX))
+            {
+                self.errors.push(VbcError::InvalidInstructionEncoding { offset: instr_start,
+                    reason: "static protocol call requires its declared receiver".into() });
+            }
             if let Instruction::BindMethodReceiver { type_ref } = &instr {
                 self.validate_type_ref(type_ref, 0);
                 if offset >= func_end || self.module.bytecode.get(offset) != Some(&crate::instruction::Opcode::CallM.to_byte()) {

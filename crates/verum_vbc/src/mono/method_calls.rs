@@ -122,19 +122,16 @@ fn static_call(
     values: &HashMap<u16, TypeRef>,
     witness: Option<&[TypeRef]>,
 ) -> Option<(u32, Vec<TypeRef>, TypeRef)> {
-    let base = receiver.base_type_id()?;
     let target = module.get_function(id)?;
     if target.params.len() != args.count as usize {
         return None;
     }
-    let owner = module.get_type(base)?;
-    let mut bindings = match receiver {
-        TypeRef::Instantiated { args, .. } if args.len() == owner.type_params.len() => {
-            TypeSubstitution::new(&owner.type_params, args)
-        }
-        TypeRef::Concrete(_) if owner.type_params.is_empty() => TypeSubstitution::empty(),
-        _ => return None,
-    };
+    let mut bindings = TypeSubstitution::empty();
+    if let Some(pattern) = &target.source_receiver
+        && !unify(pattern, receiver, &mut bindings)
+    {
+        return None;
+    }
     if let Some(witness) = witness {
         let carried = TypeSubstitution::from_function(target, witness);
         for parameter in &target.type_params {

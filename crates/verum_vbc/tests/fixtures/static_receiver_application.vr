@@ -1,0 +1,16 @@
+type Measure is protocol { fn width() -> Int; };
+type Pair<First, Second> is { first: First, second: Second };
+
+implement<B, A> Measure for Pair<A, B> {
+    fn width() -> Int { A.size * 10 + B.size }
+}
+
+fn relay<T: Measure>() -> Int { T.width() }
+
+fn run() -> Int {
+    relay<Pair<UInt8, UInt32>>() * 100 + relay<Pair<UInt32, UInt8>>()
+}
+
+fn main() -> Int {
+    if run() == 1441 { 73 } else { 0 }
+}
