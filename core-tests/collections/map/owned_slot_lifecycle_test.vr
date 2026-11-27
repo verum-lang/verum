@@ -295,4 +295,64 @@ fn test_vacant_insert_transfers_the_key_and_returns_the_attached_value() {
     assert(unsafe { VALUE_DROPS } == 3);
 }
 
+@test
+fn test_consumed_projections_transfer_only_the_selected_owners() {
+    unsafe { KEY_DROPS = 0; VALUE_DROPS = 0; }
+    {
+        let mut map: Map<OwnedKey, Guard> = Map.new();
+        map.insert(OwnedKey { id: 3, weight: 1 }, Guard { weight: 4 });
+        let mut keys = map.into_keys();
+        assert(keys.len() == 1);
+        assert(unsafe { KEY_DROPS } == 0);
+        assert(unsafe { VALUE_DROPS } == 4);
+        let held = keys.pop();
+        match &held {
+            Maybe.Some(key) => assert(key.id == 3),
+            Maybe.None => panic("missing owned key"),
+        }
+    }
+    assert(unsafe { KEY_DROPS } == 1);
+    {
+        let mut map: Map<OwnedKey, Guard> = Map.new();
+        map.insert(OwnedKey { id: 5, weight: 8 }, Guard { weight: 16 });
+        let mut values = map.into_values();
+        assert(values.len() == 1);
+        assert(unsafe { KEY_DROPS } == 9);
+        assert(unsafe { VALUE_DROPS } == 4);
+        let held = values.pop();
+        match &held {
+            Maybe.Some(value) => assert(value.weight == 16),
+            Maybe.None => panic("missing owned value"),
+        }
+    }
+    assert(unsafe { VALUE_DROPS } == 20);
+}
+
+@test
+fn test_merge_resolves_duplicates_and_moves_unmatched_entries() {
+    let mut left: Map<Int, Int> = Map.new();
+    let mut right: Map<Int, Int> = Map.new();
+    left.insert(1, 5); right.insert(1, 7); right.insert(2, 9);
+    left.merge(right, |first, second| first * 10 + second);
+    assert(left.len() == 2);
+    assert(left.get(1) == Maybe.Some(57));
+    assert(left.get(2) == Maybe.Some(9));
+}
+
+@test
+fn test_retain_updates_values_and_retires_removed_slots() {
+    unsafe { VALUE_DROPS = 0; }
+    {
+        let mut map: Map<Int, Guard> = Map.new();
+        map.insert(1, Guard { weight: 1 });
+        map.insert(2, Guard { weight: 2 });
+        map.retain(|key, val| { val.weight = val.weight * 4; *key == 2 });
+        assert(map.len() == 1);
+        assert(unsafe { VALUE_DROPS } == 4);
+        let remaining = map.remove(2);
+        match &remaining { Maybe.Some(value) => assert(value.weight == 8), Maybe.None => panic("lost retained value"), }
+    }
+    assert(unsafe { VALUE_DROPS } == 12);
+}
+
 fn main() {}

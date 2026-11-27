@@ -809,12 +809,12 @@ implement<K: Hash + Eq, V> Map<K, V> {
     }
 
     // Consume map, return list of keys.
-    public fn into_keys(self) -> List<K> {
+    public fn into_keys(mut self) -> List<K> {
         let mut keys: List<K> = List.with_capacity(self.len);
-        for i in range(0, self.cap) {
-            let entry = unsafe { &*self.entries.offset(i) };
-            if (entry.hash > 0) {
-                let key = entry.key;
+        for index in range(0, self.cap) {
+            if unsafe { (*self.entries.offset(index)).hash } > 0 {
+                let (key, _value) = unsafe { take_slot(self.entries, index, EMPTY) };
+                self.len = self.len - 1;
                 keys.push(key);
             }
         }
@@ -822,12 +822,12 @@ implement<K: Hash + Eq, V> Map<K, V> {
     }
 
     // Consume map, return list of values.
-    public fn into_values(self) -> List<V> {
+    public fn into_values(mut self) -> List<V> {
         let mut values: List<V> = List.with_capacity(self.len);
-        for i in range(0, self.cap) {
-            let entry = unsafe { &*self.entries.offset(i) };
-            if (entry.hash > 0) {
-                let value = entry.value;
+        for index in range(0, self.cap) {
+            if unsafe { (*self.entries.offset(index)).hash } > 0 {
+                let (_key, value) = unsafe { take_slot(self.entries, index, EMPTY) };
+                self.len = self.len - 1;
                 values.push(value);
             }
         }
@@ -889,8 +889,8 @@ implement<K: Hash + Eq, V> Map<K, V> {
         for i in range(0, self.cap) {
             // Check if occupied and should be removed
             let should_remove = {
-                let entry = unsafe { &mut *self.entries.offset(i) };
-                if (entry.hash > 0) {
+                let entry: &mut Slot<K, V> = unsafe { &mut *(self.entries.offset(i) as *mut Slot<K, V>) };
+                if entry.hash > 0 {
                     !f(&entry.key, &mut entry.value)
                 } else {
                     false
@@ -1074,8 +1074,9 @@ implement<K: Hash + Eq, V> Map<K, V> {
     /// a.merge(b, |existing, incoming| existing + incoming);
     /// // a = {1: 10, 2: 220, 3: 300}
     /// ```
-    public fn merge<F: fn(V, V) -> V>(&mut self, mut other: Map<K, V>, resolve: F) {
-        for (k, v) in other.drain() {
+    public fn merge<F: fn(V, V) -> V>(&mut self, other: Map<K, V>, resolve: F) {
+        let mut items = MapIntoIter<K, V>.from_map(other);
+        while let Maybe.Some((k, v)) = items.next() {
             let hash = self.make_hash_val(&k);
             match self.find_index(&k, hash) {
                 Maybe.Some(index) => {
@@ -2282,10 +2283,7 @@ implement<K: Hash + Eq, V> IntoIterator for Map<K, V> {
     type IntoIter = MapIntoIter<K, V>;
 
     fn into_iter(self) -> MapIntoIter<K, V> {
-        MapIntoIter {
-            map: self,
-            idx: 0,
-        }
+        MapIntoIter<K, V>.from_map(self)
     }
 }
 
@@ -2294,6 +2292,12 @@ public type MapIntoIter<K: Hash + Eq, V> is {
     map: Map<K, V>,
     idx: Int,
 };
+
+implement<K: Hash + Eq, V> MapIntoIter<K, V> {
+    fn from_map(map: Map<K, V>) -> MapIntoIter<K, V> {
+        MapIntoIter { map: map, idx: 0 }
+    }
+}
 
 implement<K: Hash + Eq, V> Iterator for MapIntoIter<K, V> {
     type Item = (K, V);
