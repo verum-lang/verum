@@ -1358,6 +1358,12 @@ fn typed_drop_fields<'a>(state: &InterpreterState, value: Value, plan: &'a crate
 {
     use crate::drop_plan::DropPlan;
     if value.is_unit() || matches!(plan, DropPlan::Ignore) { return Ok(None); }
+    if matches!(plan, DropPlan::Glue { .. })
+        && super::list_storage::OwnedElements::resolve(state, value, plan)?.is_some()
+    {
+        // A verified List storage producer is also a receiver for its declared Drop.
+        return Ok(None);
+    }
     let (owner, record, variants) = match plan {
         DropPlan::Ignore => return Ok(None),
         DropPlan::Text => {
@@ -1370,6 +1376,9 @@ fn typed_drop_fields<'a>(state: &InterpreterState, value: Value, plan: &'a crate
             state.heap.validate_callable(&state.module, value, signature)?;
             return Ok(None);
         }
+        DropPlan::ListStorage { .. } => return Err(InterpreterError::Panic {
+            message: "built-in List destruction requires its live owned storage".into(),
+        }),
         DropPlan::Glue { owner, .. } => (*owner, None, None),
         DropPlan::Record { owner, fields, .. } => (*owner, Some(fields.as_slice()), None),
         DropPlan::Sum { owner, variants } => (*owner, None, Some(variants)),
@@ -1515,6 +1524,15 @@ pub(super) fn validate_typed_drop(state: &InterpreterState, value: Value, plan: 
             continue;
         }
         if let Some(list) = super::list_storage::OwnedElements::resolve(state, value, &plan)? {
+            if !cells.insert(value.as_ptr::<Value>() as usize) {
+                return Err(InterpreterError::InvalidOperand {
+                    message: "two exclusive owners refer to one List storage allocation".into(),
+                });
+            }
+            if matches!(plan, DropPlan::Glue { .. }) { continue; }
+            budget = budget.checked_sub(1).ok_or_else(|| InterpreterError::InvalidOperand {
+                message: "typed destruction exceeds its runtime work budget".into(),
+            })?;
             for value in list.values() {
                 push_drop_work(&mut work, DropWork::Value(value, list.element.clone()), &mut budget)?;
             }
@@ -1609,6 +1627,9 @@ pub(super) fn execute_typed_drop(state: &mut InterpreterState, value: Value, pla
             continue;
         }
         if let Some((plan, elements)) = super::list_storage::take_owned_elements(state, value, &plan)? {
+            // SAFETY: take_owned_elements validated the owner and detached its initialized prefix.
+            let generation = unsafe { (*value.as_ptr::<heap::ObjectHeader>()).generation };
+            push_drop_work(&mut work, DropWork::Free { owner: value, generation }, &mut budget)?;
             for value in elements.into_iter().rev() {
                 push_drop_work(&mut work, DropWork::Value(value, plan.clone()), &mut budget)?;
             }

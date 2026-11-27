@@ -6,7 +6,7 @@ use crate::{
     mono::TypeSubstitution,
     types::{BuiltinValueStorage, TypeId, TypeKind, TypeRef},
 };
-use verum_common::{List, Text};
+use verum_common::{Heap, List, Text};
 
 /// A complete cleanup operation. Explicit Drop implementations own their body;
 /// structural cleanup visits only components with carried declaration types.
@@ -22,6 +22,13 @@ pub enum DropPlan {
     Callable {
         /// Exact semantic signature of the received callable.
         signature: TypeRef,
+    },
+    /// An instantiated built-in List in a module without a source List descriptor.
+    ListStorage {
+        /// Element witness carried by the List instantiation.
+        element_type: TypeRef,
+        /// Complete cleanup plan for every initialized element.
+        element: Heap<DropPlan>,
     },
     /// A declared Drop method and its exact generic arguments.
     Glue {
@@ -53,6 +60,20 @@ pub enum DropPlan {
 }
 
 impl DropPlan {
+    /// Element witness for the standard List declaration. A native backing
+    /// encoding alone cannot authorize destruction as a List of this type.
+    pub fn list_element<'a>(&'a self, module: &VbcModule) -> Result<Option<&'a TypeRef>, Text> {
+        use verum_common::well_known_types::WellKnownType;
+        if let Self::ListStorage { element_type, .. } = self {
+            return Ok(Some(element_type));
+        }
+        match self.standard_record_arguments(module, WellKnownType::List) {
+            None => Ok(None),
+            Some([element]) => Ok(Some(element)),
+            Some(_) => Err("List destruction requires its declared element witness".into()),
+        }
+    }
+
     /// Generic arguments of this exact, source-declared standard record.
     /// A runtime representation may interpret them only after checking its own storage.
     pub(crate) fn standard_record_arguments(
@@ -100,6 +121,7 @@ impl DropPlan {
         while let Some(plan) = pending.pop() {
             match plan {
                 Self::Glue { function, type_args, .. } => visit(*function, type_args),
+                Self::ListStorage { element, .. } => pending.push(element),
                 Self::Record { fields, .. } => pending.extend(fields.iter().rev()),
                 Self::Sum { variants, .. } => pending.extend(
                     variants.iter().rev().flat_map(|(_, fields)| fields.iter().rev()),
@@ -199,9 +221,21 @@ fn build_inner(
             );
         }
     };
-    let declaration = module
-        .get_type(owner)
-        .ok_or_else(|| Text::from(format!("typed destruction has no descriptor for {owner:?}")))?;
+    let Some(declaration) = module.get_type(owner) else {
+        if owner != TypeId::LIST {
+            return Err(format!("typed destruction has no descriptor for {owner:?}").into());
+        }
+        let [element_type] = args else {
+            return Err("built-in List destruction requires one declared element witness".into());
+        };
+        active.push(ty.clone());
+        let element = build_inner(module, element_type, active, budget);
+        active.pop();
+        return Ok(DropPlan::ListStorage {
+            element_type: element_type.clone(),
+            element: Heap::new(element?),
+        });
+    };
     if declaration.type_params.len() != args.len() {
         return Err("typed destruction generic arity does not match its declaring owner".into());
     }

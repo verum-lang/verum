@@ -830,16 +830,20 @@ producer, object-reference passthrough and payload extraction bridge as well: ab
 Unknown, including when a receipt budget is exhausted. A declared reference or
 an unchanged payload type does not substitute for that physical evidence.
 
-Each source body is analyzed over its forward CFG. Every reachable normal exit
-participates in the return meet; Unknown differs from no reachable exit. Loops,
-cycles, unsupported exception/context control flow and missing native callees
-remain opaque. An unknown call, a possible store or `DropRef` invalidates future
-aggregate storage reads. A payload word extracted before that operation keeps
-its representation; this is a representation fact, not proof that its pointee
-is still alive. A separate compact parameter-origin map keeps track of later
-return, store and reference uses after storage facts have been invalidated.
-An earlier value read cannot hide those later uses and authorize a whole-call
-argument load. Definitions and CFG joins update that identity independently.
+Each reachable normal exit contributes to the return representation. A bounded
+work list joins incoming register facts and revisits loop headers until they
+stabilize. Across a backedge, the analysis retains word carriers and parameter
+origins and discards allocation-site and tag facts from the previous iteration.
+Recursive calls, unsupported control flow and exhausted analysis budgets yield
+an unknown representation.
+
+An unknown call, a possible store or `DropRef` invalidates future aggregate
+storage reads. A previously extracted payload word retains its representation.
+A register may carry an argument from either predecessor at a join. Later
+returns, stores and reference uses count against every possible origin, even
+after storage facts have been invalidated. An overwrite clears the previous
+origins. A call-site load requires every observed use of that argument to
+consume the object value.
 
 Actual argument positions and adaptations govern parameter composition. A
 callee that only consumes an object value may receive a temporary loaded view

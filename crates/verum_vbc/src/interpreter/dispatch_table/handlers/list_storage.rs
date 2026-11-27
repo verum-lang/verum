@@ -218,7 +218,6 @@ impl<'heap> OwnedElements<'heap> {
             drop_plan,
             types::{TypeId, TypeRef},
         };
-        use verum_common::well_known_types::WellKnownType;
         if !value.is_regular_ptr() || !state.heap.contains(value.as_ptr()) {
             return Ok(None);
         }
@@ -227,14 +226,8 @@ impl<'heap> OwnedElements<'heap> {
         if !header.type_id.is_list_like() {
             return Ok(None);
         }
-        let Some(arguments) = plan.standard_record_arguments(&state.module, WellKnownType::List)
-        else {
+        let Some(element) = plan.list_element(&state.module).map_err(invalid)? else {
             return Ok(None);
-        };
-        let [element] = arguments else {
-            return Err(invalid(
-                "List destruction requires its declared element witness",
-            ));
         };
         if !header.is_valid()
             || header.flags.contains(heap::ObjectFlags::VARIANT)
@@ -272,7 +265,10 @@ impl<'heap> OwnedElements<'heap> {
             .and_then(|n| usize::try_from(n).ok())
             .filter(|&n| n <= storage.capacity)
             .ok_or_else(|| invalid("List storage length exceeds capacity"))?;
-        let element = drop_plan::build(&state.module, element).map_err(invalid)?;
+        let element = match plan {
+            drop_plan::DropPlan::ListStorage { element, .. } => (**element).clone(),
+            _ => drop_plan::build(&state.module, element).map_err(invalid)?,
+        };
         Ok(Some(Self {
             _heap: std::marker::PhantomData,
             storage,
@@ -302,6 +298,9 @@ pub(super) fn take_owned_elements(
     value: Value,
     plan: &crate::drop_plan::DropPlan,
 ) -> InterpreterResult<Option<(crate::drop_plan::DropPlan, Vec<Value>)>> {
+    if matches!(plan, crate::drop_plan::DropPlan::Glue { .. }) {
+        return Ok(None);
+    }
     let Some(list) = OwnedElements::resolve(state, value, plan)? else {
         return Ok(None);
     };

@@ -6,9 +6,10 @@
 use super::native_call::{
     ArgumentView, NativeCallReceipt, ReferenceSite, ReferenceSiteKind, ResultView,
 };
-use verum_common::{Heap, List, Map, Set};
+use verum_common::{Heap, List, Map, OrderedMap, Set};
 use verum_vbc::{
     Instruction as I, Reg,
+    instruction::{MemSubOpcode as Mem, TextCategory, TextSubOpcode},
     module::{FunctionDescriptor, FunctionId, VbcModule},
     types::{TypeId, TypeRef},
 };
@@ -232,7 +233,7 @@ struct State {
     cells: Map<u16, bool>,
     // Word identity outlives knowledge of the memory it addresses. Preserve it
     // across effect barriers so a later return/store is still a non-value use.
-    parameter_origins: Map<u16, u16>,
+    parameter_origins: Map<u16, Set<u16>>,
 }
 impl State {
     fn bounded(&self) -> bool {
@@ -240,7 +241,11 @@ impl State {
             return false;
         }
         let mut budget = Nodes(4096);
-        for _ in self.cells.keys().chain(self.parameter_origins.keys()) {
+        for _ in self
+            .cells
+            .keys()
+            .chain(self.parameter_origins.values().flatten())
+        {
             if budget.take(0).is_none() {
                 return false;
             }
@@ -281,7 +286,7 @@ impl State {
     fn put(&mut self, reg: Reg, value: R) {
         self.parameter_origins.remove(&reg.0);
         if let R::Parameter(index, _) = value {
-            self.parameter_origins.insert(reg.0, index);
+            self.parameter_origins.entry(reg.0).or_default().insert(index);
         }
         self.registers.insert(reg.0, value);
         self.cells.insert(reg.0, false);
@@ -330,10 +335,15 @@ impl State {
                 result.guards.push(guard.clone());
             }
         }
-        for (&reg, &origin) in &self.parameter_origins {
-            if other.parameter_origins.get(&reg) == Some(&origin) {
-                result.parameter_origins.insert(reg, origin);
-            }
+        // Parameter use is a may-property: any incoming origin counts when the
+        // merged word is used, even if its physical representation is unknown.
+        result.parameter_origins.clone_from(&self.parameter_origins);
+        for (reg, origins) in &other.parameter_origins {
+            result
+                .parameter_origins
+                .entry(*reg)
+                .or_default()
+                .extend(origins.iter().copied());
         }
         for (&reg, &cell) in &self.cells {
             if other.cells.get(&reg) == Some(&cell) {
@@ -453,8 +463,27 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                 R::Parameter(i as u16, nominal(&param.type_ref)),
             );
         }
-        let mut states: Map<usize, State> = Map::new();
-        states.insert(0, initial);
+        // Keep incoming facts at branch targets. Every other instruction has at
+        // most one predecessor and needs storage only while it is queued.
+        let mut branch_targets = Set::new();
+        for (pc, op) in instructions.iter().enumerate() {
+            match op {
+                I::Jmp { offset } | I::JmpIf { offset, .. } | I::JmpNot { offset, .. } => {
+                    let target = pc as i64 + i64::from(*offset);
+                    if target < 0 || target as usize >= instructions.len() {
+                        return BodyFacts::unknown(instructions.len());
+                    }
+                    branch_targets.insert(target as usize);
+                }
+                _ => {}
+            }
+        }
+        let mut entries: Map<usize, State> = Map::new();
+        if branch_targets.contains(&0) {
+            entries.insert(0, initial.clone());
+        }
+        let mut pending = OrderedMap::new();
+        pending.insert(0, initial);
         let mut returns: Option<R> = None;
         let mut value_inputs: Map<usize, Set<u16>> = Map::new();
         let mut parameter_uses = List::from_elem(0_u8, fd.params.len());
@@ -476,17 +505,12 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                 map.entry(site.instruction).or_default().push(site.kind);
                 map
             });
-        // Only forward CFG edges are admitted, so instruction order is a
-        // topological order. Consume each incoming state once; never cache a
-        // register map per instruction after it has been processed.
-        for pc in 0..instructions.len() {
-            let Some(mut state) = states.remove(&pc) else {
-                continue;
-            };
+        while let Some((pc, mut state)) = pending.pop_first() {
             self.work += 1;
             if !state.bounded()
                 || self.work > 2_000_000
-                || states.len() > 64
+                || pending.len() > 64
+                || entries.len() > 256
                 || state.registers.len() > 256
                 || state.objects.len() > 64
             {
@@ -494,15 +518,16 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
             }
             let instruction = &instructions[pc];
             value_inputs.remove(&pc);
+            call_inputs.remove(&pc);
             let mut edges: List<(usize, State)> = List::new();
             let mut next = true;
             let mut write: Option<(Reg, R)> = None;
             let mut written_cell = Some(false);
             let mut written_origin = None;
             let mut use_input = |reg: Reg, demand: u8, state: &State| {
-                if let Some(&origin) = state.parameter_origins.get(&reg.0) {
-                    if let Some(uses) = parameter_uses.get_mut(origin as usize) {
-                        *uses |= demand;
+                if let Some(origins) = state.parameter_origins.get(&reg.0) {
+                    for &origin in origins {
+                        parameter_uses[usize::from(origin)] |= demand;
                     }
                 } else if state.raw(reg) == R::Slot && demand == 1 {
                     value_inputs.entry(pc).or_default().insert(reg.0);
@@ -512,7 +537,7 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                 I::Mov { dst, src } => {
                     write = Some((*dst, state.raw(*src)));
                     written_cell = state.cells.get(&src.0).copied();
-                    written_origin = state.parameter_origins.get(&src.0).copied();
+                    written_origin = state.parameter_origins.get(&src.0).cloned();
                 }
                 I::LoadI { dst, .. }
                 | I::LoadK { dst, .. }
@@ -523,9 +548,40 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                 | I::LoadSmallI { dst, .. }
                 | I::New { dst, .. }
                 | I::NewG { dst, .. } => write = Some((*dst, R::Value)),
+                I::TypeResource { dst, .. } => write = Some((*dst, R::Value)),
+                I::Not { dst, src } => {
+                    use_input(*src, 8, &state);
+                    write = Some((*dst, R::Value));
+                }
+                I::TextExtended { sub_op, operands }
+                    if TextSubOpcode::from_byte(*sub_op)
+                        .is_some_and(|op| op.meta().category == TextCategory::ConvertToText) =>
+                {
+                    let mut pos = 0;
+                    let mut reg = || verum_vbc::encoding::decode_reg(operands, &mut pos);
+                    let (Ok(dst), Ok(src)) = (reg(), reg()) else {
+                        return BodyFacts::unknown(instructions.len());
+                    };
+                    if pos != operands.len() { return BodyFacts::unknown(instructions.len()); }
+                    use_input(src, 8, &state);
+                    write = Some((dst, R::Value));
+                }
+                I::Assert { cond, .. } => use_input(*cond, 8, &state),
+                I::CloneTyped { dst, src, type_ref } => {
+                    use_input(*src, 4, &state);
+                    if verum_vbc::drop_plan::has_trivial_cleanup(type_ref) {
+                        write = Some((*dst, state.raw(*src)));
+                        written_origin = state.parameter_origins.get(&src.0).cloned();
+                    } else {
+                        may_write = true;
+                        state.invalidate_storage();
+                        write = Some((*dst, R::Unknown));
+                    }
+                }
                 I::BinaryI { dst, a, b, .. } | I::BinaryF { dst, a, b, .. }
                 | I::CmpI { dst, a, b, .. } | I::CmpF { dst, a, b, .. }
-                | I::CmpU { dst, a, b, .. } | I::Bitwise { dst, a, b, .. } => {
+                | I::CmpU { dst, a, b, .. } | I::Bitwise { dst, a, b, .. }
+                | I::Concat { dst, a, b } => {
                     // The instruction reads these scalar words. It neither
                     // changes storage nor consumes any other parameter.
                     use_input(*a, 8, &state);
@@ -600,17 +656,11 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                 }
                 I::Jmp { offset } => {
                     let target = pc as i64 + i64::from(*offset);
-                    if target <= pc as i64 || target as usize >= instructions.len() {
-                        return BodyFacts::unknown(instructions.len());
-                    }
                     edges.push((target as usize, state.clone()));
                     next = false;
                 }
                 I::JmpIf { cond, offset } | I::JmpNot { cond, offset } => {
                     let target = pc as i64 + i64::from(*offset);
-                    if target <= pc as i64 || target as usize >= instructions.len() {
-                        return BodyFacts::unknown(instructions.len());
-                    }
                     use_input(*cond, 8, &state);
                     let mut yes = state.clone();
                     if let R::Test(value, tag) = state.raw(*cond) {
@@ -646,6 +696,10 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                             .map(|old| old.join(&R::Value))
                             .unwrap_or(R::Value),
                     );
+                    next = false;
+                }
+                I::PanicValue { message } => {
+                    use_input(*message, 8, &state);
                     next = false;
                 }
                 I::Panic { .. } | I::Unreachable => next = false,
@@ -729,7 +783,7 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                             source: src.0,
                         })
                     }) {
-                        written_origin = state.parameter_origins.get(&src.0).copied();
+                        written_origin = state.parameter_origins.get(&src.0).cloned();
                         state.raw(*src)
                     } else {
                         use_input(*src, 8, &state);
@@ -755,8 +809,43 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                     may_write = true;
                     state.invalidate_storage();
                 }
+                I::MemExtended { sub_op, operands } if matches!(
+                    Mem::from_byte(*sub_op),
+                    Some(Mem::ListStorageStride
+                        | Mem::ListStorageRead
+                        | Mem::ListStorageWrite
+                        | Mem::ListStorageMove
+                        | Mem::ListStorageResize)
+                ) => {
+                    let operation = Mem::from_byte(*sub_op);
+                    let mut position = 0;
+                    let mut operand = || verum_vbc::encoding::decode_reg(operands, &mut position);
+                    let (Ok(dst), Ok(owner)) = (operand(), operand()) else {
+                        return BodyFacts::unknown(instructions.len());
+                    };
+                    use_input(owner, 1, &state);
+                    if operation != Some(Mem::ListStorageStride) {
+                        let Ok(index) = operand() else { return BodyFacts::unknown(instructions.len()); };
+                        use_input(index, 8, &state);
+                    }
+                    if matches!(operation, Some(Mem::ListStorageWrite | Mem::ListStorageMove)) {
+                        let Ok(value) = operand() else { return BodyFacts::unknown(instructions.len()); };
+                        use_input(value, if operation == Some(Mem::ListStorageWrite) { 4 } else { 8 }, &state);
+                    }
+                    if operation == Some(Mem::ListStorageMove) {
+                        let Ok(count) = operand() else { return BodyFacts::unknown(instructions.len()); };
+                        use_input(count, 8, &state);
+                    }
+                    if position != operands.len() { return BodyFacts::unknown(instructions.len()); }
+                    let observes = matches!(operation, Some(Mem::ListStorageStride | Mem::ListStorageRead));
+                    if !observes {
+                        may_write = true;
+                        state.invalidate_storage();
+                    }
+                    write = Some((dst, R::Unknown));
+                }
                 I::MemExtended { sub_op, operands }
-                    if *sub_op == verum_vbc::instruction::MemSubOpcode::Replace as u8 => {
+                    if *sub_op == Mem::Replace as u8 => {
                     let mut pos = 0;
                     let mut reg = || verum_vbc::encoding::decode_reg(operands, &mut pos);
                     let (Ok(dst), Ok(place), Ok(value)) = (reg(), reg(), reg()) else {
@@ -771,6 +860,12 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                 }
                 I::DropTyped { src, type_ref } if verum_vbc::drop_plan::has_trivial_cleanup(type_ref) => {
                     // Retiring this register observes neither its bits nor any other parameter.
+                    write = Some((*src, R::Value));
+                }
+                I::DropTyped { src, .. } => {
+                    use_input(*src, 4, &state);
+                    may_write = true;
+                    state.invalidate_storage();
                     write = Some((*src, R::Value));
                 }
                 I::DropRef { src } => {
@@ -827,15 +922,34 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
             if next && pc + 1 < instructions.len() {
                 edges.push((pc + 1, state));
             }
-            for (target, incoming) in edges {
-                let joined = states
-                    .get(&target)
-                    .map(|old| old.join(&incoming))
-                    .unwrap_or(incoming);
-                if !joined.bounded() {
-                    return BodyFacts::unknown(instructions.len());
+            for (target, mut incoming) in edges {
+                if target <= pc {
+                    // A new iteration can allocate a different object at the
+                    // same instruction. A word's carrier and argument origins
+                    // survive, but a previous allocation's tag cannot prove it.
+                    incoming.registers.retain(|_, value| {
+                        matches!(value, R::Value | R::Slot | R::Parameter(..))
+                    });
+                    incoming.guards.clear();
+                    incoming.objects.clear();
                 }
-                states.insert(target, joined);
+                if branch_targets.contains(&target) {
+                    if let Some(old) = entries.get(&target) {
+                        if old == &incoming {
+                            continue;
+                        }
+                        let joined = old.join(&incoming);
+                        if joined == *old {
+                            continue;
+                        }
+                        incoming = joined;
+                    }
+                    if !incoming.bounded() {
+                        return BodyFacts::unknown(instructions.len());
+                    }
+                    entries.insert(target, incoming.clone());
+                }
+                pending.insert(target, incoming);
             }
         }
         let result = returns.unwrap_or(R::Unknown);

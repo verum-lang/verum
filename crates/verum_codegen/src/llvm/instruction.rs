@@ -27775,7 +27775,9 @@ fn lower_mem_extended<'ctx>(
             let dst = read_reg_varlen(operands, &mut pos)?;
             let list = read_reg_varlen(operands, &mut pos)?;
             let capacity = read_reg_varlen(operands, &mut pos)?;
-            let owner = as_ptr(ctx, ctx.get_register(list)?, "resize_owner")?;
+            let register = ctx.get_register(list)?;
+            let word = ctx.reference_value_view(list, register)?;
+            let owner = as_ptr(ctx, word, "resize_owner")?;
             let capacity = as_i64(ctx, ctx.get_register(capacity)?, "resize_capacity")?;
             let resize = ctx
                 .get_module()
@@ -27835,7 +27837,9 @@ fn lower_mem_extended<'ctx>(
             let dst = read_reg_varlen(operands, &mut pos)?;
             let list = read_reg_varlen(operands, &mut pos)?;
             let index = read_reg_varlen(operands, &mut pos)?;
-            let owner = as_ptr(ctx, ctx.get_register(list)?, "storage_owner")?;
+            let register = ctx.get_register(list)?;
+            let word = ctx.reference_value_view(list, register)?;
+            let owner = as_ptr(ctx, word, "storage_owner")?;
             let index = as_i64(ctx, ctx.get_register(index)?, "storage_index")?;
             let mut call_args =
                 verum_common::List::<verum_llvm::values::BasicMetadataValueEnum>::new();
@@ -27880,7 +27884,9 @@ fn lower_mem_extended<'ctx>(
         0x07 => {
             let dst = read_reg_varlen(operands, &mut pos)?;
             let list = read_reg_varlen(operands, &mut pos)?;
-            let pointer = as_ptr(ctx, ctx.get_register(list)?, "storage_list")?;
+            let register = ctx.get_register(list)?;
+            let word = ctx.reference_value_view(list, register)?;
+            let pointer = as_ptr(ctx, word, "storage_list")?;
             let runtime = RuntimeLowering::new(ctx.llvm_context());
             let width = runtime.lower_list_element_width(ctx.builder(), ctx.get_module(), pointer)?;
             ctx.set_register(dst, width.into());

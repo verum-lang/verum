@@ -96,7 +96,10 @@ pub(super) fn define_allocator<'ctx>(context: &'ctx Context, module: &Module<'ct
         )
         .or_llvm_err()?;
     builder.build_store(owner, encoding).or_llvm_err()?;
-    let size_slot = runtime.list_field_address(&builder, owner, 12, "list_object_size")?;
+    super::super::object_storage::stamp_os(context, &builder, owner, object_size)?;
+    let size_slot = runtime.list_field_address(
+        &builder, owner, verum_common::layout::OBJECT_HEADER_SIZE_OFFSET, "list_object_size",
+    )?;
     builder
         .build_store(size_slot, i32_ty.const_int(super::LIST_OBJECT_SIZE, false))
         .or_llvm_err()?;

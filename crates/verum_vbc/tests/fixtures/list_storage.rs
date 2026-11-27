@@ -26,7 +26,7 @@ fn is_header(item: &verum_ast::Item) -> bool {
         || matches!(&item.kind, ItemKind::Mount(_))
 }
 
-pub fn compile(source: &str, rename_methods: bool) -> verum_vbc::VbcModule {
+pub fn source_module(source: &str, rename_methods: bool) -> verum_vbc::VbcModule {
     let parser = FastParser::new();
     let mut files = 0..;
     let mut parse = |source: &str| {
@@ -191,6 +191,11 @@ pub fn compile(source: &str, rename_methods: bool) -> verum_vbc::VbcModule {
     for function in &mut vbc.functions {
         function.is_generic = !function.type_params.is_empty();
     }
+    vbc
+}
+
+pub fn compile(source: &str, rename_methods: bool) -> verum_vbc::VbcModule {
+    let vbc = source_module(source, rename_methods);
     let mut graph = verum_vbc::mono::InstantiationGraph::new();
     for function in &vbc.functions {
         let body = &vbc.bytecode[function.bytecode_offset as usize

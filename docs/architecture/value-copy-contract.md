@@ -166,6 +166,14 @@ The VM checks live managed or allocator-backed byte extents. Native Text copy
 requires a live flat record and live source byte range from its producer; its
 length, capacity, null and overflow checks do not validate an arbitrary forged
 pointer. Neither tier infers an allocator or exclusive ownership from capacity.
+A physically encoded List with a declared `Drop` calls that source method with
+its concrete element witness. Both tiers validate the initialized prefix.
+Native execution checks the descriptor's allocation receipt before calling the
+method and releases the descriptor afterward. A standalone module can also
+instantiate the built-in `List<T>` without the source descriptor. Its
+instantiated element type determines cleanup of the initialized prefix in
+reverse order. Missing or unresolved element types are rejected.
+
 Text producers issue a storage receipt separately from length and capacity.
 Typed destruction releases the backing allocation and descriptor through their
 recorded allocation domains; borrowed or pooled bytes are not freed. Replacing

@@ -106,6 +106,101 @@ fn retire_fields<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, pointer: PointerValu
         ctx.get_module(), pointer, bytes)
 }
 
+/// The bootstrap List has a concrete element witness but no callable source
+/// destructor. Its storage producer owns the same initialized prefix as NewList.
+fn retire_list_storage<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    pointer: PointerValue<'ctx>,
+    element: &DropPlan,
+) -> Result<()> {
+    let context = ctx.llvm_context();
+    let word = context.i64_type();
+    let length_slot = slot(ctx, pointer, verum_common::layout::LIST_LEN_OFFSET)?;
+    if matches!(element, DropPlan::Ignore) {
+        ctx.builder()
+            .build_store(length_slot, word.const_zero())
+            .or_llvm_err()?;
+    } else {
+        let test = context.append_basic_block(ctx.function(), "drop_list_test");
+        let body = context.append_basic_block(ctx.function(), "drop_list_element");
+        let done = context.append_basic_block(ctx.function(), "drop_list_empty");
+        ctx.builder()
+            .build_unconditional_branch(test)
+            .or_llvm_err()?;
+        ctx.builder().position_at_end(test);
+        let length = ctx
+            .builder()
+            .build_load(word, length_slot, "drop_list_remaining")
+            .or_llvm_err()?
+            .into_int_value();
+        let empty = ctx
+            .builder()
+            .build_int_compare(
+                IntPredicate::EQ,
+                length,
+                word.const_zero(),
+                "drop_list_empty",
+            )
+            .or_llvm_err()?;
+        ctx.builder()
+            .build_conditional_branch(empty, done, body)
+            .or_llvm_err()?;
+        ctx.builder().position_at_end(body);
+        let index = ctx
+            .builder()
+            .build_int_sub(length, word.const_int(1, false), "drop_list_last")
+            .or_llvm_err()?;
+        let read = ctx
+            .get_module()
+            .get_function("verum_list_storage_read")
+            .or_missing_fn("verum_list_storage_read")?;
+        let value = ctx
+            .builder()
+            .build_call(read, &[pointer.into(), index.into()], "drop_list_value")
+            .or_llvm_err()?
+            .basic_value_or("List storage read returned void")?;
+        ctx.builder()
+            .build_store(length_slot, index)
+            .or_llvm_err()?;
+        emit(ctx, value, element)?;
+        ctx.builder()
+            .build_unconditional_branch(test)
+            .or_llvm_err()?;
+        ctx.builder().position_at_end(done);
+    }
+    let resize = ctx
+        .get_module()
+        .get_function("verum_list_try_resize_storage")
+        .or_missing_fn("verum_list_try_resize_storage")?;
+    let released = ctx
+        .builder()
+        .build_call(
+            resize,
+            &[pointer.into(), word.const_zero().into()],
+            "drop_list_backing",
+        )
+        .or_llvm_err()?
+        .basic_value_or("List resize returned void")?
+        .into_int_value();
+    let valid = ctx
+        .builder()
+        .build_int_compare(
+            IntPredicate::NE,
+            released,
+            word.const_zero(),
+            "drop_list_released",
+        )
+        .or_llvm_err()?;
+    require_storage(ctx, valid)?;
+    super::super::object_storage::release_os(
+        context,
+        ctx.builder(),
+        ctx.get_module(),
+        pointer,
+        verum_common::layout::LIST_OBJECT_SIZE,
+    )
+}
+
 pub(super) fn emit<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
     value: BasicValueEnum<'ctx>,
@@ -151,6 +246,7 @@ pub(super) fn emit<'ctx>(
         return Ok(());
     }
     let owner = match plan {
+        DropPlan::ListStorage { .. } => TypeId::LIST,
         DropPlan::Glue { owner, .. }
         | DropPlan::Record { owner, .. }
         | DropPlan::Sum { owner, .. } => *owner,
@@ -178,19 +274,112 @@ pub(super) fn emit<'ctx>(
     let invalid = ctx
         .llvm_context()
         .append_basic_block(ctx.function(), "drop_invalid_owner");
-    ctx.builder()
-        .build_conditional_branch(matches, valid, invalid)
-        .or_llvm_err()?;
+    let list_element = if matches!(plan, DropPlan::Glue { .. } | DropPlan::ListStorage { .. }) {
+        plan.list_element(ctx.vbc_module().or_internal("DropTyped requires module")?)
+            .map_err(LlvmLoweringError::UnprovenOwnedDestruction)?
+    } else {
+        None
+    };
+    let storage_list = list_element.is_some();
+    if let Some(element) = list_element {
+        // NewList and its packed-byte producer carry a physical encoding in
+        // the header. Only the standard declaration's concrete destructor
+        // may consume it, after checking the allocation and initialized range.
+        let context = ctx.llvm_context();
+        let alternate = context.append_basic_block(ctx.function(), "drop_list_encoding");
+        let checked = context.append_basic_block(ctx.function(), "drop_list_allocation");
+        // Reserved encoding IDs always refer to physical storage, even when
+        // the linked source descriptor shares that ID.
+        if owner.is_list_like() {
+            ctx.builder()
+                .build_unconditional_branch(alternate)
+                .or_llvm_err()?;
+        } else {
+            ctx.builder()
+                .build_conditional_branch(matches, valid, alternate)
+                .or_llvm_err()?;
+        }
+        ctx.builder().position_at_end(alternate);
+        let encoding_is = |id: TypeId| {
+            ctx.builder()
+                .build_int_compare(
+                    IntPredicate::EQ,
+                    actual,
+                    context.i32_type().const_int(u64::from(id.0), false),
+                    "drop_list_encoding_matches",
+                )
+                .or_llvm_err()
+        };
+        let slots = encoding_is(TypeId::LIST)?;
+        let permitted = if element == &TypeRef::Concrete(TypeId::BYTE) {
+            ctx.builder()
+                .build_or(slots, encoding_is(TypeId::BYTE_LIST)?, "drop_byte_list")
+                .or_llvm_err()?
+        } else {
+            slots
+        };
+        ctx.builder()
+            .build_conditional_branch(permitted, checked, invalid)
+            .or_llvm_err()?;
+        ctx.builder().position_at_end(checked);
+        let receipt = super::super::object_storage::matches_os(
+            context,
+            ctx.builder(),
+            pointer,
+            verum_common::layout::LIST_OBJECT_SIZE,
+        )?;
+        require_storage(ctx, receipt)?;
+        let length = ctx
+            .builder()
+            .build_load(
+                context.i64_type(),
+                slot(ctx, pointer, verum_common::layout::LIST_LEN_OFFSET)?,
+                "drop_list_length",
+            )
+            .or_llvm_err()?
+            .into_int_value();
+        let address = ctx
+            .get_module()
+            .get_function("verum_list_storage_address")
+            .or_missing_fn("verum_list_storage_address")?;
+        ctx.builder()
+            .build_call(
+                address,
+                &[
+                    pointer.into(),
+                    context.i64_type().const_zero().into(),
+                    length.into(),
+                ],
+                "drop_list_checked_prefix",
+            )
+            .or_llvm_err()?;
+        super::super::object_storage::consume(context, ctx.builder(), pointer)?;
+        ctx.builder()
+            .build_unconditional_branch(valid)
+            .or_llvm_err()?;
+    } else {
+        ctx.builder()
+            .build_conditional_branch(matches, valid, invalid)
+            .or_llvm_err()?;
+    }
     ctx.builder().position_at_end(invalid);
+    let name = ctx
+        .vbc_module()
+        .and_then(|module| module.get_type_name(owner));
+    let function = ctx.function();
     emit_runtime_abort(
         ctx,
-        "typed destruction nominal owner mismatch",
+        &format!(
+            "typed destruction nominal owner mismatch in {}: expected {} [#{}]",
+            function.get_name().to_string_lossy(), name.as_deref().unwrap_or("<unnamed>"), owner.0,
+        ),
         "drop_invalid_owner",
     )?;
     ctx.builder().build_unreachable().or_llvm_err()?;
     ctx.builder().position_at_end(valid);
     match plan {
         DropPlan::Ignore | DropPlan::Text | DropPlan::Callable { .. } => unreachable!(),
+        DropPlan::ListStorage { element, .. } => retire_list_storage(ctx, pointer, element)?,
         DropPlan::Glue {
             function,
             type_args,
@@ -223,6 +412,19 @@ pub(super) fn emit<'ctx>(
                 .build_call(target, &[argument.into()], "")
                 .or_llvm_err()?;
             call.set_call_convention(target.get_call_conventions());
+            if storage_list {
+                // The source destructor retires the elements and their backing.
+                // The native allocator separately owns the descriptor itself.
+                if !owner.is_list_like() {
+                    let release = ctx.llvm_context().append_basic_block(ctx.function(), "drop_list_owner");
+                    ctx.builder().build_conditional_branch(matches, end, release).or_llvm_err()?;
+                    ctx.builder().position_at_end(release);
+                }
+                super::super::object_storage::release_os(
+                    ctx.llvm_context(), ctx.builder(), ctx.get_module(), pointer,
+                    verum_common::layout::LIST_OBJECT_SIZE,
+                )?;
+            }
         }
         DropPlan::Record {
             fields: declared, ..

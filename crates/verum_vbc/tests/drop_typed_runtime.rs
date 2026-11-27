@@ -427,6 +427,60 @@ fn foreign_map_declaration_cannot_claim_the_vm_table() {
 }
 
 #[test]
+fn built_in_list_cleanup_requires_its_element_witness_and_visits_nested_owners() {
+    use verum_vbc::{drop_plan, types::{TypeId, TypeRef}};
+    run(r#"
+        type Digit is { counter: &mut Int, digit: Int };
+        implement Drop for Digit {
+            fn drop(&mut self) { *self.counter = *self.counter * 10 + self.digit; }
+        }
+        type Basket is { items: List<Digit> };
+        type Shipment is { baskets: List<Basket> };
+        fn probe() -> Int {
+            let mut digits = 0;
+            {
+                let shipment = Shipment { baskets: [
+                    Basket { items: [Digit { counter: &mut digits, digit: 3 }] },
+                    Basket { items: [Digit { counter: &mut digits, digit: 7 }] }
+                ] };
+            }
+            digits
+        }
+    "#, 73);
+    let module = VbcModule::new("bootstrap".into());
+    for ty in [
+        TypeRef::Concrete(TypeId::LIST),
+        TypeRef::Instantiated { base: TypeId::LIST, args: vec![TypeRef::Concrete(TypeId(98765))] },
+        TypeRef::Instantiated { base: TypeId(98765), args: vec![TypeRef::Concrete(TypeId::INT)] },
+        TypeRef::Instantiated { base: TypeId::BYTE_LIST, args: vec![TypeRef::Concrete(TypeId::BYTE)] },
+    ] {
+        assert!(drop_plan::build(&module, &ty).is_err(), "{ty:?}");
+    }
+}
+
+#[test]
+fn a_list_storage_producer_executes_the_selected_source_drop_body() {
+    let source = r#"
+        type List<T> is { len: Int, cap: Int, ptr: &unsafe T };
+        static mut OBSERVED: Int = 0;
+        implement<T> Drop for List<T> {
+            fn drop(&mut self) { unsafe { OBSERVED = self.len; } }
+        }
+        type Basket is { items: List<Int> };
+        fn probe() -> Int {
+            { let basket = Basket { items: [4, 9] }; }
+            unsafe { OBSERVED }
+        }
+    "#;
+    for bootstrap in [false, true] {
+        let module = compile_in("core.collections.list", source, bootstrap);
+        let entry = module.find_function_by_name("core.collections.list.probe").unwrap();
+        let mut vm = Interpreter::try_new_validated(Arc::new(module)).unwrap();
+        assert_eq!(vm.execute_function(entry).unwrap().try_as_i64(), Some(2));
+    }
+}
+
+#[test]
 fn native_list_destruction_uses_the_declared_element_and_owner() {
     const SOURCE: &str = r#"
         type List<T> is { len: Int, cap: Int, ptr: &unsafe T };
