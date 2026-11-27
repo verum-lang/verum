@@ -483,8 +483,7 @@ implement Decimal {
         }
 
         let neg = self.coefficient < 0;
-        let abs_coef = if neg { -self.coefficient } else { self.coefficient };
-        let digits = digits_of(abs_coef);
+        let digits = digits_of(self.coefficient);
         let digit_count = digits.len() as Int;
 
         let mut out: Text = if neg { "-".clone() } else { "".clone() };
@@ -570,9 +569,9 @@ public fn parse_decimal(text: &Text) -> Result<Decimal, DecimalError> {
         });
     }
 
-    // Accumulate coefficient (magnitude only; sign applied at end).
+    // Accumulating a negative magnitude admits Int.MIN.
+    let limit = if neg { Int.MIN } else { -Int.MAX };
     let mut coef: Int = 0;
-    let mut digit_count: Int = 0;
     let mut frac_count: Int = 0;
     let mut saw_dot = false;
     let mut saw_digit = false;
@@ -580,19 +579,15 @@ public fn parse_decimal(text: &Text) -> Result<Decimal, DecimalError> {
     while i < n {
         let b = bytes[i] as Int;
         if b >= ('0' as Int) && b <= ('9' as Int) {
-            // Detect overflow before adding the new digit.  i64
-            // bound check: coef * 10 + d > i64.MAX ⇒ overflow.
-            let d = b - ('0' as Int);
-            let c10 = match checked_mul(coef, 10) {
-                Maybe.Some(v) => v,
-                Maybe.None    => return Result.Err(DecimalError.Overflow { op: "parse".clone() }),
-            };
-            let cnext = match checked_add(c10, d) {
-                Maybe.Some(v) => v,
-                Maybe.None    => return Result.Err(DecimalError.Overflow { op: "parse".clone() }),
-            };
-            coef = cnext;
-            digit_count = digit_count + 1;
+            let digit = b - ('0' as Int);
+            if coef < limit / 10 {
+                return Result.Err(DecimalError.Overflow { op: "parse".clone() });
+            }
+            let shifted = coef * 10;
+            if shifted < limit + digit {
+                return Result.Err(DecimalError.Overflow { op: "parse".clone() });
+            }
+            coef = shifted - digit;
             if saw_dot { frac_count = frac_count + 1; }
             saw_digit = true;
             i = i + 1;
@@ -640,7 +635,7 @@ public fn parse_decimal(text: &Text) -> Result<Decimal, DecimalError> {
         return Result.Err(DecimalError.ScaleOutOfRange { scale: frac_count });
     }
 
-    let signed = if neg { -coef } else { coef };
+    let signed = if neg { coef } else { -coef };
     Result.Ok(Decimal { coefficient: signed, scale: frac_count })
 }
 
@@ -753,9 +748,7 @@ fn checked_mul(a: Int, b: Int) -> Maybe<Int> {
 // =============================================================================
 
 
-/// Render an unsigned magnitude as decimal-digit bytes (most
-/// significant first).  Caller must pass `n >= 0` (usually by
-/// pre-extracting `abs(coefficient)`).  `n == 0` returns `[b'0']`.
+/// Render the magnitude of a signed coefficient in most-significant-first order.
 fn digits_of(n: Int) -> List<Byte> {
     if n == 0 {
         let mut zero: List<Byte> = List.new();
@@ -764,9 +757,10 @@ fn digits_of(n: Int) -> List<Byte> {
     }
     let mut buf: List<Byte> = List.new();
     let mut v = n;
-    while v > 0 {
-        let d = v % 10;
-        buf.push(((d + ('0' as Int)) as Byte));
+    while v != 0 {
+        let rem = v % 10;
+        let digit = if rem < 0 { -rem } else { rem };
+        buf.push((digit + ('0' as Int)) as Byte);
         v = v / 10;
     }
     // Reverse into MS-first order.

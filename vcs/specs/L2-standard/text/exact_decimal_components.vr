@@ -6,7 +6,7 @@
 
 mount core.base.maybe.Maybe;
 mount core.base.result.Result;
-mount core.text.numeric.decimal.{Decimal, RoundingMode};
+mount core.text.numeric.decimal.{Decimal, DecimalError, RoundingMode, parse_decimal};
 mount core.text.numeric.bigint.{BigInt, BigIntError, parse_bigint};
 mount core.text.numeric.bigdecimal.{BigDecimal, BigDecimalError};
 mount core.text.numeric.rational.{Rational, RationalError, parse_rational};
@@ -49,6 +49,14 @@ fn test_components() {
 }
 
 fn test_integer_boundaries() {
+    let minimum = fixed(Int.MIN, 18);
+    assert_eq(minimum.to_text(), "-9.223372036854775808");
+    match parse_decimal(&minimum.to_text()) {
+        Result.Ok(v) => { assert_eq(v.coefficient(), Int.MIN); assert_eq(v.scale(), 18); },
+        _ => assert(false),
+    }
+    assert(parse_decimal(&"9223372036854775808") is Result.Err(DecimalError.Overflow { op: _ }));
+    assert(parse_decimal(&"-9223372036854775809") is Result.Err(DecimalError.Overflow { op: _ }));
     let low = BigInt.from_int(Int.MIN);
     let high = BigInt.from_int(Int.MAX);
     assert_eq(low.to_text(), "-9223372036854775808");
