@@ -481,34 +481,14 @@ pub(in super::super) fn handle_iter_next(
     }
 
     match iter_type {
-        ITER_TYPE_LIST => {
-            // Read list header: [len, cap, backing_ptr]
-            let list_header = unsafe { source_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
-            let len = unsafe { (*list_header).as_i64() } as usize;
-
-            if current_idx >= len {
-                // Exhausted
-                state.set_reg(dst, Value::unit());
-                state.set_reg(has_next_dst, Value::from_bool(false));
-                return Ok(DispatchResult::Continue);
+        ITER_TYPE_LIST | ITER_TYPE_BYTE_LIST => {
+            let value = super::list_storage::iteration_element(state, source, current_idx)?;
+            if value.is_some() {
+                // SAFETY: the live iterator owns this cursor word.
+                unsafe { *iter_data.add(1) = Value::from_i64((current_idx + 1) as i64); }
             }
-
-            // Get element from backing array
-            let backing_ptr = unsafe { (*list_header.add(2)).as_ptr::<u8>() };
-            let elem_ptr = unsafe {
-                backing_ptr
-                    .add(heap::OBJECT_HEADER_SIZE + current_idx * std::mem::size_of::<Value>())
-                    as *const Value
-            };
-            let element = unsafe { *elem_ptr };
-
-            // Advance iterator
-            unsafe {
-                *iter_data.add(1) = Value::from_i64((current_idx + 1) as i64);
-            }
-
-            state.set_reg(dst, element);
-            state.set_reg(has_next_dst, Value::from_bool(true));
+            state.set_reg(dst, value.unwrap_or_else(Value::unit));
+            state.set_reg(has_next_dst, Value::from_bool(value.is_some()));
         }
         ITER_TYPE_TYPED_ARRAY => {
             // Packed typed array — element count derives from the
@@ -565,31 +545,6 @@ pub(in super::super) fn handle_iter_next(
             // SAFETY: bounds-checked above; the view addresses `len`
             // bytes at `base` (never-null producer contract).
             let byte_value = unsafe { *base.add(current_idx) };
-
-            unsafe {
-                *iter_data.add(1) = Value::from_i64((current_idx + 1) as i64);
-            }
-
-            state.set_reg(dst, Value::from_i64(byte_value as i64));
-            state.set_reg(has_next_dst, Value::from_bool(true));
-        }
-        ITER_TYPE_BYTE_LIST => {
-            // Packed-byte list iteration: same 3-Value header shape as
-            // LIST but the backing is `[u8; cap]`.  Read 1 byte and
-            // zero-extend into a NaN-boxed Value (red-team §4 fix).
-            let list_header = unsafe { source_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
-            let len = unsafe { (*list_header).as_i64() } as usize;
-
-            if current_idx >= len {
-                state.set_reg(dst, Value::unit());
-                state.set_reg(has_next_dst, Value::from_bool(false));
-                return Ok(DispatchResult::Continue);
-            }
-
-            let backing_ptr = unsafe { (*list_header.add(2)).as_ptr::<u8>() };
-            let elem_ptr =
-                unsafe { backing_ptr.add(heap::OBJECT_HEADER_SIZE + current_idx) };
-            let byte_value = unsafe { *elem_ptr };
 
             unsafe {
                 *iter_data.add(1) = Value::from_i64((current_idx + 1) as i64);

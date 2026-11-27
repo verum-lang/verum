@@ -153,6 +153,16 @@ fn fixture() -> Interpreter {
             .collect(),
         ),
         (
+            "cursor",
+            [I::IterNew { dst: Reg(4), iterable: Reg(0) }, I::Ret { value: Reg(4) }]
+                .into_iter().collect(),
+        ),
+        (
+            "advance",
+            [I::IterNext { dst: Reg(4), has_next: Reg(5), iter: Reg(0) }, I::Ret { value: Reg(4) }]
+                .into_iter().collect(),
+        ),
+        (
             "allocate",
             [cbgr(C::AllocateUser, &[4, 0, 1]), I::Ret { value: Reg(4) }]
                 .into_iter()
@@ -555,9 +565,12 @@ fn raw_backing_uses_the_same_allocator_revocation_as_managed_projection() {
                 .write(Value::from_i64(3));
             owner.data_ptr().cast::<Value>().add(2).write(raw);
         }
+        let cursor = call(&mut vm, "cursor", &[Value::from_ptr(owner.as_ptr())]).unwrap();
+        assert_eq!(call(&mut vm, "advance", &[cursor]).unwrap().try_as_i64(), Some(11));
         let span = full(&mut vm, &owner, true);
         let reference = element(&mut vm, span, 1);
         call(&mut vm, "write", &[reference, Value::from_i64(73)]).unwrap();
+        assert_eq!(call(&mut vm, "advance", &[cursor]).unwrap().try_as_i64(), Some(73));
         assert_eq!(
             call(&mut vm, "get", &[span, Value::from_i64(1)])
                 .unwrap()
@@ -565,6 +578,8 @@ fn raw_backing_uses_the_same_allocator_revocation_as_managed_projection() {
             Some(73)
         );
         call(&mut vm, "free", &[raw]).unwrap();
+        assert!(matches!(call(&mut vm, "advance", &[cursor]), Err(InterpreterError::Panic { message })
+            if message.contains("no live allocation extent")));
         stale(call(&mut vm, "read", &[reference]).unwrap_err());
         stale(call(&mut vm, "get", &[span, Value::from_i64(1)]).unwrap_err());
     }

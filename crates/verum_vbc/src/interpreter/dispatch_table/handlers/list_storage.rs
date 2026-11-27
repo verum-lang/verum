@@ -105,6 +105,20 @@ impl Storage {
             count * self.width,
         ))
     }
+    /// The caller supplies an initialized index. The physical range and stride
+    /// are checked against the same allocation for raw and managed backing.
+    fn read(&self, index: i64) -> InterpreterResult<Value> {
+        let (address, _) = self.range(index, 1)?;
+        // SAFETY: range checked the allocation extent for one storage element.
+        Ok(unsafe {
+            if self.width == 1 {
+                Value::from_i64(i64::from(address.read()))
+            } else {
+                address.cast::<Value>().read_unaligned()
+            }
+        })
+    }
+
     fn project(&self, state: &mut InterpreterState, capabilities: Capabilities) -> InterpreterResult<Value> {
         let encoding = if self.width == 1 {
             heap::ProjectionEncoding::Byte
@@ -323,6 +337,15 @@ pub(super) fn take_owned_elements(
     Ok(Some((element, elements)))
 }
 
+/// Re-resolve the live List each step so growth can replace its backing.
+pub(super) fn iteration_element(
+    state: &InterpreterState, owner: Value, index: usize,
+) -> InterpreterResult<Option<Value>> {
+    let storage = Storage::resolve(state, owner)?;
+    if index >= storage.len { return Ok(None); }
+    storage.read(index as i64).map(Some)
+}
+
 /// Swap initialized elements without changing the owner's length, capacity or
 /// backing. Both ranges are checked before either write, for either encoding.
 pub(super) fn swap(
@@ -377,16 +400,7 @@ pub(super) fn access(
         .ok_or_else(|| invalid("List storage range index is not Int"))?;
     match opcode {
         0x08 => {
-            let (address, _) = storage.range(index, 1)?;
-            // SAFETY: the checked range names one initialized element, as
-            // required by the intrinsic's unsafe source contract.
-            let value = unsafe {
-                if storage.width == 1 {
-                    Value::from_i64(address.read() as i64)
-                } else {
-                    (address as *const Value).read_unaligned()
-                }
-            };
+            let value = storage.read(index)?;
             state.set_reg(dst, value);
         }
         0x09 => {

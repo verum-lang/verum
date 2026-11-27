@@ -180,3 +180,19 @@ fn field_stores_cannot_change_private_cursor_state() {
         matches!(result, Err(InterpreterError::InvalidOperand { ref message }) if message.contains("SetF"))
     );
 }
+
+#[test]
+fn iterating_a_list_validates_its_live_backing_extent() {
+    let result = execute(&[
+        Instruction::NewList { dst: Reg(0), capacity_hint: 1 },
+        Instruction::LoadI { dst: Reg(1), value: 2048 },
+        Instruction::SetF { obj: Reg(0), field_idx: 1, value: Reg(1) },
+        Instruction::IterNew { dst: Reg(2), iterable: Reg(0) },
+        Instruction::IterNext { dst: Reg(3), has_next: Reg(4), iter: Reg(2) },
+        Instruction::Ret { value: Reg(3) },
+    ]);
+    assert!(
+        matches!(result, Err(InterpreterError::Panic { ref message }) if message.contains("capacity exceeds its allocation extent")),
+        "{result:?}",
+    );
+}
