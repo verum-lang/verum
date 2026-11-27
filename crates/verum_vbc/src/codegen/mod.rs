@@ -19090,13 +19090,15 @@ impl VbcCodegen {
         let declared_ids: verum_common::List<_> = caller_generics.values()
             .chain(caller_shadows.values()).copied().map(crate::types::TypeParamId).collect();
         caller_generics.extend(caller_shadows.clone());
-        let mut equalities = type_equalities::DeclarationEqualities::default();
-        if impl_type_name.is_some() {
-            self.collect_implementation_equalities(&mut equalities)?;
+        let mut equalities = if impl_type_name.is_some() {
+            let mut equalities = self.implementation_equalities()?;
             self.collect_declaration_equalities(
                 self.current_impl_where_clause.as_ref(), &receiver_generics, &declared_ids, &mut equalities,
             )?;
-        }
+            equalities
+        } else {
+            type_equalities::DeclarationEqualities::default()
+        };
         self.collect_declaration_equalities(
             func.generic_where_clause.as_ref(), &caller_generics, &declared_ids, &mut equalities,
         )?;

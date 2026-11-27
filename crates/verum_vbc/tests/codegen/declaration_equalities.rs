@@ -10,6 +10,29 @@ fn projection(base: TypeRef) -> TypeRef {
 }
 
 #[test]
+fn selected_member_definitions_reject_conflicting_premises_and_cycles() {
+    let cg = VbcCodegen::new();
+    let member = projection(TypeRef::Concrete(TypeId::U8));
+    let int = TypeRef::Concrete(TypeId::INT);
+    let text = TypeRef::Concrete(TypeId::TEXT);
+    let mut selected = DeclarationEqualities::with_members(
+        &cg, List::from_iter([(member.clone(), int.clone())]),
+    ).unwrap();
+    assert!(selected.add(&cg, member.clone(), text.clone()).is_err());
+    assert_eq!(selected.normalize(&cg, &member).unwrap(), int);
+    let other = DeclarationEqualities::with_members(
+        &cg, List::from_iter([(member.clone(), text.clone())]),
+    ).unwrap();
+    assert_eq!(other.normalize(&cg, &member).unwrap(), text);
+    assert!(DeclarationEqualities::with_members(&cg, List::from_iter([
+        (member.clone(), int), (member.clone(), text)
+    ])).is_err());
+    assert!(DeclarationEqualities::with_members(&cg, List::from_iter([
+        (member.clone(), TypeRef::Slice(Box::new(member)))
+    ])).is_err());
+}
+
+#[test]
 fn equality_substitution_lifts_outer_parameters_under_nested_binders() {
     let codegen = VbcCodegen::new();
     let mut equalities = DeclarationEqualities::default();

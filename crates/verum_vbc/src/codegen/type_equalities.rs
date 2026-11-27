@@ -5,6 +5,9 @@ use verum_common::{List, Maybe};
 
 #[derive(Default)]
 pub(super) struct DeclarationEqualities {
+    /// Definitions belonging to the one implementation selected for this body.
+    /// A different protocol on the same receiver can own a homonymous member.
+    members: List<(TypeRef, TypeRef)>,
     rules: List<(TypeRef, TypeRef)>,
 }
 
@@ -17,6 +20,21 @@ fn invalid(message: impl Into<verum_common::Text>) -> CodegenError {
 }
 
 impl DeclarationEqualities {
+    fn with_members(codegen: &VbcCodegen, members: List<(TypeRef, TypeRef)>) -> CodegenResult<Self> {
+        if members.len() > MAX_TYPE_REF_NODES {
+            return Err(invalid("associated member definitions exceed the premise limit"));
+        }
+        let mut seen = verum_common::Set::new();
+        for (subject, _) in &members {
+            if !seen.insert(subject) { return Err(invalid("duplicate associated member definition")); }
+        }
+        let scope = Self { members, rules: List::new() };
+        for (subject, _) in &scope.members {
+            scope.normalize(codegen, subject)?;
+        }
+        Ok(scope)
+    }
+
     fn normalize(&self, codegen: &VbcCodegen, ty: &TypeRef) -> CodegenResult<TypeRef> {
         Normalizer {
             codegen, equalities: self, active: List::new(), remaining: MAX_TYPE_REF_NODES,
@@ -111,14 +129,24 @@ impl Normalizer<'_> {
                 .ok_or_else(|| invalid("declared type equality requires a complete acyclic alias application"))?;
             return self.resolve(&expanded, binders, depth + 1);
         }
+        let equalities = self.equalities;
+        if let TypeRef::AssociatedProjection { .. } = &ty
+            && let Some(value) = self.rewrite(&ty, binders, depth, &equalities.members)? {
+            return Ok(value);
+        }
         if let Some(resolved) = self.codegen.declared_associated_projection_target(&ty)
             && resolved != ty {
             return self.resolve(&resolved, binders, depth + 1);
         }
+        Ok(self.rewrite(&ty, binders, depth, &equalities.rules)?.unwrap_or(ty))
+    }
+
+    fn rewrite(
+        &mut self, ty: &TypeRef, binders: u32, depth: usize, rules: &[(TypeRef, TypeRef)],
+    ) -> CodegenResult<Maybe<TypeRef>> {
         let mut selected = None;
-        let equalities = self.equalities;
-        for (subject, target) in &equalities.rules {
-            if !matches!((&ty, subject),
+        for (subject, target) in rules {
+            if !matches!((ty, subject),
                 (TypeRef::Generic(_), TypeRef::Generic(_)) |
                 (TypeRef::AssociatedProjection { .. }, TypeRef::AssociatedProjection { .. })) { continue; }
             let lift = |ty| crate::mono::lift_free_parameters(ty, binders)
@@ -127,8 +155,8 @@ impl Normalizer<'_> {
             // at the root; a later premise may refine a projection's base.
             let subject = map_children(&lift(subject)?, binders,
                 &mut |child, scope| self.resolve(child, scope, depth + 1))?;
-            if subject != ty { continue; }
-            if self.active.iter().any(|(subject, scope)| *scope == binders && subject == &ty) {
+            if &subject != ty { continue; }
+            if self.active.iter().any(|(subject, scope)| *scope == binders && subject == ty) {
                 return Err(invalid("cyclic declared type equality"));
             }
             self.active.push((ty.clone(), binders));
@@ -140,7 +168,7 @@ impl Normalizer<'_> {
             }
             selected = Some(result);
         }
-        Ok(selected.unwrap_or(ty))
+        Ok(selected)
     }
 }
 
@@ -240,17 +268,18 @@ impl VbcCodegen {
         if &head != receiver { return None; }
         let receiver = super::ImplReceiverWitness { ty: head, semantic: true };
         let lexical = DeclarationTypeScope { receiver: Some(&receiver), ..lexical };
-        let mut equalities = DeclarationEqualities::default();
+        let mut definitions = List::new();
         for item in &implementation.items {
             let ImplItemKind::Type { name, ty, type_params } = &item.kind else { continue; };
             if !type_params.is_empty() { continue; }
             let target = self.semantic_formal_type_in_declaration(
                 ty, &scope, &ids, &Default::default(), &lexical)?;
-            equalities.add(self, TypeRef::AssociatedProjection {
+            definitions.push((TypeRef::AssociatedProjection {
                 base: Box::new(receiver.ty.clone()), qualifier: None,
                 assoc: name.name.to_string(), args: Default::default(),
-            }, target).ok()?;
+            }, target));
         }
+        let equalities = DeclarationEqualities::with_members(self, definitions).ok()?;
         let result = equalities.normalize(self, ty).ok()?;
         super::formal_parameters::resolved(&result, &function.type_param_ids, 0).then_some(result)
     }
@@ -292,13 +321,8 @@ impl VbcCodegen {
         Ok(equations)
     }
 
-    pub(super) fn collect_implementation_equalities(
-        &self, output: &mut DeclarationEqualities,
-    ) -> CodegenResult<()> {
-        for (subject, target) in &self.current_impl_associated_equalities {
-            output.add(self, subject.clone(), target.clone())?;
-        }
-        Ok(())
+    pub(super) fn implementation_equalities(&self) -> CodegenResult<DeclarationEqualities> {
+        DeclarationEqualities::with_members(self, self.current_impl_associated_equalities.clone())
     }
 
     pub(super) fn collect_declaration_equalities(
