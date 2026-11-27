@@ -756,6 +756,21 @@ impl<'a> Validator<'a> {
         let func_name = format!("fn#{}@0x{:x}", func.id.0, instr_start);
 
         match instr {
+            Instruction::MemExtended { sub_op, operands } => {
+                if let Some(layout) = crate::encoding::PackedArrayLayout::for_subopcode(*sub_op) {
+                    match layout.decode(operands, &mut 0) {
+                        Ok(array) => {
+                            for reg in array.regs {
+                                self.check_reg(reg, max_reg, &func_name);
+                            }
+                        }
+                        Err(error) => self.errors.push(VbcError::InvalidInstructionEncoding {
+                            offset: instr_start,
+                            reason: format!("invalid packed array instruction: {error}"),
+                        }),
+                    }
+                }
+            }
             Instruction::DiscardException { .. } | Instruction::RethrowException => {
                 if self.module.header.version_minor < crate::format::EXCEPTION_DISPOSITION_VERSION {
                     self.errors.push(VbcError::InvalidInstructionEncoding {

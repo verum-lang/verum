@@ -12,6 +12,7 @@ use super::bytecode_io::*;
 use super::envelope::dispatch_enveloped;
 use super::super::super::heap;
 use super::ffi_extended::{MAX_FFI_ALLOCATION_SIZE, value_as_addr};
+use crate::encoding::{PackedArrayLayout, PackedArrayOperands};
 use crate::instruction::Opcode;
 use crate::types::TypeId;
 use crate::value::Value;
@@ -128,6 +129,14 @@ fn raw_mem_layout(size: usize, align: usize, what: &str) -> InterpreterResult<st
              bytecode producer never sent the align operand)"
         ),
     })
+}
+
+#[inline]
+fn read_packed_array(
+    state: &mut InterpreterState,
+    layout: PackedArrayLayout,
+) -> InterpreterResult<PackedArrayOperands> {
+    read_operand(state, |bytes, cursor| layout.decode(bytes, cursor))
 }
 
 fn mem_extended_body(
@@ -1436,9 +1445,8 @@ unsafe {
         0x30 => {
             // Allocate a byte array (contiguous bytes, not Values)
             // Format: dst:reg, size:reg, init:reg
-            let dst = read_reg(state)?;
-            let size_reg = read_reg(state)?;
-            let init_reg = read_reg(state)?;
+            let packed = read_packed_array(state, PackedArrayLayout::Bytes)?;
+            let [dst, size_reg, init_reg] = packed.regs;
 
             let size = state.get_reg(size_reg).as_i64() as usize;
             let init_byte = state.get_reg(init_reg).as_i64() as u8;
@@ -1472,9 +1480,8 @@ unsafe {
             // Get address of element in byte array (for &mut buf[idx] as *mut Byte)
             // Format: dst:reg, arr:reg, idx:reg
             // Returns: dst = arr_ptr + OBJECT_HEADER_SIZE + idx
-            let dst = read_reg(state)?;
-            let arr_reg = read_reg(state)?;
-            let idx_reg = read_reg(state)?;
+            let packed = read_packed_array(state, PackedArrayLayout::Bytes)?;
+            let [dst, arr_reg, idx_reg] = packed.regs;
 
             let arr_ptr = state.get_reg(arr_reg).as_ptr::<u8>();
             if arr_ptr.is_null() {
@@ -1520,9 +1527,8 @@ unsafe {
         0x32 => {
             // Load a byte from byte array
             // Format: dst:reg, arr:reg, idx:reg
-            let dst = read_reg(state)?;
-            let arr_reg = read_reg(state)?;
-            let idx_reg = read_reg(state)?;
+            let packed = read_packed_array(state, PackedArrayLayout::Bytes)?;
+            let [dst, arr_reg, idx_reg] = packed.regs;
 
             let arr_ptr = state.get_reg(arr_reg).as_ptr::<u8>();
             if arr_ptr.is_null() {
@@ -1567,9 +1573,8 @@ unsafe {
         0x33 => {
             // Store a byte to byte array
             // Format: arr:reg, idx:reg, val:reg
-            let arr_reg = read_reg(state)?;
-            let idx_reg = read_reg(state)?;
-            let val_reg = read_reg(state)?;
+            let packed = read_packed_array(state, PackedArrayLayout::Bytes)?;
+            let [arr_reg, idx_reg, val_reg] = packed.regs;
 
             let arr_ptr = state.get_reg(arr_reg).as_ptr::<u8>();
             if arr_ptr.is_null() {
@@ -1615,8 +1620,8 @@ unsafe {
         0x34 => {
             // Create new typed array with specified element size
             // Format: dst:reg, count:reg, elem_size:u8, init:reg
-            let dst = read_reg(state)?;
-            let count_reg = read_reg(state)?;
+            let packed = read_packed_array(state, PackedArrayLayout::Allocation)?;
+            let [dst, count_reg, init_reg] = packed.regs;
             // TYPED-ARRAY-FLOAT-1 (#28): bit 0x80 of the elem_size byte marks
             // a floating-point element array. The low 7 bits are the raw byte
             // stride (4 or 8); the flag routes the allocation to the float
@@ -1624,10 +1629,9 @@ unsafe {
             // decode the raw IEEE-754 bytes through `from_f64` rather than
             // `from_i64` (which re-boxes a double's bit pattern as a bogus
             // integer — the `[Float; N]` → NaN symptom).
-            let elem_size_byte = read_u8(state)?;
+            let elem_size_byte = packed.format;
             let is_float = (elem_size_byte & 0x80) != 0;
             let elem_size = (elem_size_byte & 0x7f) as usize;
-            let init_reg = read_reg(state)?;
 
             let count_val = state.get_reg(count_reg).as_i64();
             if count_val < 0 {
@@ -1732,10 +1736,9 @@ unsafe {
         0x35 => {
             // Get element address for typed array with specified element size
             // Format: dst:reg, arr:reg, idx:reg, elem_size:u8
-            let dst = read_reg(state)?;
-            let arr_reg = read_reg(state)?;
-            let idx_reg = read_reg(state)?;
-            let elem_size = read_u8(state)? as usize;
+            let packed = read_packed_array(state, PackedArrayLayout::Access)?;
+            let [dst, arr_reg, idx_reg] = packed.regs;
+            let elem_size = packed.format as usize;
 
             let arr_ptr = state.get_reg(arr_reg).as_ptr::<u8>();
             if arr_ptr.is_null() {
@@ -1785,10 +1788,9 @@ unsafe {
             // widens `from_bits` → f64, F64 round-trips its IEEE bits. Reuses
             // the ONE decode authority `heap::typed_array_element` so this path
             // and the `GetE` typed-array branch stay bit-identical.
-            let dst = read_reg(state)?;
-            let arr_reg = read_reg(state)?;
-            let idx_reg = read_reg(state)?;
-            let elem_byte = read_u8(state)?;
+            let packed = read_packed_array(state, PackedArrayLayout::Read)?;
+            let [dst, arr_reg, idx_reg] = packed.regs;
+            let elem_byte = packed.format;
             let elem_size = (elem_byte & 0x7F) as usize;
             let is_float = elem_byte & 0x80 != 0;
 
@@ -1860,10 +1862,9 @@ unsafe {
             // `from_i64`) — read back the NaN-box tag pattern as garbage
             // (`a[0]` of `[10,…]` → `0x7FF9…000A`). Storing raw makes store and
             // load coherent.
-            let arr_reg = read_reg(state)?;
-            let idx_reg = read_reg(state)?;
-            let val_reg = read_reg(state)?;
-            let elem_size = read_u8(state)? as usize;
+            let packed = read_packed_array(state, PackedArrayLayout::Access)?;
+            let [arr_reg, idx_reg, val_reg] = packed.regs;
+            let elem_size = packed.format as usize;
 
             let arr_ptr = state.get_reg(arr_reg).as_ptr::<u8>();
             if arr_ptr.is_null() {

@@ -287,6 +287,76 @@ pub fn decode_reg(data: &[u8], offset: &mut usize) -> VbcResult<Reg> {
     }
 }
 
+/// Operand order for packed-array memory instructions. Float tags occupy a
+/// literal byte, never the first byte of a two-byte register.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PackedArrayLayout {
+    /// Three registers and no format byte.
+    Bytes,
+    /// Destination, count, format byte, initial value.
+    Allocation,
+    /// Three registers followed by a possibly floating-point read format.
+    Read,
+    /// Three registers followed by an element stride.
+    Access,
+}
+
+/// Decoded operands, in operation order, and their validated element format.
+pub struct PackedArrayOperands {
+    /// Includes the initial value for both allocation operations.
+    pub regs: [Reg; 3],
+    /// Width in bytes, with the high bit set for floating allocations and reads.
+    pub format: u8,
+}
+
+impl PackedArrayLayout {
+    /// Identify the wire format before consuming registers or immediates.
+    pub fn for_subopcode(sub_op: u8) -> Option<Self> {
+        use crate::instruction::MemSubOpcode::*;
+        match crate::instruction::MemSubOpcode::from_byte(sub_op)? {
+            NewByteArray | ByteArrayElementAddr | ByteArrayLoad | ByteArrayStore => {
+                Some(Self::Bytes)
+            }
+            NewTypedArray => Some(Self::Allocation),
+            TypedArrayLoad => Some(Self::Read),
+            TypedArrayElementAddr | TypedArrayStore => Some(Self::Access),
+            _ => None,
+        }
+    }
+
+    /// Decode within the instruction's operand boundary and consume it exactly.
+    pub fn decode(self, data: &[u8], cursor: &mut usize) -> VbcResult<PackedArrayOperands> {
+        let first = decode_reg(data, cursor)?;
+        let second = decode_reg(data, cursor)?;
+        let mut format = 1;
+        if self == Self::Allocation {
+            format = decode_u8(data, cursor)?;
+        }
+        let third = decode_reg(data, cursor)?;
+        if matches!(self, Self::Read | Self::Access) {
+            format = decode_u8(data, cursor)?;
+        }
+        let valid_format = matches!(format, 1 | 2 | 4 | 8)
+            || (matches!(self, Self::Allocation | Self::Read) && matches!(format, 0x84 | 0x88));
+        if !valid_format {
+            return Err(VbcError::InvalidInstructionEncoding {
+                offset: *cursor,
+                reason: format!("invalid packed array element format {format:#x} for {self:?}"),
+            });
+        }
+        if *cursor != data.len() {
+            return Err(VbcError::InvalidInstructionEncoding {
+                offset: *cursor,
+                reason: "trailing packed array operands".into(),
+            });
+        }
+        Ok(PackedArrayOperands {
+            regs: [first, second, third],
+            format,
+        })
+    }
+}
+
 /// Upper bound on a sequence borrow's authority. Earlier operands without
 /// a mode inherit their source rights. A shared borrow narrows at issuance.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

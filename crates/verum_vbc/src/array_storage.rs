@@ -148,67 +148,43 @@ impl ArrayResultFacts {
                 self.fresh_lists.insert(*dst);
             }
             I::MemExtended { sub_op, operands } => {
-                let Some(op) = MemSubOpcode::from_byte(*sub_op) else {
+                let Some(layout) = crate::encoding::PackedArrayLayout::for_subopcode(*sub_op) else {
                     self.clear();
                     return false;
                 };
-                if matches!(
-                    op,
-                    MemSubOpcode::ByteArrayStore | MemSubOpcode::TypedArrayStore
-                ) {
-                    self.fresh_lists.clear();
-                    return true; // Element stores do not replace or resize the array.
-                }
-                let mut cursor = 0;
-                let Ok(dst) = decode_reg(operands, &mut cursor) else {
+                let Ok(array) = layout.decode(operands, &mut 0) else {
                     self.clear();
                     return false;
                 };
-                if matches!(
-                    op,
-                    MemSubOpcode::ByteArrayLoad | MemSubOpcode::TypedArrayLoad
-                ) {
-                    self.forget(dst);
-                    return true;
-                }
-                if !matches!(op, MemSubOpcode::NewByteArray | MemSubOpcode::NewTypedArray) {
-                    self.clear();
-                    return false;
-                }
-                let count =
-                    decode_reg(operands, &mut cursor)
-                        .ok()
-                        .and_then(|reg| match self.get(reg) {
+                let [dst, count_reg, _] = array.regs;
+                match MemSubOpcode::from_byte(*sub_op) {
+                    Some(MemSubOpcode::ByteArrayStore | MemSubOpcode::TypedArrayStore) => {
+                        self.fresh_lists.clear();
+                    }
+                    Some(MemSubOpcode::ByteArrayLoad | MemSubOpcode::TypedArrayLoad) => {
+                        self.forget(dst);
+                    }
+                    Some(MemSubOpcode::NewByteArray | MemSubOpcode::NewTypedArray) => {
+                        let count = match self.get(count_reg) {
                             Some(ArrayResultFact::Integer(n)) => u64::try_from(n).ok(),
                             _ => None,
-                        });
-                let geometry = if op == MemSubOpcode::NewByteArray {
-                    Some((1, false))
-                } else {
-                    operands.get(cursor).copied().map(|encoded| {
-                        cursor += 1;
-                        (usize::from(encoded & 0x7f), encoded & 0x80 != 0)
-                    })
-                };
-                let valid_init = decode_reg(operands, &mut cursor).is_ok();
-                self.forget(dst);
-                if let (Some(count), Some((width, float))) = (count, geometry)
-                    && valid_init
-                    && cursor == operands.len()
-                    && matches!(width, 1 | 2 | 4 | 8)
-                    && (!float || matches!(width, 4 | 8))
-                    && count
-                        .checked_mul(width as u64)
-                        .is_some_and(|n| n <= isize::MAX as u64)
-                {
-                    self.values.insert(
-                        dst,
-                        ArrayResultFact::Packed {
-                            width,
-                            float,
-                            count,
-                        },
-                    );
+                        };
+                        self.forget(dst);
+                        let width = usize::from(array.format & 0x7f);
+                        if let Some(count) = count
+                            && count.checked_mul(width as u64).is_some_and(|n| n <= isize::MAX as u64)
+                        {
+                            self.values.insert(dst, ArrayResultFact::Packed {
+                                width,
+                                float: array.format & 0x80 != 0,
+                                count,
+                            });
+                        }
+                    }
+                    _ => {
+                        self.clear();
+                        return false;
+                    }
                 }
             }
             I::ArithExtended { sub_op, operands }

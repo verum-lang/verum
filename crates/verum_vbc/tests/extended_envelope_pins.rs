@@ -23,6 +23,7 @@ fn create_module(bytecode_data: Vec<u8>, register_count: u16) -> Arc<VbcModule> 
     func.bytecode_length = bytecode_data.len() as u32;
     func.register_count = register_count;
     module.functions.push(func);
+    module.header.function_table_count = module.functions.len() as u32;
     module.bytecode = bytecode_data;
     Arc::new(module)
 }
@@ -126,6 +127,74 @@ fn raw_slice_uses_its_exact_operand_envelope_and_element_width() {
         let module = create_module(bytes, 3);
         let error = Interpreter::new(module).execute_function(FunctionId(0)).unwrap_err();
         assert!(matches!(error, InterpreterError::InvalidBytecode { .. }), "{error}");
+    }
+}
+
+#[test]
+fn packed_array_formats_bound_the_registers_and_the_envelope() {
+    use verum_vbc::encoding::PackedArrayLayout;
+    use verum_vbc::instruction::MemSubOpcode::*;
+    use verum_vbc::validate::validate_module;
+
+    // r127, r128 and r256 straddle both one-byte truncation boundaries.
+    for (op, bytes, format) in [
+        (NewByteArray, &[127, 0x80, 128, 0x81, 0][..], 1),
+        (NewTypedArray, &[127, 0x80, 128, 0x84, 0x81, 0], 0x84),
+        (TypedArrayLoad, &[127, 0x80, 128, 0x81, 0, 0x88], 0x88),
+        (TypedArrayStore, &[127, 0x80, 128, 0x81, 0, 2], 2),
+    ] {
+        let array = PackedArrayLayout::for_subopcode(op.to_byte())
+            .unwrap()
+            .decode(bytes, &mut 0)
+            .unwrap();
+        assert_eq!(array.regs, [Reg(127), Reg(128), Reg(256)]);
+        assert_eq!(array.format, format);
+        let mut bc = vec![];
+        bytecode::encode_instructions(
+            &[
+                Instruction::MemExtended {
+                    sub_op: op.to_byte(),
+                    operands: bytes.into(),
+                },
+                Instruction::RetV,
+            ],
+            &mut bc,
+        );
+        validate_module(&create_module(bc.clone(), 257)).unwrap();
+        assert!(matches!(
+            validate_module(&create_module(bc, 256)),
+            Err(verum_vbc::error::VbcError::RegisterOutOfBounds { reg: 256, .. })
+        ));
+    }
+
+    for (op, bytes) in [
+        (NewByteArray, &[0x80, 126, 125][..]), // truncated producer at r128
+        (NewTypedArray, &[0, 1, 4, 0x81]),
+        (TypedArrayLoad, &[0, 1, 2, 0x82]),
+        (TypedArrayElementAddr, &[0, 1, 2, 3]),
+        (TypedArrayStore, &[0, 1, 2, 0x84]),
+        (ByteArrayStore, &[0, 1, 2, 0]),
+    ] {
+        let mut bc = vec![];
+        bytecode::encode_instructions(
+            &[
+                Instruction::MemExtended {
+                    sub_op: op.to_byte(),
+                    operands: bytes.into(),
+                },
+                Instruction::RetV,
+            ],
+            &mut bc,
+        );
+        let module = create_module(bc, 300);
+        assert!(validate_module(&module).is_err(), "{op:?}");
+        let error = Interpreter::new(module)
+            .execute_function(FunctionId(0))
+            .unwrap_err();
+        assert!(
+            matches!(error, InterpreterError::InvalidBytecode { .. }),
+            "{op:?}: {error}"
+        );
     }
 }
 

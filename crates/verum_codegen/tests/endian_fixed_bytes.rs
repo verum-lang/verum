@@ -571,6 +571,61 @@ fn native_selected_packed_array_access_uses_canonical_wide_registers() {
 }
 
 #[test]
+fn native_packed_array_addresses_use_the_declared_stride_with_wide_registers() {
+    use verum_vbc::encoding::PackedArrayLayout;
+
+    for (element, width) in [("UInt16", 2), ("UInt32", 4), ("UInt64", 8)] {
+        let mut text: Text = format!("fn probe() -> *mut {element} {{").into();
+        for index in 0..270 {
+            text.push_str(&format!("let pressure{index} = {index};\n"));
+        }
+        text.push_str(&format!(
+            "let mut values: [{element}; 4] = [7; 4]; unsafe {{ &mut values[1] as *mut {element} }} }}"
+        ));
+        let module = source(&text);
+        let body = module
+            .functions
+            .iter()
+            .find(|f| module.get_string(f.name) == Some("probe"))
+            .and_then(|f| f.instructions.as_deref())
+            .unwrap();
+        assert!(
+            body.iter().any(|instruction| match instruction {
+                Instruction::MemExtended { sub_op, operands }
+                    if *sub_op == MemSubOpcode::TypedArrayElementAddr.to_byte() =>
+                {
+                    let array = PackedArrayLayout::Access.decode(operands, &mut 0).unwrap();
+                    array.regs.iter().all(|reg| reg.0 >= 256) && usize::from(array.format) == width
+                }
+                _ => false,
+            }),
+            "{element}: expected a wide typed address"
+        );
+        native(&module, |engine| {
+            // SAFETY: probe returns a pointer into one live fixture allocation.
+            let actual = unsafe {
+                engine
+                    .get_function::<unsafe extern "C" fn() -> *mut u8>("probe")
+                    .unwrap()
+                    .call()
+            };
+            ALLOCATIONS.with(|allocations| {
+                let allocations = allocations.borrow();
+                assert_eq!(allocations.len(), 1);
+                assert_eq!(
+                    actual,
+                    allocations[0]
+                        .as_ptr()
+                        .cast::<u8>()
+                        .wrapping_add(width)
+                        .cast_mut()
+                );
+            });
+        });
+    }
+}
+
+#[test]
 fn native_selected_typed_array_results_keep_integer_and_float_geometry() {
     for (element, packed, listed, replacement, initial, mutated) in [
         (

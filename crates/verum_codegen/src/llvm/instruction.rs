@@ -27500,6 +27500,12 @@ fn lower_mem_extended<'ctx>(
     // emits variable-length register indexes (1 byte for regs 0-127,
     // 2 bytes for regs ≥128).  Pre-fix, every site here read a single
     // byte and silently miscompiled any function with ≥128 live regs.
+    let packed_operands = || {
+        let layout = verum_vbc::encoding::PackedArrayLayout::for_subopcode(sub_op)
+            .ok_or_else(|| LlvmLoweringError::internal("expected a packed array instruction"))?;
+        layout.decode(operands, &mut 0)
+            .map_err(|error| LlvmLoweringError::unsupported(format!("invalid packed array operands: {error}")))
+    };
     let mut pos = 0usize;
     match sub_op {
         // The alloc/dealloc/realloc arms read all three declared operands
@@ -28441,13 +28447,9 @@ fn lower_mem_extended<'ctx>(
 
         0x30 => {
             // Allocate byte array: dst = verum_alloc_bytes(size)
-            if operands.len() < 2 {
-                return Err(LlvmLoweringError::internal(
-                    "NewByteArray: insufficient operands",
-                ));
-            }
-            let dst_reg = op_reg(operands, 0);
-            let size = ctx.get_register(op_reg(operands, 1))?;
+            let packed = packed_operands()?;
+            let dst_reg = packed.regs[0].0;
+            let size = ctx.get_register(packed.regs[1].0)?;
             let module = ctx.get_module();
             let ptr_ty = ctx.types().ptr_type();
             let i64_ty = ctx.types().i64_type();
@@ -28459,7 +28461,7 @@ fn lower_mem_extended<'ctx>(
                 .builder()
                 .build_call(alloc_fn, &[size.into()], "new_byte_array")
                 .or_llvm_err()?
-            .basic_value_or("NewByteArray: expected return value")?;
+                .basic_value_or("NewByteArray: expected return value")?;
             ctx.set_register(dst_reg, result);
 
             // T1220 — OPERAND 2 IS THE INIT VALUE AND THIS ARM USED TO
@@ -28484,8 +28486,8 @@ fn lower_mem_extended<'ctx>(
             // a value OPERAND, so it is passed straight through and no
             // constant folding is attempted — see the note on
             // `FunctionContext::get_register` for why one would not work.
-            if operands.len() >= 3 {
-                let init = ctx.get_register(op_reg(operands, 2))?;
+            {
+                let init = ctx.get_register(packed.regs[2].0)?;
                 if init.is_int_value() && size.is_int_value() {
                     let i8_type = ctx.types().i8_type();
                     let bool_type = ctx.types().bool_type();
@@ -28520,14 +28522,10 @@ fn lower_mem_extended<'ctx>(
 
         0x31 => {
             // Get pointer to element: dst = base_ptr + index
-            if operands.len() < 3 {
-                return Err(LlvmLoweringError::internal(
-                    "ByteArrayElementAddr: insufficient operands",
-                ));
-            }
-            let dst_reg = op_reg(operands, 0);
-            let base_ptr = as_ptr(ctx, ctx.get_register(op_reg(operands, 1))?, "ba_base")?;
-            let index = ctx.get_register(op_reg(operands, 2))?;
+            let packed = packed_operands()?;
+            let dst_reg = packed.regs[0].0;
+            let base_ptr = as_ptr(ctx, ctx.get_register(packed.regs[1].0)?, "ba_base")?;
+            let index = ctx.get_register(packed.regs[2].0)?;
             let i8_ty = ctx.llvm_context().i8_type();
             // SAFETY: GEP into a byte array at the given index to get the element address; bounds checking is caller's responsibility
             let elem_ptr = unsafe {
@@ -28541,14 +28539,10 @@ fn lower_mem_extended<'ctx>(
 
         0x32 => {
             // Load byte: dst = *(base_ptr + index) as i64
-            if operands.len() < 3 {
-                return Err(LlvmLoweringError::internal(
-                    "ByteArrayLoad: insufficient operands",
-                ));
-            }
-            let dst_reg = op_reg(operands, 0);
-            let base_ptr = as_ptr(ctx, ctx.get_register(op_reg(operands, 1))?, "ba_base")?;
-            let index = ctx.get_register(op_reg(operands, 2))?;
+            let packed = packed_operands()?;
+            let dst_reg = packed.regs[0].0;
+            let base_ptr = as_ptr(ctx, ctx.get_register(packed.regs[1].0)?, "ba_base")?;
+            let index = ctx.get_register(packed.regs[2].0)?;
             let i8_ty = ctx.llvm_context().i8_type();
             // SAFETY: GEP into a byte array at the given index to load a single byte; bounds checking is caller's responsibility
             let elem_ptr = unsafe {
@@ -28571,14 +28565,10 @@ fn lower_mem_extended<'ctx>(
 
         0x33 => {
             // Store byte: *(base_ptr + index) = value & 0xFF
-            if operands.len() < 3 {
-                return Err(LlvmLoweringError::internal(
-                    "ByteArrayStore: insufficient operands",
-                ));
-            }
-            let base_ptr = as_ptr(ctx, ctx.get_register(op_reg(operands, 0))?, "ba_base")?;
-            let index = ctx.get_register(op_reg(operands, 1))?;
-            let value = ctx.get_register(op_reg(operands, 2))?;
+            let packed = packed_operands()?;
+            let base_ptr = as_ptr(ctx, ctx.get_register(packed.regs[0].0)?, "ba_base")?;
+            let index = ctx.get_register(packed.regs[1].0)?;
+            let value = ctx.get_register(packed.regs[2].0)?;
             let i8_ty = ctx.llvm_context().i8_type();
             // SAFETY: GEP into a byte array at the given index to store a single byte; bounds checking is caller's responsibility
             let elem_ptr = unsafe {
@@ -28606,24 +28596,12 @@ fn lower_mem_extended<'ctx>(
             // are f64 FloatValues (see LoadF / F64FromBits). Mirrors the interp
             // `heap::typed_array_element` decode so the tiers agree. The
             // elem_size byte sits after three (possibly wide) register operands.
-            if operands.len() < 4 {
-                return Err(LlvmLoweringError::internal(
-                    "TypedArrayLoad: insufficient operands",
-                ));
-            }
-            let dst_reg = op_reg(operands, 0);
-            let base_ptr = as_ptr(ctx, ctx.get_register(op_reg(operands, 1))?, "tal_base")?;
-            let index = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "tal_idx")?;
-            let mut cursor = 0usize;
-            for _ in 0..3 {
-                cursor += if operands[cursor] & 0x80 != 0 { 2 } else { 1 };
-            }
-            let elem_byte = *operands.get(cursor).unwrap_or(&8);
-            let elem: u64 = match elem_byte & 0x7F {
-                w @ (1 | 2 | 4 | 8) => w as u64,
-                _ => 8,
-            };
-            let is_float = elem_byte & 0x80 != 0;
+            let packed = packed_operands()?;
+            let dst_reg = packed.regs[0].0;
+            let base_ptr = as_ptr(ctx, ctx.get_register(packed.regs[1].0)?, "tal_base")?;
+            let index = as_i64(ctx, ctx.get_register(packed.regs[2].0)?, "tal_idx")?;
+            let is_float = packed.format & 0x80 != 0;
+            let elem = u64::from(packed.format & 0x7f);
             let i64_ty = ctx.types().i64_type();
             let i8_ty = ctx.llvm_context().i8_type();
             let off = ctx
@@ -28695,21 +28673,10 @@ fn lower_mem_extended<'ctx>(
             // width-switched readers (GetE / SliceGet reserved=elem).
             // Format: arr:reg, idx:reg, val:reg, elem_size:u8 — the
             // stride byte sits after three (possibly wide) regs.
-            if operands.len() < 4 {
-                return Err(LlvmLoweringError::internal(
-                    "TypedArrayStore: insufficient operands",
-                ));
-            }
-            let arr_ptr = as_ptr(ctx, ctx.get_register(op_reg(operands, 0))?, "tas_base")?;
-            let index = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "tas_idx")?;
-            let mut cursor = 0usize;
-            for _ in 0..3 {
-                cursor += if operands[cursor] & 0x80 != 0 { 2 } else { 1 };
-            }
-            let elem: u64 = match operands.get(cursor) {
-                Some(w @ (1 | 2 | 4 | 8)) => *w as u64,
-                _ => 8,
-            };
+            let packed = packed_operands()?;
+            let arr_ptr = as_ptr(ctx, ctx.get_register(packed.regs[0].0)?, "tas_base")?;
+            let index = as_i64(ctx, ctx.get_register(packed.regs[1].0)?, "tas_idx")?;
+            let elem = u64::from(packed.format & 0x7f);
             let i64_ty = ctx.types().i64_type();
             // Unbox the value to the raw `elem`-byte integer to store. Ints /
             // F64 bit-reinterpret via `as_i64` (an f64 register keeps all 8
@@ -28717,8 +28684,8 @@ fn lower_mem_extended<'ctx>(
             // NARROW the f64 to f32 IEEE bits first — the interp stores
             // `(f as f32).to_bits()`; `as_i64` alone would keep the LOW half
             // of the f64 pattern, silent garbage on read-back (T0356).
-            let val_raw = ctx.get_register(op_reg(operands, 2))?;
-            let value = if elem == 4 && scalar_reg_is_float(ctx, op_reg(operands, 2), val_raw) {
+            let val_raw = ctx.get_register(packed.regs[2].0)?;
+            let value = if elem == 4 && scalar_reg_is_float(ctx, packed.regs[2].0, val_raw) {
                 let f64v = as_f64(ctx, val_raw, "tas_f64src")?;
                 let f32_ty = ctx.llvm_context().f32_type();
                 let f32v = ctx
@@ -28842,64 +28809,12 @@ fn lower_mem_extended<'ctx>(
 
         0x35 | 0x34 => {
             // Typed arrays use same allocation as byte arrays with stride
-            if operands.is_empty() {
-                return Err(LlvmLoweringError::internal(
-                    "TypedArray: insufficient operands",
-                ));
-            }
-            let dst_reg = op_reg(operands, 0);
+            let packed = packed_operands()?;
+            let dst_reg = packed.regs[0].0;
             if sub_op == 0x34 {
-                // Allocate: same as NewByteArray but size = count * element_size
-                //
-                // T1223 — THE COMMENT SAID THIS AND THE CODE DID NOT DO IT.
-                // Operand 1 is the ELEMENT COUNT and it went to
-                // `verum_cbgr_allocate` as a BYTE size, so a `[Int; 100]`
-                // got 100 bytes for 800 and every element from index 12
-                // onward was written past the allocation. For a
-                // `[Byte; N]` count == size, which is why this arm and
-                // `NewByteArray` looked like the same code.
-                //
-                // The interpreter is the oracle here — the pair really
-                // does differ: `handlers/mem_extended.rs` computes
-                // `count.checked_mul(elem_size)` and fills per element.
-                //
-                // THE WIDTH IS A RAW BYTE, NOT A REGISTER. `op_reg`
-                // decodes VARIABLE-LENGTH register operands, so on a
-                // float array — bit 0x80 set — it would swallow two bytes
-                // as a wide register. `TypedArrayStore` (0x37) walks the
-                // cursor by hand for this reason; this mirrors it. Mask
-                // 0x80 before using the width: that bit is the float
-                // marker for the heap TypeId, and multiplying by the
-                // unmasked byte would give a `[Float; N]` N * 136 bytes.
-                //
-                // DEFAULT 1, NOT 8, unlike the sibling 0x36 arm: there
-                // the default is a read STRIDE, here an allocation SIZE,
-                // so a wrong guess is either waste or a heap overflow.
-                // Falling back to 1 multiplies by nothing and leaves this
-                // arm behaving exactly as it does today.
-                //
-                // NO OVERFLOW CHECK, unlike the interpreter's
-                // `checked_mul`: its count is a runtime `Value`, while
-                // this register holds the `LoadI` of the ANNOTATION's `N`.
-                // Overflowing i64 needs N > 2^60, which the type system
-                // rejects long before here.
-                let mut cursor = 0usize;
-                for _ in 0..2 {
-                    if cursor >= operands.len() {
-                        break;
-                    }
-                    cursor += if operands[cursor] & 0x80 != 0 { 2 } else { 1 };
-                }
-                let elem_byte = *operands.get(cursor).unwrap_or(&1);
-                let elem_width: u64 = match elem_byte & 0x7F {
-                    w @ (1 | 2 | 4 | 8) => w as u64,
-                    _ => 1,
-                };
-                let count = if operands.len() >= 2 {
-                    ctx.get_register(op_reg(operands, 1))?
-                } else {
-                    ctx.types().i64_type().const_int(0, false).into()
-                };
+                let elem_byte = packed.format;
+                let elem_width = u64::from(elem_byte & 0x7f);
+                let count = ctx.get_register(packed.regs[1].0)?;
                 let size: BasicValueEnum = if count.is_int_value() && elem_width > 1 {
                     let w = ctx.types().i64_type().const_int(elem_width, false);
                     ctx.builder()
@@ -28920,7 +28835,7 @@ fn lower_mem_extended<'ctx>(
                     .builder()
                     .build_call(alloc_fn, &[size.into()], "new_typed_array")
                     .or_llvm_err()?
-            .basic_value_or("NewTypedArray: expected return value")?;
+                    .basic_value_or("NewTypedArray: expected return value")?;
                 ctx.set_register(dst_reg, result);
                 // T1223 (second half) — operand 3 is the INIT VALUE and
                 // this arm ignored it, exactly as `NewByteArray` ignored
@@ -28935,12 +28850,8 @@ fn lower_mem_extended<'ctx>(
                 // so in its own shape — four branches, `*(p as *mut u8)`,
                 // `u16`, `u32`, `u64` — and caught the mistake before a
                 // build did.
-                let init_idx = cursor + 1;
-                if init_idx < operands.len() && count.is_int_value() {
-                    let init_reg = {
-                        let mut pos = init_idx;
-                        read_reg_varlen(operands, &mut pos).unwrap_or(0)
-                    };
+                if count.is_int_value() {
+                    let init_reg = packed.regs[2].0;
                     let init = ctx.get_register(init_reg)?;
                     if init.is_int_value() {
                         let llvm_ctx = ctx.llvm_context();
@@ -29023,9 +28934,9 @@ fn lower_mem_extended<'ctx>(
                 }
 
             } else {
-                // Element addr: base + index * 8 (assuming 8-byte elements)
-                let base_ptr = as_ptr(ctx, ctx.get_register(op_reg(operands, 1))?, "ta_base")?;
-                let index = ctx.get_register(op_reg(operands, 2))?;
+                // The element-address operation carries its own stride.
+                let base_ptr = as_ptr(ctx, ctx.get_register(packed.regs[1].0)?, "ta_base")?;
+                let index = ctx.get_register(packed.regs[2].0)?;
                 let i64_ty = ctx.types().i64_type();
                 // Task #23 — coerce `index` through `ptr_to_int` when
                 // the VBC frontend handed us a generic-typed pointer
@@ -29040,10 +28951,16 @@ fn lower_mem_extended<'ctx>(
                         .build_ptr_to_int(index.into_pointer_value(), i64_ty, "ta_idx_i")
                         .or_llvm_err()?
                 };
+                let element = match packed.format {
+                    1 => ctx.llvm_context().i8_type(),
+                    2 => ctx.llvm_context().i16_type(),
+                    4 => ctx.llvm_context().i32_type(),
+                    _ => i64_ty,
+                };
                 // SAFETY: GEP into a typed array at the given index to compute the element address; bounds checking is caller's responsibility
                 let elem_ptr = unsafe {
                     ctx.builder()
-                        .build_gep(i64_ty, base_ptr, &[index_i], "ta_elem_ptr")
+                        .build_gep(element, base_ptr, &[index_i], "ta_elem_ptr")
                         .or_llvm_err()?
                 };
                 ctx.set_register(dst_reg, elem_ptr.into());
@@ -37814,7 +37731,7 @@ fn lower_set_element<'ctx>(
             }
             let op = if width == 1 && !float { MemSubOpcode::ByteArrayStore }
                 else {
-                    operands.push(width as u8 | if float { 0x80 } else { 0 });
+                    operands.push(width as u8);
                     MemSubOpcode::TypedArrayStore
                 };
             return lower_mem_extended(ctx, op.to_byte(), &operands);

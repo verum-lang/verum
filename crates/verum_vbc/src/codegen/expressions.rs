@@ -4306,14 +4306,7 @@ impl VbcCodegen {
                     let index_reg = self
                         .compile_expr(index)?
                         .or_internal("index has no value")?;
-                    let mut operands = Vec::<u8>::new();
-                    Self::write_reg(&mut operands, base_reg.0);
-                    Self::write_reg(&mut operands, index_reg.0);
-                    Self::write_reg(&mut operands, value_reg.0);
-                    self.ctx.emit(Instruction::MemExtended {
-                        sub_op: crate::instruction::MemSubOpcode::ByteArrayStore.to_byte(),
-                        operands,
-                    });
+                    self.emit_packed_store(base_reg, index_reg, value_reg, None);
                     self.ctx.free_temp(base_reg);
                     self.ctx.free_temp(index_reg);
                     self.ctx.free_temp(value_reg);
@@ -4331,14 +4324,7 @@ impl VbcCodegen {
                     let index_reg = self
                         .compile_expr(index)?
                         .or_internal("index has no value")?;
-                    let mut operands = Vec::<u8>::new();
-                    Self::write_reg(&mut operands, base_reg.0);
-                    Self::write_reg(&mut operands, index_reg.0);
-                    Self::write_reg(&mut operands, value_reg.0);
-                    self.ctx.emit(Instruction::MemExtended {
-                        sub_op: crate::instruction::MemSubOpcode::ByteArrayStore.to_byte(),
-                        operands,
-                    });
+                    self.emit_packed_store(base_reg, index_reg, value_reg, None);
                     self.ctx.free_temp(base_reg);
                     self.ctx.free_temp(index_reg);
                     self.ctx.free_temp(value_reg);
@@ -4364,15 +4350,7 @@ impl VbcCodegen {
                     let index_reg = self
                         .compile_expr(index)?
                         .or_internal("index has no value")?;
-                    let mut operands = Vec::<u8>::new();
-                    Self::write_reg(&mut operands, base_reg.0);
-                    Self::write_reg(&mut operands, index_reg.0);
-                    Self::write_reg(&mut operands, value_reg.0);
-                    operands.push(sz as u8);
-                    self.ctx.emit(Instruction::MemExtended {
-                        sub_op: crate::instruction::MemSubOpcode::TypedArrayStore.to_byte(),
-                        operands,
-                    });
+                    self.emit_packed_store(base_reg, index_reg, value_reg, Some(sz as u8));
                     self.ctx.free_temp(base_reg);
                     self.ctx.free_temp(index_reg);
                     self.ctx.free_temp(value_reg);
@@ -4868,26 +4846,11 @@ impl VbcCodegen {
                     self.ctx.emit(Instruction::DerefMut { ref_reg: reference, value: result });
                     self.ctx.free_temp(reference);
                 } else if is_byte_arr {
-                    let mut operands = Vec::<u8>::new();
-                    Self::write_reg(&mut operands, arr_reg.0);
-                    Self::write_reg(&mut operands, idx_reg.0);
-                    Self::write_reg(&mut operands, result.0);
-                    self.ctx.emit(Instruction::MemExtended {
-                        sub_op: crate::instruction::MemSubOpcode::ByteArrayStore.to_byte(),
-                        operands,
-                    });
+                    self.emit_packed_store(arr_reg, idx_reg, result, None);
                 } else if let Some((sz, _)) = typed_spec {
                     // Clean elem_size (no 0x80): TypedArrayStore unboxes floats
                     // by inspecting the value register on both tiers.
-                    let mut operands = Vec::<u8>::new();
-                    Self::write_reg(&mut operands, arr_reg.0);
-                    Self::write_reg(&mut operands, idx_reg.0);
-                    Self::write_reg(&mut operands, result.0);
-                    operands.push(sz as u8);
-                    self.ctx.emit(Instruction::MemExtended {
-                        sub_op: crate::instruction::MemSubOpcode::TypedArrayStore.to_byte(),
-                        operands,
-                    });
+                    self.emit_packed_store(arr_reg, idx_reg, result, Some(sz as u8));
                 } else {
                     self.ctx.emit(Instruction::SetE {
                         arr: arr_reg,
