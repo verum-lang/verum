@@ -81,6 +81,7 @@ pub fn compile_consumer(source: &str) -> VbcModule {
                 "resize_buffer",
                 "drop",
                 "clear",
+                "truncate",
                 "pop",
                 "free_buffer",
             ],

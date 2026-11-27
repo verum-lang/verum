@@ -656,13 +656,6 @@ impl VbcCodegen {
                 self.ctx.reference_bound_vars.remove(&name.to_string());
             }
         }
-        // Preserve tuple element declarations for downstream calls through bound names.
-        let tuple_declaration = if matches!(pattern.kind, verum_ast::PatternKind::Tuple(_)) {
-            ty.and_then(|ty| self.source_type_in_current_scope(ty))
-                .or_else(|| value.and_then(|expr| self.source_expression_declaration(expr, None, 0)))
-        } else {
-            None
-        };
         if let verum_ast::PatternKind::Tuple(elems) = &pattern.kind
             && let Some(val) = value
             && let Some(elem_types) = self.infer_tuple_element_type_names(val, elems.len())
@@ -1351,6 +1344,15 @@ impl VbcCodegen {
                 let name = Self::literal_default_type_name(value?)?;
                 self.semantic_type_in_current_scope(&name)
             });
+        // Branch and block results acquire their declaration during lowering.
+        // Read it before a destructured name can shadow one of their operands.
+        let tuple_declaration = if matches!(pattern.kind, verum_ast::PatternKind::Tuple(_)) {
+            ty.and_then(|ty| self.source_type_in_current_scope(ty))
+                .or_else(|| inferred_copy_type.clone())
+                .or_else(|| value.and_then(|expr| self.source_expression_declaration(expr, None, 0)))
+        } else {
+            None
+        };
         let open_list = if ty.is_none() && inferred_result.is_none() && inferred_copy_type.is_none() {
             value.zip(init_reg).and_then(|(expr, reg)| self.unbound_list_allocation(expr, reg, copy_start))
         } else {

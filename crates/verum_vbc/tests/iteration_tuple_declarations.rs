@@ -8,6 +8,47 @@ use verum_vbc::{
 };
 
 #[test]
+fn destructuring_a_conditional_preserves_the_selected_slice_pair() {
+    use verum_vbc::{deserialize::deserialize_module, serialize::serialize_module};
+
+    let source = r#"
+        module consumer;
+        fn choose(a: &[Byte], b: &[Byte]) -> Int {
+            let (short, long_) = if a.len() <= b.len() { (a, b) } else { (b, a) };
+            (long_[1] as Int) - (short[0] as Int)
+        }
+        fn main() -> Int {
+            let a: [Byte; 1] = [3_u8];
+            let b: [Byte; 2] = [4_u8, 77_u8];
+            choose(&a, &b) + choose(&b, &a)
+        }
+    "#;
+    let ast = Parser::new(source).parse_module().unwrap();
+    let module = VbcCodegen::with_config(CodegenConfig::new("consumer"))
+        .compile_module(&ast).unwrap();
+    let decoded = deserialize_module(&serialize_module(&module).unwrap()).unwrap();
+    for image in [module, decoded] {
+        let main = image.find_function_by_name("consumer.main").unwrap();
+        let mut vm = Interpreter::try_new_validated(Arc::new(image)).unwrap();
+        assert_eq!(vm.execute_function(main).unwrap().try_as_i64(), Some(148));
+    }
+}
+
+#[test]
+fn one_conditional_arm_cannot_authorize_an_index_on_the_other() {
+    let ast = Parser::new(r#"
+        module consumer;
+        fn choose(flag: Bool, bytes: &[Byte]) -> Byte {
+            let (element, position) = if flag { (bytes, 0) } else { (17, 0) };
+            element[position]
+        }
+    "#).parse_module().unwrap();
+    let error = VbcCodegen::with_config(CodegenConfig::new("consumer"))
+        .compile_module(&ast).unwrap_err();
+    assert!(error.to_string().contains("projection"), "{error}");
+}
+
+#[test]
 fn a_singleton_tuple_retains_its_slot_across_a_function_call() {
     use verum_vbc::{deserialize::deserialize_module, serialize::serialize_module};
 
