@@ -144,6 +144,20 @@ fn property_to_ascii_uppercase_identity_on_non_letters() {
     }
 }
 
+@test
+fn ascii_methods_preserve_scalars_whose_low_bytes_are_ascii() {
+    // Each scalar ends with an ASCII letter, digit or NUL in its low byte.
+    for ch in ['Ł', 'š', 'İ', 'Ā', '🙂'] {
+        assert_eq(ch.to_ascii_lowercase(), ch);
+        assert_eq(ch.to_ascii_uppercase(), ch);
+        assert(!ch.is_ascii_alphabetic());
+        assert(!ch.is_ascii_digit());
+        assert(!ch.is_ascii_control());
+    }
+    assert_eq("aŁšİ🙂Z".to_ascii_uppercase(), "AŁšİ🙂Z");
+    assert_eq("aŁšİ🙂Z".to_ascii_lowercase(), "aŁšİ🙂z");
+}
+
 // =============================================================================
 // §6 to_digit / from_digit round-trip on a finite digit alphabet (radix 10)
 // =============================================================================

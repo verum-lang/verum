@@ -5591,6 +5591,7 @@ pub(super) fn dispatch_primitive_method(
     // Int methods
     if receiver.is_int() {
         let v = receiver.as_i64();
+        let ascii = || u8::try_from(v).ok();
         let result = match method {
             // Hash protocol — direct materialisation of the protocol's
             // default `hash_value()` body monomorphised onto Int, plus
@@ -5791,34 +5792,33 @@ pub(super) fn dispatch_primitive_method(
                 let s = format!("{:o}", v);
                 return Ok(Some(alloc_string_value(state, &s)?));
             }
-            // Byte/ASCII methods (operate on the low 8 bits as a u8 value)
-            "is_ascii_alphabetic" => Value::from_bool((v as u8).is_ascii_alphabetic()),
-            "is_ascii_alphanumeric" => Value::from_bool((v as u8).is_ascii_alphanumeric()),
-            "is_ascii_digit" => Value::from_bool((v as u8).is_ascii_digit()),
-            "is_ascii_whitespace" => Value::from_bool((v as u8).is_ascii_whitespace()),
-            "is_ascii_lowercase" => Value::from_bool((v as u8).is_ascii_lowercase()),
-            "is_ascii_uppercase" => Value::from_bool((v as u8).is_ascii_uppercase()),
-            "is_ascii_control" => Value::from_bool((v as u8).is_ascii_control()),
-            "is_ascii_punctuation" => Value::from_bool((v as u8).is_ascii_punctuation()),
-            "is_ascii_graphic" => Value::from_bool((v as u8).is_ascii_graphic()),
-            "is_ascii_hexdigit" => Value::from_bool((v as u8).is_ascii_hexdigit()),
-            "is_ascii" => Value::from_bool((0..=127).contains(&v)),
-            "to_ascii_lowercase" => Value::from_i64((v as u8).to_ascii_lowercase() as i64),
-            "to_ascii_uppercase" => Value::from_i64((v as u8).to_ascii_uppercase() as i64),
-            // Byte-prefixed ASCII methods (codegen emits byte$ prefix for Byte-typed vars)
-            "byte$is_ascii_alphabetic" => Value::from_bool((v as u8).is_ascii_alphabetic()),
-            "byte$is_ascii_alphanumeric" => Value::from_bool((v as u8).is_ascii_alphanumeric()),
-            "byte$is_ascii_digit" => Value::from_bool((v as u8).is_ascii_digit()),
-            "byte$is_ascii_whitespace" => Value::from_bool((v as u8).is_ascii_whitespace()),
-            "byte$is_ascii_lowercase" => Value::from_bool((v as u8).is_ascii_lowercase()),
-            "byte$is_ascii_uppercase" => Value::from_bool((v as u8).is_ascii_uppercase()),
-            "byte$is_ascii_control" => Value::from_bool((v as u8).is_ascii_control()),
-            "byte$is_ascii_punctuation" => Value::from_bool((v as u8).is_ascii_punctuation()),
-            "byte$is_ascii_graphic" => Value::from_bool((v as u8).is_ascii_graphic()),
-            "byte$is_ascii_hexdigit" => Value::from_bool((v as u8).is_ascii_hexdigit()),
-            "byte$is_ascii" => Value::from_bool((0..=127).contains(&v)),
-            "byte$to_ascii_lowercase" => Value::from_i64((v as u8).to_ascii_lowercase() as i64),
-            "byte$to_ascii_uppercase" => Value::from_i64((v as u8).to_ascii_uppercase() as i64),
+            // Byte and Char use the same ASCII subset. Test membership before
+            // narrowing so a non-ASCII scalar preserves all of its bits.
+            "is_ascii_alphabetic" | "byte$is_ascii_alphabetic" =>
+                Value::from_bool(ascii().as_ref().is_some_and(u8::is_ascii_alphabetic)),
+            "is_ascii_alphanumeric" | "byte$is_ascii_alphanumeric" =>
+                Value::from_bool(ascii().as_ref().is_some_and(u8::is_ascii_alphanumeric)),
+            "is_ascii_digit" | "byte$is_ascii_digit" =>
+                Value::from_bool(ascii().as_ref().is_some_and(u8::is_ascii_digit)),
+            "is_ascii_whitespace" | "byte$is_ascii_whitespace" =>
+                Value::from_bool(ascii().as_ref().is_some_and(u8::is_ascii_whitespace)),
+            "is_ascii_lowercase" | "byte$is_ascii_lowercase" =>
+                Value::from_bool(ascii().as_ref().is_some_and(u8::is_ascii_lowercase)),
+            "is_ascii_uppercase" | "byte$is_ascii_uppercase" =>
+                Value::from_bool(ascii().as_ref().is_some_and(u8::is_ascii_uppercase)),
+            "is_ascii_control" | "byte$is_ascii_control" =>
+                Value::from_bool(ascii().as_ref().is_some_and(u8::is_ascii_control)),
+            "is_ascii_punctuation" | "byte$is_ascii_punctuation" =>
+                Value::from_bool(ascii().as_ref().is_some_and(u8::is_ascii_punctuation)),
+            "is_ascii_graphic" | "byte$is_ascii_graphic" =>
+                Value::from_bool(ascii().as_ref().is_some_and(u8::is_ascii_graphic)),
+            "is_ascii_hexdigit" | "byte$is_ascii_hexdigit" =>
+                Value::from_bool(ascii().as_ref().is_some_and(u8::is_ascii_hexdigit)),
+            "is_ascii" | "byte$is_ascii" => Value::from_bool((0..=127).contains(&v)),
+            "to_ascii_lowercase" | "byte$to_ascii_lowercase" =>
+                Value::from_i64(ascii().map_or(v, |byte| i64::from(byte.to_ascii_lowercase()))),
+            "to_ascii_uppercase" | "byte$to_ascii_uppercase" =>
+                Value::from_i64(ascii().map_or(v, |byte| i64::from(byte.to_ascii_uppercase()))),
             "byte$to_int" => Value::from_i64(v), // Byte -> Int conversion
             // Char (Unicode) methods — chars stored as i64 codepoints
             "is_alphabetic" => {
