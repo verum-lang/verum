@@ -72,8 +72,12 @@ When no declared method applies, a structural clone admitted by the checker
 carries an explicit value-copy selection into VBC. The source admission phase
 retains this selection and receiver adjustments for every accepted module.
 Admission follows the declared owned layout, including nested records, tuples,
-sum payloads and fixed arrays. A bounded work list instantiates each nominal
-component and checks its resource discipline. Borrowed fields stay borrowed;
+sum payloads and fixed arrays. For a registered `List<T>` or `Deque<T>`, the
+checker follows the element. For `Map<K, V>`, it follows both key and value.
+A recursive declaration can close a cycle through the same instantiated
+collection on its current path. Each sibling field and variant is still
+checked. A bounded work list instantiates each nominal component and checks
+its resource discipline. Borrowed fields stay borrowed;
 affine payloads, mutable references, unknown captures and opaque storage do
 not gain permission from the availability of the runtime copy operation.
 Registered scalar storage is recognized through the exact builtin declaration,

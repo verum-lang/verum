@@ -10,6 +10,16 @@
 /// The record produced by a raw catch_unwind intrinsic outside an annotated wrapper.
 pub const CATCH_UNWIND_ERROR_TYPE: &str = "core.intrinsics.control.IntrinsicPanicInfo";
 
+/// Storage with a dedicated typed-copy operation in both execution tiers.
+/// Other records are checked and copied according to their declared fields.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeCopyStorage {
+    List,
+    Map,
+    Deque,
+    Shared,
+}
+
 /// Well-known Verum standard library types referenced during compilation.
 ///
 /// These are the types that the compiler needs special handling for — collection
@@ -246,6 +256,17 @@ impl WellKnownType {
             Self::List | Self::Set | Self::Deque => &[0],
             Self::Map => &[0, 1],
             _ => &[],
+        }
+    }
+
+    /// Select the typed copy operation after resolving the declaring owner.
+    pub const fn runtime_copy_storage(self) -> Option<RuntimeCopyStorage> {
+        match self {
+            Self::List => Some(RuntimeCopyStorage::List),
+            Self::Map => Some(RuntimeCopyStorage::Map),
+            Self::Deque => Some(RuntimeCopyStorage::Deque),
+            Self::Shared => Some(RuntimeCopyStorage::Shared),
+            _ => None,
         }
     }
 

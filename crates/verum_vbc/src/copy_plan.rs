@@ -6,7 +6,10 @@ use crate::{
     mono::TypeSubstitution,
     types::{BuiltinValueStorage, FieldDescriptor, MAX_TYPE_REF_NODES, TypeId, TypeKind, TypeRef, VariantKind},
 };
-use verum_common::{List, Map, ResourceDiscipline, Text, well_known_types::WellKnownType};
+use verum_common::{
+    List, Map, ResourceDiscipline, Text,
+    well_known_types::{RuntimeCopyStorage, WellKnownType},
+};
 
 /// Shared execution policy for one typed copy, in either tier. Exhaustion is
 /// a runtime resource diagnostic, not a restriction on recursive language types.
@@ -214,8 +217,8 @@ impl Builder<'_> {
         }
         let standard = self.module.declared_runtime_carrier(owner);
         if declaration.kind == TypeKind::Record {
-            match standard {
-                Some(WellKnownType::List) => {
+            match standard.and_then(WellKnownType::runtime_copy_storage) {
+                Some(RuntimeCopyStorage::List) => {
                     let [element] = args else {
                         return Err("List copy requires its element declaration".into());
                     };
@@ -224,7 +227,7 @@ impl Builder<'_> {
                         element: self.intern(element.clone())?,
                     });
                 }
-                Some(WellKnownType::Shared) => {
+                Some(RuntimeCopyStorage::Shared) => {
                     let receiver = self.module.lifecycle_receiver(ty)?;
                     let reference = declaration.clone_fn.ok_or_else(|| {
                         Text::from("Shared copy requires its declared Clone body")
@@ -281,7 +284,7 @@ impl Builder<'_> {
                         contract,
                     });
                 }
-                Some(WellKnownType::Map) => {
+                Some(RuntimeCopyStorage::Map) => {
                     let [key, value] = args else {
                         return Err("Map copy requires key and value declarations".into());
                     };
@@ -291,7 +294,7 @@ impl Builder<'_> {
                         value: self.intern(value.clone())?,
                     });
                 }
-                Some(WellKnownType::Deque) => {
+                Some(RuntimeCopyStorage::Deque) => {
                     let [element] = args else {
                         return Err("Deque copy requires its element declaration".into());
                     };
@@ -300,7 +303,7 @@ impl Builder<'_> {
                         element: self.intern(element.clone())?,
                     });
                 }
-                _ => {}
+                None => {}
             }
         }
         match declaration.kind {

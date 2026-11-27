@@ -2,6 +2,8 @@
 #![cfg(feature = "codegen")]
 use verum_common::List;
 use verum_fast_parser::Parser;
+#[path = "fixtures/declared_list.rs"]
+mod declared_list;
 use verum_vbc::{
     Instruction, Reg, TypeId, TypeRef,
     bytecode::{decode_instructions, encode_instruction},
@@ -84,6 +86,33 @@ fn repeated_owned_children_are_copied_independently() {
             second.right.value
         }
     "#), 73);
+}
+
+#[test]
+fn recursively_owned_lists_keep_their_children_after_the_source_is_updated() {
+    let source = declared_list::compile_consumer(r#"
+        module consumer;
+        mount core.collections.list.List;
+        type Node is Leaf(Int) | Children(List<Node>);
+        type Tree is { roots: List<Node> };
+        fn probe() -> Int {
+            let leaves: List<Node> = [Node.Leaf(73)];
+            let roots: List<Node> = [Node.Children(leaves)];
+            let mut tree = Tree { roots };
+            let saved = tree;
+            tree.roots[0] = Node.Leaf(0);
+            match saved.roots[0] {
+                Children(branch) => match branch[0] { Leaf(n) => n, Children(_) => -2 },
+                Leaf(_) => -1,
+            }
+        }
+    "#);
+    for module in declared_list::source_and_wire(source) {
+        let entry = module.find_function_by_name("consumer.probe").unwrap();
+        let mut vm = Interpreter::try_new_validated(module.into()).expect("validated recursive layout");
+        let value = vm.execute_function(entry).expect("deep copy and independent write");
+        assert_eq!(value.try_as_i64(), Some(73));
+    }
 }
 
 #[test]

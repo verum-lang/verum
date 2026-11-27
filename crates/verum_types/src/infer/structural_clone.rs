@@ -2,7 +2,11 @@
 use super::TypeChecker;
 use crate::{Result, TypeError, ty::Type};
 use verum_ast::Span;
-use verum_common::{List, ResourceDiscipline, Text};
+use verum_common::{List, ResourceDiscipline, Text, well_known_types::RuntimeCopyStorage};
+
+#[cfg(test)]
+#[path = "../../tests/unit/structural_storage_clone.rs"]
+mod tests;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum StructuralUse {
@@ -34,12 +38,16 @@ impl TypeChecker {
         // at each edge. Bound both expansion depth and total work, including
         // cycles and nonregular generic declarations.
         let mut pending = List::from_iter([(ty.clone(), 0usize)]);
+        let mut enclosing_storage: List<(usize, RuntimeCopyStorage, List<Type>)> = List::new();
         let mut remaining = 4096usize;
         while let Some((ty, depth)) = pending.pop() {
             if depth >= 64 || remaining == 0 {
                 return Err(Text::from("resource layout exceeds the finite declaration boundary"));
             }
             remaining -= 1;
+            while enclosing_storage.last().is_some_and(|(ancestor, _, _)| *ancestor >= depth) {
+                enclosing_storage.pop();
+            }
             let mut enqueue = |component| {
                 if pending.len() >= remaining {
                     return Err(Text::from("resource layout exceeds the finite declaration boundary"));
@@ -101,14 +109,28 @@ impl TypeChecker {
                         || (operation == StructuralUse::Clone && discipline != ResourceDiscipline::Unrestricted) {
                         return Err(format!("`{key}` has {discipline:?} resource discipline").into());
                     }
-                    if operation == StructuralUse::Overwrite
-                        && let Some(carrier) = self.declared_runtime_storage_carrier(&key)
-                    {
+                    if let Some(carrier) = self.declared_runtime_storage_carrier(&key) {
                         if carrier.retained_storage_parameters().len() != args.len() {
                             return Err(format!("storage argument count does not match `{key}`").into());
                         }
-                        for &position in carrier.owned_storage_parameters() {
-                            enqueue(args[position].clone())?;
+                        if operation == StructuralUse::Overwrite {
+                            for &position in carrier.owned_storage_parameters() {
+                                enqueue(args[position].clone())?;
+                            }
+                        } else if let Some(storage) = carrier.runtime_copy_storage()
+                            && !carrier.owned_storage_parameters().is_empty()
+                        {
+                            // Only a repeated, identically instantiated backing
+                            // allocation guards recursion. Sibling payloads
+                            // remain pending and naked record cycles still fail.
+                            if !enclosing_storage.iter().any(|(_, kind, applied)|
+                                *kind == storage && applied.as_slice() == args) {
+                                enclosing_storage.push((depth, storage, args.iter().cloned().collect()));
+                                for &position in carrier.owned_storage_parameters() {
+                                    enqueue(args[position].clone())?;
+                                }
+                            }
+                            continue;
                         }
                     }
                     let fields: Text = format!("__struct_fields_{key}").into();
