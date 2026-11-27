@@ -37,14 +37,14 @@ mount collections.List;
 
 public type Fts5VtabToken is {
     /// Normalised form (lowercase / stemmed / etc.).
-    term: Text,
+    public(in core.database.sqlite.native.vtabs.fts5) term: Text,
     /// Byte offset of the *original* text where this token starts.
-    start: Int,
+    public(in core.database.sqlite.native.vtabs.fts5) start: Int,
     /// Byte length of the original token (NOT of `term`).
-    length: Int,
+    public(in core.database.sqlite.native.vtabs.fts5) length: Int,
     /// Position counter (token index within the tokenisation), 0-based.
     /// Used by NEAR queries.
-    position: Int,
+    public(in core.database.sqlite.native.vtabs.fts5) position: Int,
 };
 
 // -----------------------------------------------------------------------------

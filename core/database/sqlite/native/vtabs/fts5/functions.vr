@@ -26,7 +26,7 @@ module core.database.sqlite.native.vtabs.fts5.functions;
 mount base.{Text, Maybe, Bool};
 mount collections.List;
 mount core.database.sqlite.native.vtabs.fts5.tokenizer.{
-    Fts5VtabTokenizer, options_default,
+    Fts5VtabToken, Fts5VtabTokenizer, options_default,
 };
 mount core.database.sqlite.native.vtabs.fts5.query.{RowMatch};
 
@@ -42,13 +42,13 @@ public fn highlight(
     tokeniser: &Heap<dyn Fts5VtabTokenizer>,
 ) -> Text {
     let opts = options_default();
-    let tokens = (&**tokeniser).tokenise(text, &opts);
+    let tokens: List<Fts5VtabToken> = (&**tokeniser).tokenise(text, &opts);
     let mut out = Text.new();
     let bs = text.as_bytes();
     let mut cursor: Int = 0;
     let mut i: Int = 0;
     while i < tokens.len() {
-        let t = &tokens[i];
+        let t: &Fts5VtabToken = &tokens[i];
         // Append any text between cursor and t.start verbatim.
         let mut k: Int = cursor;
         while k < t.start && k < bs.len() {
@@ -100,7 +100,7 @@ public fn snippet(
     tokeniser: &Heap<dyn Fts5VtabTokenizer>,
 ) -> Text {
     let opts = options_default();
-    let tokens = (&**tokeniser).tokenise(text, &opts);
+    let tokens: List<Fts5VtabToken> = (&**tokeniser).tokenise(text, &opts);
     if tokens.len() == 0 { return Text.new(); }
     let bs = text.as_bytes();
     // Find first token that matches.

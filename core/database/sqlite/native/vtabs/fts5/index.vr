@@ -25,8 +25,8 @@ mount base.{Text, Maybe, Bool};
 mount collections.List;
 mount core.database.sqlite.native.vtabs.fts5.tokenizer.{Fts5VtabToken};
 mount core.database.sqlite.native.vtabs.fts5.segment.{
-    Fts5VtabSegment, Fts5SegmentPostingList, Fts5SegmentPosting,
-    segment_empty, segment_from_tokens, segment_lookup, segment_merge,
+    Fts5VtabSegment, Fts5SegmentPostingList,
+    segment_from_tokens, segment_lookup, segment_merge,
     posting_list_new,
 };
 
@@ -84,18 +84,7 @@ implement Fts5Index {
             let mut s: Int = 0;
             while s < self.levels[l].segments.len() {
                 match segment_lookup(&self.levels[l].segments[s], term) {
-                    Maybe.Some(pl) => {
-                        let mut k: Int = 0;
-                        let postings = pl.iter();
-                        while k < postings.len() {
-                            union.add(Fts5SegmentPosting {
-                                rowid: postings[k].rowid,
-                                column: postings[k].column,
-                                position: postings[k].position,
-                            });
-                            k = k + 1;
-                        }
-                    }
+                    Maybe.Some(pl) => { union = union.merged(&pl); }
                     Maybe.None => {}
                 }
                 s = s + 1;
@@ -125,7 +114,23 @@ implement Fts5Index {
     public fn level_count(&self) -> Int { self.levels.len() }
 
     public fn segments_at_level(&self, level: Int) -> Int {
-        if level >= self.levels.len() { return 0; }
+        if level < 0 || level >= self.levels.len() { return 0; }
         self.levels[level].segments.len()
+    }
+
+    /// Promote an eligible level and return the number of segments it contained.
+    public(in core.database.sqlite.native.vtabs.fts5) fn compact_level(&mut self, level: Int) -> Int {
+        let count = self.segments_at_level(level);
+        if count < self.merge_threshold { return 0; }
+        let mut merged = self.levels[level].segments[0];
+        let mut i = 1;
+        while i < count {
+            merged = segment_merge(&merged, &self.levels[level].segments[i]);
+            i = i + 1;
+        }
+        self.ensure_level(level + 1);
+        self.levels[level + 1].segments.push(merged);
+        self.levels[level].segments.clear();
+        count
     }
 }

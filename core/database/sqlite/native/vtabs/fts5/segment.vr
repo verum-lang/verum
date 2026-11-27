@@ -36,9 +36,9 @@ mount core.database.sqlite.native.vtabs.fts5.tokenizer.{Fts5VtabToken};
 // -----------------------------------------------------------------------------
 
 public type Fts5SegmentPosting is {
-    rowid: Int64,
-    column: Int,
-    position: Int,
+    public(in core.database.sqlite.native.vtabs.fts5) rowid: Int64,
+    public(in core.database.sqlite.native.vtabs.fts5) column: Int,
+    public(in core.database.sqlite.native.vtabs.fts5) position: Int,
 };
 
 public fn posting_less(a: &Fts5SegmentPosting, b: &Fts5SegmentPosting) -> Bool {
@@ -83,6 +83,25 @@ implement Fts5SegmentPostingList {
         }
         if !inserted { new_list.push(p); }
         self.postings = new_list;
+    }
+
+    /// Merge two sorted posting streams, retaining every term occurrence.
+    public(in core.database.sqlite.native.vtabs.fts5) fn merged(&self, other: &Fts5SegmentPostingList) -> Fts5SegmentPostingList {
+        let mut out: List<Fts5SegmentPosting> = List.new();
+        let mut i: Int = 0;
+        let mut j: Int = 0;
+        while i < self.postings.len() && j < other.postings.len() {
+            if posting_less(&self.postings[i], &other.postings[j]) {
+                out.push(clone_p(&self.postings[i]));
+                i = i + 1;
+            } else {
+                out.push(clone_p(&other.postings[j]));
+                j = j + 1;
+            }
+        }
+        while i < self.postings.len() { out.push(clone_p(&self.postings[i])); i = i + 1; }
+        while j < other.postings.len() { out.push(clone_p(&other.postings[j])); j = j + 1; }
+        Fts5SegmentPostingList { postings: out }
     }
 
     public fn iter(&self) -> List<Fts5SegmentPosting> {
@@ -158,13 +177,14 @@ fn find_or_create_term(entries: &mut List<TermEntry>, term: &Text) -> Int {
     let mut i: Int = 0;
     while i < entries.len() {
         if entries[i].term == term { return i; }
+        if *term < entries[i].term { break; }
         i = i + 1;
     }
-    entries.push(TermEntry {
+    entries.insert(i, TermEntry {
         term: term.clone(),
         postings: posting_list_new(),
     });
-    entries.len() - 1
+    i
 }
 
 // -----------------------------------------------------------------------------
@@ -204,7 +224,7 @@ public fn segment_merge(a: &Fts5VtabSegment, b: &Fts5VtabSegment) -> Fts5VtabSeg
     while i < a.entries.len() && j < b.entries.len() {
         if a.entries[i].term == b.entries[j].term {
             // Merge posting lists.
-            let merged = merge_posting_lists(&a.entries[i].postings, &b.entries[j].postings);
+            let merged = a.entries[i].postings.merged(&b.entries[j].postings);
             total = total + merged.len();
             out.push(TermEntry { term: a.entries[i].term.clone(), postings: merged });
             i = i + 1;
@@ -249,22 +269,4 @@ public fn segment_merge(a: &Fts5VtabSegment, b: &Fts5VtabSegment) -> Fts5VtabSeg
         min_rowid: min_r,
         max_rowid: max_r,
     }
-}
-
-fn merge_posting_lists(a: &Fts5SegmentPostingList, b: &Fts5SegmentPostingList) -> Fts5SegmentPostingList {
-    let mut out: List<Fts5SegmentPosting> = List.new();
-    let mut i: Int = 0;
-    let mut j: Int = 0;
-    while i < a.postings.len() && j < b.postings.len() {
-        if posting_less(&a.postings[i], &b.postings[j]) {
-            out.push(clone_p(&a.postings[i]));
-            i = i + 1;
-        } else {
-            out.push(clone_p(&b.postings[j]));
-            j = j + 1;
-        }
-    }
-    while i < a.postings.len() { out.push(clone_p(&a.postings[i])); i = i + 1; }
-    while j < b.postings.len() { out.push(clone_p(&b.postings[j])); j = j + 1; }
-    Fts5SegmentPostingList { postings: out }
 }

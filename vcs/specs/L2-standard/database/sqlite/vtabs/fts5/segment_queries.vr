@@ -1,0 +1,88 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L2
+// @tags: sqlite, fts5, query, compaction
+// @expected-exit: 0
+
+mount core.base.memory.Heap;
+mount core.base.result.Result;
+mount core.collections.list.List;
+mount core.database.sqlite.native.vtabs.fts5.tokenizer.{
+    Fts5VtabTokenizer, simple_tokenizer, options_default,
+};
+mount core.database.sqlite.native.vtabs.fts5.index.index_new;
+mount core.database.sqlite.native.vtabs.fts5.segment.posting_less;
+mount core.database.sqlite.native.vtabs.fts5.merger.compact_to_fixpoint;
+mount core.database.sqlite.native.vtabs.fts5.query.{MatchExpr, parse, execute};
+mount core.database.sqlite.native.vtabs.fts5.functions.{highlight, snippet, bm25_for_row};
+
+fn test_highlight_and_snippet() {
+    let tokenizer: Heap<dyn Fts5VtabTokenizer> = Heap.new(simple_tokenizer());
+    let text = "Écho, RED fox!";
+    let terms: List<Text> = ["red"];
+    assert_eq(highlight(&text, &terms, &"[", &"]", &tokenizer), "Écho, [RED] fox!");
+    assert_eq(highlight(&"x", &terms, &"[", &"]", &tokenizer), "x");
+    assert_eq(snippet(&text, &terms, &"<", &">", &"...", 1, &tokenizer), "...<RED>...");
+    assert_eq(snippet(&"", &terms, &"<", &">", &"...", 1, &tokenizer), "");
+}
+
+fn test_index_and_compaction() {
+    let tokenizer = simple_tokenizer();
+    let opts = options_default();
+    let mut idx = index_new();
+    idx.add_document(30_i64, 0, tokenizer.tokenise(&"zeta alpha alpha", &opts));
+    idx.add_document(10_i64, 0, tokenizer.tokenise(&"alpha zeta", &opts));
+    idx.add_document(40_i64, 0, tokenizer.tokenise(&"unrelated", &opts));
+    idx.add_document(20_i64, 0, tokenizer.tokenise(&"zeta alpha", &opts));
+    assert(idx.needs_merge());
+    assert_eq(idx.segments_at_level(-1), 0);
+    let term = "alpha";
+    let before = idx.lookup(&term).iter();
+    assert_eq(before.len(), 4);
+    assert(posting_less(&before[0], &before[1]));
+    assert(posting_less(&before[1], &before[2]));
+    assert(posting_less(&before[2], &before[3]));
+    assert_eq(idx.lookup(&"no-such-term").len(), 0);
+    let matches = execute(&MatchExpr.MeTerm(term), &idx);
+    assert_eq(matches.len(), 3);
+    assert(bm25_for_row(30_i64, &matches) != 0.0);
+    assert(bm25_for_row(40_i64, &matches) == 0.0);
+    let _ = compact_to_fixpoint(&mut idx, 4);
+    assert_eq(idx.level_count(), 2);
+    assert_eq(idx.segments_at_level(0), 0);
+    assert_eq(idx.segments_at_level(1), 1);
+    assert_eq(idx.segment_count(), 1);
+    let after = idx.lookup(&term).iter();
+    assert_eq(after.len(), before.len());
+    let mut i = 0;
+    while i < after.len() {
+        assert(!posting_less(&after[i], &before[i]));
+        assert(!posting_less(&before[i], &after[i]));
+        i = i + 1;
+    }
+    let _ = compact_to_fixpoint(&mut idx, 4);
+    assert_eq(idx.segment_count(), 1);
+    assert_eq(idx.lookup(&"zeta").len(), 3);
+}
+
+fn test_parse() {
+    match parse(&"alpha") {
+        Result.Ok(MatchExpr.MeTerm(word)) => assert_eq(word, "alpha"),
+        _ => assert(false),
+    }
+    match parse(&"\"red fox\"") {
+        Result.Ok(MatchExpr.MePhrase(words)) => {
+            assert_eq(words.len(), 2);
+            assert_eq(words[0], "red");
+            assert_eq(words[1], "fox");
+        },
+        _ => assert(false),
+    }
+    assert(parse(&"") is Result.Err(_));
+}
+
+fn main() {
+    test_highlight_and_snippet();
+    test_index_and_compaction();
+    test_parse();
+}
