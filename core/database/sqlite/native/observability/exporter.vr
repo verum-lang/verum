@@ -58,7 +58,7 @@ implement MetricExporter for PrometheusExporter {
             append_text(&mut out, &" counter\n".clone());
             append_text(&mut out, c.name());
             out.push_byte(32 as Byte);
-            append_int64(&mut out, c.get());
+            out.push_int(c.get() as Int);
             out.push_byte(10 as Byte);
             i = i + 1;
         }
@@ -70,7 +70,7 @@ implement MetricExporter for PrometheusExporter {
             append_text(&mut out, &" gauge\n".clone());
             append_text(&mut out, g.name());
             out.push_byte(32 as Byte);
-            append_int64(&mut out, g.get());
+            out.push_int(g.get() as Int);
             out.push_byte(10 as Byte);
             i = i + 1;
         }
@@ -85,25 +85,25 @@ implement MetricExporter for PrometheusExporter {
             while k < h.finite_bound_count() {
                 append_text(&mut out, h.name());
                 append_text(&mut out, &"_bucket{le=\"".clone());
-                append_int64(&mut out, h.upper_bound_ns(k));
+                out.push_int(h.upper_bound_ns(k) as Int);
                 append_text(&mut out, &"\"} ".clone());
-                append_int64(&mut out, h.cumulative(k));
+                out.push_int(h.cumulative(k) as Int);
                 out.push_byte(10 as Byte);
                 k = k + 1;
             }
             // +Inf bucket
             append_text(&mut out, h.name());
             append_text(&mut out, &"_bucket{le=\"+Inf\"} ".clone());
-            append_int64(&mut out, h.count());
+            out.push_int(h.count() as Int);
             out.push_byte(10 as Byte);
             // _sum / _count
             append_text(&mut out, h.name());
             append_text(&mut out, &"_sum ".clone());
-            append_int64(&mut out, h.sum());
+            out.push_int(h.sum() as Int);
             out.push_byte(10 as Byte);
             append_text(&mut out, h.name());
             append_text(&mut out, &"_count ".clone());
-            append_int64(&mut out, h.count());
+            out.push_int(h.count() as Int);
             out.push_byte(10 as Byte);
             i = i + 1;
         }
@@ -129,7 +129,7 @@ implement MetricExporter for JsonLineExporter {
             append_text(&mut out, &"{\"type\":\"counter\",\"name\":".clone());
             emit_string(c.name(), &mut out);
             append_text(&mut out, &",\"value\":".clone());
-            append_int64(&mut out, c.get());
+            out.push_int(c.get() as Int);
             append_text(&mut out, &"}\n".clone());
             i = i + 1;
         }
@@ -139,7 +139,7 @@ implement MetricExporter for JsonLineExporter {
             append_text(&mut out, &"{\"type\":\"gauge\",\"name\":".clone());
             emit_string(g.name(), &mut out);
             append_text(&mut out, &",\"value\":".clone());
-            append_int64(&mut out, g.get());
+            out.push_int(g.get() as Int);
             append_text(&mut out, &"}\n".clone());
             i = i + 1;
         }
@@ -149,9 +149,9 @@ implement MetricExporter for JsonLineExporter {
             append_text(&mut out, &"{\"type\":\"histogram\",\"name\":".clone());
             emit_string(h.name(), &mut out);
             append_text(&mut out, &",\"count\":".clone());
-            append_int64(&mut out, h.count());
+            out.push_int(h.count() as Int);
             append_text(&mut out, &",\"sum_ns\":".clone());
-            append_int64(&mut out, h.sum());
+            out.push_int(h.sum() as Int);
             append_text(&mut out, &"}\n".clone());
             i = i + 1;
         }
@@ -226,23 +226,4 @@ fn append_text(dst: &mut Text, s: &Text) {
     let bs = s.as_bytes();
     let mut i: Int = 0;
     while i < bs.len() { dst.push_byte(bs[i]); i = i + 1; }
-}
-
-fn append_int64(dst: &mut Text, n: Int64) {
-    // Int.MIN-safe via UInt64 magnitude.
-    if n == 0_i64 { dst.push_byte(48 as Byte); return; }
-    let mut digits: List<Byte> = List.new();
-    let mut x: UInt64 = if n < 0_i64 {
-        (((!n) as UInt64) + 1_u64)
-    } else {
-        n as UInt64
-    };
-    while x > 0_u64 {
-        let d: Byte = (x % 10_u64) as Byte;
-        digits.push(d + (48 as Byte));
-        x = x / 10_u64;
-    }
-    if n < 0_i64 { dst.push_byte(45 as Byte); }
-    let mut i: Int = digits.len() - 1;
-    while i >= 0 { dst.push_byte(digits[i]); i = i - 1; }
 }

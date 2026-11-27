@@ -34,33 +34,10 @@ public fn version_number(v: &LibVersion) -> Int {
 
 public fn version_text(v: &LibVersion) -> Text {
     let mut out = "".clone();
-    push_int(&mut out, v.major);
+    out.push_int(v.major);
     out.push_byte(0x2E as u8);
-    push_int(&mut out, v.minor);
+    out.push_int(v.minor);
     out.push_byte(0x2E as u8);
-    push_int(&mut out, v.patch);
+    out.push_int(v.patch);
     out
-}
-
-fn push_int(dst: &mut Text, n: Int) {
-    if n == 0 { dst.push_byte(0x30 as u8); return; }
-    if n < 0 { dst.push_byte(0x2D as u8); }
-    // UInt64 magnitude — Int.MIN-safe. The previous version
-    // used `n = 0 - n` which overflows for Int.MIN, then did
-    // iterative-position division on the still-negative value
-    // producing garbage. Rewritten to the canonical
-    // build-digits-then-emit pattern; share the structure with
-    // every other Int formatter in core/.
-    let mut mag: UInt64 = if n < 0 {
-        (((!n) as UInt64) + 1_u64)
-    } else {
-        n as UInt64
-    };
-    let mut digits: List<Byte> = List.new();
-    while mag > 0_u64 {
-        digits.push(((mag % 10_u64) + 0x30_u64) as u8);
-        mag = mag / 10_u64;
-    }
-    let mut i: Int = digits.len() - 1;
-    while i >= 0 { dst.push_byte(digits[i]); i = i - 1; }
 }

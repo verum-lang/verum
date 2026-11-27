@@ -33,10 +33,10 @@ mount collections.List;
 public type OpStat is {
     /// Opcode name — kept as Text rather than the Opcode enum so
     /// the profiler doesn't take a hard dependency on l4_vdbe.
-    opcode: Text,
-    count: Int64,
-    total_ns: Int64,
-    worst_ns: Int64,
+    public(in core.database.sqlite.native.profiler) opcode: Text,
+    public(in core.database.sqlite.native.profiler) count: Int64,
+    public(in core.database.sqlite.native.profiler) total_ns: Int64,
+    public(in core.database.sqlite.native.profiler) worst_ns: Int64,
 }
 
 public fn opstat_new(opcode: Text) -> OpStat {
@@ -64,7 +64,7 @@ implement OpStat {
 // OpStatTable — aggregator across all opcodes touched
 // -----------------------------------------------------------------------------
 
-public type OpStatTable is { entries: List<OpStat> }
+public type OpStatTable is { public(in core.database.sqlite.native.profiler) entries: List<OpStat> }
 
 public fn opstat_table_new() -> OpStatTable { OpStatTable { entries: List.new() } }
 

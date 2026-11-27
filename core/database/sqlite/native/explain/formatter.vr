@@ -38,19 +38,19 @@ public fn format_vdbe(table: &VdbeExplainTable) -> Text {
     let mut i: Int = 0;
     while i < table.rows.len() {
         let r = &table.rows[i];
-        push_int(&mut out, r.addr);
+        out.push_int(r.addr);
         push_text(&mut out, &"  ".clone());
         push_text(&mut out, &r.opcode);
         out.push_byte(32 as Byte);
-        push_int(&mut out, r.p1);
+        out.push_int(r.p1);
         out.push_byte(32 as Byte);
-        push_int(&mut out, r.p2);
+        out.push_int(r.p2);
         out.push_byte(32 as Byte);
-        push_int(&mut out, r.p3);
+        out.push_int(r.p3);
         out.push_byte(32 as Byte);
         push_text(&mut out, &r.p4);
         out.push_byte(32 as Byte);
-        push_int(&mut out, r.p5);
+        out.push_int(r.p5);
         out.push_byte(32 as Byte);
         push_text(&mut out, &r.comment);
         out.push_byte(10 as Byte);
@@ -108,23 +108,4 @@ public fn format_query_plan(tree: &QueryPlanTree) -> Text {
 
 fn push_text(dst: &mut Text, s: &Text) {
     dst.push_str(s);
-}
-
-fn push_int(dst: &mut Text, n: Int) {
-    if n == 0 { dst.push_byte(48 as Byte); return; }
-    let mut digits: List<Byte> = List.new();
-    // UInt64 magnitude — Int.MIN-safe. See canonical fix in
-    // core/text/format.int_to_string.
-    let mut mag: UInt64 = if n < 0 {
-        (((!n) as UInt64) + 1_u64)
-    } else {
-        n as UInt64
-    };
-    while mag > 0_u64 {
-        digits.push(((mag % 10_u64) as Byte) + (48 as Byte));
-        mag = mag / 10_u64;
-    }
-    if n < 0 { dst.push_byte(45 as Byte); }
-    let mut i: Int = digits.len() - 1;
-    while i >= 0 { dst.push_byte(digits[i]); i = i - 1; }
 }

@@ -65,7 +65,7 @@ public fn sv_kind_name(v: &ExportValue) -> Text { ev_kind_name(v) }
 public fn render_sql_literal(v: &ExportValue) -> Text {
     match v {
         EvNull       => "NULL".clone(),
-        EvInteger(n) => render_int64(*n),
+        EvInteger(n) => Text.from_int(*n as Int),
         EvReal(f)    => render_float(*f),
         EvText(t)    => quote_sql_text(t),
         EvBlob(b)    => render_blob_x(b),
@@ -109,32 +109,6 @@ fn hex_digit(n: Byte) -> Byte {
     if n < (10 as Byte) { n + (48 as Byte) } else { (n - (10 as Byte)) + (97 as Byte) }
 }
 
-fn render_int64(n: Int64) -> Text {
-    // Int.MIN-safe via UInt64 magnitude. Previously `if neg { -n }`
-    // wrapped Int64.MIN back to itself; the digit loop never entered
-    // and the export rendered "-" with no magnitude — a real data-
-    // loss bug for any DB column containing Int64.MIN written through
-    // the export path.
-    if n == 0_i64 { return "0".clone(); }
-    let mut digits: List<Byte> = List.new();
-    let neg = n < 0_i64;
-    let mut x: UInt64 = if neg {
-        (((!n) as UInt64) + 1_u64)
-    } else {
-        n as UInt64
-    };
-    while x > 0_u64 {
-        let d: Byte = (x % 10_u64) as Byte;
-        digits.push(d + (48 as Byte));
-        x = x / 10_u64;
-    }
-    let mut out = Text.new();
-    if neg { out.push_byte(45 as Byte); }
-    let mut i: Int = digits.len() - 1;
-    while i >= 0 { out.push_byte(digits[i]); i = i - 1; }
-    out
-}
-
 /// Float renderer — mantissa-only, no exponent. We stick with
 /// six significant digits which matches sqlite3's default REAL
 /// formatting precisely enough for round-trippable text dumps.
@@ -147,7 +121,7 @@ fn render_float(f: Float64) -> Text {
 
     let mut out = Text.new();
     if neg { out.push_byte(45 as Byte); }
-    push(&mut out, &render_int64(int_part));
+    out.push_int(int_part as Int);
     out.push_byte(46 as Byte);
 
     // zero-pad fractional digits to 6 places
@@ -163,12 +137,6 @@ fn render_float(f: Float64) -> Text {
     let mut i: Int = digits.len() - 1;
     while i >= 0 { out.push_byte(digits[i]); i = i - 1; }
     out
-}
-
-fn push(dst: &mut Text, s: &Text) {
-    let bs = s.as_bytes();
-    let mut i: Int = 0;
-    while i < bs.len() { dst.push_byte(bs[i]); i = i + 1; }
 }
 
 // -----------------------------------------------------------------------------

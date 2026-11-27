@@ -113,13 +113,13 @@ public fn phase_is_terminal(p: &BackupPhase) -> Bool {
 
 public type BackupEngineHandle is {
     /// Logical name for diagnostics (e.g. "main->dest").
-    label: Text,
+    public(in core.database.sqlite.native.backup) label: Text,
     phase: BackupPhase,
-    total_pages: Int,
-    copied_pages: Int,
+    public(in core.database.sqlite.native.backup) total_pages: Int,
+    public(in core.database.sqlite.native.backup) copied_pages: Int,
     /// Number of pages that were re-read because they were dirtied
     /// after the initial copy. Counter is exposed via progress reports.
-    re_read_pages: Int,
+    public(in core.database.sqlite.native.backup) re_read_pages: Int,
     /// Page size in bytes — fixed at handle creation.
     page_size: Int,
 }

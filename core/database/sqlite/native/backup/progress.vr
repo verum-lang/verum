@@ -108,32 +108,14 @@ fn append_text(dst: &mut Text, s: &Text) {
     while i < bs.len() { dst.push_byte(bs[i]); i = i + 1; }
 }
 
-fn append_int(dst: &mut Text, n: Int) {
-    // Int.MIN-safe via UInt64 magnitude.
-    if n == 0 { dst.push_byte(48 as Byte); return; }
-    let mut digits: List<Byte> = List.new();
-    let mut x: UInt64 = if n < 0 {
-        (((!n) as UInt64) + 1_u64)
-    } else {
-        n as UInt64
-    };
-    while x > 0_u64 {
-        digits.push(((x % 10_u64) + 48_u64) as Byte);
-        x = x / 10_u64;
-    }
-    if n < 0 { dst.push_byte(45 as Byte); }
-    let mut i: Int = digits.len() - 1;
-    while i >= 0 { dst.push_byte(digits[i]); i = i - 1; }
-}
-
 public fn render(s: &ProgressSnapshot) -> Text {
     let mut out = Text.new();
     append_text(&mut out, &s.label);
     out.push_byte(32 as Byte);
-    append_int(&mut out, s.percent);
+    out.push_int(s.percent);
     out.push_byte(37 as Byte);
     out.push_byte(47 as Byte);
-    append_int(&mut out, s.total_pages);
+    out.push_int(s.total_pages);
     out.push_byte(112 as Byte); out.push_byte(112 as Byte);
     out.push_byte(32 as Byte);
     out.push_byte(40 as Byte);

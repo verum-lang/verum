@@ -243,7 +243,7 @@ fn coerce_to_real(v: CoercionSqliteApiValue) -> CoercionSqliteApiValue {
 fn coerce_to_text(v: CoercionSqliteApiValue) -> CoercionSqliteApiValue {
     match v {
         VText(_) => v,
-        VInt(i)  => VText(int64_to_text(i)),
+        VInt(i)  => VText(Text.from_int(i as Int)),
         VReal(x) => VText(float64_to_text(x)),
         VBlob(b) => VBlob(b),   // blob → text not auto-applied
         VNull    => VNull,
@@ -406,35 +406,6 @@ public fn parse_float64(s: &Text) -> Float64 {
     value
 }
 
-fn int64_to_text(n: Int64) -> Text {
-    // Int.MIN-safe magnitude. The naive `0 - n` for the negative
-    // branch overflows back to Int.MIN for Int.MIN itself; the
-    // subsequent `while abs > 0` loop never enters and the formatter
-    // emits "-" with no digits. Use UInt64 magnitude so every Int64
-    // including Int64.MIN round-trips exactly.
-    if n == 0_i64 { return "0".clone(); }
-    let neg = n < 0_i64;
-    let mut mag: UInt64 = if neg {
-        (((!n) as UInt64) + 1_u64)
-    } else {
-        n as UInt64
-    };
-    let mut digits: List<Byte> = List.new();
-    while mag > 0_u64 {
-        let d = (mag % 10_u64) as Int;
-        digits.push(((d as Int) + 0x30) as Byte);
-        mag = mag / 10_u64;
-    }
-    let mut out: List<Byte> = List.new();
-    if neg { out.push(0x2D as Byte); }
-    let mut i: Int = digits.len() - 1;
-    while i >= 0 {
-        out.push(digits[i]);
-        i = i - 1;
-    }
-    Text.from_utf8(out.as_slice()).unwrap_or("0".clone())
-}
-
 fn float64_to_text(x: Float64) -> Text {
     // v1 — returns a canonical non-roundtrip form. STRICT of the
     // shape is not critical (tests compare semantics, not string).
@@ -442,11 +413,11 @@ fn float64_to_text(x: Float64) -> Text {
     // builtins (§15.1).
     let i = x as Int64;
     if (i as Float64) == x {
-        return int64_to_text(i);
+        return Text.from_int(i as Int);
     }
     // Fallback — emit `int_part.frac_part`. Not strictly conforming.
     let int_part_f = x as Int64;
-    let mut out = int64_to_text(int_part_f);
+    let mut out = Text.from_int(int_part_f as Int);
     let mut bytes: List<Byte> = List.new();
     let mut k: Int = 0;
     while k < out.len() {

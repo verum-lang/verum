@@ -35,38 +35,13 @@ public fn from_libversion_number(n: Int64) -> SqliteVersion {
     core.database.sqlite.native.sqlite_version_fmt.version.new(major, minor, patch)
 }
 
-// Emit integer as Text. UInt64 magnitude — Int.MIN-safe.
-fn int_to_text(n: Int) -> Text {
-    if n == 0 { return "0".clone(); }
-    let mut mag: UInt64 = if n < 0 {
-        (((!n) as UInt64) + 1_u64)
-    } else {
-        n as UInt64
-    };
-    let mut digits = "".clone();
-    while mag > 0_u64 {
-        let d = (mag % 10_u64) as u8;
-        digits.push_byte((d + 0x30 as u8) as u8);
-        mag = mag / 10_u64;
-    }
-    let bs = digits.as_bytes();
-    let mut out = "".clone();
-    if n < 0 { out.push_byte(0x2D as u8); }
-    let mut i: Int = bs.len() - 1;
-    while i >= 0 {
-        out.push_byte(bs[i]);
-        i = i - 1;
-    }
-    out
-}
-
 public fn to_dotted_text(v: &SqliteVersion) -> Text {
     let mut out = "".clone();
-    out = out + int_to_text(v.major);
+    out.push_int(v.major);
     out.push_byte(0x2E as u8);
-    out = out + int_to_text(v.minor);
+    out.push_int(v.minor);
     out.push_byte(0x2E as u8);
-    out = out + int_to_text(v.patch);
+    out.push_int(v.patch);
     out
 }
 

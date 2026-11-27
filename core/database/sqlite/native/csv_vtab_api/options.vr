@@ -26,9 +26,9 @@ public type CsvVtabOptions is {
     /// True iff the first row is a header.
     header: Bool,
     /// Explicit column count; Maybe.None means "infer from first row".
-    columns: Maybe<Int>,
+    public(in core.database.sqlite.native.csv_vtab_api) columns: Maybe<Int>,
     /// Explicit schema SQL; Maybe.None means "auto-generate with text columns".
-    schema: Maybe<Text>,
+    public(in core.database.sqlite.native.csv_vtab_api) schema: Maybe<Text>,
 }
 
 public fn default_options(source: DataSource) -> CsvVtabOptions {

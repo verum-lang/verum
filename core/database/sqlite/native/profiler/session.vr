@@ -31,13 +31,13 @@ mount core.database.sqlite.native.profiler.nodestat.{
 
 public type ProfileSession is {
     /// SQL fragment (used for human-readable header).
-    sql: Text,
+    public(in core.database.sqlite.native.profiler) sql: Text,
     started_at_ns: Int64,
     finished_at_ns: Int64,
     /// True between `start()` and `finish()`.
     running: Bool,
-    ops: OpStatTable,
-    nodes: NodeStatTable,
+    public(in core.database.sqlite.native.profiler) ops: OpStatTable,
+    public(in core.database.sqlite.native.profiler) nodes: NodeStatTable,
     /// Stack of node ids currently active. Codegen pushes on entry,
     /// pops on exit; the top is "the node we're spending time in".
     node_stack: List<Int>,

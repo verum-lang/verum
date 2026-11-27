@@ -10,14 +10,14 @@ module core.database.sqlite.native.explain_opcode_dump.row;
 mount base.{Bool, Text};
 
 public type ExplainOpcodeRow is {
-    addr: Int,
-    opcode: Text,
-    p1: Int,
-    p2: Int,
-    p3: Int,
-    p4: Text,      // stringified P4 (may be empty)
-    p5: Int,       // u16 flag bits
-    comment: Text, // optional trailing comment (PRAGMA vdbe_addoptrace=1)
+    public(in core.database.sqlite.native.explain_opcode_dump) addr: Int,
+    public(in core.database.sqlite.native.explain_opcode_dump) opcode: Text,
+    public(in core.database.sqlite.native.explain_opcode_dump) p1: Int,
+    public(in core.database.sqlite.native.explain_opcode_dump) p2: Int,
+    public(in core.database.sqlite.native.explain_opcode_dump) p3: Int,
+    public(in core.database.sqlite.native.explain_opcode_dump) p4: Text,      // stringified P4 (may be empty)
+    public(in core.database.sqlite.native.explain_opcode_dump) p5: Int,       // u16 flag bits
+    public(in core.database.sqlite.native.explain_opcode_dump) comment: Text, // optional trailing comment (PRAGMA vdbe_addoptrace=1)
 };
 
 public fn new(addr: Int, opcode: Text) -> ExplainOpcodeRow {

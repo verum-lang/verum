@@ -37,15 +37,15 @@ mount collections.List;
 
 public type NodeStat is {
     /// Stable plan-node id assigned by the planner (depth-first index).
-    node_id: Int,
+    public(in core.database.sqlite.native.profiler) node_id: Int,
     /// Human-readable kind tag — e.g. "PnTableScan(users)".
-    kind: Text,
+    public(in core.database.sqlite.native.profiler) kind: Text,
     /// Planner's row estimate.
-    estimated_rows: Int64,
+    public(in core.database.sqlite.native.profiler) estimated_rows: Int64,
     /// Actual rows the node emitted.
-    actual_rows: Int64,
+    public(in core.database.sqlite.native.profiler) actual_rows: Int64,
     /// Total wall-clock spent in this node's opcode range.
-    total_ns: Int64,
+    public(in core.database.sqlite.native.profiler) total_ns: Int64,
     /// First-row latency (helps spot non-pipelined sorts).
     first_row_ns: Int64,
     /// True once the first row was observed.
@@ -87,7 +87,7 @@ implement NodeStat {
 // NodeStatTable
 // -----------------------------------------------------------------------------
 
-public type NodeStatTable is { entries: List<NodeStat> }
+public type NodeStatTable is { public(in core.database.sqlite.native.profiler) entries: List<NodeStat> }
 
 public fn nodestat_table_new() -> NodeStatTable { NodeStatTable { entries: List.new() } }
 

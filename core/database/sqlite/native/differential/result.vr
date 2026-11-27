@@ -93,7 +93,7 @@ public type RunResult is {
     rows: List<DifferentialResultRow>,
     effects: SideEffect,
     /// Wall-clock the case took.
-    elapsed_ns: Int64,
+    public(in core.database.sqlite.native.differential) elapsed_ns: Int64,
 }
 
 public fn run_result(end_label: Text, status: RunStatus) -> RunResult {

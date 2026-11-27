@@ -113,13 +113,13 @@ implement DifferentialOracle {
     /// One-line summary suitable for CI output.
     public fn summary(&self) -> Text {
         let mut s = "differential: ".clone();
-        push_int(&mut s, self.matched);
+        s.push_int(self.matched);
         push(&mut s, &"/".clone());
-        push_int(&mut s, self.case_count());
+        s.push_int(self.case_count());
         push(&mut s, &" match".clone());
         if self.mismatched > 0 {
             push(&mut s, &" (".clone());
-            push_int(&mut s, self.mismatched);
+            s.push_int(self.mismatched);
             push(&mut s, &" diverged)".clone());
         }
         s
@@ -139,26 +139,4 @@ fn clone_outcome(o: &DiffOutcome) -> DiffOutcome {
 
 fn push(dst: &mut Text, s: &Text) {
     dst.push_str(s);
-}
-
-fn push_int(dst: &mut Text, n: Int) {
-    if n == 0 { dst.push_byte(48 as Byte); return; }
-    let mut digits: List<Byte> = List.new();
-    // UInt64 magnitude — exact for every Int including Int.MIN.
-    // (Naïve `if n < 0 { -n }` overflows back to Int.MIN; the
-    // `while x > 0` loop then skips entirely, silently emitting
-    // "-" with no digits. Same bug-class as the canonical
-    // core/text/format.int_to_string fix.)
-    let mut mag: UInt64 = if n < 0 {
-        (((!n) as UInt64) + 1_u64)
-    } else {
-        n as UInt64
-    };
-    while mag > 0_u64 {
-        digits.push(((mag % 10_u64) as Byte) + (48 as Byte));
-        mag = mag / 10_u64;
-    }
-    if n < 0 { dst.push_byte(45 as Byte); }
-    let mut i: Int = digits.len() - 1;
-    while i >= 0 { dst.push_byte(digits[i]); i = i - 1; }
 }

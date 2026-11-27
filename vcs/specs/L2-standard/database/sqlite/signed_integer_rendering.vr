@@ -1,0 +1,64 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L2
+// @tags: sqlite, text, integers
+// @expected-exit: 0
+
+mount core.database.sqlite.native.backup.state.handle_new;
+mount core.database.sqlite.native.backup.progress.{tracker_new, render as render_backup};
+mount core.database.sqlite.native.create_table_default_cols.infer.{InferredSource, source_name};
+mount core.database.sqlite.native.csv_vtab_api.options.{DataSource, default_options};
+mount core.database.sqlite.native.csv_vtab_api.schema.infer_schema;
+mount core.database.sqlite.native.differential.oracle.oracle_new;
+mount core.database.sqlite.native.explain_opcode_dump.row.{new as opcode_row, with_operands};
+mount core.database.sqlite.native.explain_opcode_dump.formatter.format_row;
+mount core.database.sqlite.native.export.value.{ExportValue, render_sql_literal};
+mount core.database.sqlite.native.profiler.session.session_new;
+mount core.database.sqlite.native.profiler.report.{render as render_profile};
+mount core.database.sqlite.native.sql_render.literal.{RenderLiteral, render_literal};
+mount core.database.sqlite.native.stat1_schema_api.row.{new as stat_row, push_prefix_count, render_stat_text};
+
+fn test_opcode_operands() {
+    let r = with_operands(opcode_row(0, "Open".clone()), Int.MIN, -1, Int.MAX);
+    assert_eq(format_row(&r), "0|Open|-9223372036854775808|-1|9223372036854775807||0");
+}
+
+fn test_literals_and_statistics() {
+    assert_eq(render_sql_literal(&ExportValue.EvInteger(Int.MIN as Int64)), "-9223372036854775808");
+    let mut sql = "SELECT ".clone();
+    render_literal(&mut sql, &RenderLiteral.RlInt(Int.MIN as Int64));
+    assert_eq(sql, "SELECT -9223372036854775808");
+    let base = stat_row("t".clone(), "idx".clone(), Int.MAX as Int64);
+    let r = push_prefix_count(push_prefix_count(base, -12_i64), 0_i64);
+    assert_eq(render_stat_text(&r), "9223372036854775807 -12 0");
+}
+
+fn test_column_names() {
+    assert_eq(source_name(&InferredSource.IsExpression(Int.MIN)), "column9223372036854775808");
+    let opts = default_options(DataSource.DsInline("".clone()));
+    assert_eq(infer_schema(&opts, 3), "CREATE TABLE x(c0 TEXT, c1 TEXT, c2 TEXT)");
+    assert_eq(infer_schema(&opts, -1), "CREATE TABLE x()");
+}
+
+fn test_reports() {
+    let mut handle = handle_new("main".clone(), 100, 4096);
+    let _ = handle.step(47);
+    let mut tracker = tracker_new(0_i64);
+    let snap = tracker.snapshot(&handle, 1000000000_i64);
+    assert_eq(render_backup(&snap), "main 47%/100pp (streaming)");
+    let oracle = oracle_new();
+    assert_eq(oracle.summary(), "differential: 0/0 match");
+
+    let mut s = session_new("SELECT 1".clone());
+    s.start(1_i64);
+    s.finish(0_i64);
+    s.register_node(12, "scan".clone(), Int.MIN as Int64);
+    assert_eq(render_profile(&s), "ANALYZE SELECT 1\ntotal_time_ns=-1\n\nPLAN:\n  [12] scan  est=-9223372036854775808  actual=0  ns=0\n\nOPS:\n");
+}
+
+fn main() {
+    test_opcode_operands();
+    test_literals_and_statistics();
+    test_column_names();
+    test_reports();
+}

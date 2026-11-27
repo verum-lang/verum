@@ -9,6 +9,7 @@ module core.database.sqlite.native.create_table_default_cols.infer;
 
 mount base.{Bool, Text};
 mount core.collections.list.{List};
+mount core.base.protocols.int_to_string;
 
 public type InferredSource is
     | IsColumnAlias(Text)        // SELECT x AS my_col → column name my_col
@@ -20,33 +21,16 @@ public fn source_name(s: &InferredSource) -> Text {
     match s {
         IsColumnAlias(n)  => n.clone(),
         IsBareColumn(n)   => n.clone(),
-        IsExpression(idx) => "column".clone() + int_suffix(idx),
+        IsExpression(idx) => {
+            let mut out = "column".clone();
+            let mut digits: [Byte; 20] = [0; 20];
+            let count = int_to_string(*idx, &mut digits[..]);
+            // Generated column names use the ordinal magnitude.
+            let mut pos = if *idx < 0 { 1 } else { 0 };
+            while pos < count { out.push_byte(digits[pos]); pos = pos + 1; }
+            out
+        },
     }
-}
-
-fn int_suffix(n: Int) -> Text {
-    // Convert small n to text suffix; fall back to "_n".
-    // Int.MIN-safe via UInt64 magnitude.
-    let mut out = "".clone();
-    if n == 0 { out.push_byte(0x30 as u8); return out; }
-    let mut v: UInt64 = if n < 0 {
-        (((!n) as UInt64) + 1_u64)
-    } else {
-        n as UInt64
-    };
-    let mut digits = "".clone();
-    while v > 0_u64 {
-        let d = (v % 10_u64) as u8;
-        digits.push_byte((d + 0x30 as u8) as u8);
-        v = v / 10_u64;
-    }
-    let bs = digits.as_bytes();
-    let mut i: Int = bs.len() - 1;
-    while i >= 0 {
-        out.push_byte(bs[i]);
-        i = i - 1;
-    }
-    out
 }
 
 // Per §17.1: if two inferred names collide, append "_1", "_2", ...
@@ -68,10 +52,7 @@ public fn disambiguate(names: &List<Text>) -> List<Text> {
             while found_name.len() == 0 {
                 let mut trial = candidate.clone();
                 trial.push_byte(0x5F as u8);
-                let suffix = int_suffix(n);
-                let sbs = suffix.as_bytes();
-                let mut k: Int = 0;
-                while k < sbs.len() { trial.push_byte(sbs[k]); k = k + 1; }
+                trial.push_int(n);
                 // Is `trial` in `out`?
                 let mut dup = false;
                 let mut q: Int = 0;

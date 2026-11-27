@@ -28,10 +28,10 @@ mount base.{Text, Bool, Maybe};
 mount collections.List;
 
 public type QueryPlanRow is {
-    id: Int,
+    public(in core.database.sqlite.native.explain) id: Int,
     parent: Int,
     notused: Int,
-    detail: Text,
+    public(in core.database.sqlite.native.explain) detail: Text,
 }
 
 public fn query_plan_row(id: Int, parent: Int, detail: Text) -> QueryPlanRow {

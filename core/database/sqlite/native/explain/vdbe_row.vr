@@ -19,14 +19,14 @@ mount base.{Text, Bool};
 mount collections.List;
 
 public type VdbeExplainRow is {
-    addr: Int,                    // 0-based opcode address
-    opcode: Text,                 // human-readable opcode name
-    p1: Int,
-    p2: Int,
-    p3: Int,
-    p4: Text,                     // p4 may be a string literal / SQL fragment / register-spec
-    p5: Int,
-    comment: Text,
+    public(in core.database.sqlite.native.explain) addr: Int,                    // 0-based opcode address
+    public(in core.database.sqlite.native.explain) opcode: Text,                 // human-readable opcode name
+    public(in core.database.sqlite.native.explain) p1: Int,
+    public(in core.database.sqlite.native.explain) p2: Int,
+    public(in core.database.sqlite.native.explain) p3: Int,
+    public(in core.database.sqlite.native.explain) p4: Text,                     // p4 may be a string literal / SQL fragment / register-spec
+    public(in core.database.sqlite.native.explain) p5: Int,
+    public(in core.database.sqlite.native.explain) comment: Text,
 }
 
 public fn vdbe_row(
@@ -47,7 +47,7 @@ public fn vdbe_row(
 // VdbeExplainTable — full result set for EXPLAIN <sql>
 // -----------------------------------------------------------------------------
 
-public type VdbeExplainTable is { rows: List<VdbeExplainRow> }
+public type VdbeExplainTable is { public(in core.database.sqlite.native.explain) rows: List<VdbeExplainRow> }
 
 public fn vdbe_table_new() -> VdbeExplainTable {
     VdbeExplainTable { rows: List.new() }

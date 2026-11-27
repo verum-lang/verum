@@ -56,12 +56,12 @@ public fn case_mode_name(m: &CaseMode) -> Text {
 
 public type DifferentialCase is {
     /// Stable identifier — survives across runs.
-    name: Text,
+    public(in core.database.sqlite.native.differential) name: Text,
     /// Setup applied to BOTH ends before `sql` runs.
     setup: List<SetupAction>,
     /// The statement under test.
     sql: Text,
-    mode: CaseMode,
+    public(in core.database.sqlite.native.differential) mode: CaseMode,
     /// Tags for filtering — e.g. "join", "fts5", "trigger".
     tags: List<Text>,
 }

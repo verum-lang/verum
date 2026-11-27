@@ -44,25 +44,6 @@ public fn loom_version() -> DistributionVersion {
 // Display helpers
 // -----------------------------------------------------------------------------
 
-fn append_int(dst: &mut Text, n: Int) {
-    if n == 0 { dst.push_byte(48 as Byte); return; }
-    let mut digits: List<Byte> = List.new();
-    // UInt64 magnitude — Int.MIN-safe. See canonical fix in
-    // core/text/format.int_to_string.
-    let mut mag: UInt64 = if n < 0 {
-        (((!n) as UInt64) + 1_u64)
-    } else {
-        n as UInt64
-    };
-    while mag > 0_u64 {
-        digits.push(((mag % 10_u64) + 48_u64) as Byte);
-        mag = mag / 10_u64;
-    }
-    if n < 0 { dst.push_byte(45 as Byte); }
-    let mut i: Int = digits.len() - 1;
-    while i >= 0 { dst.push_byte(digits[i]); i = i - 1; }
-}
-
 fn append_text(dst: &mut Text, s: &Text) {
     let bs = s.as_bytes();
     let mut i: Int = 0;
@@ -71,11 +52,11 @@ fn append_text(dst: &mut Text, s: &Text) {
 
 public fn version_string(v: &DistributionVersion) -> Text {
     let mut out = Text.new();
-    append_int(&mut out, v.major);
+    out.push_int(v.major);
     out.push_byte(46 as Byte);
-    append_int(&mut out, v.minor);
+    out.push_int(v.minor);
     out.push_byte(46 as Byte);
-    append_int(&mut out, v.patch);
+    out.push_int(v.patch);
     if v.suffix.len() > 0 {
         out.push_byte(45 as Byte);
         append_text(&mut out, &v.suffix);

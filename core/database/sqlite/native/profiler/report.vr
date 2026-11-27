@@ -31,7 +31,6 @@
 module core.database.sqlite.native.profiler.report;
 
 mount base.{Text, Bool};
-mount collections.List;
 mount core.database.sqlite.native.profiler.session.{ProfileSession};
 
 public fn render(session: &ProfileSession) -> Text {
@@ -40,7 +39,7 @@ public fn render(session: &ProfileSession) -> Text {
     out.push_byte(10 as Byte);
 
     push(&mut out, &"total_time_ns=".clone());
-    append_int64(&mut out, session.elapsed_ns());
+    out.push_int(session.elapsed_ns() as Int);
     out.push_byte(10 as Byte);
     out.push_byte(10 as Byte);
 
@@ -49,15 +48,15 @@ public fn render(session: &ProfileSession) -> Text {
     while i < session.nodes.entries.len() {
         let n = &session.nodes.entries[i];
         push(&mut out, &"  [".clone());
-        append_int(&mut out, n.node_id);
+        out.push_int(n.node_id);
         push(&mut out, &"] ".clone());
         push(&mut out, &n.kind);
         push(&mut out, &"  est=".clone());
-        append_int64(&mut out, n.estimated_rows);
+        out.push_int(n.estimated_rows as Int);
         push(&mut out, &"  actual=".clone());
-        append_int64(&mut out, n.actual_rows);
+        out.push_int(n.actual_rows as Int);
         push(&mut out, &"  ns=".clone());
-        append_int64(&mut out, n.total_ns);
+        out.push_int(n.total_ns as Int);
         out.push_byte(10 as Byte);
         i = i + 1;
     }
@@ -70,11 +69,11 @@ public fn render(session: &ProfileSession) -> Text {
         push(&mut out, &"  ".clone());
         push(&mut out, &o.opcode);
         push(&mut out, &"  count=".clone());
-        append_int64(&mut out, o.count);
+        out.push_int(o.count as Int);
         push(&mut out, &"  total_ns=".clone());
-        append_int64(&mut out, o.total_ns);
+        out.push_int(o.total_ns as Int);
         push(&mut out, &"  worst_ns=".clone());
-        append_int64(&mut out, o.worst_ns);
+        out.push_int(o.worst_ns as Int);
         out.push_byte(10 as Byte);
         i = i + 1;
     }
@@ -86,41 +85,4 @@ fn push(dst: &mut Text, s: &Text) {
     let bs = s.as_bytes();
     let mut i: Int = 0;
     while i < bs.len() { dst.push_byte(bs[i]); i = i + 1; }
-}
-
-fn append_int(dst: &mut Text, n: Int) {
-    // Int.MIN-safe via UInt64 magnitude.
-    if n == 0 { dst.push_byte(48 as Byte); return; }
-    let mut digits: List<Byte> = List.new();
-    let mut x: UInt64 = if n < 0 {
-        (((!n) as UInt64) + 1_u64)
-    } else {
-        n as UInt64
-    };
-    while x > 0_u64 {
-        let d: Byte = (x % 10_u64) as Byte;
-        digits.push(d + (48 as Byte));
-        x = x / 10_u64;
-    }
-    if n < 0 { dst.push_byte(45 as Byte); }
-    let mut i: Int = digits.len() - 1;
-    while i >= 0 { dst.push_byte(digits[i]); i = i - 1; }
-}
-
-fn append_int64(dst: &mut Text, n: Int64) {
-    if n == 0_i64 { dst.push_byte(48 as Byte); return; }
-    let mut digits: List<Byte> = List.new();
-    let mut x: UInt64 = if n < 0_i64 {
-        (((!n) as UInt64) + 1_u64)
-    } else {
-        n as UInt64
-    };
-    while x > 0_u64 {
-        let d: Byte = (x % 10_u64) as Byte;
-        digits.push(d + (48 as Byte));
-        x = x / 10_u64;
-    }
-    if n < 0_i64 { dst.push_byte(45 as Byte); }
-    let mut i: Int = digits.len() - 1;
-    while i >= 0 { dst.push_byte(digits[i]); i = i - 1; }
 }

@@ -36,37 +36,6 @@ public fn literal_kind(l: &RenderLiteral) -> Text {
     }
 }
 
-fn push_digit(dst: &mut Text, d: Int) {
-    dst.push_byte((0x30 + d) as u8);
-}
-
-fn push_int64(dst: &mut Text, n: Int64) {
-    // Two's-complement-safe magnitude. `0 - Int64.MIN` overflows
-    // back to Int64.MIN, the subsequent `x > 0` digit-count loop
-    // never enters, and the formatter emits garbage. Accumulate
-    // magnitude in UInt64 so every Int64 including Int64.MIN
-    // (-9223372036854775808) round-trips exactly. Same fix as the
-    // sibling `csv_vtab_api/schema.push_int`.
-    if n == 0_i64 { push_digit(dst, 0); return; }
-    let negative = n < 0_i64;
-    if negative { dst.push_byte(0x2D as u8); }
-    let mut mag: UInt64 = if negative {
-        (((!n) as UInt64) + 1_u64)
-    } else {
-        n as UInt64
-    };
-    // Worst case: 20 digits for UInt64.
-    let mut buf: [Byte; 20] = [0_u8; 20];
-    let mut i: Int = 19;
-    while mag > 0_u64 {
-        buf[i] = ((mag % 10_u64) as Byte) + 0x30_u8;
-        mag = mag / 10_u64;
-        i = i - 1;
-    }
-    let mut k: Int = i + 1;
-    while k <= 19 { dst.push_byte(buf[k]); k = k + 1; }
-}
-
 fn push_single_quoted(dst: &mut Text, s: &Text) {
     dst.push_byte(0x27 as u8);
     let bs = s.as_bytes();
@@ -114,7 +83,7 @@ public fn render_literal(dst: &mut Text, l: &RenderLiteral) {
             dst.push_byte(0x4C as u8);
             dst.push_byte(0x4C as u8);
         }
-        RlInt(n)  => push_int64(dst, n),
+        RlInt(n)  => dst.push_int(n as Int),
         RlReal(_) => {
             // Real formatting isn't byte-exact across platforms; emit a
             // placeholder. Embedders that need byte-exact output pass
