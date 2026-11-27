@@ -596,6 +596,15 @@ fn initial_oversized_call_has_the_same_loud_depth_failure_as_nested_discovery() 
         }
     ));
     assert!(graph.is_empty());
+    let valid = (1..verum_vbc::types::MAX_TYPE_REF_DEPTH)
+        .fold(concrete(TypeId::INT), |child, _| T::Tuple(vec![child]));
+    discover_call_instantiations(&m, &[call(target, vec![valid])], 0, &mut graph).unwrap();
+    assert_eq!(graph.len(), 1);
+
+    let wide = T::Tuple(vec![generic(0); verum_vbc::types::MAX_TYPE_REF_NODES]);
+    let error = discover_call_instantiations(&m, &[call(target, vec![wide])], 0, &mut graph).unwrap_err();
+    assert!(matches!(error, MonoPhaseError::ResourceLimit { resource: "type nodes", .. }));
+    assert_eq!(graph.len(), 1);
 }
 
 #[test]

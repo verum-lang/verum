@@ -187,9 +187,13 @@ impl<'a> ParameterMapping<'a> {
     }
 }
 
-/// Walk the prospective result without cloning its inputs. A replacement is
-/// simultaneous: its free parameters are lifted, never substituted again.
-/// The final bounded mapper can then use small, structurally bounded calls.
+/// Check an incoming witness against the same limits as a substituted result.
+pub(super) fn validate_witness_shape(ty: &TypeRef) -> Result<(), SubstitutionError> {
+    validate_mapped_shape(ty, ParameterMapping::Lift(0))
+}
+
+/// Walk the prospective result before cloning. A replacement is simultaneous:
+/// its free parameters are lifted, never substituted again.
 fn validate_mapped_shape<'a>(
     ty: &'a TypeRef,
     mapping: ParameterMapping<'a>,

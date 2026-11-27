@@ -89,6 +89,9 @@ impl std::fmt::Display for MonoPhaseError {
             MonoPhaseError::FunctionNotFound(id) => write!(f, "Function not found: {:?}", id),
             MonoPhaseError::Io(e) => write!(f, "IO error: {}", e),
             MonoPhaseError::ParallelExecution(e) => write!(f, "Parallel execution error: {}", e),
+            MonoPhaseError::ResourceLimit { resource: resource @ ("type depth" | "type nodes"), limit } => write!(
+                f, "VBC {resource} exceeds the structural limit of {limit} during monomorphization"
+            ),
             MonoPhaseError::ResourceLimit { resource, limit } => write!(
                 f,
                 "Monomorphization {resource} limit ({limit}) exceeded; simplify recursive generic instantiations or increase the explicit mono budget"
@@ -107,7 +110,14 @@ impl From<super::resolver::ResolverError> for MonoPhaseError {
 
 impl From<SpecializationError> for MonoPhaseError {
     fn from(e: SpecializationError) -> Self {
-        MonoPhaseError::Specialization(e)
+        use super::SubstitutionError;
+        match e {
+            SpecializationError::TypeSubstitution(SubstitutionError::TypeDepthLimit) =>
+                Self::ResourceLimit { resource: "type depth", limit: crate::types::MAX_TYPE_REF_DEPTH },
+            SpecializationError::TypeSubstitution(SubstitutionError::TypeNodeLimit) =>
+                Self::ResourceLimit { resource: "type nodes", limit: crate::types::MAX_TYPE_REF_NODES },
+            other => Self::Specialization(other),
+        }
     }
 }
 
@@ -322,25 +332,8 @@ impl MonomorphizationPhase {
                             message: format!("specialized body decode failed: {error:?}"),
                         }
                     })?;
-                for (index, instruction) in instructions.iter().enumerate() {
-                    for (callee, args) in
-                        super::discovery::concrete_call(&user_module, instruction, 0)
-                            .into_iter()
-                            .chain(super::discovery::concrete_drop_calls(
-                                &user_module,
-                                instruction,
-                            ))
-                            .chain(super::discovery::bound_method_call(
-                                &user_module, instruction, instructions.get(index + 1)))
-                    {
-                        super::discovery::record_concrete_instantiation(
-                            &mut graph,
-                            callee,
-                            args,
-                            self.config.max_instantiations,
-                        )?;
-                    }
-                }
+                super::discovery::discover_with_limit(&user_module, &instructions, 0, &mut graph,
+                    self.config.max_instantiations)?;
             }
             specialized.extend(batch);
             if graph.len() == previous_count {

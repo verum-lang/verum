@@ -127,7 +127,29 @@ pub fn discover_call_instantiations(
     function_base: u32,
     graph: &mut InstantiationGraph,
 ) -> Result<(), MonoPhaseError> {
+    discover_with_limit(module, instructions, function_base, graph, MonoPhaseConfig::default().max_instantiations)
+}
+
+pub(super) fn discover_with_limit(
+    module: &VbcModule,
+    instructions: &[Instruction],
+    function_base: u32,
+    graph: &mut InstantiationGraph,
+    limit: usize,
+) -> Result<(), MonoPhaseError> {
     for (index, instr) in instructions.iter().enumerate() {
+        // Oversized evidence is an error even if its last leaf would make
+        // the call generic. Check before canonicalization can defer the edge.
+        let operands = match instr {
+            Instruction::CallG { type_args, .. } => type_args.as_slice(),
+            Instruction::NewClosure { lexical_types, .. } => lexical_types.as_slice(),
+            Instruction::BindMethodReceiver { type_ref } | Instruction::DropTyped { type_ref, .. } =>
+                std::slice::from_ref(type_ref),
+            _ => continue,
+        };
+        for ty in operands {
+            super::substitution::validate_witness_shape(ty).map_err(super::SpecializationError::from)?;
+        }
         for (callee, args) in concrete_call(module, instr, function_base)
             .into_iter()
             .chain(concrete_drop_calls(module, instr))
@@ -137,7 +159,7 @@ pub fn discover_call_instantiations(
                 graph,
                 callee,
                 args,
-                MonoPhaseConfig::default().max_instantiations,
+                limit,
             )?;
         }
     }
@@ -195,22 +217,15 @@ pub fn record_concrete_instantiation(
     args: Vec<TypeRef>,
     limit: usize,
 ) -> Result<(), MonoPhaseError> {
-    if args
-        .iter()
-        .any(|ty| super::graph::type_ref_depth(ty) > super::graph::MAX_TYPE_REF_DEPTH)
-    {
-        return Err(MonoPhaseError::ResourceLimit {
-            resource: "type depth",
-            limit: super::graph::MAX_TYPE_REF_DEPTH,
-        });
-    }
+    args.iter().try_for_each(super::substitution::validate_witness_shape)
+        .map_err(super::SpecializationError::from)?;
     if !graph.contains(callee, &args) && graph.len() >= limit {
         return Err(MonoPhaseError::ResourceLimit {
             resource: "instantiation count",
             limit,
         });
     }
-    graph.record_instantiation(callee, args, SourceLocation::default());
+    graph.record(super::InstantiationRequest::new(callee, args, SourceLocation::default()));
     Ok(())
 }
 

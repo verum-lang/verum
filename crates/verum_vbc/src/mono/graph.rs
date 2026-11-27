@@ -126,48 +126,17 @@ impl InstantiationKey {
 // Type Reference Hashing
 // ============================================================================
 
-/// Recursively hashes a TypeRef for stable cache keys.
-/// Maximum allowed nesting depth for type arguments in a single
-/// instantiation. Prevents resource exhaustion from pathological
-/// generic instantiations like `Vec<Vec<Vec<...<T>...>>>`.
-///
-/// 64 levels comfortably accommodates any realistic hand-written code
-/// while aborting runaway macro/generated code before it consumes
-/// gigabytes of compiler memory.
 pub use crate::types::MAX_TYPE_REF_DEPTH;
 
-/// Computes the maximum nesting depth of a TypeRef tree.
+/// Computes the maximum nesting depth using the same child relation as substitution.
 pub fn type_ref_depth(type_ref: &TypeRef) -> usize {
-    match type_ref {
-        TypeRef::Concrete(_) | TypeRef::Generic(_) => 1,
-        TypeRef::Instantiated { args, .. } | TypeRef::Tuple(args) => {
-            1 + args.iter().map(type_ref_depth).max().unwrap_or(0)
-        }
-        TypeRef::Dynamic(object) => 1 + object.types().map(type_ref_depth).max().unwrap_or(0),
-        TypeRef::Function {
-            params,
-            return_type,
-            ..
-        }
-        | TypeRef::Rank2Function {
-            params,
-            return_type,
-            ..
-        } => {
-            let p = params.iter().map(type_ref_depth).max().unwrap_or(0);
-            let r = type_ref_depth(return_type);
-            1 + p.max(r)
-        }
-        TypeRef::Reference { inner, .. } | TypeRef::Slice(inner) => 1 + type_ref_depth(inner),
-        TypeRef::Array { element, .. } => 1 + type_ref_depth(element),
-        TypeRef::AssociatedProjection { base, qualifier, args, .. } => {
-            1 + std::iter::once(base.as_ref())
-                .chain(args.iter())
-                .chain(qualifier.iter().flat_map(|application| &application.args))
-                .map(type_ref_depth).max().unwrap_or(0)
-        }
-        _ => 1,
+    let mut pending = verum_common::List::from_iter([(type_ref, 1usize)]);
+    let mut maximum = 0;
+    while let Some((ty, depth)) = pending.pop() {
+        maximum = maximum.max(depth);
+        ty.for_each_child(|child| pending.push((child, depth + 1)));
     }
+    maximum
 }
 
 fn hash_type_ref<H: Hasher>(type_ref: &TypeRef, hasher: &mut H) {
@@ -386,19 +355,8 @@ impl InstantiationGraph {
         type_args: Vec<TypeRef>,
         source: SourceLocation,
     ) -> usize {
-        // Abort on runaway type nesting to prevent resource exhaustion.
-        // Any single type argument deeper than MAX_TYPE_REF_DEPTH is almost
-        // certainly a compiler bug or macro-generated infinite expansion.
-        let max_depth = type_args.iter().map(type_ref_depth).max().unwrap_or(0);
-        if max_depth > MAX_TYPE_REF_DEPTH {
-            tracing::warn!(
-                target: "vbc_mono",
-                "instantiation depth {} exceeds limit {} for function_id={:?}; request dropped",
-                max_depth, MAX_TYPE_REF_DEPTH, function_id
-            );
-            // Return a sentinel index that won't match any real instantiation.
-            // Callers using the return value for dependency tracking will get
-            // a no-op, and no specialization is emitted for the deep type.
+        if let Err(error) = type_args.iter().try_for_each(super::substitution::validate_witness_shape) {
+            tracing::warn!(target: "vbc_mono", ?function_id, %error, "invalid instantiation shape");
             return usize::MAX;
         }
         let request = InstantiationRequest::new(function_id, type_args, source);
