@@ -41,6 +41,7 @@
 
 mod cache;
 mod discovery;
+mod resource_branches;
 mod graph;
 mod merger;
 mod method_calls;

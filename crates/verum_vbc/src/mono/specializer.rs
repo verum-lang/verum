@@ -424,10 +424,13 @@ impl<'a> BytecodeSpecializer<'a> {
             self.stats.total_instructions += 1;
             self.specialize_instr_value(instr)?;
         }
+        let entries = super::resource_branches::entry_points(&mut instrs);
+        super::resource_branches::fold(self.module, &entries, &mut instrs);
         super::method_calls::resolve_type_methods(
             self.module,
             func,
             self.substitution,
+            &entries,
             &mut instrs,
         )?;
         // **L2 (task #44): ToString → Display expansion.**  With T
@@ -773,11 +776,7 @@ impl<'a> BytecodeSpecializer<'a> {
             return Ok(0);
         };
 
-        // ---- jump bookkeeping: absolute targets before insertion ----
-        let mut abs_targets: Vec<Option<i64>> = Vec::with_capacity(instrs.len());
-        for (idx, instr) in instrs.iter().enumerate() {
-            abs_targets.push(Self::jump_offset_of(instr).map(|o| idx as i64 + o as i64));
-        }
+        let old_count = instrs.len();
 
         // ---- expand, back to front (indices stay valid) ----
         let base = func.register_count;
@@ -842,25 +841,21 @@ impl<'a> BytecodeSpecializer<'a> {
         }
 
         // ---- remap jump index offsets across insertions ----
-        let shift_for = |old_idx: usize| -> i64 {
-            inserted_at
-                .iter()
-                .map(|&(at, n)| if old_idx > at { n as i64 } else { 0 })
-                .sum()
-        };
-        for (old_idx, tgt) in abs_targets.iter().enumerate() {
-            let Some(abs) = tgt else { continue };
-            let new_idx = old_idx as i64 + shift_for(old_idx);
-            // Target shifts when it lies strictly beyond an insertion
-            // point; a target AT the site (jump to the expanded
-            // instruction) lands on the expansion's first instruction.
-            let new_abs = *abs + shift_for((*abs).max(0) as usize);
-            let new_off = (new_abs - new_idx) as i32;
-            if let Some(slot) = Self::jump_offset_slot(&mut instrs[new_idx as usize]) {
-                *slot = new_off;
-            }
+        let mut positions = vec![0usize; old_count + 1];
+        for (index, extra) in inserted_at {
+            positions[index + 1] = extra;
         }
-
+        for pc in 1..=old_count {
+            positions[pc] += positions[pc - 1] + 1;
+        }
+        for pc in 0..old_count {
+            let new_pc = positions[pc];
+            crate::bytecode::map_control_offsets(&mut instrs[new_pc], |offset| {
+                pc.checked_add_signed(offset as isize)
+                    .and_then(|target| positions.get(target))
+                    .map_or(offset, |target| (*target as i64 - new_pc as i64) as i32)
+            });
+        }
         Ok(expansions * 6)
     }
 
@@ -887,32 +882,6 @@ impl<'a> BytecodeSpecializer<'a> {
             | I::Concat { dst, .. }
             | I::GetF { dst, .. }
             | I::RefObj { dst, .. } => Some(*dst),
-            _ => None,
-        }
-    }
-
-    fn jump_offset_of(instr: &crate::instruction::Instruction) -> Option<i32> {
-        use crate::instruction::Instruction as I;
-        match instr {
-            I::Jmp { offset }
-            | I::JmpIf { offset, .. }
-            | I::JmpNot { offset, .. }
-            | I::JmpCmp { offset, .. } => Some(*offset),
-            I::CtxProvide { body_offset, .. } => Some(*body_offset),
-            I::TryBegin { handler_offset } => Some(*handler_offset),
-            _ => None,
-        }
-    }
-
-    fn jump_offset_slot(instr: &mut crate::instruction::Instruction) -> Option<&mut i32> {
-        use crate::instruction::Instruction as I;
-        match instr {
-            I::Jmp { offset }
-            | I::JmpIf { offset, .. }
-            | I::JmpNot { offset, .. }
-            | I::JmpCmp { offset, .. } => Some(offset),
-            I::CtxProvide { body_offset, .. } => Some(body_offset),
-            I::TryBegin { handler_offset } => Some(handler_offset),
             _ => None,
         }
     }

@@ -180,28 +180,9 @@ pub(super) fn resolve_type_methods(
     module: &VbcModule,
     function: &FunctionDescriptor,
     substitution: &TypeSubstitution,
+    entries: &[bool],
     instructions: &mut [I],
 ) -> Result<(), super::SubstitutionError> {
-    // Each branch target starts a fresh straight-line proof. In particular,
-    // facts from the physically preceding arm are not facts at a CFG join.
-    let mut leaders = std::collections::HashSet::new();
-    for (index, instruction) in instructions.iter().enumerate() {
-        let offset = match instruction {
-            I::Jmp { offset }
-            | I::JmpIf { offset, .. }
-            | I::JmpNot { offset, .. }
-            | I::JmpCmp { offset, .. } => Some(*offset),
-            I::CtxProvide { body_offset, .. } => Some(*body_offset),
-            I::TryBegin { handler_offset } => Some(*handler_offset),
-            // Switch tables are not currently relocated by the canonical
-            // fixup API. Do not introduce width-changing rewrites here.
-            I::Switch { .. } => return Ok(()),
-            _ => None,
-        };
-        if let Some(offset) = offset {
-            leaders.insert(index as i64 + offset as i64);
-        }
-    }
     let mut values: HashMap<u16, TypeRef> = function
         .params
         .iter()
@@ -214,7 +195,7 @@ pub(super) fn resolve_type_methods(
     let mut pending_index = None;
     let mut consumed_sidecars = Vec::new();
     for (index, instruction) in instructions.iter_mut().enumerate() {
-        if leaders.contains(&(index as i64)) {
+        if entries[index] {
             values.clear();
             tokens.clear();
             pending = None;
