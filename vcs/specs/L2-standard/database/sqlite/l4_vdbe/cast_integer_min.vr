@@ -1,0 +1,76 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L2
+// @tags: sqlite, vdbe, cast, integers
+// @expected-exit: 0
+
+mount core.database.sqlite.native.l4_vdbe.interpreter.{step, vdbe_state_new};
+mount core.database.sqlite.native.l4_vdbe.opcode.Opcode;
+mount core.database.sqlite.native.l4_vdbe.program.program_new;
+mount core.database.sqlite.native.l4_vdbe.register.{Register, register_file_new};
+
+mount core.database.sqlite.native.l6_session.sql_value.{register_from_sql_value, sql_value_from_register};
+
+fn cast_text(value: Register) -> Register {
+    let mut program = program_new("SELECT CAST(? AS TEXT)".clone(), 3);
+    let _ = program.emit(Opcode.CastVal(1, 2, 2));
+    let mut state = vdbe_state_new(&program);
+    state.set_reg(1, value);
+    let _ = step(&mut state, &program);
+    state.reg(2)
+}
+
+fn check_register_snapshots() {
+    let mut regs = register_file_new(3);
+    regs.set(0, Register.RReal(-12.25));
+    match regs.get(0) {
+        Register.RReal(x) => assert(x + 0.25 == -12.0),
+        _ => panic("expected an owned real"),
+    }
+    let mut original: List<Byte> = List.new();
+    original.push(65 as Byte);
+    regs.set(1, Register.RBlob(original));
+    regs.copy_range(1, 2, 1);
+    match regs.get(2) {
+        Register.RBlob(mut bytes) => {
+            bytes[0] = 66 as Byte;
+            assert_eq(bytes[0], 66 as Byte);
+        }
+        _ => panic("expected a copied blob"),
+    }
+    match regs.get(1) {
+        Register.RBlob(bytes) => assert_eq(bytes[0], 65 as Byte),
+        _ => panic("copy must preserve its source"),
+    }
+    match regs.get(2) {
+        Register.RBlob(bytes) => assert_eq(bytes[0], 65 as Byte),
+        _ => panic("a returned blob must own its snapshot"),
+    }
+}
+
+fn check_row_boundary() {
+    let box_int = sql_value_from_register(&Register.RRowId(Int.MIN as Int64));
+    match register_from_sql_value(&box_int) {
+        Register.RInt(value) => assert_eq(Text.from_int(value as Int), "-9223372036854775808"),
+        _ => panic("rowid must become an owned SQL integer"),
+    }
+    let box_real = sql_value_from_register(&Register.RReal(-12.25));
+    match register_from_sql_value(&box_real) {
+        Register.RReal(value) => assert(value + 0.25 == -12.0),
+        _ => panic("real must remain numeric"),
+    }
+}
+
+fn main() {
+    check_row_boundary();
+    check_register_snapshots();
+    match cast_text(Register.RInt(Int.MIN as Int64)) {
+        Register.RText(s) => assert_eq(s, "-9223372036854775808"),
+        _ => panic("CAST to TEXT must return a text register"),
+    }
+    match cast_text(Register.RRowId(-12_i64)) {
+        Register.RText(s) => assert_eq(s, "-12"),
+        _ => panic("rowids have INTEGER storage class"),
+    }
+    assert(cast_text(Register.RNull) is Register.RNull);
+}

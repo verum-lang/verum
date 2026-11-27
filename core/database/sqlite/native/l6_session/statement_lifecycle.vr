@@ -34,7 +34,7 @@ mount core.database.sqlite.native.l4_vdbe.{
     VdbeProgram, ResultColumn,
     Register, RNull,
     RegisterKind,
-    register_kind, register_clone,
+    register_kind,
     StepResult, VdbeState, vdbe_state_new, step,
     ParamBindings, param_bindings_new,
 };
@@ -247,11 +247,7 @@ public fn column_declared_type(stmt: &PreparedStatement, i: Int) -> Text {
 /// register file.  `step_one` populates `last_row_start` /
 /// `last_row_cols` when it observes a `Row(start, n)` step result.
 public fn column_value(stmt: &PreparedStatement, i: Int) -> Register {
-    if i < 0 || i >= stmt.last_row_cols {
-        return RNull;
-    }
-    let reg_idx = stmt.last_row_start + i;
-    register_clone(&stmt.state.regs.get(reg_idx))
+    stmt.column(i)
 }
 
 /// Runtime kind of the column value (NULL / INTEGER / REAL / TEXT
@@ -270,9 +266,7 @@ public fn column_kind(stmt: &PreparedStatement, i: Int) -> RegisterKind {
 /// defensive default.  `RRowId` from the L4 register folds into
 /// `VInt` (the rowid distinction is invisible at the API surface).
 public fn column_sql_value(stmt: &PreparedStatement, i: Int) -> SqlValue {
-    if i < 0 || i >= stmt.last_row_cols { return VNull; }
-    let reg_idx = stmt.last_row_start + i;
-    let r = stmt.state.regs.get(reg_idx);
+    let r = stmt.column(i);
     sql_value_from_register(&r)
 }
 

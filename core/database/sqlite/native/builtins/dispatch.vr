@@ -50,7 +50,6 @@ mount collections.List;
 // per-kind implementations live in the sibling modules, mounted below as
 // qualifiers so their (colliding) bare names never enter scope.
 mount core.database.sqlite.native.l4_vdbe.register.{Register, RNull, RInt};
-mount core.database.sqlite.native.l4_vdbe.register;
 
 // ScalarKind + every variant, for the dispatch match.
 mount core.database.sqlite.native.builtins.registry.{
@@ -91,7 +90,7 @@ const DEFAULT_RNG_SEED: Int64 = 0x2545F4914F6CDD1D_i64;
 // interprets as "argument omitted".
 fn arg(args: &List<Register>, i: Int) -> Register {
     if i >= 0 && i < args.len() {
-        register.register_clone(&args[i])
+        args[i].clone()
     } else {
         RNull
     }
@@ -103,7 +102,7 @@ fn rest_from(args: &List<Register>, start: Int) -> List<Register> {
     let mut out: List<Register> = List.new();
     let mut i: Int = start;
     while i < args.len() {
-        out.push(register.register_clone(&args[i]));
+        out.push(args[i].clone());
         i = i + 1;
     }
     out

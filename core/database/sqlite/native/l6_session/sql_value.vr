@@ -113,9 +113,9 @@ public fn column_type_code(t: &ColumnType) -> Int {
 public fn sql_value_from_register(r: &Register) -> SqlValue {
     match r {
         RNull        => VNull,
-        RInt(i)      => VInt(i),
-        RRowId(i)    => VInt(i),
-        RReal(x)     => VReal(x),
+        RInt(i)      => VInt(*i),
+        RRowId(i)    => VInt(*i),
+        RReal(x)     => VReal(*x),
         RText(ref t) => VText(t.clone()),
         RBlob(ref b) => VBlob(b.clone()),
     }
@@ -126,8 +126,8 @@ public fn sql_value_from_register(r: &Register) -> SqlValue {
 public fn register_from_sql_value(v: &SqlValue) -> Register {
     match v {
         VNull        => RNull,
-        VInt(i)      => RInt(i),
-        VReal(x)     => RReal(x),
+        VInt(i)      => RInt(*i),
+        VReal(x)     => RReal(*x),
         VText(ref t) => RText(t.clone()),
         VBlob(ref b) => RBlob(b.clone()),
     }

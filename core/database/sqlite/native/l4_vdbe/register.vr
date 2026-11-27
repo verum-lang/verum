@@ -88,26 +88,6 @@ public fn register_is_truthy(r: &Register) -> Bool {
     }
 }
 
-/// Clone a register by deep-copy on the text/blob branches.
-public fn register_clone(r: &Register) -> Register {
-    match r {
-        RNull    => RNull,
-        RInt(i)  => RInt(i),
-        RReal(x) => RReal(x),
-        RText(s) => RText(s.clone()),
-        RBlob(b) => {
-            let mut out: List<Byte> = List.new();
-            let mut i: Int = 0;
-            while i < b.len() {
-                out.push(b[i]);
-                i = i + 1;
-            }
-            RBlob(out)
-        }
-        RRowId(i) => RRowId(i),
-    }
-}
-
 // -----------------------------------------------------------------------------
 // Register file
 // -----------------------------------------------------------------------------
@@ -140,7 +120,7 @@ implement RegisterFile {
         if idx < 0 || idx >= self.cells.len() {
             return RNull;
         }
-        register_clone(&self.cells[idx])
+        self.cells[idx].clone()
     }
 
     /// Write register `idx`. Silently drops on out-of-bounds.
@@ -160,7 +140,7 @@ implement RegisterFile {
         if dst < src {
             let mut i: Int = 0;
             while i < count {
-                let v = register_clone(&self.cells[src + i]);
+                let v = self.cells[src + i].clone();
                 self.cells[dst + i] = v;
                 self.cells[src + i] = RNull;
                 i = i + 1;
@@ -168,7 +148,7 @@ implement RegisterFile {
         } else if dst > src {
             let mut i: Int = count - 1;
             while i >= 0 {
-                let v = register_clone(&self.cells[src + i]);
+                let v = self.cells[src + i].clone();
                 self.cells[dst + i] = v;
                 self.cells[src + i] = RNull;
                 i = i - 1;
@@ -183,7 +163,7 @@ implement RegisterFile {
         if dst == src { return; }
         let mut i: Int = 0;
         while i < count {
-            let v = register_clone(&self.cells[src + i]);
+            let v = self.cells[src + i].clone();
             self.cells[dst + i] = v;
             i = i + 1;
         }

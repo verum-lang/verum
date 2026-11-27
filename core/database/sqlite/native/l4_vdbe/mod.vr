@@ -53,7 +53,7 @@ public mount .opcode.{
 
 public mount .register.{
     Register, RegisterKind, RegisterFile,
-    register_file_new, register_kind, register_is_truthy, register_clone,
+    register_file_new, register_kind, register_is_truthy,
 };
 
 public mount .bindings.{
