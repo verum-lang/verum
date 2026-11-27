@@ -11963,17 +11963,10 @@ with .to_float() or .to_int() (at {:?})",
                 })?;
                 // Loan retention follows the checked destination value. Copying
                 // a scalar through a reference stores no reference to its input.
-                let mut origins = self.aggregate_origins(right, &stored_type);
-                let mut whole_binding = left;
-                while let ExprKind::Paren(inner) = &whole_binding.kind { whole_binding = inner; }
-                if !matches!(whole_binding.kind, ExprKind::Path(_))
-                    && !origins.is_empty() && let Some((holder, _)) = self.borrow_place(left) {
-                    for source in self.ctx.env.reference_candidates(&holder) {
-                        if !origins.contains(&source) { origins.push(source); }
-                    }
-                }
-                let complete = self.carries_stored_loan(&stored_type) && self.complete_slot_value_origins(right);
-                self.retain_assignment_origins(left, &origins, complete)?;
+                let origins = self.aggregate_origins(right, &stored_type);
+                let carries = self.carries_stored_loan(&stored_type);
+                let complete = carries && self.complete_slot_value_origins(right);
+                self.retain_assignment_origins(left, &origins, carries, complete)?;
                 if let Some(name) = destination {
                     self.affine_tracker.reinitialize_value(&name, initialized, _span)?;
                 }

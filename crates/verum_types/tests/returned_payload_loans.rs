@@ -106,6 +106,80 @@ fn exchanging_with_a_type_supplied_default_preserves_an_owned_payload() {
 }
 
 #[test]
+fn exchanging_one_field_keeps_its_previous_borrow_separate_from_its_sibling() {
+    let source = r#"type Pair is { public left:&Int, public right:&Int };
+        fn exchange<T>(slot:&mut T, value:T)->T { @intrinsic("replace",slot,value) }"#;
+    let good = diagnostics(source, "fn chosen(from:&Int, incoming:&Int)->&Int {
+        let short=9; let mut pair=Pair{left:from,right:&short}; exchange(&mut pair.left,incoming)
+    }");
+    assert!(good.is_empty(), "{good:?}");
+    for write in ["pair.right=&short;", "{ let alias=&mut pair; alias.right=&short; }"] {
+        let good = diagnostics(source, &format!("fn chosen(from:&Int, incoming:&Int)->&Int {{
+            let short=9; let mut pair=Pair{{left:from,right:from}}; {write}
+            exchange(&mut pair.left,incoming)
+        }}"));
+        assert!(good.is_empty(), "{write}: {good:?}");
+    }
+    let bad = diagnostics(source, "fn chosen(from:&Int, incoming:&Int)->&Int {
+        let short=9; let mut pair=Pair{left:&short,right:from}; exchange(&mut pair.left,incoming)
+    }");
+    assert!(bad.iter().any(|error| error.contains("short") && error.contains("does not live long enough")), "{bad:?}");
+}
+
+#[test]
+fn writing_a_short_loan_through_an_alias_discards_old_field_provenance() {
+    let declarations = r#"type Pair is { public left:&Int, public right:&Int };
+        fn exchange<T>(slot:&mut T, value:T)->T { @intrinsic("replace",slot,value) }"#;
+    for caller in [
+        "fn chosen(from:&Int,incoming:&Int)->&Int {
+            let short=5; let mut pair=Pair{left:from,right:from};
+            { let alias=&mut pair; alias.left=&short; }
+            exchange(&mut pair.left,incoming)
+        }",
+        "fn chosen(from:&Int,incoming:&Int)->&Int {
+            let mut pair=Pair{left:from,right:from};
+            { let short=5; let alias=&mut pair; alias.left=&short; }
+            exchange(&mut pair.left,incoming)
+        }",
+        "fn chosen(from:&Int,incoming:&Int)->&Int {
+            let short=5; let mut pair=Pair{left:from,right:from};
+            { let alias=&mut pair; let inner=&mut *alias; inner.left=&short; }
+            exchange(&mut pair.left,incoming)
+        }",
+        "fn chosen(from:&Int,incoming:&Int)->&Int {
+            let short=5; let mut pair=Pair{left:from,right:from};
+            { let alias=&mut pair; { let pair=Pair{left:from,right:from}; alias.left=&short; } }
+            exchange(&mut pair.left,incoming)
+        }",
+    ] {
+        let errors = diagnostics(declarations, caller);
+        assert!(errors.iter().any(|error| error.contains("short") && error.contains("does not live long enough")), "{caller}: {errors:?}");
+    }
+    let errors = diagnostics(declarations, "type Through is {public target:&mut Pair};
+        implement Through { fn store(&mut self) { let short=5; self.target.left=&short; } }");
+    assert!(errors.iter().any(|error| error.contains("short") && error.contains("does not live long enough")), "{errors:?}");
+}
+
+#[test]
+fn writing_a_managed_loan_through_a_raw_pointer_cannot_reuse_old_field_provenance() {
+    let scalar = diagnostics("", "fn write(raw:*mut Int, value:Int) {
+        unsafe { *raw=value; };
+    }");
+    assert!(scalar.is_empty(), "{scalar:?}");
+    let errors = diagnostics(
+        r#"type Pair is { public left:&Int, public right:&Int };
+        fn exchange<T>(slot:&mut T, value:T)->T { @intrinsic("replace",slot,value) }"#,
+        "fn chosen(from:&Int,incoming:&Int)->&Int {
+            let short=5; let mut pair=Pair{left:from,right:from};
+            unsafe { let raw=(&mut pair) as *mut Pair; (*raw).left=&short; }
+            exchange(&mut pair.left,incoming)
+        }",
+    );
+    assert!(errors.iter().any(|error| error.contains("does not live long enough")
+        || error.contains("cannot establish the original carrier")), "{errors:?}");
+}
+
+#[test]
 fn a_borrowed_receiver_can_return_its_own_type_with_different_provenance() {
     let declaration = "type Duplicate is protocol {fn duplicate(&self)->Self;};";
     let caller = "fn receive(input:&Int)->Payload {

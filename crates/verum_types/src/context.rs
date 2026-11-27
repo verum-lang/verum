@@ -1296,7 +1296,14 @@ pub(crate) enum ReferenceOrigin {
     Candidates(Box<[crate::ty::RecordReceiver]>),
     /// All activation-local loans held by an owned value are accounted for.
     OwnedPayload(Box<[crate::ty::RecordReceiver]>),
+    /// A record literal supplied an exhaustive observation for every field.
+    OwnedRecord {
+        origins: List<crate::ty::RecordReceiver>,
+        fields: RecordFieldOrigins,
+    },
 }
+
+pub(crate) type RecordFieldOrigins = Map<Text, List<crate::ty::RecordReceiver>>;
 
 /// Identity changes on a write. An old alias can never attach its evidence
 /// to a subsequently installed value, even when the binding name is reused.
@@ -1804,7 +1811,8 @@ impl TypeEnv {
         if reference {
             match place.reference.as_ref()? {
                 ReferenceOrigin::Exact(source) => return Some(source.clone()),
-                ReferenceOrigin::Candidates(_) | ReferenceOrigin::OwnedPayload(_) => return None,
+                ReferenceOrigin::Candidates(_) | ReferenceOrigin::OwnedPayload(_)
+                | ReferenceOrigin::OwnedRecord { .. } => return None,
                 ReferenceOrigin::Parameter => {}
             }
         }
@@ -1826,6 +1834,7 @@ impl TypeEnv {
                 Some(
                     ReferenceOrigin::Candidates(inputs) | ReferenceOrigin::OwnedPayload(inputs),
                 ) => List::from(inputs.as_ref()),
+                Some(ReferenceOrigin::OwnedRecord { origins, .. }) => origins.clone(),
                 _ => List::new(),
             };
             for origin in &place.inserted_origins {
@@ -1864,7 +1873,7 @@ impl TypeEnv {
 
     pub(crate) fn insert_owned_slot_origins(
         &mut self,
-        binding: u64,
+        destination: &crate::ty::RecordReceiver,
         incoming: &[crate::ty::RecordReceiver],
     ) -> bool {
         let mut scope = self;
@@ -1872,8 +1881,17 @@ impl TypeEnv {
             if let Some(place) = scope
                 .record_places
                 .values_mut()
-                .find(|place| place.id == Some(binding))
+                .find(|place| place.id == Some(destination.binding))
             {
+                if let Some(ReferenceOrigin::OwnedRecord { origins, fields }) = &mut place.reference
+                    && let Some(field) = destination.fields.first().and_then(|field| fields.get_mut(field))
+                {
+                    for origin in incoming {
+                        if !field.contains(origin) { field.push(origin.clone()); }
+                        if !origins.contains(origin) { origins.push(origin.clone()); }
+                    }
+                    return true;
+                }
                 for origin in incoming {
                     if !place.inserted_origins.contains(origin) {
                         place.inserted_origins.push(origin.clone());
@@ -1891,7 +1909,7 @@ impl TypeEnv {
     pub(crate) fn binding_has_payload_origins(&mut self, name: &str) -> bool {
         self.local_record_place(name).is_some_and(|place| {
             place.unverified_write.is_none()
-                && matches!(place.reference, Some(ReferenceOrigin::OwnedPayload(_)))
+                && matches!(place.reference, Some(ReferenceOrigin::OwnedPayload(_) | ReferenceOrigin::OwnedRecord { .. }))
         })
     }
 
@@ -1907,6 +1925,7 @@ impl TypeEnv {
                     place.reference,
                     Some(
                         ReferenceOrigin::OwnedPayload(_)
+                            | ReferenceOrigin::OwnedRecord { .. }
                             | ReferenceOrigin::Parameter
                             | ReferenceOrigin::Exact(_)
                     )
@@ -1994,6 +2013,9 @@ impl TypeEnv {
                 let mut origins = match &place.reference {
                     Some(ReferenceOrigin::Exact(origin)) => List::from_iter([origin.clone()]),
                     Some(ReferenceOrigin::Candidates(origins) | ReferenceOrigin::OwnedPayload(origins)) => List::from(origins.as_ref()),
+                    Some(ReferenceOrigin::OwnedRecord { origins, fields }) => source.fields.first()
+                        .and_then(|field| fields.get(field)).cloned()
+                        .unwrap_or_else(|| origins.clone()),
                     Some(ReferenceOrigin::Parameter) if collection_element => List::new(),
                     Some(ReferenceOrigin::Parameter) => List::from_iter([source.clone()]),
                     None => List::new(),

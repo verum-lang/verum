@@ -1,7 +1,7 @@
 //! A reference result can identify a carrier only with a derivation for its
 //! referent. Returning the same reference type does not prove pointer identity.
 use super::TypeChecker;
-use crate::context::ReferenceOrigin;
+use crate::context::{RecordFieldOrigins, ReferenceOrigin};
 use crate::ty::{RecordReceiver, Type};
 use verum_common::List;
 use verum_ast::{
@@ -36,6 +36,7 @@ enum AutoBorrowRoot {
 pub(super) struct EvaluatedValueOrigins {
     origins: Option<List<RecordReceiver>>,
     complete: bool,
+    fields: Option<RecordFieldOrigins>,
 }
 
 pub(super) struct CopiedCapture {
@@ -55,6 +56,73 @@ fn reference_mutability(ty: &Type) -> Option<bool> {
 
 
 impl TypeChecker {
+    /// A projection through a reference writes the referent's storage. The
+    /// lexical binding holding the reference can leave scope before that value.
+    fn projected_store_destinations(&mut self, destination: &Expr) -> Option<List<RecordReceiver>> {
+        let (owner, field) = match &unparen(destination).kind {
+            ExprKind::Field { expr, field } => (Some(expr.as_ref()), Some(&field.name)),
+            ExprKind::Unary { op: UnOp::Deref, expr } => (Some(expr.as_ref()), None),
+            _ => (None, None),
+        };
+        if let Some(owner) = owner {
+            if let Some(field) = field
+                && let Some((mut place, ty)) = self.call_input_place(owner)
+                && self.lookup_field_type(&self.record_conversion_head(&ty), field).is_some()
+            {
+                place.fields.push(field.clone());
+                return Some(List::from_iter([place]));
+            }
+            let ty = self.observed_operand_type(owner)
+                .or_else(|| self.type_registry.lookup_expr(owner.span).cloned());
+            if let Some(ty) = ty && self.reference_mode(&ty, owner.span).ok()?.is_some() {
+                let mut targets = List::new();
+                self.collect_reference_candidates(owner, &mut targets);
+                if let Some(field) = field {
+                    for target in &mut targets { target.fields.push(field.clone()); }
+                }
+                if !targets.is_empty() { return Some(targets); }
+                // A reference field of an incoming referent may point to
+                // separate caller storage. Keep its external lifetime bound.
+                let (holder, _) = self.borrow_place(owner)?;
+                let incoming = self.ctx.env.reference_candidates(&holder);
+                return (!incoming.is_empty() && incoming.iter()
+                    .all(|target| self.ctx.env.is_incoming_referent(target.binding)))
+                    .then_some(incoming);
+            }
+        }
+        let (holder, _) = self.borrow_place(destination)?;
+        let ty = self.place_reference_head(&self.ctx.env.lookup(&holder)?.ty, destination.span).ok()?;
+        if matches!(ty, Type::Pointer { .. } | Type::VolatilePointer { .. }) { return None; }
+        if self.reference_mode(&ty, destination.span).ok()?.is_some() {
+            let targets = self.ctx.env.reference_candidates(&holder);
+            return (!targets.is_empty()).then_some(targets);
+        }
+        Some(List::from_iter([self.ctx.env.record_source(&holder, false)?]))
+    }
+
+    fn retain_projected_store(
+        &mut self,
+        destination: &Expr,
+        incoming: &[RecordReceiver],
+        complete: bool,
+    ) -> crate::Result<()> {
+        let Some(targets) = self.projected_store_destinations(destination) else {
+            if complete && incoming.is_empty() { return Ok(()); }
+            return Err(crate::TypeError::UnknownRecordOrigin { span: destination.span });
+        };
+        for target in targets {
+            self.check_input_storage_retention(incoming, &target, destination.span)?;
+            let region = self.ctx.env.storage_loan_region(target.binding)
+                .ok_or(crate::TypeError::UnknownRecordOrigin { span: destination.span })?;
+            self.retain_origins_in_region(incoming, region, destination.span)?;
+            self.ctx.env.insert_owned_slot_origins(&target, incoming);
+            if !complete {
+                self.ctx.env.invalidate_payload_origins(&target, destination.span);
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn retain_iteration_origin(&mut self, origin: &RecordReceiver, span: verum_ast::Span) -> crate::Result<()> {
         let root = self.ctx.env.record_storage_name(origin.binding)
             .ok_or(crate::TypeError::UnknownRecordOrigin { span })?;
@@ -69,31 +137,24 @@ impl TypeChecker {
         &mut self,
         destination: &Expr,
         origins: &[RecordReceiver],
+        carries: bool,
         complete: bool,
     ) -> crate::Result<()> {
-        let direct = match &unparen(destination).kind {
-            ExprKind::Path(path) => path.as_ident().map(|name| name.name.clone()),
-            _ => None,
+        let ExprKind::Path(path) = &unparen(destination).kind else {
+            return if carries { self.retain_projected_store(destination, origins, complete) } else { Ok(()) };
         };
-        if origins.is_empty() {
-            if let Some(name) = direct { self.ctx.env.replace_current_binding_origins(&name, origins, complete); }
-            return Ok(());
+        let Some(holder) = path.as_ident() else {
+            return if origins.is_empty() { Ok(()) } else {
+                Err(crate::TypeError::UnknownRecordOrigin { span: destination.span })
+            };
+        };
+        if !origins.is_empty() {
+            let region = self.ctx.env.binding_loan_region(&holder.name)
+                .ok_or(crate::TypeError::UnknownRecordOrigin { span: destination.span })?;
+            self.retain_origins_in_region(origins, region, destination.span)?;
         }
-        let (holder, _) = self.borrow_place(destination)
-            .ok_or(crate::TypeError::UnknownRecordOrigin { span: destination.span })?;
-        if direct.is_none()
-            && self.ctx.env.lookup(&holder).is_some_and(|scheme|
-                self.reference_mode(&scheme.ty, destination.span).is_ok_and(|mode| mode.is_some()))
-        {
-            for target in self.ctx.env.reference_candidates(&holder) {
-                self.check_input_storage_retention(origins, &target, destination.span)?;
-            }
-        }
-        let region = self.ctx.env.binding_loan_region(&holder)
-            .ok_or(crate::TypeError::UnknownRecordOrigin { span: destination.span })?;
-        self.retain_origins_in_region(origins, region, destination.span)?;
-        if !direct.is_some_and(|name| self.ctx.env.replace_current_binding_origins(&name, origins, complete)) {
-            self.ctx.env.assign_reference_origins(&holder, origins);
+        if !self.ctx.env.replace_current_binding_origins(&holder.name, origins, complete) && !origins.is_empty() {
+            self.ctx.env.assign_reference_origins(&holder.name, origins);
         }
         Ok(())
     }
@@ -271,7 +332,14 @@ impl TypeChecker {
         for source in &sources {
             self.retain_origin(source, None, value.span)?;
         }
-        if self.complete_slot_value_origins(value) {
+        if let Some(fields) = self.evaluated_value_origins.get(&unparen(value).span)
+            .filter(|observed| observed.complete).and_then(|observed| observed.fields.as_ref())
+        {
+            Ok(Some(ReferenceOrigin::OwnedRecord {
+                origins: sources,
+                fields: fields.clone(),
+            }))
+        } else if self.complete_slot_value_origins(value) {
             Ok(Some(ReferenceOrigin::OwnedPayload(sources.into_boxed_slice())))
         } else {
             Ok((!sources.is_empty()).then(|| ReferenceOrigin::Candidates(sources.into_boxed_slice())))
@@ -406,6 +474,16 @@ impl TypeChecker {
         origins: Option<List<RecordReceiver>>,
         complete: bool,
     ) {
+        self.record_payload_fields(span, origins, complete, None);
+    }
+
+    fn record_payload_fields(
+        &mut self,
+        span: verum_ast::Span,
+        origins: Option<List<RecordReceiver>>,
+        complete: bool,
+        fields: Option<RecordFieldOrigins>,
+    ) {
         if span.is_empty() {
             return;
         }
@@ -413,6 +491,18 @@ impl TypeChecker {
             .entry(span)
             .and_modify(|previous| {
                 previous.complete &= complete;
+                match (previous.fields.as_mut(), fields.as_ref()) {
+                    (Some(saved), Some(observed)) if saved.len() == observed.len()
+                        && saved.keys().all(|field| observed.contains_key(field)) =>
+                    {
+                        for (field, retained) in saved {
+                            for origin in &observed[field] {
+                                if !retained.contains(origin) { retained.push(origin.clone()); }
+                            }
+                        }
+                    }
+                    _ => previous.fields = None,
+                }
                 match (previous.origins.as_mut(), origins.as_ref()) {
                     (Some(known), Some(observed)) => {
                         for origin in observed {
@@ -424,7 +514,7 @@ impl TypeChecker {
                     _ => previous.origins = None,
                 }
             })
-            .or_insert(EvaluatedValueOrigins { origins, complete });
+            .or_insert(EvaluatedValueOrigins { origins, complete, fields });
     }
 
     pub(super) fn observe_closure_capture_origins(
@@ -507,6 +597,7 @@ impl TypeChecker {
     pub(super) fn observe_aggregate_result_origins(&mut self, value: &Expr, ty: &Type) {
         let mut origins = List::new();
         let mut complete = false;
+        let mut field_origins = None;
         match &unparen(value).kind {
             ExprKind::Tuple(values) | ExprKind::Array(verum_ast::ArrayExpr::List(values)) => {
                 for value in values { self.collect_evaluated_operand_origins(value, &mut origins); }
@@ -516,21 +607,30 @@ impl TypeChecker {
             }
             ExprKind::Record { fields, base, .. } => {
                 complete = true;
+                if fields.len() > 1 && base.is_none() && self.carries_stored_loan(ty) {
+                    field_origins = Some(RecordFieldOrigins::new());
+                }
                 for field in fields {
-                    if let Some(value) = &field.value {
+                    let retained = if let Some(value) = &field.value {
                         complete &= self.observed_operand_type(value).is_some_and(|ty|
                             !self.carries_stored_loan(&ty) || self.observed_known_owned_payload(value));
-                        self.collect_evaluated_operand_origins(value, &mut origins);
+                        let mut retained = List::new();
+                        self.collect_evaluated_operand_origins(value, &mut retained);
+                        retained
                     } else if let Some(observed) = self.evaluated_value_origins.get(&field.span)
                         && let Some(known) = &observed.origins
                     {
                         complete &= observed.complete;
-                        for origin in known {
-                            if !origins.contains(origin) { origins.push(origin.clone()); }
-                        }
+                        known.clone()
                     } else {
                         self.record_evaluated_origins(value.span, None);
                         return;
+                    };
+                    for origin in &retained {
+                        if !origins.contains(origin) { origins.push(origin.clone()); }
+                    }
+                    if let Some(known) = &mut field_origins {
+                        known.insert(field.name.name.clone(), retained);
                     }
                 }
                 if let Some(base) = base {
@@ -542,7 +642,8 @@ impl TypeChecker {
             _ => return,
         }
         if !self.carries_stored_loan(ty) { origins.clear(); }
-        self.record_owned_value_origins(value.span, Some(origins), complete);
+        let fields = field_origins.filter(|_| complete && !origins.is_empty());
+        self.record_payload_fields(value.span, Some(origins), complete, fields);
     }
 
     /// A call result may carry any evaluated input or callable capture unless
@@ -1652,7 +1753,7 @@ impl TypeChecker {
         Ok(self
             .ctx
             .env
-            .insert_owned_slot_origins(destination.binding, &incoming))
+            .insert_owned_slot_origins(&destination, &incoming))
     }
 
     /// An unknown callee can store an incoming loan in each writable carrier.
