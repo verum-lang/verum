@@ -17,6 +17,7 @@ pub(super) struct PendingValueObligation {
     where_clauses: List<WhereClause>,
     type_equalities: List<TypeEquality>,
     nominal_applications: List<crate::context::NominalApplication>,
+    field_overwrites: List<crate::context::FieldOverwrite>,
     span: Span,
 }
 
@@ -127,7 +128,7 @@ impl TypeChecker {
         self.pending_value_obligations.push(PendingValueObligation {
             inference_variables: List::new(),
             value_parameters: parameters, type_bounds: Map::new(), protocol_bounds: Map::new(),
-            where_clauses: List::new(), type_equalities: List::new(), nominal_applications: List::new(), span,
+            where_clauses: List::new(), type_equalities: List::new(), nominal_applications: List::new(), field_overwrites: List::new(), span,
         });
         Ok(())
     }
@@ -209,6 +210,7 @@ impl TypeChecker {
             || !instance.where_clauses.is_empty()
             || !instance.type_equalities.is_empty()
             || !instance.nominal_applications.is_empty()
+            || !instance.field_overwrites.is_empty()
             || !instance.value_parameters.is_empty()
         {
             if self.value_obligation_scope_depth == 0 {
@@ -231,6 +233,7 @@ impl TypeChecker {
                 where_clauses: instance.where_clauses.clone(),
                 type_equalities: instance.type_equalities.clone(),
                 nominal_applications: instance.nominal_applications.clone(),
+                field_overwrites: instance.field_overwrites.clone(),
                 span,
             });
         }
@@ -288,6 +291,9 @@ impl TypeChecker {
                 self.enforce_call_where_clauses(&obligation.where_clauses, &obligation.protocol_bounds, obligation.span)?;
                 self.enforce_call_type_equalities(&obligation.type_equalities,
                     &obligation.protocol_bounds, &obligation.where_clauses, obligation.span)?;
+                for write in &obligation.field_overwrites {
+                    self.check_instantiated_field_overwrite(write, obligation.span)?;
+                }
                 for application in &obligation.nominal_applications {
                     let arguments: List<_> = application.arguments.iter()
                         .map(|argument| self.unifier.apply(argument)).collect();
@@ -310,7 +316,8 @@ impl TypeChecker {
             .map_err(|message| TypeError::UniverseBinding { message, span })?;
         if !instance.where_clauses.is_empty() || !instance.value_parameters.is_empty()
             || !instance.type_equalities.is_empty()
-            || !instance.nominal_applications.is_empty() {
+            || !instance.nominal_applications.is_empty()
+            || !instance.field_overwrites.is_empty() {
             if self.value_obligation_scope_depth == 0 {
                 return Err(TypeError::UniverseBinding {
                     message: "conditional call requires an inference obligation scope".into(),
@@ -325,6 +332,7 @@ impl TypeChecker {
                 where_clauses: instance.where_clauses.clone(),
                 type_equalities: instance.type_equalities.clone(),
                 nominal_applications: instance.nominal_applications.clone(),
+                field_overwrites: instance.field_overwrites.clone(),
                 span,
             });
         }

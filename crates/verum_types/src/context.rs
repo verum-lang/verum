@@ -179,6 +179,7 @@ pub(crate) struct ReturnedValue {
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct InputFieldWrite {
+    pub place: Span,
     pub input: usize,
     pub fields: List<Text>,
     pub value: usize,
@@ -308,6 +309,15 @@ pub struct TypeScheme {
     pub explicit_method_vars: Option<List<Option<GenericBinder>>>,
 }
 
+/// Replacing this named field retires its previous initialized value. The
+/// owner type carries the declaration's quantified slots through instantiation.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct FieldOverwrite {
+    pub place: Span,
+    pub owner: Type,
+    pub fields: List<Text>,
+}
+
 /// One call's fresh body and obligations. All fields use the same simultaneous
 /// substitution, including level parameters nested in bounds and the receiver.
 #[derive(Clone)]
@@ -324,6 +334,7 @@ pub struct InstantiatedScheme {
     pub where_clauses: List<crate::protocol::WhereClause>,
     pub type_equalities: List<TypeEquality>,
     pub(crate) nominal_applications: List<NominalApplication>,
+    pub(crate) field_overwrites: List<FieldOverwrite>,
     pub impl_self_type: Option<Type>,
     pub explicit_method_vars: Option<List<Option<GenericBinder>>>,
 }
@@ -353,6 +364,53 @@ impl InstantiatedScheme {
 }
 
 impl TypeScheme {
+    /// A selected free function carries its input-field obligations through
+    /// the same scheme as its argument types. A protocol implementation cannot
+    /// add premises to an independently selected protocol declaration.
+    pub(crate) fn field_overwrites(&self) -> List<FieldOverwrite> {
+        let (Some(body), Some((_, source)), Type::Function { params, .. }) = (
+            self.returned_value.as_ref(),
+            self.callable_source.as_ref(),
+            &self.ty,
+        ) else {
+            return List::new();
+        };
+        if self.vars.is_empty()
+            || body.writes.is_empty()
+            || self.impl_self_type.is_some()
+            || params.len() != source.params.len()
+        {
+            return List::new();
+        }
+        body.writes
+            .iter()
+            .filter_map(|write| {
+                let ReturnedValueNode::Parameter(index) = body.nodes.get(write.input)? else {
+                    return None;
+                };
+                let owner = params.get(*index)?;
+                if !matches!(
+                    owner,
+                    Type::Reference { mutable: true, .. }
+                        | Type::CheckedReference { mutable: true, .. }
+                        | Type::UnsafeReference { mutable: true, .. }
+                ) {
+                    return None;
+                }
+                let variables = owner.free_vars();
+                if !self.vars.iter().any(|var| variables.contains(var)) {
+                    return None;
+                }
+                Some(FieldOverwrite {
+                    place: write.place,
+                    owner: owner.clone(),
+                    fields: write.fields.clone(),
+                })
+            })
+            .collect()
+    }
+
+
     pub(crate) fn refine_callable_contract(
         &mut self,
         owner: &Text,
@@ -470,6 +528,9 @@ impl TypeScheme {
                     arguments: application.arguments.iter().map(|argument|
                         argument.try_apply_subst(&subst)).collect::<Result<List<_>, Text>>()?,
                 })
+            }).collect::<Result<List<_>, Text>>()?,
+            field_overwrites: self.field_overwrites().into_iter().map(|write| {
+                Ok(FieldOverwrite { owner: write.owner.try_apply_subst(&subst)?, ..write })
             }).collect::<Result<List<_>, Text>>()?,
             impl_self_type: self
                 .impl_self_type

@@ -283,6 +283,7 @@ fn append_statements(
                         nodes.push(ReturnedValueNode::Compound { op: *op, left, right });
                     }
                     writes.push(InputFieldWrite {
+                        place: left.span,
                         input,
                         fields,
                         value,

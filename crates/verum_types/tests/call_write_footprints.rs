@@ -546,6 +546,78 @@ fn generic_write_footprints_are_validated_at_the_actual_instantiation() {
 }
 
 #[test]
+fn imported_field_overwrites_check_linear_values_at_calls_and_at_function_value_formation() {
+    let owner = "public type Holder<T> is {public payload:T}; public fn update<T>(holder:&mut Holder<T>,value:T){holder.payload=value;}";
+    let imports = "mount owner.{Holder,update as replace}; type linear Ticket is {id:Int};";
+    for (caller, expected) in [
+        (
+            "fn good(holder:&mut Holder<Int>) {replace(holder,73);}",
+            None,
+        ),
+        ("fn good()->fn(&mut Holder<Int>,Int)->Unit {replace}", None),
+        (
+            "fn bad(holder:&mut Holder<Ticket>, value:Ticket) {replace(holder,value);}",
+            Some("linear"),
+        ),
+        (
+            "fn bad()->fn(&mut Holder<Ticket>,Ticket)->Unit {replace}",
+            Some("linear"),
+        ),
+        (
+            "fn hidden<T>()->fn(&mut Holder<T>,T)->Unit {replace}",
+            Some("cannot overwrite"),
+        ),
+    ] {
+        let found = registered_errors([
+            ("owner", owner.into()),
+            ("consumer", format!("{imports} {caller}").into()),
+        ]);
+        match expected {
+            Some(text) => assert!(
+                found
+                    .iter()
+                    .any(|e| e.contains("overwrite") && e.contains(text)),
+                "{caller}: {found:?}"
+            ),
+            None => assert!(found.is_empty(), "{caller}: {found:?}"),
+        }
+    }
+}
+
+#[test]
+fn overwriting_a_field_preserves_owned_linear_siblings_and_rejects_linear_sum_payloads() {
+    for (declarations, caller, rejected) in [
+        (
+            "type linear Ticket is {id:Int}; type Holder<T> is {public payload:T,public count:Int}; fn reset<T>(h:&mut Holder<T>) {h.count=0;}",
+            "fn good(h:&mut Holder<Ticket>){reset(h);}",
+            false,
+        ),
+        (
+            "type linear Ticket is {id:Int}; type Choice<T> is Empty | Full(T); type Holder<T> is {public state:Choice<T>}; fn reset<T>(h:&mut Holder<T>) {h.state=Choice.Empty;}",
+            "fn bad(h:&mut Holder<Ticket>){reset(h);}",
+            true,
+        ),
+        (
+            "type linear Ticket is {id:Int}; type Inner<T> is {public payload:T,public ticket:Ticket}; type Holder<T> is {public part:Inner<T>};",
+            "fn bad<T>(h:&mut Holder<T>, incoming:Inner<T>){h.part=incoming;}",
+            true,
+        ),
+    ] {
+        let found = module_errors("overwrite_probe", &format!("{declarations} {caller}"));
+        if rejected {
+            assert!(
+                found
+                    .iter()
+                    .any(|e| e.contains("overwrite") && e.contains("linear")),
+                "{caller}: {found:?}"
+            );
+        } else {
+            assert!(found.is_empty(), "{caller}: {found:?}");
+        }
+    }
+}
+
+#[test]
 fn a_scalar_field_read_does_not_retain_its_temporary_owner() {
     let found = errors(
         "fn update(cell:&mut Cell,source:&Cell) {cell.value=source.value;}",

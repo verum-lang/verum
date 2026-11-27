@@ -9566,11 +9566,13 @@ impl TypeChecker {
                 checker.with_declared_universe_scope("function", &func.name.name, &func.generics, |checker| {
                     checker.validate_function_universes(func)?;
                     checker.with_function_body_context(|checker| {
+                        let previous_overwrites = std::mem::take(&mut checker.source_type_registration.field_overwrites);
                         let previous = checker.source_type_registration.unsafe_function_body;
                         checker.source_type_registration.unsafe_function_body =
                             func.is_unsafe.then(|| checker.borrow_tracker.current_closure_id());
                         let result = checker.check_function_inner(func);
                         checker.source_type_registration.unsafe_function_body = previous;
+                        checker.source_type_registration.field_overwrites = previous_overwrites;
                         result
                     })
                 })
@@ -10010,6 +10012,7 @@ impl TypeChecker {
         scheme.where_clauses = structural_conditions.clone();
         scheme.type_equalities = type_equalities.clone();
         self.record_callable_declaration(&mut scheme, func);
+        self.source_type_registration.field_overwrites = scheme.field_overwrites();
         let source_returned_value = scheme.returned_value.clone();
         let source_callable_declaration = scheme.callable_source.clone();
         let source_explicit_slots = scheme.explicit_method_vars.clone();

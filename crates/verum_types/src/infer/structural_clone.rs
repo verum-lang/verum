@@ -1,8 +1,8 @@
 //! Structural resource operations use the declared layout of each owned component.
 use super::TypeChecker;
-use crate::{Result, TypeError, ty::Type};
+use crate::{Result, TypeError, context::FieldOverwrite, ty::{Type, TypeVar}};
 use verum_ast::Span;
-use verum_common::{List, ResourceDiscipline, Text, well_known_types::RuntimeCopyStorage};
+use verum_common::{List, ResourceDiscipline, Set, Text, well_known_types::RuntimeCopyStorage};
 
 #[cfg(test)]
 #[path = "../../tests/unit/structural_storage_clone.rs"]
@@ -16,7 +16,7 @@ enum StructuralUse {
 
 impl TypeChecker {
     pub(super) fn check_structural_clone(&self, ty: &Type, span: Span) -> Result<()> {
-        self.check_resource_layout(ty, StructuralUse::Clone)
+        self.check_resource_layout(ty, StructuralUse::Clone, None)
             .map_err(|reason| TypeError::OtherWithCodeSpanned {
                 code: "E400".into(),
                 msg: format!("No implicit clone for `{ty}`: {reason}").into(),
@@ -24,8 +24,79 @@ impl TypeChecker {
             })
     }
 
+    fn overwrite_field_type(&self, write: &FieldOverwrite, span: Span) -> Option<Type> {
+        let mut field = self.unifier.apply(&write.owner);
+        for (index, name) in write.fields.iter().enumerate() {
+            field = match self.place_reference_head(&field, span).ok()? {
+                Type::Reference {
+                    mutable: true,
+                    inner,
+                }
+                | Type::CheckedReference {
+                    mutable: true,
+                    inner,
+                }
+                | Type::UnsafeReference {
+                    mutable: true,
+                    inner,
+                } => *inner,
+                Type::Reference { .. }
+                | Type::CheckedReference { .. }
+                | Type::UnsafeReference { .. } => return None,
+                owned if index != 0 => owned,
+                _ => return None,
+            };
+            field = self.lookup_field_type(&field, name)?;
+        }
+        Some(self.unifier.apply(&field))
+    }
+
+    pub(super) fn check_instantiated_field_overwrite(
+        &self,
+        write: &FieldOverwrite,
+        span: Span,
+    ) -> Result<()> {
+        let field = self.overwrite_field_type(write, span).ok_or_else(|| {
+            TypeError::OtherWithCodeSpanned {
+                code: "E310".into(),
+                msg: "cannot establish the type of the selected field to overwrite".into(),
+                span,
+            }
+        })?;
+        self.check_overwrite_layout(&field, None, span)
+    }
+
     pub(super) fn check_referent_overwrite(&self, ty: &Type, span: Span) -> Result<()> {
-        self.check_resource_layout(ty, StructuralUse::Overwrite)
+        // A generic body can defer only the exact declared input field whose
+        // old value the selected callable checks after substitution. Concrete
+        // linear components are rejected even inside an open declaration.
+        let ty = self.unifier.apply(ty);
+        let permitted = self
+            .source_type_registration
+            .field_overwrites
+            .iter()
+            .filter(|_| self.borrow_tracker.current_closure_id().is_none())
+            .find(|write| {
+                write.place == span && self.overwrite_field_type(write, span).as_ref() == Some(&ty)
+            })
+            .map(|write| {
+                write
+                    .owner
+                    .free_vars()
+                    .into_iter()
+                    .filter(|var| self.unifier.is_rigid(*var))
+                    .collect::<Set<_>>()
+            });
+        self.check_overwrite_layout(&ty, permitted.as_ref(), span)
+    }
+
+    fn check_overwrite_layout(
+        &self,
+        ty: &Type,
+        permitted: Option<&Set<TypeVar>>,
+        span: Span,
+    ) -> Result<()> {
+        self.check_resource_layout(ty, StructuralUse::Overwrite, permitted)
             .map_err(|reason| TypeError::OtherWithCodeSpanned {
                 code: "E310".into(),
                 msg: format!("cannot overwrite `{ty}`: {reason}").into(),
@@ -33,7 +104,7 @@ impl TypeChecker {
             })
     }
 
-    fn check_resource_layout(&self, ty: &Type, operation: StructuralUse) -> std::result::Result<(), Text> {
+    fn check_resource_layout(&self, ty: &Type, operation: StructuralUse, permitted: Option<&Set<TypeVar>>) -> std::result::Result<(), Text> {
         // Consume expanded components instead of recursively cloning a subtree
         // at each edge. Bound both expansion depth and total work, including
         // cycles and nonregular generic declarations.
@@ -56,6 +127,7 @@ impl TypeChecker {
                 Ok(())
             };
             match ty {
+                Type::Var(var) if permitted.is_some_and(|vars| vars.contains(&var)) => {}
                 Type::Unit
                 | Type::Never
                 | Type::Bool
