@@ -31759,24 +31759,8 @@ fn build_overflow_intrinsic_pair<'ctx>(
     Ok((value, flag_basic.into_int_value()))
 }
 
-/// Wrap an `(value: i64, is_none: i1)` pair into a `Maybe<Int>` heap
-/// variant matching the canonical `MAYBE_VARIANT_LAYOUT`
-/// (`None=0, Some=1`). Returns the variant pointer cast to `i64`
-/// (matches the VBC register-value convention — heap pointers are
-/// stored as i64 with the pointer-tag NaN-box header set when read
-/// through `Value::from_ptr`).
-///
-/// The shape mirrors `interpreter::dispatch_table::handlers::method_dispatch::
-/// {make_some_value, make_none_value}` exactly — same canonical tags
-/// drawn from `verum_common::well_known_types::{maybe_success_tag,
-/// maybe_none_tag}`, same `[ObjectHeader][tag: u32][field_count: u32]
-/// [payload?: Value]` layout via `RuntimeLowering::lower_make_variant`.
-/// Bit-equivalent to the Tier-0 output, so user pattern-matches and
-/// `format_variant_for_print_depth` work uniformly across tiers.
-///
-/// Used by every Checked* arm whose result type is `Maybe<Int>` —
-/// `CheckedAddI` / `SubI` / `MulI` / `DivI` plus the unsigned
-/// variants.
+/// Construct the canonical Maybe returned by numeric and parsing intrinsics.
+/// Both alternatives carry their reserved owner and exact allocation extent.
 fn build_maybe_int_wrap<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
     value: verum_llvm::values::IntValue<'ctx>,
@@ -31807,7 +31791,7 @@ fn build_maybe_int_wrap<'ctx>(
 
     // Some path: alloc Maybe.Some(tag=1, field_count=1) + store payload.
     ctx.builder().position_at_end(some_bb);
-    let some_ptr = runtime.lower_make_variant(ctx.builder(), &module, some_tag, 1)?;
+    let some_ptr = runtime.lower_make_typed_variant(ctx.builder(), module, TypeId::MAYBE, some_tag, 1)?;
     runtime.lower_set_variant_data(ctx.builder(), some_ptr, 0, value)?;
     let some_int = ctx
         .builder()
@@ -31826,7 +31810,7 @@ fn build_maybe_int_wrap<'ctx>(
 
     // None path: alloc Maybe.None(tag=0, field_count=0).
     ctx.builder().position_at_end(none_bb);
-    let none_ptr = runtime.lower_make_variant(ctx.builder(), &module, none_tag, 0)?;
+    let none_ptr = runtime.lower_make_typed_variant(ctx.builder(), module, TypeId::MAYBE, none_tag, 0)?;
     let none_int = ctx
         .builder()
         .build_ptr_to_int(none_ptr, i64_ty, &format!("{}_none_int", label))

@@ -58,3 +58,59 @@ fn a_native_variant_reference_addresses_its_payload_and_writes_through() {
         "the mutation must reach the original payload"
     );
 }
+
+#[cfg(target_os = "macos")]
+#[path = "support/source_image.rs"]
+mod source_image;
+
+#[cfg(target_os = "macos")]
+#[test]
+fn checked_arithmetic_creates_owned_some_and_none_values() {
+    use verum_ast::ItemKind;
+    use verum_fast_parser::Parser;
+    use verum_vbc::codegen::{ItemFailurePolicy, VbcCodegen};
+
+    let mut maybe = Parser::new(include_str!("../../../core/base/maybe.vr"))
+        .parse_module()
+        .unwrap();
+    maybe.items.retain(|item| {
+        matches!(&item.kind, ItemKind::Module(module) if module.items.is_none())
+            || matches!(&item.kind, ItemKind::Type(decl) if decl.name.name == "Maybe")
+    });
+    let mut arithmetic = Parser::new(include_str!("../../../core/intrinsics/arithmetic.vr"))
+        .parse_module()
+        .unwrap();
+    arithmetic.items.retain(|item| {
+        matches!(&item.kind, ItemKind::Module(module) if module.items.is_none())
+            || matches!(&item.kind, ItemKind::Function(decl) if decl.name.name == "checked_mul")
+    });
+    let caller = Parser::new(
+        r#"
+        mount core.base.maybe.Maybe;
+        mount core.intrinsics.arithmetic.checked_mul;
+        fn main() -> Int {
+            let success = match checked_mul<Int>(7, 10) { Maybe.Some(v) => v, Maybe.None => 0 };
+            let overflow = match checked_mul<Int>(9223372036854775807, 2) {
+                Maybe.None => 3, Maybe.Some(_) => 0
+            };
+            success + overflow
+        }
+    "#,
+    )
+    .parse_module()
+    .unwrap();
+    let units = [&maybe, &arithmetic, &caller];
+    let mut compiler = VbcCodegen::new();
+    compiler.initialize();
+    compiler.collect_unit_declarations(&units).unwrap();
+    compiler.resolve_pending_imports();
+    compiler
+        .compile_unit_items(&units, ItemFailurePolicy::Strict)
+        .unwrap();
+    let module = compiler.finalize_module().unwrap();
+    let wire = verum_vbc::serialize::serialize_module(&module).unwrap();
+    source_image::run_module(
+        verum_vbc::deserialize::deserialize_module_validated(&wire).unwrap(),
+        |_| {},
+    );
+}
