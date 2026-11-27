@@ -61,11 +61,11 @@ fn main() {}
 @test
 fn invalid_slot_errors_preserve_the_requested_index() {
     match ctx_clear(MAX_CONTEXT_SLOTS) {
-        Result.Err(SysTlsError.InvalidSlot { slot }) => assert(slot == MAX_CONTEXT_SLOTS),
+        Result.Err(e) => assert(e.message() == f"Invalid context slot index: {MAX_CONTEXT_SLOTS}"),
         _ => panic("clearing a slot outside the table must report its index"),
     }
     match ctx_pop(-1) {
-        Result.Err(SysTlsError.InvalidSlot { slot }) => assert(slot == -1),
+        Result.Err(e) => assert(e.message() == "Invalid context slot index: -1"),
         _ => panic("popping a negative slot must report its index"),
     }
 }
