@@ -205,7 +205,7 @@ implement SplitState {
         ke: KeyEvent,
         step: Int,
     ) -> Bool {
-        let ctrl = ke.modifiers.contains(Modifiers.CTRL);
+        let ctrl = ke.modifiers().contains(Modifiers.CTRL);
         if !ctrl { return false; }
         let total = match split.orientation {
             Horizontal => area.width(),
@@ -214,14 +214,14 @@ implement SplitState {
         let available = (total - if split.show_divider { split.divider_width } else { 0 }).max(0);
         match split.orientation {
             Horizontal => {
-                match ke.code {
+                match ke.code() {
                     KeyCode.Left  => { self.resize(-step, available, split.min_first, split.min_second); true }
                     KeyCode.Right => { self.resize(step,  available, split.min_first, split.min_second); true }
                     _ => false,
                 }
             }
             Vertical => {
-                match ke.code {
+                match ke.code() {
                     KeyCode.Up   => { self.resize(-step, available, split.min_first, split.min_second); true }
                     KeyCode.Down => { self.resize(step,  available, split.min_first, split.min_second); true }
                     _ => false,
@@ -239,10 +239,11 @@ implement SplitState {
         area: Rect,
         me: MouseEvent,
     ) -> Bool {
-        let (first_area, divider_area, _second_area) = split.layout(area, self);
-        let on_divider = rect_contains(&divider_area, me.column, me.row);
+        let (_, divider_area, _) = split.layout(area, self);
+        let (column, row) = me.position();
+        let on_divider = divider_area.contains(column, row);
 
-        match me.kind {
+        match me.kind() {
             Down(MouseButton.Left) => {
                 if on_divider { self.dragging = true; return true; }
                 false
@@ -260,8 +261,8 @@ implement SplitState {
                 let div_w = if split.show_divider { split.divider_width } else { 0 };
                 let available = (total - div_w).max(0);
                 let target = match split.orientation {
-                    Horizontal => me.column - area.x,
-                    Vertical   => me.row - area.y,
+                    Horizontal => column - area.x,
+                    Vertical   => row - area.y,
                 };
                 let clamped = clamp_first(target, available, split.min_first, split.min_second);
                 self.size = match self.size {
@@ -289,8 +290,4 @@ fn clamp_first(raw: Int, available: Int, min_first: Int, min_second: Int) -> Int
     if v > upper { v = upper; }
     if v < 0 { v = 0; }
     v
-}
-
-fn rect_contains(r: &Rect, x: Int, y: Int) -> Bool {
-    x >= r.x && x < r.right() && y >= r.y && y < r.bottom()
 }

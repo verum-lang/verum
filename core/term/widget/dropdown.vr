@@ -123,6 +123,8 @@ implement DropdownState {
 
     public fn open_it(&mut self) { self.open = true; }
 
+    public fn selected_index(&self) -> Maybe<Int> { self.selected }
+
     /// Index of the visible item at `vi` (after search filter).
     fn item_index<T>(&self, d: &Dropdown<T>, vi: Int) -> Maybe<Int> {
         let filtered = filter_indices(d, &self.search);
@@ -132,13 +134,13 @@ implement DropdownState {
     /// Handle a key; returns `true` iff handled.
     public fn handle_key<T>(&mut self, d: &Dropdown<T>, ke: KeyEvent) -> Bool {
         if !self.open {
-            match ke.code {
+            match ke.code() {
                 KeyCode.Enter | KeyCode.Space => { self.toggle(); true }
                 KeyCode.Down => { self.open_it(); true }
                 _ => false,
             }
         } else {
-            match ke.code {
+            match ke.code() {
                 KeyCode.Escape => { self.close(); true }
                 KeyCode.Enter => {
                     let filtered = filter_indices(d, &self.search);
@@ -288,9 +290,7 @@ implement<T> StatefulWidget for Dropdown<T> {
             let shown_row = truncate_to_width(&text, inner.width());
             // Fill row background
             if is_hl {
-                for x in inner.x..(inner.x + inner.width()) {
-                    buf.get_mut(x, list_y + row).style = self.highlight_style;
-                }
+                buf.set_style(Rect.new(inner.x, list_y + row, inner.width(), 1), self.highlight_style);
             }
             buf.set_string(inner.x, list_y + row, &shown_row, row_style);
         }
@@ -302,50 +302,17 @@ implement<T> StatefulWidget for Dropdown<T> {
 // =============================================================================
 
 fn filter_indices<T>(d: &Dropdown<T>, query: &Text) -> List<Int> {
-    let mut out = List.new();
-    if query.len() == 0 {
-        for i in 0..d.items.len() { out.push(i); }
-        return out;
-    }
-    let q_low = lower_ascii(query);
-    for i in 0..d.items.len() {
-        let label = (d.label_fn)(&d.items[i]);
-        let l_low = lower_ascii(&label);
-        if contains_substring(&l_low, &q_low) { out.push(i); }
+    let mut out: List<Int> = List.new();
+    let wanted = query.to_ascii_lowercase();
+    let all = wanted.is_empty();
+    let mut index: Int = 0;
+    while index < d.items.len() {
+        if all || (d.label_fn)(&d.items[index]).to_ascii_lowercase().contains(&wanted) {
+            out.push(index);
+        }
+        index = index + 1;
     }
     out
-}
-
-fn lower_ascii(s: &Text) -> Text {
-    let bytes = s.as_bytes();
-    let mut out: List<Byte> = List.new();
-    for i in 0..bytes.len() {
-        let b = bytes[i];
-        if b >= 0x41 && b <= 0x5A {
-            out.push(b + 0x20);
-        } else {
-            out.push(b);
-        }
-    }
-    Text.from_utf8_unchecked(&out)
-}
-
-fn contains_substring(hay: &Text, needle: &Text) -> Bool {
-    let hn = hay.len();
-    let nn = needle.len();
-    if nn == 0 { return true; }
-    if nn > hn { return false; }
-    let hb = hay.as_bytes();
-    let nb = needle.as_bytes();
-    let limit = hn - nn;
-    for i in 0..(limit + 1) {
-        let mut ok = true;
-        for j in 0..nn {
-            if hb[i + j] != nb[j] { ok = false; break; }
-        }
-        if ok { return true; }
-    }
-    false
 }
 
 fn truncate_to_width(text: &Text, max_width: Int) -> Text {

@@ -31,18 +31,21 @@ mount super.keys.Modifiers;
 /// SGR format: CSI < Pb ; Px ; Py M (press) or CSI < Pb ; Px ; Py m (release)
 /// Pb encodes button and modifiers, Px/Py are 1-indexed coordinates.
 public fn parse_sgr_mouse(params: &List<Int>, final_byte: Byte) -> Maybe<MouseEvent> {
-    if params.len() < 3 {
+    if params.len() != 3 || (final_byte != 0x4D && final_byte != 0x6D) {
         return Maybe.None;
     }
 
     let pb = params[0];
+    if pb < 0 || pb >= 128 || params[1] < 1 || params[2] < 1 {
+        return Maybe.None;
+    }
     let px = params[1] - 1;  // Convert to 0-indexed
     let py = params[2] - 1;
 
-    let is_release = final_byte == ('m' as Int);
+    let is_release = final_byte == 0x6D;
 
     // Extract modifier flags from Pb
-    let mut mods = Modifiers.NONE;
+    let mut mods: Modifiers = Modifiers.NONE;
     if (pb & 4) != 0 { mods = mods.union(Modifiers.SHIFT); }
     if (pb & 8) != 0 { mods = mods.union(Modifiers.ALT); }
     if (pb & 16) != 0 { mods = mods.union(Modifiers.CTRL); }
@@ -51,21 +54,26 @@ public fn parse_sgr_mouse(params: &List<Int>, final_byte: Byte) -> Maybe<MouseEv
     let button_bits = pb & 3;
     let is_motion = (pb & 32) != 0;
     let is_scroll = (pb & 64) != 0;
+    if (is_motion && is_scroll) || (is_release && (is_motion || is_scroll)) {
+        return Maybe.None;
+    }
 
-    let kind = if is_scroll {
+    let kind: MouseEventKind = if is_scroll {
         match button_bits {
             0 => MouseEventKind.ScrollUp,
             1 => MouseEventKind.ScrollDown,
             2 => MouseEventKind.ScrollLeft,
             3 => MouseEventKind.ScrollRight,
-            _ => MouseEventKind.ScrollUp,
+            _ => return Maybe.None,
         }
+    } else if is_motion && button_bits == 3 {
+        MouseEventKind.Moved
     } else {
-        let button = match button_bits {
+        let button: MouseButton = match button_bits {
             0 => MouseButton.Left,
             1 => MouseButton.Middle,
             2 => MouseButton.Right,
-            _ => MouseButton.Left,
+            _ => return Maybe.None,
         };
         if is_release {
             MouseEventKind.Up(button)
@@ -76,12 +84,7 @@ public fn parse_sgr_mouse(params: &List<Int>, final_byte: Byte) -> Maybe<MouseEv
         }
     };
 
-    Maybe.Some(MouseEvent {
-        kind: kind,
-        column: px,
-        row: py,
-        modifiers: mods,
-    })
+    Maybe.Some(MouseEvent.new(kind, px, py, mods))
 }
 
 // =============================================================================

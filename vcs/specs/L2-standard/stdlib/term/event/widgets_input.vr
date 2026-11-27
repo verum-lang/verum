@@ -1,0 +1,83 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L2
+// @timeout: 120000
+// @tags: stdlib, term, event, mouse, dropdown, split
+
+mount core.term.event.parser.InputParser;
+mount core.term.event.types.{Event, KeyEvent, MouseEvent, MouseEventKind, MouseButton};
+mount core.term.event.keys.Modifiers;
+mount core.term.layout.rect.Rect;
+mount core.term.widget.dropdown.{Dropdown, DropdownState};
+mount core.term.widget.split.{TermSplit, SplitState};
+
+fn next_key(parser: &mut InputParser) -> KeyEvent {
+    match parser.next_event() {
+        Maybe.Some(Event.Key(key)) => key,
+        _ => panic("expected a key event"),
+    }
+}
+
+fn next_mouse(parser: &mut InputParser) -> MouseEvent {
+    match parser.next_event() {
+        Maybe.Some(Event.Mouse(mouse)) => mouse,
+        _ => panic("expected a mouse event"),
+    }
+}
+
+pure fn label(n: &Int) -> Text { if *n == 1 { "first" } else { "second" } }
+
+fn main() {
+    let mut parser = InputParser.new();
+    let menu = Dropdown<Int>.new([1, 2], label);
+    let mut menu_state = DropdownState.new();
+    assert(parser.feed("\x1b[B\x1b[B\r".as_bytes()) == 3);
+    assert(menu_state.handle_key(&menu, next_key(&mut parser)));
+    assert(menu_state.handle_key(&menu, next_key(&mut parser)));
+    assert(menu_state.handle_key(&menu, next_key(&mut parser)));
+    assert(menu_state.selected_index().unwrap() == 1);
+
+    let filtered = Dropdown<Int>.new([1, 2], label).searchable(true);
+    let mut filtered_state = DropdownState.new();
+    assert(parser.feed("\x1b[BSEC\r".as_bytes()) == 5);
+    let mut i: Int = 0;
+    while i < 5 {
+        assert(filtered_state.handle_key(&filtered, next_key(&mut parser)));
+        i = i + 1;
+    }
+    assert(filtered_state.selected_index().unwrap() == 1);
+
+    let split = TermSplit.horizontal();
+    let mut panes = SplitState.fixed(6);
+    let area = Rect.new(10, 4, 21, 5);
+    assert(parser.feed("\x1b[1;5C".as_bytes()) == 1);
+    let right = next_key(&mut parser);
+    assert(right.modifiers().contains(Modifiers.CTRL));
+    assert(panes.handle_resize_key(&split, area, right, 2));
+    assert(split.layout(area, &panes).0.width() == 8);
+
+    // Terminal columns and rows start at one. The divider is at (18, 4).
+    assert(parser.feed("\x1b[<28;".as_bytes()) == 0);
+    assert(parser.feed("19;5M".as_bytes()) == 1);
+    let down = next_mouse(&mut parser);
+    assert(down.position() == (18, 4));
+    assert(down.modifiers().contains(Modifiers.SHIFT));
+    assert(down.modifiers().contains(Modifiers.ALT));
+    assert(down.modifiers().contains(Modifiers.CTRL));
+    assert(down.kind() is MouseEventKind.Down(MouseButton.Left));
+    assert(panes.handle_mouse(&split, area, down));
+    assert(parser.feed("\x1b[<32;24;5M\x1b[<0;24;5m".as_bytes()) == 2);
+    assert(panes.handle_mouse(&split, area, next_mouse(&mut parser)));
+    assert(split.layout(area, &panes).0.width() == 13);
+    assert(panes.handle_mouse(&split, area, next_mouse(&mut parser)));
+
+    assert(parser.feed("\x1b[<35;28;5M\x1b[<32;28;5M".as_bytes()) == 2);
+    assert(next_mouse(&mut parser).kind() is MouseEventKind.Moved);
+    assert(!panes.handle_mouse(&split, area, next_mouse(&mut parser)));
+    assert(split.layout(area, &panes).0.width() == 13);
+
+    assert(parser.feed("\x1b[<0;0;1M\x1b[<3;1;1M\x1b[<128;1;1M".as_bytes()) == 0);
+    assert(parser.feed("\x1b[<0;1;1;2M\x1b[<0;1;1A\x1b[0;1;1M".as_bytes()) == 0);
+    assert(!parser.has_pending());
+    assert(parser.feed("\r".as_bytes()) == 1 && next_key(&mut parser).is_enter());
+}

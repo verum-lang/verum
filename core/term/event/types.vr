@@ -50,6 +50,10 @@ public type KeyEvent is {
 public type KeyEventKind is Press | Release | Repeat;
 
 implement KeyEvent {
+    public fn code(&self) -> KeyCode { self.code }
+    public fn modifiers(&self) -> Modifiers { self.modifiers }
+    public fn kind(&self) -> KeyEventKind { self.kind }
+
     /// Create a simple key press with no modifiers.
     public fn press(code: KeyCode) -> KeyEvent {
         KeyEvent {
@@ -111,6 +115,13 @@ public type MouseEventKind is
 public type MouseButton is Left | Right | Middle;
 
 implement MouseEvent {
+    pub(in core.term.event) fn new(kind: MouseEventKind, column: Int, row: Int, modifiers: Modifiers) -> MouseEvent {
+        MouseEvent { kind: kind, column: column, row: row, modifiers: modifiers }
+    }
+
+    public fn kind(&self) -> MouseEventKind { self.kind }
+    public fn modifiers(&self) -> Modifiers { self.modifiers }
+
     /// Get the position as a (column, row) tuple.
     public fn position(&self) -> (Int, Int) {
         (self.column, self.row)
