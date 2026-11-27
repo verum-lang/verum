@@ -374,7 +374,7 @@ fn source_record_extent_is_bound_to_the_constant_in_its_checked_snapshot() {
     let mut checker = dependency_checker(active.read().clone());
     checker.set_module_registry(active.clone());
     let extent = |checker: &TypeChecker| match checker.local_record_field("Carrier", "data") {
-        Some(crate::Type::Array { size, .. }) => *size,
+        Some(crate::Type::Array { size, .. }) => size.as_ref().and_then(crate::ty::ArrayLength::known),
         other => panic!("expected checked array, got {other:?}"),
     };
     load_carrier(&mut checker).unwrap();
