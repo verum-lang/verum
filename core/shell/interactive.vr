@@ -35,7 +35,7 @@ public fn input(prompt: &Text) -> Text {
     print(prompt);
     match read_line() {
         Result.Ok(s)  => strip_newline(s),
-        Result.Err(_) => "".into(),
+        Result.Err(_) => "",
     }
 }
 
@@ -62,7 +62,7 @@ fn strip_newline(s: Text) -> Text {
         if last == ('\n' as Byte) || last == ('\r' as Byte) { end = end - 1; }
         else { break; }
     }
-    s.slice(0, end).into()
+    s.slice(0, end)
 }
 
 // =============================================================================
@@ -76,10 +76,10 @@ public fn password(prompt: &Text) -> Text {
     let restore = disable_echo();
     let line = match read_line() {
         Result.Ok(s)  => strip_newline(s),
-        Result.Err(_) => "".into(),
+        Result.Err(_) => "",
     };
     restore_echo(restore);
-    println(&"".into());
+    println(&"");
     line
 }
 
@@ -155,11 +155,11 @@ public fn select<T: Clone>(prompt: &Text, options: &[(Text, T)]) -> T {
         println(&f"  [{i + 1}] {label}");
     }
     loop {
-        let raw = input(&"Choice: ".into());
+        let raw = input(&"Choice: ");
         match raw.parse_int() {
             Result.Ok(n) if n >= 1 && (n as Int) <= options.len() as Int =>
                 return options[(n - 1) as usize].1.clone(),
-            _ => println(&"Invalid choice, try again.".into()),
+            _ => println(&"Invalid choice, try again."),
         }
     }
 }
@@ -171,11 +171,11 @@ public fn multi_select(prompt: &Text, options: &[Text]) -> List<Int> {
     for (i, label) in options.iter().enumerate() {
         println(&f"  [{i + 1}] {label}");
     }
-    let raw = input(&"Choices (comma-separated, empty for none): ".into());
+    let raw = input(&"Choices (comma-separated, empty for none): ");
     let mut chosen: List<Int> = [];
     if raw.is_empty() { return chosen; }
     for token in raw.split(",") {
-        let t: Text = token.trim().into();
+        let t: Text = token.trim();
         match t.parse_int() {
             Result.Ok(n) if n >= 1 && (n as Int) <= options.len() as Int =>
                 chosen.push(n - 1),
@@ -208,7 +208,7 @@ public fn input_validated<T>(
 /// Required non-empty input. Re-prompts on empty.
 public fn input_required(prompt: &Text) -> Text {
     input_validated(prompt, |s| {
-        if s.is_empty() { Result.Err("input cannot be empty".into()) }
+        if s.is_empty() { Result.Err("input cannot be empty") }
         else { Result.Ok(s.clone()) }
     })
 }

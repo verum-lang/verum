@@ -71,8 +71,8 @@ implement JobHandle {
             Result.Err(e) => Result.Err(ShellError.SpawnFailed {
                 command: self.command,
                 reason:  match e {
-                    JoinError.Panicked  => "task panicked".into(),
-                    JoinError.Cancelled => "task cancelled".into(),
+                    JoinError.Panicked  => "task panicked",
+                    JoinError.Cancelled => "task cancelled",
                 },
             }),
         }
@@ -183,7 +183,7 @@ public async fn fail_fast(cmds: List<Text>)
     // Watch every job; on first error, cancel the rest.
     let mut results: List<Result<ShellResult, ShellError>> = [];
     for j in jobs.iter() { results.push(Result.Ok(ShellResult.from_error(
-        ShellError.SpawnFailed { command: j.command.clone(), reason: "pending".into() }
+        ShellError.SpawnFailed { command: j.command.clone(), reason: "pending" }
     ))); }
     let mut error: Maybe<ShellError> = Maybe.None;
     for (i, job) in jobs.into_iter().enumerate() {
@@ -230,14 +230,14 @@ public async fn fanout(
         match handle.await {
             Result.Ok(result) => out.push(result),
             Result.Err(error) => out.push(Result.Err(ShellError.SpawnFailed {
-                command: "<nursery task>".into(), reason: error.to_string(),
+                command: "<nursery task>", reason: error.to_string(),
             })),
         }
     }
     match nursery.wait_all().await {
         Result.Ok(_) => Result.Ok(out),
         Result.Err(error) => Result.Err(ShellError.SpawnFailed {
-            command: "<nursery>".into(), reason: error.to_string(),
+            command: "<nursery>", reason: error.to_string(),
         }),
     }
 }

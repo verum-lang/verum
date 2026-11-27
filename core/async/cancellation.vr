@@ -112,9 +112,9 @@ public type CancelReason is
 implement CancelReason {
     public fn message(&self) -> Text {
         match self {
-            Cancelled => "cancelled".into(),
+            Cancelled => "cancelled",
             Timeout { deadline } => f"timeout expired at {deadline}",
-            ParentCancelled => "parent cancelled".into(),
+            ParentCancelled => "parent cancelled",
             Aborted(msg) => f"aborted: {msg}",
         }
     }

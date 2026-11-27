@@ -98,7 +98,7 @@ implement Progress {
     public fn done(mut self, message: Text) {
         self.current = self.total;
         self.repaint();
-        println(&"".into());
+        println(&"");
         if !message.is_empty() { println(&message); }
         self.finished = true;
     }
@@ -126,7 +126,7 @@ implement Progress {
 
 implement Drop for Progress {
     fn drop(&mut self) {
-        if !self.finished { println(&"".into()); }
+        if !self.finished { println(&""); }
     }
 }
 
@@ -188,9 +188,9 @@ implement Spinner {
         let label = self.label.clone();
         let task = spawn(async move {
             let frames: List<Text> = [
-                "⠋".into(), "⠙".into(), "⠹".into(), "⠸".into(),
-                "⠼".into(), "⠴".into(), "⠦".into(), "⠧".into(),
-                "⠇".into(), "⠏".into(),
+                "⠋", "⠙", "⠹", "⠸",
+                "⠼", "⠴", "⠦", "⠧",
+                "⠇", "⠏",
             ];
             let mut idx = 0;
             loop {
@@ -200,7 +200,7 @@ implement Spinner {
                     _ = sleep(Duration.from_millis(80)).await => {},
                     _ = token.cancelled().await => {
                         // Clear line on stop
-                        print(&"\r\u{001b}[2K".into());
+                        print(&"\r\u{001b}[2K");
                         return;
                     },
                 }
@@ -216,7 +216,7 @@ implement Spinner {
         self.cancel.cancel_with(core.async.cancellation.CancelReason.Cancelled);
         if let Maybe.Some(t) = self.task.take() { let _ = t.join().await; }
         // Clear line and write final message
-        print(&"\r\u{001b}[2K".into());
+        print(&"\r\u{001b}[2K");
         if !message.is_empty() { println(&message); }
         self.stopped = true;
     }
@@ -227,7 +227,7 @@ implement Drop for Spinner {
         if !self.stopped {
             // Best-effort: cancel the spawned task and clear the line.
             self.cancel.cancel_with(core.async.cancellation.CancelReason.Cancelled);
-            print(&"\r\u{001b}[2K".into());
+            print(&"\r\u{001b}[2K");
             self.stopped = true;
         }
     }

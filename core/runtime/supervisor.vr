@@ -230,13 +230,13 @@ implement FailureReason {
     /// Get human-readable description
     public fn description(&self) -> Text {
         match self {
-            NormalExit => "normal exit".into(),
+            NormalExit => "normal exit",
             ErrorExit(msg) => f"error: {msg}",
             Panic(msg) => f"panic: {msg}",
-            Timeout => "timeout".into(),
-            Cancelled => "cancelled".into(),
-            Manual => "manual restart".into(),
-            SupervisorShutdown => "supervisor shutdown".into(),
+            Timeout => "timeout",
+            Cancelled => "cancelled",
+            Manual => "manual restart",
+            SupervisorShutdown => "supervisor shutdown",
         }
     }
 }
@@ -328,7 +328,7 @@ implement ChildSpec {
     /// Create new child specification with default settings
     public fn new(name: Text) -> Self {
         Self {
-            name: name.into(),
+            name,
             restart: SupervisorRestartStrategy.Transient,
             shutdown_timeout_ms: 5000, // 5 seconds
             max_restarts: 10,
@@ -340,7 +340,7 @@ implement ChildSpec {
     /// Create specification for a permanent worker
     public fn permanent(name: Text) -> Self {
         Self {
-            name: name.into(),
+            name,
             restart: SupervisorRestartStrategy.Permanent,
             shutdown_timeout_ms: 5000,
             max_restarts: 10,
@@ -352,7 +352,7 @@ implement ChildSpec {
     /// Create specification for a temporary one-shot task
     public fn temporary(name: Text) -> Self {
         Self {
-            name: name.into(),
+            name,
             restart: SupervisorRestartStrategy.Temporary,
             shutdown_timeout_ms: 1000,
             max_restarts: 0,
@@ -644,7 +644,7 @@ implement EscalationReason {
             InternalFault { error } =>
                 f"supervisor error: {error}",
             AllStrategiesExhausted =>
-                "all recovery strategies exhausted".into(),
+                "all recovery strategies exhausted",
         }
     }
 }
@@ -737,7 +737,7 @@ implement SupervisorConfig {
             shutdown: ShutdownStrategy.graceful(),
             enable_circuit_breaker: false,
             circuit_breaker_threshold: 5,
-            name: name.into(),
+            name,
         }
     }
 
@@ -751,7 +751,7 @@ implement SupervisorConfig {
             shutdown: ShutdownStrategy.graceful(),
             enable_circuit_breaker: false,
             circuit_breaker_threshold: 5,
-            name: name.into(),
+            name,
         }
     }
 
@@ -765,7 +765,7 @@ implement SupervisorConfig {
             shutdown: ShutdownStrategy.graceful(),
             enable_circuit_breaker: false,
             circuit_breaker_threshold: 5,
-            name: name.into(),
+            name,
         }
     }
 
@@ -860,17 +860,17 @@ implement SupervisorError {
             ChildNotFound(id) =>
                 f"child not found: {id.raw()}",
             ShuttingDown =>
-                "supervisor is shutting down".into(),
+                "supervisor is shutting down",
             ShutdownTimedOut(id) =>
                 f"child {id.raw()} did not stop before the shutdown deadline",
             SpawnFailed(msg) =>
                 f"spawn failed: {msg}",
             ChannelClosed =>
-                "supervisor channel closed".into(),
+                "supervisor channel closed",
             InvalidSpec(msg) =>
                 f"invalid spec: {msg}",
             NoParentSupervisor =>
-                "no parent supervisor".into(),
+                "no parent supervisor",
             Other(msg) =>
                 msg.clone(),
         }
@@ -1186,7 +1186,7 @@ implement SupervisorHandle {
         let child = inner.find_child(child_id);
 
         let child_name = child.map(|c| c.get().spec.name.clone())
-            .unwrap_or_else(|| "unknown".into());
+            .unwrap_or_else(|| "unknown");
 
         let escalation_reason = EscalationReason.RestartLimitExceeded {
             child_id: child_id,
@@ -1510,7 +1510,7 @@ implement ChildState {
             Maybe.None => false,
         };
         if running {
-            Result.Err(SupervisorError.SpawnFailed("child is still running".into()))
+            Result.Err(SupervisorError.SpawnFailed("child is still running"))
         } else {
             let run = Shared.new(ChildRun {
                 stop: CancellationToken.new(), finished: CancellationToken.new(),

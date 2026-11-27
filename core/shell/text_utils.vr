@@ -75,7 +75,7 @@ public fn grep_capture(rx: &Regex, lines: &List<Text>) -> List<Text> {
     let mut out: List<Text> = [];
     for line in lines.iter() {
         match rx.find(line) {
-            Maybe.Some(m) => out.push(m.matched_text().into()),
+            Maybe.Some(m) => out.push(m),
             Maybe.None    => {},
         }
     }
@@ -120,7 +120,7 @@ public fn awk_field(lines: &List<Text>, n: Int) -> List<Text> {
         if (n as Int) < fields.len() as Int {
             out.push(fields[n as usize].clone());
         } else {
-            out.push("".into());
+            out.push("");
         }
     }
     out
@@ -130,11 +130,11 @@ public fn awk_field(lines: &List<Text>, n: Int) -> List<Text> {
 public fn awk_field_sep(lines: &List<Text>, sep: &Text, n: Int) -> List<Text> {
     let mut out: List<Text> = [];
     for line in lines.iter() {
-        let fields: List<Text> = line.split(sep).map(|s| s.into()).collect();
+        let fields: List<Text> = line.split(sep);
         if (n as Int) < fields.len() as Int {
             out.push(fields[n as usize].clone());
         } else {
-            out.push("".into());
+            out.push("");
         }
     }
     out
@@ -142,10 +142,10 @@ public fn awk_field_sep(lines: &List<Text>, sep: &Text, n: Int) -> List<Text> {
 
 fn split_whitespace(s: &Text) -> List<Text> {
     let mut fields: List<Text> = [];
-    let mut current: Text = "".into();
+    let mut current: Text = "";
     for ch in s.chars() {
         if ch == ' ' || ch == '\t' {
-            if !current.is_empty() { fields.push(current.clone()); current = "".into(); }
+            if !current.is_empty() { fields.push(current.clone()); current = ""; }
         } else {
             current.push(ch);
         }
@@ -217,7 +217,7 @@ public fn wc(text: &Text) -> Counts {
 
 /// Render rows as space-padded columns. Auto-computes column widths.
 public fn column_format(rows: &List<List<Text>>) -> Text {
-    if rows.is_empty() { return "".into(); }
+    if rows.is_empty() { return ""; }
     let cols = rows[0].len();
     let mut widths: List<Int> = [];
     for _ in 0..cols { widths.push(0); }
