@@ -763,10 +763,8 @@ implement<A, P: Parser<A>> Parser<Maybe<A>> for OptionalParser<A, P> {
         let saved_cursor = state.cursor;
         match self.inner.parse(state) {
             Result.Ok(v) => Result.Ok(Maybe.Some(v)),
-            Result.Err(_) => {
-                state.cursor = saved_cursor;
-                Result.Ok(Maybe.None)
-            },
+            Result.Err(_) if state.cursor == saved_cursor => Result.Ok(Maybe.None),
+            Result.Err(err) => Result.Err(err),
         }
     }
 

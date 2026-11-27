@@ -1,6 +1,6 @@
 mount core.cli.spec.{ArgSpec, CommandSpec, FlagSpec};
 mount core.cli.builder.AppBuilder;
-mount core.cli.parser.{flag, parse_argv, Parser, ParseState};
+mount core.cli.parser.{arg, flag, optional, parse_argv, ArgParser, FlagParser, OptionalParser, Parser, ParseState};
 mount core.base.maybe.Maybe;
 mount core.collections.List;
 mount core.text.Text;
@@ -71,4 +71,17 @@ fn test_flag_parser_preserves_attached_values_and_leaves_mismatches_in_place() {
     assert(mode.parse(&mut state) is Result.Ok(Maybe.None));
     assert_eq(model.parse(&mut state).unwrap(), Maybe.Some("z"));
     assert(mode.parse(&mut state) is Result.Err(_));
+}
+
+@test
+fn test_optional_parser_preserves_errors_after_consuming_an_option() {
+    let required: OptionalParser<Text, ArgParser> = optional(arg(ArgSpec.required("item", "Item")));
+    let mut tokens = ParseState.new(["value"]);
+    assert_eq(required.parse(&mut tokens).unwrap(), Maybe.Some("value"));
+    assert(required.parse(&mut tokens) is Result.Ok(Maybe.None));
+
+    let mode: OptionalParser<Maybe<Text>, FlagParser> = optional(flag(FlagSpec.value("mode", "Mode")));
+    let mut incomplete = ParseState.new(["--mode"]);
+    assert(mode.parse(&mut incomplete) is Result.Err(_));
+    assert(required.parse(&mut incomplete) is Result.Ok(Maybe.None));
 }
