@@ -460,7 +460,7 @@ impl TypeChecker {
                     )
                 })?;
             if let Some(method) = protocol.methods.get(method) {
-                let method = checker.apply_protocol_method_callback_bounds(
+                let method = checker.apply_declared_protocol_method(
                     method, &protocol.constraints, name, receiver, arguments, span,
                 )?;
                 return Ok(List::from_iter([AppliedProtocolMethod {
@@ -555,8 +555,8 @@ impl TypeChecker {
         Ok(methods.into_iter().next().map(|selected| selected.method))
     }
 
-    pub(super) fn has_callback_projection(&self, bound: &Type) -> bool {
-        bound.contains_type(|part| {
+    pub(super) fn has_associated_projection(&self, ty: &Type) -> bool {
+        ty.contains_type(|part| {
             super::associated_family_applications::checked_projection_parts(part).is_some()
                 || matches!(part, Type::Generic { name, args }
                     if !args.is_empty() && self.ctx.lookup_type(name).is_none()
@@ -564,10 +564,9 @@ impl TypeChecker {
         })
     }
 
-    /// Callback arguments use the associated members of the method's declaration.
-    /// Select their owners before substituting `Self` and the protocol parameters:
-    /// two distinct binders can receive the same concrete argument.
-    fn apply_protocol_method_callback_bounds(
+    /// Resolve projections in the declaring telescope before applying the
+    /// receiver. Distinct protocol members can share a concrete receiver.
+    fn apply_declared_protocol_method(
         &self,
         method: &ProtocolMethod,
         constraints: &ProtocolConstraints,
@@ -579,8 +578,10 @@ impl TypeChecker {
         let mut applied = method
             .apply_owner(arguments, receiver.declared())
             .map_err(|message| invalid(span, message))?;
-        if !method.type_param_bounds.values().flatten()
-            .any(|bound| self.has_callback_projection(bound))
+        let resolve_signature = matches!(receiver, ProtocolMethodReceiver::Call(_))
+            && self.has_associated_projection(&method.ty);
+        if !resolve_signature && !method.type_param_bounds.values().flatten()
+            .any(|bound| self.has_associated_projection(bound))
         {
             return Ok(applied);
         }
@@ -632,6 +633,9 @@ impl TypeChecker {
             caller: caller.as_ref().map(|premises| premises.as_slice()),
             span,
         };
+        if resolve_signature {
+            applied.ty = self.resolve_call_output_projections(&declared.ty, &scope)?;
+        }
         for (parameter, bounds) in &declared.type_param_bounds {
             let resolved: List<_> = bounds
                 .iter()

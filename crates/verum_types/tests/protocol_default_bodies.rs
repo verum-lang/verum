@@ -101,6 +101,34 @@ fn associated_receiver_types_are_available_after_the_complete_header() {
     accepted("type Rule is protocol {fn identity(value:Self.Item)->Self.Item{value} type Item;};");
     rejected("type Rule is protocol {fn wrong(value:Self.Item)->Bool{value} type Item;};");
 }
+
+#[test]
+fn a_default_method_projects_through_its_own_protocol_on_a_concrete_receiver() {
+    let definitions = "
+        type Source is protocol {
+            type Item;
+            fn next(&mut self) -> Self.Item;
+            fn first(&mut self) -> Self.Item { self.next() }
+        };
+        type Other is protocol {
+            type Item;
+            fn flag(&self) -> Self.Item;
+        };
+        type Cursor is { value: Int };
+        implement Source for Cursor {
+            type Item = Int;
+            fn next(&mut self) -> Int { self.value }
+        }
+        implement Other for Cursor {
+            type Item = Bool;
+            fn flag(&self) -> Bool { true }
+        }";
+    accepted(&format!("{definitions} fn read(mut c: Cursor) -> Int {{ c.first() }}"));
+    accepted(&format!("{definitions} fn read(c: Cursor) -> Bool {{ c.flag() }}"));
+    rejected(&format!("{definitions} fn wrong(mut c: Cursor) -> Bool {{ c.first() }}"));
+    rejected(&format!("{definitions} fn wrong(c: Cursor) -> Int {{ c.flag() }}"));
+    rejected(&format!("{definitions} fn ambiguous<T: Source + Other>(c: T) -> T.Item {{ c.flag() }}"));
+}
 #[test]
 fn failed_body_does_not_publish_locals_or_owner_parameters() {
     let mut checker = checker();
