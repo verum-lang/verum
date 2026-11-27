@@ -538,7 +538,7 @@ public type FormatSpec is {
 
 implement FormatSpec {
     // Create default format spec.
-    fn new() -> FormatSpec {
+    public fn new() -> FormatSpec {
         FormatSpec {
             fill: ' ',
             align: Left,
@@ -551,37 +551,37 @@ implement FormatSpec {
     }
 
     // Set width.
-    fn with_width(mut self, w: Int) -> FormatSpec {
+    public fn with_width(mut self, w: Int) -> FormatSpec {
         self.width = Maybe.Some(w);
         self
     }
 
     // Set precision.
-    fn with_precision(mut self, p: Int) -> FormatSpec {
+    public fn with_precision(mut self, p: Int) -> FormatSpec {
         self.precision = Maybe.Some(p);
         self
     }
 
     // Set alignment.
-    fn with_align(mut self, a: TextAlignment) -> FormatSpec {
+    public fn with_align(mut self, a: TextAlignment) -> FormatSpec {
         self.align = a;
         self
     }
 
     // Set fill character.
-    fn with_fill(mut self, c: Char) -> FormatSpec {
+    public fn with_fill(mut self, c: Char) -> FormatSpec {
         self.fill = c;
         self
     }
 
     // Enable alternate form.
-    fn alternate_form(mut self) -> FormatSpec {
+    public fn alternate_form(mut self) -> FormatSpec {
         self.alternate = true;
         self
     }
 
     // Enable zero padding (sets fill='0' and align=Right).
-    fn zero_padded(mut self) -> FormatSpec {
+    public fn zero_padded(mut self) -> FormatSpec {
         self.fill = '0';
         self.align = Right;
         self
@@ -593,7 +593,7 @@ implement FormatSpec {
     }
 
     // Set type specifier.
-    fn with_type(mut self, t: Char) -> FormatSpec {
+    public fn with_type(mut self, t: Char) -> FormatSpec {
         self.format_type = Maybe.Some(t);
         self
     }
@@ -887,72 +887,44 @@ implement Formatter {
     }
 
 
-    // Format integer in specified base.
-    //
-
-    // Correctly handles `Int.MIN`: magnitude is accumulated in
-    // `UInt64` (same idiom as `int_to_string` above) so the
-    // previous `if negative { -n }` overflow no longer silently
-    // emits "-" with no digits.
-    //
-
-    // Replaces the old `Text → List<Char> → Text` reverse-and-
-    // collect chain (~4× allocations + ~3× memcpy) with a
-    // 64-byte stack buffer + single `Text.push_str` of the
-    // assembled digit slice.
-    fn write_int_base(&mut self, n: Int, base: Int, uppercase: Bool) -> Result<(), FormatError> {
-        let negative = n < 0;
-
-        if n == 0 {
-            return self.write_str("0");
+    /// Format a signed integer in base 2 through 16, applying the current spec.
+    public(in core) fn write_int_base(&mut self, n: Int, base: Int, uppercase: Bool) -> Result<(), FormatError> {
+        if base < 2 || base > 16 { return Result.Err(FormatError {}); }
+        // One sign, two prefix bytes and at most 64 binary digits.
+        let mut bytes: [Byte; 67] = [0; 67];
+        let mut start = 67;
+        let radix = base as UInt64;
+        let mut magnitude = n.unsigned_abs();
+        loop {
+            let digit = (magnitude % radix) as Byte;
+            start = start - 1;
+            bytes[start] = if digit < 10_u8 { ('0' as Byte) + digit } else {
+                let letter = if uppercase { 'A' } else { 'a' };
+                (letter as Byte) + (digit - 10_u8)
+            };
+            magnitude = magnitude / radix;
+            if magnitude == 0_u64 { break; }
         }
-
-        let digits = if uppercase {
-            "0123456789ABCDEF"
-        } else {
-            "0123456789abcdef"
-        };
-
-        let mut mag = n.unsigned_abs();
-        let base_u: UInt64 = base as UInt64;
-
-        // Worst case: base=2 over 64-bit unsigned ⇒ 64 digits.
-        let mut buf: [Byte; 64] = [0; 64];
-        let mut i: Int = 63;
-        while mag > 0_u64 {
-            let digit = (mag % base_u) as Int;
-            buf[i] = digits.nth_char(digit).expect("write_int_base: digit < base ≤ digits.len() guaranteed by caller (currently bases 2..=16)") as Byte;
-            mag = mag / base_u;
-            i = i - 1;
+        if self.spec.alternate {
+            let prefix = match base {
+                2 => 'b', 8 => 'o', 16 => if uppercase { 'X' } else { 'x' }, _ => '\0',
+            };
+            if prefix != '\0' {
+                start = start - 2;
+                bytes[start] = '0' as Byte;
+                bytes[start + 1] = prefix as Byte;
+            }
         }
-        let start = i + 1;
-        let res = Text.from_utf8_unchecked(&buf[start..64]);
-
-        // Add prefix for alternate form
-        let prefix = if self.spec.alternate {
-            match base {
-                2 => "0b",
-                8 => "0o",
-                16 => if uppercase { "0X" } else { "0x" },
-                _ => "",
-            }
-        } else {
-            ""
+        let sign = if n < 0 { '-' } else {
+            match self.spec.sign { Plus => '+', Space => ' ', Minus => '\0' }
         };
-
-        let sign = if negative { "-" } else {
-            match self.spec.sign {
-                Plus => "+",
-                Space => " ",
-                Minus => "",
-            }
-        };
-
-        // Combine: sign + prefix + number
-        let full = sign + prefix + &res;
-        self.write_str(&full)
+        if sign != '\0' {
+            start = start - 1;
+            bytes[start] = sign as Byte;
+        }
+        let text = Text.from_utf8_unchecked(&bytes[start..67]);
+        self.write_str(&text)
     }
-
 
     // Write value with sign, handling zero padding.
     fn write_with_sign(&mut self, sign: &Text, value: &Text) -> Result<(), FormatError> {

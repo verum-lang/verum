@@ -118,3 +118,18 @@ fn declared_protocol_receiver_permissions_are_not_erased_by_a_metadata_spelling(
         assert!(found.iter().any(|e| e.contains("SharedReferenceWrite")), "{source}: {found:?}");
     }
 }
+
+#[test]
+fn formatter_radix_helper_is_visible_only_inside_core() {
+    let providers = [
+        ("core.base.maybe", include_str!("../../../core/base/maybe.vr")),
+        ("core.base.result", include_str!("../../../core/base/result.vr")),
+        ("core.base.ordering", include_str!("../../../core/base/ordering.vr")),
+        ("core.base.protocols", include_str!("../../../core/base/protocols.vr")),
+    ];
+    let client = "mount core.base.protocols.TextFormatter; fn render(out: &mut TextFormatter) {";
+    let public = errors(&format!("{client} let _ = out.write_int(31); }}"), &providers);
+    assert!(public.is_empty(), "{public:?}");
+    let restricted = errors(&format!("{client} let _ = out.write_int_base(31, 16, false); }}"), &providers);
+    assert!(restricted.iter().any(|error| error.contains("MethodNotFound") && error.contains("write_int_base")), "{restricted:?}");
+}
