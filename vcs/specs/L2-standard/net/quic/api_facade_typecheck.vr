@@ -4,11 +4,17 @@
 // @tags: quic, api, client, server, typecheck
 // @timeout: 10000
 
+module core.net.quic.api.tests.facade;
+
 mount core.net.quic.api.{
     QuicClient, QuicClientOptions, QuicClientError,
     QuicServer, QuicServerOptions, QuicServerError, QuicAccepted,
-    QuicStream, QuicStreamError,
+    QuicApiStream, QuicSendStream, QuicRecvStream,
 };
+
+mount core.collections.list.{List};
+mount core.net.quic.transport_params.encode;
+mount core.net.tls13.handshake.server_sm.CertSigner;
 
 async fn check_client_api() -> Result<(), QuicClientError> {
     let opts = QuicClientOptions.default();
@@ -16,18 +22,25 @@ async fn check_client_api() -> Result<(), QuicClientError> {
     let mut client = QuicClient.connect(&authority, opts).await?;
     let _ = client.authority();
     let _ = client.peer_addr();
-    let _ = client.open_bidi_stream().await;
-    let _ = client.open_uni_stream().await;
+    let stream: QuicApiStream = client.open_bidi_stream().await?;
+    let sid = stream.stream_id();
+    let (send, recv): (QuicSendStream, QuicRecvStream) = stream.into_halves();
+    assert(send.stream_id() == sid && recv.stream_id() == sid);
+    let uni: QuicSendStream = client.open_uni_stream().await?;
+    let _ = uni.stream_id();
     let _ = client.send_datagram(b"ping").await;
     Ok(())
 }
 
-fn check_server_shape() {
-    let _ = QuicServerOptions.from_cert;
-    let _ = QuicServer.bind;
+fn server_advertisement(chain: List<List<Byte>>, signer: Heap<dyn CertSigner>) -> List<Byte> {
+    let opts = QuicServerOptions.from_cert(chain, signer);
+    let mut wire: List<Byte> = [];
+    encode(opts.transport_params(), &mut wire);
+    wire
 }
 
 fn main() {
     let _ = check_client_api;
-    check_server_shape();
+    let _ = server_advertisement;
+    let _ = QuicServer.bind;
 }

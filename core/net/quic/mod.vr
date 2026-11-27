@@ -148,8 +148,8 @@ public mount .stats_prometheus.{
 
 // Re-exports — address-validation tokens
 public mount .address_token.{
-    AddressTokenKey, TokenKind, TokenPlaintext, TokenError,
-    VerifyOptions,
+    AddressTokenKey, QuicTokenKind, TokenPlaintext, TokenError,
+    QuicTokenVerifyOptions,
     issue, verify, ip_bytes_from,
 };
 

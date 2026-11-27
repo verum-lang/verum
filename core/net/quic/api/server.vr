@@ -5,23 +5,8 @@
 // =============================================================================
 //
 
-// User-facing QUIC server. Binds a UDP socket, runs the QUIC
-// Initial-packet dispatch + TLS 1.3 server handshake per peer,
-// exposes `accept()` returning a live connection + peer-opened
-// streams.
-//
-
-//  let server = QuicServer.bind("[::]:443", opts).await?;
-//  loop {
-//  let accepted = server.accept().await?;
-//  nursery.spawn(async move {
-//  let mut s = accepted.next_bidi_stream().await?;
-//  let body = s.read_to_end().await?;
-//  s.write_all(&process(body)).await?;
-//  s.close().await?;
-//  });
-//  }
-//
+// Server options describe the TLS credentials and the local QUIC receive limits.
+// Accepting a peer requires a listener and a completed QUIC handshake.
 
 // =============================================================================
 
@@ -36,13 +21,6 @@ mount core.collections.list.{List};
 mount core.time.duration.{Duration};
 mount core.net.addr.{SocketAddr};
 mount core.net.quic.transport_params.{TransportParams};
-// `QuicApiStream` is not a declared name: api/stream.vr declares
-// `QuicApiStream` (same three fields — stream_id, send, recv). The
-// bare spelling resolved to the TRANSPORT-level `QuicApiStream` in
-// net/quic/stream.vr, whose shape is handle/connection_id/stream_id/
-// direction, so every field of the constructed value went through a
-// positional GUESS (T0723). Aliased at the mount, as the sibling
-// Send/Recv halves already are.
 mount core.net.quic.api.stream.{QuicApiStream, QuicRecvStream, QuicStreamError};
 mount core.net.tls13.cipher_suite.{CipherSuite};
 mount core.net.tls13.named_group.{NamedGroup};
@@ -68,16 +46,6 @@ public type QuicServerOptions is {
 
 implement QuicServerOptions {
     public fn from_cert(cert_chain: List<List<Byte>>, signer: Heap<dyn CertSigner>) -> QuicServerOptions {
-        let mut params = TransportParams.defaults();
-        params.initial_max_data                    = 10_485_760_u64;    // 10 MiB
-        params.initial_max_stream_data_bidi_local  = 1_048_576_u64;     // 1 MiB
-        params.initial_max_stream_data_bidi_remote = 1_048_576_u64;
-        params.initial_max_stream_data_uni         = 1_048_576_u64;
-        params.initial_max_streams_bidi            = 128_u64;
-        params.initial_max_streams_uni             = 128_u64;
-        params.max_idle_timeout_ms                 = 30_000_u64;
-        params.active_connection_id_limit          = 4_u64;
-
         QuicServerOptions {
             cert_chain:       cert_chain,
             signer:           signer,
@@ -89,11 +57,14 @@ implement QuicServerOptions {
                 CipherSuite.TlsAes256GcmSha384,
             ],
             dhe_pool:         Heap.new(LocalDhePool.new()) as Heap<dyn DhePool>,
-            params:           params,
+            params:           TransportParams.server_defaults(),
             idle_timeout:     Duration.from_secs(30),
             max_connections:  0_u64,
         }
     }
+
+    /// The local parameters carried in the QUIC transport-parameters extension.
+    public fn transport_params(&self) -> &TransportParams { &self.params }
 
     public fn with_alpn(mut self, alpn: List<List<Byte>>) -> QuicServerOptions {
         self.alpn_prefs = alpn;
@@ -173,14 +144,11 @@ implement QuicAccepted {
     }
 
     pub async fn send_datagram(&mut self, data: &[Byte]) -> Result<(), QuicServerError> {
-        let _ = data;
-        Result.Ok(())
+        Result.Err(QuicServerError.Closed)
     }
 
     pub async fn close(&mut self, error_code: UInt64, reason: &Text) -> Result<(), QuicServerError> {
-        let _ = error_code;
-        let _ = reason;
-        Result.Ok(())
+        Result.Err(QuicServerError.Closed)
     }
 }
 
@@ -190,74 +158,30 @@ implement QuicAccepted {
 
 public type QuicServer is {
     local_addr: SocketAddr,
-    opts:       QuicServerOptions,
 };
 
 implement QuicServer {
-    /// Bind a UDP socket and prepare to accept QUIC connections.
-    /// The server is idle until `accept()` / `accept_loop()` drive it.
+    /// Parse the listener address. A server handle requires a bound UDP transport.
     pub async fn bind(addr_text: &Text, opts: QuicServerOptions) -> Result<QuicServer, QuicServerError> {
-        let addr = SocketAddr.from_text(addr_text.clone())
-            .map_err(|_| QuicServerError.Bind(Text.from(f"parse addr {addr_text}")))?;
-        Result.Ok(QuicServer {
-            local_addr: addr,
-            opts:       opts,
-        })
+        match SocketAddr.from_text(addr_text) {
+            Result.Err(_) => Result.Err(QuicServerError.Bind(f"parse addr {addr_text}")),
+            Result.Ok(_) => Result.Err(QuicServerError.Bind(Text.from("QUIC server listener transport is unavailable"))),
+        }
     }
 
-    /// Block until a new peer completes the QUIC + TLS handshake;
-    /// return its `QuicAccepted` handle. The accept loop is an
-    /// infinite generator — caller spawns each accepted connection
-    /// into a per-peer nursery task.
     pub async fn accept(&mut self) -> Result<QuicAccepted, QuicServerError> {
-        // Real implementation:
-        //  1. UDP recv_batch on the listener socket.
-        //  2. For each datagram: parse Initial packet, check the
-        //  5-tuple against the live connection table; if new,
-        //  check anti-amplification budget against max_connections;
-        //  spin up a fresh QuicConnectionSm<Initial> + HandshakeDriver
-        //  on ServerSm.
-        //  3. Drive handshake until 1-RTT keys installed + peer
-        //  transport params parsed.
-        //  4. Wrap the QuicConnectionSm<OneRtt> in a QuicAccepted and
-        //  return.
-        //
-
-        // The shape is carried here for the integration commit;
-        // returning a Handshake stub keeps the SM well-typed.
-        Result.Err(QuicServerError.Handshake(Text.from("accept pending transport wire-up")))
+        Result.Err(QuicServerError.Closed)
     }
 
-    /// Convenience: run accept() in a loop, spawning `handler` for
-    /// each new connection. Errors in one connection never bring
-    /// down the loop.
+    /// Deliver accepted connections to a synchronous handler until the listener closes.
     pub async fn accept_loop<F>(&mut self, handler: F) -> Result<(), QuicServerError>
     where F: fn(QuicAccepted) -> (),
     {
         loop {
             match self.accept().await {
-                Result.Ok(accepted) => {
-                    // `core.async.nursery.spawn` named nothing: `spawn`
-                    // on a Nursery is a METHOD (`&mut self`), and a
-                    // module-path call to a name that resolves nowhere
-                    // was accepted silently — so every accepted
-                    // connection was dropped instead of handled
-                    // (T0806). The free task spawner is the callee this
-                    // wanted.
-                    let _ = core.async.task.spawn(async move {
-                        handler(accepted);
-                    });
-                },
-                Result.Err(e) => {
-                    // Log + continue; only propagate truly fatal errors.
-                    match e {
-                        QuicServerError.Bind(_)  => return Result.Err(e),
-                        QuicServerError.Closed   => return Result.Ok(()),
-                        _ => {
-                            // Transient — next iteration.
-                        },
-                    }
-                },
+                Result.Ok(accepted) => { handler(accepted); },
+                Result.Err(QuicServerError.Closed) => return Result.Ok(()),
+                Result.Err(e) => return Result.Err(e),
             }
         }
     }

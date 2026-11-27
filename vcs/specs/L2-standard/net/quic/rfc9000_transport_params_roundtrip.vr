@@ -1,98 +1,92 @@
-// @test: typecheck-pass
+// @test: run-interpreter
 // @tier: 0
 // @level: L2
 // @tags: quic, rfc9000, transport-params, encode, decode, roundtrip
-// @timeout: 10000
-//
-// RFC 9000 §18 — QUIC transport-parameter wire format.
-//
-// Parameter table:
-//   0x01 max_idle_timeout        (varint, milliseconds)
-//   0x03 max_udp_payload_size    (varint, bytes)
-//   0x04 initial_max_data        (varint)
-//   0x05 initial_max_stream_data_bidi_local  (varint)
-//   0x06 initial_max_stream_data_bidi_remote (varint)
-//   0x07 initial_max_stream_data_uni         (varint)
-//   0x08 initial_max_streams_bidi            (varint)
-//   0x09 initial_max_streams_uni             (varint)
-//   0x0a ack_delay_exponent      (varint, default 3, max 20)
-//   0x0b max_ack_delay           (varint, default 25, max 2^14-1)
-//   0x0c disable_active_migration (zero-length present/absent)
-//   0x0e active_connection_id_limit (varint, default 2, min 2)
-//
-// This KAT constructs a representative client-side parameter set,
-// encodes it through `transport_params.encode`, decodes the result
-// via `transport_params.decode`, and verifies semantic round-trip.
-// Catches silent drift in any of the 12 scalar parameters + the
-// two boolean flags under one compilation surface.
+// @timeout: 15000
+// @expected-exit: 0
+// @expected-stdout: QUIC endpoint advertisements verified
 
-mount core.net.quic.transport_params.{TransportParams, encode, decode, TpError};
-mount core.collections.List;
+module core.net.quic.api.tests.endpoint_advertisements;
 
-fn build_client_params() -> TransportParams {
-    let mut tp = TransportParams.defaults();
-    // A realistic client advert: 30s idle, 1452B MTU, 1 MiB FC window,
-    // 100 bidi + 10 uni initial stream-count budget, 2^14-1 max ack
-    // delay, 4 active CIDs, migration enabled.
-    tp.max_idle_timeout_ms = 30_000_u64;
-    tp.max_udp_payload_size = 1452_u64;
-    tp.initial_max_data = 1_048_576_u64;
-    tp.initial_max_stream_data_bidi_local = 262_144_u64;
-    tp.initial_max_stream_data_bidi_remote = 262_144_u64;
-    tp.initial_max_stream_data_uni = 131_072_u64;
-    tp.initial_max_streams_bidi = 100_u64;
-    tp.initial_max_streams_uni = 10_u64;
-    tp.ack_delay_exponent = 3_u8;
-    tp.max_ack_delay_ms = 25_u64;
-    tp.active_connection_id_limit = 4_u64;
-    tp.disable_active_migration = false;
-    tp.grease_quic_bit = true;
-    tp
-}
+mount core.collections.list.{List};
+mount core.net.quic.api.{QuicClientOptions};
+mount core.net.quic.transport_params.{TransportParams, TpError, encode, decode};
 
-fn check_roundtrip() -> Result<(), TpError> {
-    let params = build_client_params();
-
-    // Encode into a scratch buffer.
-    let mut wire: List<Byte> = [];
-    encode(&params, &mut wire);
-    assert(wire.len() > 0);
-
-    // Decode back and compare structurally.
-    let decoded = decode(wire.as_slice())?;
-    assert(decoded.max_idle_timeout_ms == params.max_idle_timeout_ms);
-    assert(decoded.max_udp_payload_size == params.max_udp_payload_size);
-    assert(decoded.initial_max_data == params.initial_max_data);
-    assert(decoded.initial_max_stream_data_bidi_local
-           == params.initial_max_stream_data_bidi_local);
-    assert(decoded.initial_max_stream_data_bidi_remote
-           == params.initial_max_stream_data_bidi_remote);
-    assert(decoded.initial_max_stream_data_uni == params.initial_max_stream_data_uni);
-    assert(decoded.initial_max_streams_bidi == params.initial_max_streams_bidi);
-    assert(decoded.initial_max_streams_uni == params.initial_max_streams_uni);
-    assert(decoded.ack_delay_exponent == params.ack_delay_exponent);
-    assert(decoded.max_ack_delay_ms == params.max_ack_delay_ms);
-    assert(decoded.active_connection_id_limit == params.active_connection_id_limit);
-    assert(decoded.disable_active_migration == params.disable_active_migration);
-    assert(decoded.grease_quic_bit == params.grease_quic_bit);
-    Ok(())
-}
-
-fn check_defaults_roundtrip() -> Result<(), TpError> {
-    // RFC 9000 §18.2 — default values per parameter. Round-tripping
-    // defaults should yield defaults.
-    let tp = TransportParams.defaults();
-    let mut wire: List<Byte> = [];
-    encode(&tp, &mut wire);
-    let decoded = decode(wire.as_slice())?;
-    assert(decoded.ack_delay_exponent == 3_u8);
-    assert(decoded.max_ack_delay_ms == 25_u64);
-    assert(decoded.max_udp_payload_size == 65527_u64);
-    assert(decoded.active_connection_id_limit == 2_u64);
-    Ok(())
+fn check_bytes(params: &TransportParams, expected: &[Byte]) {
+    assert(params.bounds_ok());
+    let mut encoded: List<Byte> = [];
+    encode(params, &mut encoded);
+    assert(encoded.len() == expected.len());
+    let mut i = 0;
+    while i < expected.len() {
+        assert(encoded[i] == expected[i]);
+        i = i + 1;
+    }
 }
 
 fn main() {
-    let _ = check_roundtrip();
-    let _ = check_defaults_roundtrip();
+    // Each row is a complete RFC 9000 parameter (ID, length and varint value).
+    let defaults_wire: List<Byte> = [
+        0x01, 0x01, 0x00,
+        0x03, 0x04, 0x80, 0x00, 0xff, 0xf7,
+        0x04, 0x01, 0x00,
+        0x05, 0x01, 0x00,
+        0x06, 0x01, 0x00,
+        0x07, 0x01, 0x00,
+        0x08, 0x01, 0x00,
+        0x09, 0x01, 0x00,
+        0x0a, 0x01, 0x03,
+        0x0b, 0x01, 0x19,
+        0x0e, 0x01, 0x02,
+    ];
+    check_bytes(&TransportParams.defaults(), defaults_wire.as_slice());
+    check_bytes(&decode(defaults_wire.as_slice()).unwrap(), defaults_wire.as_slice());
+
+    let client_wire: List<Byte> = [
+        0x01, 0x04, 0x80, 0x00, 0x75, 0x30,
+        0x03, 0x04, 0x80, 0x00, 0xff, 0xf7,
+        0x04, 0x04, 0x80, 0x10, 0x00, 0x00,
+        0x05, 0x04, 0x80, 0x04, 0x00, 0x00,
+        0x06, 0x04, 0x80, 0x04, 0x00, 0x00,
+        0x07, 0x04, 0x80, 0x04, 0x00, 0x00,
+        0x08, 0x02, 0x40, 0x64,
+        0x09, 0x02, 0x40, 0x64,
+        0x0a, 0x01, 0x03,
+        0x0b, 0x01, 0x19,
+        0x0e, 0x01, 0x02,
+    ];
+    let client = QuicClientOptions.default();
+    check_bytes(client.transport_params(), client_wire.as_slice());
+    check_bytes(&decode(client_wire.as_slice()).unwrap(), client_wire.as_slice());
+
+    let server_wire: List<Byte> = [
+        0x01, 0x04, 0x80, 0x00, 0x75, 0x30,
+        0x03, 0x04, 0x80, 0x00, 0xff, 0xf7,
+        0x04, 0x04, 0x80, 0xa0, 0x00, 0x00,
+        0x05, 0x04, 0x80, 0x10, 0x00, 0x00,
+        0x06, 0x04, 0x80, 0x10, 0x00, 0x00,
+        0x07, 0x04, 0x80, 0x10, 0x00, 0x00,
+        0x08, 0x02, 0x40, 0x80,
+        0x09, 0x02, 0x40, 0x80,
+        0x0a, 0x01, 0x03,
+        0x0b, 0x01, 0x19,
+        0x0e, 0x01, 0x04,
+    ];
+    check_bytes(&TransportParams.server_defaults(), server_wire.as_slice());
+    check_bytes(&decode(server_wire.as_slice()).unwrap(), server_wire.as_slice());
+
+    // A zero-length extension flag survives the same decode and encode path.
+    let mut flagged = client_wire.clone();
+    flagged.extend_from_slice(&[0x6a_u8, 0xb2_u8, 0x00_u8]);
+    check_bytes(&decode(flagged.as_slice()).unwrap(), flagged.as_slice());
+    // A missing parameter body and an incomplete parameter ID retain distinct errors.
+    match decode(&[0x01_u8, 0x01_u8]) {
+        Result.Err(TpError.Truncated) => {},
+        _ => panic("missing transport parameter body"),
+    }
+    match decode(&[0x40_u8]) {
+        Result.Err(TpError.VarintFailure) => {},
+        _ => panic("incomplete transport parameter ID"),
+    }
+    print("QUIC endpoint advertisements verified");
 }

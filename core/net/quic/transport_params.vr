@@ -34,7 +34,7 @@ module core.net.quic.transport_params;
 
 mount core.time.duration.{Duration};
 mount core.collections.list.{List};
-mount core.encoding.varint.{quic_encode_into, quic_decode, VarintError};
+mount core.encoding.varint.{quic_encode_into, quic_decode};
 mount core.net.quic.connection_id.{ConnectionId, MAX_CID_LEN};
 mount core.net.quic.stream_sm.flow_control.{ConnFlowControl};
 
@@ -120,6 +120,31 @@ implement TransportParams {
     pub(in core.net.quic) fn local_bidi_receive_limit(&self) -> UInt64 { self.initial_max_stream_data_bidi_local }
     pub(in core.net.quic) fn remote_bidi_receive_limit(&self) -> UInt64 { self.initial_max_stream_data_bidi_remote }
     pub(in core.net.quic) fn uni_receive_limit(&self) -> UInt64 { self.initial_max_stream_data_uni }
+
+    /// Local receive limits advertised by a high-level client.
+    public fn client_defaults() -> TransportParams {
+        TransportParams.endpoint_advertisement(1_048_576_u64, 262_144_u64, 100_u64, 2_u64)
+    }
+
+    /// Local receive limits advertised by a high-level server.
+    public fn server_defaults() -> TransportParams {
+        TransportParams.endpoint_advertisement(10_485_760_u64, 1_048_576_u64, 128_u64, 4_u64)
+    }
+
+    fn endpoint_advertisement(
+        connection_bytes: UInt64, stream_bytes: UInt64, stream_count: UInt64, cid_limit: UInt64,
+    ) -> TransportParams {
+        let mut p = TransportParams.defaults();
+        p.initial_max_data = connection_bytes;
+        p.initial_max_stream_data_bidi_local = stream_bytes;
+        p.initial_max_stream_data_bidi_remote = stream_bytes;
+        p.initial_max_stream_data_uni = stream_bytes;
+        p.initial_max_streams_bidi = stream_count;
+        p.initial_max_streams_uni = stream_count;
+        p.max_idle_timeout_ms = 30_000_u64;
+        p.active_connection_id_limit = cid_limit;
+        p
+    }
 
     /// Default values per RFC 9000 §18.2.
     public fn defaults() -> TransportParams {
@@ -217,7 +242,12 @@ implement PartialEq for TpError {
 
 implement Eq for TpError {}
 
-fn vfail<T>(_: VarintError) -> Result<T, TpError> { Result.Err(TpError.VarintFailure) }
+fn decode_varint(buf: &[Byte], start: Int) -> Result<(UInt64, Int), TpError> {
+    match quic_decode(buf, start) {
+        Result.Ok(pair) => Result.Ok(pair),
+        Result.Err(_) => Result.Err(TpError.VarintFailure),
+    }
+}
 
 // =============================================================================
 // Encode
@@ -325,8 +355,8 @@ public fn decode(buf: &[Byte]) -> Result<TransportParams, TpError> {
     let mut out = TransportParams.defaults();
     let mut pos: Int = 0;
     while pos < buf.len() {
-        let (id,  p1) = quic_decode(buf, pos).or_else(vfail)?;
-        let (len, p2) = quic_decode(buf, p1).or_else(vfail)?;
+        let (id,  p1) = decode_varint(buf, pos)?;
+        let (len, p2) = decode_varint(buf, p1)?;
         let value_end = p2 + (len as Int);
         if value_end > buf.len() { return Result.Err(TpError.Truncated); }
         // Slice containing just this parameter's value.
@@ -398,7 +428,7 @@ fn apply_param(p: &mut TransportParams, id: UInt64, value: &[Byte]) -> Result<()
 }
 
 fn read_varint_all(buf: &[Byte]) -> Result<UInt64, TpError> {
-    let (v, next) = quic_decode(buf, 0).or_else(vfail)?;
+    let (v, next) = decode_varint(buf, 0)?;
     if next != buf.len() {
         return Result.Err(TpError.InvalidLength(Text.from("varint param has trailing bytes")));
     }
