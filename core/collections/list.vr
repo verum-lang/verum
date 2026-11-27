@@ -515,38 +515,23 @@ implement<T> List<T> {
 
     // Clear all elements.
     public fn clear(&mut self) {
-        while self.pop().is_some() {}
+        self.truncate(0);
     }
 
     // Truncate to len elements.
     public fn truncate(&mut self, new_len: Int) {
-        if new_len >= self.len {
-            return;
-        }
-        while self.len > new_len {
-            self.pop();
+        let end = if new_len < 0 { 0 } else { new_len };
+        while self.len > end {
+            let last = self.len - 1;
+            let removed: T = unsafe { list_storage_read(self, last) };
+            self.len = last;
         }
     }
 
     /// Retain only elements satisfying predicate.
     /// Preserves the relative order of retained elements.
     public fn retain<F: fn(&T) -> Bool>(&mut self, f: F) {
-        let mut write = 0;
-        let mut read = 0;
-        while read < self.len {
-            let elem: &T = unsafe { &*self.ptr.offset(read) };
-            if f(elem) {
-                if write != read {
-                    unsafe {
-                        let val = ptr_read(self.ptr.offset(read));
-                        ptr_write(self.ptr.offset(write), val);
-                    }
-                }
-                write = write + 1;
-            }
-            read = read + 1;
-        }
-        self.len = write;
+        self.retain_mut(|item| f(item));
     }
 
     // Swap two elements.
@@ -1186,22 +1171,18 @@ implement<T> List<T> {
     /// giving mutable access to each element before the decision.
     /// Elements can be modified in-place during retention.
     public fn retain_mut<F: fn(&mut T) -> Bool>(&mut self, f: F) {
-        let mut write_idx = 0;
-        let mut read_idx = 0;
-        while read_idx < self.len {
-            let item: &mut T = unsafe { &mut *self.ptr.offset(read_idx) };
-            if f(item) {
-                if write_idx != read_idx {
-                    unsafe {
-                        let val = ptr_read(self.ptr.offset(read_idx) as &unsafe T);
-                        ptr_write(self.ptr.offset(write_idx) as &unsafe T, val);
-                    }
-                }
-                write_idx = write_idx + 1;
+        // Every slot remains initialized while user code runs. Kept elements
+        // form an ordered prefix; rejected elements still have one owner.
+        let mut kept = 0;
+        let mut read = 0;
+        while read < self.len {
+            if f(&mut self[read]) {
+                if kept != read { self.swap(kept, read); }
+                kept = kept + 1;
             }
-            read_idx = read_idx + 1;
+            read = read + 1;
         }
-        self.len = write_idx;
+        self.truncate(kept);
     }
 
     // =========================================================================

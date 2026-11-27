@@ -1,18 +1,8 @@
 //! Real List source bodies and the ordinary interpreter method dispatch surface.
 #![cfg(feature = "codegen")]
-use verum_ast::{
-    ItemKind,
-    decl::{ImplItemKind, ImplKind},
-};
-use verum_fast_parser::Parser;
-use verum_vbc::codegen::{ItemFailurePolicy, VbcCodegen};
-fn is_list(ty: &verum_ast::Type) -> bool {
-    match &ty.kind {
-        verum_ast::ty::TypeKind::Path(p) => p.as_ident().is_some_and(|i| i.name == "List"),
-        verum_ast::ty::TypeKind::Generic { base, .. } => is_list(base),
-        _ => false,
-    }
-}
+#[path = "fixtures/list_storage.rs"]
+mod list_storage;
+
 fn execute(source: &str) -> i64 {
     execute_with_method_names(source, true)
 }
@@ -27,163 +17,7 @@ fn try_execute_with_method_names(
     source: &str,
     rename_methods: bool,
 ) -> verum_vbc::interpreter::InterpreterResult<verum_vbc::Value> {
-    let mut ast = Parser::new(source).parse_module().expect("caller grammar");
-    let mut core = Parser::new(include_str!("../../../core/collections/list.vr"))
-        .parse_module()
-        .expect("core grammar");
-    core.items.retain_mut(|item| match &mut item.kind {
-        ItemKind::Type(t) => t.name.name == "List",
-        ItemKind::Function(f) => f.name.name == "list_max_len",
-        ItemKind::Impl(i) if matches!(&i.kind, ImplKind::Inherent(t) if is_list(t)) => {
-            // clear/truncate retain their real call to the original pop body.
-            let original_pop = i
-                .items
-                .iter()
-                .find(|item| {
-                    matches!(&item.kind,
-                ImplItemKind::Function(function) if function.name.name == "pop")
-                })
-                .cloned();
-            i.items.retain_mut(|m| {
-                let ImplItemKind::Function(f) = &mut m.kind else {
-                    return false;
-                };
-                if [
-                    "with_capacity",
-                    "try_with_capacity",
-                    "clear",
-                    "truncate",
-                    "get",
-                    "set",
-                    "push",
-                    "pop",
-                    "insert",
-                    "remove",
-                    "swap",
-                    "swap_remove",
-                ]
-                .contains(&f.name.name.as_str())
-                {
-                    // Keep the actual source body while avoiding native method
-                    // intercepts: these tests exercise the source implementation.
-                    if rename_methods {
-                        f.name.name = format!("checked_{}", f.name.name).into();
-                    }
-                    true
-                } else {
-                    [
-                        "new",
-                        "len",
-                        "capacity",
-                        "reserve",
-                        "shrink_to_fit",
-                        "resize_buffer",
-                        "try_resize_buffer",
-                        "free_buffer",
-                        "grow",
-                        "next_cap",
-                        "reverse",
-                    ]
-                    .contains(&f.name.name.as_str())
-                }
-            });
-            if let Some(original_pop) = original_pop.filter(|_| rename_methods) {
-                i.items.push(original_pop);
-            }
-            true
-        }
-        _ => false,
-    });
-    ast.items.extend(core.items);
-    let mut memory = Parser::new(include_str!("../../../core/intrinsics/memory.vr"))
-        .parse_module()
-        .expect("memory grammar");
-    memory.items.retain(|item| matches!(&item.kind, ItemKind::Function(f) if ["list_storage_read", "list_storage_write", "list_storage_move", "list_storage_resize"].contains(&f.name.name.as_str())));
-    ast.items.extend(memory.items);
-    let mut primitives = Parser::new(include_str!("../../../core/base/primitives.vr"))
-        .parse_module()
-        .expect("primitive grammar");
-    primitives.items.retain_mut(|item| {
-        let ItemKind::Impl(decl) = &mut item.kind else { return false; };
-        if !matches!(&decl.kind, ImplKind::Inherent(ty) if matches!(&ty.kind,
-            verum_ast::ty::TypeKind::Int)) {
-            return false;
-        }
-        decl.items.retain(|item| matches!(&item.kind, ImplItemKind::Function(function) if function.name.name == "checked_mul"));
-        true
-    });
-    ast.items.extend(primitives.items);
-    let mut arithmetic = Parser::new(include_str!("../../../core/intrinsics/arithmetic.vr"))
-        .parse_module()
-        .expect("arithmetic grammar");
-    arithmetic.items.retain(|item| matches!(&item.kind, ItemKind::Function(function) if function.name.name == "checked_mul"));
-    ast.items.extend(arithmetic.items);
-    let mut allocation = Parser::new(include_str!("../../../core/mem/allocator.vr"))
-        .parse_module()
-        .expect("allocator grammar");
-    allocation.items.retain(
-        |item| matches!(&item.kind, ItemKind::Type(decl) if decl.name.name == "AllocError"),
-    );
-    ast.items.extend(allocation.items);
-    let result_owner =
-        Parser::new("module core.base.result; public type Result<T,E> is Ok(T) | Err(E);")
-            .parse_module()
-            .expect("canonical Result source owner");
-    let mut maybe_owner =
-        Parser::new("module core.base.maybe; public type Maybe<T> is None | Some(T);")
-            .parse_module()
-            .expect("canonical Maybe source owner");
-    let mut maybe_methods = Parser::new(include_str!("../../../core/base/maybe.vr"))
-        .parse_module()
-        .expect("actual Maybe source");
-    maybe_methods.items.retain_mut(|item| {
-        let ItemKind::Impl(decl) = &mut item.kind else {
-            return false;
-        };
-        if !matches!(&decl.kind, ImplKind::Inherent(_)) {
-            return false;
-        }
-        decl.items.retain(|item| {
-            matches!(&item.kind, ImplItemKind::Function(function)
-            if function.name.name == "is_some")
-        });
-        !decl.items.is_empty()
-    });
-    maybe_owner.items.extend(maybe_methods.items);
-
-    let mut codegen = VbcCodegen::new();
-    codegen.register_builtin_variants();
-    codegen.register_stdlib_constants();
-    codegen.register_stdlib_intrinsics();
-    codegen
-        .collect_unit_declarations(&[&maybe_owner, &result_owner, &ast])
-        .expect("declarations");
-    codegen
-        .compile_unit_items(
-            &[&maybe_owner, &result_owner, &ast],
-            ItemFailurePolicy::Strict,
-        )
-        .expect("source bodies");
-    let mut vbc = codegen.finalize_module().expect("source VBC");
-    vbc.resolve_protocol_dispatch();
-    for function in &mut vbc.functions {
-        function.is_generic = !function.type_params.is_empty();
-    }
-    let mut graph = verum_vbc::mono::InstantiationGraph::new();
-    for function in &vbc.functions {
-        let body = &vbc.bytecode[function.bytecode_offset as usize
-            ..(function.bytecode_offset + function.bytecode_length) as usize];
-        verum_vbc::mono::discover_call_instantiations(
-            &vbc,
-            &verum_vbc::bytecode::decode_instructions(body).unwrap(),
-            function.func_id_base,
-            &mut graph,
-        )
-        .expect("source call discovery");
-    }
-    let vbc = verum_vbc::mono::monomorphize_minimal(vbc, &graph)
-        .expect("source mono")
-        .module;
+    let vbc = list_storage::compile(source, rename_methods);
     let bytes = verum_vbc::serialize::serialize_module(&vbc).expect("source wire");
     let vbc = verum_vbc::deserialize::deserialize_module(&bytes).expect("source roundtrip");
     assert!(vbc.header.version_minor >= 22);
@@ -482,12 +316,12 @@ fn ordinary_reordering_rejects_malformed_owners_before_access() {
             (
                 "values.len=1;",
                 "values.reverse();",
-                "range exceeds capacity",
+                "length exceeds capacity",
             ),
             (
                 "values.len=2;",
                 "values.swap(0,1);",
-                "range exceeds capacity",
+                "length exceeds capacity",
             ),
             ("", "values.swap(0,0);", "out of bounds"),
         ] {
@@ -504,6 +338,21 @@ fn ordinary_reordering_rejects_malformed_owners_before_access() {
                 error.contains(diagnostic),
                 "{ty}: {setup} {operation}: {error}"
             );
+        }
+    }
+}
+
+#[test]
+fn retained_owners_survive_serialization_with_their_declared_cleanup() {
+    let module = list_storage::compile(list_storage::RETAIN_OWNERSHIP, false);
+    let bytes = verum_vbc::serialize::serialize_module(&module).expect("serialize list operations");
+    let decoded = verum_vbc::deserialize::deserialize_module(&bytes).expect("decode list operations");
+    for module in [module, decoded] {
+        let module = verum_common::Shared::new(module).into_arc();
+        let mut vm = verum_vbc::interpreter::Interpreter::try_new_validated(module.clone()).expect("valid source module");
+        for name in list_storage::RETAIN_PROBES {
+            let entry = module.find_function_by_name(&format!("core.collections.tests.list_retain_ownership.{name}")).unwrap();
+            vm.execute_function(entry).unwrap_or_else(|error| panic!("{name}: {error}"));
         }
     }
 }

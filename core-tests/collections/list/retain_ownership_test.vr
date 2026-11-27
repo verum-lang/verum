@@ -1,0 +1,100 @@
+module core.collections.tests.list_retain_ownership;
+mount core.collections.list.List;
+mount core.base.protocols.Drop;
+
+static mut FIRST_DROPS: Int = 0;
+static mut SECOND_DROPS: Int = 0;
+static mut THIRD_DROPS: Int = 0;
+static mut FOURTH_DROPS: Int = 0;
+
+fn reset_drops() {
+    unsafe {
+        FIRST_DROPS = 0;
+        SECOND_DROPS = 0;
+        THIRD_DROPS = 0;
+        FOURTH_DROPS = 0;
+    }
+}
+type affine Ticket is { id: Int };
+type affine Entry<T> is { value: T, visits: Int };
+
+implement Drop for Ticket {
+    fn drop(&mut self) {
+        unsafe {
+            match self.id {
+                0 => { FIRST_DROPS = FIRST_DROPS + 1; },
+                1 => { SECOND_DROPS = SECOND_DROPS + 1; },
+                2 => { THIRD_DROPS = THIRD_DROPS + 1; },
+                3 => { FOURTH_DROPS = FOURTH_DROPS + 1; },
+                _ => panic("unexpected ticket"),
+            }
+        }
+    }
+}
+
+fn owned_inputs() -> List<Entry<Ticket>> {
+    let mut entries: List<Entry<Ticket>> = List.new();
+    let mut id = 0;
+    while id < 4 {
+        entries.push(Entry { value: Ticket { id: id }, visits: 0 });
+        id = id + 1;
+    }
+    entries
+}
+
+@test
+fn retain_preserves_order_and_drops_each_rejected_owner_once() {
+    reset_drops();
+    {
+        let mut entries = owned_inputs();
+        entries.retain(|entry| entry.value.id % 2 == 1);
+        assert(entries.len() == 2);
+        assert(entries[0].value.id == 1 && entries[1].value.id == 3);
+        assert(unsafe { FIRST_DROPS == 1 && SECOND_DROPS == 0 && THIRD_DROPS == 1 && FOURTH_DROPS == 0 });
+        entries.retain_mut(|entry| {
+            entry.visits = entry.visits + 1;
+            entry.value.id == 3
+        });
+        assert(entries.len() == 1 && entries[0].value.id == 3 && entries[0].visits == 1);
+        assert(unsafe { SECOND_DROPS == 1 && FOURTH_DROPS == 0 });
+        entries.retain(|entry| true);
+        assert(unsafe { FOURTH_DROPS == 0 });
+        entries.retain(|entry| false);
+        assert(entries.is_empty());
+    }
+    assert(unsafe { FIRST_DROPS == 1 && SECOND_DROPS == 1 && THIRD_DROPS == 1 && FOURTH_DROPS == 1 });
+}
+
+@test
+fn retaining_borrowed_elements_leaves_their_owner_live() {
+    reset_drops();
+    {
+        let owner = Ticket { id: 0 };
+        let mut refs: List<&Ticket> = [&owner, &owner];
+        refs.retain(|item| false);
+        assert(refs.is_empty());
+        assert(unsafe { FIRST_DROPS == 0 });
+    }
+    assert(unsafe { FIRST_DROPS == 1 });
+}
+
+@test
+fn retaining_raw_handles_leaves_their_owner_live() {
+    reset_drops();
+    {
+        let owner = Ticket { id: 0 };
+        let raw = &owner as &unsafe Ticket;
+        let mut refs: List<&unsafe Ticket> = [raw, raw];
+        refs.retain_mut(|item| false);
+        assert(refs.is_empty());
+        assert(unsafe { FIRST_DROPS == 0 });
+        assert(owner.id == 0);
+    }
+    assert(unsafe { FIRST_DROPS == 1 });
+}
+
+fn main() {
+    retain_preserves_order_and_drops_each_rejected_owner_once();
+    retaining_borrowed_elements_leaves_their_owner_live();
+    retaining_raw_handles_leaves_their_owner_live();
+}
