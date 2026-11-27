@@ -209,6 +209,20 @@ fn record_variant_unknown_field_is_still_named_and_refused() {
     );
 }
 
+#[test]
+fn a_mounted_sum_requires_a_declared_record_payload() {
+    for case in ["Missing", "Empty"] {
+        let source = format!(
+            "mount core.field_compatibility.Choice; fn make() -> Choice {{ Choice.{case} {{ number: 7 }} }}"
+        );
+        let (_, errors) = source_checker(&source);
+        assert!(
+            errors.iter().any(|error| error.contains(case)),
+            "undeclared record constructor Choice.{case}: {errors:?}"
+        );
+    }
+}
+
 const PROJECTED_SOURCE: &str = r#"
     mount core.field_compatibility.{Packet};
     type Supply is protocol { type Item; };

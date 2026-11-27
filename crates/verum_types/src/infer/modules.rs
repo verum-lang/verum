@@ -15570,12 +15570,12 @@ impl TypeChecker {
     /// ReduceResult's payload and failed `expected 'Text', found 'Int'`
     /// (79 base/ops + 22 control tests). When the hint matches a
     /// registered parent (exact or dotted-suffix), it wins outright.
-    pub(super) fn try_resolve_variant_constructor_with_arity_for(
+    pub(super) fn select_constructor_parent(
         &self,
         name: &str,
         expected_arity: Option<usize>,
         expected_parent: Option<&str>,
-    ) -> Option<Type> {
+    ) -> Option<Text> {
         if crate::ctor_trace_enabled() {
             eprintln!(
                 "[ctor-trace] try_resolve_variant_constructor_with_arity('{}', {:?}, hint={:?})",
@@ -15908,6 +15908,17 @@ impl TypeChecker {
                 .ok()?;
             }
         }
+        Some(parent_name)
+    }
+
+    pub(super) fn try_resolve_variant_constructor_with_arity_for(
+        &self,
+        name: &str,
+        expected_arity: Option<usize>,
+        expected_parent: Option<&str>,
+    ) -> Option<Type> {
+        let parent_name = self.select_constructor_parent(name, expected_arity, expected_parent)?;
+        let ctor_text = Text::from(name);
         let constructors = match self.ctx.get_constructors(&parent_name) {
             Maybe::Some(c) => c.clone(),
             Maybe::None => return None,

@@ -60,6 +60,35 @@ fn inferred_record_keeps_its_value_argument() {
         "{TYPES} fn make(cell:Cell<7>)->Frame<7>{{ let frame=Frame {{cell:cell}}; frame }}"
     ));
 }
+
+#[test]
+fn record_variants_instantiate_only_their_own_parameters_at_each_construction() {
+    let declarations = "
+        type Wrapped<A> is { item: A };
+        type Entry<Tag, K, V> is Filled { value: V, key: K } | Empty;
+    ";
+    let first = "fn integer() -> Entry<Bool, Int, Int> {
+        Entry.Filled { key: 2, value: 17 }
+    }";
+    let second = "fn wrapped(item: Wrapped<Int>) -> Entry<Int, Bool, Wrapped<Int>> {
+        let entry = Entry.Filled { value: item, key: true };
+        entry
+    }";
+    accept(&format!("{declarations} {first} {second}"));
+    accept(&format!("{declarations} {second} {first}"));
+    let bare = format!("{declarations} {first} {second}").replace("Entry.Filled", "Filled");
+    accept(&bare);
+}
+
+#[test]
+fn record_variant_payload_and_parent_must_match_the_result() {
+    let declarations = "
+        type First<A> is Item { value: A } | Empty;
+        type Second<A> is Item { value: A } | Empty;
+    ";
+    reject(&format!("{declarations} fn bad() -> First<Bool> {{ First.Item {{ value: 7 }} }}"));
+    reject(&format!("{declarations} fn bad() -> Second<Int> {{ First.Item {{ value: 7 }} }}"));
+}
 #[test]
 fn projection_keeps_the_receivers_value_argument() {
     accept(&format!(

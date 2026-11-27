@@ -1772,7 +1772,13 @@ impl TypeChecker {
         let Some((verum_ast::PathSegment::Name(variant), prefix)) = path.segments.split_last() else {
             return Ok(None);
         };
-        if prefix.is_empty() { return Ok(None); }
+        if prefix.is_empty() {
+            if self.has_declared_record_field_policy(variant.as_str(), span) {
+                return Ok(None);
+            }
+            return Ok(self.select_constructor_parent(variant.as_str(), None, None)
+                .map(|owner| (owner, variant.name.clone())));
+        }
         if let Some(owner) = self.declared_constructor_owner(path, span)? {
             return Ok(Some((owner, variant.name.clone())));
         }
@@ -9882,9 +9888,12 @@ impl TypeChecker {
         // #[cfg(debug_assertions)]
         // eprintln!("[DEBUG] infer_expr_inner: Record at {:?}, path={:?}", current_expr.span, path);
 
-        // First check if this is a variant constructor (Type.Variant { ... })
-        if let Some((parent_name, variant_name)) = self.record_variant_parent(path, expr.span)?
-        {
+        if let Some((parent_name, variant_name)) = self.record_variant_parent(path, expr.span)? {
+            if path.as_ident().is_some()
+                && self.diagnose_ambiguous_constructor(variant_name.as_str(), None, expr.span)?
+            {
+                return Ok(InferResult::new(Type::Unknown));
+            }
             // Resolve the complete parent path. A module-qualified constructor
             // has the same payload contract as a locally mounted constructor.
             let type_name = parent_name.as_str();
@@ -9943,9 +9952,6 @@ impl TypeChecker {
                     Option::Some(n) if !matches!(n, Type::Variant(_)) => n.clone(),
                     _ => ty.clone(),
                 };
-                let ty_body_variants = variants.clone();
-                let variants = &ty_body_variants;
-                // It's a variant type! Look up the specific variant
                 if let Some(variant_payload_ty) = variants.get(variant_name) {
                     // Verify the payload is a record type. Metadata ctor
                     // registration FLATTENS record payloads positionally
@@ -9956,8 +9962,7 @@ impl TypeChecker {
                     // variant spelling («RetryBackoff.Linear») instead of
                     // the enum — same root and same remedy as the pattern
                     // binder: consult the parent-qualified
-                    // `__struct_fields_<Type>.<Variant>` side-channel
-                    // (then the bare key) before giving up.
+                    // `__struct_fields_<Type>.<Variant>` declaration.
                     let upgraded_fields: Option<
                         indexmap::IndexMap<verum_common::Text, Type>,
                     > = match variant_payload_ty {
@@ -9967,17 +9972,16 @@ impl TypeChecker {
                                 format!("__struct_fields_{}.{}", type_name, variant_name);
                             match self.ctx.lookup_type(qualified.as_str()) {
                                 Option::Some(Type::Record(m)) => Some(m.clone()),
-                                _ => match self.ctx.lookup_type(
-                                    format!("__struct_fields_{}", variant_name).as_str(),
-                                ) {
-                                    Option::Some(Type::Record(m)) => Some(m.clone()),
-                                    _ => None,
-                                },
+                                _ => None,
                             }
                         }
                     };
                     if let Some(expected_field_types) = upgraded_fields {
-                        // Type check the record fields
+                        // Each constructor use owns one instance of the parent's
+                        // parameters, shared by its payload and nominal result.
+                        let (expected_field_types, arguments) = self.instantiate_nominal_record_fields(
+                            type_name, &expected_field_types, None, expr.span,
+                        )?;
                         let mut provided_fields: indexmap::IndexMap<
                             verum_common::Text,
                             Type,
@@ -10049,177 +10053,25 @@ impl TypeChecker {
                             }
                         }
 
-                        // Return the variant type (the whole Color type, not just the Rgba variant)
-                        return Ok(InferResult::new(ty));
-                    }
-                }
-            }
-
-            // QUALVAR-CONSTRUCT-1 fallback. The rich `Type::Variant` body
-            // could not be materialized above — for a cross-module imported
-            // enum the unqualified key holds a `Type::Named` placeholder that
-            // shadows the lazy body and survives even `resolve_type_name`.
-            // But the FIRST path segment still resolves to that enclosing
-            // type, and the type of an `E.Variant { … }` record-variant
-            // construction IS the enclosing enum `E`, regardless of whether
-            // its fields can be checked here. Yield `E` so the expression
-            // unifies with a matching `let e: E = …` annotation, instead of
-            // falling through to the generic record handler, which mis-types
-            // the literal as the variant `E.Variant`. Field VALUES are still
-            // inferred best-effort to surface gross errors. Restricted to a
-            // `Named` enclosing type: a fully-resolved `Variant`/`Record`
-            // reaching here is a genuine bad-variant/bad-field error that the
-            // block above already reported and must not be masked.
-            if let Option::Some(enclosing @ Type::Named { .. }) =
-                self.ctx.lookup_type(type_name).cloned()
-            {
-                for field_init in fields {
-                    if let Some(ref value_expr) = field_init.value {
-                        let _ = self.infer_expr(value_expr, InferMode::Synth);
-                    }
-                }
-                return Ok(InferResult::new(enclosing));
-            }
-        }
-
-        // SINGLE-SEGMENT VARIANT CONSTRUCTOR CHECK
-        // For paths like `Node { ... }` (without `Tree::` prefix),
-        // check if Node is a variant constructor by looking it up in the environment
-        if path.segments.len() == 1
-            && let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0]
-        {
-            let variant_name = ident.name.as_str();
-
-            // Only a real record declaration can outrank the selected case.
-            // A cached payload map with matching fields grants no namespace authority.
-            let has_record_declaration = self.has_declared_record_field_policy(variant_name, expr.span);
-
-            // Look up the variant constructor in the environment
-            // Variant constructors are registered with type Constructor -> VariantType
-            if !has_record_declaration
-                && !self.explicit_value_outranks_constructor(variant_name)
-                && let Some(ty) = self.try_resolve_variant_constructor(variant_name)
-            {
-                if self.diagnose_ambiguous_constructor(variant_name, None, expr.span)? {
-                    return Ok(InferResult::new(Type::Unknown));
-                }
-
-                // Check if this value has a Named type (unit variant like Leaf)
-                // or if it's a function returning a Named type (payload variant like Node)
-                let return_type_opt = match &ty {
-                    Type::Named { .. } => Some(ty.clone()),
-                    Type::Function {
-                        return_type,
-                        ..
-                    } => {
-                        // Check if return type is a variant type (Named or inline Variant)
-                        // Named types are used for imported variants, Variant for local definitions
-                        if matches!(
-                            return_type.as_ref(),
-                            Type::Named { .. } | Type::Generic { .. } | Type::Variant(_)
-                        ) {
-                            // Payload names and types come from the selected
-                            // nominal sum, independently of positional arguments.
-                            let expanded = self.expand_generic_to_variant(return_type)?;
-                            if let Type::Variant(cases) = &expanded
-                                && let Some(Type::Record(expected_field_types)) = cases.get(variant_name)
-                            {
-                                self.check_variant_construction_visibility(return_type, variant_name, expr.span)?;
-                                // Type check the record fields
-                                let expected_field_types = expected_field_types.clone();
-                                let mut provided_fields: indexmap::IndexMap<
-                                    Text,
-                                    Type,
-                                > = indexmap::IndexMap::new();
-
-                                for field_init in fields {
-                                    let field_name = field_init.name.name.as_str();
-
-                                    let expected_field_ty = match expected_field_types
-                                        .get(field_name)
-                                    {
-                                        Some(ty) => ty,
-                                        None => {
-                                            return Err(TypeError::Other(
-                                                verum_common::Text::from(format!(
-                                                    "field '{}' not found in type '{}' variant construction",
-                                                    field_name, variant_name
-                                                )),
-                                            ));
-                                        }
-                                    };
-
-                                    // Handle shorthand syntax
-                                    let field_ty = if let Some(ref value_expr) =
-                                        field_init.value
-                                    {
-                                        self.check_record_field_value(
-                                            field_init,
-                                            value_expr,
-                                            expected_field_ty,
-                                            variant_name,
-                                        )?;
-                                        expected_field_ty.clone()
-                                    } else {
-                                        match self.ctx.env.lookup(field_name).cloned() {
-                                            Some(var_scheme) => {
-                                                let var_ty = self.instantiate_value_scheme(&var_scheme, field_init.span)?;
-                                                self.unifier.unify(
-                                                    &var_ty,
-                                                    expected_field_ty,
-                                                    field_init.span,
-                                                )?;
-                                                self.observe_record_shorthand_origins(field_init, expected_field_ty);
-                                                expected_field_ty.clone()
-                                            }
-                                            None => {
-                                                return Err(
-                                                    TypeError::UnboundVariable {
-                                                        name: field_name.to_text(),
-                                                        span: field_init.span,
-                                                    },
-                                                );
-                                            }
-                                        }
-                                    };
-
-                                    provided_fields.insert(field_name.into(), field_ty);
-                                }
-
-                                // Validate all required fields are present
-                                for (expected_name, expected_ty) in
-                                    expected_field_types.iter()
-                                {
-                                    if !provided_fields.contains_key(expected_name)
-                                    {
-                                        return Err(TypeError::Other(
-                                            verum_common::Text::from(format!(
-                                                "Missing required field '{}' of type {} in variant {} construction",
-                                                expected_name,
-                                                expected_ty,
-                                                variant_name
-                                            )),
-                                        ));
-                                    }
-                                }
-
-                                // Return the Named type
-                                return Ok(InferResult::new(
-                                    return_type.as_ref().clone(),
-                                ));
-                            }
-                            Some(return_type.as_ref().clone())
+                        let result = if arguments.is_empty() {
+                            ty
                         } else {
-                            None
-                        }
+                            Type::Named {
+                                path: Self::text_to_path(&parent_name),
+                                args: arguments.iter().map(|arg| self.unifier.apply(arg)).collect(),
+                            }
+                        };
+                        return Ok(InferResult::new(result));
                     }
-                    _ => None,
-                };
-
-                if return_type_opt.is_some() {
-                    // This path is a variant constructor, handled above
-                    // If we reach here without returning, something went wrong
                 }
+            }
+
+            if self.declared_sum_key(&parent_name).is_some() {
+                return Err(TypeError::OtherWithCodeSpanned {
+                    code: "E400".into(),
+                    msg: format!("no declared record payload for `{type_name}.{variant_name}`").into(),
+                    span: expr.span,
+                });
             }
         }
 
