@@ -79,6 +79,32 @@ fn rejects(source: &str) {
     let e = errors(source);
     assert!(e.iter().any(|x| x.contains("E427")), "{e:?}");
 }
+
+#[test]
+fn an_implementation_cannot_require_unsafe_from_a_safe_protocol_caller() {
+    let source = "module core.owned;
+        type Access<T> is protocol { fn read(value: T) -> T; };
+        type Model<U> is { item: U };
+        implement<U> Access<U> for Model<U> { fn read(value: U) -> U { value } }";
+    accepts(source);
+    let stronger = source.replace("{ fn read(value: U)", "{ unsafe fn read(value: U)");
+    let diagnostics = errors(&stronger);
+    assert!(diagnostics.iter().any(|error|
+        error.contains("E427") && error.contains("safe protocol method `read`")), "{diagnostics:?}");
+    accepts(&stronger.replace("{ fn read(value: T)", "{ unsafe fn read(value: T)"));
+    accepts(&source.replace("{ fn read(value: T)", "{ unsafe fn read(value: T)"));
+
+    let inherited = "module core.owned;
+        type Base is protocol { fn read(&self) -> Int; };
+        type Child is protocol extends Base {};
+        type Model is { item: Int };
+        implement Base for Model { fn read(&self) -> Int { self.item } }
+        implement Child for Model { unsafe fn read(&self) -> Int { self.item } }";
+    let diagnostics = errors(inherited);
+    assert!(diagnostics.iter().any(|error|
+        error.contains("E427") && error.contains("safe protocol method `read`")), "{diagnostics:?}");
+}
+
 #[test]
 fn nested_result_carrier() {
     accepts(

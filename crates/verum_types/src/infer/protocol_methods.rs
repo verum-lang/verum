@@ -134,7 +134,10 @@ impl TypeChecker {
         has_default: bool,
     ) -> Result<ProtocolMethod> {
         let mut frame = indexmap::IndexMap::new();
-        let mut scope = ProtocolMethodScope::default();
+        let mut scope = ProtocolMethodScope {
+            requires_unsafe: method.is_unsafe,
+            ..ProtocolMethodScope::default()
+        };
         for (position, parameter) in owner.iter().enumerate() {
             let name = match &parameter.kind {
                 GenericParamKind::Type { name, .. } | GenericParamKind::Meta { name, .. }

@@ -236,6 +236,12 @@ impl TypeChecker {
             .scope
             .as_ref()
             .ok_or_else(|| invalid(span, "implementation method has no owned local telescope"))?;
+        if actual_scope.requires_unsafe && !expected_scope.requires_unsafe {
+            return Err(invalid(span, format!(
+                "implementation of safe protocol method `{}` cannot require unsafe access",
+                expected.name
+            )));
+        }
         if expected_scope.binders.local.len() != actual_scope.binders.local.len() {
             return Err(invalid(
                 span,

@@ -582,6 +582,8 @@ pub struct ProtocolMethod {
 /// Source method variables are owned by their declaration, not inferred from use.
 #[derive(Debug, Clone, Default)]
 pub struct ProtocolMethodScope {
+    /// An unsafe source member may impose obligations on its caller.
+    pub requires_unsafe: bool,
     pub binders: DeclarationBinders,
     pub protocol_bounds: Map<crate::ty::TypeVar, List<ProtocolBound>>,
     pub where_clauses: List<WhereClause>,
