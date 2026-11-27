@@ -33395,12 +33395,9 @@ fn lower_sys_extended<'ctx>(
     match sub_opcode {
         Some(SysSubOpcode::LinuxSignalWatch) => {
             use verum_vbc::signal_watch::SignalWatchOp;
-            let (op, registers) = operands.split_first().and_then(|(&byte, regs)| Some((SignalWatchOp::decode(byte)?, regs)))
-                .ok_or_else(|| LlvmLoweringError::internal("invalid Linux signal operation"))?;
-            let mut pos = 0;
-            let dst = read_reg_varlen(registers, &mut pos)?;
-            let arg = read_reg_varlen(registers, &mut pos)?;
-            let value = as_i64(ctx, ctx.get_register(arg)?, "signal_operand")?;
+            let (op, dst, arg) = SignalWatchOp::decode_operands(operands)
+                .ok_or_else(|| LlvmLoweringError::internal("invalid Linux signal operation or registers"))?;
+            let value = as_i64(ctx, ctx.get_register(arg.0)?, "signal_operand")?;
             let scope = verum_vbc::interpreter::permission::PermissionScope::Process.to_wire_tag();
             lower_permission_assert_with(ctx, scope, |ctx| {
                 if op == SignalWatchOp::Install { return Ok(value); }
@@ -33414,7 +33411,7 @@ fn lower_sys_extended<'ctx>(
             let tag = ctx.llvm_context().i8_type().const_int(op as u64, false);
             let result = ctx.builder().build_call(runtime, &[tag.into(), value.into()], "watch_result")
                 .or_llvm_err()?.basic_value_or("signal observation returned void")?;
-            ctx.set_register(dst, result);
+            ctx.set_register(dst.0, result);
             Ok(())
         }
         Some(SysSubOpcode::GetPid) => {

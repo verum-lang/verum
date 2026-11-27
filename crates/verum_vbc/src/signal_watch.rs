@@ -1,5 +1,5 @@
 //! The wire contract for observing asynchronous Linux signal deliveries.
-use crate::encoding::encode_reg;
+use crate::encoding::{decode_reg, encode_reg};
 use crate::instruction::{Instruction, Reg, SysSubOpcode};
 
 /// Install takes a signal number and returns a positive ownership ticket.
@@ -47,6 +47,16 @@ impl SignalWatchOp {
             2 => Some(Self::Restore),
             _ => None,
         }
+    }
+
+    /// Decode the operation and its single output and input register.
+    pub fn decode_operands(operands: &[u8]) -> Option<(Self, Reg, Reg)> {
+        let (&tag, registers) = operands.split_first()?;
+        let operation = Self::decode(tag)?;
+        let mut cursor = 0;
+        let dst = decode_reg(registers, &mut cursor).ok()?;
+        let arg = decode_reg(registers, &mut cursor).ok()?;
+        (cursor == registers.len()).then_some((operation, dst, arg))
     }
 
     /// The same instruction is used at call sites and inside callable thunks.

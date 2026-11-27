@@ -1,6 +1,9 @@
 //! One bounded instruction-index graph for native block boundaries and reachability.
 //! TryBegin contributes its handler edge even when the throwing operation is an
 //! indirect call. This is conservative reachability, never proof that a call succeeds.
+#[path = "instruction_flow/callable.rs"]
+mod callable;
+
 use super::{LlvmLoweringError, Result};
 use verum_common::List;
 use verum_vbc::{Instruction, VbcModule};

@@ -235,3 +235,51 @@ fn fused_integer_branches_use_instruction_targets_on_both_edges() {
         });
     }
 }
+
+#[test]
+fn a_named_callable_keeps_its_declaration_through_aliases_and_loop_joins() {
+    let source = r#"
+        fn step(n: Int) -> Int { n + 1 }
+        fn choose(flag: Bool) -> Int {
+            let initial = step;
+            let callback: fn(Int) -> Int = if flag { initial } else { step };
+            let mut n: Int = 0;
+            while n < 2 { n = callback(n); }
+            callback(n + 70)
+        }
+        fn probe() -> Int { choose(true) + choose(false) }
+    "#;
+    for module in images(source) {
+        let entry = module.find_function_by_name("probe").unwrap();
+        let result = Interpreter::new(Arc::new(module.clone())).execute_function(entry).unwrap();
+        assert_eq!(result.as_i64(), 146);
+        native_library::with_library(&module, &[("probe", "invoke_probe")], |library| {
+            // SAFETY: the native adapter exports the source nullary Int signature.
+            let result = unsafe {
+                library.get::<unsafe extern "C" fn() -> i64>(b"invoke_probe").unwrap()()
+            };
+            assert_eq!(result, 146);
+        });
+    }
+}
+
+#[test]
+fn an_indirect_write_or_conflicting_loop_backedge_invalidates_the_callable() {
+    for body in [
+        "let slot = &mut callback; *slot = other; callback()",
+        "let mut n:Int=0; while n<2 { let used=callback(); callback=other; n=n+used; } n",
+    ] {
+        let source = format!(
+            "fn known()->Int {{1}} fn other()->Int {{2}} fn probe()->Int {{let mut callback:fn()->Int=known; {body}}}"
+        );
+        for module in images(&source) {
+            let context = Context::create();
+            let mut lowering = VbcToLlvmLowering::new(
+                &context,
+                LoweringConfig::debug("conflicting_callable").with_debug_info(false),
+            );
+            let error = lowering.lower_module(&module).unwrap_err();
+            assert!(error.to_string().contains("producer-issued parameter convention"), "{error}");
+        }
+    }
+}

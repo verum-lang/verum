@@ -1101,7 +1101,8 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         // machines ended up with multi-hundred-GB verum processes.
         let reachable_for_lowering: Option<std::collections::HashSet<u32>> = {
             let entry = entry_index.map(|index| vbc_module.functions[index].id.0);
-            let reach = verum_vbc::reachability::analyze_with_roots(vbc_module, entry.as_slice());
+            let reach = verum_vbc::reachability::analyze_with_roots(vbc_module, entry.as_slice())
+                .map_err(|error| LlvmLoweringError::internal(format!("VBC reachability: {error}")))?;
             tracing::debug!(
                 "reachability: {} of {} functions reachable ({} CallM method names)",
                 reach.reachable_ids.len(),
@@ -2874,6 +2875,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         // Block boundaries and executable reachability use one bounded graph of
         // decoded instruction offsets, including recovery and comparison branches.
         let flow = InstructionFlow::build(vbc_module, &vbc_func.instructions)?;
+        let callable_inputs = flow.callable_inputs(vbc_module, &vbc_func.instructions)?;
         let entry_is_jump_target = flow.entry_is_target;
         let block_starts = flow.starts;
         let block_id_offset: u32 = if entry_is_jump_target { 1 } else { 0 };
@@ -4407,6 +4409,9 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                 continue;
             }
 
+            if let Some(&(register, target)) = callable_inputs.get(&instr_idx) {
+                ctx.record_selected_callable(register, target);
+            }
             lowered_instructions += 1;
             // For Jmp/JmpNot/JmpIf, resolve the offset to a block
             match instr {
