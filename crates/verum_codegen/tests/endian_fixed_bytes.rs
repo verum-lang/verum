@@ -454,28 +454,49 @@ fn native_unproved_array_calls_refuse_before_any_jit_execution() {
 }
 
 #[test]
-fn native_colliding_array_bodies_do_not_gain_a_second_selection_rule() {
+fn same_named_source_bodies_use_the_storage_of_the_called_id() {
     let mut module = source(
-        "fn selected() -> [Byte; 2] { let bytes: [Byte; 2] = [7, 9]; bytes } fn probe() -> Int { let bytes = selected(); bytes[1] as Int }",
+        "fn packed() -> [Byte; 2] { let bytes: [Byte; 2] = [7, 9]; bytes }
+         fn listed() -> [Byte; 2] { [2 as Byte, 5 as Byte] }
+         fn probe() -> Int { let a = packed(); let first = a[1] as Int; let b = listed(); first * 100 + (b[1] as Int) }",
     );
-    let mut duplicate = module
-        .functions
-        .iter()
-        .find(|f| module.get_string(f.name) == Some("selected"))
-        .unwrap()
-        .clone();
-    duplicate.id =
-        verum_vbc::module::FunctionId(module.functions.iter().map(|f| f.id.0).max().unwrap() + 1);
-    module.functions.push(duplicate);
+    let sources = ["packed", "listed"].map(|name| {
+        module
+            .functions
+            .iter()
+            .position(|f| module.get_string(f.name) == Some(name))
+            .unwrap()
+    });
+    let [packed, listed] = sources;
+    module.functions[listed].name = module.functions[packed].name;
     let context = Context::create();
     let mut lowering = VbcToLlvmLowering::new(
         &context,
         LoweringConfig::debug("array_collision").with_debug_info(false),
     );
-    assert!(matches!(
-        lowering.lower_module(&module),
-        Err(verum_codegen::llvm::LlvmLoweringError::UnprovenArrayStorage(_))
-    ));
+    lowering.lower_module(&module).unwrap();
+    let targets = sources.map(|index| {
+        lowering
+            .get_function_by_id(module.functions[index].id.0)
+            .unwrap()
+    });
+    assert_ne!(targets[0], targets[1]);
+    assert!(
+        targets
+            .iter()
+            .all(|target| target.count_basic_blocks() != 0),
+        "every called VBC id needs its own executable definition"
+    );
+    native(&module, |engine| {
+        // SAFETY: the compiled probe is a parameterless function returning Int.
+        let actual = unsafe {
+            engine
+                .get_function::<unsafe extern "C" fn() -> i64>("probe")
+                .unwrap()
+                .call()
+        };
+        assert_eq!(actual, 905);
+    });
 }
 
 #[test]

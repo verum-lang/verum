@@ -1178,55 +1178,20 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         // collapse to a thin `verum_gpu_launch_kernel(name, args)`
         // host stub; until then we keep the full LLVM lowering as
         // the safe fallback.
-        // Track which LLVM functions have already been lowered to handle
-        // name collisions where multiple VBC functions map to the same LLVM
-        // function (e.g., stdlib and user both define `execute_with_retry`).
-        // The LAST body wins (user code overrides stdlib).
-        //
-
-        // Dedupe key is (raw_name, arity). Different-arity overloads of the
-        // same name (e.g. user `fn main()` 0-arity and stdlib
-        // `darwin_entry::main(argc, argv)` 2-arity) map to DIFFERENT LLVM
-        // functions (the second collides on declare and gets a `__arity{n}`
-        // suffix at vbc_lowering.rs ~1200). Deduping by name only would
-        // skip user's main when stdlib's same-named overload comes second
-        // in iteration order, leaving the 0-arity LLVM function bodyless
-        // and the Phase 3.6 safety net stubs it with `return 0` — masking
-        // the user's program logic. Bisect 2026-04-26: `mount core.*; fn main() -> Int { 7 }`
-        // returned exit=0 instead of 7 due to this.
-        let mut lowered_llvm_fns: std::collections::HashMap<(String, usize), usize> =
-            std::collections::HashMap::new();
-
-        // First pass: collect (name, arity) pairs that have multiple bodies.
-        //
-        // TEXT-AOT-CHARS-PUSH-1 / FUNC-REGISTRY-QUALIFICATION-1 class:
-        // also record, per colliding key, the ordinal of the FIRST
-        // occurrence with a NON-EMPTY body. This mirrors the Tier-0
-        // dispatch rule (`VbcModule::find_function_by_name`, ARCH-P2):
-        // a real body beats a stub, and among same-bodiedness entries
-        // the LOWEST id wins. The dedup historically kept the LAST
-        // non-empty occurrence, which diverged from the interpreter
-        // whenever duplicate stdlib methods differ semantically — e.g.
-        // the two `Int.checked_mul` descriptors (by-value wrapper vs a
-        // `&self` variant whose body starts with ChkRef/Deref): Tier-0
-        // called the by-value one, AOT lowered only the `&self` one,
-        // and every by-value call site SIGSEGV'd dereferencing a raw
-        // integer receiver (DUP-METHOD-SELF-KIND-1). Bodiless shells
-        // (`Char.encode_utf8` empty wrapper) still lose to any
-        // non-empty body regardless of position.
-        let mut body_count: std::collections::HashMap<(String, usize), usize> =
-            std::collections::HashMap::new();
-        let mut first_nonempty_ordinal: std::collections::HashMap<(String, usize), usize> =
-            std::collections::HashMap::new();
-        for func_desc in &vbc_module.functions {
-            if let Some(ref instrs) = func_desc.instructions {
-                let name = vbc_module.strings.get(func_desc.name).unwrap_or("");
-                let key = (name.to_string(), func_desc.params.len());
-                let cnt = body_count.entry(key.clone()).or_default();
-                *cnt += 1;
-                if !instrs.is_empty() {
-                    first_nonempty_ordinal.entry(key).or_insert(*cnt);
-                }
+        // Multiple VBC declarations can have the same spelling and arity.
+        // Only the actual native target can be shared with a forward declaration.
+        let mut source_owners = Map::new();
+        for descriptor in &vbc_module.functions {
+            if !descriptor.instructions.as_ref().is_some_and(|body| !body.is_empty()) {
+                continue;
+            }
+            if let Some(&target) = self.functions.get(&descriptor.id.0)
+                && let Some(previous) = source_owners.insert(target, descriptor.id)
+            {
+                return Err(LlvmLoweringError::VerificationFailed(format!(
+                    "VBC bodies {} and {} selected the same LLVM declaration",
+                    previous.0, descriptor.id.0,
+                ).into()));
             }
         }
 
@@ -1308,7 +1273,6 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                 continue;
             }
             if let Some(ref instructions) = func_desc.instructions {
-                let vbc_func = VbcFunction::new(func_desc.clone(), instructions.clone());
                 let func_name = vbc_module
                     .strings
                     .get(func_desc.name)
@@ -1324,25 +1288,10 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     }
                 }
 
-                // For name+arity collisions (e.g., stdlib and user both
-                // define `parallel_map<T,U>` with the same arity), only
-                // lower the LAST occurrence (user code overrides stdlib).
-                let dedupe_key = (func_name.to_string(), func_desc.params.len());
-                if let Some(&count) = body_count.get(&dedupe_key) {
-                    if count > 1 {
-                        let keep_ordinal = first_nonempty_ordinal
-                            .get(&dedupe_key)
-                            .copied()
-                            .unwrap_or(1);
-                        let seen = lowered_llvm_fns.entry(dedupe_key).or_insert(0);
-                        *seen += 1;
-                        if *seen != keep_ordinal {
-                            // Not the survivor (FIRST non-empty body wins —
-                            // the Tier-0 dispatch order; positional-first
-                            // when all are empty) — skip it.
-                            continue;
-                        }
-                    }
+                if instructions.is_empty() && self.functions.get(&func_desc.id.0)
+                    .is_some_and(|target| source_owners.contains_key(target))
+                {
+                    continue;
                 }
 
                 let is_tracked = func_name == "parallel_map"
@@ -1370,6 +1319,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                 if std::env::var_os("VERUM_AOT_TRACE_LOWER").is_some() {
                     eprintln!("[aot-lower] id={} name={}", func_desc.id.0, func_name);
                 }
+                let vbc_func = VbcFunction::new(func_desc.clone(), instructions.clone());
                 self.lower_vbc_function(vbc_module, &vbc_func)?;
                 if is_tracked {
                     let bb_count = self
