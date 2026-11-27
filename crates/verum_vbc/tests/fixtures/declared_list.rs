@@ -73,6 +73,7 @@ pub fn compile_consumer(source: &str) -> VbcModule {
         Some((
             "List<T>",
             &[
+                "new",
                 "len",
                 "push",
                 "grow",

@@ -69,7 +69,7 @@ fn 'Shared.deref' (5 instrs):
 
 fn 'Bag.nth_ref' (4 instrs):
   0: GetF { dst: Reg(2), obj: Reg(0), field_idx: 0 }
-  1: CbgrExtended { sub_op: 11, operands: [3, 2, 1] }
+  1: CbgrExtended { sub_op: 11, operands: [3, 2, 1, 1] }
   2: Mov { dst: Reg(2), src: Reg(3) }
   3: Ret { value: Reg(2) }
 ```
@@ -80,12 +80,14 @@ by a different instruction because the field lives behind a raw pointer.
 A predicate that knew only `RefField` was blind to every `unsafe`
 accessor in `core/base/memory.vr`.
 
-`RefListElement` has different carriers in the two backends. The
-interpreter returns the actual `Value` slot address and registers it in
-`cbgr_mutable_ptrs`; `Deref` reads that slot and mutation writes through it.
-Its raw-stride slice path refuses an interior reference that cannot be
-represented as a `Value` slot. This address classification does not, by
-itself, establish borrow-lifetime or container-invalidation enforcement.
+For a managed list the interpreter returns a revocable reference to the
+element in its backing storage. A source-level shared borrow encodes a
+trailing `1` in `RefListElement`. A shared range encodes the same operand
+after its stride in `RefSlice`. The interpreter intersects the source rights
+with the requested access before issuing either reference. Shared references
+to elements and ranges can coexist. Taking a fresh exclusive borrow of the
+owner retires the earlier views. The incoming rights apply to older operands
+that omit the access byte.
 
 The native lowering performs the load and marks the register
 `interior_list_ref`, so its `Deref` arm passes the value through instead

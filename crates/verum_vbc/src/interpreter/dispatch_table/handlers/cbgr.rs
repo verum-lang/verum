@@ -2295,20 +2295,12 @@ fn cbgr_extended_body(
         // Slice and Interior References (0x00-0x0F)
         // ================================================================
         Some(CbgrSubOpcode::RefListElement) => {
-            // Create interior reference to List<T> element at index.
-            // Produces a plain `Value::from_ptr(element_ptr)` so the
-            // existing DerefMut/Deref handlers for ptr values write
-            // and read through it directly.
-            //
-
-            // Format: dst:reg, list:reg, index:reg
-            let dst = read_reg(state)?;
-            let list_reg = read_reg(state)?;
-            let index_reg = read_reg(state)?;
-
-            let list_val = state.get_reg(list_reg);
+            let ([dst, list_reg, index_reg], access) =
+                super::bytecode_io::read_operand(state, crate::encoding::decode_element_projection)?;
+            let mut receiver = super::cbgr_helpers::resolve_receiver_place(state, state.get_reg(list_reg))?;
+            receiver.capabilities = access.restrict(receiver.capabilities);
             let index = state.get_reg(index_reg).as_i64();
-            if let Some(reference) = super::list_storage::project_element(state, list_val, index)? {
+            if let Some(reference) = super::list_storage::project_element(state, &receiver, index)? {
                 state.set_reg(dst, reference);
                 return Ok(DispatchResult::Continue);
             }
@@ -2319,7 +2311,7 @@ fn cbgr_extended_body(
             // register/thin-only peel made len() and &values[index] disagree.
             // The shared authority follows register chains, then one value-cell
             // or ThinRef hop, and preserves bridge-allocation provenance.
-            let list_val = super::cbgr_helpers::resolve_receiver(state, list_val)?;
+            let list_val = receiver.value;
             // The shared resolver preserves a null ThinRef; this operation has
             // always refused it before attempting any container header read.
             if list_val.is_thin_ref() && state.heap.thin_ref(list_val)?.ptr.is_null() {
@@ -2357,8 +2349,10 @@ fn cbgr_extended_body(
                 let elem_ptr = unsafe {
                     fr.ptr().add((index as usize) * std::mem::size_of::<Value>())
                 };
-                state.cbgr_mutable_ptrs.insert(elem_ptr as usize);
-                state.set_reg(dst, Value::from_ptr(elem_ptr));
+                let reference = crate::value::ThinRef::new(
+                    elem_ptr, fr.generation(), fr.epoch(), receiver.capabilities,
+                );
+                state.set_reg(dst, Value::from_thin_ref(reference));
                 return Ok(DispatchResult::Continue);
             }
 
@@ -2470,14 +2464,18 @@ fn cbgr_extended_body(
                 unsafe { ptr.add(offset) }
             };
 
-            // Mark this pointer as "dereferences to a Value in memory" so the
-            // generic `Deref` handler reads through it (`*(ptr as *const Value)`)
-            // instead of falling through to identity-deref for heap objects.
-            // Without this, `*&arr[i]` returns the interior pointer itself
-            // (displayed as `<object type_id=N>`), not the element value —
-            // breaking every spec that builds a reference with `&arr[i]`.
-            state.cbgr_mutable_ptrs.insert(elem_ptr as usize);
-            state.set_reg(dst, Value::from_ptr(elem_ptr));
+            // Inline Value slots share their allocation's lifetime.
+            let reference = if state.heap.contains(ptr.cast()) && !header.type_id.is_list_like() {
+                let offset = index as usize * std::mem::size_of::<Value>();
+                state.heap.project_object_field(ptr as usize, offset, receiver.capabilities)?
+            } else if let Some((base, extent)) = bridge_extent(state, elem_ptr as usize) {
+                state.heap.project_raw_slot(base, extent, elem_ptr as usize - base, receiver.capabilities)?
+            } else {
+                return Err(InterpreterError::InvalidOperand {
+                    message: "indexed reference has no live storage owner".into(),
+                });
+            };
+            state.set_reg(dst, reference);
             Ok(DispatchResult::Continue)
         }
 
@@ -2749,14 +2747,10 @@ fn cbgr_extended_body(
         }
 
         Some(CbgrSubOpcode::RefSlice) => {
-            // Create slice reference (FatRef) from array/buffer
-            // Format: dst:reg, src:reg, start:reg, len:reg
-            let dst = read_reg(state)?;
-            let src_reg = read_reg(state)?;
-            let start_reg = read_reg(state)?;
-            let len_reg = read_reg(state)?;
-
-            let source = state.get_reg(src_reg);
+            let ([dst, src_reg, start_reg, len_reg], layout) =
+                super::bytecode_io::read_operand(state, crate::encoding::SliceProjectionLayout::decode)?;
+            let mut receiver = super::cbgr_helpers::resolve_receiver_place(state, state.get_reg(src_reg))?;
+            receiver.capabilities = layout.access.restrict(receiver.capabilities);
             let start_value = state.get_reg(start_reg).try_as_i64().ok_or_else(|| {
                 InterpreterError::InvalidOperand {
                     message: "slice start is not Int".into(),
@@ -2774,50 +2768,13 @@ fn cbgr_extended_body(
             let len = usize::try_from(len_value).map_err(|_| InterpreterError::InvalidOperand {
                 message: "slice length is negative".into(),
             })?;
-            if let Some(view) = super::list_storage::project_view(state, source, start, Some(len))?
+            if let Some(view) = super::list_storage::project_view(state, &receiver, start, Some(len))?
             {
                 state.set_reg(dst, view);
                 return Ok(DispatchResult::Continue);
             }
-            let mut src = source;
-            // T0467: `&list` passed to a slice parameter is a register ref,
-            // possibly forwarded through more than one frame. Resolve its
-            // value before classifying the container; otherwise the fallback
-            // below fabricated a nonempty FatRef with a null data pointer.
-            // A finite register file bounds every acyclic reference chain.
-            let mut remaining_hops = state.registers.top();
-            while is_cbgr_ref(&src) {
-                let (abs_index, generation) = decode_cbgr_ref(src);
-                if abs_index as usize >= state.registers.top() || remaining_hops == 0 {
-                    return Err(InterpreterError::InvalidOperand {
-                        message: "slice source contains an invalid or cyclic register reference"
-                            .into(),
-                    });
-                }
-                validate_cbgr_generation(state, abs_index, generation)?;
-                src = state.registers.get_absolute(abs_index);
-                remaining_hops -= 1;
-            }
-            // An element or field borrow holds the container in a Value slot.
-            // Load that slot before interpreting the array header. Raw-address
-            // and FatRef slices retain their own data/stride representation.
-            if src.is_regular_ptr() {
-                src = super::cbgr_helpers::resolve_arg_value(state, src)?;
-            }
-            let start_value = state.get_reg(start_reg).as_i64();
-            let len_value = state.get_reg(len_reg).as_i64();
-            if start_value < 0 || len_value < 0 {
-                return Err(InterpreterError::Panic {
-                    message: format!(
-                        "slice range has negative start {} or length {}",
-                        start_value, len_value
-                    ),
-                });
-            }
-            let start = usize::try_from(start_value).map_err(|_| InterpreterError::Panic {
-                message: "slice start exceeds the addressable range".into(),
-            })?;
-            let len = len_value as u64;
+            let src = receiver.value;
+            let len = len as u64;
 
             // Canonical container/FatRef path (mirrors SliceSubslice below).
             // The shared descriptor keeps List/ByteList strides and lengths
@@ -2854,7 +2811,7 @@ fn cbgr_extended_body(
                     new_ptr,
                     fat_ref.generation(),
                     fat_ref.epoch(),
-                    fat_ref.capabilities(),
+                    receiver.capabilities.intersect(&fat_ref.capabilities()),
                     len,
                 );
                 new_fat_ref.reserved = fat_ref.reserved;
@@ -2877,9 +2834,10 @@ fn cbgr_extended_body(
                 } else {
                     unsafe { base.add(start) }
                 };
-                let obj = state.heap.alloc_byte_slice(new_ptr, len)?;
-                state.record_allocation();
-                state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
+                let mut view = FatRef::slice(new_ptr, 0, (state.cbgr_epoch & 0xFFFF) as u16,
+                    receiver.capabilities.intersect(&Capabilities::MUT_EXCLUSIVE), len);
+                view.reserved = 1;
+                state.set_reg(dst, Value::from_fat_ref(view));
                 return Ok(DispatchResult::Continue);
             }
 
@@ -2980,7 +2938,7 @@ fn cbgr_extended_body(
                 slice_ptr,
                 0, // generation (not tracked in interpreter)
                 (state.cbgr_epoch & 0xFFFF) as u16,
-                Capabilities::MUT_EXCLUSIVE, // Full capabilities for slices
+                receiver.capabilities.intersect(&Capabilities::MUT_EXCLUSIVE),
                 len,
             );
             fat_ref.reserved = elem_size;

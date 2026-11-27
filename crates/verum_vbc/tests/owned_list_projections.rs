@@ -57,6 +57,16 @@ fn fixture() -> Interpreter {
             .collect(),
         ),
         (
+            "shared_element",
+            [cbgr(C::RefListElement, &[4, 0, 1, 1]), I::Ret { value: Reg(4) }]
+                .into_iter().collect(),
+        ),
+        (
+            "shared_range",
+            [cbgr(C::RefSlice, &[4, 0, 1, 2, 0, 1]), I::Ret { value: Reg(4) }]
+                .into_iter().collect(),
+        ),
+        (
             "element",
             [
                 cbgr(C::RefListElement, &[4, 0, 1]),
@@ -313,6 +323,26 @@ fn stale(error: InterpreterError) {
         "{error:?}"
     );
 }
+#[test]
+fn shared_elements_coexist_with_ranges_and_retire_on_exclusive_access() {
+    let mut vm = fixture();
+    let (owner, _) = list(&mut vm, false);
+    let collection = Value::from_ptr(owner.as_ptr());
+    let zero = Value::from_i64(0);
+    let one = Value::from_i64(1);
+    let left = call(&mut vm, "shared_element", &[collection, zero]).unwrap();
+    let right = call(&mut vm, "shared_element", &[collection, one]).unwrap();
+    let range = call(&mut vm, "shared_range", &[collection, one, one]).unwrap();
+    assert_eq!(call(&mut vm, "read", &[left]).unwrap().try_as_i64(), Some(11));
+    assert_eq!(call(&mut vm, "get", &[range, zero]).unwrap().try_as_i64(), Some(42));
+    capability(call(&mut vm, "write", &[right, zero]).unwrap_err());
+    assert_eq!(call(&mut vm, "read", &[right]).unwrap().try_as_i64(), Some(42));
+    full(&mut vm, &owner, true);
+    stale(call(&mut vm, "read", &[left]).unwrap_err());
+    stale(call(&mut vm, "read", &[right]).unwrap_err());
+    stale(call(&mut vm, "get", &[range, zero]).unwrap_err());
+}
+
 #[test]
 fn value_slot_view_and_subview_return_live_addresses() {
     let mut vm = fixture();

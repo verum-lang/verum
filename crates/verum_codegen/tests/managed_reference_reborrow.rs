@@ -40,3 +40,15 @@ fn shared_reborrow_keeps_the_original_value() {
         fn main() -> Int { let value = 73; *reborrow(&value) }
     "#);
 }
+
+#[test]
+fn shared_indexed_records_survive_a_sibling_borrow_at_a_call() {
+    source_image::run(r#"
+        type Item is { amount: Int };
+        fn sum(left: &Item, right: &Item) -> Int { left.amount + right.amount }
+        fn main() -> Int {
+            let items: List<Item> = [Item { amount: 8 }, Item { amount: 11 }];
+            if sum(&items[0], &items[1]) == 19 { 73 } else { 0 }
+        }
+    "#);
+}

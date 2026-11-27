@@ -528,7 +528,9 @@ pub(super) fn resolve_receiver_place(
         } else if let Some(caps) = state.heap.projection_capabilities(place)? {
             caps
         } else if place.is_thin_ref() {
-            state.heap.thin_ref(place)?.capabilities()
+            let reference = state.heap.thin_ref(place)?;
+            if reference.is_null() { return Err(InterpreterError::NullPointer); }
+            reference.capabilities()
         } else if place.is_fat_ref() {
             place.as_fat_ref().capabilities()
         } else {

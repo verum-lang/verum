@@ -25041,15 +25041,13 @@ fn lower_cbgr_extended<'ctx>(
             // Value`; the existing DerefMut lowering for non-CBGR
             // pointers writes through it directly, so `&mut arr[i];
             // *r = v` becomes a real write into arr[i].
-            if operands.len() < 3 {
-                return Ok(());
-            }
-            let dst = op_reg(operands, 0);
-            let list_reg = op_reg(operands, 1);
-            let index_reg = op_reg(operands, 2);
+            let ([dst, list_reg, index_reg], _) =
+                verum_vbc::encoding::decode_element_projection(operands, &mut 0)
+                    .map_err(|error| LlvmLoweringError::unsupported(error.to_string()))?;
+            let dst = dst.0;
 
-            let list_ptr = as_ptr(ctx, ctx.get_register(list_reg)?, "rle_list_ptr")?;
-            let index = as_i64(ctx, ctx.get_register(index_reg)?, "rle_idx")?;
+            let list_ptr = as_ptr(ctx, ctx.get_register(list_reg.0)?, "rle_list_ptr")?;
+            let index = as_i64(ctx, ctx.get_register(index_reg.0)?, "rle_idx")?;
             let i64_type = ctx.types().i64_type();
             let ptr_type = ctx.types().ptr_type();
 
@@ -25570,13 +25568,13 @@ fn lower_cbgr_extended<'ctx>(
         // ====================================================================
         0x00 => {
             // RefSlice — create fat pointer from base + start + len
-            if operands.len() < 4 {
-                return Ok(());
-            }
-            let dst = op_reg(operands, 0);
-            let src = ctx.get_register(op_reg(operands, 1))?;
-            let start = ctx.get_register(op_reg(operands, 2))?;
-            let len = ctx.get_register(op_reg(operands, 3))?;
+            let ([dst, source, start, len], layout) =
+                verum_vbc::encoding::SliceProjectionLayout::decode(operands, &mut 0)
+                    .map_err(|error| LlvmLoweringError::unsupported(error.to_string()))?;
+            let dst = dst.0;
+            let src = ctx.get_register(source.0)?;
+            let start = ctx.get_register(start.0)?;
+            let len = ctx.get_register(len.0)?;
             let i64_ty = ctx.types().i64_type();
             let ptr_ty = ctx.types().ptr_type();
             // Task #23 — `start` and `len` registers may hold either
@@ -25629,8 +25627,6 @@ fn lower_cbgr_extended<'ctx>(
             // selected producer supplies their stride, including across calls.
             // A storage-neutral fixed array must never probe its own bytes as
             // an object header. Existing explicit raw views retain their stride.
-            let source = Reg(op_reg(operands, 1));
-            let supplied_stride = op_reg(operands, 4);
             let static_elem = match ctx.array_storage_fact(source) {
                 Some(ArrayResultFact::Packed { width, .. }) => width as u16,
                 Some(ArrayResultFact::List) => 0,
@@ -25639,7 +25635,7 @@ fn lower_cbgr_extended<'ctx>(
                         format!("RefSlice r{} has no selected array storage in {}", source.0, ctx.function_name()).into(),
                     ));
                 }
-                _ => supplied_stride,
+                _ => layout.stride,
             };
             if matches!(static_elem, 1 | 2 | 4 | 8) {
                 let elem_c = i64_ty.const_int(static_elem as u64, false);

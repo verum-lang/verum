@@ -287,6 +287,81 @@ pub fn decode_reg(data: &[u8], offset: &mut usize) -> VbcResult<Reg> {
     }
 }
 
+/// Upper bound on a sequence borrow's authority. Earlier operands without
+/// a mode inherit their source rights. A shared borrow narrows at issuance.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProjectionAccess {
+    /// Preserve the source's authority.
+    Inherit,
+    /// Request a shared, read-only view.
+    Shared,
+}
+
+impl ProjectionAccess {
+    /// Select the bound of a source-level borrow.
+    pub fn for_borrow(mutable: bool) -> Self {
+        if mutable { Self::Inherit } else { Self::Shared }
+    }
+
+    /// Narrow the incoming authority without introducing new rights.
+    pub fn restrict(self, source: crate::value::Capabilities) -> crate::value::Capabilities {
+        match self {
+            Self::Inherit => source,
+            Self::Shared => source.intersect(&crate::value::Capabilities::READ_ONLY),
+        }
+    }
+
+    /// Append the optional access operand to an indexed projection.
+    pub fn encode(self, output: &mut Vec<u8>) {
+        if self == Self::Shared { output.push(1); }
+    }
+
+    fn decode(data: &[u8], offset: &mut usize) -> VbcResult<Self> {
+        if *offset == data.len() { return Ok(Self::Inherit); }
+        let start = *offset;
+        if decode_u8(data, offset)? == 1 && *offset == data.len() {
+            Ok(Self::Shared)
+        } else {
+            Err(VbcError::InvalidInstructionEncoding {
+                offset: start, reason: "invalid sequence projection access".into(),
+            })
+        }
+    }
+}
+
+/// Access and physical stride follow the registers in a range projection.
+/// A stride of zero selects the receiver's layout.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SliceProjectionLayout {
+    pub stride: u16,
+    pub access: ProjectionAccess,
+}
+
+impl SliceProjectionLayout {
+    /// Append the optional layout to an encoded range projection.
+    pub fn encode(self, output: &mut Vec<u8>) {
+        if self.stride != 0 || self.access == ProjectionAccess::Shared {
+            encode_reg(Reg(self.stride), output);
+        }
+        self.access.encode(output);
+    }
+
+    /// Decode the range's registers and layout within its instruction envelope.
+    pub fn decode(data: &[u8], cursor: &mut usize) -> VbcResult<([Reg; 4], Self)> {
+        let registers = [decode_reg(data, cursor)?, decode_reg(data, cursor)?,
+            decode_reg(data, cursor)?, decode_reg(data, cursor)?];
+        let stride = if *cursor < data.len() { decode_reg(data, cursor)?.0 } else { 0 };
+        let access = ProjectionAccess::decode(data, cursor)?;
+        Ok((registers, Self { stride, access }))
+    }
+}
+
+/// Registers and access of an indexed element reference.
+pub fn decode_element_projection(data: &[u8], cursor: &mut usize) -> VbcResult<([Reg; 3], ProjectionAccess)> {
+    let registers = [decode_reg(data, cursor)?, decode_reg(data, cursor)?, decode_reg(data, cursor)?];
+    Ok((registers, ProjectionAccess::decode(data, cursor)?))
+}
+
 /// Operands of a raw slice view. Both VBC producers and both execution tiers
 /// use the same register encoding and element-stride domain.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

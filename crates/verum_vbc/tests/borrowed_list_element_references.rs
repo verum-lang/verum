@@ -2,11 +2,12 @@
 //! Parsed source is serialized before execution; no stdlib archive is injected.
 #![cfg(feature = "codegen")]
 
+#[path = "fixtures/declared_list.rs"]
+mod declared_list;
+
 use std::sync::Arc;
-use verum_common::{List, Text};
-use verum_fast_parser::Parser;
+use verum_common::List;
 use verum_vbc::bytecode::decode_instructions;
-use verum_vbc::codegen::{CodegenConfig, ItemFailurePolicy, VbcCodegen};
 use verum_vbc::instruction::{CbgrSubOpcode, Instruction, Reg};
 use verum_vbc::interpreter::{Interpreter, InterpreterError};
 use verum_vbc::module::{FunctionDescriptor, FunctionId, VbcModule};
@@ -14,7 +15,9 @@ use verum_vbc::types::{StringId, TypeId};
 use verum_vbc::value::{Capabilities, ThinRef, Value};
 
 const ENV: &str = r#"
+module borrowed_lists;
 mount core.base.maybe.Maybe;
+mount core.collections.list.List;
 type Holder is { marker: Int, values: List<Int> };
 type Packet is Empty | Items(List<Int>);
 fn sample() -> List<Int> {
@@ -77,24 +80,8 @@ fn body_has(module: &VbcModule, name: &str, predicate: impl Fn(&Instruction) -> 
     );
 }
 
-fn execute(body: &str) -> Result<Value, InterpreterError> {
-    let source: Text = format!("{ENV}\n{body}").into();
-    let ast = Parser::new(source.as_str())
-        .parse_module()
-        .expect("source grammar");
-    let mut maybe = Parser::new(include_str!("../../../core/base/maybe.vr"))
-        .parse_module().expect("canonical Maybe grammar");
-    maybe.items.retain(|item| {
-        matches!(&item.kind, verum_ast::ItemKind::Module(decl) if decl.items.is_none())
-            || item.kind.type_or_protocol_name().is_some_and(|name| name.as_str() == "Maybe")
-    });
-    let mut compiler = VbcCodegen::with_config(CodegenConfig::new("borrowed_lists"));
-    compiler.collect_unit_declarations(&[&maybe, &ast]).expect("source declarations");
-    compiler.resolve_pending_imports();
-    compiler.compile_unit_items(&[&maybe, &ast], ItemFailurePolicy::Strict).expect("source VBC");
-    let module = compiler.finalize_module_from_state().expect("checked source module");
-    let bytes = verum_vbc::serialize::serialize_module(&module).expect("serialize VBC");
-    let module = verum_vbc::deserialize::deserialize_module(&bytes).expect("decode VBC");
+fn execute(body: &str) -> [Result<Value, InterpreterError>; 2] {
+    let module = declared_list::compile_consumer(&format!("{ENV}\n{body}"));
     body_has(&module, "read_ref", |instruction| {
         matches!(instruction, Instruction::CbgrExtended { sub_op, .. }
             if *sub_op == CbgrSubOpcode::RefListElement as u8)
@@ -119,23 +106,27 @@ fn execute(body: &str) -> Result<Value, InterpreterError> {
         })
         .expect("qualified probe")
         .id;
-    Interpreter::new(Arc::new(module)).execute_function(entry)
+    declared_list::source_and_wire(module)
+        .map(|module| Interpreter::new(Arc::new(module)).execute_function(entry))
 }
 
 fn value(body: &str, expected: i64) {
-    let actual = execute(body).expect("source must execute");
-    assert!(actual.is_int(), "expected Int, got {actual:?}");
-    assert_eq!(actual.as_i64(), expected);
+    for result in execute(body) {
+        let actual = result.expect("source and serialized VBC must execute");
+        assert!(actual.is_int(), "expected Int, got {actual:?}");
+        assert_eq!(actual.as_i64(), expected);
+    }
 }
 
 fn bounds(body: &str, index: i64, length: usize) {
-    let error =
-        execute(body).expect_err("invalid index must be refused before exposing a reference");
-    assert!(
-        matches!(error, InterpreterError::IndexOutOfBounds { index: actual, length: actual_length }
-            if actual == index && actual_length == length),
-        "expected index {index} for length {length}, got {error:?}"
-    );
+    for result in execute(body) {
+        let error = result.expect_err("invalid index must be refused before exposing a reference");
+        assert!(
+            matches!(error, InterpreterError::IndexOutOfBounds { index: actual, length: actual_length }
+                if actual == index && actual_length == length),
+            "expected index {index} for length {length}, got {error:?}"
+        );
+    }
 }
 
 #[test]
@@ -144,6 +135,32 @@ fn a_direct_list_element_borrow_reads_the_selected_element() {
         "fn probe() -> Int { let values = sample(); let item = &values[1]; *item }",
         42,
     );
+}
+
+#[test]
+fn simultaneous_shared_element_and_range_borrows_remain_readable() {
+    value(r#"
+fn combine(left: &Int, right: &Int) -> Int { *left + *right }
+fn probe() -> Int {
+    let values = sample();
+    let left = &values[0];
+    let right = &values[1];
+    let span = &values[1..3];
+    combine(left, right) + span[1]
+}
+"#, 152);
+}
+
+#[test]
+fn indexed_record_arguments_reach_their_own_field() {
+    value(r#"
+type Item is { amount: Int };
+fn sum(left: &Item, right: &Item) -> Int { left.amount + right.amount }
+fn probe() -> Int {
+    let items: List<Item> = [Item { amount: 8 }, Item { amount: 11 }];
+    sum(&items[0], &items[1])
+}
+"#, 19);
 }
 
 #[test]

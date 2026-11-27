@@ -8039,7 +8039,8 @@ pub enum CbgrSubOpcode {
     /// Create slice reference from array/buffer.
     ///
     /// Creates a FatRef with length metadata from a contiguous buffer.
-    /// Format: `dst:reg, src:reg, start:reg, len:reg`
+    /// Format: `dst:reg, src:reg, start:reg, len:reg [, stride [, shared]]`.
+    /// The optional layout is encoded by `SliceProjectionLayout`.
     RefSlice = 0x00,
 
     /// Create interior reference to struct field.
@@ -8125,7 +8126,8 @@ pub enum CbgrSubOpcode {
     /// produce a reference to a register holding a *copy* of the element,
     /// so `*r = v` would write to the copy instead of the underlying List.
     ///
-    /// Format: `dst:reg, list:reg, index:reg`
+    /// Format: `dst:reg, list:reg, index:reg [, shared]`. The shared
+    /// operand restricts the incoming rights before the view is issued.
     RefListElement = 0x0B,
 
     /// Create interior reference to a record field by field-index, with

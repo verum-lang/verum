@@ -5733,7 +5733,10 @@ impl VbcCodegen {
                 }
                 _ => 0,
             };
-            Self::write_reg(&mut operands, elem_hint);
+            crate::encoding::SliceProjectionLayout {
+                stride: elem_hint,
+                access: crate::encoding::ProjectionAccess::for_borrow(op == UnOp::RefMut),
+            }.encode(&mut operands);
             self.ctx.emit(Instruction::CbgrExtended {
                 sub_op: crate::instruction::CbgrSubOpcode::RefSlice as u8,
                 operands,
@@ -5824,7 +5827,10 @@ impl VbcCodegen {
             // re-derive it by reading the array's own first word as a
             // type_id. T1269: it is `elem_sz`, not the constant 1, now
             // that the arm admits `[T; N]`.
-            Self::write_reg(&mut operands, elem_sz as u16);
+            crate::encoding::SliceProjectionLayout {
+                stride: elem_sz as u16,
+                access: crate::encoding::ProjectionAccess::for_borrow(op == UnOp::RefMut),
+            }.encode(&mut operands);
             self.ctx.emit(Instruction::CbgrExtended {
                 sub_op: crate::instruction::CbgrSubOpcode::RefSlice as u8,
                 operands,
@@ -5882,6 +5888,7 @@ impl VbcCodegen {
             Self::write_reg(&mut operands, dest.0);
             Self::write_reg(&mut operands, list_reg.0);
             Self::write_reg(&mut operands, index_reg.0);
+            crate::encoding::ProjectionAccess::for_borrow(op == UnOp::RefMut).encode(&mut operands);
             self.ctx.emit(Instruction::CbgrExtended {
                 sub_op: crate::instruction::CbgrSubOpcode::RefListElement as u8,
                 operands,

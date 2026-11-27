@@ -6,7 +6,8 @@ use super::super::super::{
 };
 use super::super::DispatchResult;
 use super::{bytecode_io::read_reg, cbgr_helpers::resolve_receiver, ffi_extended::value_as_addr};
-use crate::value::Value;
+use crate::value::{Capabilities, Value};
+use super::cbgr_helpers::ReceiverPlace;
 
 fn invalid(message: impl Into<verum_common::Text>) -> InterpreterError {
     InterpreterError::Panic {
@@ -104,6 +105,17 @@ impl Storage {
             count * self.width,
         ))
     }
+    fn project(&self, state: &mut InterpreterState, capabilities: Capabilities) -> InterpreterResult<Value> {
+        let encoding = if self.width == 1 {
+            heap::ProjectionEncoding::Byte
+        } else {
+            heap::ProjectionEncoding::Value
+        };
+        let raw_extent = super::cbgr::bridge_extent(state, self.data as usize);
+        state.heap.project_sequence(
+            self.owner, 2, self.backing, self.data, raw_extent, self.len, encoding, capabilities,
+        )
+    }
 }
 
 /// Borrow the initialized storage through its existing physical-layout authority.
@@ -111,12 +123,10 @@ impl Storage {
 /// a mutable reference and no new raw-layout convention is introduced.
 pub(super) fn project_view(
     state: &mut InterpreterState,
-    source: Value,
+    place: &ReceiverPlace,
     start: usize,
     count: Option<usize>,
 ) -> InterpreterResult<Option<Value>> {
-    use crate::value::Capabilities;
-    let place = super::cbgr_helpers::resolve_receiver_place(state, source)?;
     if let Some(available) = state.heap.projection_len(place.value)? {
         let count = count.unwrap_or(available.saturating_sub(start));
         return state
@@ -140,22 +150,7 @@ pub(super) fn project_view(
     if start > storage.len || count > storage.len - start {
         return Err(invalid("slice range exceeds List length"));
     }
-    let encoding = if storage.width == 1 {
-        heap::ProjectionEncoding::Byte
-    } else {
-        heap::ProjectionEncoding::Value
-    };
-    let raw_extent = super::cbgr::bridge_extent(state, storage.data as usize);
-    let view = state.heap.project_sequence(
-        storage.owner,
-        2,
-        storage.backing,
-        storage.data,
-        raw_extent,
-        storage.len,
-        encoding,
-        place.capabilities,
-    )?;
+    let view = storage.project(state, place.capabilities)?;
     if start == 0 && count == storage.len {
         Ok(Some(view))
     } else {
@@ -168,10 +163,9 @@ pub(super) fn project_view(
 
 pub(super) fn project_element(
     state: &mut InterpreterState,
-    source: Value,
+    place: &ReceiverPlace,
     index: i64,
 ) -> InterpreterResult<Option<Value>> {
-    let place = super::cbgr_helpers::resolve_receiver_place(state, source)?;
     if let Some(len) = state.heap.projection_len(place.value)? {
         if index < 0 || index as u64 >= len as u64 {
             return Err(InterpreterError::IndexOutOfBounds { index, length: len });
@@ -198,7 +192,7 @@ pub(super) fn project_element(
             length: storage.len,
         });
     }
-    let view = project_view(state, source, 0, None)?.expect("List storage was checked");
+    let view = storage.project(state, place.capabilities)?;
     state
         .heap
         .project_sequence_element(view, index as usize, place.capabilities)
