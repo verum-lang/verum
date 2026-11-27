@@ -98,7 +98,7 @@ public mount .error.{
 };
 
 public mount .parser.{
-    ParseState, ParseOutcome, parse_argv,
+    ParseOutcome, parse_argv,
 };
 
 public mount .help.{

@@ -42,6 +42,7 @@
 module core.cli.parser;
 
 mount core.base.{Maybe, Result};
+mount core.base.memory.replace;
 mount core.base.protocols.Default;
 mount core.collections.{List, Map, Set};
 mount core.text.Text;
@@ -100,9 +101,8 @@ public type ParseOutcome is {
 // ParseState — internal cursor over argv
 // =============================================================================
 
-/// Stateful cursor over argv. Construction is done by `parse_argv`;
-/// users typically don't touch this directly.
-public type ParseState is {
+/// Cursor used by the command-spec parser.
+type ParseState is {
     argv:   List<Text>,
     cursor: Int,
     /// Whether we've crossed `--` (everything after is positional).
@@ -110,7 +110,7 @@ public type ParseState is {
 };
 
 implement ParseState {
-    public fn new(argv: List<Text>) -> ParseState {
+    fn new(argv: List<Text>) -> ParseState {
         ParseState { argv: argv, cursor: 0, after_double_dash: false }
     }
 
@@ -638,17 +638,9 @@ fn count_present(members: &List<Text>, flags: &Map<Text, CapturedFlag>) -> Int {
 // Parser<A> protocol — composable combinator surface (spec §3.3)
 // =============================================================================
 //
-// The `Parser<A>` protocol describes a stateful parser that consumes
-// part of a `ParseState` and returns either a parsed `A` or a
-// `ParseError`. Concrete combinators (`arg`, `flag`, `many`, etc.)
-// build small parsers that the runtime composes into the parse tree.
-//
-// Phase 0 ships only the protocol + the `ArgParser` / `FlagParser`
-// adapters that wrap a single `ArgSpec` / `FlagSpec`. The `parse_argv`
-// driver above is the production path; combinator-driven parsers are
-// for tooling that needs to reason about partial parses (linters,
-// REPL completion, structured-input adapters).
-//
+// Combinators inspect a stable slice of tokens. Each success carries its
+// next position, so a caller may retain values borrowed from earlier tokens.
+// The command-spec driver also handles dispatch, flag groups and arity.
 
 /// A description of what a parser consumes — used by the help renderer
 /// when the parser is built combinator-style instead of derived from a
@@ -662,11 +654,21 @@ public type ParserDescription is {
     kind:     Text,
 };
 
-/// A parser of `A` values. Implementations consume part of `state.argv`
-/// starting at `state.cursor` and return either a parsed value or an
-/// error explaining why the consumption failed.
+/// A matched value carries the position of the next token. A mismatch allows
+/// a combinator to try another parser. A failure commits its diagnostic.
+public type ParseStep<A> is
+    | Matched { public value: A, public next: Int }
+    | Mismatch(ParseError)
+    | Failed(ParseError);
+
+fn invalid_parser_position(position: Int, minimum: Int, limit: Int) -> ParseError {
+    ParseError.bare(ParseErrorKind.InternalError, f"parser position {position} is outside {minimum}..={limit}")
+}
+
+/// Parse from a position in stable input. A result may borrow the parser or
+/// input tokens while subsequent calls advance independently.
 public type Parser<A> is protocol {
-    fn parse(&self, state: &mut ParseState) -> Result<A, ParseError>;
+    fn parse(&self, tokens: &[Text], at: Int) -> ParseStep<A>;
     fn describe(&self) -> ParserDescription;
 }
 
@@ -679,11 +681,14 @@ public type ArgParser is {
 };
 
 implement Parser<Text> for ArgParser {
-    fn parse(&self, state: &mut ParseState) -> Result<Text, ParseError> {
-        match state.advance() {
-            Maybe.Some(tok) => Result.Ok(tok),
-            Maybe.None => Result.Err(ParseError.missing_required(self.spec.name.clone())),
+    fn parse(&self, tokens: &[Text], at: Int) -> ParseStep<Text> {
+        if at < 0 || at > tokens.len() {
+            return ParseStep.Failed(invalid_parser_position(at, 0, tokens.len()));
         }
+        if at == tokens.len() {
+            return ParseStep.Mismatch(ParseError.missing_required(self.spec.name.clone()));
+        }
+        ParseStep.Matched { value: tokens[at].clone(), next: at + 1 }
     }
 
     fn describe(&self) -> ParserDescription {
@@ -708,24 +713,31 @@ public type FlagParser is {
     spec: FlagSpec,
 };
 
-implement Parser<Maybe<Text>> for FlagParser {
-    fn parse(&self, state: &mut ParseState) -> Result<Maybe<Text>, ParseError> {
-        let (name, attached) = match state.peek() {
-            Maybe.Some(token) if token.len() > 2 && token.starts_with(&"--") => split_long_option(token),
-            _ => return Result.Ok(Maybe.None),
+implement Parser<Text> for FlagParser {
+    fn parse(&self, tokens: &[Text], at: Int) -> ParseStep<Text> {
+        if at < 0 || at > tokens.len() {
+            return ParseStep.Failed(invalid_parser_position(at, 0, tokens.len()));
+        }
+        let expected: &Text = match &self.spec.long {
+            Maybe.Some(name) => name,
+            Maybe.None => return ParseStep.Mismatch(ParseError.bare(
+                ParseErrorKind.MissingRequired, "expected a value-taking long flag",
+            )),
         };
-        match &self.spec.long {
-            Maybe.Some(expected) if &name == expected => {},
-            _ => return Result.Ok(Maybe.None),
+        if at < tokens.len() {
+            let token = &tokens[at];
+            if token.len() > 2 && token.starts_with(&"--") {
+                let (name, attached) = split_long_option(token);
+                if &name == expected {
+                    return match attached {
+                        Maybe.Some(value) => ParseStep.Matched { value, next: at + 1 },
+                        Maybe.None if at + 1 == tokens.len() => ParseStep.Failed(ParseError.missing_value(name)),
+                        Maybe.None => ParseStep.Matched { value: tokens[at + 1].clone(), next: at + 2 },
+                    };
+                }
+            }
         }
-        state.cursor = state.cursor + 1;
-        match attached {
-            Maybe.Some(value) => Result.Ok(Maybe.Some(value)),
-            Maybe.None => match state.advance() {
-                Maybe.Some(value) => Result.Ok(Maybe.Some(value)),
-                Maybe.None => Result.Err(ParseError.missing_value(name)),
-            },
-        }
+        ParseStep.Mismatch(ParseError.missing_required(expected.clone()))
     }
 
     fn describe(&self) -> ParserDescription {
@@ -747,24 +759,29 @@ public fn flag(spec: FlagSpec) -> FlagParser {
 }
 
 // -----------------------------------------------------------------------------
-// Combinators — Phase 0 ships the structural form; the runtime path
-// in `parse_argv` is the optimised implementation. These exist for
-// tooling that wants to compose parsers programmatically.
+// Parser combinators
 // -----------------------------------------------------------------------------
 
-/// Make a parser optional: if it fails non-fatally (no input consumed)
-/// produce `Maybe.None` instead of `Err`.
+/// A mismatch yields an absent value at the original position. A committed
+/// error or an invalid continuation position propagates as a failure.
 public type OptionalParser<A, P: Parser<A>> is {
     inner: P,
 };
 
 implement<A, P: Parser<A>> Parser<Maybe<A>> for OptionalParser<A, P> {
-    fn parse(&self, state: &mut ParseState) -> Result<Maybe<A>, ParseError> {
-        let saved_cursor = state.cursor;
-        match self.inner.parse(state) {
-            Result.Ok(v) => Result.Ok(Maybe.Some(v)),
-            Result.Err(_) if state.cursor == saved_cursor => Result.Ok(Maybe.None),
-            Result.Err(err) => Result.Err(err),
+    fn parse(&self, tokens: &[Text], at: Int) -> ParseStep<Maybe<A>> {
+        if at < 0 || at > tokens.len() {
+            return ParseStep.Failed(invalid_parser_position(at, 0, tokens.len()));
+        }
+        match self.inner.parse(tokens, at) {
+            ParseStep.Matched { value, next } => {
+                if next < at || next > tokens.len() {
+                    return ParseStep.Failed(invalid_parser_position(next, at, tokens.len()));
+                }
+                ParseStep.Matched { value: Maybe.Some(value), next }
+            },
+            ParseStep.Mismatch(_) => ParseStep.Matched { value: Maybe.None, next: at },
+            ParseStep.Failed(error) => ParseStep.Failed(error),
         }
     }
 
@@ -782,24 +799,37 @@ public fn optional<A, P: Parser<A>>(inner: P) -> OptionalParser<A, P> {
     OptionalParser { inner: inner }
 }
 
-/// Run `inner` zero or more times, collecting into a List.
+/// Collect matches until the first mismatch. Each match must advance within the input.
 public type ManyParser<A, P: Parser<A>> is {
     inner: P,
 };
 
 implement<A, P: Parser<A>> Parser<List<A>> for ManyParser<A, P> {
-    fn parse(&self, state: &mut ParseState) -> Result<List<A>, ParseError> {
-        let mut out: List<A> = List.new();
+    fn parse(&self, tokens: &[Text], at: Int) -> ParseStep<List<A>> {
+        if at < 0 || at > tokens.len() {
+            return ParseStep.Failed(invalid_parser_position(at, 0, tokens.len()));
+        }
+        let mut values: List<A> = List.new();
+        let mut cursor = at;
         loop {
-            let saved = state.cursor;
-            match self.inner.parse(state) {
-                Result.Ok(v) => out.push(v),
-                Result.Err(_) => {
-                    state.cursor = saved;
-                    return Result.Ok(out);
+            match self.inner.parse(tokens, cursor) {
+                ParseStep.Matched { value, next } => {
+                    if next == cursor {
+                        return ParseStep.Failed(ParseError.bare(
+                            ParseErrorKind.InternalError, "repeated parser consumed no input",
+                        ));
+                    }
+                    if next < cursor || next > tokens.len() {
+                        return ParseStep.Failed(invalid_parser_position(next, cursor, tokens.len()));
+                    }
+                    values = append_matched(replace(&mut values, List.new()), value);
+                    cursor = next;
                 },
+                ParseStep.Mismatch(_) => break,
+                ParseStep.Failed(error) => return ParseStep.Failed(error),
             }
         }
+        ParseStep.Matched { value: values, next: cursor }
     }
 
     fn describe(&self) -> ParserDescription {
@@ -807,6 +837,13 @@ implement<A, P: Parser<A>> Parser<List<A>> for ManyParser<A, P> {
         d.label.push_str("...");
         d
     }
+}
+
+// Transfer the buffer and the matched item into the same append. References
+// inside an item retain their original input or parser as their owner.
+fn append_matched<A>(mut values: List<A>, value: A) -> List<A> {
+    values.push(value);
+    values
 }
 
 public fn many<A, P: Parser<A>>(inner: P) -> ManyParser<A, P> {

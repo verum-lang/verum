@@ -1,6 +1,10 @@
 mount core.cli.spec.{ArgSpec, CommandSpec, FlagSpec};
 mount core.cli.builder.AppBuilder;
-mount core.cli.parser.{arg, flag, optional, parse_argv, ArgParser, FlagParser, OptionalParser, Parser, ParseState};
+mount core.cli.parser.{
+    arg, flag, many, optional, parse_argv, ArgParser, FlagParser,
+    Parser, ParserDescription, ParseStep,
+};
+mount core.cli.error.{ParseError, ParseErrorKind};
 mount core.base.maybe.Maybe;
 mount core.collections.List;
 mount core.text.Text;
@@ -64,24 +68,113 @@ fn test_required_positionals_belong_to_the_selected_command() {
 fn test_flag_parser_preserves_attached_values_and_leaves_mismatches_in_place() {
     let mode = flag(FlagSpec.value("mode", "Mode"));
     let model = flag(FlagSpec.value("model", "Model"));
-    let mut state = ParseState.new(["--mode=λ=x", "--mode=", "--mode", "", "--model=z", "--mode"]);
-    assert_eq(mode.parse(&mut state).unwrap(), Maybe.Some("λ=x"));
-    assert_eq(mode.parse(&mut state).unwrap(), Maybe.Some(""));
-    assert_eq(mode.parse(&mut state).unwrap(), Maybe.Some(""));
-    assert(mode.parse(&mut state) is Result.Ok(Maybe.None));
-    assert_eq(model.parse(&mut state).unwrap(), Maybe.Some("z"));
-    assert(mode.parse(&mut state) is Result.Err(_));
+    let tokens: List<Text> = ["--mode=λ=x", "--mode=", "--mode", "", "--model=z", "--mode"];
+    let input = tokens.as_slice();
+    assert(mode.parse(input, 0) is ParseStep.Matched { value: "λ=x", next: 1 });
+    assert(mode.parse(input, 1) is ParseStep.Matched { value: "", next: 2 });
+    assert(mode.parse(input, 2) is ParseStep.Matched { value: "", next: 4 });
+    assert(mode.parse(input, 4) is ParseStep.Mismatch(_));
+    assert(model.parse(input, 4) is ParseStep.Matched { value: "z", next: 5 });
+    assert(mode.parse(input, 5) is ParseStep.Failed(_));
+
+    let repeated = many<Text, FlagParser>(mode);
+    match repeated.parse(input, 0) {
+        ParseStep.Matched { value, next } => {
+            assert_eq(next, 4);
+            assert_eq(value.len(), 3);
+            assert_eq(value[0], "λ=x");
+            assert_eq(value[1], "");
+            assert_eq(value[2], "");
+        },
+        _ => panic("expected three mode options"),
+    };
 }
 
 @test
 fn test_optional_parser_preserves_errors_after_consuming_an_option() {
-    let required: OptionalParser<Text, ArgParser> = optional(arg(ArgSpec.required("item", "Item")));
-    let mut tokens = ParseState.new(["value"]);
-    assert_eq(required.parse(&mut tokens).unwrap(), Maybe.Some("value"));
-    assert(required.parse(&mut tokens) is Result.Ok(Maybe.None));
+    let required = optional<Text, ArgParser>(arg(ArgSpec.required("item", "Item")));
+    let tokens: List<Text> = ["value", "--mode"];
+    let input = tokens.as_slice();
+    assert(required.parse(input, 0) is ParseStep.Matched { value: Maybe.Some("value"), next: 1 });
+    assert(required.parse(input, 2) is ParseStep.Matched { value: Maybe.None, next: 2 });
 
-    let mode: OptionalParser<Maybe<Text>, FlagParser> = optional(flag(FlagSpec.value("mode", "Mode")));
-    let mut incomplete = ParseState.new(["--mode"]);
-    assert(mode.parse(&mut incomplete) is Result.Err(_));
-    assert(required.parse(&mut incomplete) is Result.Ok(Maybe.None));
+    let mode = optional<Text, FlagParser>(flag(FlagSpec.value("mode", "Mode")));
+    assert(mode.parse(input, 1) is ParseStep.Failed(_));
+}
+
+type BorrowedToken is { stride: Int };
+
+implement Parser<&Text> for BorrowedToken {
+    fn parse(&self, tokens: &[Text], at: Int) -> ParseStep<&Text> {
+        if at == tokens.len() {
+            return ParseStep.Mismatch(ParseError.missing_required("token"));
+        }
+        if tokens[at] == "invalid" {
+            return ParseStep.Failed(ParseError.bare(ParseErrorKind.InvalidValue, "invalid token"));
+        }
+        ParseStep.Matched { value: &tokens[at], next: at + self.stride }
+    }
+
+    fn describe(&self) -> ParserDescription {
+        arg(ArgSpec.required("token", "Input")).describe()
+    }
+}
+
+@test
+fn test_many_retains_distinct_borrowed_and_owned_values() {
+    let tokens: List<Text> = ["skipped", "first", "second"];
+    let input = tokens.as_slice();
+    let borrowed = many<&Text, BorrowedToken>(BorrowedToken { stride: 1 });
+    match borrowed.parse(input, 1) {
+        ParseStep.Matched { value, next } => {
+            assert_eq(next, 3);
+            assert_eq(value.len(), 2);
+            assert_eq(*value[0], "first");
+            assert_eq(*value[1], "second");
+        },
+        _ => panic("expected two borrowed tokens"),
+    }
+    let owned = many<Text, ArgParser>(arg(ArgSpec.required("item", "Input")));
+    match owned.parse(input, 1) {
+        ParseStep.Matched { value, next } => {
+            assert_eq(next, 3);
+            assert_eq(value.len(), 2);
+            assert_eq(value[0], "first");
+            assert_eq(value[1], "second");
+        },
+        _ => panic("expected two owned tokens"),
+    }
+}
+
+@test
+fn test_many_terminates_on_absence_and_propagates_committed_failure() {
+    let tokens: List<Text> = ["ok", "invalid"];
+    let repeated = many<&Text, BorrowedToken>(BorrowedToken { stride: 1 });
+    match repeated.parse(tokens.as_slice(), 2) {
+        ParseStep.Matched { value, next } => {
+            assert(value.is_empty());
+            assert_eq(next, 2);
+        },
+        _ => panic("expected an empty repetition at end of input"),
+    }
+    match repeated.parse(tokens.as_slice(), 0) {
+        ParseStep.Failed(error) => assert_eq(*error.message(), "invalid token"),
+        _ => panic("expected the diagnostic from the second token"),
+    };
+}
+
+@test
+fn test_many_refuses_nonprogress_and_out_of_range_positions() {
+    let tokens: List<Text> = ["a", "b"];
+    let input = tokens.as_slice();
+    let zero = many<&Text, BorrowedToken>(BorrowedToken { stride: 0 });
+    let back = many<&Text, BorrowedToken>(BorrowedToken { stride: -1 });
+    let ahead = many<&Text, BorrowedToken>(BorrowedToken { stride: 3 });
+    assert(zero.parse(input, 0) is ParseStep.Failed(_));
+    assert(back.parse(input, 1) is ParseStep.Failed(_));
+    assert(ahead.parse(input, 0) is ParseStep.Failed(_));
+    assert(zero.parse(input, -1) is ParseStep.Failed(_));
+    assert(zero.parse(input, 3) is ParseStep.Failed(_));
+    let opt = optional<&Text, BorrowedToken>(BorrowedToken { stride: 3 });
+    assert(opt.parse(input, 0) is ParseStep.Failed(_));
 }
