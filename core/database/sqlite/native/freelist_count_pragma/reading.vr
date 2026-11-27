@@ -62,31 +62,12 @@ public fn advice_name(v: &VacuumAdvice) -> Text {
 
 // Snapshot rendering "freelist=X / total=Y (Z%)".
 public fn snapshot_text(r: &FreelistCountReading) -> Text {
-    let mut s = Text.new();
-    s = s.concat(&"freelist=".clone());
-    s = s.concat(&int64_decimal(r.free_pages));
-    s = s.concat(&" total=".clone());
-    s = s.concat(&int64_decimal(r.total_pages));
-    s = s.concat(&" (".clone());
-    s = s.concat(&int_decimal(fragmentation_percent(r)));
-    s = s.concat(&"%)".clone());
+    let mut s = "freelist=".clone();
+    s.push_int(r.free_pages as Int);
+    s.push_str(" total=");
+    s.push_int(r.total_pages as Int);
+    s.push_str(" (");
+    s.push_int(fragmentation_percent(r));
+    s.push_str("%)");
     s
-}
-
-fn int64_decimal(n: Int64) -> Text {
-    // T1061: this was eighteen lines that built the digits with
-    // `.append_byte(0x30 + d)` — a method declared NOWHERE in core/, so
-    // every call died. Three modules each carried their own copy under
-    // two spellings, which is why no single failure looked like a
-    // shared one.
-    //
-    // A format literal renders a sized integer directly. Measured on
-    // v28: 1234567890123, 0 and -42 all correct — and the old loop was
-    // `while x > zero`, so it returned "" for EVERY negative n. The
-    // literal handles the sign too.
-    f"{n}"
-}
-
-fn int_decimal(n: Int) -> Text {
-    int64_decimal(n as Int64)
 }

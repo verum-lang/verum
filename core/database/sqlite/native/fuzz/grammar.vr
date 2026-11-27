@@ -77,7 +77,7 @@ fn emit_insert(s: &mut DstSeed) -> Text {
     let mut sql = "INSERT INTO t".clone();
     push(&mut sql, &draw_table_suffix(s));
     push(&mut sql, &" VALUES (".clone());
-    push(&mut sql, &draw_int_lit(s));
+    sql.push_int(s.next_below(10000));
     push(&mut sql, &", ".clone());
     push(&mut sql, &draw_string_lit(s));
     push(&mut sql, &");".clone());
@@ -100,7 +100,7 @@ fn emit_select(s: &mut DstSeed) -> Text {
     }
     if s.next_bool() {
         push(&mut sql, &" LIMIT ".clone());
-        push(&mut sql, &draw_int_lit(s));
+        sql.push_int(s.next_below(10000));
     }
     push(&mut sql, &";".clone());
     sql
@@ -112,7 +112,7 @@ fn emit_update(s: &mut DstSeed) -> Text {
     push(&mut sql, &" SET name = ".clone());
     push(&mut sql, &draw_string_lit(s));
     push(&mut sql, &" WHERE id = ".clone());
-    push(&mut sql, &draw_int_lit(s));
+    sql.push_int(s.next_below(10000));
     push(&mut sql, &";".clone());
     sql
 }
@@ -121,7 +121,7 @@ fn emit_delete(s: &mut DstSeed) -> Text {
     let mut sql = "DELETE FROM t".clone();
     push(&mut sql, &draw_table_suffix(s));
     push(&mut sql, &" WHERE id = ".clone());
-    push(&mut sql, &draw_int_lit(s));
+    sql.push_int(s.next_below(10000));
     push(&mut sql, &";".clone());
     sql
 }
@@ -177,18 +177,6 @@ fn draw_table_suffix(s: &mut DstSeed) -> Text {
     t
 }
 
-fn draw_int_lit(s: &mut DstSeed) -> Text {
-    let v = s.next_below(10000);
-    let mut t = Text.new();
-    if v == 0 { t.push_byte(48 as Byte); return t; }
-    let mut digits: List<Byte> = List.new();
-    let mut x: Int = v;
-    while x > 0 { digits.push(((x % 10) as Byte) + (48 as Byte)); x = x / 10; }
-    let mut i: Int = digits.len() - 1;
-    while i >= 0 { t.push_byte(digits[i]); i = i - 1; }
-    t
-}
-
 fn draw_string_lit(s: &mut DstSeed) -> Text {
     let mut t = "'".clone();
     let n = s.next_below(8) + 1;
@@ -210,7 +198,7 @@ fn draw_predicate(s: &mut DstSeed) -> Text {
     let mut t = "id ".clone();
     push(&mut t, &if s.next_bool() { "=".clone() } else { ">".clone() });
     push(&mut t, &" ".clone());
-    push(&mut t, &draw_int_lit(s));
+    t.push_int(s.next_below(10000));
     t
 }
 
@@ -219,14 +207,9 @@ fn push(dst: &mut Text, s: &Text) {
 }
 
 fn pop_terminator(t: &mut Text) {
-    let bs = t.as_bytes();
-    if bs.len() == 0 { return; }
-    if bs[bs.len() - 1] == (59 as Byte) {
-        // Re-emit without trailing semicolon.
-        let mut new_t = Text.with_capacity(bs.len() - 1);
-        let mut i: Int = 0;
-        while i < bs.len() - 1 { new_t.push_byte(bs[i]); i = i + 1; }
-        *t = new_t;
+    let len = t.len();
+    if len > 0 && t.as_bytes()[len - 1] == (';' as Byte) {
+        t.truncate(len - 1);
     }
 }
 

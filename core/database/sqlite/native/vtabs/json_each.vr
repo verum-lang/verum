@@ -272,17 +272,7 @@ fn parent_path(p: &Text) -> Text {
 fn format_index(base: &Text, idx: Int) -> Text {
     let mut out = base.clone();
     out.push_byte(91 as Byte);  // [
-    if idx == 0 { out.push_byte(48 as Byte); }
-    else {
-        let mut digits: List<Byte> = List.new();
-        let mut x = idx;
-        while x > 0 {
-            digits.push(((x % 10) + 48) as Byte);
-            x = x / 10;
-        }
-        let mut k: Int = digits.len() - 1;
-        while k >= 0 { out.push_byte(digits[k]); k = k - 1; }
-    }
+    out.push_int(idx);
     out.push_byte(93 as Byte);  // ]
     out
 }

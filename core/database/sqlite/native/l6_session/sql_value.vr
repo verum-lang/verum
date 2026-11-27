@@ -181,8 +181,8 @@ public fn value_to_real(v: &SqlValue) -> Float64 {
 public fn value_to_text(v: &SqlValue) -> Text {
     match v {
         VNull    => "".clone(),
-        VInt(i)  => int64_to_text(i),
-        VReal(x) => float_to_text(x),
+        VInt(i)  => Text.from_int(i as Int),
+        VReal(x) => float_to_text(*x),
         VText(ref t) => t.clone(),
         VBlob(_) => "".clone(),
     }
@@ -397,25 +397,6 @@ fn parse_leading_real(t: &Text) -> Float64 {
     if neg { 0.0 - value } else { value }
 }
 
-/// Cheap Int64 → decimal Text without going through the full
-/// stdlib Display path (avoids pulling Formatter through the L6 API).
-fn int64_to_text(i: Int64) -> Text {
-    if i == 0_i64 { return "0".clone(); }
-    let neg = i < 0_i64;
-    let mut x: Int64 = if neg { 0_i64 - i } else { i };
-    let mut digits: List<Byte> = List.new();
-    while x > 0_i64 {
-        let d = (x % 10_i64) as Int;
-        digits.push((0x30 + d) as Byte);
-        x = x / 10_i64;
-    }
-    let mut out: List<Byte> = List.new();
-    if neg { out.push(0x2D as Byte); }
-    let mut k: Int = digits.len() - 1;
-    while k >= 0 { out.push(digits[k]); k = k - 1; }
-    Text.from_utf8(out.as_slice()).unwrap_or("0".clone())
-}
-
 /// Best-effort Float64 → Text — strips trailing zeros from the
 /// fractional part for readability.  Doesn't attempt full IEEE-754
 /// round-trip precision; matches SQLite's "%!.15g" default to within
@@ -424,30 +405,27 @@ fn float_to_text(x: Float64) -> Text {
     if x != x { return "NaN".clone(); }
     if x == 0.0 { return "0.0".clone(); }
     let neg = x < 0.0;
-    let mut v: Float64 = if neg { 0.0 - x } else { x };
+    let v: Float64 = if neg { 0.0 - x } else { x };
     // Decompose into integer + fractional.
     let int_part_i: Int64 = v as Int64;
-    let int_text = int64_to_text(int_part_i);
     let mut frac: Float64 = v - (int_part_i as Float64);
-    let mut out: List<Byte> = List.new();
+    let mut out = Text.new();
     if neg {
-        out.push(0x2D as Byte);
+        out.push_byte(0x2D as Byte);
     }
-    let int_bytes = int_text.as_bytes();
-    let mut i: Int = 0;
-    while i < int_bytes.len() { out.push(int_bytes[i]); i = i + 1; }
-    out.push(0x2E as Byte);  // '.'
+    out.push_int(int_part_i as Int);
+    out.push_byte(0x2E as Byte);  // '.'
     // Emit up to 6 fractional digits.
     let mut k: Int = 0;
     while k < 6 && frac > 0.0 {
         frac = frac * 10.0;
         let d = frac as Int64;
-        out.push((0x30 as Int64 + d) as Byte);
+        out.push_byte((0x30 as Int64 + d) as Byte);
         frac = frac - (d as Float64);
         k = k + 1;
     }
-    if k == 0 { out.push(0x30 as Byte); }   // ensure at least "x.0"
-    Text.from_utf8(out.as_slice()).unwrap_or("0.0".clone())
+    if k == 0 { out.push_byte(0x30 as Byte); }   // ensure at least "x.0"
+    out
 }
 
 /// Convert a Text into an owned List<Byte> (UTF-8 bytes).  Used by

@@ -18,6 +18,13 @@ mount core.database.sqlite.native.profiler.report.{render as render_profile};
 mount core.database.sqlite.native.sql_render.literal.{RenderLiteral, render_literal};
 mount core.database.sqlite.native.stat1_schema_api.row.{new as stat_row, push_prefix_count, render_stat_text};
 
+mount core.database.sqlite.native.column.coerce.{to_text as column_text};
+mount core.database.sqlite.native.column.value.ColumnValue;
+mount core.database.sqlite.native.freelist_count_pragma.reading.{new as freelist_reading, snapshot_text as freelist_text};
+mount core.database.sqlite.native.fts5_offsets_fn_api.auxdata.{new_hit, render_hit};
+mount core.database.sqlite.native.l6_session.sql_value.{SqlValue, value_to_text};
+mount core.database.sqlite.native.total_changes64_api.counters.{empty as empty_counters, record_stmt, snapshot_text as changes_text};
+
 fn test_opcode_operands() {
     let r = with_operands(opcode_row(0, "Open".clone()), Int.MIN, -1, Int.MAX);
     assert_eq(format_row(&r), "0|Open|-9223372036854775808|-1|9223372036854775807||0");
@@ -56,7 +63,21 @@ fn test_reports() {
     assert_eq(render_profile(&s), "ANALYZE SELECT 1\ntotal_time_ns=-1\n\nPLAN:\n  [12] scan  est=-9223372036854775808  actual=0  ns=0\n\nOPS:\n");
 }
 
+fn test_coercions_and_counters() {
+    let lo = Int.MIN as Int64;
+    assert_eq(column_text(&ColumnValue.CvInt64(lo)), "-9223372036854775808");
+    assert_eq(value_to_text(&SqlValue.VInt(lo)), "-9223372036854775808");
+    assert_eq(value_to_text(&SqlValue.VReal(-12.25)), "-12.25");
+    let counts = record_stmt(empty_counters(), lo);
+    assert_eq(changes_text(&counts), "changes=-9223372036854775808 total=-9223372036854775808");
+    let reading = freelist_reading(3_i64, 12_i64);
+    assert_eq(freelist_text(&reading), "freelist=3 total=12 (25%)");
+    let hit = new_hit(2, 10, 1234567890123_i64, 16_i64);
+    assert_eq(render_hit(&hit), "2 10 1234567890123 16");
+}
+
 fn main() {
+    test_coercions_and_counters();
     test_opcode_operands();
     test_literals_and_statistics();
     test_column_names();

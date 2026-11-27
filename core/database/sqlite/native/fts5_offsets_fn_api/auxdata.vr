@@ -56,34 +56,14 @@ public fn is_empty(r: &OffsetsResult) -> Bool {
 
 // Render one hit in the "col term off size" form, space-separated.
 public fn render_hit(h: &MatchHit) -> Text {
-    let mut s = Text.new();
-    s = s.concat(&int_to_text(h.column));
-    s = s.concat(&" ".clone());
-    s = s.concat(&int_to_text(h.term));
-    s = s.concat(&" ".clone());
-    s = s.concat(&i64_to_text(h.byte_offset));
-    s = s.concat(&" ".clone());
-    s = s.concat(&i64_to_text(h.byte_size));
+    let mut s = Text.from_int(h.column);
+    s.push_byte(' ' as Byte);
+    s.push_int(h.term);
+    s.push_byte(' ' as Byte);
+    s.push_int(h.byte_offset as Int);
+    s.push_byte(' ' as Byte);
+    s.push_int(h.byte_size as Int);
     s
-}
-
-fn int_to_text(n: Int) -> Text {
-    let n64 = n as Int64;
-    i64_to_text(n64)
-}
-
-fn i64_to_text(n: Int64) -> Text {
-    // T1061: this was eighteen lines that built the digits with
-    // `.append_byte(0x30 + d)` — a method declared NOWHERE in core/, so
-    // every call died. Three modules each carried their own copy under
-    // two spellings, which is why no single failure looked like a
-    // shared one.
-    //
-    // A format literal renders a sized integer directly. Measured on
-    // v28: 1234567890123, 0 and -42 all correct — and the old loop was
-    // `while x > zero`, so it returned "" for EVERY negative n. The
-    // literal handles the sign too.
-    f"{n}"
 }
 
 // Number of items the SQL `offsets()` call would emit (4 ints per hit).

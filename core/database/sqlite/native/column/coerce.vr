@@ -57,7 +57,7 @@ public fn to_double(v: &ColumnValue) -> Float64 {
 public fn to_text(v: &ColumnValue) -> Text {
     match v {
         CvNull       => Text.new(),
-        CvInt64(n)   => render_int64(*n),
+        CvInt64(n)   => Text.from_int(*n as Int),
         CvReal(f)    => render_real(*f),
         CvText(t)    => t.clone(),
         CvBlob(b)    => blob_to_text(b),
@@ -176,25 +176,9 @@ fn parse_real(t: &Text) -> Float64 {
     if neg { -int_part } else { int_part }
 }
 
-fn render_int64(n: Int64) -> Text {
-    if n == 0_i64 { return "0".clone(); }
-    let neg = n < 0_i64;
-    let mut x: Int64 = if neg { -n } else { n };
-    let mut digits: List<Byte> = List.new();
-    while x > 0_i64 {
-        digits.push((((x as Int) % 10) as Byte) + (48 as Byte));
-        x = x / 10_i64;
-    }
-    let mut t = Text.new();
-    if neg { t.push_byte(45 as Byte); }
-    let mut i: Int = digits.len() - 1;
-    while i >= 0 { t.push_byte(digits[i]); i = i - 1; }
-    t
-}
-
 fn render_real(f: Float64) -> Text {
     let int_part: Int64 = f as Int64;
-    render_int64(int_part)
+    Text.from_int(int_part as Int)
 }
 
 fn blob_to_text(b: &List<Byte>) -> Text {
