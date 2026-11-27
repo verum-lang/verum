@@ -36511,18 +36511,24 @@ impl VbcCodegen {
             Opcode::SyscallLinux
                 if !args.is_empty() => {
                     let num = args[0];
-                    // Get up to 6 syscall arguments, use Reg(0) as placeholder for missing ones
-                    let a1 = args.get(1).copied().unwrap_or(Reg::new(0));
-                    let a2 = args.get(2).copied().unwrap_or(Reg::new(0));
-                    let a3 = args.get(3).copied().unwrap_or(Reg::new(0));
-                    let a4 = args.get(4).copied().unwrap_or(Reg::new(0));
-                    let a5 = args.get(5).copied().unwrap_or(Reg::new(0));
-                    let a6 = args.get(6).copied().unwrap_or(Reg::new(0));
+                    let mut words = [num; 6];
+                    let (supplied, unused) = words.split_at_mut_checked(args.len() - 1)
+                        .ok_or_else(|| CodegenError::internal("syscall accepts at most six argument words"))?;
+                    supplied.copy_from_slice(&args[1..]);
+                    // VBC and the native ABI consume six words regardless of source arity.
+                    let zero = (!unused.is_empty()).then(|| {
+                        let reg = self.ctx.alloc_temp();
+                        self.ctx.emit(Instruction::LoadI { dst: reg, value: 0 });
+                        unused.fill(reg);
+                        reg
+                    });
+                    let [a1, a2, a3, a4, a5, a6] = words;
                     self.ctx.emit(Instruction::SyscallLinux {
                         dst: dest,
                         num,
                         a1, a2, a3, a4, a5, a6,
                     });
+                    if let Some(reg) = zero { self.ctx.free_temp(reg); }
                 }
 
             // TLS operations

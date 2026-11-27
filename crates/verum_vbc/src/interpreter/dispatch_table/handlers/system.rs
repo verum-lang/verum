@@ -24,21 +24,20 @@ pub(in super::super) fn handle_syscall(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
-    let num_reg = read_reg(state)?;
-    let a1_reg = read_reg(state)?;
-    let a2_reg = read_reg(state)?;
-    let a3_reg = read_reg(state)?;
-    let a4_reg = read_reg(state)?;
-    let a5_reg = read_reg(state)?;
-    let a6_reg = read_reg(state)?;
-
-    let num = state.get_reg(num_reg).as_i64();
-    let a1 = state.get_reg(a1_reg).as_i64() as usize;
-    let a2 = state.get_reg(a2_reg).as_i64() as usize;
-    let a3 = state.get_reg(a3_reg).as_i64() as usize;
-    let a4 = state.get_reg(a4_reg).as_i64() as usize;
-    let a5 = state.get_reg(a5_reg).as_i64() as usize;
-    let a6 = state.get_reg(a6_reg).as_i64() as usize;
+    let mut read_word = || {
+        let reg = read_reg(state)?;
+        state.get_reg(reg).try_as_i64().ok_or(InterpreterError::TypeMismatch {
+            expected: "Int",
+            got: "non-integer",
+            operation: "raw syscall word",
+        })
+    };
+    let num = read_word()?;
+    let mut args = [0usize; 6];
+    for arg in &mut args {
+        *arg = read_word()? as usize;
+    }
+    let [a1, a2, a3, a4, a5, a6] = args;
 
     #[cfg(target_os = "linux")]
     {
@@ -57,8 +56,16 @@ pub(in super::super) fn handle_syscall(
                 reason: "native threads require isolated concurrent VM execution".into(),
             });
         }
-        let result = unsafe { libc::syscall(num, a1, a2, a3, a4, a5, a6) };
-        state.set_reg(dst, Value::from_i64(result as i64));
+        // SAFETY: the raw syscall intrinsic supplies the host ABI words; its
+        // caller owns pointer validity. Read the calling thread's errno before
+        // performing any further host operation on the failure path.
+        let result = unsafe {
+            match libc::syscall(num, a1, a2, a3, a4, a5, a6) {
+                -1 => -i64::from(*libc::__errno_location()),
+                value => value as i64,
+            }
+        };
+        state.set_reg(dst, Value::from_i64(result));
         Ok(DispatchResult::Continue)
     }
 

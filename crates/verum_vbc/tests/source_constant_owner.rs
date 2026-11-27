@@ -164,3 +164,72 @@ fn check_syscall_constants(module: verum_vbc::module::VbcModule) {
         assert_eq!(value.as_i64(), expected, "{qualified}");
     }
 }
+
+#[test]
+fn short_syscalls_initialize_unused_words_and_vm_rejects_noninteger_arguments() {
+    use verum_vbc::{Instruction, interpreter::InterpreterError};
+
+    let source = r#"module raw_contract;
+        fn one(n: Int, arg: Int) -> Int { @intrinsic("syscall1", n, arg) }
+        fn bad() -> Int { @intrinsic("syscall1", -1, false) }"#;
+    let ast = Parser::new(source).parse_module().unwrap();
+    let module = VbcCodegen::new().compile_module(&ast).unwrap();
+    let wire = verum_vbc::serialize::serialize_module(&module).unwrap();
+    let decoded = verum_vbc::deserialize::deserialize_module(&wire).unwrap();
+    for module in [module, decoded] {
+        let entry = module.find_function_by_name("raw_contract.one").unwrap();
+        let body = &module.functions[entry.0 as usize];
+        let start = body.bytecode_offset as usize;
+        let mut pc = start;
+        let mut zero = None;
+        let mut words = None;
+        while pc < start + body.bytecode_length as usize {
+            match verum_vbc::bytecode::decode_instruction(&module.bytecode, &mut pc).unwrap() {
+                Instruction::LoadI { dst, value: 0 } => zero = Some(dst),
+                Instruction::SyscallLinux { num, a1, a2, a3, a4, a5, a6, .. } => {
+                    assert_ne!(Some(num), zero);
+                    assert_ne!(Some(a1), zero);
+                    words = Some([a2, a3, a4, a5, a6]);
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(words.unwrap(), [zero.expect("initialized padding"); 5]);
+        let bad = module.find_function_by_name("raw_contract.bad").unwrap();
+        let mut vm = Interpreter::new(Arc::new(module));
+        assert!(matches!(vm.execute_function(bad),
+            Err(InterpreterError::TypeMismatch { operation: "raw syscall word", .. })));
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn raw_syscall_results_preserve_success_and_distinct_kernel_errors() {
+    let source = format!(
+        r#"module raw_contract;
+           fn pid() -> Int {{ @intrinsic("syscall0", {}) }}
+           fn bad_fd() -> Int {{ @intrinsic("syscall1", {}, -1) }}
+           fn unknown() -> Int {{ @intrinsic("syscall0", -1) }}"#,
+        libc::SYS_getpid, libc::SYS_close
+    );
+    let ast = Parser::new(&source).parse_module().unwrap();
+    let module = VbcCodegen::new().compile_module(&ast).unwrap();
+    let wire = verum_vbc::serialize::serialize_module(&module).unwrap();
+    let decoded = verum_vbc::deserialize::deserialize_module(&wire).unwrap();
+    for module in [module, decoded] {
+        let module = Arc::new(module);
+        let mut vm = Interpreter::new(module.clone());
+        for (name, expected) in [
+            ("pid", i64::from(std::process::id())),
+            ("bad_fd", -i64::from(libc::EBADF)),
+            ("unknown", -i64::from(libc::ENOSYS)),
+        ] {
+            let id = module.find_function_by_name(&format!("raw_contract.{name}")).unwrap();
+            assert_eq!(
+                vm.execute_function(id).unwrap().try_as_i64(),
+                Some(expected),
+                "{name}"
+            );
+        }
+    }
+}
