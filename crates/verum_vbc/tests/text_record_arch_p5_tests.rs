@@ -348,6 +348,7 @@ fn text_queries_measure_the_stored_bytes_of_each_representation() {
         for byte_view in [false, true] {
             for (query, expected) in [
                 (TextSubOpcode::ByteLen, Value::from_i64(text.len() as i64)),
+                (TextSubOpcode::Capacity, Value::from_i64(text.len() as i64)),
                 (TextSubOpcode::IsEmpty, Value::from_bool(text.is_empty())),
             ] {
                 let mut instructions = vec![Instruction::LoadK {
@@ -384,7 +385,7 @@ fn text_queries_measure_the_stored_bytes_of_each_representation() {
 
 #[test]
 fn text_queries_reject_an_integer_operand() {
-    for query in [TextSubOpcode::ByteLen, TextSubOpcode::IsEmpty] {
+    for query in [TextSubOpcode::ByteLen, TextSubOpcode::IsEmpty, TextSubOpcode::Capacity] {
         let (module, _) = create_module(
             encode(&[
                 Instruction::LoadI {

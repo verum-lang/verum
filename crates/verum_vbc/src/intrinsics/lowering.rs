@@ -1842,11 +1842,14 @@ impl IntrinsicLowering {
                     region: None,
                 })
             }
-            InlineSequenceId::TextByteLen => self.emit(MlirOp {
+            InlineSequenceId::TextByteLen | InlineSequenceId::TextCapacity => self.emit(MlirOp {
                 name: "llvm.call".to_string(),
                 attrs: vec![MlirAttr {
                     name: "callee".to_string(),
-                    value: MlirAttrValue::String("verum_text_byte_len".to_string()),
+                    value: MlirAttrValue::String(match seq_id {
+                        InlineSequenceId::TextCapacity => "verum_text_capacity",
+                        _ => "verum_text_byte_len",
+                    }.into()),
                 }],
                 result_types: vec![MlirType::I64],
                 operands: operands.to_vec(),

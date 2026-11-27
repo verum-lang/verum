@@ -48,7 +48,7 @@ mount core.intrinsics.runtime.text.{
     text_copy, utf8_decode_char as intrinsic_utf8_decode_char,
     text_parse_int, text_parse_float, int_to_text,
     char_to_uppercase, char_to_lowercase,
-    text_byte_len,
+    text_byte_len, text_capacity,
     text_as_bytes,
     text_adopt_owned, text_release_storage,
 };
@@ -291,38 +291,27 @@ implement Text {
         text_copy(s)
     }
 
-    /// Create text with a given capacity.
-    ///
-
-    /// Panics on allocation failure with a message that carries the
-    /// requested-bytes count. For a fallible counterpart see
-    /// `try_with_capacity`.
+    /// Reserve byte capacity for an empty text. Panics on allocation failure.
     public fn with_capacity(cap: Int) -> Text {
-        if cap <= 0 {
-            Text.new()
-        } else {
-            let ptr = unsafe { alloc(cap + 1, 1) };  // +1 for null terminator
-            if is_null(ptr) {
-                panic(f"Text.with_capacity: allocator returned null for {cap + 1} bytes");
-            }
-            unsafe { text_adopt_owned(ptr, 0, cap) }
+        match Text.try_with_capacity(cap) {
+            Result.Ok(text) => text,
+            Result.Err(error) => panic(error.message()),
         }
     }
 
-    /// Fallible counterpart to `with_capacity`.
-    ///
-
-    /// Returns `Result.Err(AllocError)` on allocation failure rather than
-    /// panicking. Routes through `try_alloc` so all allocator-side
-    /// errors (OutOfMemory, InvalidSize, InvalidAlignment, etc.)
-    /// propagate as typed variants.
+    /// Nonpositive capacities produce empty text. The allocation also owns its
+    /// NUL terminator. An unrepresentable byte extent yields CapacityOverflow.
     public fn try_with_capacity(cap: Int) -> Result<Text, AllocError> {
         if cap <= 0 {
             return Result.Ok(Text.new());
         }
-        let raw = try_alloc(cap + 1, 1)?;
+        let extent = match cap.checked_add(1) {
+            Maybe.Some(bytes) => bytes,
+            Maybe.None => return Result.Err(AllocError.CapacityOverflow { requested: cap }),
+        };
+        let raw = try_alloc(extent, 1)?;
         if is_null(raw) {
-            return Result.Err(AllocError.OutOfMemory { requested: cap + 1 });
+            return Result.Err(AllocError.OutOfMemory { requested: extent });
         }
         Result.Ok(unsafe { text_adopt_owned(raw, 0, cap) })
     }
@@ -528,39 +517,10 @@ implement Text {
         text_byte_len(self) == 0
     }
 
-    /// Capacity in bytes — the number of bytes the buffer can hold
-    /// without reallocating.  The semantics depend on the underlying
-    /// representation:
-    ///
-    /// | Representation | `capacity()` |
-    /// |----------------|--------------|
-    /// | Static literal `"..."` (cap = 0, immutable) | `len()` |
-    /// | Small-string (NaN-boxed inline, ≤6 bytes) | `len()` |
-    /// | Heap-allocated flat `[hdr][len:u64][bytes…]` | `len()` |
-    /// | Builder layout `{ptr, len, cap}` | the `cap` field |
-    ///
-    /// The first three are immutable views — pushing past `len()`
-    /// requires migrating to the builder layout, so the reported
-    /// capacity equals the current byte length.  Only the builder
-    /// layout (produced by `with_capacity` / `try_with_capacity` /
-    /// `reserve`) carries a separate `cap` field that can exceed
-    /// `len()`.
-    ///
-    /// The body uses `text_byte_len` as a conservative lower bound;
-    /// the Tier-0 interpreter intercepts the call at
-    /// `crates/verum_vbc/src/interpreter/dispatch_table/handlers/
-    /// text_static_runtime.rs` and returns the true capacity by
-    /// reading the underlying representation directly.  Pinned by
-    /// `core-tests/text/text/regression_test.vr.regression_*_reports_capacity`.
-    ///
-    /// `@no_inline` is critical: without it, the Verum compiler
-    /// folds the single-intrinsic body into the caller's bytecode,
-    /// emitting `TextExtended.ByteLen` directly and bypassing the
-    /// Tier-0 intercept.  The intercept can only fire when the call
-    /// reaches the interpreter as `Call(Text.capacity_fid)`.
-    @no_inline
+    /// Byte capacity of the current storage. Fixed text reports its length.
+    @inline(always)
     public fn capacity(&self) -> Int {
-        text_byte_len(self)
+        text_capacity(self)
     }
 
     /// Get underlying bytes.

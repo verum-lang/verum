@@ -9505,6 +9505,8 @@ pub enum TextSubOpcode {
     ///
     /// Format: `dst:reg, text:reg`
     AsBytes = 0x34,
+    /// Read the receiver's byte capacity: dst:reg, source:reg.
+    Capacity = 0x35,
 }
 
 // =========================================================================
@@ -9575,6 +9577,7 @@ impl TextSubOpcode {
             0x32 => Some(Self::IsEmpty),
             0x33 => Some(Self::IsUtf8),
             0x34 => Some(Self::AsBytes),
+            0x35 => Some(Self::Capacity),
             _ => None,
         }
     }
@@ -9618,6 +9621,7 @@ impl TextSubOpcode {
             Self::CharLen      => m!("TEXT_CHAR_LEN",       Manipulation,   rtext=false, parse=false),
             Self::IsEmpty      => m!("TEXT_IS_EMPTY",       Manipulation,   rtext=false, parse=false),
             Self::IsUtf8       => m!("TEXT_IS_UTF8",        Manipulation,   rtext=false, parse=false),
+            Self::Capacity     => m!("TEXT_CAPACITY",       Manipulation,   rtext=false, parse=false),
             Self::AsBytes      => m!("TEXT_AS_BYTES",       Manipulation,   rtext=false, parse=false),
         }
     }
@@ -17876,7 +17880,7 @@ mod tests {
         }
     }
 
-    const TEXT_WIRE_SUB_OPS: [(TextSubOpcode, u8); 13] = [
+    const TEXT_WIRE_SUB_OPS: [(TextSubOpcode, u8); 14] = [
         (TextSubOpcode::Copy, 0x00),
         (TextSubOpcode::AdoptOwned, 0x01),
         (TextSubOpcode::ReleaseStorage, 0x02),
@@ -17890,6 +17894,7 @@ mod tests {
         (TextSubOpcode::IsEmpty, 0x32),
         (TextSubOpcode::IsUtf8, 0x33),
         (TextSubOpcode::AsBytes, 0x34),
+        (TextSubOpcode::Capacity, 0x35),
     ];
 
     #[test]
@@ -17915,7 +17920,7 @@ mod tests {
                 // Releasing storage returns Unit and leaves an empty live
                 // descriptor; its wire slot does not make it a constructor.
                 TextSubOpcode::ReleaseStorage | TextSubOpcode::ByteLen | TextSubOpcode::CharLen
-                | TextSubOpcode::IsEmpty | TextSubOpcode::IsUtf8 | TextSubOpcode::AsBytes => TextCategory::Manipulation,
+                | TextSubOpcode::IsEmpty | TextSubOpcode::IsUtf8 | TextSubOpcode::AsBytes | TextSubOpcode::Capacity => TextCategory::Manipulation,
             };
             assert_eq!(op.meta().category, expected);
             assert_eq!(op.category(), expected.as_str());

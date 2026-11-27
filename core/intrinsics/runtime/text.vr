@@ -49,6 +49,11 @@ public fn text_release_storage(text: &mut Text);
 @inline(always)
 public fn text_byte_len(text: &Text) -> Int;
 
+/// Number of bytes the current Text storage can hold.
+@intrinsic("text_capacity")
+@inline(always)
+public fn text_capacity(text: &Text) -> Int;
+
 /// Borrow Text as a byte slice without copying.
 ///
 /// Routes through the canonical `TextSubOpcode.AsBytes` runtime handler,

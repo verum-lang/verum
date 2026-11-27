@@ -1392,7 +1392,7 @@ fn execute_method_call(
         // Compute current capacity via the same dispatch-by-
         // representation logic as the "capacity" arm below — record
         // cap when grow-capable, else byte_len.
-        let current_cap = text_capacity_of(&text_receiver, current_len);
+        let current_cap = super::text_storage::extents(state, text_receiver)?.1 as i64;
         let needed_cap = current_len + additional;
         let new_cap = if needed_cap > current_cap { needed_cap } else { current_cap };
         let obj = state
@@ -4977,57 +4977,6 @@ fn text_padding_width(value: Value) -> InterpreterResult<usize> {
     usize::try_from(value.as_i64().max(0)).map_err(|_| InterpreterError::IntegerOverflow {
         operation: "text padding width",
     })
-}
-
-/// Read the capacity of a Text Value, dispatching by representation.
-/// Returns the byte budget the buffer can hold without reallocating.
-///
-///   * small-string (NaN-boxed inline): byte_len
-///   * BYTE_SLICE byte view (immutable, ARCH-P5): byte_len
-///   * canonical TEXT record `[hdr]{ptr,len,cap}[bytes…]`: `cap` when
-///     `cap > 0` (grow-capable — `with_capacity` / `reserve`),
-///     otherwise byte_len (`cap == 0` is text.vr's static/immutable
-///     marker; immutable representations report their length, matching
-///     the small-string / BYTE_SLICE convention above and the retired
-///     flat-layout fallback).
-///
-/// Shared between the `"capacity"` intercept arm (`dispatch_primitive_method`)
-/// and the `reserve` intercept (which needs the current capacity to
-/// decide whether the migration actually needs to grow the buffer).
-#[inline]
-fn text_capacity_of(v: &Value, byte_len_fallback: i64) -> i64 {
-    if v.is_small_string() {
-        return v.as_small_string().len() as i64;
-    }
-    // BYTE_SLICE byte view (ARCH-P5): an immutable borrow's capacity
-    // is its length — typed replacement for the retired FatRef-as-Text
-    // heuristic arm.
-    if let Some((_p, len)) = heap::value_as_byte_slice(v) {
-        return len as i64;
-    }
-    if !v.is_ptr() || v.is_nil() {
-        return byte_len_fallback;
-    }
-    let base = v.as_ptr::<u8>();
-    if base.is_null()
-        || !(base as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
-    {
-        return byte_len_fallback;
-    }
-    let header = unsafe { heap::ObjectHeader::ref_or_stub(base) };
-    if header.type_id != TypeId::TEXT {
-        return byte_len_fallback;
-    }
-    // SAFETY: TEXT header established; producers guarantee the record
-    // payload contract.
-    if let Some((_p, len)) = unsafe { heap::text_record_payload(base) } {
-        let cap = unsafe { heap::text_record_cap(base) };
-        if cap > 0 {
-            return cap;
-        }
-        return len as i64;
-    }
-    byte_len_fallback
 }
 
 #[inline]
@@ -9322,6 +9271,14 @@ pub(super) fn dispatch_primitive_method(
 
     // Text/String methods
     if receiver.is_small_string() || is_heap_string(receiver) {
+        if matches!(method, "len" | "is_empty" | "capacity") {
+            let (len, capacity) = super::text_storage::extents(state, *receiver)?;
+            return Ok(Some(match method {
+                "len" => Value::from_i64(len as i64),
+                "is_empty" => Value::from_bool(len == 0),
+                _ => Value::from_i64(capacity as i64),
+            }));
+        }
         let text = extract_string(receiver, state);
         match method {
             // Hash protocol — mirror `implement Hash for Text`
@@ -9335,35 +9292,8 @@ pub(super) fn dispatch_primitive_method(
             "hash_value" => {
                 return Ok(Some(Value::from_i64(fxhash_bytes(0, text.as_bytes()))));
             }
-            "len" => {
-                return Ok(Some(Value::from_i64(text.len() as i64)));
-            }
             "char_len" => {
                 return Ok(Some(Value::from_i64(text.chars().count() as i64)));
-            }
-            "is_empty" => {
-                return Ok(Some(Value::from_bool(text.is_empty())));
-            }
-            // `capacity()` reports the byte budget the buffer can hold
-            // without reallocating.  Dispatches by representation:
-            //
-            //   * small-string (NaN-boxed inline): capacity == byte_len
-            //   * FatRef Text (immutable byte view):  capacity == byte_len
-            //   * heap-string `[hdr][len:u64][bytes…]` (flat, immutable):
-            //                                        capacity == byte_len
-            //   * builder layout `[hdr]{ptr,len,cap}` (24-byte payload —
-            //     what `Text.with_capacity` / `try_with_capacity` /
-            //     `reserve` produce): capacity == field2 (the `cap` field)
-            //
-            // Pre-fix, the user-side `capacity()` body returned
-            // `text_byte_len(self)`, which lost the `cap` field on every
-            // builder-layout Text.  Pinned by
-            // `core-tests/text/text/regression_test.vr::
-            // regression_with_capacity_reports_capacity` and siblings.
-            "capacity" => {
-                return Ok(Some(Value::from_i64(
-                    text_capacity_of(receiver, text.len() as i64),
-                )));
             }
             "contains" => {
                 let arg = state.get_reg(Reg(args.start.0));

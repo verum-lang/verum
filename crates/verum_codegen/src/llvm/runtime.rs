@@ -11694,15 +11694,25 @@ pub fn define_internal_calloc<'ctx>(context: &'ctx Context, module: &Module<'ctx
     Ok(())
 }
 
-/// Read a native Text record's byte count without visiting its buffer.
-pub(super) fn define_text_byte_len<'ctx>(
+#[derive(Clone, Copy)]
+pub(super) enum TextExtent {
+    Length,
+    Capacity,
+}
+
+/// Read an extent from a native Text descriptor without visiting its buffer.
+pub(super) fn define_text_extent<'ctx>(
     context: &'ctx Context,
     module: &Module<'ctx>,
+    extent: TextExtent,
 ) -> Result<FunctionValue<'ctx>> {
     let word = context.i64_type();
     let function = super::error::get_or_declare_function(
         module,
-        "verum_text_byte_len",
+        match extent {
+            TextExtent::Length => "verum_text_byte_len",
+            TextExtent::Capacity => "verum_text_capacity",
+        },
         word.fn_type(&[word.into()], false),
     );
     if function.get_first_basic_block().is_some() {
@@ -11738,19 +11748,26 @@ pub(super) fn define_text_byte_len<'ctx>(
     let ptr = builder
         .build_int_to_ptr(text, context.ptr_type(AddressSpace::default()), "text")
         .or_llvm_err()?;
-    // SAFETY: a non-null native Text points to a live {ptr, len, cap} record.
-    let slot = unsafe {
-        builder
-            .build_in_bounds_gep(
-                context.i8_type(),
-                ptr,
-                &[word.const_int(TEXT_LEN_OFFSET, false)],
-                "len_slot",
-            )
-            .or_llvm_err()?
+    let load_field = |offset, name| -> Result<_> {
+        // SAFETY: a non-null native Text contains its length and capacity at the declared offsets.
+        let slot = unsafe {
+            builder.build_in_bounds_gep(context.i8_type(), ptr, &[word.const_int(offset, false)], name)
+        }.or_llvm_err()?;
+        Ok(builder.build_load(word, slot, name).or_llvm_err()?.into_int_value())
     };
-    let len = builder.build_load(word, slot, "len").or_llvm_err()?;
-    builder.build_return(Some(&len)).or_llvm_err()?;
+    let len = load_field(TEXT_LEN_OFFSET, "len")?;
+    let value = match extent {
+        TextExtent::Length => len,
+        TextExtent::Capacity => {
+            let cap = load_field(TEXT_CAP_OFFSET, "capacity")?;
+            let fixed = builder
+                .build_int_compare(verum_llvm::IntPredicate::EQ, cap, word.const_zero(), "fixed")
+                .or_llvm_err()?;
+            builder.build_select(fixed, len, cap, "byte_capacity")
+                .or_llvm_err()?.into_int_value()
+        }
+    };
+    builder.build_return(Some(&value)).or_llvm_err()?;
     Ok(function)
 }
 
@@ -12494,7 +12511,7 @@ pub fn define_text_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
         builder.build_return(Some(&result)).or_llvm_err()?;
     }
 
-    let byte_len = define_text_byte_len(context, module)?;
+    let byte_len = define_text_extent(context, module, TextExtent::Length)?;
 
     // This named entry shares the instruction's length-delimited Text ABI.
     let is_empty = super::error::get_or_declare_function(

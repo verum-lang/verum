@@ -24469,18 +24469,23 @@ fn lower_text_extended<'ctx>(
             ctx.mark_text_register(dst);
             Ok(())
         }
-        0x30 | 0x32 => {
+        0x30 | 0x32 | 0x35 => {
             let mut cursor = 0;
             let dst = read_reg_varlen(operands, &mut cursor)?;
             let src = read_reg_varlen(operands, &mut cursor)?;
             if cursor != operands.len() {
-                return Err(LlvmLoweringError::internal("unexpected trailing operands in Text length query"));
+                return Err(LlvmLoweringError::internal("unexpected trailing operands in Text extent query"));
             }
             let word = ctx.types().i64_type();
             let text = as_i64(ctx, ctx.get_register(src)?, "text")?;
-            let helper = super::runtime::define_text_byte_len(ctx.llvm_context(), ctx.get_module())?;
-            let len = ctx.builder().build_call(helper, &[text.into()], "byte_len").or_llvm_err()?
-                .basic_value_or("Text byte length has no result")?.into_int_value();
+            let extent = if sub_op == verum_vbc::instruction::TextSubOpcode::Capacity as u8 {
+                super::runtime::TextExtent::Capacity
+            } else {
+                super::runtime::TextExtent::Length
+            };
+            let helper = super::runtime::define_text_extent(ctx.llvm_context(), ctx.get_module(), extent)?;
+            let len = ctx.builder().build_call(helper, &[text.into()], "extent").or_llvm_err()?
+                .basic_value_or("Text extent query has no result")?.into_int_value();
             let result = if sub_op == 0x32 {
                 let empty = ctx.builder().build_int_compare(IntPredicate::EQ, len, word.const_zero(), "is_empty")
                     .or_llvm_err()?;

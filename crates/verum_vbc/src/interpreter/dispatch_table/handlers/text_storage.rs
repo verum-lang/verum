@@ -76,6 +76,23 @@ pub(super) fn adopt_owned(
 #[path = "../../../../tests/unit/text_storage_lifecycle.rs"]
 mod tests;
 
+/// Return the initialized byte length and the observable storage capacity.
+pub(super) fn extents(state: &InterpreterState, receiver: Value) -> InterpreterResult<(usize, usize)> {
+    let value = super::cbgr_helpers::resolve_receiver(state, receiver)?;
+    if value.is_small_string() {
+        let len = value.as_small_string().len();
+        return Ok((len, len));
+    }
+    if value.is_regular_ptr() && !value.is_nil() && state.heap.contains(value.as_ptr())
+        && let Some((_, len)) = heap::value_as_byte_slice(&value)
+    {
+        let len = usize::try_from(len).map_err(|_| invalid("Text byte view exceeds the target address space"))?;
+        return Ok((len, len));
+    }
+    let storage = TextStorage::checked(state, value)?;
+    Ok((storage.len, if storage.capacity == 0 { storage.len } else { storage.capacity }))
+}
+
 /// A read capability obtained from live storage, valid until the next mutation.
 pub(super) struct TextStorage {
     pub object: heap::Object,

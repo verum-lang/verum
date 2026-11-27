@@ -38325,9 +38325,10 @@ impl VbcCodegen {
             }
 
             // Text operations
-            InlineSequenceId::TextCopy | InlineSequenceId::TextAdoptOwned | InlineSequenceId::TextReleaseStorage => {
+            InlineSequenceId::TextCopy | InlineSequenceId::TextCapacity | InlineSequenceId::TextAdoptOwned | InlineSequenceId::TextReleaseStorage => {
                 let operation = match seq_id {
                     InlineSequenceId::TextCopy => crate::instruction::TextSubOpcode::Copy,
+                    InlineSequenceId::TextCapacity => crate::instruction::TextSubOpcode::Capacity,
                     InlineSequenceId::TextAdoptOwned => crate::instruction::TextSubOpcode::AdoptOwned,
                     _ => crate::instruction::TextSubOpcode::ReleaseStorage,
                 };

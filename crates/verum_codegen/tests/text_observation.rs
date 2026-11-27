@@ -16,6 +16,7 @@ fn native_text_queries_respect_embedded_nul_and_the_empty_carrier() {
     for (name, op) in [
         ("length", TextSubOpcode::ByteLen),
         ("empty", TextSubOpcode::IsEmpty),
+        ("capacity", TextSubOpcode::Capacity),
     ] {
         let function = module.add_function(name, word.fn_type(&[word.into()], false), None);
         let mut ctx = FunctionContext::new(&context, &module, function, name);
@@ -38,9 +39,9 @@ fn native_text_queries_respect_embedded_nul_and_the_empty_carrier() {
     let engine = module
         .create_jit_execution_engine(OptimizationLevel::None)
         .unwrap();
-    // SAFETY: both generated functions have the declared u64 -> u64 ABI. A
+    // SAFETY: all generated functions have the declared u64 -> u64 ABI. A
     // nonzero argument points to a live three-word native Text record.
-    let (length, empty) = unsafe {
+    let (length, empty, capacity) = unsafe {
         (
             engine
                 .get_function::<unsafe extern "C" fn(u64) -> u64>("length")
@@ -48,20 +49,29 @@ fn native_text_queries_respect_embedded_nul_and_the_empty_carrier() {
             engine
                 .get_function::<unsafe extern "C" fn(u64) -> u64>("empty")
                 .unwrap(),
+            engine
+                .get_function::<unsafe extern "C" fn(u64) -> u64>("capacity")
+                .unwrap(),
         )
     };
     for text in ["", "\0é", "Верум 🧮"] {
-        let record = [text.as_ptr() as u64, text.len() as u64, text.len() as u64];
-        let address = record.as_ptr() as u64;
-        // SAFETY: the record and its byte buffer outlive both calls.
-        unsafe {
-            assert_eq!(length.call(address), text.len() as u64);
-            assert_eq!(empty.call(address), u64::from(text.is_empty()));
+        let mut bytes = vec![0u8; text.len() + 17];
+        bytes[..text.len()].copy_from_slice(text.as_bytes());
+        for reserved in [0, bytes.len() as u64 - 1] {
+            let record = [bytes.as_ptr() as u64, text.len() as u64, reserved];
+            let address = record.as_ptr() as u64;
+            // SAFETY: the record and its complete byte storage outlive every query.
+            unsafe {
+                assert_eq!(length.call(address), text.len() as u64);
+                assert_eq!(empty.call(address), u64::from(text.is_empty()));
+                assert_eq!(capacity.call(address), reserved.max(text.len() as u64));
+            }
         }
     }
     // SAFETY: the native Text ABI treats the null carrier as empty.
     unsafe {
         assert_eq!(length.call(0), 0);
         assert_eq!(empty.call(0), 1);
+        assert_eq!(capacity.call(0), 0);
     }
 }

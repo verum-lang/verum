@@ -163,24 +163,13 @@ fn text_extended_body(
             let text_val = super::string_helpers::alloc_string_value(state, &s)?;
             state.set_reg(dst, text_val);
         }
-        Some(query @ (TextSubOpcode::ByteLen | TextSubOpcode::IsEmpty)) => {
+        Some(query @ (TextSubOpcode::ByteLen | TextSubOpcode::IsEmpty | TextSubOpcode::Capacity)) => {
             let src = read_reg(state)?;
-            let text = super::cbgr_helpers::resolve_receiver(state, state.get_reg(src))?;
-            let len = if text.is_small_string() {
-                text.as_small_string().len() as u64
-            } else if let Some((_, len)) = crate::interpreter::heap::value_as_text_record(&text) {
-                len as u64
-            } else if let Some((_, len)) = crate::interpreter::heap::value_as_byte_slice(&text) {
-                len
-            } else {
-                return Err(InterpreterError::InvalidOperand {
-                    message: format!("{query:?} expects Text or a byte view"),
-                });
-            };
-            let result = if query == TextSubOpcode::IsEmpty {
-                Value::from_bool(len == 0)
-            } else {
-                Value::from_i64(len as i64)
+            let (len, capacity) = super::text_storage::extents(state, state.get_reg(src))?;
+            let result = match query {
+                TextSubOpcode::IsEmpty => Value::from_bool(len == 0),
+                TextSubOpcode::Capacity => Value::from_i64(capacity as i64),
+                _ => Value::from_i64(len as i64),
             };
             state.set_reg(dst, result);
         }

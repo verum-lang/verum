@@ -1,31 +1,7 @@
 //! High-level Rust intercepts for `core.text.text.Text` static
 //! factory methods.
 //!
-//! Sibling to `path_ops_runtime.rs` and `file_runtime.rs`. Closes
-//! the gap left by stub-only registration: when codegen sees
-//! `Text.with_capacity(64)` and emits `Call { func_id: <archive_id> }`,
-//! the user-side codegen has no body for that id (the body lives
-//! in the precompiled stdlib archive, which is not currently
-//! injected into user modules); `emit_missing_stub_descriptors`
-//! registers a `RetV` placeholder so dispatch doesn't fail with
-//! `FunctionNotFound`, but the placeholder returns Unit and
-//! downstream `s.len()` / `s.capacity()` crash with `method not
-//! found on receiver of runtime kind ()`.
-//!
-//! Each factory here re-implements the stdlib body in Rust against
-//! the runtime heap layouts — small-string optimisation for short
-//! payloads, full heap allocation for longer ones — exactly as
-//! `core/text/text.vr` would.
-//!
-//! # Methods intercepted
-//!  * `Text.new()`                      — empty
-//!  * `Text.with_capacity(cap: Int)`    — empty (capacity hint
-//!    informational at Tier-0; the heap grows on demand)
-//!  * `Text.try_with_capacity(cap)`     — `Result<Text, AllocError>`,
-//!    always `Ok` at Tier-0 (panic-on-OOM allocator)
-//!  * `Text.from_str(s: &Text)`         — `Result<Text, Utf8Error>`,
-//!    always `Ok` at Tier-0 (Verum `Text` is UTF-8 by construction)
-//!  * `Text.from_char(ch: Char)`        — single-char Text
+//! Capacity constructors and ownership copies execute their stdlib bodies.
 
 use super::super::super::error::InterpreterResult;
 use super::super::super::heap;
@@ -65,69 +41,6 @@ pub(in super::super) fn try_intercept_text_static_runtime(
         "new" if arg_count == 0 => {
             Ok(Some(empty_text()))
         }
-        "with_capacity" if arg_count == 1 => {
-            // Allocate the canonical capacity-carrying TEXT record
-            // (`Heap::alloc_text_with_capacity` — ONE self-contained
-            // `{ptr, len, cap}[storage…]` allocation, ARCH-P5 final
-            // leg) so the `cap` field survives to subsequent
-            // `capacity()` / `push_*` calls.  Pre-fix this returned an
-            // empty small-string, silently discarding the capacity
-            // argument — see `core-tests/text/text/regression_test.vr::
-            // regression_with_capacity_*`.
-            let cap = match read_arg(state, args_start_reg, 0, caller_base) {
-                Some(v) if v.is_int() => v.as_i64(),
-                _ => 0,
-            };
-            Ok(Some(alloc_text_capacity_record(state, &[], cap)?))
-        }
-        "try_with_capacity" if arg_count == 1 => {
-            // `Result<Text, AllocError>` — always Ok at Tier-0 (the
-            // host allocator panics on OOM rather than returning Err).
-            // Same canonical record allocation as `with_capacity`.
-            let cap = match read_arg(state, args_start_reg, 0, caller_base) {
-                Some(v) if v.is_int() => v.as_i64(),
-                _ => 0,
-            };
-            let val = alloc_text_capacity_record(state, &[], cap)?;
-            Ok(Some(wrap_in_variant(state, "Result", 0, &[val])?))
-        }
-        // Instance-method intercept: `Text.capacity(&self) -> Int`.
-        //
-        // The user-side body calls `text_byte_len(self)` which loses
-        // the `cap` field on builder-layout Text values (the Tier-0
-        // `TextExtended::ByteLen` handler only recognises small-string
-        // values; non-small returns 0).  This intercept dispatches
-        // directly on the runtime representation:
-        //
-        //   * small-string (NaN-boxed inline):  capacity == byte_len
-        //   * FatRef Text (immutable byte view): capacity == byte_len
-        //   * heap-string `[hdr][len:u64][bytes…]` (flat, immutable):
-        //                                        capacity == byte_len
-        //   * builder layout `[hdr]{ptr,len,cap}` (24-byte payload):
-        //                                        capacity == field2 (cap)
-        //
-        // Pinned by `core-tests/text/text/regression_test.vr::
-        // regression_with_capacity_reports_capacity` and siblings.
-        "capacity" if arg_count == 1 => {
-            use super::cbgr_helpers::{decode_cbgr_ref, is_cbgr_ref};
-            let raw = state
-                .registers
-                .get(caller_base, Reg(args_start_reg));
-            let v = if is_cbgr_ref(&raw) {
-                let (abs_index, _) = decode_cbgr_ref(raw);
-                state.registers.get_absolute(abs_index)
-            } else if raw.is_thin_ref() {
-                let tr = state.heap.thin_ref(raw)?;
-                if !tr.ptr.is_null() {
-                    unsafe { *(tr.ptr as *const Value) }
-                } else {
-                    raw
-                }
-            } else {
-                raw
-            };
-            Ok(Some(Value::from_i64(text_capacity_value(&v))))
-        }
         // Instance-method intercept: `Text.reserve(&mut self, additional: Int)`.
         //
         // The stdlib body grows the underlying buffer in-place via
@@ -157,7 +70,8 @@ pub(in super::super) fn try_intercept_text_static_runtime(
             // during byte-wise construction).
             let bytes = extract_text_bytes(&current_val, state);
             let current_len = bytes.len() as i64;
-            let current_cap = text_capacity_value(&current_val);
+            let (_, current_cap) = super::text_storage::extents(state, current_val)?;
+            let current_cap = current_cap as i64;
             let needed_cap = current_len + additional;
             let new_cap = if needed_cap > current_cap { needed_cap } else { current_cap };
             // ONE canonical capacity-carrying TEXT record carrying the
@@ -504,7 +418,7 @@ fn read_arg(
 }
 
 /// Allocate the canonical capacity-carrying TEXT record for the
-/// `with_capacity` / `try_with_capacity` / `reserve` intercepts
+/// `reserve` operation
 /// (ARCH-P5 final leg): ONE self-contained
 /// `[ObjectHeader(TEXT)]{ptr, len, cap}[storage…]` allocation via
 /// `Heap::alloc_text_with_capacity`, with the bytes carried IN PLACE.
@@ -526,49 +440,4 @@ fn alloc_text_capacity_record(
     };
     state.record_allocation();
     Ok(Value::from_ptr(obj.as_ptr() as *mut u8))
-}
-
-/// Read the capacity of a Text Value, dispatching by representation.
-/// Returns the byte budget the buffer can hold without reallocating.
-///
-///   * small-string (NaN-boxed inline): byte_len
-///   * BYTE_SLICE byte view (immutable, ARCH-P5): byte_len
-///   * canonical TEXT record `[hdr]{ptr,len,cap}[bytes…]`: `cap` when
-///     `cap > 0` (grow-capable), otherwise byte_len (`cap == 0` is
-///     text.vr's static/immutable marker — immutables report their
-///     length, matching the small-string / BYTE_SLICE convention
-///     above and the retired flat-layout fallback).
-fn text_capacity_value(v: &Value) -> i64 {
-    if v.is_small_string() {
-        return v.as_small_string().len() as i64;
-    }
-    // BYTE_SLICE byte view (ARCH-P5): an immutable borrow's capacity
-    // is its length — typed replacement for the retired FatRef-as-Text
-    // heuristic arm.
-    if let Some((_p, len)) = heap::value_as_byte_slice(v) {
-        return len as i64;
-    }
-    if !v.is_ptr() || v.is_nil() {
-        return 0;
-    }
-    let base = v.as_ptr::<u8>();
-    if base.is_null()
-        || !(base as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
-    {
-        return 0;
-    }
-    let header = unsafe { heap::ObjectHeader::ref_or_stub(base) };
-    if header.type_id != crate::types::TypeId::TEXT {
-        return 0;
-    }
-    // SAFETY: TEXT header established; producers guarantee the record
-    // payload contract.
-    if let Some((_p, len)) = unsafe { heap::text_record_payload(base) } {
-        let cap = unsafe { heap::text_record_cap(base) };
-        if cap > 0 {
-            return cap;
-        }
-        return len as i64;
-    }
-    0
 }

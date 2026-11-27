@@ -570,6 +570,8 @@ pub enum InlineSequenceId {
     FloatToText,
     /// text_byte_len: get byte length of Text
     TextByteLen,
+    /// Read the byte capacity from the selected Text storage.
+    TextCapacity,
     /// text_as_bytes: borrow Text as byte slice (FatRef), handling all
     /// three Text representations — small-string (inline NaN-boxed),
     /// builder-layout `{ptr, len, cap}` heap object, and heap-string
@@ -1386,7 +1388,7 @@ impl Intrinsic {
             )
             // Reading the stored length never visits the buffer. A full-width
             // Int result may require boxing in the interpreter.
-            | CodegenStrategy::InlineSequence(InlineSequenceId::TextByteLen | InlineSequenceId::TextCopy)
+            | CodegenStrategy::InlineSequence(InlineSequenceId::TextByteLen | InlineSequenceId::TextCapacity | InlineSequenceId::TextCopy)
             // Both tiers read the argument and allocate a fresh byte view; the
             // interpreter also copies inline Text bytes into fresh storage.
             // Neither lowering mutates the input or calls user code.
@@ -2426,6 +2428,16 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::FloatToText),
         mlir_op: Some("verum.text.from_float"),
         doc: "Convert float to text",
+    },
+    Intrinsic {
+        name: "text_capacity",
+        category: IntrinsicCategory::Memory,
+        hints: &[IntrinsicHint::Inline],
+        param_count: 1,
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::TextCapacity),
+        mlir_op: Some("verum.text.capacity"),
+        doc: "Read the byte capacity of a Text value",
     },
     Intrinsic {
         name: "text_byte_len",
