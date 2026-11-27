@@ -68,6 +68,38 @@ fn declared_smart_pointer_carriers_survive_source_and_archive_shadowing() {
     }
 }
 
+#[test]
+fn the_declared_deque_uses_the_runtime_ring_identity_across_archive_order() {
+    const RING: &str = "core.collections.deque";
+    let declaration = |owner: &str| {
+        let source = include_str!("../../../core/collections/deque.vr")
+            .replace("module core.collections.deque;", &format!("module {owner};"));
+        let mut ast = Parser::new(&source).parse_module().expect("production Deque grammar");
+        ast.items.retain(|item| match &item.kind {
+            ItemKind::Module(_) => true,
+            ItemKind::Type(decl) => decl.name.as_str() == "Deque",
+            _ => false,
+        });
+        wire(&VbcCodegen::with_config(CodegenConfig::new(owner)).compile_module(&ast).unwrap())
+    };
+    let canonical = declaration(RING);
+    let foreign = declaration("foreign.collections");
+    let check = |module: &VbcModule, owner: &str| {
+        let record = module.types.iter().find(|ty|
+            ty.origin_module.and_then(|origin| module.get_string(origin)) == Some(owner)
+                && module.get_string(ty.name).and_then(|name| name.rsplit('.').next()) == Some("Deque")
+        ).expect("declaring owner survives the wire");
+        assert_eq!(record.id == TypeId::DEQUE, owner == RING, "{owner}");
+    };
+    check(&canonical, RING);
+    check(&foreign, "foreign.collections");
+    for order in [[&canonical, &foreign], [&foreign, &canonical]] {
+        let reloaded = wire(&import(&order));
+        check(&reloaded, RING);
+        check(&reloaded, "foreign.collections");
+    }
+}
+
 fn declaration(owner: &str) -> VbcModule {
     declaration_with_protocol(owner, "")
 }

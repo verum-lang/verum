@@ -47,8 +47,10 @@ impl TypeId {
     pub(crate) fn for_declared_record(name: &str, owner: Option<&str>) -> Option<Self> {
         use verum_common::well_known_types::WellKnownType;
         let declaration = WellKnownType::from_declaration(name, owner?)?;
-        if declaration == WellKnownType::Text {
-            return Some(Self::TEXT);
+        match declaration {
+            WellKnownType::Text => return Some(Self::TEXT),
+            WellKnownType::Deque => return Some(Self::DEQUE),
+            _ => {}
         }
         Self::SMART_POINTER_TYPE_IDS.iter().find_map(|(spelling, id)| {
             declaration.matches(spelling).then_some(*id)

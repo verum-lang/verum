@@ -25057,7 +25057,7 @@ impl VbcCodegen {
                             // registration would be unreachable anyway.
                             None => return,
                         }
-                    } else if existing_id.is_smart_pointer()
+                    } else if existing_id.is_smart_pointer() || existing_id == TypeId::DEQUE
                         || TypeId::from_well_known_scalar_name(&name_str) == Some(existing_id)
                     {
                         // Only the canonical declaration can fill its reserved
