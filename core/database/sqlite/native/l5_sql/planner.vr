@@ -197,40 +197,70 @@ public fn plan_statement(stmt: &SqlStatement) -> Result<PlanNode, PlanError> {
 // SELECT
 // -----------------------------------------------------------------------------
 
-fn plan_select(sel: &SelectStmt) -> Result<PlanNode, PlanError> {
-    // Compound SELECT — recursively plan both sides, then wrap in the
-    // corresponding compound node. Outer ORDER BY / LIMIT (held on
-    // `sel`) is applied AFTER the compound op, mirroring SQL semantics.
-    let simple = match sel.kind {
-        SkSimple(ref s) => s,
-        SkCompound(op, ref lhs, ref rhs) => {
-            let lp = plan_select(lhs)?;
-            let rp = plan_select(rhs)?;
-            let n_proj = compound_proj_count(lhs);
-            let mut compound: PlanNode = match op {
-                CoUnionAll  => PnUnionAll(Heap.new(lp), Heap.new(rp)),
-                CoUnion     => PnUnion(Heap.new(lp), Heap.new(rp), n_proj),
-                CoIntersect => PnIntersect(Heap.new(lp), Heap.new(rp), n_proj),
-                CoExcept    => PnExcept(Heap.new(lp), Heap.new(rp), n_proj),
-            };
-            // Outer ORDER BY / LIMIT applies to the compound result.
-            if sel.order_by.len() > 0 {
-                compound = PnSort(Heap.new(compound), clone_order_terms(&sel.order_by));
+fn plan_select(root: &SelectStmt) -> Result<PlanNode, PlanError> {
+    let mut path: List<Int> = [];
+    let mut next_child: List<Int> = [0];
+    let mut plans: List<PlanNode> = [];
+    while next_child.len() > 0 {
+        let sel = next_select(root, &mut path, &mut next_child);
+        let node: PlanNode = match sel.kind {
+            SkSimple(ref simple) => plan_simple_select(sel, simple)?,
+            SkCompound(ref op, ref left, _) => {
+                let result = assemble_compound(op, left.as_ref(), &mut plans, false);
+                apply_select_order_limit(result, sel)
             }
-            match sel.limit {
-                Maybe.Some(ref lc) => {
-                    let off: Maybe<Expr> = match lc.offset {
-                        Maybe.Some(ref e) => Maybe.Some(clone_expr(e)),
-                        Maybe.None => Maybe.None,
-                    };
-                    compound = PnLimit(Heap.new(compound), clone_expr(&lc.limit), off);
-                }
-                Maybe.None => {}
-            }
-            return Result.Ok(compound);
-        }
-    };
+        };
+        plans.push(node);
+    }
+    Result.Ok(pop_plan(&mut plans))
+}
 
+// Visit both operands before their compound and report the left operand's errors first.
+fn next_select(root: &SelectStmt, path: &mut List<Int>, next_child: &mut List<Int>) -> &SelectStmt {
+    loop {
+        let mut sel: &SelectStmt = root;
+        for depth in range(0, path.len()) {
+            sel = select_child_at(sel, path[depth]).unwrap();
+        }
+        let top = next_child.len() - 1;
+        let side = next_child[top];
+        if select_child_at(sel, side).is_some() {
+            next_child[top] = side + 1;
+            path.push(side);
+            next_child.push(0);
+        } else {
+            next_child.pop();
+            path.pop();
+            return sel;
+        }
+    }
+}
+
+fn assemble_compound(op: &CompoundOp, left: &SelectStmt, plans: &mut List<PlanNode>, schema_known: Bool) -> PlanNode {
+    let rp = pop_plan(plans);
+    let lp = pop_plan(plans);
+    let syntactic_width = compound_proj_count(left);
+    let width = if schema_known && syntactic_width < 0 { plan_node_proj_count(&lp) } else { syntactic_width };
+    match op {
+        CoUnionAll => PnUnionAll(Heap.new(lp), Heap.new(rp)),
+        CoUnion => PnUnion(Heap.new(lp), Heap.new(rp), width),
+        CoIntersect => PnIntersect(Heap.new(lp), Heap.new(rp), width),
+        CoExcept => PnExcept(Heap.new(lp), Heap.new(rp), width),
+    }
+}
+
+fn select_child_at(sel: &SelectStmt, side: Int) -> Maybe<&SelectStmt> {
+    match sel.kind {
+        SkCompound(_, ref left, ref right) => {
+            if side == 0 { Maybe.Some(left.as_ref()) }
+            else if side == 1 { Maybe.Some(right.as_ref()) }
+            else { Maybe.None }
+        }
+        SkSimple(_) => Maybe.None,
+    }
+}
+
+fn plan_simple_select(sel: &SelectStmt, simple: &SimpleSelect) -> Result<PlanNode, PlanError> {
     // Source: either FROM clause or VALUES-like bare SELECT (no FROM).
     let mut node: PlanNode = match simple.from {
         Maybe.Some(ref fi) => plan_from_item(fi, 0)?,
@@ -288,24 +318,21 @@ fn plan_select(sel: &SelectStmt) -> Result<PlanNode, PlanError> {
         node = PnProject(Heap.new(node), cols);
     }
 
-    // ORDER BY.
+    Result.Ok(apply_select_order_limit(node, sel))
+}
+
+fn apply_select_order_limit(input: PlanNode, sel: &SelectStmt) -> PlanNode {
+    let mut node = input;
     if sel.order_by.len() > 0 {
         node = PnSort(Heap.new(node), clone_order_terms(&sel.order_by));
     }
-
-    // LIMIT / OFFSET.
     match sel.limit {
         Maybe.Some(ref lc) => {
-            let off: Maybe<Expr> = match lc.offset {
-                Maybe.Some(ref e) => Maybe.Some(clone_expr(e)),
-                Maybe.None => Maybe.None,
-            };
-            node = PnLimit(Heap.new(node), clone_expr(&lc.limit), off);
+            node = PnLimit(Heap.new(node), clone_expr(&lc.limit), clone_opt_expr(&lc.offset));
         }
         Maybe.None => {}
     }
-
-    Result.Ok(node)
+    node
 }
 
 fn plan_from_item(fi: &FromItem, cursor_id: Int) -> Result<PlanNode, PlanError> {
@@ -430,7 +457,7 @@ public(in core.database.sqlite.native.l5_sql) fn clone_plan(root: &PlanNode) -> 
             path.pop();
         }
     }
-    take_plan_copy(&mut copies)
+    pop_plan(&mut copies)
 }
 
 fn plan_child_at(node: &PlanNode, index: Int) -> Maybe<&PlanNode> {
@@ -450,10 +477,10 @@ fn plan_child_at(node: &PlanNode, index: Int) -> Maybe<&PlanNode> {
     }
 }
 
-fn take_plan_copy(copies: &mut List<PlanNode>) -> PlanNode {
+fn pop_plan(copies: &mut List<PlanNode>) -> PlanNode {
     match copies.pop() {
         Maybe.Some(node) => node,
-        Maybe.None => panic("missing child while copying SQL plan"),
+        Maybe.None => panic("missing child SQL plan"),
     }
 }
 
@@ -461,35 +488,35 @@ fn copy_plan_node(node: &PlanNode, copies: &mut List<PlanNode>) -> PlanNode {
     match node {
         PnValues(ref rows, n) => PnValues(clone_rows(rows), n),
         PnTableScan(ref table, id, n) => PnTableScan(clone_table_ref(table), id, n),
-        PnFilter(_, ref predicate) => PnFilter(Heap.new(take_plan_copy(copies)), clone_expr(predicate)),
-        PnProject(_, ref columns) => PnProject(Heap.new(take_plan_copy(copies)), clone_plan_columns(columns)),
-        PnSort(_, ref terms) => PnSort(Heap.new(take_plan_copy(copies)), clone_order_terms(terms)),
-        PnDistinct(_, n) => PnDistinct(Heap.new(take_plan_copy(copies)), n),
+        PnFilter(_, ref predicate) => PnFilter(Heap.new(pop_plan(copies)), clone_expr(predicate)),
+        PnProject(_, ref columns) => PnProject(Heap.new(pop_plan(copies)), clone_plan_columns(columns)),
+        PnSort(_, ref terms) => PnSort(Heap.new(pop_plan(copies)), clone_order_terms(terms)),
+        PnDistinct(_, n) => PnDistinct(Heap.new(pop_plan(copies)), n),
         PnGroupBy(_, ref groups, ref columns, ref having) => PnGroupBy(
-            Heap.new(take_plan_copy(copies)), clone_expr_list(groups), clone_plan_columns(columns), clone_opt_expr(having),
+            Heap.new(pop_plan(copies)), clone_expr_list(groups), clone_plan_columns(columns), clone_opt_expr(having),
         ),
         PnUnionAll(_, _) => {
-            let right = Heap.new(take_plan_copy(copies));
-            PnUnionAll(Heap.new(take_plan_copy(copies)), right)
+            let right = Heap.new(pop_plan(copies));
+            PnUnionAll(Heap.new(pop_plan(copies)), right)
         }
         PnUnion(_, _, n) => {
-            let right = Heap.new(take_plan_copy(copies));
-            PnUnion(Heap.new(take_plan_copy(copies)), right, n)
+            let right = Heap.new(pop_plan(copies));
+            PnUnion(Heap.new(pop_plan(copies)), right, n)
         }
         PnIntersect(_, _, n) => {
-            let right = Heap.new(take_plan_copy(copies));
-            PnIntersect(Heap.new(take_plan_copy(copies)), right, n)
+            let right = Heap.new(pop_plan(copies));
+            PnIntersect(Heap.new(pop_plan(copies)), right, n)
         }
         PnExcept(_, _, n) => {
-            let right = Heap.new(take_plan_copy(copies));
-            PnExcept(Heap.new(take_plan_copy(copies)), right, n)
+            let right = Heap.new(pop_plan(copies));
+            PnExcept(Heap.new(pop_plan(copies)), right, n)
         }
         PnNestedLoopJoin(ref left, lc, ln, ref right, rc, rn, ref on, outer) => PnNestedLoopJoin(
             clone_table_ref(left), lc, ln, clone_table_ref(right), rc, rn, clone_opt_expr(on), outer,
         ),
-        PnLimit(_, ref limit, ref offset) => PnLimit(Heap.new(take_plan_copy(copies)), clone_expr(limit), clone_opt_expr(offset)),
+        PnLimit(_, ref limit, ref offset) => PnLimit(Heap.new(pop_plan(copies)), clone_expr(limit), clone_opt_expr(offset)),
         PnInsert(ref table, ref cols, _, ref conflict) => PnInsert(
-            clone_table_ref(table), clone_text_list(cols), Heap.new(take_plan_copy(copies)), clone_opt_on_conflict(conflict),
+            clone_table_ref(table), clone_text_list(cols), Heap.new(pop_plan(copies)), clone_opt_on_conflict(conflict),
         ),
         PnDelete(ref table, id, ref predicate) => PnDelete(clone_table_ref(table), id, clone_opt_expr(predicate)),
         PnUpdate(ref table, id, n, ref assignments, ref predicate) => PnUpdate(
@@ -545,21 +572,17 @@ fn clone_assignments(xs: &List<UpdateAssignment>) -> List<UpdateAssignment> {
 // fallback when the AST-side `compound_proj_count` returns -1 (i.e.
 // the lhs uses `SELECT *` / `t.*`); the post-projection plan node
 // structure exposes the resolved count.
-fn plan_node_proj_count(node: &PlanNode) -> Int {
-    match node {
-        PnProject(_, ref cols) => cols.len(),
-        PnDistinct(_, n_proj) => n_proj,
-        PnGroupBy(_, _, ref projection, _) => projection.len(),
-        PnValues(_, col_count) => col_count,
-        PnSort(ref child, _) => plan_node_proj_count(child),
-        PnLimit(ref child, _, _) => plan_node_proj_count(child),
-        PnFilter(ref child, _) => plan_node_proj_count(child),
-        PnUnion(_, _, n_proj) => n_proj,
-        PnIntersect(_, _, n_proj) => n_proj,
-        PnExcept(_, _, n_proj) => n_proj,
-        PnUnionAll(ref l, _) => plan_node_proj_count(l),
-        // Conservative fallback — codegen will reject this anyway.
-        _ => 0,
+fn plan_node_proj_count(root: &PlanNode) -> Int {
+    let mut node: &PlanNode = root;
+    loop {
+        match node {
+            PnProject(_, ref cols) => { return cols.len(); }
+            PnDistinct(_, n) | PnValues(_, n) | PnUnion(_, _, n) | PnIntersect(_, _, n) | PnExcept(_, _, n) => { return n; }
+            PnGroupBy(_, _, ref projection, _) => { return projection.len(); }
+            PnSort(_, _) | PnLimit(_, _, _) | PnFilter(_, _) | PnUnionAll(_, _) => {}
+            _ => { return 0; }
+        }
+        node = plan_child_at(node, 0).unwrap();
     }
 }
 
@@ -572,21 +595,22 @@ fn plan_node_proj_count(node: &PlanNode) -> Int {
 // Returns -1 for `SELECT *` / `SELECT t.*` since the actual column
 // count needs schema; those cases fall through to the schema-aware
 // planner which has access to table metadata.
-fn compound_proj_count(sel: &SelectStmt) -> Int {
-    match sel.kind {
-        SkSimple(ref s) => {
-            let mut count: Int = 0;
-            let mut i: Int = 0;
-            while i < s.result_columns.len() {
-                match s.result_columns[i] {
-                    RcExpr(_, _) => { count = count + 1; }
-                    RcStar | RcTableStar(_) => { return -1; }
+fn compound_proj_count(root: &SelectStmt) -> Int {
+    let mut sel: &SelectStmt = root;
+    loop {
+        match sel.kind {
+            SkSimple(ref simple) => {
+                for i in range(0, simple.result_columns.len()) {
+                    match simple.result_columns[i] {
+                        RcExpr(_, _) => {}
+                        RcStar | RcTableStar(_) => { return -1; }
+                    }
                 }
-                i = i + 1;
+                return simple.result_columns.len();
             }
-            count
+            SkCompound(_, _, _) => {}
         }
-        SkCompound(_, ref lhs, _) => compound_proj_count(lhs),
+        sel = select_child_at(sel, 0).unwrap();
     }
 }
 
@@ -805,7 +829,7 @@ fn plan_insert_with_schema(
             // SELECT's projection, validated against the INSERT column
             // list (or table schema if no explicit column list) downstream
             // by the codegen.
-            match plan_select_with_schema(sel, schema) {
+            match plan_select_with_schema(sel.as_ref(), schema) {
                 Result.Ok(p)  => p,
                 Result.Err(e) => { return Result.Err(e); }
             }
@@ -1073,73 +1097,28 @@ fn plan_from_for_select(
     }
 }
 
-fn plan_select_with_schema(
-    sel: &SelectStmt,
-    schema: &SchemaCache,
-) -> Result<PlanNode, PlanError> {
-    let simple = match sel.kind {
-        SkSimple(ref s) => s,
-        SkCompound(op, ref lhs, ref rhs) => {
-            let lp = match plan_select_with_schema(lhs, schema) {
-                Result.Ok(p)  => p, Result.Err(e) => { return Result.Err(e); }
-            };
-            let rp = match plan_select_with_schema(rhs, schema) {
-                Result.Ok(p)  => p, Result.Err(e) => { return Result.Err(e); }
-            };
-            // Determine projection width — when the lhs is a simple
-            // SELECT with no `*`, we know it from result_columns; for
-            // `*`/`t.*` or nested compounds we resort to the count
-            // produced by the lhs subplan structure. The codegen
-            // never reads n_proj < 0; the schema resolver above has
-            // already enforced agreement.
-            let n_proj_left = compound_proj_count(lhs);
-            let n_proj = if n_proj_left < 0 {
-                plan_node_proj_count(&lp)
-            } else {
-                n_proj_left
-            };
-            let mut compound: PlanNode = match op {
-                CoUnionAll  => PnUnionAll(Heap.new(lp), Heap.new(rp)),
-                CoUnion     => PnUnion(Heap.new(lp), Heap.new(rp), n_proj),
-                CoIntersect => PnIntersect(Heap.new(lp), Heap.new(rp), n_proj),
-                CoExcept    => PnExcept(Heap.new(lp), Heap.new(rp), n_proj),
-            };
-            // Outer ORDER BY / LIMIT applies AFTER the compound op.
-            if sel.order_by.len() > 0 {
-                let mut resolved_terms: List<OrderTerm> = List.new();
-                let mut t: Int = 0;
-                while t < sel.order_by.len() {
-                    let term = &sel.order_by[t];
-                    // Compound ORDER BY can only reference position-
-                    // independent expressions / column-position numbers;
-                    // for v1 we accept the literal expr without scope
-                    // resolution (matches schema-free planner).
-                    resolved_terms.push(OrderTerm {
-                        expr: clone_expr(&term.expr),
-                        direction: term.direction,
-                        nulls_first: term.nulls_first,
-                    });
-                    t = t + 1;
-                }
-                compound = PnSort(Heap.new(compound), resolved_terms);
+fn plan_select_with_schema(root: &SelectStmt, schema: &SchemaCache) -> Result<PlanNode, PlanError> {
+    let mut path: List<Int> = [];
+    let mut next_child: List<Int> = [0];
+    let mut plans: List<PlanNode> = [];
+    while next_child.len() > 0 {
+        let sel = next_select(root, &mut path, &mut next_child);
+        let node: PlanNode = match sel.kind {
+            SkSimple(ref simple) => plan_simple_select_with_schema(sel, simple, schema)?,
+            SkCompound(ref op, ref left, _) => {
+                let result = assemble_compound(op, left.as_ref(), &mut plans, true);
+                apply_select_order_limit(result, sel)
             }
-            match sel.limit {
-                Maybe.Some(ref lc) => {
-                    let off: Maybe<Expr> = match lc.offset {
-                        Maybe.Some(ref e) => Maybe.Some(clone_expr(e)),
-                        Maybe.None => Maybe.None,
-                    };
-                    compound = PnLimit(Heap.new(compound), clone_expr(&lc.limit), off);
-                }
-                Maybe.None => {}
-            }
-            return Result.Ok(compound);
-        }
-    };
+        };
+        plans.push(node);
+    }
+    Result.Ok(pop_plan(&mut plans))
+}
 
+fn plan_simple_select_with_schema(sel: &SelectStmt, simple: &SimpleSelect, schema: &SchemaCache) -> Result<PlanNode, PlanError> {
     // No FROM → fall back to the schema-free planner.
     match simple.from {
-        Maybe.None => { return plan_select(sel); }
+        Maybe.None => { return plan_simple_select(sel, simple); }
         _ => {}
     }
 

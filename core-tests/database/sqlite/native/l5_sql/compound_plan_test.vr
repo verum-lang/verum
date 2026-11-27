@@ -1,0 +1,145 @@
+module core.database.sqlite.native.l5_sql.tests.compound_plan;
+
+mount core.database.sqlite.native.l5_sql.ast.{
+    SqlStatement, SSelect, SelectStmt, SelectKind, SkSimple, SkCompound, SimpleSelect,
+    CompoundOp, CoUnion, CoUnionAll, CoIntersect, CoExcept, ResultColumnItem, RcExpr, RcStar,
+    FromItem, FiSubquery, Expr, EPositional, OrderTerm, OrderDirection, OdDesc, LimitClause,
+};
+mount core.database.sqlite.native.l5_sql.planner.{
+    PlanNode, PnValues, PnUnion, PnUnionAll, PnIntersect, PnExcept, PnSort, PnLimit,
+    PlanError, plan_statement, plan_error,
+};
+
+fn simple(column: ResultColumnItem, source: Maybe<FromItem>) -> SelectStmt {
+    let mut columns: List<ResultColumnItem> = List.new();
+    columns.push(column);
+    let keys: List<Expr> = [];
+    let query = SimpleSelect {
+        result_columns: columns, distinct: false, from: source, where_clause: Maybe.None,
+        group_by: keys, having: Maybe.None,
+    };
+    SelectStmt { kind: SkSimple(query), order_by: List.new(), limit: Maybe.None }
+}
+
+fn leaf(value: Int) -> SelectStmt {
+    simple(RcExpr(EPositional(value), ""), Maybe.None)
+}
+
+fn compound(op: CompoundOp, left: SelectStmt, right: SelectStmt) -> SelectStmt {
+    SelectStmt { kind: SkCompound(op, Heap.new(left), Heap.new(right)), order_by: List.new(), limit: Maybe.None }
+}
+
+fn leaf_matches(node: &PlanNode, expected: Int) -> Bool {
+    match node {
+        PnValues(ref rows, width) => match &rows[0][0] {
+            EPositional(value) => width == 1 && value == expected,
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+@test
+fn test_compound_operands_and_outer_clauses() {
+    let left = compound(CoExcept, compound(CoUnion, leaf(2), leaf(3)), leaf(5));
+    let right = compound(CoIntersect, leaf(7), leaf(11));
+    let mut root = compound(CoUnionAll, left, right);
+    root.order_by.push(OrderTerm { expr: EPositional(13), direction: OdDesc, nulls_first: Maybe.None });
+    root.limit = Maybe.Some(LimitClause { limit: EPositional(17), offset: Maybe.Some(EPositional(19)) });
+    let stmt = SSelect(root);
+    let result = match plan_statement(&stmt) {
+        Result.Ok(node) => node,
+        Result.Err(_) => panic("expected a compound plan"),
+    };
+    match &result {
+        PnLimit(ref sorted, ref limit_expr, ref offset_expr) => {
+            assert(limit_expr is EPositional(17));
+            assert(offset_expr is Maybe.Some(EPositional(19)));
+            match sorted.as_ref() {
+                PnSort(ref set, ref terms) => {
+                    assert_eq(terms.len(), 1);
+                    assert(terms[0].expr is EPositional(13));
+                    assert(terms[0].direction is OdDesc);
+                    match set.as_ref() {
+                        PnUnionAll(ref l, ref r) => {
+                            match l.as_ref() {
+                                PnExcept(ref u, ref five, 1) => {
+                                    assert(leaf_matches(five.as_ref(), 5));
+                                    match u.as_ref() {
+                                        PnUnion(ref two, ref three, 1) => {
+                                            assert(leaf_matches(two.as_ref(), 2));
+                                            assert(leaf_matches(three.as_ref(), 3));
+                                        }
+                                        _ => panic("expected UNION"),
+                                    }
+                                }
+                                _ => panic("expected EXCEPT"),
+                            }
+                            match r.as_ref() {
+                                PnIntersect(ref seven, ref eleven, 1) => {
+                                    assert(leaf_matches(seven.as_ref(), 7));
+                                    assert(leaf_matches(eleven.as_ref(), 11));
+                                }
+                                _ => panic("expected INTERSECT"),
+                            }
+                        }
+                        _ => panic("expected UNION ALL"),
+                    }
+                }
+                _ => panic("expected ORDER BY"),
+            }
+        }
+        _ => panic("expected LIMIT and OFFSET"),
+    }
+}
+
+fn left_operand(node: &PlanNode) -> &PlanNode {
+    match node {
+        PnUnionAll(ref child, _) => child.as_ref(),
+        _ => panic("expected UNION ALL"),
+    }
+}
+
+fn assert_right_operand(node: &PlanNode, value: Int) {
+    match node {
+        PnUnionAll(_, ref right) => assert(leaf_matches(right.as_ref(), value)),
+        _ => panic("missing nested operand"),
+    }
+}
+
+@test
+fn test_nested_operands_keep_their_order() {
+    let mut query = leaf(73);
+    let mut value: Int = 0;
+    while value < 64 {
+        query = compound(CoUnionAll, query, leaf(value));
+        value = value + 1;
+    }
+    let stmt = SSelect(query);
+    let plan = match plan_statement(&stmt) {
+        Result.Ok(node) => node,
+        Result.Err(_) => panic("expected a nested compound plan"),
+    };
+    let mut node: &PlanNode = &plan;
+    let mut i: Int = 64;
+    while i > 0 {
+        i = i - 1;
+        assert_right_operand(node, i);
+        node = left_operand(node);
+    }
+    assert(leaf_matches(node, 73));
+}
+
+@test
+fn test_compound_reports_the_left_error_first() {
+    let star = simple(RcStar, Maybe.None);
+    let source = FiSubquery(Heap.new(leaf(23)), "");
+    let invalid_from = simple(RcExpr(EPositional(29), ""), Maybe.Some(source));
+    let stmt = SSelect(compound(CoUnion, star, invalid_from));
+    match plan_statement(&stmt) {
+        Result.Err(err) => assert(err == plan_error("SELECT * with no FROM is invalid")),
+        Result.Ok(_) => panic("expected an invalid SELECT"),
+    }
+}
+
+fn main() {}
