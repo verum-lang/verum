@@ -1454,3 +1454,26 @@ fn refined_carriers_inherit_read_operations_without_granting_write_permission() 
     let invalid = check(&format!("{imports} fn clear(x: &mut Counter) {{ x.count.clear_count(); }}"), &providers);
     assert!(invalid.iter().any(|error| error.contains("clear_count")), "{invalid:?}");
 }
+
+#[test]
+fn a_static_call_uses_the_receivers_declared_protocol_arguments() {
+    let declarations = r#"
+        type ReadFrom<S> is protocol { fn read_from(value: S) -> Self; };
+        implement<S> ReadFrom<S> for S { fn read_from(value: S) -> S { value } }
+        type Convert<D> is protocol { fn convert(self) -> D; };
+    "#;
+    let blanket = "implement<S,D:ReadFrom<S>> Convert<D> for S { fn convert(self)->D { D.read_from(self) } }";
+    let errors = check(&format!("{declarations} {blanket}"), &[]);
+    assert!(errors.is_empty(), "{errors:?}");
+    let direct = "fn read<S,D:ReadFrom<S>>(value:S)->D { D.read_from(value) }";
+    let errors = check(&format!("{declarations} {direct}"), &[]);
+    assert!(errors.is_empty(), "{errors:?}");
+    for (wrong, expected) in [
+        ("fn read<S,D:ReadFrom<S>>(value:D)->D { D.read_from(value) }", "Mismatch"),
+        ("fn read<S,D:ReadFrom<S>>(value:S)->S { D.read_from(value) }", "Mismatch"),
+        ("type Another<S> is protocol { fn read_from(value: S) -> Self; }; fn read<S,D:ReadFrom<S>+Another<S>>(value:S)->D { D.read_from(value) }", "multiple bounds"),
+    ] {
+        let errors = check(&format!("{declarations} {wrong}"), &[]);
+        assert!(errors.iter().any(|error| error.contains(expected)), "{wrong}: {errors:?}");
+    }
+}

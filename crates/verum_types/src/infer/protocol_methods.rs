@@ -51,37 +51,63 @@ fn invalid(span: Span, message: impl Into<Text>) -> TypeError {
 }
 
 impl TypeChecker {
-    /// A static member of a projected type must be declared by a positive
-    /// bound on this exact projection in the current body.
-    pub(super) fn projected_static_call(
+    /// Select a static protocol member from the premises of the lexical type
+    /// parameter or associated projection that appears before the dot.
+    pub(super) fn bounded_static_call(
         &mut self, receiver: &verum_ast::Expr, method: &verum_ast::Ident,
         arguments: &List<verum_ast::GenericArg>, operands: &[verum_ast::Expr], span: Span,
     ) -> Result<Option<super::InferResult>> {
-        let Some(ast) = receiver.associated_type_designator(|name| {
-            (name == "Self" && self.current_self_type.is_some()) ||
-                self.ctx.env.is_type_parameter_mirror(name) ||
-                (!self.ctx.env.is_locally_bound_value(name) && self.lookup_decl_param(name).is_some())
-        }) else { return Ok(None) };
-        let ty = self.ast_to_type(&ast)?;
-        let mut candidates = List::new();
+        let (ty, projected) = match &receiver.kind {
+            verum_ast::ExprKind::Path(path) => {
+                let Some(name) = path.as_ident() else { return Ok(None) };
+                if self.ctx.env.is_locally_bound_value(name.as_str())
+                    || self.ctx.env.get_type_param(name.as_str()).is_none()
+                {
+                    return Ok(None);
+                }
+                let Some(ty @ Type::Var(_)) = self.lookup_decl_param(name.as_str())
+                    .or_else(|| self.ctx.lookup_type(name.as_str())).cloned()
+                else { return Ok(None) };
+                (ty, false)
+            }
+            _ => {
+                let Some(ast) = receiver.associated_type_designator(|name| {
+                    (name == "Self" && self.current_self_type.is_some())
+                        || self.ctx.env.is_type_parameter_mirror(name)
+                        || (!self.ctx.env.is_locally_bound_value(name)
+                            && self.lookup_decl_param(name).is_some())
+                }) else { return Ok(None) };
+                (self.ast_to_type(&ast)?, true)
+            }
+        };
+        let mut bounds = match &ty {
+            Type::Var(variable) => self.get_type_var_bounds(variable),
+            _ => List::new(),
+        };
         for premise in &self.source_type_registration.projection_assumptions {
-            if self.unifier.apply(&premise.ty) != self.unifier.apply(&ty) { continue; }
-            for bound in premise.bounds.iter().filter(|bound| !bound.is_negative) {
-                let owner = self.path_to_string(&bound.protocol);
-                for candidate in self.applied_protocol_methods_in_hierarchy(
-                    &owner, &bound.args, ProtocolMethodReceiver::Call(&ty), &method.name, span,
-                )? {
-                    if candidate.method.receiver_kind() == Some(crate::core_metadata::ReceiverKind::None)
-                        && !candidates.iter().any(|other: &AppliedProtocolMethod|
-                            other.owner == candidate.owner && other.arguments == candidate.arguments)
-                    {
-                        candidates.push(candidate);
-                    }
+            if self.unifier.apply(&premise.ty) == self.unifier.apply(&ty) {
+                for bound in &premise.bounds {
+                    if !bounds.contains(bound) { bounds.push(bound.clone()); }
+                }
+            }
+        }
+        let mut candidates = List::new();
+        for bound in bounds.iter().filter(|bound| !bound.is_negative) {
+            let owner = self.path_to_string(&bound.protocol);
+            for candidate in self.applied_protocol_methods_in_hierarchy(
+                &owner, &bound.args, ProtocolMethodReceiver::Call(&ty), &method.name, span,
+            )? {
+                if candidate.method.receiver_kind() == Some(crate::core_metadata::ReceiverKind::None)
+                    && !candidates.iter().any(|other: &AppliedProtocolMethod|
+                        other.owner == candidate.owner && other.arguments == candidate.arguments)
+                {
+                    candidates.push(candidate);
                 }
             }
         }
         let selected = match candidates.as_slice() {
             [candidate] => candidate,
+            [] if !projected => return Ok(None),
             [] => return Err(invalid(span, format!("no bound on `{ty}` declares static member `{method}`"))),
             _ => return Err(invalid(span, format!("multiple bounds on `{ty}` declare static member `{method}`"))),
         };

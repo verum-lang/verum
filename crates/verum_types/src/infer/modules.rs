@@ -22600,7 +22600,7 @@ impl TypeChecker {
             return Ok(None);
         }
         if !skip_static_lookup
-            && let Some(result) = self.projected_static_call(receiver, method, type_args, args, span)?
+            && let Some(result) = self.bounded_static_call(receiver, method, type_args, args, span)?
         {
             return Ok(Some(result));
         }
@@ -24002,81 +24002,7 @@ impl TypeChecker {
                 let method_name = method.name.as_str();
                 let qualified_name = format!("{}.{}", type_name, method_name);
 
-                // CRITICAL: Handle static method calls on type parameters with protocol bounds.
-                // For example: `U.from(self)` where `U: From<T>` should lookup `from` from `From<T>` protocol.
-                // Check if type_name refers to a type parameter.
                 let type_name_text = verum_common::Text::from(type_name);
-                if let Some(ty) = self.ctx.lookup_type(&type_name_text).cloned() {
-                    // If the type is a type variable, it might have protocol bounds
-                    if let Type::Var(_) = &ty {
-                        // Look up all type parameters with their bounds
-                        let all_type_params = self.ctx.env.all_type_params();
-                        for type_param in all_type_params {
-                            // Check if this type parameter matches our type_name
-                            if type_param.name.as_str() == type_name {
-                                // Check each protocol bound on this type parameter
-                                for bound in &type_param.bounds {
-                                    if let Some(protocol_ident) = bound.protocol.as_ident() {
-                                        let protocol_name: Text = protocol_ident.name.clone();
-
-                                        // Look up the protocol definition
-                                        let protocol_opt = self
-                                            .protocol_checker
-                                            .read()
-                                            .get_protocol(&protocol_name)
-                                            .cloned();
-                                        if let Maybe::Some(protocol) = protocol_opt {
-                                            // Check if this protocol has the method we're looking for
-                                            for (_, proto_method) in &protocol.methods {
-                                                if proto_method.name.as_str() == method_name {
-                                                    // Found the method in a bounded protocol
-                                                    // Substitute Self with the type parameter's type variable
-                                                    let applied = self.applied_protocol_method(proto_method, &bound.args, &ty)?;
-                                                    let method_ty = self.instantiate_applied_protocol_method(&applied, &ty, type_args, span)?;
-
-                                                    if let Type::Function {
-                                                        params,
-                                                        return_type,
-                                                        ..
-                                                    } = &method_ty
-                                                    {
-                                                        // For STATIC protocol methods (like From::from), there's no self param
-                                                        // The params should already be correct
-                                                        // T1270: a ±1 tolerance is not the self-parameter rule.
-                                                        let params = match Self::effective_params(params.as_slice(), args.len(), None) {
-                                                            Some(effective) => effective,
-                                                            None => {
-                                                                return Err(self.arity_error(method_name.to_text(), params.len(), args.len(), span));
-                                                            }
-                                                        };
-
-                                                        // Type check each argument
-                                                        for (arg, param_ty) in
-                                                            args.iter().zip(params.iter())
-                                                        {
-                                                            let resolved_param =
-                                                                self.unifier.apply(param_ty);
-                                                            self.check_expr(arg, &resolved_param)?;
-                                                        }
-
-                                                        // Apply substitution to return type
-                                                        let resolved_return =
-                                                            self.unifier.apply(return_type);
-                                                        self.type_registry.register_call_target(span, self.unifier.apply(&method_ty));
-                                                        return Ok(Some(InferResult::new(
-                                                            resolved_return,
-                                                        )));
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
                 // Scalar instance methods also support an explicit receiver, for example
                 // Int.min(a, b). Resolve the declaration before interpreting argument zero
                 // as self. Static functions have their normal precedence.
