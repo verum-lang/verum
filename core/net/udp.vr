@@ -281,11 +281,13 @@ implement UdpSocket {
         let addrs = addr.to_socket_addrs()?;
         let mut last_err = IoError.Other("No addresses resolved");
 
-        for socket_addr in addrs {
-            match UdpSocket.bind_addr(&socket_addr) {
+        let mut i = 0;
+        while i < addrs.len() {
+            match UdpSocket.bind_addr(&addrs[i]) {
                 Result.Ok(socket) => return Result.Ok(socket),
                 Result.Err(e) => last_err = e,
             }
+            i = i + 1;
         }
 
         Result.Err(last_err)

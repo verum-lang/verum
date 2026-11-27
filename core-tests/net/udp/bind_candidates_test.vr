@@ -1,0 +1,27 @@
+mount core.io.{IoError, IoErrorKind};
+mount core.net.addr.{Ipv4Addr, SocketAddr};
+mount core.net.resolve.ToSocketAddrs;
+mount core.net.udp.UdpSocket;
+
+type EmptyUdpCandidates is ();
+
+implement ToSocketAddrs for EmptyUdpCandidates {
+    fn to_socket_addrs(&self) -> Result<List<SocketAddr>, IoError> {
+        Result.Ok(List.new())
+    }
+}
+
+@test
+fn test_bound_udp_socket_reports_an_empty_candidate_list() {
+    let mut socket = UdpSocket.bind(SocketAddr.new_v4(Ipv4Addr.localhost(), 0)).unwrap();
+    match socket.connect(EmptyUdpCandidates()) {
+        Result.Err(error) => {
+            assert(error.kind() is IoErrorKind.ConnectionRefused);
+            match error.message() {
+                Maybe.Some(message) => assert(*message == "connect: no candidate addresses"),
+                Maybe.None => panic("missing UDP connection diagnostic"),
+            }
+        },
+        Result.Ok(_) => panic("UDP connect accepted an empty candidate list"),
+    }
+}
