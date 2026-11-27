@@ -73,6 +73,7 @@ module core.net.udp;
 mount io.*;
 mount super.addr.*;
 mount core.net.resolve.ToSocketAddrs;
+mount core.sys.common.OSError;
 
 // =============================================================================
 // V-LLSI Native Socket Imports
@@ -465,10 +466,9 @@ implement UdpSocket {
         // failed with NotFound).
         match last_err {
             Maybe.Some(e) => Result.Err(e),
-            Maybe.None => Result.Err(IoError {
-                kind: IoErrorKind.ConnectionRefused,
-                message: Maybe.Some(Text.from("connect: no candidate addresses")),
-            }),
+            Maybe.None => Result.Err(IoError.with_message(
+                IoErrorKind.ConnectionRefused, "connect: no candidate addresses",
+            )),
         }
     }
 
