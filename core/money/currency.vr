@@ -52,11 +52,23 @@ implement Currency {
         Currency { code: code, minor_units: minor_units }
     }
 
+    /// ISO currency code.
+    public fn code(&self) -> &Text { &self.code }
+
+    /// Number of decimal places in one minor unit.
+    public fn minor_units(&self) -> Int { self.minor_units }
+
     /// Two currencies compare equal iff their ISO codes match.
     /// Minor-unit precision is conventionally fixed by the ISO code
     /// so a code-only comparison is sufficient at this layer.
     public fn eq(&self, other: &Currency) -> Bool {
         self.code == other.code
+    }
+}
+
+implement Clone for Currency {
+    fn clone(&self) -> Currency {
+        Currency { code: self.code.clone(), minor_units: self.minor_units }
     }
 }
 

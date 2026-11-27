@@ -56,16 +56,11 @@ module core.text.numeric.bigdecimal;
 
 mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
 mount base.ordering.{Ordering, Less, Equal, Greater};
-mount collections.List;
 mount core.text.numeric.bigint.{
     BigInt, BigIntError,
-    BIGINT_BASE, BIGINT_DIGITS_PER_CHUNK,
     parse_bigint,
 };
-mount core.text.numeric.decimal.{
-    Decimal,
-    RoundingMode, HalfEven, HalfUp, HalfDown, RoundingMode.Truncate,
-};
+mount core.text.numeric.decimal.{Decimal, RoundingMode};
 
 // =============================================================================
 // Constants
@@ -96,9 +91,9 @@ public type BigDecimal is {
 /// Errors surfaced by the BigDecimal API.
 public type BigDecimalError is
       ParseEmpty
-    | ParseInvalidChar { byte_offset: Int, byte: Int }
-    | ParseInvalidShape { reason: Text }
-    | ScaleOutOfRange  { scale: Int }
+    | ParseInvalidChar { public byte_offset: Int, public byte: Int }
+    | ParseInvalidShape { public reason: Text }
+    | ScaleOutOfRange  { public scale: Int }
     | DivByZero;
 
 // =============================================================================
@@ -123,15 +118,15 @@ implement BigDecimal {
 
     /// Build from an existing BigInt.  scale=0.
     public fn from_bigint(b: &BigInt) -> BigDecimal {
-        BigDecimal { coefficient: clone_bigint(b), scale: 0 }
+        BigDecimal { coefficient: b.clone(), scale: 0 }
     }
 
     /// Build from a V0 Decimal (i64-coefficient).  Always succeeds —
     /// any Decimal value fits within BigDecimal trivially.
     public fn from_decimal(d: &Decimal) -> BigDecimal {
         BigDecimal {
-            coefficient: BigInt.from_int(d.coefficient),
-            scale: d.scale,
+            coefficient: BigInt.from_int(d.coefficient()),
+            scale: d.scale(),
         }
     }
 
@@ -145,6 +140,12 @@ implement BigDecimal {
         }
         Result.Ok(BigDecimal { coefficient: coefficient, scale: scale })
     }
+
+    /// Borrow the exact signed coefficient without converting it to a machine integer.
+    public fn coefficient(&self) -> &BigInt { &self.coefficient }
+
+    /// Number of fractional decimal digits, including retained trailing zeros.
+    public fn scale(&self) -> Int { self.scale }
 
     // -------------------------------------------------------------------------
     // Predicates
@@ -241,21 +242,14 @@ implement BigDecimal {
         };
         let round_digit = match round_digit_bi.abs().to_int() {
             Maybe.Some(v) => v,
-            Maybe.None    => 0,  // Shouldn't happen — round_digit fits in 0..=9
+            Maybe.None    => panic("a decimal rounding digit must fit in Int"),
         };
         let sticky = !rem.is_zero();
-        let kept_is_neg = kept.is_negative();
-        let kept_abs = kept.abs();
-        let kept_last_digit_is_odd = match kept_abs.rem(&ten) {
-            Result.Ok(d)  => match d.to_int() {
-                Maybe.Some(v) => (v % 2) != 0,
-                Maybe.None    => false,
-            },
-            Result.Err(_) => false,
-        };
+        let quotient_is_negative = self.is_negative() != other.is_negative();
+        let kept_last_digit_is_odd = kept.is_odd();
 
         let bump_up = match mode {
-            HalfEven => {
+            RoundingMode.HalfEven => {
                 if round_digit < 5 {
                     false
                 } else if round_digit > 5 {
@@ -266,10 +260,10 @@ implement BigDecimal {
                     kept_last_digit_is_odd
                 }
             }
-            HalfUp => {
+            RoundingMode.HalfUp => {
                 if round_digit < 5 { false } else { true }
             }
-            HalfDown => {
+            RoundingMode.HalfDown => {
                 if round_digit < 5 { false }
                 else if round_digit > 5 { true }
                 else { sticky }
@@ -277,12 +271,10 @@ implement BigDecimal {
             RoundingMode.Truncate => false,
         };
 
-        // Apply bump.  For negative kept values, "bump up in
-        // magnitude" means "subtract one" (because kept is negative
-        // and we want |kept| → |kept|+1).
+        // Use the sign of the exact quotient even when the retained digits are zero.
         let final_coef = if !bump_up {
             kept
-        } else if kept_is_neg {
+        } else if quotient_is_negative {
             kept.sub(&BigInt.one())
         } else {
             kept.add(&BigInt.one())
@@ -291,11 +283,11 @@ implement BigDecimal {
         Result.Ok(BigDecimal { coefficient: final_coef, scale: precision })
     }
 
-    /// Convenience: divide with default banker's rounding (HalfEven).
+    /// Convenience: divide with default banker's rounding (RoundingMode.HalfEven).
     public fn div_round(&self, other: &BigDecimal, precision: Int)
         -> Result<BigDecimal, BigDecimalError>
     {
-        self.div(other, precision, HalfEven)
+        self.div(other, precision, RoundingMode.HalfEven)
     }
 
     /// Integer quotient (truncated towards zero, scale=0).
@@ -368,21 +360,19 @@ implement BigDecimal {
 
         // Mixed integer + fractional: split at total_len - scale.
         let split = total_len - self.scale;
-        let int_part = bytes_subslice(&abs_bytes, 0, split);
-        let frac_part = bytes_subslice(&abs_bytes, split, total_len);
-        out = out + Text.from_bytes(&int_part).unwrap_or("".clone());
+        out = out + abs_text.slice(0, split);
         out = out + ".";
-        out = out + Text.from_bytes(&frac_part).unwrap_or("".clone());
+        out = out + abs_text.slice(split, total_len);
         out
     }
 
     /// Try to convert into a V0 `Decimal` (i64 coefficient).  Returns
-    /// `Maybe.None` if the coefficient exceeds i64 range; `Maybe.Some(d)` otherwise.
+    /// `Maybe.None` if the coefficient or the scale is outside the fixed Decimal range; `Maybe.Some(d)` otherwise.
     /// Useful for hot-path callers that optimistically expect the
     /// result of arbitrary-precision arithmetic to fit i64.
     public fn try_to_decimal(&self) -> Maybe<Decimal> {
         match self.coefficient.to_int() {
-            Maybe.Some(c) => Maybe.Some(Decimal { coefficient: c, scale: self.scale }),
+            Maybe.Some(c) => Decimal.from_parts(c, self.scale).ok(),
             Maybe.None    => Maybe.None,
         }
     }
@@ -434,14 +424,14 @@ public fn parse_bigdecimal(text: &Text) -> Result<BigDecimal, BigDecimalError> {
 
     // Walk digits + optional decimal point.  Build a single digit
     // string (sign-stripped) and track frac_count.
-    let mut digit_run: List<Byte> = List.new();
+    let mut coef_text: Text = if neg { "-" } else { "" };
     let mut frac_count: Int = 0;
     let mut saw_dot = false;
     let mut saw_digit = false;
     while i < n {
         let b = bytes[i] as Int;
         if b >= ('0' as Int) && b <= ('9' as Int) {
-            digit_run.push(bytes[i]);
+            coef_text.push_byte(bytes[i]);
             if saw_dot { frac_count = frac_count + 1; }
             saw_digit = true;
             i = i + 1;
@@ -487,17 +477,15 @@ public fn parse_bigdecimal(text: &Text) -> Result<BigDecimal, BigDecimalError> {
         return Result.Err(BigDecimalError.ScaleOutOfRange { scale: frac_count });
     }
 
-    // Build the coefficient by re-stitching digit_run as a
-    // (signed) BigInt text and parsing.
-    let mut coef_text: Text = if neg { "-".clone() } else { "".clone() };
-    coef_text = coef_text + Text.from_bytes(&digit_run).unwrap_or("".clone());
     let coef = match parse_bigint(&coef_text) {
         Result.Ok(b)  => b,
-        Result.Err(_) => {
-            return Result.Err(BigDecimalError.ParseInvalidShape {
-                reason: "digit run failed BigInt parse (defensive)".clone(),
-            });
-        }
+        Result.Err(e) => return Result.Err(match e {
+            BigIntError.ParseEmpty => BigDecimalError.ParseEmpty,
+            BigIntError.ParseInvalidShape { reason } => BigDecimalError.ParseInvalidShape { reason: reason },
+            BigIntError.ParseInvalidChar { byte_offset, byte } =>
+                BigDecimalError.ParseInvalidChar { byte_offset: byte_offset, byte: byte },
+            BigIntError.DivByZero => BigDecimalError.DivByZero,
+        }),
     };
 
     Result.Ok(BigDecimal { coefficient: coef, scale: frac_count })
@@ -512,16 +500,16 @@ public fn parse_bigdecimal(text: &Text) -> Result<BigDecimal, BigDecimalError> {
 /// overflow possible — BigInt arithmetic is unbounded.
 fn align_scales(a: &BigDecimal, b: &BigDecimal) -> (BigInt, BigInt, Int) {
     if a.scale == b.scale {
-        return (clone_bigint(&a.coefficient), clone_bigint(&b.coefficient), a.scale);
+        return (a.coefficient.clone(), b.coefficient.clone(), a.scale);
     }
     if a.scale < b.scale {
         let diff = b.scale - a.scale;
         let mult = bigint_pow10(diff);
-        (a.coefficient.mul(&mult), clone_bigint(&b.coefficient), b.scale)
+        (a.coefficient.mul(&mult), b.coefficient.clone(), b.scale)
     } else {
         let diff = a.scale - b.scale;
         let mult = bigint_pow10(diff);
-        (clone_bigint(&a.coefficient), b.coefficient.mul(&mult), a.scale)
+        (a.coefficient.clone(), b.coefficient.mul(&mult), a.scale)
     }
 }
 
@@ -538,27 +526,4 @@ fn bigint_pow10(k: Int) -> BigInt {
         i = i + 1;
     }
     acc
-}
-
-fn clone_bigint(b: &BigInt) -> BigInt {
-    // Round-trip through to_text + parse_bigint is the cleanest
-    // currently-available clone — BigInt doesn't expose a direct
-    // Clone protocol surface yet (V1: derive Clone).
-    let t = b.to_text();
-    match parse_bigint(&t) {
-        Result.Ok(c)  => c,
-        Result.Err(_) => BigInt.zero(),  // unreachable for well-formed BigInts
-    }
-}
-
-/// Borrowed sub-slice [start, end) of a List<Byte>.  Mirrors the
-/// helper in `decimal.vr`.
-fn bytes_subslice(src: &List<Byte>, start: Int, end: Int) -> List<Byte> {
-    let mut out: List<Byte> = List.with_capacity(end - start);
-    let mut i = start;
-    while i < end && i < (src.len() as Int) {
-        out.push(src[i]);
-        i = i + 1;
-    }
-    out
 }

@@ -102,8 +102,8 @@ public type BigInt is {
 /// Errors surfaced by the BigInt API.
 public type BigIntError is
       ParseEmpty
-    | ParseInvalidChar { byte_offset: Int, byte: Int }
-    | ParseInvalidShape { reason: Text }
+    | ParseInvalidChar { public byte_offset: Int, public byte: Int }
+    | ParseInvalidShape { public reason: Text }
     | DivByZero;
 
 // =============================================================================
@@ -127,11 +127,12 @@ implement BigInt {
     public fn from_int(n: Int) -> BigInt {
         if n == 0 { return BigInt.zero(); }
         let neg = n < 0;
-        let mut mag = abs_int(n);
+        let mut remaining = n;
         let mut digits: List<Int> = List.new();
-        while mag > 0 {
-            digits.push(mag % BIGINT_BASE);
-            mag = mag / BIGINT_BASE;
+        while remaining != 0 {
+            let chunk = remaining % BIGINT_BASE;
+            digits.push(if chunk < 0 { -chunk } else { chunk });
+            remaining = remaining / BIGINT_BASE;
         }
         BigInt { sign: neg, digits: digits }
     }
@@ -173,8 +174,8 @@ implement BigInt {
     ///   * Differing     ⇒ sub smaller magnitude from larger;
     ///                     result sign = sign of larger operand.
     public fn add(&self, other: &BigInt) -> BigInt {
-        if self.is_zero() { return BigInt { sign: other.sign, digits: clone_digits(&other.digits) }; }
-        if other.is_zero() { return BigInt { sign: self.sign, digits: clone_digits(&self.digits) }; }
+        if self.is_zero() { return other.clone(); }
+        if other.is_zero() { return self.clone(); }
 
         if self.sign == other.sign {
             let sum = add_magnitudes(&self.digits, &other.digits);
@@ -420,36 +421,19 @@ implement BigInt {
     /// optimistically expect i64-bounded values.
     public fn to_int(&self) -> Maybe<Int> {
         if self.is_zero() { return Maybe.Some(0); }
-        let i64_max: Int = 9223372036854775807;
-        let n = self.digits.len() as Int;
-        // i64.MAX = 9_223_372_036_854_775_807 — three base-10^9
-        // chunks max for any i64-bounded magnitude.  Reject up
-        // front if more than three.
-        if n > 3 { return Maybe.None; }
-
-        let mut acc: Int = 0;
-        let mut k: Int = n - 1;
-        while k >= 0 {
-            // acc * BIGINT_BASE + digit ≤ i64.MAX?  Each step:
-            //   acc_next = acc * BIGINT_BASE + digit
-            // With BIGINT_BASE = 10^9, acc * 10^9 must fit.  Bound:
-            //   acc ≤ i64.MAX / 10^9 ≈ 9.22 × 10^9
-            if acc > i64_max / BIGINT_BASE { return Maybe.None; }
-            let scaled = acc * BIGINT_BASE;
-            let next = scaled + self.digits[k];
-            if next < scaled { return Maybe.None; }  // Overflow
-            acc = next;
+        // Accumulate toward the negative bound so Int.MIN is representable.
+        let limit = if self.sign { Int.MIN } else { -Int.MAX };
+        let mut acc = 0;
+        let mut k = self.digits.len();
+        while k > 0 {
             k = k - 1;
+            let digit = self.digits[k];
+            if acc < limit / BIGINT_BASE { return Maybe.None; }
+            let scaled = acc * BIGINT_BASE;
+            if scaled < limit + digit { return Maybe.None; }
+            acc = scaled - digit;
         }
-        // For negatives, the magnitude must be ≤ -i64.MIN = i64.MAX + 1.
-        // We compute the magnitude as i64 (≤ i64.MAX), so the only
-        // edge case is `digits = [0, 0, 9_223_372_036]` magnitude
-        // 9_223_372_036_000_000_000 ≤ i64.MAX < 9_223_372_036_854_775_808.
-        // We accept any magnitude ≤ i64.MAX for both signs (i64.MIN
-        // representation requires magnitude i64.MAX + 1, which we
-        // cannot construct via this i64 accumulator — caller gets
-        // Maybe.None for that single edge case).
-        if self.sign { Maybe.Some(-acc) } else { Maybe.Some(acc) }
+        Maybe.Some(if self.sign { acc } else { -acc })
     }
 
     // -------------------------------------------------------------------------
@@ -503,7 +487,7 @@ implement BigInt {
         let mag = self.abs();
         let mut bytes_le: List<Byte> = List.new();
         let two56 = BigInt.from_int(256);
-        let mut x = clone_digits_to_bigint(&mag);
+        let mut x = mag.clone();
         while !x.is_zero() {
             let (q, r) = match x.div_rem(&two56) {
                 Result.Ok(t)  => t,
@@ -637,11 +621,10 @@ implement BigInt {
     }
 }
 
-/// Internal helper: clone a BigInt's digit list into a fresh BigInt.
-/// Cheaper than the to_text/parse_bigint round-trip used by the
-/// public clone helpers in sibling modules.
-fn clone_digits_to_bigint(b: &BigInt) -> BigInt {
-    BigInt { sign: b.sign, digits: clone_digits(&b.digits) }
+implement Clone for BigInt {
+    fn clone(&self) -> BigInt {
+        BigInt { sign: self.sign, digits: clone_digits(&self.digits) }
+    }
 }
 
 /// Compute bit length of a BigInt's magnitude via repeated div-by-2.
@@ -650,7 +633,7 @@ fn clone_digits_to_bigint(b: &BigInt) -> BigInt {
 fn bit_length_via_div(b: &BigInt) -> Int {
     if b.is_zero() { return 0; }
     let two = BigInt.from_int(2);
-    let mut x = clone_digits_to_bigint(&b.abs());
+    let mut x = b.abs();
     let mut count: Int = 0;
     while !x.is_zero() {
         x = match x.div(&two) {
@@ -1250,13 +1233,4 @@ fn pad_chunk_to_9(v: Int) -> Text {
         // having pushed 8 zeros.
     }
     out
-}
-
-
-/// Absolute-value of an i64 with safe i64.MIN saturation.  Mirrors
-/// the helper in `decimal.vr`; duplicated here to keep this module
-/// self-contained.
-fn abs_int(x: Int) -> Int {
-    let i64_min: Int = -9223372036854775807 - 1;
-    if x == i64_min { 9223372036854775807 } else if x < 0 { -x } else { x }
 }

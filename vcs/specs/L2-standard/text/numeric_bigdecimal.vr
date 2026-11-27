@@ -37,7 +37,7 @@ fn check_constructors() -> Result<Bool, BigDecimalError> {
         Err(_) => Decimal.zero(),
     };
     let bd_from_d = BigDecimal.from_decimal(&d);
-    assert(bd_from_d.scale == 2);
+    assert(bd_from_d.scale() == 2);
 
     // Out-of-range scale → ScaleOutOfRange.
     let oversized = match BigDecimal.from_parts(BigInt.one(), MAX_SCALE_BIG + 1) {
@@ -176,10 +176,10 @@ fn check_render() -> Result<Bool, BigDecimalError> {
 
 fn check_parse() -> Result<Bool, BigDecimalError> {
     let a = parse_bigdecimal(&"123.45".clone())?;
-    assert(a.scale == 2);
+    assert(a.scale() == 2);
 
     let b = parse_bigdecimal(&"-999999999999999999999.123456789".clone())?;
-    assert(b.scale == 9);
+    assert(b.scale() == 9);
     assert(b.is_negative());
 
     // Empty input → ParseEmpty.
@@ -206,13 +206,13 @@ fn check_interop() -> Result<Bool, BigDecimalError> {
         Err(_) => Decimal.zero(),
     };
     let bd = BigDecimal.from_decimal(&d);
-    assert(bd.scale == 2);
+    assert(bd.scale() == 2);
 
     // BigDecimal → Decimal (Some when fits i64).
     match bd.try_to_decimal() {
         Some(d_back) => {
-            assert(d_back.coefficient == 12345);
-            assert(d_back.scale == 2);
+            assert(d_back.coefficient() == 12345);
+            assert(d_back.scale() == 2);
         }
         None => assert(false),
     }

@@ -144,13 +144,13 @@ fn check_render() {
 
 fn check_parse() -> Result<Bool, DecimalError> {
     let a = parse_decimal(&"123.45".clone())?;
-    assert(a.coefficient == 12345 && a.scale == 2);
+    assert(a.coefficient() == 12345 && a.scale() == 2);
 
     let b = parse_decimal(&"-0.007".clone())?;
-    assert(b.coefficient == -7 && b.scale == 3);
+    assert(b.coefficient() == -7 && b.scale() == 3);
 
     let c = parse_decimal(&"42".clone())?;
-    assert(c.coefficient == 42 && c.scale == 0);
+    assert(c.coefficient() == 42 && c.scale() == 0);
 
     // Empty input ⇒ ParseEmpty.
     let empty = match parse_decimal(&"".clone()) {

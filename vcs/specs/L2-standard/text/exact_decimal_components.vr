@@ -1,0 +1,119 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L2
+// @tags: decimal, rational, money, exact
+// @expected-exit: 0
+
+mount core.base.maybe.Maybe;
+mount core.base.result.Result;
+mount core.text.numeric.decimal.{Decimal, RoundingMode};
+mount core.text.numeric.bigint.{BigInt, BigIntError, parse_bigint};
+mount core.text.numeric.bigdecimal.{BigDecimal, BigDecimalError};
+mount core.text.numeric.rational.{Rational, RationalError, parse_rational};
+mount core.money.currency.{Currency, usd};
+mount core.money.money.{Money, MoneyError};
+
+fn fixed(c: Int, s: Int) -> Decimal {
+    match Decimal.from_parts(c, s) { Result.Ok(v) => v, _ => panic("expected a fixed decimal") }
+}
+fn wide(t: &Text) -> BigInt {
+    match parse_bigint(t) { Result.Ok(v) => v, _ => panic("expected an integer") }
+}
+fn scaled(c: BigInt, s: Int) -> BigDecimal {
+    match BigDecimal.from_parts(c, s) { Result.Ok(v) => v, _ => panic("expected a big decimal") }
+}
+
+fn test_components() {
+    let small = fixed(-12340, 3);
+    assert_eq(small.coefficient(), -12340);
+    assert_eq(small.scale(), 3);
+    let promoted = BigDecimal.from_decimal(&small);
+    assert_eq(promoted.coefficient().to_text(), "-12340");
+    assert_eq(promoted.scale(), 3);
+    let restored = promoted.try_to_decimal().unwrap();
+    assert_eq(restored.coefficient(), small.coefficient());
+    assert_eq(restored.scale(), 3);
+    assert_eq(Rational.from_decimal(&small).to_text(), "-617/50");
+    assert_eq(Rational.from_bigdecimal(&promoted).to_text(), "-617/50");
+
+    let digits = "100000000000000000000000000001";
+    let large = scaled(wide(&digits), 1);
+    assert_eq(large.coefficient().to_text(), digits);
+    assert(large.try_to_decimal() is Maybe.None);
+    assert_eq(Rational.from_bigdecimal(&large).to_text(), "100000000000000000000000000001/10");
+    let fine = scaled(BigInt.zero(), 19);
+    assert(fine.try_to_decimal() is Maybe.None);
+    assert_eq(Rational.from_bigdecimal(&fine).to_text(), "0");
+    assert(Decimal.from_parts(7, 19) is Result.Err(_));
+    assert(BigDecimal.from_parts(BigInt.one(), 1025) is Result.Err(_));
+}
+
+fn test_integer_boundaries() {
+    let low = BigInt.from_int(Int.MIN);
+    let high = BigInt.from_int(Int.MAX);
+    assert_eq(low.to_text(), "-9223372036854775808");
+    assert_eq(low.to_int().unwrap(), Int.MIN);
+    assert_eq(high.to_int().unwrap(), Int.MAX);
+    assert(wide(&"9223372036854775808").to_int() is Maybe.None);
+    assert(wide(&"-9223372036854775809").to_int() is Maybe.None);
+    let boundary = BigDecimal.from_decimal(&fixed(Int.MIN, 18));
+    assert_eq(boundary.try_to_decimal().unwrap().coefficient(), Int.MIN);
+}
+
+fn test_errors() {
+    match parse_rational(&"12x/7") {
+        Result.Err(RationalError.ParseInvalidChar { byte_offset, byte }) => {
+            assert_eq(byte_offset, 2);
+            assert_eq(byte, 120);
+        },
+        _ => assert(false),
+    }
+    match parse_rational(&"1/12x") {
+        Result.Err(RationalError.ParseInvalidChar { byte_offset, byte }) => {
+            assert_eq(byte_offset, 4);
+            assert_eq(byte, 120);
+        },
+        _ => assert(false),
+    }
+    assert(parse_rational(&"1/0") is Result.Err(RationalError.DenominatorIsZero));
+    assert(parse_bigint(&"") is Result.Err(BigIntError.ParseEmpty));
+}
+
+fn test_money() {
+    let cash = Money.from_minor_units(BigInt.from_int(-101), usd()).unwrap();
+    assert_eq(cash.amount().coefficient().to_int().unwrap(), -101);
+    assert_eq(cash.amount().scale(), 2);
+    assert_eq(cash.to_text(), "-1.01 USD");
+    let shares = cash.split(3).unwrap();
+    assert_eq(shares[0].to_text(), "-0.34 USD");
+    assert_eq(shares[1].to_text(), "-0.34 USD");
+    assert_eq(shares[2].to_text(), "-0.33 USD");
+    assert(cash.split(0) is Result.Err(_));
+    let invalid = Currency.new("X", -1);
+    match Money.zero(invalid) {
+        Result.Err(MoneyError.Underlying { source: BigDecimalError.ScaleOutOfRange { scale } }) =>
+            assert_eq(scale, -1),
+        _ => assert(false),
+    }
+    assert(Money.from_minor_units(BigInt.zero(), Currency.new("X", 1025)) is Result.Err(_));
+    let low = Money.zero(Currency.new("TEST", 2)).unwrap();
+    let high = Money.zero(Currency.new("TEST", 3)).unwrap();
+    assert(low.add(&high) is Result.Err(MoneyError.ScaleMismatch { expected: 2, actual: 3 }));
+    assert(high.sub(&low) is Result.Err(MoneyError.ScaleMismatch { expected: 3, actual: 2 }));
+    let cent = Money.from_minor_units(BigInt.from_int(-1), usd()).unwrap();
+    let rounded = cent.mul_scalar(&scaled(BigInt.from_int(6), 1), RoundingMode.HalfEven).unwrap();
+    assert_eq(rounded.to_text(), "-0.01 USD");
+
+    let bill = Money.from_minor_units(BigInt.from_int(10000), usd()).unwrap();
+    let thirds = bill.split(3).unwrap();
+    assert_eq(thirds[0].to_text(), "33.34 USD");
+    assert_eq(thirds[2].to_text(), "33.33 USD");
+    assert(Money.from_amount(BigDecimal.one(), usd()) is Result.Err(_));
+}
+
+fn main() {
+    test_components();
+    test_integer_boundaries();
+    test_errors();
+    test_money();
+}

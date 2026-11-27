@@ -109,10 +109,10 @@ public type Decimal is {
 /// Errors surfaced by the Decimal API.
 public type DecimalError is
       ParseEmpty
-    | ParseInvalidChar { byte_offset: Int, byte: Int }
-    | ParseInvalidShape { reason: Text }
-    | ScaleOutOfRange  { scale: Int }
-    | Overflow         { op: Text }
+    | ParseInvalidChar { public byte_offset: Int, public byte: Int }
+    | ParseInvalidShape { public reason: Text }
+    | ScaleOutOfRange  { public scale: Int }
+    | Overflow         { public op: Text }
     | DivByZero;
 
 /// Rounding policy for `div` (and any future inexact operation).
@@ -168,6 +168,12 @@ implement Decimal {
         }
         Result.Ok(Decimal { coefficient: coefficient, scale: scale })
     }
+
+    /// Signed integer multiplied by 10 raised to the negative scale.
+    public fn coefficient(&self) -> Int { self.coefficient }
+
+    /// Number of fractional decimal digits, including retained trailing zeros.
+    public fn scale(&self) -> Int { self.scale }
 
     // -------------------------------------------------------------------------
     // Predicates

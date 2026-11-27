@@ -27,20 +27,20 @@ mount core.money.currency.{Currency,
 @test
 fn test_currency_new_preserves_code() {
     let c = Currency.new("USD".clone(), 2);
-    assert_eq(c.code, "USD");
+    assert_eq(*c.code(), "USD");
 }
 
 @test
 fn test_currency_new_preserves_minor_units() {
     let c = Currency.new("JPY".clone(), 0);
-    assert_eq(c.minor_units, 0);
+    assert_eq(c.minor_units(), 0);
 }
 
 @test
 fn test_currency_new_custom_test_currency() {
     let c = Currency.new("XTC".clone(), 4);
-    assert_eq(c.code, "XTC");
-    assert_eq(c.minor_units, 4);
+    assert_eq(*c.code(), "XTC");
+    assert_eq(c.minor_units(), 4);
 }
 
 // =============================================================================
@@ -77,40 +77,40 @@ fn test_currency_eq_ignores_minor_units() {
 
 @test
 fn test_jpy_code() {
-    assert_eq(jpy().code, "JPY");
+    assert_eq(*jpy().code(), "JPY");
 }
 
 @test
 fn test_jpy_minor_units_zero() {
-    assert_eq(jpy().minor_units, 0);
+    assert_eq(jpy().minor_units(), 0);
 }
 
 @test
 fn test_krw_code_and_minor_units() {
     let c = krw();
-    assert_eq(c.code, "KRW");
-    assert_eq(c.minor_units, 0);
+    assert_eq(*c.code(), "KRW");
+    assert_eq(c.minor_units(), 0);
 }
 
 @test
 fn test_vnd_code_and_minor_units() {
     let c = vnd();
-    assert_eq(c.code, "VND");
-    assert_eq(c.minor_units, 0);
+    assert_eq(*c.code(), "VND");
+    assert_eq(c.minor_units(), 0);
 }
 
 @test
 fn test_clp_code_and_minor_units() {
     let c = clp();
-    assert_eq(c.code, "CLP");
-    assert_eq(c.minor_units, 0);
+    assert_eq(*c.code(), "CLP");
+    assert_eq(c.minor_units(), 0);
 }
 
 @test
 fn test_isk_code_and_minor_units() {
     let c = isk();
-    assert_eq(c.code, "ISK");
-    assert_eq(c.minor_units, 0);
+    assert_eq(*c.code(), "ISK");
+    assert_eq(c.minor_units(), 0);
 }
 
 // =============================================================================
@@ -118,107 +118,107 @@ fn test_isk_code_and_minor_units() {
 // =============================================================================
 
 @test
-fn test_usd_code() { assert_eq(usd().code, "USD"); }
+fn test_usd_code() { assert_eq(*usd().code(), "USD"); }
 
 @test
-fn test_usd_minor_units() { assert_eq(usd().minor_units, 2); }
+fn test_usd_minor_units() { assert_eq(usd().minor_units(), 2); }
 
 @test
 fn test_eur_factory() {
     let c = eur();
-    assert_eq(c.code, "EUR");
-    assert_eq(c.minor_units, 2);
+    assert_eq(*c.code(), "EUR");
+    assert_eq(c.minor_units(), 2);
 }
 
 @test
 fn test_gbp_factory() {
     let c = gbp();
-    assert_eq(c.code, "GBP");
-    assert_eq(c.minor_units, 2);
+    assert_eq(*c.code(), "GBP");
+    assert_eq(c.minor_units(), 2);
 }
 
 @test
 fn test_cad_factory() {
     let c = cad();
-    assert_eq(c.code, "CAD");
-    assert_eq(c.minor_units, 2);
+    assert_eq(*c.code(), "CAD");
+    assert_eq(c.minor_units(), 2);
 }
 
 @test
 fn test_aud_factory() {
     let c = aud();
-    assert_eq(c.code, "AUD");
-    assert_eq(c.minor_units, 2);
+    assert_eq(*c.code(), "AUD");
+    assert_eq(c.minor_units(), 2);
 }
 
 @test
 fn test_nzd_factory() {
     let c = nzd();
-    assert_eq(c.code, "NZD");
-    assert_eq(c.minor_units, 2);
+    assert_eq(*c.code(), "NZD");
+    assert_eq(c.minor_units(), 2);
 }
 
 @test
 fn test_chf_factory() {
     let c = chf();
-    assert_eq(c.code, "CHF");
-    assert_eq(c.minor_units, 2);
+    assert_eq(*c.code(), "CHF");
+    assert_eq(c.minor_units(), 2);
 }
 
 @test
 fn test_cny_factory() {
     let c = cny();
-    assert_eq(c.code, "CNY");
-    assert_eq(c.minor_units, 2);
+    assert_eq(*c.code(), "CNY");
+    assert_eq(c.minor_units(), 2);
 }
 
 @test
 fn test_inr_factory() {
     let c = inr();
-    assert_eq(c.code, "INR");
-    assert_eq(c.minor_units, 2);
+    assert_eq(*c.code(), "INR");
+    assert_eq(c.minor_units(), 2);
 }
 
 @test
 fn test_brl_factory() {
     let c = brl();
-    assert_eq(c.code, "BRL");
-    assert_eq(c.minor_units, 2);
+    assert_eq(*c.code(), "BRL");
+    assert_eq(c.minor_units(), 2);
 }
 
 @test
 fn test_mxn_factory() {
     let c = mxn();
-    assert_eq(c.code, "MXN");
-    assert_eq(c.minor_units, 2);
+    assert_eq(*c.code(), "MXN");
+    assert_eq(c.minor_units(), 2);
 }
 
 @test
 fn test_zar_factory() {
     let c = zar();
-    assert_eq(c.code, "ZAR");
-    assert_eq(c.minor_units, 2);
+    assert_eq(*c.code(), "ZAR");
+    assert_eq(c.minor_units(), 2);
 }
 
 @test
 fn test_sek_factory() {
     let c = sek();
-    assert_eq(c.code, "SEK");
-    assert_eq(c.minor_units, 2);
+    assert_eq(*c.code(), "SEK");
+    assert_eq(c.minor_units(), 2);
 }
 
 @test
 fn test_nok_factory() {
     let c = nok();
-    assert_eq(c.code, "NOK");
-    assert_eq(c.minor_units, 2);
+    assert_eq(*c.code(), "NOK");
+    assert_eq(c.minor_units(), 2);
 }
 
 @test
 fn test_dkk_factory() {
     let c = dkk();
-    assert_eq(c.code, "DKK");
-    assert_eq(c.minor_units, 2);
+    assert_eq(*c.code(), "DKK");
+    assert_eq(c.minor_units(), 2);
 }
 
 // =============================================================================
@@ -228,34 +228,34 @@ fn test_dkk_factory() {
 @test
 fn test_bhd_factory() {
     let c = bhd();
-    assert_eq(c.code, "BHD");
-    assert_eq(c.minor_units, 3);
+    assert_eq(*c.code(), "BHD");
+    assert_eq(c.minor_units(), 3);
 }
 
 @test
 fn test_kwd_factory() {
     let c = kwd();
-    assert_eq(c.code, "KWD");
-    assert_eq(c.minor_units, 3);
+    assert_eq(*c.code(), "KWD");
+    assert_eq(c.minor_units(), 3);
 }
 
 @test
 fn test_omr_factory() {
     let c = omr();
-    assert_eq(c.code, "OMR");
-    assert_eq(c.minor_units, 3);
+    assert_eq(*c.code(), "OMR");
+    assert_eq(c.minor_units(), 3);
 }
 
 @test
 fn test_jod_factory() {
     let c = jod();
-    assert_eq(c.code, "JOD");
-    assert_eq(c.minor_units, 3);
+    assert_eq(*c.code(), "JOD");
+    assert_eq(c.minor_units(), 3);
 }
 
 @test
 fn test_tnd_factory() {
     let c = tnd();
-    assert_eq(c.code, "TND");
-    assert_eq(c.minor_units, 3);
+    assert_eq(*c.code(), "TND");
+    assert_eq(c.minor_units(), 3);
 }

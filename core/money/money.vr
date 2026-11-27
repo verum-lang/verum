@@ -55,7 +55,7 @@ mount base.ordering.{Ordering, Less, Equal, Greater};
 mount collections.List;
 mount core.text.numeric.{
     BigInt, BigDecimal, BigDecimalError,
-    RoundingMode, HalfEven,
+    RoundingMode,
 };
 mount core.money.currency.Currency;
 
@@ -65,7 +65,7 @@ mount core.money.currency.Currency;
 
 /// Currency-aware monetary value.  Invariants enforced at every
 /// public API entry:
-///   * `amount.scale == currency.minor_units` (e.g. USD amounts
+///   * `amount.scale() == currency.minor_units()` (e.g. USD amounts
 ///     always carry scale=2 — `12.34` is stored as coefficient
 ///     1234, scale 2).
 public type Money is {
@@ -75,11 +75,11 @@ public type Money is {
 
 /// Errors surfaced by the Money API.
 public type MoneyError is
-      CurrencyMismatch { left: Text, right: Text }
-    | ScaleMismatch    { expected: Int, actual: Int }
+      CurrencyMismatch { public left: Text, public right: Text }
+    | ScaleMismatch    { public expected: Int, public actual: Int }
     | DivByZero
-    | InvalidSplit     { reason: Text }
-    | Underlying       { source: BigDecimalError };
+    | InvalidSplit     { public reason: Text }
+    | Underlying       { public source: BigDecimalError };
 
 implement Display for MoneyError {
     /// Single-line human-readable error message. Format follows the
@@ -135,37 +135,37 @@ implement Eq for MoneyError {}
 
 implement Money {
     /// Build a Money from a BigDecimal amount + Currency.  Validates
-    /// `amount.scale == currency.minor_units`.  Caller wanting
+    /// `amount.scale() == currency.minor_units()`.  Caller wanting
     /// flexible scale-truncation should pre-process via `BigDecimal.
-    /// div_round` against `BigDecimal.one()` at `currency.minor_units`
+    /// div_round` against `BigDecimal.one()` at `currency.minor_units()`
     /// precision.
     public fn from_amount(amount: BigDecimal, currency: Currency)
         -> Result<Money, MoneyError>
     {
-        if amount.scale != currency.minor_units {
+        if amount.scale() != currency.minor_units() {
             return Result.Err(MoneyError.ScaleMismatch {
-                expected: currency.minor_units,
-                actual: amount.scale,
+                expected: currency.minor_units(),
+                actual: amount.scale(),
             });
         }
         Result.Ok(Money { amount: amount, currency: currency })
     }
 
-    /// Build a Money from a count of minor units (cents for USD,
-    /// yen for JPY, fils for BHD, ...).  Always succeeds — the
-    /// minor-unit count IS the BigDecimal coefficient.
-    public fn from_minor_units(units: BigInt, currency: Currency) -> Money {
-        let amount = BigDecimal {
-            coefficient: units,
-            scale: currency.minor_units,
-        };
-        Money { amount: amount, currency: currency }
+    /// Build an exact monetary amount at the currency's minor-unit scale.
+    public fn from_minor_units(units: BigInt, currency: Currency) -> Result<Money, MoneyError> {
+        match BigDecimal.from_parts(units, currency.minor_units()) {
+            Result.Ok(amount) => Result.Ok(Money { amount: amount, currency: currency }),
+            Result.Err(e) => Result.Err(MoneyError.Underlying { source: e }),
+        }
     }
 
-    /// Zero amount in the given currency.
-    public fn zero(currency: Currency) -> Money {
+    /// Zero amount at the currency's minor-unit scale.
+    public fn zero(currency: Currency) -> Result<Money, MoneyError> {
         Money.from_minor_units(BigInt.zero(), currency)
     }
+
+    /// Borrow the exact amount in the currency's minor-unit precision.
+    public fn amount(&self) -> &BigDecimal { &self.amount }
 
     // -------------------------------------------------------------------------
     // Predicates
@@ -176,51 +176,56 @@ implement Money {
     public fn is_positive(&self) -> Bool { self.amount.is_positive() }
 
     public fn abs(&self) -> Money {
-        Money { amount: self.amount.abs(), currency: clone_currency(&self.currency) }
+        Money { amount: self.amount.abs(), currency: self.currency.clone() }
     }
 
     public fn neg(&self) -> Money {
-        Money { amount: self.amount.neg(), currency: clone_currency(&self.currency) }
+        Money { amount: self.amount.neg(), currency: self.currency.clone() }
     }
 
     // -------------------------------------------------------------------------
     // Arithmetic
     // -------------------------------------------------------------------------
 
-    /// Sum `self + other`.  Errors with `CurrencyMismatch` if
-    /// currencies differ.  No overflow (BigDecimal is unbounded);
-    /// scale stays = currency.minor_units because both operands
-    /// already match.
-    public fn add(&self, other: &Money) -> Result<Money, MoneyError> {
+    fn check_currency(&self, other: &Money) -> Result<(), MoneyError> {
         if !self.currency.eq(&other.currency) {
             return Result.Err(MoneyError.CurrencyMismatch {
-                left: self.currency.code.clone(),
-                right: other.currency.code.clone(),
+                left: self.currency.code().clone(),
+                right: other.currency.code().clone(),
             });
         }
+        let expected = self.currency.minor_units();
+        let actual = other.currency.minor_units();
+        if expected != actual {
+            return Result.Err(MoneyError.ScaleMismatch { expected: expected, actual: actual });
+        }
+        Result.Ok(())
+    }
+
+    /// Sum `self + other`.  Errors with `CurrencyMismatch` if
+    /// currencies differ.  No overflow (BigDecimal is unbounded);
+    /// scale stays = currency.minor_units() because both operands
+    /// already match.
+    public fn add(&self, other: &Money) -> Result<Money, MoneyError> {
+        self.check_currency(other)?;
         match self.amount.add(&other.amount) {
-            Result.Ok(sum) => Result.Ok(Money { amount: sum, currency: clone_currency(&self.currency) }),
+            Result.Ok(sum) => Result.Ok(Money { amount: sum, currency: self.currency.clone() }),
             Result.Err(e)  => Result.Err(MoneyError.Underlying { source: e }),
         }
     }
 
     /// Difference `self - other`.  Same currency-match contract as add.
     public fn sub(&self, other: &Money) -> Result<Money, MoneyError> {
-        if !self.currency.eq(&other.currency) {
-            return Result.Err(MoneyError.CurrencyMismatch {
-                left: self.currency.code.clone(),
-                right: other.currency.code.clone(),
-            });
-        }
+        self.check_currency(other)?;
         match self.amount.sub(&other.amount) {
-            Result.Ok(diff) => Result.Ok(Money { amount: diff, currency: clone_currency(&self.currency) }),
+            Result.Ok(diff) => Result.Ok(Money { amount: diff, currency: self.currency.clone() }),
             Result.Err(e)   => Result.Err(MoneyError.Underlying { source: e }),
         }
     }
 
     /// Multiply by a scalar (e.g. tax rate, percentage).  The raw
-    /// product's scale is `self.amount.scale + factor.scale`; we
-    /// round back to `currency.minor_units` via the caller's
+    /// product's scale is `self.amount.scale() + factor.scale()`; we
+    /// round back to `currency.minor_units()` via the caller's
     /// `RoundingMode`.
     public fn mul_scalar(
         &self,
@@ -231,28 +236,26 @@ implement Money {
             Result.Ok(p)  => p,
             Result.Err(e) => return Result.Err(MoneyError.Underlying { source: e }),
         };
-        let normalised = match round_to_currency_scale(&raw, &self.currency, mode) {
+        let normalised = match round_to_currency_scale(raw, &self.currency, mode) {
             Result.Ok(v)  => v,
             Result.Err(e) => return Result.Err(e),
         };
-        Result.Ok(Money { amount: normalised, currency: clone_currency(&self.currency) })
+        Result.Ok(Money { amount: normalised, currency: self.currency.clone() })
     }
 
     /// Divide by a scalar.  Same precision-normalisation discipline
-    /// as mul_scalar — the BigDecimal `div` produces a result at the
-    /// requested precision (currency.minor_units), then we wrap
-    /// back as Money.
+    /// as mul_scalar. The quotient has the currency's minor-unit scale.
     public fn div_scalar(
         &self,
         divisor: &BigDecimal,
         mode: RoundingMode,
     ) -> Result<Money, MoneyError> {
         if divisor.is_zero() { return Result.Err(MoneyError.DivByZero); }
-        let result = match self.amount.div(divisor, self.currency.minor_units, mode) {
+        let result = match self.amount.div(divisor, self.currency.minor_units(), mode) {
             Result.Ok(q)  => q,
             Result.Err(e) => return Result.Err(MoneyError.Underlying { source: e }),
         };
-        Result.Ok(Money { amount: result, currency: clone_currency(&self.currency) })
+        Result.Ok(Money { amount: result, currency: self.currency.clone() })
     }
 
     /// Split into `n` equal pieces with fair remainder distribution.
@@ -273,7 +276,7 @@ implement Money {
             });
         }
         let n_bi = BigInt.from_int(n);
-        let total_minor = clone_bigint(&self.amount.coefficient);
+        let total_minor = self.amount.coefficient();
         let (base, rem) = match total_minor.div_rem(&n_bi) {
             Result.Ok(t)  => t,
             Result.Err(_) => return Result.Err(MoneyError.DivByZero),
@@ -296,8 +299,8 @@ implement Money {
             }),
         };
         while i < n {
-            let piece_minor = if i < abs_rem_int { base.add(&bump) } else { clone_bigint(&base) };
-            out.push(Money.from_minor_units(piece_minor, clone_currency(&self.currency)));
+            let piece_minor = if i < abs_rem_int { base.add(&bump) } else { base.clone() };
+            out.push(Money.from_minor_units(piece_minor, self.currency.clone())?);
             i = i + 1;
         }
         Result.Ok(out)
@@ -311,12 +314,7 @@ implement Money {
     /// currencies differ — comparing 100 USD against 100 JPY is
     /// nonsensical without a conversion rate.
     public fn compare(&self, other: &Money) -> Result<Ordering, MoneyError> {
-        if !self.currency.eq(&other.currency) {
-            return Result.Err(MoneyError.CurrencyMismatch {
-                left: self.currency.code.clone(),
-                right: other.currency.code.clone(),
-            });
-        }
+        self.check_currency(other)?;
         Result.Ok(self.amount.compare(&other.amount))
     }
 
@@ -342,12 +340,11 @@ implement Money {
 
     /// Render as `"<amount> <ISO_CODE>"` — e.g. "12.34 USD",
     /// "100 JPY", "1.235 BHD", "-0.50 EUR".  Amount text is driven
-    /// by `BigDecimal.to_text` so trailing fractional zeros (per
-    /// currency.minor_units) are preserved.
+    /// by `BigDecimal.to_text`, including trailing fractional zeros.
     public fn to_text(&self) -> Text {
         let mut out = self.amount.to_text();
         out = out + " ";
-        out = out + self.currency.code.clone();
+        out = out + self.currency.code().clone();
         out
     }
 }
@@ -361,40 +358,16 @@ implement Money {
 /// at the target precision, which forces the rounding policy to
 /// apply to the trailing digits.
 fn round_to_currency_scale(
-    value: &BigDecimal,
+    value: BigDecimal,
     currency: &Currency,
     mode: RoundingMode,
 ) -> Result<BigDecimal, MoneyError> {
-    if value.scale == currency.minor_units {
-        return Result.Ok(clone_bigdecimal(value));
+    if value.scale() == currency.minor_units() {
+        return Result.Ok(value);
     }
     let one = BigDecimal.one();
-    match value.div(&one, currency.minor_units, mode) {
+    match value.div(&one, currency.minor_units(), mode) {
         Result.Ok(v)  => Result.Ok(v),
         Result.Err(e) => Result.Err(MoneyError.Underlying { source: e }),
     }
 }
-
-/// BigInt clone via to_text + parse_bigint round-trip.  Mirrors
-/// the helper in `bigdecimal.vr`.
-fn clone_bigint(b: &BigInt) -> BigInt {
-    let t = b.to_text();
-    match core.text.numeric.bigint.parse_bigint(&t) {
-        Result.Ok(c)  => c,
-        Result.Err(_) => BigInt.zero(),
-    }
-}
-
-/// BigDecimal clone — copy coefficient + scale.
-fn clone_bigdecimal(bd: &BigDecimal) -> BigDecimal {
-    BigDecimal {
-        coefficient: clone_bigint(&bd.coefficient),
-        scale: bd.scale,
-    }
-}
-
-/// Currency clone — Text is reference-counted so this is cheap.
-fn clone_currency(c: &Currency) -> Currency {
-    Currency { code: c.code.clone(), minor_units: c.minor_units }
-}
-

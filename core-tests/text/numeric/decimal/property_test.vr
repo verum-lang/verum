@@ -34,15 +34,15 @@ mount core.collections.list.List;
 @test
 fn property_zero_canonical_shape() {
     let z = Decimal.zero();
-    assert_eq(z.coefficient, 0);
-    assert_eq(z.scale, 0);
+    assert_eq(z.coefficient(), 0);
+    assert_eq(z.scale(), 0);
 }
 
 @test
 fn property_one_canonical_shape() {
     let o = Decimal.one();
-    assert_eq(o.coefficient, 1);
-    assert_eq(o.scale, 0);
+    assert_eq(o.coefficient(), 1);
+    assert_eq(o.scale(), 0);
 }
 
 @test
@@ -50,8 +50,8 @@ fn property_from_int_preserves_value() {
     let xs: List<Int> = [0, 1, -1, 42, -42, 1000000];
     for n in xs.iter() {
         let d = Decimal.from_int(*n);
-        assert_eq(d.coefficient, *n);
-        assert_eq(d.scale, 0);
+        assert_eq(d.coefficient(), *n);
+        assert_eq(d.scale(), 0);
     }
 }
 
@@ -85,7 +85,7 @@ fn property_abs_idempotent() {
         let d = Decimal.from_int(*n);
         let once = d.abs();
         let twice = once.abs();
-        assert_eq(once.coefficient, twice.coefficient);
+        assert_eq(once.coefficient(), twice.coefficient());
     }
 }
 
@@ -95,7 +95,7 @@ fn property_abs_non_negative() {
     for n in xs.iter() {
         let d = Decimal.from_int(*n);
         let a = d.abs();
-        assert(a.coefficient >= 0);
+        assert(a.coefficient() >= 0);
     }
 }
 
@@ -109,7 +109,7 @@ fn property_neg_involution() {
     for n in xs.iter() {
         let d = Decimal.from_int(*n);
         let twice = d.neg().neg();
-        assert_eq(twice.coefficient, d.coefficient);
+        assert_eq(twice.coefficient(), d.coefficient());
     }
 }
 
@@ -124,7 +124,7 @@ fn property_add_zero_left_identity() {
     for n in xs.iter() {
         let d = Decimal.from_int(*n);
         match z.add(&d) {
-            Ok(r) => assert_eq(r.coefficient, *n),
+            Ok(r) => assert_eq(r.coefficient(), *n),
             Err(_) => panic("zero is left identity"),
         }
     }
@@ -144,7 +144,7 @@ fn property_add_commutative_small() {
             let r1 = da.add(&db);
             let r2 = db.add(&da);
             match (r1, r2) {
-                (Ok(x), Ok(y)) => assert_eq(x.coefficient, y.coefficient),
+                (Ok(x), Ok(y)) => assert_eq(x.coefficient(), y.coefficient()),
                 _ => {},
             }
         }
@@ -162,7 +162,7 @@ fn property_mul_one_left_identity() {
     for n in xs.iter() {
         let d = Decimal.from_int(*n);
         match o.mul(&d) {
-            Ok(r) => assert_eq(r.coefficient, *n),
+            Ok(r) => assert_eq(r.coefficient(), *n),
             Err(_) => panic("one is left identity"),
         }
     }
@@ -179,7 +179,7 @@ fn property_mul_by_zero_is_zero() {
     for n in xs.iter() {
         let d = Decimal.from_int(*n);
         match d.mul(&z) {
-            Ok(r) => assert_eq(r.coefficient, 0),
+            Ok(r) => assert_eq(r.coefficient(), 0),
             Err(_) => panic("x * 0 = 0"),
         }
     }
@@ -195,8 +195,8 @@ fn property_from_parts_preserves_fields() {
     for c in cases.iter() {
         match Decimal.from_parts((*c).0, (*c).1) {
             Ok(d) => {
-                assert_eq(d.coefficient, (*c).0);
-                assert_eq(d.scale, (*c).1);
+                assert_eq(d.coefficient(), (*c).0);
+                assert_eq(d.scale(), (*c).1);
             }
             Err(_) => panic("valid (coefficient, scale) must succeed"),
         }
@@ -236,7 +236,7 @@ fn property_abs_neg_equiv_abs() {
         let d = Decimal.from_int(*n);
         let lhs = d.neg().abs();
         let rhs = d.abs();
-        assert_eq(lhs.coefficient, rhs.coefficient);
+        assert_eq(lhs.coefficient(), rhs.coefficient());
     }
 }
 
