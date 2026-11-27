@@ -16496,9 +16496,11 @@ impl VbcCodegen {
                     .compile_call_operand(arg, expected)?
                     .or_internal("method arg has no value")?;
                 let copy_type = self.copy_source_type(arg, arg_val, copy_start, self.ctx.instructions.len());
-                // Builtin storage uses CallM for its native layout. The selected
-                // declaration still specifies which operands own their values.
-                let receives_value = devirt_func_id.is_some() || (receiver_slots == 0 && resolved_method.as_ref().is_some_and(|method| method.has_source_body))
+                // CallM can enter the selected source body, including a helper
+                // on a collection with runtime-dispatched public operations.
+                // That body owns its by-value parameters on either call opcode.
+                let receives_value = devirt_func_id.is_some()
+                    || resolved_method.as_ref().is_some_and(|method| method.has_source_body)
                     || (stores_arguments && type_prefix_intercepted_by_runtime(&effective_method_name));
                 let source = arg_val;
                 let arg_val = if let Some(callable) = resolved_method.as_ref().filter(|_| receives_value) {

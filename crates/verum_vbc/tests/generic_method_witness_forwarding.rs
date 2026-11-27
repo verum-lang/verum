@@ -132,6 +132,23 @@ fn static_factories_retain_the_implementation_receiver_across_binder_reordering(
 }
 
 #[test]
+fn a_dispatched_source_method_receives_its_owned_parameter() {
+    run(r#"
+type Map<K, V> is { marker: Int };
+implement<K, V> Map<K, V> {
+    fn consume(&self, value: V) {}
+    fn forward(&self, value: V) { self.consume(value); }
+}
+fn probe() -> Int {
+    let mut count = Count { value: 0 };
+    let table: Map<Int, Ticket> = Map { marker: 0 };
+    table.forward(Ticket { count: &mut count });
+    count.value
+}
+"#);
+}
+
+#[test]
 fn a_generic_function_forwards_its_witness_to_a_borrowed_receiver() {
     run(r#"
 fn forward<T>(sink: &Sink<T>, value: T) { sink.consume(value); }

@@ -91,6 +91,9 @@ parameters alike, cleans them on normal and explicit returns, and preserves a
 parameter transferred as its result. A returned field or element is copied
 before its enclosing parameter is cleaned. Generic handoffs and cleanup use
 the selected declaration's concrete witnesses.
+An instance method reached through `CallM` receives its declared by-value
+arguments under the same convention as a direct call. This includes source
+helpers on collections whose other operations have runtime implementations.
 The async callable allowance does not change this lifecycle. A synchronous
 producer may satisfy an async-permitting callback contract; nested callable
 parameters are contravariant and results covariant. Context requirements and
