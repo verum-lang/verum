@@ -480,7 +480,7 @@ extern {
 
     /// Set socket option. C: `int setsockopt(int, int, int, const void *, socklen_t)`.
     /// All four `int`-typed params + socklen_t (uint32_t). T0.4 fix.
-    fn setsockopt(sockfd: Int32, level: Int32, optname: Int32, optval: &Byte, optlen: UInt32) -> Int32;
+    fn setsockopt(sockfd: Int32, level: Int32, optname: Int32, optval: &unsafe Byte, optlen: UInt32) -> Int32;
 
     /// Shutdown socket. C: `int shutdown(int sockfd, int how)`.
     fn shutdown(sockfd: Int32, how: Int32) -> Int32;
@@ -2308,7 +2308,7 @@ public fn safe_setsockopt(
     optlen: Int
 ) -> Result<(), OSError> {
     let result = unsafe {
-        setsockopt(fd.0, level, optname, optval.as_ptr() as &Byte, optlen)
+        setsockopt(fd.0 as Int32, level as Int32, optname as Int32, optval.as_ptr(), optlen as UInt32)
     };
     if result < 0 {
         let err = errno();
@@ -2529,48 +2529,19 @@ public fn safe_set_recv_buffer_size(fd: FileDesc, size: Int) -> Result<(), OSErr
     safe_setsockopt_int(fd, SOL_SOCKET, SO_RCVBUF, size)
 }
 
-// T1135: `DarwinIpMreq` is gone. It existed only to be handed to C by
-// reference — `&mreq as &unsafe Byte` — which passes the record's
-// ObjectHeader, not its fields. Its two call sites now serialise the
-// eight bytes `struct ip_mreq` actually is. Deleting the record removes
-// the temptation to reintroduce the shape that caused the defect.
-
-/// Join an IPv4 multicast group
-///
-
-/// multiaddr: multicast group address (network byte order)
-/// interface: local interface address (network byte order), 0 = default
-public fn safe_join_multicast_v4(fd: FileDesc, multiaddr: UInt32, interface: UInt32) -> Result<(), OSError> {
-    // T1135: `&record as &unsafe Byte` hands C the record's heap
-    // header, not its fields. `struct ip_mreq { in_addr imr_multiaddr;
-    // in_addr imr_interface; }` is eight bytes; write them.
-    let mut mreq: [Byte; 8] = [0; 8];
-    mreq[0] = (multiaddr & 0xFF) as Byte;
-    mreq[1] = ((multiaddr >> 8) & 0xFF) as Byte;
-    mreq[2] = ((multiaddr >> 16) & 0xFF) as Byte;
-    mreq[3] = ((multiaddr >> 24) & 0xFF) as Byte;
-    mreq[4] = (interface & 0xFF) as Byte;
-    mreq[5] = ((interface >> 8) & 0xFF) as Byte;
-    mreq[6] = ((interface >> 16) & 0xFF) as Byte;
-    mreq[7] = ((interface >> 24) & 0xFF) as Byte;
-    safe_setsockopt(fd, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq[..], 8)  // sizeof(ip_mreq) = 8
+/// Join the group specified by a packed IPv4 multicast request.
+public fn safe_join_multicast_v4(fd: FileDesc, request: &[Byte]) -> Result<(), OSError> {
+    set_ipv4_membership(fd, IP_ADD_MEMBERSHIP, request)
 }
 
-/// Leave an IPv4 multicast group
-public fn safe_leave_multicast_v4(fd: FileDesc, multiaddr: UInt32, interface: UInt32) -> Result<(), OSError> {
-    // T1135: `&record as &unsafe Byte` hands C the record's heap
-    // header, not its fields. `struct ip_mreq { in_addr imr_multiaddr;
-    // in_addr imr_interface; }` is eight bytes; write them.
-    let mut mreq: [Byte; 8] = [0; 8];
-    mreq[0] = (multiaddr & 0xFF) as Byte;
-    mreq[1] = ((multiaddr >> 8) & 0xFF) as Byte;
-    mreq[2] = ((multiaddr >> 16) & 0xFF) as Byte;
-    mreq[3] = ((multiaddr >> 24) & 0xFF) as Byte;
-    mreq[4] = (interface & 0xFF) as Byte;
-    mreq[5] = ((interface >> 8) & 0xFF) as Byte;
-    mreq[6] = ((interface >> 16) & 0xFF) as Byte;
-    mreq[7] = ((interface >> 24) & 0xFF) as Byte;
-    safe_setsockopt(fd, IPPROTO_IP, IP_DROP_MEMBERSHIP, &mreq[..], 8)
+/// Drop the group membership on the interface specified in the request.
+public fn safe_leave_multicast_v4(fd: FileDesc, request: &[Byte]) -> Result<(), OSError> {
+    set_ipv4_membership(fd, IP_DROP_MEMBERSHIP, request)
+}
+
+fn set_ipv4_membership(fd: FileDesc, option: Int, request: &[Byte]) -> Result<(), OSError> {
+    if request.len() != 8 { return Result.Err(OSError.new(EINVAL, "IPv4 multicast requests require 8 bytes")); }
+    safe_setsockopt(fd, IPPROTO_IP, option, request, 8)
 }
 
 /// Set multicast TTL for IPv4

@@ -10,8 +10,8 @@ recv_from + multicast join/leave + socket-option setters. There
 is no public enum or data-surface algebra to cover from a USER
 test module — every method needs a runtime fd.
 
-Live tests live at `vcs/specs/L2-standard/net/udp/` against a
-loopback harness.
+The public bind, empty connect and IPv4 multicast tests in this directory
+use an ephemeral loopback socket.
 
 ## 1. Cross-stdlib usage
 
@@ -31,13 +31,9 @@ syscalls (no libc).
 
 ### §3.1 UDP-1 — Functional surface gated on socket fixture
 
-The UdpSocket public methods all require an OS-allocated UDP
-socket fd. The fan-out methods (multicast, set_broadcast,
-set_send_buffer_size) require either a per-platform socket-
-option fixture or an emulation layer.
-
-Pre-fix harness: none in `core-tests/`. End-to-end coverage at
-language-level `vcs/specs/L2-standard/net/udp/`.
+The loopback socket tests cover bind, connect with zero candidates and
+IPv4 multicast membership. Sending and receiving datagrams requires
+a paired socket fixture.
 
 ### §3.2 No public ADT to cover at data-surface
 
@@ -59,7 +55,7 @@ chain doesn't SIGSEGV under user-side compilation.
 
 | Item | Scope | Estimated effort |
 |---|---|---|
-| UdpSocket.bind/.send_to/.recv_from against in-process loopback | this folder + harness | 1 day |
-| Multicast group join/leave coverage (IPv4 + IPv6) | this folder + multicast harness | 1 day |
+| UdpSocket.send_to/.recv_from against in-process loopback | this folder + harness | 1 day |
+| IPv6 multicast group join/leave coverage | this folder + multicast harness | 1 day |
 | SO_REUSEPORT / SO_RCVBUF / SO_SNDBUF round-trip via getsockopt | language level | 4h |
 | Add `enum UdpFlags` or similar public ADT to give a data-surface | stdlib design | 30 min discussion |

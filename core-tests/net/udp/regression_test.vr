@@ -2,22 +2,10 @@
 // core-tests/net/udp/regression_test.vr
 // =============================================================================
 //
-// Regression pins for `core/net/udp.vr`. Live datagram operations
-// (`bind` / `send_to` / `recv_from` / multicast group join + leave)
-// require a socket-bind harness — gated on
-// `vcs/specs/L2-standard/net/udp/`. The @ignore'd pins below
-// register the harness-side coverage points so flipping them to
-// active once the harness lands is a one-line change.
-//
-// Active pins cover:
-//
-//   * UDP-5 `UdpSocket` type symbol resolution through
-//     `mount core.net.udp.{UdpSocket}` — regression for the
-//     precompile-cascade SIGSEGV class.
-//   * UDP-6 `UdpSocket.bind` on a malformed address surface (no
-//     actual socket bind — data-surface only).
-// =============================================================================
+// Live IPv4 multicast coverage uses a bound loopback socket. The send and
+// receive cases below still need a pair of sockets.
 
+mount core.net.addr.{Ipv4Addr, SocketAddr};
 mount core.net.udp.{UdpSocket};
 
 // =============================================================================
@@ -57,10 +45,22 @@ fn regression_udp_recv_from_blocking_and_nonblocking() {
 // UDP-4 — multicast group join + leave
 // =============================================================================
 
-@ignore("UDP-4: multicast join/leave needs a real interface from harness. See audit.md §3.1.")
+@cfg(target_os = "macos")
 @test
 fn regression_udp_multicast_join_leave() {
-    assert(true);
+    let interface = Ipv4Addr.localhost();
+    let group = Ipv4Addr.new(239, 193, 7, 225);
+    match UdpSocket.bind(SocketAddr.new_v4(interface, 0)) {
+        Result.Ok(socket) => {
+            assert(socket.join_multicast_v4(&group, &interface).is_ok());
+            assert(socket.join_multicast_v4(&group, &interface).is_err());
+            assert(socket.leave_multicast_v4(&group, &interface).is_ok());
+            assert(socket.leave_multicast_v4(&group, &interface).is_err());
+            assert(socket.join_multicast_v4(&group, &interface).is_ok());
+            assert(socket.leave_multicast_v4(&group, &interface).is_ok());
+        },
+        Result.Err(_) => panic("cannot bind the IPv4 loopback interface"),
+    }
 }
 
 // =============================================================================

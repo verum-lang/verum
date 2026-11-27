@@ -51,7 +51,7 @@
 // # Example - Multicast Receiver
 // ```verum
 // let socket = UdpSocket.bind("0.0.0.0:5000")?;
-// socket.join_multicast_v4(&Ipv4Addr.new(239, 0, 0, 1), &Ipv4Addr.any())?;
+// socket.join_multicast_v4(&Ipv4Addr.new(239, 0, 0, 1), &Ipv4Addr.unspecified())?;
 //
 
 // let mut buf: [Byte; 1500] = [0; 1500];
@@ -162,8 +162,8 @@ mount sys.darwin.libsystem.{
     safe_set_ipv6_tclass,
     safe_set_ipv6_recvtclass,
     // Multicast
-    safe_join_multicast_v4,
-    safe_leave_multicast_v4,
+    safe_join_multicast_v4 as sys_join_multicast_v4,
+    safe_leave_multicast_v4 as sys_leave_multicast_v4,
     safe_set_multicast_ttl_v4,
     safe_set_multicast_loop_v4,
     // Peek and non-blocking
@@ -701,45 +701,43 @@ implement UdpSocket {
 
     /// # Arguments
     /// - multiaddr: The multicast group address (224.0.0.0 - 239.255.255.255)
-    /// - interface: Local interface to receive multicast on (use Ipv4Addr.any() for default)
+    /// - interface: Local interface to receive multicast on (use Ipv4Addr.unspecified() for default)
     ///
 
     /// # Example
     /// ```verum
-    /// socket.join_multicast_v4(&Ipv4Addr.new(239, 0, 0, 1), &Ipv4Addr.any())?;
+    /// socket.join_multicast_v4(&Ipv4Addr.new(239, 0, 0, 1), &Ipv4Addr.unspecified())?;
     /// ```
     public fn join_multicast_v4(&self, multiaddr: &Ipv4Addr, interface: &Ipv4Addr) -> Result<(), IoError> {
-        let (a, b, c, d) = multiaddr.octets();
-        let mcast = ((a as UInt32) << 24) | ((b as UInt32) << 16) | ((c as UInt32) << 8) | (d as UInt32);
-
-        let (ia, ib, ic, id) = interface.octets();
-        let iface = ((ia as UInt32) << 24) | ((ib as UInt32) << 16) | ((ic as UInt32) << 8) | (id as UInt32);
-
-        @cfg(any(target_os = "linux", target_os = "windows")) {
-            return join_multicast_v4(self.fd, mcast.to_be(), iface.to_be())
-                .map_err(|e| IoError.from_os(e));
-        }
         @cfg(target_os = "macos") {
-            return safe_join_multicast_v4(self.fd, mcast.to_be(), iface.to_be())
-                .map_err(|e| IoError.from_os(e));
+            let request = ipv4_membership_request(multiaddr, interface);
+            let bytes = &request[..];
+            return sys_join_multicast_v4(self.fd, bytes).map_err(|e| IoError.from_os(e));
+        }
+        @cfg(any(target_os = "linux", target_os = "windows")) {
+            let (a, b, c, d) = multiaddr.octets();
+            let mcast = ((a as UInt32) << 24) | ((b as UInt32) << 16) | ((c as UInt32) << 8) | (d as UInt32);
+
+            let (ia, ib, ic, id) = interface.octets();
+            let iface = ((ia as UInt32) << 24) | ((ib as UInt32) << 16) | ((ic as UInt32) << 8) | (id as UInt32);
+            return join_multicast_v4(self.fd, mcast.to_be(), iface.to_be()).map_err(|e| IoError.from_os(e));
         }
     }
 
     /// Leave an IPv4 multicast group.
     public fn leave_multicast_v4(&self, multiaddr: &Ipv4Addr, interface: &Ipv4Addr) -> Result<(), IoError> {
-        let (a, b, c, d) = multiaddr.octets();
-        let mcast = ((a as UInt32) << 24) | ((b as UInt32) << 16) | ((c as UInt32) << 8) | (d as UInt32);
-
-        let (ia, ib, ic, id) = interface.octets();
-        let iface = ((ia as UInt32) << 24) | ((ib as UInt32) << 16) | ((ic as UInt32) << 8) | (id as UInt32);
-
-        @cfg(any(target_os = "linux", target_os = "windows")) {
-            return leave_multicast_v4(self.fd, mcast.to_be(), iface.to_be())
-                .map_err(|e| IoError.from_os(e));
-        }
         @cfg(target_os = "macos") {
-            return safe_leave_multicast_v4(self.fd, mcast.to_be(), iface.to_be())
-                .map_err(|e| IoError.from_os(e));
+            let request = ipv4_membership_request(multiaddr, interface);
+            let bytes = &request[..];
+            return sys_leave_multicast_v4(self.fd, bytes).map_err(|e| IoError.from_os(e));
+        }
+        @cfg(any(target_os = "linux", target_os = "windows")) {
+            let (a, b, c, d) = multiaddr.octets();
+            let mcast = ((a as UInt32) << 24) | ((b as UInt32) << 16) | ((c as UInt32) << 8) | (d as UInt32);
+
+            let (ia, ib, ic, id) = interface.octets();
+            let iface = ((ia as UInt32) << 24) | ((ib as UInt32) << 16) | ((ic as UInt32) << 8) | (id as UInt32);
+            return leave_multicast_v4(self.fd, mcast.to_be(), iface.to_be()).map_err(|e| IoError.from_os(e));
         }
     }
 
@@ -960,6 +958,14 @@ implement UdpSocket {
 // =============================================================================
 // Socket Address Serialization (shared with tcp.vr)
 // =============================================================================
+
+/// The ip_mreq ABI places the group before the local interface, both in network order.
+fn ipv4_membership_request(group: &Ipv4Addr, interface: &Ipv4Addr) -> [Byte; 8] {
+    let (a, b, c, d) = group.octets();
+    let (i, j, k, l) = interface.octets();
+    let request: [Byte; 8] = [a, b, c, d, i, j, k, l];
+    request
+}
 
 /// Serialize a socket address to bytes for syscalls.
 ///
