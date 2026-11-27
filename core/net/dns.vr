@@ -216,7 +216,7 @@ implement DnsError {
     ///  (transient — caller should retry)
     ///  * everything else → `NetworkError(<formatted>)`
     fn from_io_error(e: IoError) -> DnsError {
-        match e.kind {
+        match e.kind() {
             IoErrorKind.TimedOut          => DnsError.Timeout,
             IoErrorKind.NotFound          => DnsError.HostNotFound,
             IoErrorKind.ConnectionRefused => DnsError.Refused,
