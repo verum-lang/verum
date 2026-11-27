@@ -1359,6 +1359,7 @@ impl Intrinsic {
     pub(crate) fn stored_value_operand(&self) -> Option<usize> {
         match self.strategy {
             CodegenStrategy::InlineSequence(InlineSequenceId::Replace) => Some(1),
+            CodegenStrategy::InlineSequence(InlineSequenceId::ListStorageWrite) => Some(2),
             _ => None,
         }
     }
