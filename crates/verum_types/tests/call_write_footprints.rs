@@ -601,13 +601,17 @@ fn taking_a_slot_requires_its_exclusive_owner_and_retains_the_moved_values_loans
     }
 }
 
-#[test]
-fn dynamic_list_push_retains_the_inserted_value_in_its_canonical_owner() {
+fn list_with_push() -> Text {
     let source = include_str!("../../../core/collections/list.vr");
     let list = declaration(source, "List");
     let body = source.split_once("    public fn push(").unwrap().1;
     let end = body.find("\n    }").unwrap();
-    let method = format!("implement<T> List<T> {{ public fn push({} }} }}", &body[..end]);
+    format!("{list} implement<T> List<T> {{ public fn push({} }} }}", &body[..end]).into()
+}
+
+#[test]
+fn dynamic_list_push_retains_the_inserted_value_in_its_canonical_owner() {
+    let list = list_with_push();
     for (provider, caller, expected) in [
         ("core.collections.list", "fn collect<T>(mut items:List<T>, a:T, b:T)->List<T> {items.push(a);items.push(b);items}", None),
         ("core.collections.list", "fn collect(mut items:List<&Int>, a:&Int)->List<&Int> {items.push(a);items}", None),
@@ -616,7 +620,7 @@ fn dynamic_list_push_retains_the_inserted_value_in_its_canonical_owner() {
         ("other", "fn collect<T>(mut items:List<T>, a:T, b:T)->List<T> {items.push(a);items.push(b);items}", Some("cannot establish the lifetime")),
     ] {
         let found = registered_errors([
-            (provider, format!("{list} {method}").into()),
+            (provider, list.clone()),
             ("consumer", format!("mount {provider}.List; {caller}").into()),
         ]);
         match expected {
@@ -627,17 +631,43 @@ fn dynamic_list_push_retains_the_inserted_value_in_its_canonical_owner() {
     let source = "type State is {public cursor:Int}; type Parser is {}; implement Parser { fn read(&self, state:&mut State)->&Int {&state.cursor} }";
     let retain = "fn collect(parser:&Parser, state:&mut State, mut items:List<&Int>)->List<&Int> {let next=parser.read(state);items.push(next);state.cursor=state.cursor+1;items}";
     let found = registered_errors([
-        ("core.collections.list", format!("{list} {method}").into()),
+        ("core.collections.list", list),
         ("consumer", format!("mount core.collections.list.List; {source} {retain}").into()),
     ]);
     assert!(found.iter().any(|error| error.contains("cannot borrow `state`") && error.contains("conflicting borrows")), "{found:?}");
 
     let extension = "type Push<T> is protocol { fn push(&mut self, value:T); }; implement<T> Push<T> for List<T> { fn push(&mut self, value:T) { self.len = self.len + 1; } }";
+    let list = declaration(include_str!("../../../core/collections/list.vr"), "List");
     let found = registered_errors([
         ("core.collections.list", format!("{list} {extension}").into()),
         ("consumer", "mount core.collections.list.{List,Push}; fn collect<T>(mut items:List<T>, a:T, b:T)->List<T> {items.push(a);items.push(b);items}".into()),
     ]);
     assert!(found.iter().any(|error| error.contains("cannot establish the lifetime")), "{found:?}");
+}
+
+#[test]
+fn moving_a_pattern_payload_preserves_its_known_origins() {
+    let list = list_with_push();
+    let maybe = declaration(include_str!("../../../core/base/maybe.vr"), "Maybe");
+    let imports = "mount core.collections.list.List; mount core.base.maybe.Maybe;";
+    for (caller, expected) in [
+        ("fn append<T>(mut out:List<T>, entry:Maybe<T>)->List<T> {match entry {Maybe.Some(value)=>out.push(value),Maybe.None=>{},} out}", None),
+        ("fn append<T>(mut out:List<T>, value:Maybe<T>)->List<T> {if let Maybe.Some(value)=value {out.push(value);} out}", None),
+        ("fn append<T>(mut out:List<T>, entries:Maybe<(T,Int)>)->List<T> {if let Maybe.Some((value,_))=entries {out.push(value);} out}", None),
+        ("fn append<T>(mut out:List<T>, callback:fn()->Maybe<T>)->List<T> {match callback() {Maybe.Some(value)=>out.push(value),Maybe.None=>{},} out}", Some("cannot establish the lifetime")),
+        ("fn append(mut out:List<&Int>)->List<&Int> {let local=37;let entry=Maybe.Some(&local);if let Maybe.Some(value)=entry {out.push(value);} out}", Some("local")),
+        ("fn append(mut out:List<&Int>, entry:Maybe<Int>)->List<&Int> {if let Maybe.Some(ref value)=entry {out.push(value);} out}", Some("cannot establish the lifetime")),
+    ] {
+        let found = registered_errors([
+            ("core.collections.list", list.clone()),
+            ("core.base.maybe", maybe.into()),
+            ("consumer", format!("{imports} {caller}").into()),
+        ]);
+        match expected {
+            None => assert!(found.is_empty(), "{caller}: {found:?}"),
+            Some(message) => assert!(found.iter().any(|error| error.contains(message)), "{caller}: {found:?}"),
+        }
+    }
 }
 
 #[test]

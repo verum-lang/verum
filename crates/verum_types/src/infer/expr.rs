@@ -5571,6 +5571,10 @@ impl TypeChecker {
     ) -> Result<BranchPatternScope> {
         let bindings = self.collect_pattern_bindings(pattern, scrutinee_ty)?;
         let (consumes, ref_bindings) = self.match_pattern_use(pattern, &bindings);
+        // The pattern can shadow the subject's name. Read its ownership
+        // evidence while it still denotes the value being destructured.
+        let complete_payload = !bindings.is_empty() && self.complete_slot_value_origins(scrutinee)
+            && self.reference_mode(scrutinee_ty, scrutinee.span)?.is_none();
         if consumes {
             self.check_owned_place_read(scrutinee, scrutinee_ty, None)?;
             if scrutinee_ty.reference_parts().is_some() {
@@ -5636,16 +5640,24 @@ impl TypeChecker {
                 self.ctx.env.set_reference_origin(&name,
                     crate::context::ReferenceOrigin::Candidates(origins.into_boxed_slice()));
             }
-            if !sources.is_empty() {
+            if complete_payload || !sources.is_empty() {
                 for (name, ty) in &bindings {
                     if self.carries_stored_loan(ty) && !ref_bindings.iter().any(|binding| &binding.name == name) {
+                        let origin = if complete_payload && self.reference_mode(ty, pattern.span)?.is_none() {
+                            // Moving a component out of a known owned payload
+                            // cannot introduce a loan from this match arm.
+                            crate::context::ReferenceOrigin::OwnedPayload(sources.into())
+                        } else if !sources.is_empty() {
+                            crate::context::ReferenceOrigin::Candidates(sources.into())
+                        } else {
+                            continue;
+                        };
                         // Borrowed patterns project the scrutinee's existing
                         // loan. Only owned aggregates need new retained loans.
                         if scrutinee_ty.reference_parts().is_none() {
                             for source in sources { self.retain_origin(source, None, pattern.span)?; }
                         }
-                        self.ctx.env.set_reference_origin(name,
-                            crate::context::ReferenceOrigin::Candidates(sources.into()));
+                        self.ctx.env.set_reference_origin(name, origin);
                     }
                 }
             }
