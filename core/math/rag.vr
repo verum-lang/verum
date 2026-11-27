@@ -25,11 +25,13 @@
     lifecycle: Lifecycle.Definition
 )
 module core.math.rag;
-mount core.math.tensor.{DynTensor, sub, mul, sum};
+mount core.math.tensor.{DynTensor, euclidean_distance};
+mount core.collections.heap.{BinaryHeap, Reverse};
 mount core.math.nn.Module;
 mount core.math.agent.{ChatMessage, Role, MessageContent};
 mount core.encoding.value.Value;
-mount core.base.protocols.Clone;
+mount core.base.protocols.{Clone, Eq, Ord, PartialEq};
+mount core.base.ordering.Ordering;
 
 // =============================================================================
 // Document Types
@@ -199,6 +201,46 @@ type HNSWNode is {
     level: USize,
 };
 
+// Order equal distances by node index so neighbor selection is reproducible.
+type HNSWNeighbor is { idx: USize, distance: Float };
+
+implement Ord for HNSWNeighbor {
+    fn cmp(&self, other: &Self) -> Ordering {
+        let order = self.distance.total_cmp(other.distance);
+        if order is Ordering.Equal {
+            if self.idx < other.idx { Ordering.Less }
+            else if self.idx > other.idx { Ordering.Greater }
+            else { Ordering.Equal }
+        } else { order }
+    }
+}
+
+implement PartialEq for HNSWNeighbor {
+    fn eq(&self, other: &Self) -> Bool { self.cmp(other) is Ordering.Equal }
+}
+
+implement Eq for HNSWNeighbor {}
+
+// The max-heap exposes the worst retained neighbor for eviction.
+fn retain_nearest(best: &mut BinaryHeap<HNSWNeighbor>, neighbor: HNSWNeighbor, limit: USize) -> Bool {
+    if limit == 0 { return false; }
+    if (*best).len() < limit {
+        best.push(neighbor);
+        return true;
+    }
+    let idx = neighbor.idx;
+    best.push_pop(neighbor).idx != idx
+}
+
+fn nearest_first(mut best: BinaryHeap<HNSWNeighbor>) -> List<(USize, Float)> {
+    let mut ordered: List<(USize, Float)> = List.with_capacity(best.len());
+    while let Maybe.Some(neighbor) = best.pop() {
+        ordered.push((neighbor.idx, neighbor.distance));
+    }
+    ordered.reverse();
+    ordered
+}
+
 // HNSW index for approximate nearest neighbor search
 //
 
@@ -276,7 +318,7 @@ implement HNSWIndex {
 
     // Search for k nearest neighbors
     public fn search(&self, query: &DynTensor<Float>, k: USize) -> List<(Text, Float)> {
-        if self.nodes.is_empty() {
+        if k == 0 || self.nodes.is_empty() {
             return List.new();
         }
 
@@ -290,13 +332,13 @@ implement HNSWIndex {
         }
 
         // Search at level 0 with ef candidates
-        let candidates = self.search_level(query, current, 0, self.config.ef_search);
+        let candidates = self.search_level(query, current, 0, k.max(self.config.ef_search));
 
-        // Return top k
-        candidates.into_iter()
-            .take(k)
-            .map(|(idx, dist)| (self.nodes[idx].id.clone(), 1.0 / (1.0 + dist)))
-            .collect()
+        let mut results: List<(Text, Float)> = List.new();
+        for (idx, dist) in candidates.into_iter().take(k) {
+            results.push((self.nodes[idx].id.clone(), 1.0 / (1.0 + dist)));
+        }
+        results
     }
 
     // Remove node by ID
@@ -320,7 +362,7 @@ implement HNSWIndex {
         let mut level = 0;
         let ml = 1.0 / (self.config.m as Float).ln();
 
-        while random_float() < ml && level < self.config.max_level {
+        while level < self.config.max_level && random_float() < ml {
             level += 1;
         }
         level
@@ -329,59 +371,39 @@ implement HNSWIndex {
     fn connect_node(&mut self, new_idx: USize, entry_point: USize, max_level: USize) {
         let mut current = entry_point;
 
-        // Search from top level down
-        for level in (0..=max_level).rev() {
-            if level <= self.nodes[new_idx].level {
-                // Find neighbors at this level
-                let neighbors = self.search_level(
-                    &self.nodes[new_idx].embedding,
-                    current,
-                    level,
-                    self.config.ef_construction,
-                );
+        let mut level = self.nodes[entry_point].level;
+        while level > max_level {
+            current = self.greedy_search(&self.nodes[new_idx].embedding, current, level);
+            level -= 1;
+        }
 
-                // Select M best neighbors
-                let m = if level == 0 { self.config.m * 2 } else { self.config.m };
-                let selected: List<USize> = neighbors.iter()
-                    .take(m)
-                    .map(|(idx, _)| *idx)
-                    .collect();
-
-                // Add bidirectional connections
-                for &neighbor_idx in &selected {
-                    self.nodes[new_idx].connections[level].push(neighbor_idx);
-                    self.nodes[neighbor_idx].connections[level].push(new_idx);
-
-                    // Prune if too many connections
-                    if self.nodes[neighbor_idx].connections[level].len() > m {
-                        self.prune_connections(neighbor_idx, level, m);
-                    }
-                }
-
-                // Update current for next level.
-                //
-                // Was placed AFTER the enclosing `if level <= ...` block, where
-                // `neighbors` — bound inside it — is out of scope. The compiler
-                // said so ("undefined variable: neighbors") and the whole method
-                // shipped as a panic stub. Moved inside, which is also the only
-                // reading that means anything: when the level was skipped there
-                // was no search, so there is no best neighbour to advance to.
-                if !neighbors.is_empty() {
-                    current = neighbors[0].0;
+        loop {
+            let neighbors = self.search_level(
+                &self.nodes[new_idx].embedding, current, level, self.config.ef_construction,
+            );
+            let m = if level == 0 { self.config.m * 2 } else { self.config.m };
+            for (neighbor_idx, _) in neighbors.iter().take(m) {
+                self.nodes[new_idx].connections[level].push(*neighbor_idx);
+                self.nodes[*neighbor_idx].connections[level].push(new_idx);
+                if self.nodes[*neighbor_idx].connections[level].len() > m {
+                    self.prune_connections(*neighbor_idx, level, m);
                 }
             }
+            if level == 0 { break; }
+            if !neighbors.is_empty() { current = neighbors[0].0; }
+            level -= 1;
         }
     }
 
     fn greedy_search(&self, query: &DynTensor<Float>, start: USize, level: USize) -> USize {
         let mut current = start;
-        let mut current_dist = self.distance(query, &self.nodes[current].embedding);
+        let mut current_dist = euclidean_distance(query, &self.nodes[current].embedding);
 
         loop {
             let mut improved = false;
 
             for &neighbor in &self.nodes[current].connections[level] {
-                let dist = self.distance(query, &self.nodes[neighbor].embedding);
+                let dist = euclidean_distance(query, &self.nodes[neighbor].embedding);
                 if dist < current_dist {
                     current = neighbor;
                     current_dist = dist;
@@ -404,75 +426,42 @@ implement HNSWIndex {
         level: USize,
         ef: USize,
     ) -> List<(USize, Float)> {
+        if ef == 0 { return List.new(); }
         let mut visited = Set.new();
-        let mut candidates = BinaryHeap.new();  // Min-heap
-        let mut results = BinaryHeap.new();     // Max-heap for top-k
+        let mut candidates: BinaryHeap<Reverse<HNSWNeighbor>> = BinaryHeap.new();
+        let mut results: BinaryHeap<HNSWNeighbor> = BinaryHeap.new();
 
-        let dist = self.distance(query, &self.nodes[entry].embedding);
-        candidates.push((dist, entry));
-        results.push((-dist, entry));
+        let first = HNSWNeighbor { idx: entry, distance: euclidean_distance(query, &self.nodes[entry].embedding) };
+        candidates.push(Reverse.new(first));
+        results.push(first);
         visited.insert(entry);
 
-        while !candidates.is_empty() {
-            let (c_dist, current) = candidates.pop().unwrap();
-
-            // Check if worst result is better than best candidate
-            if let Maybe.Some(&(worst_dist, _)) = results.peek() {
-                if c_dist > -worst_dist {
-                    break;
-                }
+        while let Maybe.Some(candidate) = candidates.pop() {
+            let nearest = candidate.into_inner();
+            if results.len() >= ef && nearest.distance > results.peek().unwrap().distance {
+                break;
             }
-
-            // Explore neighbors
-            for &neighbor in &self.nodes[current].connections[level] {
-                if !visited.contains(&neighbor) {
-                    visited.insert(neighbor);
-
-                    let neighbor_dist = self.distance(query, &self.nodes[neighbor].embedding);
-
-                    if results.len() < ef {
-                        candidates.push((neighbor_dist, neighbor));
-                        results.push((-neighbor_dist, neighbor));
-                    } else if let Maybe.Some(&(worst_dist, _)) = results.peek() {
-                        if neighbor_dist < -worst_dist {
-                            candidates.push((neighbor_dist, neighbor));
-                            results.push((-neighbor_dist, neighbor));
-                            results.pop();
-                        }
-                    }
+            for &idx in &self.nodes[nearest.idx].connections[level] {
+                if visited.contains(&idx) { continue; }
+                visited.insert(idx);
+                let next = HNSWNeighbor { idx, distance: euclidean_distance(query, &self.nodes[idx].embedding) };
+                if retain_nearest(&mut results, next, ef) {
+                    candidates.push(Reverse.new(next));
                 }
             }
         }
-
-        // Convert to sorted list
-        let mut result_list: List<(USize, Float)> = results.into_iter()
-            .map(|(neg_dist, idx)| (idx, -neg_dist))
-            .collect();
-        result_list.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(Ordering.Equal));
-        result_list
+        nearest_first(results)
     }
 
     fn prune_connections(&mut self, node_idx: USize, level: USize, max_m: USize) {
-        let node_embedding = &self.nodes[node_idx].embedding;
-        let mut connections_with_dist: List<(USize, Float)> = self.nodes[node_idx]
-            .connections[level]
-            .iter()
-            .map(|&idx| (idx, self.distance(node_embedding, &self.nodes[idx].embedding)))
-            .collect();
-
-        connections_with_dist.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(Ordering.Equal));
-
-        self.nodes[node_idx].connections[level] = connections_with_dist
-            .into_iter()
-            .take(max_m)
-            .map(|(idx, _)| idx)
-            .collect();
-    }
-
-    fn distance(&self, a: &DynTensor<Float>, b: &DynTensor<Float>) -> Float {
-        // L2 distance
-        let diff = sub(a, b);
-        sum(&mul(&diff, &diff)).item().sqrt()
+        let mut best: BinaryHeap<HNSWNeighbor> = BinaryHeap.new();
+        for &idx in &self.nodes[node_idx].connections[level] {
+            let distance = euclidean_distance(&self.nodes[node_idx].embedding, &self.nodes[idx].embedding);
+            retain_nearest(&mut best, HNSWNeighbor { idx, distance }, max_m);
+        }
+        let mut kept: List<USize> = List.with_capacity(best.len());
+        for (idx, _) in nearest_first(best) { kept.push(idx); }
+        self.nodes[node_idx].connections[level] = kept;
     }
 }
 
