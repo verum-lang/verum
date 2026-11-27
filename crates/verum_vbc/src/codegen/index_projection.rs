@@ -490,6 +490,7 @@ impl VbcCodegen {
                 TypeRef::Instantiated { args, .. } => args.as_slice(),
                 _ => &[],
             };
+            let range = matches!(index.kind, ExprKind::Range { .. });
             let native = match &owner {
                 TypeRef::Array { element, .. } | TypeRef::Slice(element) => {
                     Some(Some((**element).clone()))
@@ -500,9 +501,10 @@ impl VbcCodegen {
                 TypeRef::Concrete(TypeId::ARRAY) => Some(None),
                 TypeRef::Concrete(TypeId::BYTE_LIST) => Some(Some(TypeRef::Concrete(TypeId::U8))),
                 _ => match nominal {
-                    Some(WKT::List | WKT::Deque) => Some(args.first().cloned()),
-                    Some(WKT::Map) => Some(args.get(1).cloned()),
-                    Some(WKT::Text) => Some(Some(TypeRef::Concrete(TypeId::CHAR))),
+                    Some(WKT::List) => Some(args.first().cloned()),
+                    Some(WKT::Deque) if !range => Some(args.first().cloned()),
+                    Some(WKT::Map) if !range => Some(args.get(1).cloned()),
+                    Some(WKT::Text) if !range => Some(Some(TypeRef::Concrete(TypeId::CHAR))),
                     _ => None,
                 },
             };

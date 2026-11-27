@@ -769,6 +769,9 @@ impl TypeChecker {
             } => {
                 self.collect_borrowed_place_candidates(expr, found);
             }
+            ExprKind::Index { index, .. } if matches!(index.kind, ExprKind::Range { .. }) => {
+                self.collect_borrowed_place_candidates(value, found);
+            }
             ExprKind::Block(block) | ExprKind::Async(block) => {
                 self.collect_block_candidates(block, found)
             }

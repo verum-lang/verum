@@ -1,5 +1,8 @@
 #![cfg(feature = "codegen")]
 
+#[path = "fixtures/declared_list.rs"]
+mod declared_list;
+
 use std::sync::Arc;
 use verum_fast_parser::Parser;
 use verum_vbc::codegen::{CodegenConfig, VbcCodegen};
@@ -31,10 +34,25 @@ fn read(values: &[Int]) -> Int {
     let part = &values[1..3];
     part[0] + part[1]
 }
+
 fn probe() -> Int { let values = [11, 42, 99]; read(&values) }
 "#)
     .expect("borrowed collection subslice");
     assert_eq!(result.as_i64(), 141);
+}
+
+#[test]
+fn bare_and_explicit_subranges_share_offsets_and_borrowed_storage() {
+    let result = run(r#"
+        fn first(xs: &[Int]) -> Int { xs[0] }
+        fn read(xs: &[Int]) -> Int {
+            let first_view = xs[1..=2];
+            let next = &xs[2..];
+            first(first_view) + first(next)
+        }
+        fn probe() -> Int { let xs = [1, 40, 33]; read(&xs[..]) }
+    "#).expect("forward inferred and explicit range borrows");
+    assert_eq!(result.try_as_i64(), Some(73));
 }
 
 #[test]
@@ -188,7 +206,9 @@ fn probe() -> Int {{ let values = [11, 42, 99]; length(&values) }}
 
 #[test]
 fn subslices_of_projected_fixed_arrays_use_the_selected_container() {
-    let value = run(r#"
+    let source = declared_list::compile_consumer(r#"
+        module consumer;
+        mount core.collections.list.List;
         fn read(a: &[Byte;4], b: &[Byte;4]) -> Int {
             let left = &a[1..4];
             let right = &b[..];
@@ -200,6 +220,11 @@ fn subslices_of_projected_fixed_arrays_use_the_selected_container() {
             rows.push([3_u8;4]); rows.push([5_u8;4]);
             from_rows(&rows)
         }
-    "#).expect("borrowed rows");
-    assert_eq!(value.as_i64(), 35);
+    "#);
+    for module in declared_list::source_and_wire(source) {
+        let entry = module.find_function_by_name("consumer.probe").expect("source function");
+        let mut vm = Interpreter::try_new_validated(module.into()).expect("validated nested list");
+        let value = vm.execute_function(entry).expect("borrowed rows");
+        assert_eq!(value.try_as_i64(), Some(35));
+    }
 }

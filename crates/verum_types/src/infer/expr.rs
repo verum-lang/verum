@@ -232,6 +232,17 @@ impl TypeChecker {
         })
     }
 
+    /// An explicit borrow addresses the range place itself. Reading that
+    /// place as a value already creates a shared slice descriptor.
+    pub(super) fn synth_address_operand(&mut self, expr: &Expr) -> Result<InferResult> {
+        let mut place = expr;
+        while let ExprKind::Paren(inner) = &place.kind { place = inner; }
+        if matches!(&place.kind, ExprKind::Index { index, .. } if matches!(index.kind, ExprKind::Range { .. })) {
+            return self.with_place_types(expr, |checker| checker.infer_index_projection(place, true));
+        }
+        self.synth_borrowed_operand(expr)
+    }
+
     fn with_expression_value_context<T>(
         &mut self, expr: &Expr, infer: impl FnOnce(&mut Self) -> Result<T>,
     ) -> Result<T> {
@@ -309,7 +320,7 @@ impl TypeChecker {
         while let ExprKind::Paren(inner) = &place.kind { place = inner; }
         if mutable || matches!(place.kind, ExprKind::Field { .. } | ExprKind::Index { .. }
             | ExprKind::TupleIndex { .. } | ExprKind::Unary { op: UnOp::Deref, .. }) {
-            let result = self.synth_borrowed_operand(expr)?;
+            let result = self.synth_address_operand(expr)?;
             let source = result.ty.clone();
             let checked = self.check_synthesized_value(expr, expected, result)?;
             if mutable
@@ -9245,6 +9256,34 @@ impl TypeChecker {
     }
 
     fn infer_expr_index(&mut self, expr: &Expr) -> Result<InferResult> {
+        self.infer_index_projection(expr, false)
+    }
+
+    fn contiguous_range_element(&self, ty: &Type, span: Span) -> Result<Option<Type>> {
+        let mut owner = self.place_reference_head(ty, span)?;
+        for _ in 0..64 {
+            if let Some((element, _)) = owner.sequence_domain() {
+                return Ok(Some(element.clone()));
+            }
+            if let Some((referent, _, _)) = owner.reference_parts() {
+                owner = self.place_reference_head(referent, span)?;
+                continue;
+            }
+            if let Some((name, args)) = self.conversion_nominal_head(&owner)
+                && self.declared_runtime_storage_carrier(&name) == Some(WKT::List)
+                && let [element] = args
+            {
+                return Ok(Some(element.clone()));
+            }
+            return Ok(None);
+        }
+        Err(TypeError::InvalidIndex {
+            message: "range receiver exceeds the reference resolution boundary".into(),
+            span,
+        })
+    }
+
+    fn infer_index_projection(&mut self, expr: &Expr, addressed: bool) -> Result<InferResult> {
         use ExprKind::*;
         let ExprKind::Index { expr: arr, index } = &expr.kind else { unreachable!() };
         // =====================================================================
@@ -9383,126 +9422,33 @@ impl TypeChecker {
             self.record_deref_adjustment(arr.span, hops);
         }
 
-        // Get expected index type via protocol resolution
-        let expected_index_type = self
-            .protocol_checker
-            .read()
-            .resolve_index_protocol(&arr_result.ty)
-            .map(|r| r.key)
-            .unwrap_or_else(Type::int);
-
-        // Check if this is a Range type (slicing) or the expected index type (indexing)
-        let is_range = match &index_ty {
-            Type::Generic { name, args }
-                if WKT::Range.matches(name.as_str()) && args.len() == 1 =>
-            {
-                // Ensure the range is over Int
+        let index_contract = self.protocol_checker.read().resolve_index_protocol(&resolved_main);
+        if matches!(index.kind, ExprKind::Range { .. }) {
+            if let Some(element) = self.contiguous_range_element(&resolved_main, arr.span)? {
+                // Both inclusive and exclusive bounds are integer offsets into
+                // contiguous storage. The index expression was evaluated once.
+                let Type::Generic { args, .. } = &index_ty else {
+                    return Err(TypeError::InvalidIndex {
+                        message: "range expression has no bound type".into(), span: index.span,
+                    });
+                };
                 self.unifier.unify(&args[0], &Type::int(), index.span)?;
-                true
+                let slice = Type::slice(element);
+                if addressed { return Ok(InferResult::new(slice)); }
+                self.track_reference_borrow(expr, false, expr.span)?;
+                return Ok(InferResult::new(Type::reference(false, slice)));
             }
-            Type::Named { path, args } if !args.is_empty() => {
-                if let Some(last) = path.segments.last()
-                    && let verum_ast::ty::PathSegment::Name(id) = last
-                    && WKT::Range.matches(id.name.as_str())
-                {
-                    self.unifier.unify(&args[0], &Type::int(), index.span)?;
-                    true
-                } else {
-                    self.unifier
-                        .unify(&index_ty, &expected_index_type, index.span)?;
-                    false
-                }
-            }
-            _ => {
-                self.unifier
-                    .unify(&index_ty, &expected_index_type, index.span)?;
-                false
-            }
-        };
-
-        // If slicing with Range, return array/slice type instead of element type
-        if is_range {
-            // For slicing, return the same collection type (or a slice)
-            return match &arr_result.ty {
-                Type::Array { element, .. } => Ok(InferResult::new(Type::Array {
-                    element: element.clone(),
-                    size: None, // Dynamic size after slicing
-                })),
-                Type::Slice { element } => Ok(InferResult::new(Type::Slice {
-                    element: element.clone(),
-                })),
-                // STDLIB-AGNOSTIC: Use Index protocol to detect sliceable collection types
-                // Any type that implements Index protocol can be sliced (returns slice of element type)
-                ty if self
-                    .protocol_checker
-                    .read()
-                    .resolve_index_protocol(ty)
-                    .is_some() =>
-                {
-                    // Return the original collection type for slicing operations
-                    Ok(InferResult::new(ty.clone()))
-                }
-                Type::Text => Ok(InferResult::new(Type::Text)),
-                Type::Reference { inner, .. }
-                | Type::CheckedReference { inner, .. }
-                | Type::UnsafeReference { inner, .. } => {
-                    // Recursively handle referenced types
-                    match inner.as_ref() {
-                        Type::Array { element, .. } => {
-                            Ok(InferResult::new(Type::Array {
-                                element: element.clone(),
-                                size: None,
-                            }))
-                        }
-                        // Handle &[T] slice reference - slicing returns a slice
-                        Type::Slice { element } => Ok(InferResult::new(Type::Slice {
-                            element: element.clone(),
-                        })),
-                        Type::Text => Ok(InferResult::new(Type::Text)),
-                        // STDLIB-AGNOSTIC: Use Index protocol to detect sliceable types
-                        // Any type that implements Index yields a slice of its element type
-                        inner_ty
-                            if self
-                                .protocol_checker
-                                .read()
-                                .resolve_index_protocol(inner_ty)
-                                .is_some() =>
-                        {
-                            let index_res = self
-                                .protocol_checker
-                                .read()
-                                .resolve_index_protocol(inner_ty);
-                            if let Some(res) = index_res {
-                                Ok(InferResult::new(Type::Slice {
-                                    element: Box::new(res.output),
-                                }))
-                            } else {
-                                Err(TypeError::Other(verum_common::Text::from(
-                                    format!("Cannot slice type: {}", arr_result.ty),
-                                )))
-                            }
-                        }
-                        // Named/Generic types behind references may be sliceable
-                        // (e.g., &Bytes, &List<T>) - assume they support slicing
-                        Type::Named { .. } | Type::Generic { .. } => {
-                            Ok(InferResult::new(Type::Var(TypeVar::fresh())))
-                        }
-                        _ => Err(TypeError::Other(verum_common::Text::from(format!(
-                            "Cannot slice type: {}",
-                            arr_result.ty
-                        )))),
-                    }
-                }
-                // Named/Generic types may support slicing through Index protocol
-                Type::Named { .. } | Type::Generic { .. } => {
-                    Ok(InferResult::new(Type::Var(TypeVar::fresh())))
-                }
-                _ => Err(TypeError::Other(verum_common::Text::from(format!(
-                    "Cannot slice type: {}",
-                    arr_result.ty
-                )))),
-            };
+            // An integer subscript alone cannot establish range support.
+            // A user-defined range index owns its key and its output type.
+            let contract = index_contract.ok_or_else(|| TypeError::InvalidIndex {
+                message: format!("no declared range index for `{resolved_main}`").into(),
+                span: expr.span,
+            })?;
+            self.unifier.unify(&index_ty, &contract.key, index.span)?;
+            return Ok(InferResult::new(contract.output));
         }
+        let expected_index_type = index_contract.map(|contract| contract.key).unwrap_or_else(Type::int);
+        self.unifier.unify(&index_ty, &expected_index_type, index.span)?;
 
         // Try compile-time evaluation of the index for tuple access
         let const_index: Option<usize> = {

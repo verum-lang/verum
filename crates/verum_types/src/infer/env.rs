@@ -12343,7 +12343,7 @@ with .to_float() or .to_int() (at {:?})",
             Ref => {
                 // CRITICAL: Set call_arg_context so inner path lookup uses borrow_value
                 // instead of use_value. Taking &x borrows x, it does NOT consume/move x.
-                let result = self.synth_borrowed_operand(expr)?;
+                let result = self.synth_address_operand(expr)?;
 
                 // Track immutable borrow for aliasing detection
                 // Spec: L0-critical/reference_system/access_rules - Reference aliasing
@@ -12370,7 +12370,7 @@ with .to_float() or .to_int() (at {:?})",
             RefMut => {
                 // CRITICAL: Set call_arg_context so inner path lookup uses borrow_value
                 // instead of use_value. Taking &mut x borrows x, it does NOT consume/move x.
-                let result = self.synth_borrowed_operand(expr)?;
+                let result = self.synth_address_operand(expr)?;
 
                 // Auto-deref smart pointers: &mut Heap<T> -> &mut T, &mut Shared<T> -> &mut T
                 // STDLIB-AGNOSTIC: These are Verum memory types, not Rust types

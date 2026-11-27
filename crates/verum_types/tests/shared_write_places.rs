@@ -31,6 +31,32 @@ fn errors(source: &str) -> Vec<String> {
 }
 
 #[test]
+fn range_views_reborrow_the_original_storage_with_exact_reference_depth() {
+    let valid = errors(r#"
+        fn take(xs: &[Int]) -> Int { xs[0] }
+        fn relay(xs: &[Int]) -> &[Int] { xs[1..] }
+        fn slice(xs: &[Int]) -> Int {
+            let a = xs[1..=2];
+            let b = &xs[1..3];
+            let slot: &&[Int] = &a;
+            take(a) + take(b) + take(*slot)
+        }
+        fn change(xs: &mut [Int]) { let piece = &mut xs[1..]; piece[0] = 7; }
+    "#);
+    assert!(valid.is_empty(), "{valid:?}");
+    for (source, message) in [
+        ("fn bad(xs: &[Int]) { let part = &mut xs[1..]; part[0] = 7; }", "shared reference"),
+        ("fn bad() -> &[Int] { let xs = [1,2]; xs[..] }", "does not live long enough"),
+        ("fn bad() -> &[Int] { let xs = [1,2]; let part = xs[..]; part }", "does not live long enough"),
+        ("fn bad(xs: &[Bool]) -> &[Int] { xs[..] }", "mismatch"),
+        ("type Bag is { data:Int }; fn bad(xs: Bag) -> &[Int] { xs[..] }", "range index"),
+    ] {
+        let result = errors(source);
+        assert!(result.iter().any(|error| error.to_lowercase().contains(message)), "{source}: {result:?}");
+    }
+}
+
+#[test]
 fn a_selected_protocol_method_preserves_its_receiver_permission_on_a_field() {
     let definitions = r#"
         type Cell<T> is { value:T };
