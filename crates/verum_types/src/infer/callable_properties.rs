@@ -79,17 +79,22 @@ fn synchronous_parameters(function: &FunctionDecl) -> Set<Text> {
         bounds.iter().any(|bound| matches!(&bound.kind,
             TypeBoundKind::Callable(ty) if synchronous(ty)))
     }
-    let mut generics: Set<Text> = function.generics.iter().filter_map(|generic| {
-        match &generic.kind {
-            GenericParamKind::Type { name, bounds, .. } if callable_bound(bounds) => Some(name.name.clone()),
-            _ => None,
+    let mut declared = Set::new();
+    let mut generics = Set::new();
+    for generic in &function.generics {
+        if let GenericParamKind::Type { name, bounds, .. } = &generic.kind {
+            declared.insert(name.name.clone());
+            if callable_bound(bounds) {
+                generics.insert(name.name.clone());
+            }
         }
-    }).collect();
+    }
     if let Some(clause) = &function.generic_where_clause {
         for predicate in &clause.predicates {
             if let WherePredicateKind::Type { ty, bounds } = &predicate.kind
                 && let TypeKind::Path(path) = &ty.kind
                 && let Some(name) = path.as_ident()
+                && declared.contains(&name.name)
                 && callable_bound(bounds)
             {
                 generics.insert(name.name.clone());

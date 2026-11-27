@@ -1,0 +1,19 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L0
+// @tags: types, generics, async, callable
+// @expected-error: E400
+// @expected-error-count: 1
+
+type Pending is async fn(Int) -> Int;
+
+async fn wait_number(value: Int) -> Int { value }
+
+fn main() -> Int {
+    let synchronous: fn(Pending) -> Int = invoke;
+    synchronous(wait_number)
+}
+
+fn invoke(callback: Pending) -> Int where Pending: fn(Int) -> Int {
+    callback(4)
+}

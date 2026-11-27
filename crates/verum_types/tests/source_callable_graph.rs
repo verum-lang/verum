@@ -85,6 +85,8 @@ fn a_declared_callback_bounds_calls_through_its_parameter() {
     for source in [
         "fn invoke(callback:async fn(Int)->Int)->Int {callback(4)}",
         "fn invoke<F:async fn(Int)->Int>(callback:F)->Int {callback(4)}",
+        "type Pending is async fn(Int)->Int;
+         fn invoke(callback:Pending)->Int where Pending:fn(Int)->Int {callback(4)}",
         "fn invoke(callback:fn(Int)->Int, pending:async fn(Int)->Int)->Int {
              let callback = pending; callback(4)
          }",
