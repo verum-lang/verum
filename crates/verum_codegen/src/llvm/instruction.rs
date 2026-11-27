@@ -15127,7 +15127,7 @@ fn lower_call_method<'ctx>(
     // 3. Search functions by name suffix ".{method_name}"
 
     let mut method_id = method_id;
-    if let Some(declaration) = receiver_declaration {
+    let selection = if let Some(declaration) = receiver_declaration {
         if declaration.is_generic() {
             emit_runtime_abort(
                 ctx,
@@ -15142,19 +15142,20 @@ fn lower_call_method<'ctx>(
             ctx.set_register(dst.0, ctx.types().i64_type().get_undef().into());
             return Ok(());
         }
-        if let Some((function, args)) =
-            vbc_mod.try_bound_instance_method(&declaration, StringId(method_id), args.count)
-                .map_err(LlvmLoweringError::unsupported)?
-        {
-            let target = vbc_mod
-                .specialized_function_id(function, &args)
-                .and_then(|id| vbc_mod.get_function(id))
-                .ok_or_else(|| {
-                    LlvmLoweringError::unsupported("missing exact bound method specialization")
-                })?;
-            method_id = target.name.0;
-            call_witness = Some(args);
-        }
+        vbc_mod.try_bound_instance_method(&declaration, StringId(method_id), args.count)
+    } else if let Some(witness) = &call_witness {
+        vbc_mod.witnessed_instance_method(StringId(method_id), args.count, witness)
+    } else {
+        Ok(None)
+    }.map_err(LlvmLoweringError::unsupported)?;
+    if let Some((function, arguments)) = selection {
+        let target = vbc_mod.specialized_function_id(function, &arguments)
+            .and_then(|id| vbc_mod.get_function(id))
+            .ok_or_else(|| LlvmLoweringError::unsupported(format!(
+                "missing exact bound method specialization for {:?} with {arguments:?}", function
+            )))?;
+        method_id = target.name.0;
+        call_witness = Some(arguments);
     }
     let method_name_str = vbc_mod
         .get_string(StringId(method_id))

@@ -141,7 +141,7 @@ pub(super) fn discover_with_limit(
         // Oversized evidence is an error even if its last leaf would make
         // the call generic. Check before canonicalization can defer the edge.
         let operands = match instr {
-            Instruction::CallG { type_args, .. } => type_args.as_slice(),
+            Instruction::CallG { type_args, .. } | Instruction::SetCallWitness { type_args } => type_args.as_slice(),
             Instruction::NewClosure { lexical_types, .. } => lexical_types.as_slice(),
             Instruction::BindMethodReceiver { type_ref } | Instruction::DropTyped { type_ref, .. } =>
                 std::slice::from_ref(type_ref),
@@ -153,7 +153,8 @@ pub(super) fn discover_with_limit(
         for (callee, args) in concrete_call(module, instr, function_base)
             .into_iter()
             .chain(concrete_drop_calls(module, instr))
-            .chain(bound_method_call(module, instr, instructions.get(index + 1)))
+            .chain(bound_method_call(module, instr, instructions.get(index + 1))
+                .map_err(super::SpecializationError::InvalidWitness)?)
         {
             record_concrete_instantiation(
                 graph,
@@ -166,25 +167,30 @@ pub(super) fn discover_with_limit(
     Ok(())
 }
 
-/// A receiver declaration authorizes only its adjacent CallM. This is also
-/// used after substitution, when a generic caller first learns its implementor.
+/// A sidecar authorizes only its adjacent CallM. Nested discovery revisits the
+/// same pair after the caller's generic arguments have become concrete.
 pub(super) fn bound_method_call(
     module: &VbcModule,
     witness: &Instruction,
     call: Option<&Instruction>,
-) -> Option<(FunctionId, Vec<TypeRef>)> {
-    let Instruction::BindMethodReceiver { type_ref } = witness else {
-        return None;
-    };
-    let Instruction::CallM {
+) -> Result<Option<(FunctionId, Vec<TypeRef>)>, String> {
+    let Some(Instruction::CallM {
         method_id, args, ..
-    } = call?
+    }) = call
     else {
-        return None;
+        return Ok(None);
     };
-    let (id, args) =
-        module.bound_instance_method(type_ref, crate::types::StringId(*method_id), args.count)?;
-    (!args.is_empty()).then_some((id, args))
+    let method = crate::types::StringId(*method_id);
+    match witness {
+        Instruction::BindMethodReceiver { type_ref } => {
+            Ok(module.bound_instance_method(type_ref, method, args.count)
+                .filter(|(_, args)| !args.is_empty()))
+        }
+        Instruction::SetCallWitness { type_args } => {
+            module.witnessed_instance_method(method, args.count, type_args)
+        }
+        _ => Ok(None),
+    }
 }
 
 /// Destruction can call generic user glue even though it has no CallG operand.

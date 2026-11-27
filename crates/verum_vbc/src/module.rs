@@ -1498,6 +1498,34 @@ impl VbcModule {
         self.try_bound_instance_method(receiver, method, argc).ok().flatten()
     }
 
+    /// A call witness supplies method arguments, but has no receiver identity.
+    /// Only an exact, qualified source declaration can name the instance body.
+    pub fn witnessed_instance_method(
+        &self,
+        method: StringId,
+        argc: u8,
+        witness: &[TypeRef],
+    ) -> Result<Option<(FunctionId, Vec<TypeRef>)>, String> {
+        let Some(name) = self.get_string(method).filter(|name| name.contains('.')) else {
+            return Ok(None);
+        };
+        let mut declarations = self.functions_named(name).filter(|(_, function)| {
+            function.has_source_body
+                && function.source_receiver.is_some()
+                && function.source_signature.is_some()
+                && function.params.len() == usize::from(argc) + 1
+                && self.get_string(function.params[0].name) == Some("self")
+        });
+        let Some((id, function)) = declarations.next() else { return Ok(None) };
+        if declarations.next().is_some() {
+            return Err(format!("call witness for `{name}` has competing instance declarations"));
+        }
+        if function.type_params.is_empty() {
+            return Ok(None);
+        }
+        Ok(crate::mono::canonical_type_args(function, witness).map(|args| (id, args)))
+    }
+
     /// A competing family requires a unique declared receiver. Native lowering
     /// must propagate a refusal before considering ordinary protocol dispatch.
     pub fn try_bound_instance_method(

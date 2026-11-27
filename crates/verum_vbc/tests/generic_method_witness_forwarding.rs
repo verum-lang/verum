@@ -23,6 +23,45 @@ implement<T> Sink<T> {
 }
 "#;
 
+#[test]
+fn specialized_instance_edges_require_an_adjacent_witness_and_one_exact_source_declaration() {
+    use verum_vbc::{
+        Instruction, Reg, RegRange,
+        mono::{InstantiationGraph, discover_call_instantiations},
+        types::{TypeId, TypeRef},
+    };
+    let ast = Parser::new(TYPES).parse_module().unwrap();
+    let original = lower(&ast, true).unwrap();
+    let mut module = deserialize_module(&serialize_module(&original).unwrap()).unwrap();
+    let id = module.find_function_by_name("forwarding.Sink.consume").unwrap();
+    let declaration = module.get_function(id).unwrap().clone();
+    let actual = [TypeRef::Concrete(TypeId::INT)];
+    let witness = Instruction::SetCallWitness { type_args: actual.to_vec() };
+    let call = |name, count| Instruction::CallM {
+        dst: Reg(2), receiver: Reg(0), method_id: name,
+        args: RegRange { start: Reg(1), count },
+    };
+    let mut graph = InstantiationGraph::new();
+    let qualified = declaration.name.0;
+    let suffix = module.intern_string("Sink.consume").0;
+    for instructions in [
+        vec![witness.clone(), call(suffix, 1)],
+        vec![witness.clone(), call(qualified, 0)],
+        vec![witness.clone(), Instruction::Nop, call(qualified, 1)],
+    ] {
+        discover_call_instantiations(&module, &instructions, 0, &mut graph).unwrap();
+        assert!(graph.is_empty());
+    }
+    let instructions = [witness, call(qualified, 1)];
+    discover_call_instantiations(&module, &instructions, 0, &mut graph).unwrap();
+    assert!(graph.contains(id, &actual));
+    module.add_function(declaration);
+    let mut ambiguous = InstantiationGraph::new();
+    let error = discover_call_instantiations(&module, &instructions, 0, &mut ambiguous).unwrap_err();
+    assert!(error.to_string().contains("competing instance declarations"));
+    assert!(ambiguous.is_empty());
+}
+
 fn lower(ast: &verum_ast::Module, bootstrap: bool) -> CodegenResult<verum_vbc::module::VbcModule> {
     let mut codegen = VbcCodegen::with_config(CodegenConfig::new("forwarding"));
     canonical_drop::initialize(&mut codegen);
