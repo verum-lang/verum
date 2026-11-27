@@ -3054,17 +3054,7 @@ impl TypeChecker {
                         // A type export can also carry a public companion module.
                         // The export table keeps the type facet on collisions;
                         // retain the namespace facet under the same declaring owner.
-                        for item in &module_info.ast.items {
-                            if let verum_ast::ItemKind::Module(module) = &item.kind
-                                && module.name.name.as_str() == item_name
-                                && module.visibility == verum_ast::decl::Visibility::Public
-                            {
-                                let owner: Text = format!("{resolved_module_path}.{item_name}").into();
-                                self.inline_modules.insert(owner.clone(), module.clone());
-                                self.inline_modules.insert(register_name.into(), module.clone());
-                                self.module_aliases.insert(register_name.into(), owner);
-                            }
-                        }
+                        self.bind_exported_namespace(&module_info, exported, register_name, registry);
                         // Bug C (type facet) — umbrella re-export of a TYPE
                         // whose defining module's IMPL BLOCK (associated
                         // consts + methods) would otherwise be dropped. The
@@ -3150,27 +3140,7 @@ impl TypeChecker {
                         self.register_protocol_as_context(verum_common::Text::from(register_name));
                     }
                     ExportKind::Module => {
-                        // Register the imported inline module so qualified path calls like
-                        // `ModuleName.fn(...)` resolve in the importing file.
-                        // Without this, `Transducer.map(...)` fails because the importing
-                        // checker's `inline_modules` map is empty for cross-file modules.
-                        for ast_item in &module_info.ast.items {
-                            if let verum_ast::ItemKind::Module(mod_decl) = &ast_item.kind {
-                                if mod_decl.name.name.as_str() == item_name
-                                    && mod_decl.visibility == verum_ast::decl::Visibility::Public
-                                {
-                                    let short_name = verum_common::Text::from(register_name);
-                                    let full_path = verum_common::Text::from(format!(
-                                        "{}.{}",
-                                        resolved_module_path.as_str(),
-                                        item_name
-                                    ));
-                                    self.inline_modules.insert(short_name, mod_decl.clone());
-                                    self.inline_modules.insert(full_path, mod_decl.clone());
-                                    break;
-                                }
-                            }
-                        }
+                        self.bind_exported_namespace(&module_info, exported, register_name, registry);
                     }
                     ExportKind::Predicate => {
                         // Predicates don't need special handling in the type environment
@@ -3557,7 +3527,7 @@ impl TypeChecker {
                                 return Ok(());
                             }
                             ExportKind::Module => {
-                                // Module re-exports - just mark as successful
+                                self.bind_exported_namespace(&module_info, export, local_name.unwrap_or(item_name), registry);
                                 return Ok(());
                             }
                             // For other kinds (Const, Static, Context, etc.), fall through
@@ -4212,11 +4182,43 @@ impl TypeChecker {
         Some(names.into_iter().collect::<List<Text>>())
     }
 
-    /// Find a type declaration in a module's AST by name.
-    /// Import a type or protocol export from a module.
-    /// Resolves transitive type dependencies, registers the type declaration
-    /// (including companion inline module + blanket impls), and falls back to
-    /// a Named-type placeholder when full registration fails.
+    /// Bind the namespace facet of an export at the module that declared it.
+    fn bind_exported_namespace(
+        &mut self,
+        module: &verum_modules::ModuleInfo,
+        export: &verum_modules::ExportedItem,
+        local_name: &str,
+        registry: &verum_modules::ModuleRegistry,
+    ) {
+        let declaring_module;
+        let source = if export.source_module == module.id {
+            module
+        } else {
+            let Some(owner) = registry.get(export.source_module) else { return };
+            declaring_module = owner;
+            &declaring_module
+        };
+        let name = export.original_name.as_ref().unwrap_or(&export.name);
+        let Some(decl) = source.ast.items.iter().find_map(|item| match &item.kind {
+            verum_ast::ItemKind::Module(decl) if decl.name.name == *name => Some(decl),
+            _ => None,
+        }) else { return };
+        if !decl.visibility.visible_from(
+            source.path.segments().iter().map(Text::as_str), self.current_module_path.as_str().split('.'),
+        ) { return; }
+        let owner: Text = format!("{}.{name}", source.path).into();
+        let owner = if decl.items.is_some() {
+            self.inline_modules.insert(owner.clone(), decl.clone());
+            self.inline_modules.insert(local_name.into(), decl.clone());
+            owner
+        } else {
+            let Some(owner) = self.mount_module_target(owner.as_str(), registry) else { return };
+            owner
+        };
+        self.module_aliases.insert(local_name.into(), owner);
+    }
+
+    /// Import a type or protocol export, including its transitive type dependencies.
     fn import_type_export(
         &mut self,
         module_info: &verum_modules::ModuleInfo,
@@ -16840,15 +16842,11 @@ impl TypeChecker {
         //
         // Resolve namespaces through their declarations before synthesizing a
         // receiver. They cannot be represented by fresh inference variables.
-        let base_is_module_alias = matches!(&current_receiver.kind, ExprKind::Path(path)
-            if path.segments.len() == 1
-                && matches!(path.segments.first(), Some(verum_ast::ty::PathSegment::Name(ident))
-                    if self.module_aliases.contains_key(&ident.name)));
         let base_is_declared_namespace = matches!(&current_receiver.kind, ExprKind::Path(path)
             if path.segments.len() == 1
                 && matches!(path.segments.first(), Some(verum_ast::ty::PathSegment::Name(ident))
                     if self.declared_namespace_owner(&ident.name).is_some()));
-        let base_is_module_path = !base_is_module_alias && {
+        let base_is_module_path = {
             let root_name: Option<&str> = match &current_receiver.kind {
                 ExprKind::Path(path) if path.segments.len() >= 2 => {
                     match path.segments.first() {
@@ -16869,7 +16867,7 @@ impl TypeChecker {
             }
         };
         self.with_place_types(current_receiver, |tc| {
-            let mut namespace_first = if base_is_rooted_path || base_is_module_alias || base_is_module_path || base_is_declared_namespace {
+            let mut namespace_first = if base_is_rooted_path || base_is_module_path || base_is_declared_namespace {
                 let (_, first_method, first_type_args, first_args, first_span) =
                     chain.last().expect("method chain is nonempty");
                 // A dotted qualifier can denote a value (a variant or an
@@ -22620,6 +22618,16 @@ impl TypeChecker {
         span: Span,
         skip_static_lookup: bool,
     ) -> Result<Option<InferResult>> {
+        let mut root = receiver;
+        while let ExprKind::Field { expr, .. } = &root.kind {
+            root = expr;
+        }
+        if let ExprKind::Path(path) = &root.kind
+            && let Some(verum_ast::ty::PathSegment::Name(head)) = path.segments.first()
+            && self.ctx.env.is_locally_bound_value(head.name.as_str())
+        {
+            return Ok(None);
+        }
         if !skip_static_lookup
             && let Some(result) = self.projected_static_call(receiver, method, type_args, args, span)?
         {

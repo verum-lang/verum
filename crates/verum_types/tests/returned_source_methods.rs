@@ -745,6 +745,25 @@ fn module_path_aliases_preserve_borrowed_receiver_private_methods() {
 }
 
 #[test]
+fn lexical_values_shadow_module_receivers_for_instance_calls() {
+    let modules = [
+        ("demo.catalog", "module demo.catalog; public module reader;"),
+        ("demo.catalog.reader", "public fn size() -> Bool { false } public fn remote() -> Int { 9 }"),
+    ];
+    for mount in ["mount demo.catalog.*;", "mount demo.catalog.reader as reader;"] {
+        let header = format!("{mount}
+            type Buffer is {{ public used: Int }};
+            implement Buffer {{ fn size(&self) -> Int {{ self.used }} }}");
+        let valid = check(&format!("{header}
+            fn instance(reader: &Buffer) -> Int {{ reader.size() }}
+            fn namespace() -> Bool {{ reader.size() }}"), &modules);
+        assert!(valid.is_empty(), "{header}: {valid:?}");
+        let missing = check(&format!("{header} fn wrong(reader: &Buffer) -> Int {{ reader.remote() }}"), &modules);
+        assert_missing_method(&missing, "remote");
+    }
+}
+
+#[test]
 fn a_source_index_projects_its_key_and_output_through_a_shared_field() {
     let modules = [
         ("core.base.protocols", r#"

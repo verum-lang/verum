@@ -152,20 +152,11 @@ fn source_local_private_types_stay_available_to_their_public_function_signatures
 }
 
 #[test]
-fn resolved_export_origins_precede_source_order_mount_fallbacks() {
-    for (source, before) in [
-        (
-            "public mount providers.early.*; public mount providers.late.Token;",
-            "providers.early",
-        ),
-        (
-            "public mount providers.late.Token; public mount providers.early.*;",
-            "providers.late",
-        ),
-        (
-            "public mount providers.{early.*, late.Token};",
-            "providers.early",
-        ),
+fn named_reexports_keep_the_same_owner_before_and_after_export_resolution() {
+    for source in [
+        "public mount providers.early.*; public mount providers.late.Token;",
+        "public mount providers.late.Token; public mount providers.early.*;",
+        "public mount providers.{early.*, late.Token};",
     ] {
         let mut registry = ModuleRegistry::new();
         for owner in ["providers.early", "providers.late"] {
@@ -177,15 +168,15 @@ fn resolved_export_origins_precede_source_order_mount_fallbacks() {
         }
         register(&mut registry, "facade", source);
         let checker = TypeChecker::with_minimal_context();
-        // Source admission can query before all re-export identities have been
-        // resolved. The placeholder's AST traversal retains source order.
+        // A consumer may observe a placeholder before the export graph closes.
+        // Its explicit mount has the same precedence at both stages.
         assert_eq!(
             checker
                 .resolve_public_source_type("facade", "Token", &registry)
                 .unwrap()
                 .1
                 .as_str(),
-            before,
+            "providers.late",
             "{source}"
         );
         verum_modules::resolve_specific_reexport_kinds(&mut registry).unwrap();
@@ -229,15 +220,9 @@ fn local_declarations_precede_source_mounts() {
 
 #[test]
 fn only_explored_mount_alternatives_contribute_registry_observations() {
-    for (source, explored) in [
-        (
-            "public mount selected.Token; public mount alternative.*;",
-            false,
-        ),
-        (
-            "public mount alternative.*; public mount selected.Token;",
-            true,
-        ),
+    for source in [
+        "public mount selected.Token; public mount alternative.*;",
+        "public mount alternative.*; public mount selected.Token;",
     ] {
         let mut registry = ModuleRegistry::new();
         register(
@@ -263,16 +248,26 @@ fn only_explored_mount_alternatives_contribute_registry_observations() {
             "alternative",
             "public type Token is { public value: Bool };",
         );
-        assert_eq!(receipt.unchanged(&changed), !explored, "{source}");
+        assert!(receipt.unchanged(&changed), "{source}");
         assert_eq!(
             checker
                 .resolve_public_source_type("facade", "Token", &changed)
                 .unwrap()
                 .1
                 .as_str(),
-            if explored { "alternative" } else { "selected" }
+            "selected"
         );
     }
+    let mut registry = ModuleRegistry::new();
+    register(&mut registry, "facade", "public mount alternative.Token;");
+    let base = std::sync::Arc::new(registry);
+    let (observed, receipt) = base.observe_reads();
+    let checker = TypeChecker::with_minimal_context();
+    assert!(checker.resolve_public_source_type("facade", "Token", &observed).is_none());
+    let mut changed = (*base).clone();
+    register(&mut changed, "alternative", "public type Token is { public value: Bool };");
+    assert!(!receipt.unchanged(&changed));
+    assert_eq!(checker.resolve_public_source_type("facade", "Token", &changed).unwrap().1, "alternative");
 }
 
 #[test]

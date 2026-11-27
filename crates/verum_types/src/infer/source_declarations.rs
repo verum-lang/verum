@@ -330,6 +330,16 @@ impl TypeChecker {
             return Ok((ty, Some(key)));
         }
         let (head, tail) = name.split_once('.').unwrap_or((name, ""));
+        if !tail.is_empty() && self.with_declaring_source_items(&self.current_module_path, |items| {
+            items.iter().any(|item| matches!(&item.kind,
+                verum_ast::ItemKind::Module(module) if module.name.as_str() == head
+                    && self.cfg_evaluator.should_include_item(item)))
+        }) == Some(true) {
+            let qualified = verum_common::qualified_name::qualify_module_name(&self.current_module_path, name);
+            return self.resolve_qualified_source_type_with_parameter_key(&qualified, span)?
+                .map(|(ty, key)| (ty, Some(key)))
+                .ok_or(TypeError::TypeNotFound { name: qualified, span });
+        }
         if let Some((ty, key)) = self.source_mounted_archive_type(head, tail, span)? {
             return Ok((ty, Some(key)));
         }
