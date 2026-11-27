@@ -6672,9 +6672,14 @@ impl TypeChecker {
         let declaration = filtered.as_ref().unwrap_or(impl_decl);
         let depth = self.ctx.env.scope_depth();
         self.ctx.env.push_scope();
-        let result = self.with_impl_parameter_scope(declaration, |checker, owner|
-            checker.check_impl_block_inner(declaration, owner)
-        );
+        let result = self.with_impl_parameter_scope(declaration, |checker, owner| {
+            let previous_rigid = checker.unifier.rigid_snapshot();
+            let bodies = checker.check_impl_method_bodies(declaration, owner);
+            checker.unifier.exit_rigid_scope(previous_rigid);
+            bodies?;
+            checker.check_protocol_impl_is_complete(declaration);
+            Ok(())
+        });
         self.ctx.env.restore_scope_depth(depth);
         result
     }
@@ -6708,7 +6713,7 @@ impl TypeChecker {
         }
     }
 
-    fn check_impl_block_inner(
+    fn check_impl_method_bodies(
         &mut self,
         impl_decl: &verum_ast::decl::ImplDecl,
         owner: &indexmap::IndexMap<Text, Type>,
@@ -6717,7 +6722,7 @@ impl TypeChecker {
 
         // Inline bounds and where clauses can constrain the same parameter.
         // Install all of its proved premises together for body method lookup.
-        let (clauses, _) = self.enter_source_impl_conditions(impl_decl, owner)?;
+        let (clauses, mut callables) = self.enter_source_impl_conditions(impl_decl, owner)?;
         let mut bounds_by_variable: Map<TypeVar, List<crate::protocol::ProtocolBound>> = Map::new();
         for clause in clauses {
             if let Type::Var(variable) = clause.ty {
@@ -6727,6 +6732,10 @@ impl TypeChecker {
         for (name, ty) in owner {
             if let Type::Var(variable) = ty {
                 let bounds = bounds_by_variable.remove(variable).unwrap_or_default();
+                let callable = callables.remove(variable);
+                self.unifier.enter_rigid_scope([(
+                    *variable, name.clone(), !bounds.is_empty() || callable.is_some(), callable,
+                )]);
                 let parameter = crate::context::TypeParam::new(name.clone(), impl_decl.span)
                     .with_bounds(bounds.clone());
                 self.ctx.env.add_type_param(parameter);
@@ -6862,17 +6871,6 @@ impl TypeChecker {
                 self.set_current_self_type(previous_self_type);
             }
         }
-
-        // CONFORMANCE: an `implement P for T` block must provide every
-        // method P requires.
-        //
-        // The check used to be that an implementation EXISTS, never that it
-        // is COMPLETE, so `implement P for R { }` against a protocol
-        // requiring `fn m` type-checked and then panicked at the call with
-        // "method 'm' not found". Worse than a missing implementation,
-        // which E405 catches: writing an EMPTY one silenced that too, so
-        // the bound `T: P` promised a method the type did not have.
-        self.check_protocol_impl_is_complete(impl_decl);
 
         Ok(())
     }

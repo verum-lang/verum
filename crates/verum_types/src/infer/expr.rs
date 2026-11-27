@@ -7473,13 +7473,15 @@ impl TypeChecker {
         let Type::Var(v) = func_ty else {
             unreachable!()
         };
-        // Reached only when the parameter has NO declared function
-        // bound — one with a bound was rewritten to that bound
-        // where `func_ty` is computed, so it arrives at the
-        // ordinary `Type::Function` arm instead.
-        //
-        // Type variable being called as a function - instantiate it as a function type
-        // Create fresh type variables for parameters based on argument count
+        // A declaration parameter can be invoked only through its callable
+        // premise, which prepare_call selects before reaching this path.
+        if self.unifier.is_rigid(v) {
+            return Err(TypeError::NotAFunction {
+                ty: self.unifier.rigid_name(v),
+                span: func.span,
+            });
+        }
+        // A flexible variable may still infer its signature from this call.
         let mut param_types = List::new();
         for _ in args.iter() {
             param_types.push(Type::Var(TypeVar::fresh()));

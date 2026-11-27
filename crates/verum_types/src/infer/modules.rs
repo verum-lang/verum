@@ -9685,16 +9685,6 @@ impl TypeChecker {
         // below and are deliberately not made rigid yet — one kind at a
         // time, each with its own measurement.
         let mut func_rigid_type_params: List<(TypeVar, Text, bool, Maybe<Type>)> = List::new();
-        // The AST of each parameter's FUNCTION-shaped bound, collected here
-        // and resolved after the loop.
-        //
-        // Not resolved inline, because a bound may name a parameter the loop
-        // has not reached yet — `<F: fn(Int) -> List<U>, U>` is legal and
-        // resolving `U` mid-loop would invent a second variable for it. See
-        // [[RigidVar]] in unify.rs for what the resolved bound is for.
-        let mut func_rigid_fn_bound_ast: List<(TypeVar, verum_ast::ty::Type)> = List::new();
-        // …and the same thing keyed by NAME, because the loop below is not
-        // the only one: `check_function_inner` walks `func.generics` twice.
         let mut func_type_param_by_name: Map<Text, TypeVar> = Map::new();
         // T0741 PROBE (companion to `[ambig-free]` below): does this filling
         // point run at all for a method of an `implement<…>` block? Measured at
@@ -9742,18 +9732,6 @@ impl TypeChecker {
                         !bounds.is_empty(),
                         Maybe::None,
                     ));
-                    // Callable bounds retain their declared invocation contract;
-                    // exact equality predicates are checked independently.
-                    for bound in bounds.iter() {
-                        let bound_ty = match &bound.kind {
-                            verum_ast::ty::TypeBoundKind::Callable(t) => t,
-                            _ => continue,
-                        };
-                        if matches!(bound_ty.kind, verum_ast::ty::TypeKind::Function { .. }) {
-                            func_rigid_fn_bound_ast.push((tvar, bound_ty.clone()));
-                            break;
-                        }
-                    }
                     func_type_param_by_name.insert(name_text.clone(), tvar);
 
                     // Track implicit parameters
@@ -10064,21 +10042,23 @@ impl TypeChecker {
         // anywhere, because T was one shared inference variable rather than
         // a universally quantified one.
         // (Restored by `check_function`, which wraps every exit path.)
-        // Resolve the function-shaped bounds now that EVERY parameter of
-        // this signature is defined, and attach each to its parameter.
-        // Resolution failure is not an error here: a bound naming a type
-        // this pass cannot see is the ordinary cross-module case, and the
-        // parameter simply keeps the behaviour it had before this channel
-        // existed.
-        for (bound_var, bound_ast) in func_rigid_fn_bound_ast.iter() {
-            let Ok(resolved) = self.ast_to_type(bound_ast) else {
-                continue;
-            };
-            for entry in func_rigid_type_params.iter_mut() {
-                if entry.0 == *bound_var {
-                    entry.3 = Maybe::Some(resolved.clone());
-                    break;
+        // The scheme already contains inline and where conditions resolved
+        // after the full parameter frame was installed. Use those same
+        // invocation contracts in the body, including forward references.
+        for (var, _, bounded, callable) in &mut func_rigid_type_params {
+            let Some(bounds) = func_param_type_bounds.get(var) else { continue };
+            for bound in bounds.iter().filter(|ty| matches!(ty, Type::Function { .. })) {
+                if let Some(previous) = callable.as_ref()
+                    && !self.protocol_checker.read().types_structurally_equal(previous, bound)
+                {
+                    return Err(TypeError::OtherWithCodeSpanned {
+                        code: "E427".into(),
+                        msg: "multiple callable conditions need a represented intersection".into(),
+                        span: func.span,
+                    });
                 }
+                *callable = Some(bound.clone());
+                *bounded = true;
             }
         }
         if std::env::var_os("VERUM_TRACE_RIGID").is_some() {

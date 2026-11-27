@@ -401,7 +401,7 @@ impl Unifier {
 
     /// How a rigid var should read in a diagnostic: the name the author
     /// wrote, not the `_` an unsolved variable renders as.
-    fn rigid_name(&self, var: TypeVar) -> Text {
+    pub(crate) fn rigid_name(&self, var: TypeVar) -> Text {
         self.rigid_vars
             .get(&var)
             .map(|entry| entry.name.clone())
