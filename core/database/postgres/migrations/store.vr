@@ -44,13 +44,13 @@ public fn store_new(conn: PgConnection, config: MigrationStoreConfig) -> Postgre
     PostgresMigrationStore { conn: conn, config: config, table: Maybe.None, held_lock: Maybe.None }
 }
 
-fn state_error(message: &Text) -> DbError {
-    DbError.Adapter(AdapterSpecific.new(AdPostgres, "migration_session_invalid", message.clone(), false))
+fn state_error(message: Text) -> DbError {
+    DbError.Adapter(AdapterSpecific.new(AdPostgres, "migration_session_invalid", message, false))
 }
 
 fn require_idle(conn: &PgConnection) -> Result<(), DbError> {
     if conn.tx_status() is TxIdle { Result.Ok(()) }
-    else { Result.Err(state_error(&"migration store requires an idle transaction")) }
+    else { Result.Err(state_error("migration store requires an idle transaction")) }
 }
 
 /// Attempt to close every prepared statement after execution, retaining both
@@ -74,11 +74,11 @@ fn quoted_table(conn: &mut PgConnection, name: &Text) -> Result<Text, DbError> {
     let params: List<Maybe<TypedValue>> = [];
     let result = query_typed(conn, &"SELECT pg_catalog.current_setting('max_identifier_length')::bigint", &params)?;
     if result.rows.len() != 1 || result.rows[0].len() != 1 {
-        return Result.Err(state_error(&"invalid PostgreSQL identifier limit response"));
+        return Result.Err(state_error("invalid PostgreSQL identifier limit response"));
     }
     match result.rows[0][0] {
         TypedValue.TvInt8(limit) => quote_tracking_table(name, limit),
-        _ => Result.Err(state_error(&"identifier limit is not BIGINT")),
+        _ => Result.Err(state_error("identifier limit is not BIGINT")),
     }
 }
 
@@ -90,19 +90,19 @@ fn lookup_table(conn: &mut PgConnection, table: &Text) -> Result<Maybe<(Text, In
     let result = query_typed(conn, &sql, &params)?;
     if result.rows.len() == 0 { return Result.Ok(Maybe.None); }
     if result.rows.len() != 1 || result.rows[0].len() != 3 {
-        return Result.Err(state_error(&"invalid tracking table identity response"));
+        return Result.Err(state_error("invalid tracking table identity response"));
     }
     match (&result.rows[0][0], &result.rows[0][1], &result.rows[0][2]) {
         (TypedValue.TvText(name), TypedValue.TvInt8(oid), TypedValue.TvBool(true)) =>
             Result.Ok(Maybe.Some((name.clone(), *oid))),
-        _ => Result.Err(state_error(&"tracking relation is not a table")),
+        _ => Result.Err(state_error("tracking relation is not a table")),
     }
 }
 
 fn require_table_identity(conn: &mut PgConnection, table: &Text, expected: Int) -> Result<(), DbError> {
     match lookup_table(conn, table)? {
         Maybe.Some((_, oid)) if oid == expected => Result.Ok(()),
-        _ => Result.Err(state_error(&"tracking table was replaced; reinitialize the store")),
+        _ => Result.Err(state_error("tracking table was replaced; reinitialize the store")),
     }
 }
 
@@ -117,7 +117,7 @@ fn lock_table(conn: &mut PgConnection, table: &Text, expected: Int, mode: &Text)
     if result.rows.len() == 1 && result.rows[0].len() == 1 && result.rows[0][0] is TypedValue.TvBool(true) {
         return Result.Ok(());
     }
-    Result.Err(state_error(&"tracking table was replaced; reinitialize the store"))
+    Result.Err(state_error("tracking table was replaced; reinitialize the store"))
 }
 
 fn rollback_if_active(conn: &mut PgConnection, error: DbError) -> DbError {
@@ -147,7 +147,7 @@ fn execute_transaction_sql(conn: &mut PgConnection, sql: &Text) -> Result<(), Db
     let command = transactional_sql(sql)?;
     conn.execute(&command)?;
     if !(conn.tx_status() is TxInTransaction) {
-        return Result.Err(state_error(&"migration did not retain its transaction"));
+        return Result.Err(state_error("migration did not retain its transaction"));
     }
     Result.Ok(())
 }
@@ -155,7 +155,7 @@ fn execute_transaction_sql(conn: &mut PgConnection, sql: &Text) -> Result<(), Db
 fn execute_sequential_sql(conn: &mut PgConnection, sql: &Text) -> Result<(), DbError> {
     match conn.execute(sql) {
         Result.Ok(_) if conn.tx_status() is TxIdle => Result.Ok(()),
-        Result.Ok(_) => Result.Err(rollback_if_active(conn, state_error(&"nontransactional SQL left an open transaction"))),
+        Result.Ok(_) => Result.Err(rollback_if_active(conn, state_error("nontransactional SQL left an open transaction"))),
         Result.Err(error) => Result.Err(rollback_if_active(conn, error)),
     }
 }
@@ -170,7 +170,7 @@ fn initialize_table(conn: &mut PgConnection, table: &Text) -> Result<(Text, Int)
     let sql = f"CREATE TABLE IF NOT EXISTS {table} (version BIGINT PRIMARY KEY,name TEXT NOT NULL,status TEXT NOT NULL,applied_at BIGINT,error TEXT,checksum BIGINT NOT NULL,CHECK ((status='pending' AND applied_at IS NULL AND error IS NULL) OR (status IN ('applied','rolled_back') AND applied_at IS NOT NULL AND error IS NULL) OR (status='failed' AND applied_at IS NULL AND error IS NOT NULL)))";
     conn.execute(&sql)?;
     let relation = lookup_table(conn, table)?;
-    relation.ok_or_else(|| state_error(&"tracking table was not found after initialization"))
+    relation.ok_or_else(|| state_error("tracking table was not found after initialization"))
 }
 
 fn write_locked(conn: &mut PgConnection, table: &Text, expected: Int, sql: Maybe<&Text>, entry: &JournalEntry)
@@ -189,11 +189,11 @@ fn write_locked(conn: &mut PgConnection, table: &Text, expected: Int, sql: Maybe
     let params = entry_parameters(entry);
     let result = query_typed(conn, &insert, &params)?;
     if result.rows.len() != 1 || result.rows[0].len() != 1 {
-        return Result.Err(state_error(&"journal upsert did not write one row"));
+        return Result.Err(state_error("journal upsert did not write one row"));
     }
     match result.rows[0][0] {
         TypedValue.TvInt8(oid) if oid == expected => Result.Ok(()),
-        _ => Result.Err(state_error(&"journal upsert reached a replacement table")),
+        _ => Result.Err(state_error("journal upsert reached a replacement table")),
     }
 }
 
@@ -214,20 +214,20 @@ fn read_locked(conn: &mut PgConnection, table: &Text, expected: Int) -> Result<M
     let result = query_typed(conn, &sql, &params)?;
     let mut entries: List<JournalEntry> = List.with_capacity(result.rows.len());
     let mut previous: Maybe<Int> = Maybe.None;
-    if result.rows.len() == 0 { return Result.Err(state_error(&"missing journal identity response")); }
+    if result.rows.len() == 0 { return Result.Err(state_error("missing journal identity response")); }
     for mut row in result.rows.into_iter() {
         match row.pop() {
             Maybe.Some(TypedValue.TvInt8(oid)) if oid == expected => {},
-            _ => return Result.Err(state_error(&"journal read reached a replacement table")),
+            _ => return Result.Err(state_error("journal read reached a replacement table")),
         }
         match row.pop() {
             Maybe.Some(TypedValue.TvBool(false)) => continue,
             Maybe.Some(TypedValue.TvBool(true)) => {},
-            _ => return Result.Err(state_error(&"invalid journal presence response")),
+            _ => return Result.Err(state_error("invalid journal presence response")),
         }
         let entry = decode_entry(&row)?;
         if let Maybe.Some(version) = previous {
-            if entry.version <= version { return Result.Err(state_error(&"duplicate or unordered journal versions")); }
+            if entry.version <= version { return Result.Err(state_error("duplicate or unordered journal versions")); }
         }
         previous = Maybe.Some(entry.version);
         entries.push(entry);
@@ -261,14 +261,14 @@ fn drop_locked(conn: &mut PgConnection, table: &Text, expected: Int) -> Result<(
     if result.rows.len() == 1 && result.rows[0].len() == 1 && result.rows[0][0] is TypedValue.TvBool(true) {
         return Result.Ok(());
     }
-    Result.Err(state_error(&"drop reached a replacement tracking table"))
+    Result.Err(state_error("drop reached a replacement tracking table"))
 }
 
 implement PostgresMigrationStore {
     fn initialized_table(&self) -> Result<(Text, Int), DbError> {
         match &self.table {
             Maybe.Some((name, oid)) => Result.Ok((name.clone(), *oid)),
-            Maybe.None => Result.Err(state_error(&"initialize the migration store first")),
+            Maybe.None => Result.Err(state_error("initialize the migration store first")),
         }
     }
 
@@ -286,7 +286,7 @@ implement MigrationStore for PostgresMigrationStore {
 
     async fn init(&mut self) -> Result<(), DbError> {
         require_idle(&self.conn)?;
-        if self.held_lock is Maybe.Some(_) { return Result.Err(state_error(&"cannot reinitialize a locked store")); }
+        if self.held_lock is Maybe.Some(_) { return Result.Err(state_error("cannot reinitialize a locked store")); }
         let table = quoted_table(&mut self.conn, &self.config.table_name)?;
         let tx = begin_tx(&mut self.conn)?;
         let result = initialize_table(&mut self.conn, &table);
@@ -336,15 +336,15 @@ implement MigrationStore for PostgresMigrationStore {
         let params: List<Maybe<TypedValue>> = [Maybe.Some(TypedValue.TvInt8(key))];
         let result = query_typed(&mut self.conn, &"SELECT pg_catalog.pg_advisory_unlock($1::bigint)", &params)?;
         if result.rows.len() != 1 || result.rows[0].len() != 1 {
-            return Result.Err(state_error(&"invalid advisory unlock response"));
+            return Result.Err(state_error("invalid advisory unlock response"));
         }
         match result.rows[0][0] {
             TypedValue.TvBool(true) => { self.held_lock = Maybe.None; Result.Ok(()) },
             TypedValue.TvBool(false) => {
                 self.held_lock = Maybe.None;
-                Result.Err(state_error(&"migration advisory lock was not held"))
+                Result.Err(state_error("migration advisory lock was not held"))
             }
-            _ => Result.Err(state_error(&"invalid advisory unlock response")),
+            _ => Result.Err(state_error("invalid advisory unlock response")),
         }
     }
 
@@ -370,7 +370,7 @@ implement MigrationStore for PostgresMigrationStore {
 
     async fn drop_tracking_table(&mut self) -> Result<(), DbError> {
         require_idle(&self.conn)?;
-        if self.held_lock is Maybe.Some(_) { return Result.Err(state_error(&"cannot drop a locked migration store")); }
+        if self.held_lock is Maybe.Some(_) { return Result.Err(state_error("cannot drop a locked migration store")); }
         if self.table is Maybe.None { return Result.Ok(()); }
         let (table, oid) = self.initialized_table()?;
         self.acquire_lock().await?;
