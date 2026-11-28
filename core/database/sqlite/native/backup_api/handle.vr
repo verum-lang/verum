@@ -44,6 +44,15 @@ public fn new_handle(
 
 implement BackupHandle {
     public fn is_live(&self) -> Bool { !self.finished }
+    public fn page_count(&self) -> Int { self.total_pages }
+    public fn remaining(&self) -> Int { self.remaining_pages }
+
+    public(in core.database.sqlite.native) fn restart(&mut self, total_pages: Int) {
+        self.total_pages = total_pages;
+        self.remaining_pages = total_pages;
+        self.finished = false;
+    }
+
     public fn record_progress(&mut self, pages: Int) {
         if pages <= 0 { return; }
         if self.remaining_pages >= pages {

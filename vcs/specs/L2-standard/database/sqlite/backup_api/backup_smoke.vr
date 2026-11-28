@@ -13,7 +13,7 @@ mount core.database.sqlite.native.backup_api.request.{
     from_n_pages, is_noop, requested_pages,
 };
 mount core.database.sqlite.native.backup_api.outcome.{
-    BackupOutcome, BoOk, BoDone, BoBusy, BoLocked, BoFailed,
+    BackupOutcome, BoOk, BoDone, BoBusy, BoLocked,
     outcome_numeric, outcome_name, is_retriable, is_progress, is_terminal,
 };
 mount core.database.sqlite.native.errors.code.{
@@ -26,8 +26,8 @@ fn test_new_handle_total_and_remaining() {
         1 as Int64, 1 as Int64, "main".clone(),
         2 as Int64, "main".clone(), 100,
     );
-    assert_eq(h.total_pages, 100);
-    assert_eq(h.remaining_pages, 100);
+    assert_eq(h.page_count(), 100);
+    assert_eq(h.remaining(), 100);
     assert(h.is_live());
 }
 
@@ -37,9 +37,9 @@ fn test_record_progress_shrinks_remaining() {
         2 as Int64, "main".clone(), 100,
     );
     h.record_progress(30);
-    assert_eq(h.remaining_pages, 70);
+    assert_eq(h.remaining(), 70);
     h.record_progress(100);
-    assert_eq(h.remaining_pages, 0);
+    assert_eq(h.remaining(), 0);
 }
 
 fn test_progress_fraction_pct() {
@@ -84,11 +84,10 @@ fn test_outcome_numeric_matches_c_header() {
     assert_eq(outcome_numeric(&BoDone), 101);
     assert_eq(outcome_numeric(&BoBusy), 5);
     assert_eq(outcome_numeric(&BoLocked), 6);
-    let failed: BackupOutcome = BoFailed {
-        code: extended_of(PcError, 0),
-        reason: "boom".clone(),
-    };
-    assert(outcome_numeric(&failed) != 0);
+    let failed = BackupOutcome.failed(extended_of(PcError, 0), "boom");
+    assert_eq(outcome_numeric(&failed), 1);
+    assert_eq(failed.failure_message(), "boom");
+    assert(is_terminal(&failed));
 }
 
 fn test_outcome_name() {

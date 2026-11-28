@@ -31,6 +31,16 @@ public type BackupOutcome is
     | BoLocked
     | BoFailed { code: ExtendedCode, reason: Text };
 
+implement BackupOutcome {
+    public fn failed(code: ExtendedCode, reason: Text) -> BackupOutcome {
+        BoFailed { code, reason }
+    }
+
+    public fn failure_message(&self) -> Text {
+        match self { BoFailed { reason, .. } => reason.clone(), _ => outcome_name(self) }
+    }
+}
+
 public fn outcome_numeric(o: &BackupOutcome) -> Int {
     match o {
         BoOk      => 0,

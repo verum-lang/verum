@@ -173,3 +173,43 @@ fn sqlite_pager_keeps_live_cache_and_journal_state_with_the_owner() {
         );
     }
 }
+
+#[test]
+fn sqlite_backup_handle_reports_progress_and_preserves_field_privacy() {
+    let session = crate::Session::new(crate::CompilerOptions::default());
+    let (registry, phase) = release_stdlib_graph(&session);
+    for owner in [
+        "core.database.sqlite.native.backup_api.handle",
+        "core.database.sqlite.native.backup_api.outcome",
+    ] {
+        let module = registry.read().get_by_path(owner).unwrap().ast.clone();
+        check_source_module(&mut phase.configured_checker(), owner, &module, &registry)
+            .unwrap_or_else(|diagnostics| panic!("{owner}: {diagnostics:#?}"));
+    }
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let fixture = workspace.join("vcs/specs/L2-standard/database/sqlite/backup_api/backup_smoke.vr");
+    let source = std::fs::read_to_string(fixture).unwrap();
+    let module = Parser::new(&source).parse_module().unwrap();
+    check_source_module(&mut phase.configured_checker(), "application", &module, &registry)
+        .unwrap_or_else(|diagnostics| panic!("backup handle client: {diagnostics:#?}"));
+    for field in ["remaining_pages", "total_pages", "finished"] {
+        let source = format!(
+            "module application; mount core.database.sqlite.native.backup_api.handle.BackupHandle;
+             fn forge(handle: &mut BackupHandle) {{ let leak = &mut handle.{field}; }}"
+        );
+        let module = Parser::new(&source).parse_module().unwrap();
+        let errors = check_source_module(
+            &mut phase.configured_checker(),
+            "application",
+            &module,
+            &registry,
+        )
+        .expect_err("client bypassed the backup handle");
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.code() == Some("E202") && error.message().contains(field)),
+            "{errors:#?}"
+        );
+    }
+}
