@@ -2985,7 +2985,7 @@ implement<T> IndexMut<Int> for List<T> {
 // Eq && Debug
 // =============================================================================
 
-implement<T: Eq> PartialEq for List<T> {
+implement<T: PartialEq> PartialEq for List<T> {
     fn eq(&self, other: &List<T>) -> Bool {
         if self.len != other.len {
             return false;

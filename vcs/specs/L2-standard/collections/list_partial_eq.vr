@@ -1,0 +1,24 @@
+// @test: run
+// @tier: 0
+// @level: L2
+// @tags: collections, protocols, equality
+// @expected-exit: 0
+// @description: List compares values whose equality may be non-reflexive.
+mount core.collections.list.List;
+
+type Reading is { value: Float };
+implement PartialEq for Reading {
+    fn eq(&self, other: &Reading) -> Bool { self.value == other.value }
+}
+
+fn equal_values<T: PartialEq>(a: &T, b: &T) -> Bool { a.eq(b) }
+
+fn main() {
+    let one: List<Reading> = [Reading { value: 1.0 }];
+    let same: List<Reading> = [Reading { value: 1.0 }];
+    let other: List<Reading> = [Reading { value: 2.0 }];
+    let missing: List<Reading> = [Reading { value: Float.from_bits(0x7ff8000000000000) }];
+    assert(equal_values(&one, &same));
+    assert(!equal_values(&one, &other));
+    assert(!equal_values(&missing, &missing));
+}
