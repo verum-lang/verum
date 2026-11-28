@@ -47,6 +47,11 @@ public fn new_engine() -> FreeEngine {
 implement FreeEngine {
     public fn set_hard_limit(&mut self, n: Int64) { self.hard_limit = n; }
 
+    /// Outstanding bytes and successful malloc, free and realloc counts.
+    public fn snapshot(&self) -> (Int64, Int64, Int64, Int64) {
+        (self.outstanding_bytes, self.mallocs, self.frees, self.reallocs)
+    }
+
     fn reject_oom(&self, size: Int64) -> Bool {
         self.hard_limit > 0_i64
             && (self.outstanding_bytes + size) > self.hard_limit
@@ -75,8 +80,9 @@ implement FreeEngine {
 
     public fn sqlite3_free(&mut self, h: &OpaqueHandle) {
         if is_null(h) { return; }
-        if self.outstanding_bytes >= h.size {
-            self.outstanding_bytes = self.outstanding_bytes - h.size;
+        let size = self.sqlite3_msize(h);
+        if self.outstanding_bytes >= size {
+            self.outstanding_bytes = self.outstanding_bytes - size;
         } else {
             self.outstanding_bytes = 0 as Int64;
         }
@@ -88,16 +94,17 @@ implement FreeEngine {
     public fn sqlite3_realloc(&mut self, old: &OpaqueHandle, new_size: Int) -> OpaqueHandle {
         if new_size <= 0 { self.sqlite3_free(old); return null_handle(); }
         let size = new_size as Int64;
-        let delta = if size > old.size { size - old.size } else { 0 as Int64 };
+        let old_size = self.sqlite3_msize(old);
+        let delta = if size > old_size { size - old_size } else { 0 as Int64 };
         if self.reject_oom(delta) { return null_handle(); }
         self.reallocs = self.reallocs + 1_i64;
-        self.outstanding_bytes = self.outstanding_bytes + (size - old.size);
+        self.outstanding_bytes = self.outstanding_bytes + (size - old_size);
         let id = self.next_id;
         self.next_id = self.next_id + 1_i64;
         new_handle(id, size)
     }
 
     public fn sqlite3_msize(&self, h: &OpaqueHandle) -> Int64 {
-        h.size
+        h.allocation_size()
     }
 }

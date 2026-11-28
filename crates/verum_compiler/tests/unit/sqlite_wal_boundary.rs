@@ -2,6 +2,29 @@
 use super::*;
 
 #[test]
+fn sqlite_allocator_keeps_handle_sizes_and_accounting_under_their_owners() {
+    let session = crate::Session::new(crate::CompilerOptions::default());
+    let (registry, phase) = release_stdlib_graph(&session);
+    for owner in ["core.database.sqlite.native.free_api.ptr", "core.database.sqlite.native.free_api.engine"] {
+        let module = registry.read().get_by_path(owner).unwrap().ast.clone();
+        check_source_module(&mut phase.configured_checker(), owner, &module, &registry)
+            .unwrap_or_else(|diagnostics| panic!("{owner}: {diagnostics:#?}"));
+    }
+    let client = include_str!("../../../../vcs/specs/L2-standard/database/sqlite/free_api/alloc_smoke.vr");
+    let module = Parser::new(client).parse_module().unwrap();
+    check_source_module(&mut phase.configured_checker(), "application", &module, &registry)
+        .unwrap_or_else(|diagnostics| panic!("SQLite allocation client: {diagnostics:#?}"));
+    for (owner, name, field) in [("ptr", "OpaqueHandle", "size"), ("engine", "FreeEngine", "outstanding_bytes")] {
+        let source = format!("module application; mount core.database.sqlite.native.free_api.{owner}.{name};
+            fn forge(value: &mut {name}) {{ value.{field} = 1_i64; }}");
+        let module = Parser::new(&source).parse_module().unwrap();
+        let errors = check_source_module(&mut phase.configured_checker(), "application", &module, &registry)
+            .expect_err("outside caller modified private allocator state");
+        assert!(errors.iter().any(|error| error.code() == Some("E202") && error.message().contains(field)), "{errors:#?}");
+    }
+}
+
+#[test]
 fn sqlite_wal_reader_uses_the_private_writer_and_wire_header_contracts() {
     let session = crate::Session::new(crate::CompilerOptions::default());
     let (registry, phase) = release_stdlib_graph(&session);

@@ -22,6 +22,10 @@ public type OpaqueHandle is {
     size: Int64,
 }
 
+implement OpaqueHandle {
+    public(in core.database.sqlite.native.free_api) fn allocation_size(&self) -> Int64 { self.size }
+}
+
 public fn null_handle() -> OpaqueHandle {
     OpaqueHandle { id: 0 as Int64, size: 0 as Int64 }
 }
