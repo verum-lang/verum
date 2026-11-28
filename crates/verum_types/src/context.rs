@@ -1308,6 +1308,13 @@ pub(crate) enum ReferenceOrigin {
 
 pub(crate) type RecordFieldOrigins = Map<Text, List<crate::ty::RecordReceiver>>;
 
+#[derive(Clone, Copy)]
+enum StoredRead {
+    Referent,
+    CollectionElement,
+    InlineField,
+}
+
 /// Identity changes on a write. An old alias can never attach its evidence
 /// to a subsequently installed value, even when the binding name is reused.
 #[derive(Clone, Debug, Default)]
@@ -1322,7 +1329,9 @@ struct RecordPlace {
     /// Origins inserted after construction into a proved owned storage slot.
     /// The existing binding still owns its original incoming loan identity.
     inserted_origins: List<crate::ty::RecordReceiver>,
-    unverified_write: Option<Span>,
+    /// Each path identifies an inline subplace whose previous stored loans
+    /// no longer describe its payload. An empty path covers the entire binding.
+    unverified_writes: List<(List<Text>, Span)>,
 }
 
 impl RecordPlace {
@@ -1332,6 +1341,19 @@ impl RecordPlace {
         if let Some(ReferenceOrigin::Exact(origin)) = &self.reference {
             self.reference = Some(ReferenceOrigin::Candidates(Box::new([origin.clone()])));
         }
+    }
+
+    fn invalidate_payload(&mut self, fields: &[Text], span: Span) {
+        if self.unverified_writes.iter().any(|(written, _)| fields.starts_with(written)) {
+            return;
+        }
+        self.unverified_writes.retain(|(written, _)| !written.starts_with(fields));
+        self.unverified_writes.push((List::from(fields), span));
+    }
+
+    fn unverified_write(&self, fields: &[Text]) -> Option<Span> {
+        self.unverified_writes.iter().find_map(|(written, span)|
+            (written.starts_with(fields) || fields.starts_with(written)).then_some(*span))
     }
 
     fn identity(&mut self) -> Option<u64> {
@@ -1880,7 +1902,7 @@ impl TypeEnv {
                 place.reference = Some(if complete { ReferenceOrigin::OwnedPayload(sources.into()) }
                     else { ReferenceOrigin::Candidates(sources.into()) });
                 place.inserted_origins.clear();
-                place.unverified_write = None;
+                place.unverified_writes.clear();
                 return true;
             }
             if !scope.origins_dominate_parent { return false; }
@@ -1929,7 +1951,7 @@ impl TypeEnv {
 
     pub(crate) fn binding_has_payload_origins(&mut self, name: &str) -> bool {
         self.local_record_place(name).is_some_and(|place| {
-            place.unverified_write.is_none()
+            place.unverified_writes.is_empty()
                 && matches!(place.reference, Some(ReferenceOrigin::OwnedPayload(_) | ReferenceOrigin::OwnedRecord { .. }))
         })
     }
@@ -1950,7 +1972,7 @@ impl TypeEnv {
                             | ReferenceOrigin::Parameter
                             | ReferenceOrigin::Exact(_)
                     )
-                ) && place.unverified_write.is_none();
+                ) && place.unverified_writes.is_empty();
             }
             scope = env.parent.as_deref();
         }
@@ -1960,6 +1982,7 @@ impl TypeEnv {
     pub(crate) fn invalidate_payload_origins(
         &mut self,
         destination: &crate::ty::RecordReceiver,
+        inline_fields: &[Text],
         span: Span,
     ) {
         let mut scope = self;
@@ -1970,7 +1993,7 @@ impl TypeEnv {
                 if destination.fields.is_empty() {
                     place.may_replace_reference();
                 }
-                place.unverified_write = Some(span);
+                place.invalidate_payload(inline_fields, span);
                 return;
             }
             let Some(parent) = scope.parent.as_deref_mut() else { return; };
@@ -1987,7 +2010,7 @@ impl TypeEnv {
         while scope.parent.is_some() {
             for place in scope.record_places.values_mut() {
                 if matches!(place.reference, Some(ReferenceOrigin::Parameter)) {
-                    place.unverified_write = Some(span);
+                    place.invalidate_payload(&[], span);
                 }
             }
             scope = scope.parent.as_deref_mut().expect("lexical parent");
@@ -2002,18 +2025,18 @@ impl TypeEnv {
                 if matches!(place.reference, Some(ReferenceOrigin::Parameter | ReferenceOrigin::Exact(_)
                     | ReferenceOrigin::Candidates(_) | ReferenceOrigin::OwnedPayload(_) | ReferenceOrigin::OwnedRecord { .. })) {
                     place.may_replace_reference();
-                    place.unverified_write = Some(span);
+                    place.invalidate_payload(&[], span);
                 }
             }
             scope = scope.parent.as_deref_mut().expect("lexical parent");
         }
     }
 
-    pub(crate) fn unverified_payload_write(&self, binding: u64) -> Option<Span> {
+    pub(crate) fn unverified_payload_write(&self, source: &crate::ty::RecordReceiver) -> Option<Span> {
         let mut scope = Some(self);
         while let Some(env) = scope {
-            if let Some(place) = env.record_places.values().find(|place| place.id == Some(binding)) {
-                return place.unverified_write;
+            if let Some(place) = env.record_places.values().find(|place| place.id == Some(source.binding)) {
+                return place.unverified_write(&source.fields);
             }
             scope = env.parent.as_deref();
         }
@@ -2027,7 +2050,7 @@ impl TypeEnv {
         &self,
         source: &crate::ty::RecordReceiver,
     ) -> Option<List<crate::ty::RecordReceiver>> {
-        self.stored_value_origins(source, false)
+        self.stored_value_origins(source, StoredRead::Referent)
     }
 
     /// An incoming collection's pre-existing elements belong to the caller.
@@ -2036,11 +2059,19 @@ impl TypeEnv {
     pub(crate) fn collection_element_origins(
         &self, source: &crate::ty::RecordReceiver,
     ) -> Option<List<crate::ty::RecordReceiver>> {
-        self.stored_value_origins(source, true)
+        self.stored_value_origins(source, StoredRead::CollectionElement)
+    }
+
+    /// Distinct inline slots can hold references to the same external object.
+    /// Only observed field contents supply a narrower referent identity.
+    pub(crate) fn inline_field_value_origins(
+        &self, source: &crate::ty::RecordReceiver,
+    ) -> Option<List<crate::ty::RecordReceiver>> {
+        self.stored_value_origins(source, StoredRead::InlineField)
     }
 
     fn stored_value_origins(
-        &self, source: &crate::ty::RecordReceiver, collection_element: bool,
+        &self, source: &crate::ty::RecordReceiver, read: StoredRead,
     ) -> Option<List<crate::ty::RecordReceiver>> {
         let mut scope = Some(self);
         while let Some(env) = scope {
@@ -2055,8 +2086,13 @@ impl TypeEnv {
                     Some(ReferenceOrigin::OwnedRecord { origins, fields }) => source.fields.first()
                         .and_then(|field| fields.get(field)).cloned()
                         .unwrap_or_else(|| origins.clone()),
-                    Some(ReferenceOrigin::Parameter) if collection_element => List::new(),
-                    Some(ReferenceOrigin::Parameter) => List::from_iter([source.clone()]),
+                    Some(ReferenceOrigin::Parameter) => match read {
+                        StoredRead::CollectionElement => List::new(),
+                        StoredRead::Referent => List::from_single(source.clone()),
+                        StoredRead::InlineField => List::from_single(crate::ty::RecordReceiver {
+                            binding: source.binding, fields: List::new(),
+                        }),
+                    },
                     Some(ReferenceOrigin::RawAddress(_)) | None => List::new(),
                 };
                 for origin in &place.inserted_origins {

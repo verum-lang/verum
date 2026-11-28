@@ -207,3 +207,21 @@ fn sorting_text_keys_uses_the_source_comparison_contract() {
     check_source_module(&mut phase.configured_checker(), "sort_keys", &module, &registry)
         .unwrap_or_else(|errors| panic!("{errors:#?}"));
 }
+
+#[test]
+fn field_write_through_a_dhe_pool_preserves_the_disjoint_config_loan() {
+    let session = crate::Session::new(crate::options::CompilerOptions::default());
+    let (registry, phase) = release_stdlib_graph(&session);
+    let source = r#"module handshake_client;
+        mount core.net.tls13.handshake.dhe_pool.DhePool;
+        mount core.net.tls13.named_group.NamedGroup;
+        type Config is { pool: Heap<dyn DhePool>, setting: &Int };
+        type State is { config: Config };
+        fn after_key(mut state: State, group: NamedGroup) -> &Int {
+            let key = state.config.pool.take(group);
+            state.config.setting
+        }"#;
+    let module = Parser::new(source).parse_module().unwrap();
+    check_source_module(&mut phase.configured_checker(), "handshake_client", &module, &registry)
+        .unwrap_or_else(|errors| panic!("DhePool.take: {errors:#?}"));
+}

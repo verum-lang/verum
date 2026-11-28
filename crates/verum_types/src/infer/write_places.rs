@@ -15,6 +15,13 @@ pub(super) struct EvaluatedOperand {
     raw_address: Option<Box<[RecordReceiver]>>,
 }
 
+/// Selecting a deeper inline field uses its parent's type without copying the
+/// parent or observing loans in unrelated sibling fields.
+pub(super) enum PlaceOperand {
+    TypeOnly(Option<Type>),
+    Value(Option<EvaluatedOperand>),
+}
+
 fn unparen(mut expr: &Expr) -> &Expr {
     while let ExprKind::Paren(inner) = &expr.kind {
         expr = inner;
@@ -143,40 +150,50 @@ impl TypeChecker {
         let mut requested = Map::new();
         for arg in args {
             let arg = unparen(arg);
-            requested.insert(std::ptr::from_ref(arg).addr(), None);
+            requested.insert(std::ptr::from_ref(arg).addr(), PlaceOperand::Value(None));
         }
         match &unparen(place).kind {
             ExprKind::Call { func, .. } => {
-                requested.insert(std::ptr::from_ref(unparen(func)).addr(), None);
+                requested.insert(std::ptr::from_ref(unparen(func)).addr(), PlaceOperand::Value(None));
             }
             ExprKind::MethodCall { receiver, .. } => {
-                requested.insert(std::ptr::from_ref(unparen(receiver)).addr(), None);
+                requested.insert(std::ptr::from_ref(unparen(receiver)).addr(), PlaceOperand::Value(None));
             }
             ExprKind::Tuple(values) | ExprKind::Array(verum_ast::ArrayExpr::List(values)) => {
                 for value in values {
-                    requested.insert(std::ptr::from_ref(unparen(value)).addr(), None);
+                    requested.insert(std::ptr::from_ref(unparen(value)).addr(), PlaceOperand::Value(None));
                 }
             }
             ExprKind::Array(verum_ast::ArrayExpr::Repeat { value, .. }) => {
-                requested.insert(std::ptr::from_ref(unparen(value)).addr(), None);
+                requested.insert(std::ptr::from_ref(unparen(value)).addr(), PlaceOperand::Value(None));
             }
             ExprKind::Record { fields, base, .. } => {
                 for value in fields.iter().filter_map(|field| field.value.as_ref()).chain(base.as_deref()) {
-                    requested.insert(std::ptr::from_ref(unparen(value)).addr(), None);
+                    requested.insert(std::ptr::from_ref(unparen(value)).addr(), PlaceOperand::Value(None));
                 }
             }
             _ if !args.is_empty() => {
-                requested.insert(std::ptr::from_ref(unparen(place)).addr(), None);
+                requested.insert(std::ptr::from_ref(unparen(place)).addr(), PlaceOperand::Value(None));
             }
             _ => {}
         }
         for place in std::iter::once(place).chain(args.iter()) {
             let mut step = unparen(place);
             while let Some((operand, _)) = place_operand(step) {
+                let selecting_field = matches!(&step.kind, ExprKind::Field { .. });
                 step = unparen(operand);
                 if !matches!(&step.kind, ExprKind::Path(p) if p.segments.len() == 1 && self.ctx.env.lookup(p.last_segment_name()).is_some())
                 {
-                    requested.insert(std::ptr::from_ref(step).addr(), None);
+                    let entry = requested.entry(std::ptr::from_ref(step).addr());
+                    entry.or_insert_with(|| {
+                        if selecting_field && matches!(&step.kind, ExprKind::Field { .. })
+                            && self.call_input_place(step).is_some()
+                        {
+                            PlaceOperand::TypeOnly(None)
+                        } else {
+                            PlaceOperand::Value(None)
+                        }
+                    });
                 }
             }
         }
@@ -197,12 +214,18 @@ impl TypeChecker {
             return;
         }
         let key = std::ptr::from_ref(unparen(expr)).addr();
-        if !self.place_operands.iter().any(|scope| scope.contains_key(&key)) {
-            return;
+        let mut observe_value = false;
+        for scope in &mut self.place_operands {
+            match scope.get_mut(&key) {
+                Some(PlaceOperand::TypeOnly(slot)) => *slot = Some(ty.clone()),
+                Some(PlaceOperand::Value(_)) => observe_value = true,
+                None => (),
+            }
         }
+        if !observe_value { return; }
         // Observe before another argument or the invocation can mutate a
         // source place. Empty candidates are not a no-write/cleanup proof.
-        let previous_type = self.observed_operand_type(expr);
+        let previous_type = self.observed_operand(expr).map(|operand| self.unifier.apply(&operand.ty));
         let previous_origins = self.observed_operand_origins(expr);
         let mut origins = self.aggregate_origins(expr, ty);
         if self.reference_mode(ty, expr.span).is_ok_and(|mode| mode.is_some()) {
@@ -226,7 +249,7 @@ impl TypeChecker {
         };
         let observed = EvaluatedOperand { ty: ty.clone(), origins, known_owned_payload, raw_address };
         for scope in &mut self.place_operands {
-            if let Some(slot) = scope.get_mut(&key) {
+            if let Some(PlaceOperand::Value(slot)) = scope.get_mut(&key) {
                 *slot = Some(observed.clone());
             }
         }
@@ -579,30 +602,29 @@ impl TypeChecker {
 
     pub(super) fn observed_operand_type(&self, expr: &Expr) -> Option<Type> {
         let key = std::ptr::from_ref(unparen(expr)).addr();
-        self.place_operands
-            .iter()
-            .rev()
-            .find_map(|scope| scope.get(&key)?.as_ref())
-            .map(|operand| self.unifier.apply(&operand.ty))
+        self.place_operands.iter().rev().find_map(|scope| match scope.get(&key)? {
+            PlaceOperand::TypeOnly(ty) => ty.as_ref(),
+            PlaceOperand::Value(operand) => operand.as_ref().map(|operand| &operand.ty),
+        }).map(|ty| self.unifier.apply(ty))
+    }
+
+    fn observed_operand(&self, expr: &Expr) -> Option<&EvaluatedOperand> {
+        let key = std::ptr::from_ref(unparen(expr)).addr();
+        self.place_operands.iter().rev().find_map(|scope| match scope.get(&key)? {
+            PlaceOperand::Value(operand) => operand.as_ref(),
+            PlaceOperand::TypeOnly(_) => None,
+        })
     }
 
     pub(super) fn observed_operand_origins(&self, expr: &Expr) -> Option<List<RecordReceiver>> {
-        let key = std::ptr::from_ref(unparen(expr)).addr();
-        self.place_operands.iter().rev()
-            .find_map(|scope| scope.get(&key)?.as_ref())
-            .map(|operand| operand.origins.clone())
+        Some(self.observed_operand(expr)?.origins.clone())
     }
 
     pub(super) fn observed_known_owned_payload(&self, expr: &Expr) -> bool {
-        let key = std::ptr::from_ref(unparen(expr)).addr();
-        self.place_operands.iter().rev()
-            .find_map(|scope| scope.get(&key)?.as_ref())
-            .is_some_and(|operand| operand.known_owned_payload)
+        self.observed_operand(expr).is_some_and(|operand| operand.known_owned_payload)
     }
 
     pub(super) fn observed_raw_address(&self, expr: &Expr) -> Option<List<RecordReceiver>> {
-        let key = std::ptr::from_ref(unparen(expr)).addr();
-        self.place_operands.iter().rev().find_map(|scope| scope.get(&key)?.as_ref())?
-            .raw_address.as_deref().map(List::from)
+        self.observed_operand(expr)?.raw_address.as_deref().map(List::from)
     }
 }

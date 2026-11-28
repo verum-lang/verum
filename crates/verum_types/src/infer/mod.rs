@@ -616,7 +616,7 @@ pub struct TypeChecker {
     /// Origins of evaluated values are local to the current function's binding identities.
     evaluated_value_origins: Map<Span, reference_origin::EvaluatedValueOrigins>,
     closure_return_depth: Maybe<usize>,
-    place_operands: List<Map<usize, Maybe<write_places::EvaluatedOperand>>>,
+    place_operands: List<Map<usize, write_places::PlaceOperand>>,
     /// Type context
     pub(crate) ctx: TypeContext,
     /// Unifier

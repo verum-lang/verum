@@ -870,3 +870,66 @@ fn a_selected_helper_retains_the_loans_of_either_conditional_result() {
         }
     }
 }
+
+#[test]
+fn an_opaque_field_write_preserves_only_disjoint_inline_payloads() {
+    let declarations = "type Branch is { left: Payload, right: Payload };
+        type Bundle is { nested: Branch, other: Payload };
+        fn update(slot: &mut Payload);
+        fn replace_all(slot: &mut Bundle);";
+    for projection in ["value.nested.right.ptr", "value.other.ptr"] {
+        let source = format!("fn read(mut value:Bundle)->&Int {{
+            update(&mut value.nested.left); {projection} }}");
+        let errors = diagnostics(declarations, &source);
+        assert!(errors.is_empty(), "{source}: {errors:?}");
+    }
+    let errors = diagnostics(declarations, "fn incoming()->Payload;
+        fn after_assignment(mut value:Bundle)->&Int {
+            value.nested.left=incoming(); value.nested.right.ptr }");
+    assert!(errors.is_empty(), "{errors:?}");
+    let errors = diagnostics(declarations, "fn through_alias(mut value:Bundle)->&Int {
+        { let target=&mut value.nested.left; update(target); }
+        value.other.ptr }");
+    assert!(errors.is_empty(), "{errors:?}");
+    for (result, expression) in [
+        ("&Int", "value.nested.left.ptr"),
+        ("Branch", "value.nested"),
+        ("Bundle", "value"),
+    ] {
+        let source = format!("fn read(mut value:Bundle)->{result} {{
+            update(&mut value.nested.left); {expression} }}");
+        let errors = diagnostics(declarations, &source);
+        assert!(errors.iter().any(|error| error.contains("cannot establish the lifetime")),
+            "{source}: {errors:?}");
+    }
+    let errors = diagnostics(declarations, "fn read(mut value:Bundle)->&Int {
+        replace_all(&mut value); value.other.ptr }");
+    assert!(errors.iter().any(|error| error.contains("cannot establish the lifetime")), "{errors:?}");
+}
+
+#[test]
+fn disjoint_field_access_keeps_its_own_local_loan_and_opaque_capture_writes() {
+    let declarations = "type Pair is { changed: Payload, kept: Payload };
+        fn update(value:&mut Payload);";
+    let errors = diagnostics(declarations, "fn dangling(input:&Int)->&Int {
+        let short=19; let mut value=Pair {
+            changed:Payload{ptr:input, marker:1}, kept:Payload{ptr:&short, marker:2}
+        };
+        update(&mut value.changed); value.kept.ptr }");
+    assert!(errors.iter().any(|error| error.contains("short") && error.contains("does not live long enough")),
+        "{errors:?}");
+
+    for body in [
+        "fn replace_pair(slot:&mut Pair);
+         implement Pair { fn after_whole_write(&mut self)->&Int {
+             replace_pair(self); self.kept.ptr } }",
+        "fn callback_write(mut value:Pair, callback:fn(&mut Payload))->&Int {
+            callback(&mut value.kept); value.kept.ptr }",
+        "fn captured_write(mut value:Pair)->&Int {
+            { let change=|| update(&mut value.kept); change(); } value.kept.ptr }",
+    ] {
+        let errors = diagnostics(declarations, body);
+        assert!(errors.iter().any(|error| error.contains("cannot establish the lifetime")
+            || error.contains("borrow")), "{body}: {errors:?}");
+    }
+}

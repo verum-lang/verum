@@ -128,12 +128,15 @@ impl TypeChecker {
         complete: bool,
     ) -> crate::Result<()> {
         let targets = self.projected_store_destinations(destination);
-        self.retain_addressed_store(targets, incoming, complete, destination.span)
+        let inline = if !complete {
+            self.call_input_place(destination).map(|(place, _)| place)
+        } else { None };
+        self.retain_addressed_store(targets, inline.as_ref(), incoming, complete, destination.span)
     }
 
     fn retain_addressed_store(
-        &mut self, targets: Option<List<RecordReceiver>>, incoming: &[RecordReceiver],
-        complete: bool, span: verum_ast::Span,
+        &mut self, targets: Option<List<RecordReceiver>>, inline: Option<&RecordReceiver>,
+        incoming: &[RecordReceiver], complete: bool, span: verum_ast::Span,
     ) -> crate::Result<()> {
         let Some(targets) = targets else {
             self.refinement_evidence.invalidate_write(&[]);
@@ -148,7 +151,8 @@ impl TypeChecker {
             self.retain_origins_in_region(incoming, region, span)?;
             self.ctx.env.insert_owned_slot_origins(&target, incoming);
             if !complete {
-                self.ctx.env.invalidate_payload_origins(&target, span);
+                let fields = if inline == Some(&target) { target.fields.as_slice() } else { &[] };
+                self.ctx.env.invalidate_payload_origins(&target, fields, span);
             }
         }
         Ok(())
@@ -206,7 +210,7 @@ impl TypeChecker {
         }
         let incoming = self.observed_operand_origins(value);
         let complete = incoming.is_some() && self.observed_known_owned_payload(value);
-        self.retain_addressed_store(targets, incoming.as_deref().unwrap_or(&[]), complete, span)
+        self.retain_addressed_store(targets, None, incoming.as_deref().unwrap_or(&[]), complete, span)
     }
 
     pub(super) fn check_raw_store_intrinsic(
@@ -892,7 +896,7 @@ impl TypeChecker {
                     pending.extend(base.as_deref());
                 }
                 ExprKind::Field { expr, .. } | ExprKind::TupleIndex { expr, .. } => {
-                    if let Some(sources) = self.projected_value_origins(expr) {
+                    if let Some(sources) = self.projected_value_origins(value) {
                         for source in sources {
                             if !origins.contains(&source) {
                                 origins.push(source);
@@ -1101,7 +1105,7 @@ impl TypeChecker {
                 }
             }
             ExprKind::Field { expr, .. } | ExprKind::TupleIndex { expr, .. } => {
-                if let Some(origins) = self.projected_value_origins(expr) {
+                if let Some(origins) = self.projected_value_origins(value) {
                     for origin in origins {
                         add(found, origin);
                     }
@@ -1200,7 +1204,21 @@ impl TypeChecker {
     /// Field selection implicitly dereferences its receiver. Its value keeps
     /// the referent's payload loans, while an explicit `&receiver.field` still
     /// borrows that field's storage through the reference-formation path.
-    fn projected_value_origins(&mut self, receiver: &Expr) -> Option<List<RecordReceiver>> {
+    fn projected_value_origins(&mut self, projection: &Expr) -> Option<List<RecordReceiver>> {
+        let receiver = match &unparen(projection).kind {
+            ExprKind::Field { expr, field } => {
+                if let Some((mut place, owner)) = self.call_input_place(expr)
+                    && self.lookup_field_type(&self.record_conversion_head(&owner), &field.name).is_some()
+                {
+                    place.fields.push(field.name.clone());
+                    if !self.check_payload_origin_observation(&place) { return None; }
+                    return self.ctx.env.inline_field_value_origins(&place);
+                }
+                expr.as_ref()
+            }
+            ExprKind::TupleIndex { expr, .. } => expr.as_ref(),
+            _ => return None,
+        };
         let receiver = unparen(receiver);
         let ty = self.observed_operand_type(receiver).or_else(|| {
             self.type_registry.lookup_expr(receiver.span).cloned()
@@ -1489,7 +1507,7 @@ impl TypeChecker {
     }
 
     fn check_payload_origin_observation(&mut self, source: &RecordReceiver) -> bool {
-        let Some(span) = self.ctx.env.unverified_payload_write(source.binding) else {
+        let Some(span) = self.ctx.env.unverified_payload_write(source) else {
             return true;
         };
         let name = self.ctx.env.record_storage_name(source.binding).unwrap_or_else(|| "value".into());
@@ -1985,7 +2003,7 @@ impl TypeChecker {
                     let retains_shared = carries && self.may_retain_shared_loan(element);
                     for target in targets {
                         if !sources.contains(&(target.clone(), true)) { sources.push((target.clone(), true)); }
-                        if carries { destinations.push((target, argument.span, retains_shared)); }
+                        if carries { destinations.push((target, argument.span, retains_shared, false)); }
                     }
                 } else if carries {
                     unknown_raw_write = Some(argument.span);
@@ -2059,11 +2077,22 @@ impl TypeChecker {
                     if !is_callee && !callable_value(payload) && !callable_value(actual)
                         && let Some((source, _)) = self.call_input_place(argument)
                     {
-                        self.ctx.env.invalidate_payload_origins(&source, argument.span);
+                        self.ctx.env.invalidate_payload_origins(&source, &[], argument.span);
                     }
                 }
+                // Only a typed, inline place proves that sibling fields do not
+                // overlap this write. Dynamic indexing, raw pointers and unknown
+                // captured or reachable storage keep their enclosing write set.
+                let inline = if writes_payload {
+                    let value = match &unparen(argument).kind {
+                        ExprKind::Unary { op: UnOp::RefMut | UnOp::RefCheckedMut, expr } => expr,
+                        _ => argument,
+                    };
+                    self.call_input_place(value).map(|(place, _)| place)
+                } else { None };
                 for origin in origins {
-                    destinations.push((origin, argument.span, retains_shared));
+                    let exact = inline.as_ref() == Some(&origin);
+                    destinations.push((origin, argument.span, retains_shared, exact));
                 }
             }
         }
@@ -2078,8 +2107,9 @@ impl TypeChecker {
             }
             self.ctx.env.invalidate_unknown_raw_write(span);
         }
-        for (destination, span, retains_shared) in destinations {
-            self.ctx.env.invalidate_payload_origins(&destination, span);
+        for (destination, span, retains_shared, inline) in destinations {
+            let fields = if inline { destination.fields.as_slice() } else { &[] };
+            self.ctx.env.invalidate_payload_origins(&destination, fields, span);
             let incoming: List<_> = sources.iter()
                 .filter(|(source, writable)| source.binding != destination.binding
                     && (*writable || retains_shared))
