@@ -1,0 +1,62 @@
+module core.net.weft.tests.tracing;
+
+mount core.net.http.{Headers, Method, Response, StatusCode};
+mount core.net.weft.error.WeftError;
+mount core.net.weft.handler.{Handler, WeftRequest};
+mount core.net.weft.service.Layer;
+mount core.net.weft.tracing.{TraceContext, TracingHandler, TracingLayer};
+
+const TRACE_PREFIX: Text = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7";
+
+@test
+fn traceparent_checks_ids_and_flags() {
+    let sampled = TraceContext.parse_header(&f"{TRACE_PREFIX}-0f").unwrap();
+    let unsampled = TraceContext.parse_header(&f"{TRACE_PREFIX}-fe").unwrap();
+    assert_eq(sampled.to_header(), f"{TRACE_PREFIX}-01");
+    assert_eq(unsampled.to_header(), f"{TRACE_PREFIX}-00");
+    assert(TraceContext.parse_header(&f"{TRACE_PREFIX}-gg").is_none());
+    assert(TraceContext.parse_header(&"00-00000000000000000000000000000000-00f067aa0ba902b7-01").is_none());
+    assert(TraceContext.parse_header(&"00-4bf92f3577b34da6a3ce929d0e0e4736-0000000000000000-01").is_none());
+    let fresh = TraceContext.synthesise().to_header();
+    let parsed = TraceContext.parse_header(&fresh).unwrap();
+    assert_eq(parsed.to_header(), fresh);
+}
+
+type TraceEndpoint is { fail: Bool };
+
+implement Handler for TraceEndpoint {
+    type Error = WeftError;
+    async fn handle(&self, req: WeftRequest) -> Result<Response, WeftError> {
+        if self.fail { Result.Err(WeftError.Timeout) } else { Result.Ok(Response.new(StatusCode.ok())) }
+    }
+}
+
+@test
+async fn tracing_layer_propagates_the_header_and_preserves_failures() {
+    let mut headers = Headers.new();
+    headers.set(&"traceparent", &f"{TRACE_PREFIX}-0f");
+    let layer = TracingLayer.named("trace-test");
+    let applied: &dyn Layer<TraceEndpoint, Wrapped = TracingHandler<TraceEndpoint>> = &layer;
+    let endpoint: TracingHandler<TraceEndpoint> = applied.wrap(TraceEndpoint { fail: false });
+    let success = WeftRequest.new(Method.Get, "/ok", Maybe.None, headers, []);
+    let response: Response = match endpoint.handle(success).await {
+        Result.Ok(reply) => reply,
+        Result.Err(_) => panic("tracing rejected a valid request"),
+    };
+    assert_eq(*response.headers().get(&"traceparent").unwrap(), f"{TRACE_PREFIX}-01");
+
+    let mut invalid = Headers.new();
+    invalid.set(&"traceparent", &"broken");
+    let recover = WeftRequest.new(Method.Get, "/recover", Maybe.None, invalid, []);
+    let generated: Response = match endpoint.handle(recover).await {
+        Result.Ok(reply) => reply,
+        Result.Err(_) => panic("tracing rejected a malformed incoming header"),
+    };
+    let header = generated.headers().get(&"traceparent").unwrap();
+    let parsed = TraceContext.parse_header(header).unwrap();
+    assert_eq(parsed.to_header(), *header);
+
+    let failure: TracingHandler<TraceEndpoint> = applied.wrap(TraceEndpoint { fail: true });
+    let request = WeftRequest.new(Method.Get, "/timeout", Maybe.None, Headers.new(), []);
+    assert(failure.handle(request).await is Result.Err(WeftError.Timeout));
+}

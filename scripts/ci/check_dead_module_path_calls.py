@@ -142,20 +142,9 @@ ALWAYS_MODULE_ROOTS = {"core", "super", "cog"}
 # through a WRONG module is invisible to a gate whose name is "dead module
 # path calls".
 #
-# Not hypothetical: `core/net/weft/tracing.vr` logs three span lines
-# through `core.base.logger.info` / `.warn`. The module is
-# `core.base.log`; `core.base.logger` does not exist. `info` IS declared
-# (log.vr:513), so the leaf check passes it and every span line in the
-# weft tracing layer goes to a path that cannot resolve.
-#
-# THE POPULATION IS ONE, measured before the check was written rather than
-# feared: 2496 module paths (every `module X;` plus all its prefixes)
-# against every fully-rooted `core.` call in the tree gives exactly one
-# distinct (prefix, file). So this half carries a roster of one, and a
-# second entry appearing is a real event.
-KNOWN_DEAD_MODULES: set[tuple[str, str]] = {
-    ("core.base.logger", "core/net/weft/tracing.vr"),
-}
+# A call can name an existing function through an absent module. Keep this
+# roster independent of the leaf-name check so both identities are validated.
+KNOWN_DEAD_MODULES: set[tuple[str, str]] = set()
 
 # EMPTY, and written as `set()` rather than `{}` — the latter is an empty
 # DICT in Python and `set - dict` raises. The population reached zero on
