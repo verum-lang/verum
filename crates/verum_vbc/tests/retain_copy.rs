@@ -71,6 +71,47 @@ fn retaining_shared_storage_updates_only_the_explicitly_writable_atomic_field() 
 }
 
 #[test]
+fn denied_writes_through_a_stored_reference_preserve_the_counter_and_neighbor() {
+    use verum_vbc::interpreter::{InterpreterError, ObjectHeader};
+    use verum_vbc::value::{Capabilities, ThinRef, Value};
+
+    let fixture = include_str!("fixtures/retained_allocation.vr");
+    let (declarations, _) = fixture.split_once("fn main()").unwrap();
+    for operation in [
+        "let copied = retain(alias);",
+        "let stored = alias.ptr; unsafe { (*stored).strong = 8; }",
+    ] {
+        let source = format!(r#"{declarations}
+            fn create() -> Allocation {{ Allocation {{ strong: 1, neighbor: 11 }} }}
+            fn attempt(allocation: &Allocation) {{
+                let value = 73;
+                let ticket = Ticket {{ ptr: allocation as &unsafe mut Allocation, value: &value }};
+                let alias = &ticket;
+                {operation}
+            }}
+        "#);
+        let module = wire(&source);
+        let create = module.find_function_by_name("create").unwrap();
+        let attempt = module.find_function_by_name("attempt").unwrap();
+        let mut vm = Interpreter::new(module.into());
+        let mut allocation = vm.execute_function(create).unwrap();
+        let header = allocation.as_ptr::<ObjectHeader>();
+        assert!(vm.state.heap.contains(header));
+        let data = header.wrapping_add(1).cast();
+        let reference = Value::from_thin_ref(ThinRef::new(
+            (&mut allocation as *mut Value).cast(), 0, 0, Capabilities::READ_ONLY,
+        ));
+        let error = vm.execute_function_with_args(attempt, &[reference]).unwrap_err();
+        assert!(matches!(error, InterpreterError::CapabilityDenied { .. }), "{error:?}");
+        let live = vm.state.heap.get_object(data).expect("original Allocation remains live");
+        assert!(live.size() as usize >= std::mem::size_of::<[Value; 2]>());
+        // SAFETY: the live source record contains the two initialized Value fields.
+        let [count, neighbor] = unsafe { live.data_ptr().cast::<[Value; 2]>().read() };
+        assert_eq!((count.try_as_i64(), neighbor.try_as_i64()), (Some(1), Some(11)), "{operation}");
+    }
+}
+
+#[test]
 fn zero_and_overflow_refuse_and_release_the_unpublished_wrapper() {
     for count in [0, u32::MAX] {
         let module = wire(&SOURCE.replace("strong: 1", &format!("strong: {count}")));
