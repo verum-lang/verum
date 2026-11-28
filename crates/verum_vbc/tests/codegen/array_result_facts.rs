@@ -339,6 +339,42 @@ fn reading_a_record_field_preserves_only_unrelated_list_freshness() {
     assert!(!facts.is_fresh_list(fresh));
 }
 
+#[test]
+fn slice_length_preserves_unrelated_producers_only_for_complete_operands() {
+    let list = Reg(130);
+    let length = Reg(8);
+    let slice = Reg(270);
+    let observe_length = |facts: &mut ArrayResultFacts, dst, src, trailing: &[u8]| {
+        let mut operands = vec![];
+        encode_reg(dst, &mut operands);
+        encode_reg(src, &mut operands);
+        operands.extend_from_slice(trailing);
+        facts.observe(&Instruction::CbgrExtended {
+            sub_op: crate::instruction::CbgrSubOpcode::SliceLen.to_byte(),
+            operands,
+        })
+    };
+    let mut facts = ArrayResultFacts::default();
+    facts.observe(&Instruction::NewList { dst: list, capacity_hint: 0 });
+    assert!(observe_length(&mut facts, length, slice, &[]));
+    assert!(facts.is_fresh_list(list));
+    assert_eq!(facts.get(length), None);
+    assert!(observe_length(&mut facts, list, slice, &[]));
+    assert_eq!(facts.get(list), None);
+
+    facts.observe(&Instruction::NewList { dst: list, capacity_hint: 0 });
+    assert!(!observe_length(&mut facts, length, slice, &[0]));
+    assert!(!facts.is_fresh_list(list));
+    for operands in [vec![8, 0x81], vec![0x80, 8, 0]] {
+        facts.observe(&Instruction::NewList { dst: list, capacity_hint: 0 });
+        assert!(!facts.observe(&Instruction::CbgrExtended {
+            sub_op: crate::instruction::CbgrSubOpcode::SliceLen.to_byte(),
+            operands,
+        }));
+        assert!(!facts.is_fresh_list(list));
+    }
+}
+
 fn sign_extend(dst: Reg, source: Reg, from_bits: u8) -> Instruction {
     let mut operands = vec![];
     encode_reg(dst, &mut operands);

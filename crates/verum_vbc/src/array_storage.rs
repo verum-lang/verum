@@ -187,30 +187,24 @@ impl ArrayResultFacts {
                     }
                 }
             }
+            I::CbgrExtended { sub_op, operands }
+                if crate::instruction::CbgrSubOpcode::from_byte(*sub_op)
+                    == Some(crate::instruction::CbgrSubOpcode::SliceLen) =>
+            {
+                let Some((destination, [])) = scalar_register_pair(operands) else {
+                    self.clear();
+                    return false;
+                };
+                self.forget(destination);
+            }
             I::ArithExtended { sub_op, operands }
                 if ArithSubOpcode::from_byte(*sub_op) == Some(ArithSubOpcode::SextI) =>
             {
-                // A validated scalar conversion overwrites only its result;
-                // it supplies no physical storage or integer-constant proof.
-                let mut cursor = 0;
-                let mut registers = [Reg(0); 2];
-                for register in &mut registers {
-                    let start = cursor;
-                    let Ok(decoded) = decode_reg(operands, &mut cursor) else {
-                        self.clear();
-                        return false;
-                    };
-                    if cursor - start != if decoded.0 < 128 { 1 } else { 2 } {
-                        self.clear();
-                        return false;
-                    }
-                    *register = decoded;
-                }
-                if !matches!(operands.get(cursor..), Some([8 | 16 | 32 | 64, 64])) {
+                let Some((destination, [8 | 16 | 32 | 64, 64])) = scalar_register_pair(operands) else {
                     self.clear();
                     return false;
-                }
-                self.forget(registers[0]);
+                };
+                self.forget(destination);
             }
             I::LoadK { dst, .. }
             | I::LoadF { dst, .. }
@@ -257,6 +251,20 @@ impl ArrayResultFacts {
         self.fresh_lists.remove(&register);
         self.values.insert(register, fact);
     }
+}
+
+/// Read the destination and source before an extended scalar operation's immediates.
+fn scalar_register_pair(operands: &[u8]) -> Option<(Reg, &[u8])> {
+    let mut cursor = 0;
+    let mut read = || {
+        let start = cursor;
+        let register = decode_reg(operands, &mut cursor).ok()?;
+        let width = if register.0 < 128 { 1 } else { 2 };
+        (cursor - start == width).then_some(register)
+    };
+    let destination = read()?;
+    read()?;
+    Some((destination, &operands[cursor..]))
 }
 
 /// Summarize one completed, straight-line executable body. This establishes the
