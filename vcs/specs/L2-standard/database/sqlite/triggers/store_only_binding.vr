@@ -1,0 +1,20 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L2
+// @tags: sqlite, triggers, visibility
+// @expected-error: E400 "bind_subprogram"
+// @expected-error-count: 2
+
+module core.database.sqlite.native.trigger_tests.store_only_binding;
+
+mount core.database.sqlite.native.triggers.spec.TriggerDef;
+
+fn bind_without_store(trigger: &mut TriggerDef) {
+    trigger.bind_subprogram(7);
+}
+
+fn bind_by_type_name(trigger: &mut TriggerDef) {
+    TriggerDef.bind_subprogram(trigger, 7);
+}
+
+fn main() {}

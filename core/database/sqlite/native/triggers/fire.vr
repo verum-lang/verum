@@ -33,7 +33,7 @@ mount core.database.sqlite.native.l4_vdbe.register.{
 };
 mount core.database.sqlite.native.triggers.spec.{
     TriggerDef, SqlTriggerEvent, TeInsert, TeDelete, TeUpdate,
-    RowBindingKind, RbNew, RbOld, row_binding_available_for_event,
+    RowBindingKind, RbNew, RbOld,
 };
 
 // -----------------------------------------------------------------------------
@@ -69,11 +69,11 @@ implement RowBinding {
         match kind {
             RbNew => {
                 if col_idx < 0 || col_idx >= self.new_row.len() { return RNull; }
-                clone_register(&self.new_row[col_idx])
+                self.new_row[col_idx].clone()
             }
             RbOld => {
                 if col_idx < 0 || col_idx >= self.old_row.len() { return RNull; }
-                clone_register(&self.old_row[col_idx])
+                self.old_row[col_idx].clone()
             }
         }
     }
@@ -99,26 +99,8 @@ public type FireDecision is FdSkip | FdRun(Int);
 
 public fn decide_fire(trig: &TriggerDef, when_truthy: Bool) -> FireDecision {
     if !when_truthy { return FdSkip; }
-    if trig.sub_program_id <= 0 { return FdSkip; }
-    FdRun(trig.sub_program_id)
-}
-
-// -----------------------------------------------------------------------------
-// Helpers
-// -----------------------------------------------------------------------------
-
-fn clone_register(r: &Register) -> Register {
-    match r {
-        RNull          => RNull,
-        core.database.sqlite.native.l4_vdbe.register.RInt(x)   => core.database.sqlite.native.l4_vdbe.register.RInt(x),
-        core.database.sqlite.native.l4_vdbe.register.RReal(x)  => core.database.sqlite.native.l4_vdbe.register.RReal(x),
-        core.database.sqlite.native.l4_vdbe.register.RText(s)  => core.database.sqlite.native.l4_vdbe.register.RText(s.clone()),
-        core.database.sqlite.native.l4_vdbe.register.RBlob(b)  => {
-            let mut out: List<Byte> = List.new();
-            let mut i: Int = 0;
-            while i < b.len() { out.push(b[i]); i = i + 1; }
-            core.database.sqlite.native.l4_vdbe.register.RBlob(out)
-        }
-        core.database.sqlite.native.l4_vdbe.register.RRowId(x) => core.database.sqlite.native.l4_vdbe.register.RRowId(x),
+    match trig.subprogram() {
+        Maybe.Some(id) => FdRun(id),
+        Maybe.None => FdSkip,
     }
 }

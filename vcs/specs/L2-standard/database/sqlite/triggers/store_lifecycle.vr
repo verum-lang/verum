@@ -1,4 +1,4 @@
-// @test: typecheck-pass
+// @test: run-interpreter
 // @tier: 0
 // @level: L2
 // @tags: sqlite, triggers, store
@@ -9,31 +9,25 @@
 // store for matches at each DML hook combination, drops the table
 // and verifies cascade.
 
+module core.database.sqlite.native.trigger_tests.store_lifecycle;
+
 mount core.database.sqlite.native.triggers.spec.{
-    TriggerDef, TriggerTiming, TriggerEvent,
-    TtBefore, TtAfter, TtInsteadOf,
-    TeInsert, TeDelete, TeUpdate,
-    trigger_def_new,
-    RowBindingKind, RbNew, RbOld, row_binding_available_for_event,
+    TtBefore, TtAfter, TtInsteadOf, TeInsert, TeDelete, TeUpdate,
+    trigger_def_new, RbNew, RbOld, row_binding_available_for_event,
 };
-mount core.database.sqlite.native.triggers.store.{
-    TriggerStore, store_new,
-};
+mount core.database.sqlite.native.triggers.store.store_new;
 mount core.database.sqlite.native.triggers.fire.{
-    RowBinding, binding_for_insert, binding_for_delete, binding_for_update,
-    validate_binding_for_event, decide_fire,
-    FireDecision, FdSkip, FdRun,
+    binding_for_insert, validate_binding_for_event, decide_fire, FdSkip, FdRun,
 };
 mount core.database.sqlite.native.l4_vdbe.register.{Register, RNull, RInt};
 
 fn test_event_match_logic() {
-    let mut t = trigger_def_new(
+    let t = trigger_def_new(
         "audit".clone(),
         "users".clone(),
         TtAfter,
         TeInsert,
     );
-    let _ = &mut t;
     assert(t.fires_on_event(&TeInsert));
     assert(!t.fires_on_event(&TeDelete));
 }
@@ -71,6 +65,9 @@ fn test_store_add_and_match() {
     assert_eq(match_before.len(), 1);
     let match_after = s.matching(&"users".clone(), &TtAfter, &TeInsert);
     assert_eq(match_after.len(), 1);
+    assert_eq(s.matching(&"elsewhere".clone(), &TtBefore, &TeInsert).len(), 0);
+    assert_eq(s.matching(&"users".clone(), &TtInsteadOf, &TeInsert).len(), 0);
+    assert_eq(s.matching(&"users".clone(), &TtBefore, &TeDelete).len(), 0);
 }
 
 fn test_drop_named() {
@@ -89,6 +86,9 @@ fn test_drop_for_table_cascade() {
     let dropped = s.drop_for_table(&"alpha".clone());
     assert_eq(dropped, 2);
     assert_eq(s.count(), 1);
+    let remaining = s.names();
+    assert_eq(remaining[0], "t2");
+    assert_eq(s.drop_for_table(&"gone".clone()), 0);
 }
 
 fn test_row_bindings_for_event() {
@@ -105,6 +105,8 @@ fn test_binding_lookup() {
     let mut new_row: List<Register> = List.new();
     new_row.push(RInt(42_i64));
     let b = binding_for_insert(new_row);
+    assert(validate_binding_for_event(&b, &TeInsert));
+    assert(!validate_binding_for_event(&b, &TeDelete));
     let v = b.lookup(&RbNew, 0);
     match v {
         RInt(x) => assert_eq(x, 42 as Int64),
@@ -118,15 +120,35 @@ fn test_binding_lookup() {
 }
 
 fn test_decide_fire() {
-    let mut t = trigger_def_new("x".clone(), "u".clone(), TtBefore, TeInsert);
-    t.sub_program_id = 7;
-    match decide_fire(&t, true) {
-        FdRun(id) => assert_eq(id, 7),
-        FdSkip    => panic("should fire"),
+    let mut store = store_new();
+    let mut trigger = trigger_def_new("x".clone(), "u".clone(), TtBefore, TeInsert);
+    trigger.set_schema("temp".clone());
+    trigger.set_when("NEW.value > 0".clone());
+    trigger.add_body_stmt("SELECT 1".clone());
+    match decide_fire(&trigger, true) {
+        FdSkip => {},
+        FdRun(_) => panic("unregistered trigger must skip"),
     }
-    match decide_fire(&t, false) {
+    let id = store.add(trigger);
+    let stored = store.matching(&"u".clone(), &TtBefore, &TeInsert);
+    assert_eq(stored.len(), 1);
+    let mut second = store_new();
+    let _ = second.add(trigger_def_new("other".clone(), "u".clone(), TtAfter, TeDelete));
+    let second_id = second.add(stored[0]);
+    assert(second_id != id);
+    assert(store.drop_named(&"x".clone()));
+    match decide_fire(&stored[0], true) {
+        FdRun(selected) => assert_eq(selected, id),
+        FdSkip => panic("registered trigger should fire"),
+    }
+    match decide_fire(&stored[0], false) {
         FdSkip    => {},
         FdRun(_)  => panic("WHEN false should skip"),
+    }
+    let registered_again = second.matching(&"u".clone(), &TtBefore, &TeInsert);
+    match decide_fire(&registered_again[0], true) {
+        FdRun(selected) => assert_eq(selected, second_id),
+        FdSkip => panic("second store must select its own identifier"),
     }
 }
 

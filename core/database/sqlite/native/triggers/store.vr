@@ -17,12 +17,10 @@
 )
 module core.database.sqlite.native.triggers.store;
 
-mount base.{Text, Maybe, Bool};
+mount base.{Text, Bool};
 mount collections.List;
 mount core.database.sqlite.native.triggers.spec.{
     TriggerDef, SqlTriggerTiming, SqlTriggerEvent,
-    TtBefore, TtAfter, TtInsteadOf,
-    TeInsert, TeDelete, TeUpdate,
 };
 
 // -----------------------------------------------------------------------------
@@ -47,7 +45,7 @@ implement TriggerStore {
 
     public fn add(&mut self, mut def: TriggerDef) -> Int {
         let id = self.next_subprogram_id;
-        def.sub_program_id = id;
+        def.bind_subprogram(id);
         self.next_subprogram_id = id + 1;
         self.triggers.push(def);
         id
@@ -56,14 +54,8 @@ implement TriggerStore {
     public fn drop_named(&mut self, name: &Text) -> Bool {
         let mut i: Int = 0;
         while i < self.triggers.len() {
-            if self.triggers[i].name == name {
-                let mut new_triggers: List<TriggerDef> = List.new();
-                let mut k: Int = 0;
-                while k < self.triggers.len() {
-                    if k != i { new_triggers.push(clone_def(&self.triggers[k])); }
-                    k = k + 1;
-                }
-                self.triggers = new_triggers;
+            if self.triggers[i].name().eq(name) {
+                let _ = self.triggers.remove(i);
                 return true;
             }
             i = i + 1;
@@ -82,8 +74,8 @@ implement TriggerStore {
         let mut i: Int = 0;
         while i < self.triggers.len() {
             let t = &self.triggers[i];
-            if t.table_name == table_name && timing_eq(&t.timing, timing) && t.fires_on_event(event) {
-                out.push(clone_def(t));
+            if t.matches_hook(table_name, timing, event) {
+                out.push(*t);
             }
             i = i + 1;
         }
@@ -93,80 +85,18 @@ implement TriggerStore {
     /// Drop every trigger attached to a given table — called when
     /// the table itself is dropped.
     public fn drop_for_table(&mut self, table_name: &Text) -> Int {
-        let mut new_triggers: List<TriggerDef> = List.new();
-        let mut dropped: Int = 0;
-        let mut i: Int = 0;
-        while i < self.triggers.len() {
-            if self.triggers[i].table_name != table_name {
-                new_triggers.push(clone_def(&self.triggers[i]));
-            } else {
-                dropped = dropped + 1;
-            }
-            i = i + 1;
-        }
-        self.triggers = new_triggers;
-        dropped
+        let before = self.triggers.len();
+        self.triggers.retain(|trigger| !trigger.is_for_table(table_name));
+        before - self.triggers.len()
     }
 
     public fn names(&self) -> List<Text> {
         let mut out: List<Text> = List.new();
         let mut i: Int = 0;
         while i < self.triggers.len() {
-            out.push(self.triggers[i].name.clone());
+            out.push(self.triggers[i].name().clone());
             i = i + 1;
         }
         out
-    }
-}
-
-fn timing_eq(a: &SqlTriggerTiming, b: &SqlTriggerTiming) -> Bool {
-    match a {
-        TtBefore    => match b { TtBefore    => true, _ => false },
-        TtAfter     => match b { TtAfter     => true, _ => false },
-        TtInsteadOf => match b { TtInsteadOf => true, _ => false },
-    }
-}
-
-fn clone_def(d: &TriggerDef) -> TriggerDef {
-    let mut body: List<core.database.sqlite.native.triggers.spec.TriggerBodyStmt> = List.new();
-    let mut i: Int = 0;
-    while i < d.body.len() {
-        body.push(core.database.sqlite.native.triggers.spec.TriggerBodyStmt {
-            sql: d.body[i].sql.clone(),
-        });
-        i = i + 1;
-    }
-    let when_c = match &d.when_clause { Maybe.Some(s) => Maybe.Some(s.clone()), Maybe.None => Maybe.None };
-    TriggerDef {
-        name: d.name.clone(),
-        schema_name: d.schema_name.clone(),
-        timing: clone_timing(&d.timing),
-        event: clone_event(&d.event),
-        table_name: d.table_name.clone(),
-        for_each_row: d.for_each_row,
-        when_clause: when_c,
-        body: body,
-        sub_program_id: d.sub_program_id,
-    }
-}
-
-fn clone_timing(t: &SqlTriggerTiming) -> SqlTriggerTiming {
-    match t {
-        TtBefore    => TtBefore,
-        TtAfter     => TtAfter,
-        TtInsteadOf => TtInsteadOf,
-    }
-}
-
-fn clone_event(e: &SqlTriggerEvent) -> SqlTriggerEvent {
-    match e {
-        TeInsert    => TeInsert,
-        TeDelete    => TeDelete,
-        TeUpdate(cols) => {
-            let mut out: List<Text> = List.new();
-            let mut i: Int = 0;
-            while i < cols.len() { out.push(cols[i].clone()); i = i + 1; }
-            TeUpdate(out)
-        }
     }
 }

@@ -1,0 +1,21 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L2
+// @tags: sqlite, triggers, visibility
+// @expected-error: E202 "'sub_program_id' is Private"
+// @expected-error: E202 "'body' is Private"
+// @expected-error-count: 2
+
+module core.database.sqlite.native.trigger_tests.private_registration;
+
+mount core.database.sqlite.native.triggers.spec.TriggerDef;
+
+fn forge_registration(trigger: &mut TriggerDef) {
+    trigger.sub_program_id = Maybe.Some(7);
+}
+
+fn inspect_statements(trigger: &TriggerDef) -> Int {
+    trigger.body.len()
+}
+
+fn main() {}
