@@ -8212,12 +8212,11 @@ pub enum CbgrSubOpcode {
     /// Unlike `RefSlice`, this does not read the source's ObjectHeader to infer
     /// element size — the raw pointer may point into the middle of an allocation
     /// (e.g. past the heap string header), so reading an ObjectHeader at that
-    /// offset would be incorrect. Produces `FatRef { ptr, len, elem_size=1 }`,
-    /// i.e. a byte slice. This is the lowering target for the generic stdlib
-    /// `slice_from_raw_parts<T>` intrinsic, whose primary use sites are
-    /// `Text.as_bytes()` and binary buffers indexed one byte at a time.
+    /// offset would be incorrect. The operand carries the declared element
+    /// stride, selected from 1, 2, 4 or 8 bytes. The shared raw-parts
+    /// constructor restricts the resulting view with a shared projection.
     ///
-    /// Format: `dst:reg, ptr:reg, len:reg`
+    /// Format: `dst:reg, ptr:reg, len:reg, stride:u8`
     RefSliceRaw = 0x0A,
 
     /// Create interior reference to a List<T> element by element-index.

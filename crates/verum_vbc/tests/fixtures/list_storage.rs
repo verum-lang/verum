@@ -46,6 +46,7 @@ fn named_type(ty: &verum_ast::Type, name: &str) -> bool {
 struct ClientMethods {
     clone: bool,
     retain: bool,
+    slice_parts: bool,
 }
 
 impl Visitor for ClientMethods {
@@ -54,6 +55,10 @@ impl Visitor for ClientMethods {
             match method.name.as_str() {
                 "clone" => self.clone = true,
                 "retain" | "retain_mut" => self.retain = true,
+                "split_first" | "split_last" | "as_mut_slice" | "checked_as_slice"
+                | "checked_as_mut_slice" | "checked_split_first" | "checked_split_last" => {
+                    self.slice_parts = true;
+                }
                 _ => {}
             }
         }
@@ -112,6 +117,8 @@ pub fn source_module(source: &str, rename_methods: bool) -> verum_vbc::VbcModule
                     "swap_remove",
                 ]
                 .contains(&f.name.name.as_str())
+                    || (client.slice_parts && matches!(f.name.as_str(),
+                        "as_slice" | "as_mut_slice" | "split_first" | "split_last"))
                 {
                     if rename_methods {
                         // An alias exercises the same source body independently of

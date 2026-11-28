@@ -1,0 +1,52 @@
+module core.mem.allocator;
+
+mount core.base.result.Result;
+mount core.database.sqlite.native.l2_record.varint.decode;
+mount core.intrinsics.runtime.mem_raw.{load_byte, store_byte};
+
+fn write_and_observe_metadata(header: &unsafe mut AllocPageHeader, base: Int) -> Bool {
+    unsafe { (*header).slot_count = 12_u16; }
+    let first = base + PAGE_HEADER_SIZE;
+    store_byte(first - 1, 0x19);
+    store_byte(first + 12, 0x2B);
+    {
+        let bytes = unsafe { header.slot_metadata_mut() };
+        if bytes.len() != 12 { return false; }
+        bytes[0] = 0x81_u8;
+        bytes[1] = 0x02_u8;
+        bytes[11] = 0x49_u8;
+    }
+    let bytes = unsafe { header.slot_metadata() };
+    let valid = match decode(bytes, 0) {
+        Result.Ok((value, consumed)) => value == 130_i64 && consumed == 2,
+        Result.Err(_) => false,
+    };
+    valid && bytes.len() == 12 && bytes[11] == 0x49_u8
+        && load_byte(first - 1) == 0x19 && load_byte(first) == 0x81
+        && load_byte(first + 1) == 0x02 && load_byte(first + 11) == 0x49
+        && load_byte(first + 12) == 0x2B
+}
+
+fn reserve_metadata_page() -> Int {
+    match cbgr_alloc_zeroed(256, 64) {
+        Result.Ok((block, _, _)) => block as Int,
+        Result.Err(_) => 0,
+    }
+}
+
+fn release_metadata_page(base: Int) {
+    unsafe { cbgr_deallocate(base); }
+}
+
+fn metadata_control() -> Int {
+    let base = reserve_metadata_page();
+    if base == 0 { return 0; }
+    let valid = write_and_observe_metadata(base as &unsafe mut AllocPageHeader, base);
+    release_metadata_page(base);
+    if valid { 73 } else { 0 }
+}
+
+@test
+fn allocated_page_metadata_is_readable_as_packed_sqlite_bytes() {
+    assert_eq(metadata_control(), 73);
+}

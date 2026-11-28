@@ -35804,6 +35804,32 @@ impl VbcCodegen {
         use crate::intrinsics::registry::{CodegenStrategy, InlineSequenceId};
         use crate::types::{Mutability, TypeRef};
         let pointer = operands.first();
+        if let CodegenStrategy::InlineSequence(InlineSequenceId::MakeSlice { mutable }) = strategy {
+            let [ptr, len] = args else {
+                return Err(CodegenError::internal(
+                    "raw slice requires a pointer and length",
+                ));
+            };
+            let declaration =
+                pointer.and_then(|operand| self.projection_operand_declaration(operand));
+            let Some(TypeRef::Reference {
+                inner,
+                tier: CbgrTier::Tier2,
+                mutability,
+            }) = declaration
+            else {
+                return Err(CodegenError::new(CodegenErrorKind::TypeInference(
+                    "raw slice requires its source pointee declaration".into(),
+                )));
+            };
+            if *mutable && mutability != Mutability::Mutable {
+                return Err(CodegenError::new(CodegenErrorKind::TypeInference(
+                    "writable raw slice requires a mutable pointer".into(),
+                )));
+            }
+            self.emit_declared_raw_slice(dest, *ptr, *len, *inner, *mutable)?;
+            return Ok(true);
+        }
         if let CodegenStrategy::InlineSequence(
             operation @ (InlineSequenceId::HeapSlotInit | InlineSequenceId::HeapSlotTake
                 | InlineSequenceId::HeapSlotBorrow { .. }),
@@ -35911,13 +35937,6 @@ impl VbcCodegen {
                 | "intrinsic_ptr_offset"
                 | "ptr_add"
                 | "ptr_sub"
-                // #48 phase-2: the slice producers obey the SAME probe-
-                // proven buffer-stride discipline — the stride of the
-                // memory BEHIND the pointer is 1 only for the genuine
-                // packed `&unsafe Byte` idiom; `*const T` / `&Byte` /
-                // List<Byte> backings are 8-byte NaN-boxed Value arrays.
-                | "slice_from_raw_parts"
-                | "slice_from_raw_parts_mut"
         );
         if !is_ptr_arith {
             return DEFAULT_STRIDE;
@@ -37223,14 +37242,9 @@ impl VbcCodegen {
                 }
             }
 
-            InlineSequenceId::MakeSlice => {
-                let [ptr, len] = args else {
-                    return Err(CodegenError::internal("raw slice requires a pointer and length"));
-                };
-                let view = crate::encoding::RawSliceOperands::new(dest, *ptr, *len, byte_width)
-                    .ok_or_else(|| CodegenError::internal(format!("invalid raw slice stride {byte_width}")))?;
-                self.ctx.emit(view.instruction());
-            }
+            InlineSequenceId::MakeSlice { .. } => return Err(CodegenError::internal(
+                "raw slice requires its declared pointer operand",
+            )),
 
             InlineSequenceId::Uninit => {
                 // Return uninitialized value (just allocate register, don't init)

@@ -70,7 +70,7 @@ mount super.epoch.{GLOBAL_EPOCH};
 // Import intrinsics as functions
 mount core.intrinsics.runtime.cbgr.{cbgr_deallocate};
 mount core.intrinsics.{
-    ptr_read, ptr_write, ptr_offset,
+    ptr_read, ptr_write, ptr_offset, ptr_offset_mut,
     slice_from_raw_parts, slice_from_raw_parts_mut,
     atomic_load_u32, atomic_load_i32,
     atomic_store_u32, atomic_exchange_i32,
@@ -598,25 +598,23 @@ implement AllocPageHeader {
         unsafe { ptr_write(last_slot, -1 as Int16) };
     }
 
-    /// Get pointer to slot metadata array (1 byte per slot)
+    /// Borrow the slot metadata bytes immediately following the page header.
     @inline
     public fn slot_metadata(&self) -> &[UInt8] {
-        let base = self as &unsafe Byte;
-        let offset = PAGE_HEADER_SIZE;
+        let count = self.slot_count as USize;
         unsafe {
-            let ptr = ptr_offset(base, offset);
-            slice_from_raw_parts(ptr as &unsafe UInt8, self.slot_count as Int)
+            let ptr = ptr_offset(self as &unsafe UInt8, PAGE_HEADER_SIZE as ISize);
+            slice_from_raw_parts(ptr, count)
         }
     }
 
-    /// Get mutable pointer to slot metadata
+    /// Borrow the slot metadata bytes for in-place updates.
     @inline
     public fn slot_metadata_mut(&mut self) -> &mut [UInt8] {
-        let base = self as &unsafe Byte;
-        let offset = PAGE_HEADER_SIZE;
+        let count = self.slot_count as USize;
         unsafe {
-            let ptr = ptr_offset(base, offset);
-            slice_from_raw_parts_mut(ptr as &unsafe UInt8, self.slot_count as Int)
+            let ptr = ptr_offset_mut(self as &unsafe mut UInt8, PAGE_HEADER_SIZE as ISize);
+            slice_from_raw_parts_mut(ptr, count)
         }
     }
 

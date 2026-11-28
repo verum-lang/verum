@@ -1,6 +1,17 @@
 //! Exercise the default allocator's mounted public declarations on both backends.
 #[path = "support/source_image.rs"]
 mod source_image;
+#[cfg(target_os = "macos")]
+#[path = "../../verum_vbc/tests/fixtures/page_metadata.rs"]
+mod page_metadata;
+
+#[test]
+#[cfg(target_os = "macos")]
+fn page_metadata_uses_packed_bytes_in_the_native_sqlite_decoder() {
+    let bytes = verum_vbc::serialize::serialize_module(&page_metadata::module()).unwrap();
+    let wire = verum_vbc::deserialize::deserialize_module_validated(&bytes).unwrap();
+    source_image::run_module(wire, |_| {});
+}
 
 // Build the executable link unit from the operation declarations used by this
 // consumer. These operations are bodyless and their implementation is the

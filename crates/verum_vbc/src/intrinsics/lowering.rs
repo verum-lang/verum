@@ -1197,7 +1197,7 @@ impl IntrinsicLowering {
                     None
                 }
             }
-            InlineSequenceId::MakeSlice => {
+            InlineSequenceId::MakeSlice { .. } => {
                 // Pack ptr and len into LLVM fat pointer struct
                 self.emit(MlirOp {
                     name: "llvm.mlir.undef".to_string(),

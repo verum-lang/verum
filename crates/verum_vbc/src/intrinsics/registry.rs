@@ -555,7 +555,7 @@ pub enum InlineSequenceId {
     /// drop_in_place: run destructor via pointer
     DropInPlace,
     /// make_slice: construct fat pointer from ptr + len
-    MakeSlice,
+    MakeSlice { mutable: bool },
     /// slice_len: extract length from fat pointer
     SliceLen,
     /// slice_as_ptr: extract pointer from fat pointer
@@ -1595,7 +1595,7 @@ impl Intrinsic {
             CodegenStrategy::RetainCopy
             // Constructs a slice descriptor from pointer and length on the
             // calling stack. This bound establishes only absence of suspension.
-            | CodegenStrategy::InlineSequence(InlineSequenceId::MakeSlice)
+            | CodegenStrategy::InlineSequence(InlineSequenceId::MakeSlice { .. })
             // Reads process state and constructs the result on the calling stack.
             | CodegenStrategy::InlineSequence(InlineSequenceId::EnvGetSeq)
             | CodegenStrategy::SystemRegisters(
@@ -2405,7 +2405,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         ],
         param_count: 2,  // ptr, len
         return_count: 1, // fat pointer (ptr, len)
-        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::MakeSlice),
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::MakeSlice { mutable: false }),
         mlir_op: Some("verum.slice.from_raw"),
         doc: "Create slice from raw parts",
     },
@@ -2419,7 +2419,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         ],
         param_count: 2, // ptr, len
         return_count: 1,
-        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::MakeSlice),
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::MakeSlice { mutable: true }),
         mlir_op: Some("verum.slice.from_raw_mut"),
         doc: "Create mutable slice from raw parts",
     },

@@ -2,6 +2,27 @@
 use super::*;
 
 #[test]
+fn slab_page_metadata_requires_a_mutable_receiver_to_write() {
+    let session = crate::Session::new(crate::CompilerOptions::default());
+    let (registry, phase) = release_stdlib_graph(&session);
+    let check = |body: &str| {
+        let source = format!("module application; mount core.mem.allocator.AllocPageHeader; {body}");
+        let module = Parser::new(&source).parse_module().unwrap();
+        check_source_module(&mut phase.configured_checker(), "application", &module, &registry)
+    };
+    check("fn read(p: &AllocPageHeader) -> UInt8 { p.slot_metadata()[0] }
+           fn write(p: &mut AllocPageHeader) { p.slot_metadata_mut()[0] = 129_u8; }")
+        .expect("public metadata access");
+    for body in [
+        "fn forge(p: &AllocPageHeader) { p.slot_metadata()[0] = 129_u8; }",
+        "fn forge(p: &mut AllocPageHeader) { let bytes = p.slot_metadata(); bytes[0] = 129_u8; }",
+    ] {
+        let errors = check(body).expect_err("shared metadata permitted a write");
+        assert!(errors.iter().any(|error| error.message().contains("shared reference")), "{body}: {errors:#?}");
+    }
+}
+
+#[test]
 fn sqlite_allocator_keeps_handle_sizes_and_accounting_under_their_owners() {
     let session = crate::Session::new(crate::CompilerOptions::default());
     let (registry, phase) = release_stdlib_graph(&session);

@@ -9,6 +9,93 @@ use verum_ast::{Expr, ExprKind, UnOp};
 use verum_common::{Heap, well_known_types::WellKnownType};
 
 impl VbcCodegen {
+    /// A generic raw-parts function receives the pointee in its ordinary
+    /// call witness. Select one of the scalar layouts supported by the
+    /// raw-slice instruction before publishing the view.
+    pub(super) fn emit_declared_raw_slice(
+        &mut self,
+        dest: Reg,
+        ptr: Reg,
+        len: Reg,
+        pointee: TypeRef,
+        mutable: bool,
+    ) -> CodegenResult<()> {
+        use crate::{
+            encoding::RawSliceOperands,
+            instruction::{CompareOp, LayoutProperty},
+        };
+        let raw = if mutable { dest } else { self.ctx.alloc_temp() };
+        let view =
+            |width| RawSliceOperands::new(raw, ptr, len, width).map(RawSliceOperands::instruction);
+        if let Some(stride) =
+            crate::type_layout::query_with(&pointee, LayoutProperty::Stride, |id| {
+                self.type_by_id(id)
+            })
+        {
+            let instruction = u8::try_from(stride).ok().and_then(view).ok_or_else(|| {
+                CodegenError::new(CodegenErrorKind::TypeInference(format!(
+                    "raw slice has unsupported element stride {stride}"
+                )))
+            })?;
+            self.ctx.emit(instruction);
+        } else {
+            let stride = self.ctx.alloc_temp();
+            let width = self.ctx.alloc_temp();
+            let matched = self.ctx.alloc_temp();
+            self.ctx.emit(Instruction::TypeLayout {
+                dst: stride,
+                type_ref: pointee,
+                property: LayoutProperty::Stride,
+            });
+            let ready = self.ctx.new_label("raw_slice_ready");
+            for bytes in [1_u8, 2, 4, 8] {
+                let next = self.ctx.new_label("raw_slice_next_width");
+                self.ctx.emit(Instruction::LoadI {
+                    dst: width,
+                    value: i64::from(bytes),
+                });
+                self.ctx.emit(Instruction::CmpI {
+                    op: CompareOp::Eq,
+                    dst: matched,
+                    a: stride,
+                    b: width,
+                });
+                self.ctx
+                    .emit_forward_jump(&next, |offset| Instruction::JmpNot {
+                        cond: matched,
+                        offset,
+                    });
+                self.ctx
+                    .emit(view(bytes).expect("supported raw slice width"));
+                self.ctx
+                    .emit_forward_jump(&ready, |offset| Instruction::Jmp { offset });
+                self.ctx.define_label(&next);
+            }
+            let message_id = self.intern_string("unsupported raw slice element stride");
+            self.ctx.emit(Instruction::Panic { message_id });
+            self.ctx.define_label(&ready);
+            for reg in [matched, width, stride] {
+                self.ctx.free_temp(reg);
+            }
+        }
+        if !mutable {
+            let zero = self.ctx.alloc_temp();
+            self.ctx.emit(Instruction::LoadI {
+                dst: zero,
+                value: 0,
+            });
+            let shared = self.emit_slice_projection(raw, zero, len, 0, false);
+            self.ctx.emit(Instruction::Mov {
+                dst: dest,
+                src: shared,
+            });
+            for reg in [shared, zero, raw] {
+                self.ctx.free_temp(reg);
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn emit_slice_projection(
         &mut self, source: Reg, start: Reg, length: Reg, stride: u16, mutable: bool,
     ) -> Reg {

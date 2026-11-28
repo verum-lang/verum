@@ -50,7 +50,7 @@ mount core.intrinsics.arithmetic.{ilog2};
 // bare variant `Equal` (e.g. the `cmp` chain), so the variants must
 // come in alongside the type.
 mount core.base.ordering.{Ordering, Less, Equal, Greater};
-mount core.intrinsics.memory.{ptr_read, ptr_write, slice_from_raw_parts, list_storage_stride, list_storage_read, list_storage_write, list_storage_move, list_storage_resize};
+mount core.intrinsics.memory.{ptr_read, ptr_write, list_storage_stride, list_storage_read, list_storage_write, list_storage_move, list_storage_resize};
 
 // =============================================================================
 // List<T>
@@ -729,16 +729,12 @@ implement<T> List<T> {
 
     // Get as slice.
     public fn as_slice(&self) -> &[T] {
-        unsafe {
-            slice_from_raw_parts(self.ptr, self.len)
-        }
+        &self[..]
     }
 
     // Get as mutable slice.
     public fn as_mut_slice(&mut self) -> &mut [T] {
-        unsafe {
-            slice_from_raw_parts_mut(self.ptr, self.len)
-        }
+        &mut self[..]
     }
 
     // =========================================================================
@@ -2334,11 +2330,7 @@ implement<T> List<T> {
         if self.len == 0 {
             return Maybe.None;
         }
-        let first_ref: &T = unsafe { &*self.ptr.offset(0) };
-        let rest = unsafe {
-            slice_from_raw_parts(self.ptr.offset(1) as &T, self.len - 1)
-        };
-        Maybe.Some((first_ref, rest))
+        Maybe.Some((&self[0], &self[1..]))
     }
 
     /// Returns the last element and the rest of the list as a slice,
@@ -2358,11 +2350,8 @@ implement<T> List<T> {
         if self.len == 0 {
             return Maybe.None;
         }
-        let last_ref: &T = unsafe { &*self.ptr.offset(self.len - 1) };
-        let init = unsafe {
-            slice_from_raw_parts(self.ptr as &T, self.len - 1)
-        };
-        Maybe.Some((last_ref, init))
+        let last = self.len - 1;
+        Maybe.Some((&self[last], &self[..last]))
     }
 
     /// Returns `true` if the list is sorted in ascending order.

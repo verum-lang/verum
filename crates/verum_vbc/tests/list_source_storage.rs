@@ -52,6 +52,39 @@ fn packed_and_slot_source_methods_preserve_values_and_capacity() {
         assert_eq!(execute(&source), 321, "{ty}");
     }
 }
+
+#[test]
+fn list_slice_methods_preserve_both_byte_storage_layouts() {
+    let source = r#"
+        mount core.intrinsics.memory.list_storage_stride;
+        fn triple<T>(a:T,b:T,c:T) -> List<T> {
+            let mut items: List<T> = List<T>.new();
+            items.push(a); items.push(b); items.push(c); items
+        }
+        fn check(xs:&mut List<Byte>,width:Int) -> Bool {
+            if unsafe { list_storage_stride(xs) } != width { return false; }
+            { let bytes = xs.checked_as_mut_slice(); bytes[1] = 73_u8; }
+            if xs.checked_as_slice()[1] != 73_u8 { return false; }
+            let first = match xs.checked_split_first() {
+                Maybe.Some((head, rest)) => *head == 11_u8 && rest.len() == 2 && rest[0] == 73_u8 && rest[1] == 211_u8,
+                _ => false,
+            };
+            let last = match xs.checked_split_last() {
+                Maybe.Some((tail, init)) => *tail == 211_u8 && init.len() == 2 && init[0] == 11_u8 && init[1] == 73_u8,
+                _ => false,
+            };
+            first && last && xs[1] == 73_u8
+        }
+        fn probe() -> Int {
+            let mut packed:List<Byte> = List<Byte>.new();
+            packed.push(11_u8); packed.push(97_u8); packed.push(211_u8);
+            let mut slots = triple(11_u8,97_u8,211_u8);
+            if check(&mut packed,1) && check(&mut slots,8) { 73 } else { 0 }
+        }
+    "#;
+    assert_eq!(execute(source), 73);
+    assert_eq!(execute_with_method_names(&source.replace("checked_", ""), false), 73);
+}
 #[test]
 fn source_moves_record_values_as_slots() {
     assert_eq!(

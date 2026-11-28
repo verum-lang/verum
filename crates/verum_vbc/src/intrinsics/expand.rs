@@ -787,12 +787,8 @@ fn expand_sequence(
             }
             e.emit(Instruction::LoadNil { dst: dest });
         }
-        InlineSequenceId::MakeSlice => {
-            let [ptr, len] = args else { return false; };
-            let Some(view) = crate::encoding::RawSliceOperands::new(dest, *ptr, *len, byte_width)
-                else { return false; };
-            e.emit(view.instruction());
-        }
+        // A register-only fallback has no source declaration for its pointee.
+        InlineSequenceId::MakeSlice { .. } => return false,
         InlineSequenceId::Uninit => {
             e.emit(Instruction::LoadUnit { dst: dest });
         }

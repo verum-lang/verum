@@ -209,6 +209,14 @@ Canonical constructor: `container_to_slice_fat_ref`
 fixed `*const Value` read would truncate a byte slice to the first element's
 tag bits.
 
+For an allocated byte buffer, `slice_from_raw_parts(ptr, len)` starts at
+`ptr` and advances one byte per element. Its generic body obtains this
+stride from the declared pointee of the call. The resulting slice grants
+read access. `slice_from_raw_parts_mut` requires a mutable pointer and
+grants write access. A `List<Byte>` can hold either packed bytes or value
+slots. Its slice methods borrow the corresponding range of the live list so
+the view inherits its storage layout.
+
 ## 3. `.as_ptr()` / `.as_mut_ptr()` — both spellings, since T1276
 
 > **`Unslice` returns `fat_ref.ptr()` for a `FatRef` and the `BYTE_SLICE`
