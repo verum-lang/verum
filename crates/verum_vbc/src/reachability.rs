@@ -87,9 +87,17 @@ pub fn analyze_with_roots(module: &VbcModule, extra_roots: &[u32]) -> VbcResult<
             // `$mono$` body was ever a by-name candidate. The module
             // carries 441 of them — measured by the trace below — and
             // the walk indexed every one under a key nobody asks for.
-            let bare = name.rsplit('.').next().unwrap_or(name);
-            let bare = bare.split("$mono$").next().unwrap_or(bare);
-            by_bare_name.entry(bare).or_default().push(f.id.0);
+            let linkage = name.rsplit('.').next().unwrap_or(name);
+            let linkage = linkage.split("$mono$").next().unwrap_or(linkage);
+            by_bare_name.entry(linkage).or_default().push(f.id.0);
+            // Several implementations may have distinct linkage symbols for
+            // the same declared member. CallM carries that source selector;
+            // specializations retain the declaration of their generic body.
+            if let Some(source) = &f.source_signature
+                && source.name.as_str() != linkage
+            {
+                by_bare_name.entry(source.name.as_str()).or_default().push(f.id.0);
+            }
         }
     }
     // Band/stub name table: id → qualified name.

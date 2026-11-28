@@ -20,6 +20,14 @@ const FLOAT_READ: &str = r#"
     }
 "#;
 
+#[cfg(target_os = "macos")]
+#[test]
+fn native_products_use_the_selected_structural_implementation() {
+    source_image::run_module(checked_wire(include_str!(
+        "../../verum_vbc/tests/fixtures/structural_product_dispatch.vr"
+    )), |_| {});
+}
+
 fn checked_wire(source: &str) -> VbcModule {
     let mut ast = Parser::new(source).parse_module().expect("source grammar");
     let mut checker = TypeChecker::with_minimal_context();
@@ -32,7 +40,7 @@ fn checked_wire(source: &str) -> VbcModule {
     );
     errors.extend(checker.take_deferred_errors());
     assert!(errors.is_empty(), "{errors:?}");
-    assert!(checker.diagnostic_sources().is_empty());
+    assert!(checker.diagnostic_sources().is_empty(), "{:?}", checker.diagnostic_sources());
     checker.commit_resolved_call_targets(&mut ast);
     let original = VbcCodegen::new()
         .compile_module(&ast)
