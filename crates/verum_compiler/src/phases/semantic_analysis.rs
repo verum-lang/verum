@@ -106,20 +106,27 @@ fn shared_diagnostic_locations(
     sources: &[(Text, Text, verum_ast::Module)],
     outcomes: &[SourceCheckOutcome],
 ) -> Text {
+    #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    enum Role { Primary, Related }
+
     let files: Set<_> = sources.iter().map(|(_, path, _)| path.as_str()).collect();
     let mut sites = OrderedMap::new();
     for ((owner, _, _), outcome) in sources.iter().zip(outcomes) {
         for diagnostic in &outcome.diagnostics {
             let mut visited = Set::new();
-            for label in diagnostic.secondary_labels() {
+            let primary = diagnostic.primary_labels().iter().map(|label| (Role::Primary, label));
+            let related = diagnostic.secondary_labels().iter().map(|label| (Role::Related, label));
+            for (role, label) in primary.chain(related) {
                 let span = &label.span;
                 if !files.contains(&span.file.as_str()) {
                     continue;
                 }
                 let site = (
-                    span.file.as_str(), span.line, span.column,
+                    role, span.file.as_str(), span.line, span.column,
                     span.end_line.unwrap_or(span.line), span.end_column,
-                    diagnostic.code(), label.message.as_str(),
+                    diagnostic.code(), match role {
+                        Role::Primary => diagnostic.message(), Role::Related => "",
+                    }, label.message.as_str(),
                 );
                 if visited.insert(site) {
                     let owners = sites.entry(site).or_insert_with(Map::new);
@@ -129,26 +136,41 @@ fn shared_diagnostic_locations(
         }
     }
     let mut shared: List<_> = sites.into_iter()
-        .filter(|(_, owners)| owners.len() > 1)
         .map(|(site, owners)| (site, owners.len(), owners.values().sum::<usize>()))
+        .filter(|(site, owners, count)| match site.0 {
+            Role::Primary => *count > 1, Role::Related => *owners > 1,
+        })
         .collect();
-    if shared.is_empty() {
-        return Text::new();
-    }
     shared.sort_by_key(|(site, owners, count)| {
-        (std::cmp::Reverse(*owners), std::cmp::Reverse(*count), *site)
+        (site.0, std::cmp::Reverse(*owners), std::cmp::Reverse(*count), *site)
     });
-    let mut rendered = Text::from("Related source locations shared by modules:\n");
-    for ((path, line, column, _, _, code, label), owners, count) in shared {
+    let mut rendered = Text::new();
+    let mut previous = None;
+    for ((role, path, line, column, _, _, code, message, label), owners, count) in shared {
+        if previous != Some(role) {
+            rendered.push_str(match role {
+                Role::Primary => "Repeated primary source diagnostics:\n",
+                Role::Related => "Related source locations shared by modules:\n",
+            });
+            previous = Some(role);
+        }
         rendered.push_str(&format!("  {path}:{line}:{column}: "));
         if let Some(code) = code {
             rendered.push_str(code);
             rendered.push(' ');
         }
-        rendered.push_str(&format!("{label} ({count} diagnostics in {owners} modules)\n"));
+        rendered.push_str(message);
+        if !message.is_empty() && !label.is_empty() { rendered.push_str(" — "); }
+        rendered.push_str(label);
+        let unit = if owners == 1 { "module" } else { "modules" };
+        rendered.push_str(&format!(" ({count} diagnostics in {owners} {unit})\n"));
     }
     rendered
 }
+
+#[cfg(test)]
+#[path = "../../tests/unit/repeated_diagnostic_locations.rs"]
+mod repeated_diagnostic_locations;
 
 impl SemanticAnalysisPhase {
     /// Bound independent source checks. The default is serial for callers
