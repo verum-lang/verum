@@ -33,6 +33,7 @@ mount super.executor.{AsyncRuntime, current_runtime};
 // Mounted rather than inherited: §4ter — the prelude carries only what
 // the LANGUAGE requires, and this is library API.
 mount core.sync.{Mutex, MutexGuard, AtomicInt, MemoryOrdering, Send};
+mount core.sync.atomic.AtomicBool;
 mount core.sync.mutex.PoisonError;
 
 // =============================================================================
