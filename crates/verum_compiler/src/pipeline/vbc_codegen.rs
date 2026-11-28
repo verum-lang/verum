@@ -52,7 +52,7 @@ impl<'s> CompilationPipeline<'s> {
                 .map(|source| source.name.to_string()).unwrap_or_else(|| owner.to_string()), module.as_ref().clone()));
         }
         let refs: Vec<_> = units.iter().map(|(owner, path, module)| (owner.as_str(), path.as_str(), module)).collect();
-        let mut units = crate::owned_source_semantics::select_source_roster(&refs, &target)?;
+        let mut units = crate::owned_source_semantics::prepare_source_roster(&refs, &target, self.session.language_features().meta.derive)?;
         let staged = units.iter().any(|(_, _, module)| ConstLowering::required(module));
         // A composite entry can import executable siblings. Admit their original
         // bodies before publishing a test result, even without staged code.
@@ -71,7 +71,7 @@ impl<'s> CompilationPipeline<'s> {
             }).collect();
             let source_refs: Vec<_> = originals.iter().map(|(owner, path, module)|
                 (owner.as_str(), path.as_str(), module)).collect();
-            let mut selected = crate::owned_source_semantics::select_source_roster(&source_refs, &target)?;
+            let mut selected = crate::owned_source_semantics::prepare_source_roster(&source_refs, &target, self.session.language_features().meta.derive)?;
             let mut semantic = crate::phases::semantic_analysis::SemanticAnalysisPhase::new()
                 .with_language_features(self.session.language_features()).with_target(target);
             if let Some(metadata) = self.stdlib_metadata.get() {

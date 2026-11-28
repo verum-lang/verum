@@ -526,7 +526,7 @@ impl DeriveContext {
             is_unsafe: false,
             generics: self.type_info.generics.iter().cloned().collect(),
             kind: ImplKind::Protocol {
-                protocol: Path::single(Ident::new(protocol, span)),
+                protocol: path_from_str(protocol, span),
                 protocol_args: List::new(),
                 for_type: self.type_info.as_type(span),
             },
@@ -598,7 +598,7 @@ impl DeriveContext {
                 span,
             );
             let bound = TypeBound {
-                kind: TypeBoundKind::Protocol(Path::single(Ident::new(protocol, span))),
+                kind: TypeBoundKind::Protocol(path_from_str(protocol, span)),
                 span,
             };
             predicates.push(WherePredicate {

@@ -400,8 +400,9 @@ impl<'s> CompilationPipeline<'s> {
 
                             // Apply @cfg conditional compilation filtering
                             let cfg_evaluator = self.session.cfg_evaluator();
-                            imported_module.items =
-                                cfg_evaluator.filter_items(&imported_module.items);
+                            crate::owned_source_semantics::prepare_source_module(
+                                &mut imported_module, cfg_evaluator, self.session.language_features().meta.derive,
+                            )?;
 
                             // Implicit prelude for imported user
                             // modules — same contract as the entry
@@ -1411,9 +1412,9 @@ impl<'s> CompilationPipeline<'s> {
 
         // Apply @cfg conditional compilation filtering
         let cfg_evaluator = self.session.cfg_evaluator();
-        let original_count = module.items.len();
-        module.items = cfg_evaluator.filter_items(&module.items);
-        let filtered_count = original_count - module.items.len();
+        let filtered_count = crate::owned_source_semantics::prepare_source_module(
+            &mut module, cfg_evaluator, self.session.language_features().meta.derive,
+        )?;
 
         // Implicit prelude — user compiles only; stdlib bootstrap
         // defines the prelude and must not self-inject.

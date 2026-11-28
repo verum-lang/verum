@@ -35,7 +35,9 @@ fn derive(module: &mut Module, name: &str, protocol: &str) {
 fn check(module: &Module) {
     let mut checker = TypeChecker::new();
     checker.register_primitives();
-    checker.set_current_module_path("projection");
+    let owner = VbcCodegen::resolve_full_module_path(module, "projection")
+        .unwrap_or_else(|| "projection".into());
+    checker.set_current_module_path(owner.as_str());
     let mut errors = checker.prepare_module_declarations(module);
     checker.with_module_declarations(module, |checker| {
         for item in &module.items {
@@ -56,6 +58,7 @@ fn keyid_hash_projects_the_declared_text() {
     let tuf = Parser::new(TUF_TYPES).parse_module().unwrap();
     let mut module = Parser::new(
         r#"
+        module core.base.protocols;
         type Hasher is protocol {};
         type Hash is protocol { fn hash(&self, hasher: &mut Hasher); };
         implement Hash for Text { fn hash(&self, hasher: &mut Hasher) {} }
@@ -88,6 +91,7 @@ fn keyid_and_pair_equality_typecheck_both_operands() {
 fn assert_hash_body(decl: &str, constructor: &str) {
     let source = format!(
         r#"
+        module core.base.protocols;
         type Hasher is {{ state: Int }};
         type Hash is protocol {{ fn hash(&self, hasher: &mut Hasher); }};
         type Leaf is {{ value: Int }};
@@ -111,9 +115,9 @@ fn assert_hash_body(decl: &str, constructor: &str) {
     let mut module = Parser::new(&source).parse_module().unwrap();
     derive(&mut module, "Wrapper", "Hash");
     check(&module);
-    let mut codegen = VbcCodegen::with_config(CodegenConfig::new("projection"));
+    let mut codegen = VbcCodegen::with_config(CodegenConfig::new("core.base.protocols"));
     let vbc = codegen.compile_module(&module).unwrap();
-    let entry = vbc.find_function_by_name("projection.probe").unwrap();
+    let entry = vbc.find_function_by_name("core.base.protocols.probe").unwrap();
     let mut vm = Interpreter::new(Arc::new(vbc));
     let run = |vm: &mut Interpreter, first, second| {
         vm.execute_function_with_args(entry, &[Value::from_i64(first), Value::from_i64(second)])

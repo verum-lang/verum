@@ -1,75 +1,22 @@
 //! `@derive(Hash)` — auto-generate the `core.base.protocols.Hash`
 //! protocol impl for record / newtype / sum types.
 //!
-//! Closes the gap left by `@derive(PartialEq)` shipping without a
-//! matching `@derive(Hash)` — HashMap/HashSet keys want both, but
-//! every implementor had to hand-write the Hash side. After this
-//! commit `@derive(PartialEq, Hash)` is the conventional pair.
-//!
-//! # Generated code shapes
-//!
-//! For a record `User { id: Int, name: Text }`:
-//!
-//! ```verum
-//! implement Hash for User {
-//!     fn hash(&self, hasher: &mut Hasher) {
-//!         self.id.hash(hasher);
-//!         self.name.hash(hasher);
-//!     }
-//! }
-//! ```
-//!
-//! For a sum type:
-//!
-//! ```verum
-//! implement Hash for Status {
-//!     fn hash(&self, hasher: &mut Hasher) {
-//!         match self {
-//!             Self.Active => { hasher.write_byte(0 as Byte); }
-//!             Self.Pending { code } => {
-//!                 hasher.write_byte(1 as Byte);
-//!                 code.hash(hasher);
-//!             }
-//!             Self.Tagged(t) => {
-//!                 hasher.write_byte(2 as Byte);
-//!                 t.hash(hasher);
-//!             }
-//!         }
-//!     }
-//! }
-//! ```
-//!
-//! The leading `write_byte(<index>)` is what preserves Hash's
-//! invariant `a == b ⟹ hash(a) == hash(b)`: equal-shape
-//! variants of different identity hash to different prefixes.
-//!
-//! For a newtype `type UserId is (Int);`:
-//!
-//! ```verum
-//! implement Hash for UserId {
-//!     fn hash(&self, hasher: &mut Hasher) {
-//!         self.0.hash(hasher);
-//!     }
-//! }
-//! ```
-//!
-//! # Bound inference
-//!
-//! Adopts `generate_impl_with_field_bounds` — generic types like
-//! `type Pair<A, B> { first: A, second: B }` get
-//! `where A: Hash, B: Hash` auto-emitted into the impl. Mirrors
-//! the sweep landed for the 6 sibling derives.
+//! The implementation visits record and tuple fields in declaration order.
+//! Sum variants first feed their discriminator. A local generic function
+//! borrows each payload with the canonical Hash bound, so its body selects
+//! the protocol method and each caller must supply a conformance witness.
 
-use super::common::{DeriveContext, FieldInfo, TypeInfo, VariantInfo};
+use super::common::{DeriveContext, TypeInfo, VariantInfo, path_from_str};
 use super::{DeriveMacro, DeriveResult, ident_expr, int_lit, method_call, self_ref};
 use verum_ast::Span;
-use verum_ast::decl::{FunctionDecl, FunctionParam, FunctionParamKind, Item, Visibility};
-use verum_ast::expr::{Block, Expr, ExprKind};
-use verum_ast::pattern::{
-    FieldPattern, MatchArm, Pattern, PatternKind, VariantPatternData,
-};
+use verum_ast::decl::{FunctionDecl, FunctionParam, FunctionParamKind, Item, ItemKind, Visibility};
+use verum_ast::expr::{Block, Expr, ExprKind, UnOp};
+use verum_ast::pattern::{FieldPattern, MatchArm, Pattern, PatternKind, VariantPatternData};
 use verum_ast::stmt::Stmt;
-use verum_ast::ty::{Ident, Path, PathSegment, Type, TypeKind};
+use verum_ast::ty::{
+    GenericParam, GenericParamKind, Ident, Path, PathSegment, Type, TypeBound, TypeBoundKind,
+    TypeKind,
+};
 use verum_common::{Heap, List, Maybe, Text};
 
 /// `@derive(Hash)` macro implementation.
@@ -87,18 +34,32 @@ impl DeriveMacro for DeriveHash {
     fn expand(&self, ctx: &DeriveContext) -> DeriveResult<Item> {
         let span = ctx.span;
         let type_info = &ctx.type_info;
+        // Nested methods may share a leaf name in one compilation unit. Keep
+        // the generated local outside the source identifier alphabet.
+        let helper = format!(
+            "$hash_field_{}_{}_{}",
+            type_info.name,
+            span.file_id.raw(),
+            span.start
+        );
 
-        let body = if type_info.is_enum {
-            self.generate_enum_body(type_info, span)?
-        } else if type_info.is_newtype {
-            self.generate_newtype_body(type_info, span)?
+        let mut body = if type_info.is_enum {
+            self.generate_enum_body(type_info, &helper, span)?
         } else {
-            self.generate_struct_body(type_info, span)?
+            self.generate_struct_body(type_info, &helper, span)?
         };
 
+        if !type_info.fields.is_empty()
+            || type_info
+                .variants
+                .iter()
+                .any(|variant| !variant.fields.is_empty())
+        {
+            body.stmts.insert(0, self.field_hasher(ctx, &helper, span));
+        }
         let method = self.create_hash_method(ctx, body, span);
         Ok(ctx.generate_impl_with_field_bounds(
-            "Hash",
+            "core.base.protocols.Hash",
             List::from(vec![method]),
             span,
         ))
@@ -115,48 +76,44 @@ impl DeriveHash {
     // Body generators
     // ------------------------------------------------------------------
 
-    /// Empty struct → empty body. Otherwise: chain
-    /// `self.f.hash(hasher);` per field.
-    fn generate_struct_body(&self, type_info: &TypeInfo, span: Span) -> DeriveResult<Block> {
-        let mut stmts: Vec<Stmt> = Vec::new();
-        for field in type_info.fields.iter() {
-            stmts.push(self.field_hash_stmt_on_self(field, span));
-        }
+    fn generate_struct_body(
+        &self,
+        type_info: &TypeInfo,
+        helper: &str,
+        span: Span,
+    ) -> DeriveResult<Block> {
         Ok(Block {
-            stmts: List::from(stmts),
-            expr: Maybe::None,
-            span,
-        })
-    }
-
-    /// `self.0.hash(hasher);`
-    fn generate_newtype_body(&self, type_info: &TypeInfo, span: Span) -> DeriveResult<Block> {
-        let _ = type_info; // newtype's synthesized field is positional `0`
-        let inner = Expr::new(
-            ExprKind::TupleIndex {
-                expr: Heap::new(self_ref(span)),
-                index: 0,
-            },
-            span,
-        );
-        let call = method_call(
-            inner,
-            "hash",
-            List::from(vec![ident_expr("hasher", span)]),
-            span,
-        );
-        Ok(Block {
-            stmts: List::from(vec![Stmt::expr(call, true)]),
-            expr: Maybe::None,
+            stmts: type_info
+                .fields
+                .iter()
+                .map(|field| {
+                    let span = field.ty.span;
+                    let value = field.access_on_self(span);
+                    let borrowed = Expr::new(
+                        ExprKind::Unary {
+                            op: UnOp::Ref,
+                            expr: Heap::new(value),
+                        },
+                        span,
+                    );
+                    self.hash_field(helper, borrowed, span)
+                })
+                .collect(),
+            expr: None,
             span,
         })
     }
 
     /// `match self { Self.<V> {...} => { write_byte(i); <field>.hash(hasher); ... } }`
-    fn generate_enum_body(&self, type_info: &TypeInfo, span: Span) -> DeriveResult<Block> {
+    fn generate_enum_body(
+        &self,
+        type_info: &TypeInfo,
+        helper: &str,
+        span: Span,
+    ) -> DeriveResult<Block> {
         let mut arms: Vec<MatchArm> = Vec::new();
         for (idx, variant) in type_info.variants.iter().enumerate() {
-            arms.push(self.variant_arm(variant, idx, span));
+            arms.push(self.variant_arm(variant, idx, helper, variant.span));
         }
         let match_expr = Expr::new(
             ExprKind::Match {
@@ -172,7 +129,13 @@ impl DeriveHash {
         })
     }
 
-    fn variant_arm(&self, variant: &VariantInfo, index: usize, span: Span) -> MatchArm {
+    fn variant_arm(
+        &self,
+        variant: &VariantInfo,
+        index: usize,
+        helper: &str,
+        span: Span,
+    ) -> MatchArm {
         let variant_path = Path::new(
             List::from(vec![
                 PathSegment::SelfValue,
@@ -181,91 +144,52 @@ impl DeriveHash {
             span,
         );
 
-        let (pattern, body) = if variant.is_unit {
-            // Self.Unit => { hasher.write_byte(<index> as Byte); }
-            let pattern = Pattern::new(
-                PatternKind::Variant {
-                    path: variant_path,
-                    data: Maybe::None,
-                },
-                span,
-            );
-            let body = self.write_index_block(index, vec![], span);
-            (pattern, body)
+        // Always bind payloads to generated names. A field called `hasher`
+        // must not shadow the method's destination.
+        let names: List<Text> = (0..variant.fields.len())
+            .map(|index| format!("field{index}").into())
+            .collect();
+        let binding = |name: &Text| Pattern::ident(Ident::new(name.as_str(), span), false, span);
+        let data = if variant.is_unit {
+            None
         } else if variant.is_tuple {
-            // Self.Tuple(_0, _1) => { write_byte(i); _0.hash(hasher); _1.hash(hasher); }
-            // Bind each positional field as `f<i>` for the body.
-            let bind_names: Vec<Text> = (0..variant.fields.len())
-                .map(|i| Text::from(format!("f{}", i)))
-                .collect();
-            let bind_patterns: List<Pattern> = bind_names
-                .iter()
-                .map(|n| Pattern::new(
-                    PatternKind::Ident {
-                        name: Ident::new(n.as_str(), span),
-                        mutable: false,
-                        by_ref: false,
-                        subpattern: Maybe::None,
-                    },
-                    span,
-                ))
-                .collect();
-            let pattern = Pattern::new(
-                PatternKind::Variant {
-                    path: variant_path,
-                    data: Maybe::Some(VariantPatternData::Tuple(bind_patterns)),
-                },
-                span,
-            );
-            let body = self.write_index_block(
-                index,
-                bind_names
-                    .into_iter()
-                    .map(|n| self.hash_call_on_ident(n.as_str(), span))
-                    .collect(),
-                span,
-            );
-            (pattern, body)
+            Some(VariantPatternData::Tuple(
+                names.iter().map(binding).collect(),
+            ))
         } else {
-            // Self.Struct { f } => { write_byte(i); f.hash(hasher); }
-            // Bind each named field 1:1 (no rename — pattern's
-            // `name = ident` shorthand: `Pattern { f }` equiv
-            // `Pattern { f: f }`).
-            let bind_patterns: List<FieldPattern> = variant
-                .fields
-                .iter()
-                .map(|f| FieldPattern {
-                    name: f.ident(span),
-                    pattern: Maybe::Some(Pattern::new(
-                        PatternKind::Ident {
-                            name: f.ident(span),
-                            mutable: false,
-                            by_ref: false,
-                            subpattern: Maybe::None,
-                        },
+            Some(VariantPatternData::Record {
+                fields: variant
+                    .fields
+                    .iter()
+                    .zip(&names)
+                    .map(|(field, name)| FieldPattern {
+                        name: field.ident(span),
+                        pattern: Some(binding(name)),
                         span,
-                    )),
-                    span,
-                })
-                .collect();
-            let pattern = Pattern::new(
-                PatternKind::Variant {
-                    path: variant_path,
-                    data: Maybe::Some(VariantPatternData::Record {
-                        fields: bind_patterns,
-                        rest: false,
-                    }),
-                },
-                span,
-            );
-            let calls: Vec<Stmt> = variant
-                .fields
-                .iter()
-                .map(|f| self.hash_call_on_ident(f.name.as_str(), span))
-                .collect();
-            let body = self.write_index_block(index, calls, span);
-            (pattern, body)
+                    })
+                    .collect(),
+                rest: false,
+            })
         };
+        let pattern = Pattern::new(
+            PatternKind::Variant {
+                path: variant_path,
+                data,
+            },
+            span,
+        );
+        let calls = names
+            .iter()
+            .zip(&variant.fields)
+            .map(|(name, field)| {
+                self.hash_field(
+                    helper,
+                    ident_expr(name.as_str(), field.ty.span),
+                    field.ty.span,
+                )
+            })
+            .collect();
+        let body = self.write_index_block(index, calls, span);
 
         MatchArm::new(pattern, Maybe::None, Heap::new(body), span)
     }
@@ -276,10 +200,7 @@ impl DeriveHash {
         let byte_expr = Expr::new(
             ExprKind::Cast {
                 expr: Heap::new(int_lit(index as i128, span)),
-                ty: Type::new(
-                    TypeKind::Path(Path::single(Ident::new("Byte", span))),
-                    span,
-                ),
+                ty: Type::new(TypeKind::Path(Path::single(Ident::new("Byte", span))), span),
             },
             span,
         );
@@ -305,27 +226,67 @@ impl DeriveHash {
     // Per-field hash calls
     // ------------------------------------------------------------------
 
-    /// `self.<field>.hash(hasher);`
-    fn field_hash_stmt_on_self(&self, field: &FieldInfo, span: Span) -> Stmt {
-        let recv = field.access_on_self(span);
-        let call = method_call(
-            recv,
-            "hash",
-            List::from(vec![ident_expr("hasher", span)]),
+    fn hash_field(&self, helper: &str, borrowed: Expr, span: Span) -> Stmt {
+        let call = Expr::new(
+            ExprKind::Call {
+                func: Heap::new(ident_expr(helper, span)),
+                type_args: List::new(),
+                args: List::from(vec![borrowed, ident_expr("hasher", span)]),
+            },
             span,
         );
         Stmt::expr(call, true)
     }
 
-    /// `<ident>.hash(hasher);`
-    fn hash_call_on_ident(&self, ident: &str, span: Span) -> Stmt {
-        let call = method_call(
-            ident_expr(ident, span),
+    fn field_hasher(&self, ctx: &DeriveContext, name: &str, span: Span) -> Stmt {
+        let parameter = Ident::new("Member", span);
+        let ty = Type::new(TypeKind::Path(Path::single(parameter.clone())), span);
+        let member = self.regular_param(
+            "member",
+            Type::new(
+                TypeKind::Reference {
+                    mutable: false,
+                    inner: Heap::new(ty),
+                },
+                span,
+            ),
+            span,
+        );
+        let feed = method_call(
+            ident_expr("member", span),
             "hash",
             List::from(vec![ident_expr("hasher", span)]),
             span,
         );
-        Stmt::expr(call, true)
+        let body = Block {
+            stmts: List::from(vec![Stmt::expr(feed, true)]),
+            expr: None,
+            span,
+        };
+        let mut helper = ctx.method(
+            name,
+            List::from(vec![member, self.hasher_param(span)]),
+            Type::new(TypeKind::Unit, span),
+            body,
+            span,
+        );
+        helper.visibility = Visibility::Private;
+        helper.generics.push(GenericParam {
+            kind: GenericParamKind::Type {
+                name: parameter,
+                default: None,
+                bounds: List::from(vec![TypeBound {
+                    kind: TypeBoundKind::Protocol(path_from_str(
+                        "core.base.protocols.Hash",
+                        span,
+                    )),
+                    span,
+                }]),
+            },
+            is_implicit: false,
+            span,
+        });
+        Stmt::item(Item::new(ItemKind::Function(helper), span))
     }
 
     // ------------------------------------------------------------------
@@ -334,19 +295,9 @@ impl DeriveHash {
 
     /// `fn hash(&self, hasher: &mut Hasher)`
     fn create_hash_method(&self, ctx: &DeriveContext, body: Block, span: Span) -> FunctionDecl {
-        let hasher_ty = Type::new(
-            TypeKind::Reference {
-                mutable: true,
-                inner: Heap::new(Type::new(
-                    TypeKind::Path(Path::single(Ident::new("Hasher", span))),
-                    span,
-                )),
-            },
-            span,
-        );
         let unit_ty = Type::new(TypeKind::Unit, span);
         let self_param = ctx.self_ref_param(span);
-        let hasher_param = self.regular_param("hasher", hasher_ty, span);
+        let hasher_param = self.hasher_param(span);
         ctx.method(
             "hash",
             List::from(vec![self_param, hasher_param]),
@@ -354,6 +305,20 @@ impl DeriveHash {
             body,
             span,
         )
+    }
+
+    fn hasher_param(&self, span: Span) -> FunctionParam {
+        let hasher_ty = Type::new(
+            TypeKind::Reference {
+                mutable: true,
+                inner: Heap::new(Type::new(
+                    TypeKind::Path(path_from_str("core.base.protocols.Hasher", span)),
+                    span,
+                )),
+            },
+            span,
+        );
+        self.regular_param("hasher", hasher_ty, span)
     }
 
     fn regular_param(&self, name: &str, ty: Type, span: Span) -> FunctionParam {
@@ -375,11 +340,6 @@ impl DeriveHash {
         )
     }
 }
-
-// Suppress unused-import warnings on `Visibility` — load-bearing for
-// future fields if a Hash variant requires private impls.
-#[allow(dead_code)]
-const _: Option<Visibility> = None;
 
 #[cfg(test)]
 mod tests {
@@ -505,7 +465,7 @@ mod tests {
             verum_ast::decl::ItemKind::Impl(i) => i,
             other => panic!("expected Impl, got {:?}", other),
         };
-        // Method body should contain a single Match expression.
+        // The bounded helper precedes the match over the sum.
         let func = match &impl_decl.items.iter().next().unwrap().kind {
             verum_ast::decl::ImplItemKind::Function(f) => f.clone(),
             other => panic!("expected Function impl item, got {:?}", other),
@@ -514,6 +474,6 @@ mod tests {
             Maybe::Some(verum_ast::decl::FunctionBody::Block(b)) => b.clone(),
             other => panic!("expected Block body, got {:?}", other),
         };
-        assert_eq!(body.stmts.len(), 1, "single Match stmt in sum-type body");
+        assert!(matches!(&body.stmts.last().unwrap().kind, verum_ast::stmt::StmtKind::Expr { expr, .. } if matches!(expr.kind, ExprKind::Match { .. })));
     }
 }

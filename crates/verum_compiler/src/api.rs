@@ -804,6 +804,13 @@ pub fn run_common_pipeline(
         .map_err(|error| CompilationError::type_error(error.to_string()))?;
     ast_modules = selected.into_iter().map(|(_, _, module)| module).collect();
 
+    if config.expand_macros {
+        for module in &mut ast_modules {
+            crate::derives::expand_source_derives(&mut module.items, config.derive_enabled)
+                .map_err(|error| CompilationError::type_error(error.to_string()))?;
+        }
+    }
+
     // Phase 2: Meta Registry (if macros enabled)
     let mut current_data = PhaseData::AstModules(ast_modules.clone());
 

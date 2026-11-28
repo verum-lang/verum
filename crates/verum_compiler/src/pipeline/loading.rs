@@ -273,7 +273,7 @@ impl<'s> CompilationPipeline<'s> {
             let mut entries = Vec::with_capacity(file_data.len());
             for (idx, (module_path_str, source_text, file_path)) in file_data.into_iter().enumerate() {
                 let file_id = self.session.load_file_snapshot(&file_path, Some(&source_text))?;
-                match Self::parse_module_file(&module_path_str, &source_text, file_id) {
+                match self.parse_module_file(&module_path_str, &source_text, file_id) {
                     Ok(module) => {
                         entries.push((
                             module_path_str.clone(),
@@ -1258,7 +1258,7 @@ impl<'s> CompilationPipeline<'s> {
         source: &str,
         file_id: FileId,
     ) -> Result<Module> {
-        let mut module = Self::parse_module_file(module_path, source, file_id)?;
+        let mut module = self.parse_module_file(module_path, source, file_id)?;
         if matches!(self.build_mode, super::BuildMode::Normal) {
             super::inject_implicit_prelude_mount(&mut module);
         }
@@ -1267,6 +1267,7 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Parse a module and attach its spans to the source file in this session.
     fn parse_module_file(
+        &self,
         module_path: &Text,
         source: &str,
         file_id: FileId,
@@ -1274,7 +1275,7 @@ impl<'s> CompilationPipeline<'s> {
         let lexer = Lexer::new(source, file_id);
 
         let parser = VerumParser::new();
-        let module = parser.parse_module(lexer, file_id).map_err(|errors| {
+        let mut module = parser.parse_module(lexer, file_id).map_err(|errors| {
             for error in &errors {
                 warn!("Module parse error in {}: {}", module_path.as_str(), error);
             }
@@ -1285,6 +1286,9 @@ impl<'s> CompilationPipeline<'s> {
             )
         })?;
 
+        crate::owned_source_semantics::prepare_source_module(
+            &mut module, self.session.cfg_evaluator(), self.session.language_features().meta.derive,
+        )?;
         Ok(module)
     }
 
@@ -1341,9 +1345,9 @@ impl<'s> CompilationPipeline<'s> {
         // This ensures platform-specific code (e.g., FFI blocks with @cfg(unix))
         // is excluded when compiling for incompatible targets.
         let cfg_evaluator = self.session.cfg_evaluator();
-        let original_count = module.items.len();
-        module.items = cfg_evaluator.filter_items(&module.items);
-        let filtered_count = original_count - module.items.len();
+        let filtered_count = crate::owned_source_semantics::prepare_source_module(
+            &mut module, cfg_evaluator, self.session.language_features().meta.derive,
+        )?;
         if filtered_count > 0 {
             debug!(
                 "  Filtered {} item(s) based on @cfg predicates in {}",

@@ -198,7 +198,7 @@ impl<'s> CompilationPipeline<'s> {
         let identities: Vec<_> = all_parsed_modules.iter().flat_map(|(_, files)| files)
             .map(|file| (file.owner.as_str(), resolver.source_path(&file.path).to_string_lossy().into_owned(), &file.ast)).collect();
         let refs: Vec<_> = identities.iter().map(|(owner, path, ast)| (*owner, path.as_str(), *ast)).collect();
-        let selected = crate::owned_source_semantics::select_source_roster(&refs, &target)?;
+        let selected = crate::owned_source_semantics::prepare_source_roster(&refs, &target, self.session.language_features().meta.derive)?;
         Ok(BootstrapSources { modules: modules_to_compile, groups: all_parsed_modules, selected })
     }
 

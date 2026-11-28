@@ -93,6 +93,9 @@ mod derive_inject;
 pub fn inject_derived_impls_for_test(
     module: &mut verum_ast::Module,
 ) -> Vec<(String, String)> {
+    if let Err(error) = crate::derives::expand_source_derives(&mut module.items, true) {
+        return vec![("<derive>".into(), error.to_string())];
+    }
     derive_inject::inject_derived_impls(module)
         .into_iter()
         .map(|u| (u.type_name, u.protocol))

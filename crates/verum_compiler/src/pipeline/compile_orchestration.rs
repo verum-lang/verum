@@ -843,7 +843,7 @@ impl<'s> CompilationPipeline<'s> {
                 Ok(mut module) => {
                     // Apply @cfg conditional compilation filtering
                     let cfg_evaluator = self.session.cfg_evaluator();
-                    module.items = cfg_evaluator.filter_items(&module.items);
+                    crate::owned_source_semantics::prepare_source_module(&mut module, cfg_evaluator, self.session.language_features().meta.derive)?;
 
                     // Declaration-level checks — see `on_module_parsed`
                     // for why they live behind one carrier. This loop

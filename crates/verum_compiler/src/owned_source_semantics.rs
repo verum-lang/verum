@@ -191,6 +191,33 @@ pub(crate) fn select_source_roster(
     Ok(selected)
 }
 
+/// Select active members before expanding derives for source registration and checking.
+pub(crate) fn prepare_source_module(
+    module: &mut Module,
+    evaluator: &CfgEvaluator,
+    derive_enabled: bool,
+) -> anyhow::Result<usize> {
+    let count = module.items.len();
+    select_members(&mut module.items, evaluator)
+        .map_err(|span| anyhow::anyhow!("invalid @cfg at {span:?}"))?;
+    let filtered = count - module.items.len();
+    crate::derives::expand_source_derives(&mut module.items, derive_enabled)?;
+    Ok(filtered)
+}
+
+pub(crate) fn prepare_source_roster(
+    sources: &[(&str, &str, &Module)],
+    target: &TargetConfig,
+    derive_enabled: bool,
+) -> anyhow::Result<List<(Text, Text, Module)>> {
+    let mut selected = select_source_roster(sources, target)?;
+    for (owner, _, module) in &mut selected {
+        crate::derives::expand_source_derives(&mut module.items, derive_enabled)
+            .map_err(|err| anyhow::anyhow!("{owner}: {err}"))?;
+    }
+    Ok(selected)
+}
+
 /// The caller provides a fresh checker with its language and backend policy.
 /// Registry declarations retain their owner; only mounts populate local names.
 /// Recovered/deferred errors are failures, just like direct `check_item` errors.

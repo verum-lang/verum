@@ -52,7 +52,7 @@ pub mod typed_row;
 
 mod common;
 
-use verum_ast::decl::{Item, TypeDecl};
+use verum_ast::decl::{Item, ItemKind, TypeDecl};
 use verum_ast::expr::{Block, Expr, ExprKind};
 use verum_ast::literal::IntLit;
 use verum_ast::ty::{Ident, Path};
@@ -76,6 +76,65 @@ pub use typed_row::DeriveTypedRow;
 
 /// Result type for derive operations
 pub type DeriveResult<T> = Result<T, DeriveError>;
+
+/// Expand built-in derives supported on the ordinary source path. An applied
+/// argument is consumed so an already-prepared project or inline body can
+/// safely pass through selection again. Other derive arguments keep their spans.
+pub(crate) fn expand_source_derives(items: &mut List<Item>, enabled: bool) -> anyhow::Result<()> {
+    static REGISTRY: std::sync::LazyLock<DeriveRegistry> =
+        std::sync::LazyLock::new(DeriveRegistry::new);
+    let is_hash = |arg: &Expr| {
+        matches!(&arg.kind, ExprKind::Path(path)
+        if path.as_ident().is_some_and(|id| id.as_str() == "Hash"))
+    };
+
+    let mut pending = List::from(vec![items]);
+    while let Some(items) = pending.pop() {
+        let mut generated = List::new();
+        for item in &mut *items {
+            let ItemKind::Type(decl) = &mut item.kind else {
+                continue;
+            };
+            let requested = decl
+                .attributes
+                .iter()
+                .filter(|attr| attr.name.as_str() == "derive")
+                .flat_map(|attr| attr.args.iter().flatten())
+                .filter(|arg| is_hash(arg));
+            let mut spans = requested.map(|arg| arg.span);
+            let Some(span) = spans.next() else { continue };
+            anyhow::ensure!(
+                enabled,
+                "`@derive(Hash)` on `{}` is disabled by `[meta] derive` at {span:?}",
+                decl.name
+            );
+            anyhow::ensure!(
+                spans.next().is_none(),
+                "duplicate `@derive(Hash)` on `{}` at {span:?}",
+                decl.name
+            );
+            generated.push(REGISTRY.expand("Hash", decl, span)?);
+            decl.attributes.retain_mut(|attr| {
+                if attr.name.as_str() == "derive"
+                    && let Some(args) = &mut attr.args
+                {
+                    args.retain(|arg| !is_hash(arg));
+                    return !args.is_empty();
+                }
+                true
+            });
+        }
+        items.extend(generated);
+        for item in items {
+            if let ItemKind::Module(decl) = &mut item.kind
+                && let Some(children) = &mut decl.items
+            {
+                pending.push(children);
+            }
+        }
+    }
+    Ok(())
+}
 
 /// Registry for all derive macros
 pub struct DeriveRegistry {

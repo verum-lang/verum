@@ -22,8 +22,8 @@
 //! standard library's own `Ordering.then`, so lexicographic order is not
 //! reinvented either.
 //!
-//! Runs beside `inject_implicit_prelude_mount`, at the one point every
-//! parse funnels through.
+//! The project parse path invokes this pass for the remaining Ord and Default
+//! derives after shared source preparation has expanded structural Hash.
 
 use verum_ast::Module;
 use verum_ast::decl::{TypeDecl, TypeDeclBody};

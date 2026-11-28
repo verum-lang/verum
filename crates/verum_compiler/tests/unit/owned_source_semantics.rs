@@ -771,7 +771,7 @@ fn release_stdlib_graph(session: &crate::Session) -> (SourceRegistry, crate::pha
     }
     let entries: List<_> = parsed.iter().map(|(owner, path, ast)|
         (owner.as_str(), path.as_str(), ast)).collect();
-    let selected = select_source_roster(&entries, &target).unwrap();
+    let selected = prepare_source_roster(&entries, &target, session.language_features().meta.derive).unwrap();
     let registry = source_registry(selected.iter().map(|(owner, path, ast)|
         (owner.as_str(), path.as_str(), ast))).unwrap();
     let phase = SemanticAnalysisPhase::new().with_language_features(session.language_features()).with_target(target);
@@ -812,6 +812,9 @@ fn release_runtime_and_sync_source_admission() {
 
 #[path = "stdlib_local_file_readers.rs"]
 mod stdlib_local_file_readers;
+
+#[path = "derived_hash_source.rs"]
+mod derived_hash_source;
 
 #[path = "stdlib_dynamic_protocol_arguments.rs"]
 mod stdlib_dynamic_protocol_arguments;
