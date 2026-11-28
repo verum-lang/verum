@@ -102,16 +102,8 @@ fn test_phaser_new_some_parties_constructs() {
 // Section 5: Phaser.register + terminate
 // =============================================================================
 //
-// Phaser.register() acquires Phaser.mutex (Mutex<Bool>) before bumping
-// `state`.  That path used to trip "FFI symbol not found: FfiSymbolId(61)"
-// at Tier-0; the futex routing landed 2026-07-12, so register() is live
-// and its party-count progression is observable (0→1→2).
-//
-// Phaser.terminate() is a DIFFERENT matter and stays gated: it packs
-// TERMINATED_BIT at bit 62 (barrier.vr:298), and the Tier-0 8-byte
-// atomic handlers NaN-box the cell through a 48-bit payload mask, so
-// every bit above 47 is dropped — terminate() is a silent no-op at
-// Tier-0.  Tracked as T0620; the pins below stay @ignore until it lands.
+// Registration updates the party count. Termination sets bit 62 of the same
+// word and must preserve the registered parties.
 
 @test
 fn test_phaser_register_increments_parties() {
@@ -132,7 +124,6 @@ fn test_phaser_register_returns_current_phase() {
 }
 
 @test
-@ignore  // T0620: terminate() bit-62 write is masked away at Tier-0 — RED (is_terminated stays false)
 fn test_phaser_terminate_flips_is_terminated() {
     let p = Phaser.new(2);
     assert(!p.is_terminated());
@@ -141,20 +132,11 @@ fn test_phaser_terminate_flips_is_terminated() {
 }
 
 @test
-@ignore  // T0620: PASSES BUT VACUOUS — terminate() is a no-op at Tier-0, so "preserved" is trivially true
 fn test_phaser_terminate_preserves_party_count() {
     let p = Phaser.new(2);
     assert_eq(p.get_registered_parties(), 2);
     p.terminate();
-    // The terminate-bit preservation contract: party-count survives
-    // (audit §3.2 + barrier.vr:262-288 doc-comment).
-    //
-    // Held @ignore even though it currently PASSES: under T0620 the
-    // bit-62 write never lands, so the state word is bit-identical
-    // before and after terminate() and this assertion cannot tell a
-    // working terminate from a no-op — exactly the invariant it exists
-    // to lock.  Un-ignore together with the RED terminate pins once
-    // T0620 lands.
+    assert(p.is_terminated());
     assert_eq(p.get_registered_parties(), 2);
 }
 
@@ -233,11 +215,7 @@ fn test_two_phasers_independent_initial_state() {
 }
 
 @test
-@ignore  // T0620: terminate() bit-62 write is masked away at Tier-0 — RED (p1.is_terminated stays false)
 fn test_two_phasers_independent() {
-    // GATED on T0620, not the (closed) futex gap: terminate() sets
-    // TERMINATED_BIT at bit 62, which the Tier-0 48-bit atomic payload
-    // mask drops, so p1.is_terminated() never flips.
     let p1 = Phaser.new(2);
     let p2 = Phaser.new(3);
     p1.terminate();

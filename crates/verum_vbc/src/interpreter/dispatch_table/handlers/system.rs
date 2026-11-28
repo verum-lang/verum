@@ -136,20 +136,8 @@ pub(in super::super) fn handle_atomic_load(
                     atomic.load(ord) as i64
                 }
                 8 => {
-                    // 8-byte loads land on a NaN-boxed Value (the
-                    // Tier-0 storage layout of every Verum struct
-                    // field is uniform 8-byte slots tagged via
-                    // value.rs Value). Mask off the tag bits and
-                    // sign-extend at bit 47 to reconstruct the i64
-                    // payload — this is what the user-level
-                    // `AtomicInt.load` etc. expect. See task #39
-                    // for the architectural background; the
-                    // alternative (raw u64 storage marker via a
-                    // future @raw_layout attribute) is the
-                    // long-term path.
                     let atomic = &*(ptr as *const std::sync::atomic::AtomicU64);
-                    let raw = atomic.load(ord);
-                    nan_box_payload_to_i64(raw)
+                    AtomicWordStorage::at(state, ptr).decode(atomic.load(ord))?
                 }
                 _ => {
                     return Err(InterpreterError::InvalidOperand {
@@ -164,33 +152,50 @@ pub(in super::super) fn handle_atomic_load(
     Ok(DispatchResult::Continue)
 }
 
-/// Extract the inline-int payload from a NaN-boxed Value bit-
-/// pattern. Mirrors `Value::as_i64` for the inline-integer case.
-/// Used by 8-byte atomic load/CAS to reconstruct the user-visible
-/// integer from the raw u64 storage of a Verum struct field.
-#[inline]
-fn nan_box_payload_to_i64(raw: u64) -> i64 {
-    // PAYLOAD_MASK = bits 0..47 (48 bits). Sign-extend at bit 47
-    // so values -2^47..-1 round-trip correctly.
-    let payload = (raw & 0x0000_FFFF_FFFF_FFFF) as i64;
-    if payload & (1 << 47) != 0 {
-        // Sign-extend: clear bit 47 then OR in the high 16 bits as 1s.
-        payload | !0x0000_FFFF_FFFF_FFFFi64
-    } else {
-        payload
-    }
+/// A declared record field stores a Value. Static, native and raw allocation
+/// cells store machine words, including words whose bits resemble Value tags.
+#[derive(Clone, Copy)]
+enum AtomicWordStorage {
+    ValueField,
+    MachineWord,
 }
 
-/// Re-encode an i64 as a NaN-boxed Value bit-pattern with the
-/// integer tag. Inverse of `nan_box_payload_to_i64`.
-/// Mirrors `Value::from_i64` for the inline-integer case.
-#[inline]
-fn i64_to_nan_box_payload(v: i64) -> u64 {
-    // Headers and payload mask come from the canonical
-    // `verum_vbc::value::nanbox` submodule — single source of truth
-    // shared with codegen-emitted IR for cross-tier value boundaries.
-    use crate::value::nanbox::{NAN_INTEGER_HEADER, PAYLOAD_MASK};
-    NAN_INTEGER_HEADER | ((v as u64) & PAYLOAD_MASK)
+impl AtomicWordStorage {
+    fn at(state: &InterpreterState, address: usize) -> Self {
+        if state.heap.is_exposed_value_field(address) {
+            Self::ValueField
+        } else {
+            Self::MachineWord
+        }
+    }
+
+    fn decode(self, bits: u64) -> InterpreterResult<i64> {
+        match self {
+            Self::MachineWord => Ok(bits as i64),
+            Self::ValueField => Value::from_bits(bits).try_as_i64().ok_or(
+                InterpreterError::TypeMismatch {
+                    expected: "64-bit integer",
+                    got: "non-integer record field",
+                    operation: "atomic word access",
+                },
+            ),
+        }
+    }
+
+    fn encode(self, value: i64) -> u64 {
+        match self {
+            Self::MachineWord => value as u64,
+            Self::ValueField => Value::from_i64(value).bits(),
+        }
+    }
+
+    fn encode_operand(self, operand: Value, integer: i64) -> u64 {
+        match self {
+            Self::MachineWord => integer as u64,
+            Self::ValueField if operand.is_inline_int() || operand.is_boxed_int() => operand.bits(),
+            Self::ValueField => Value::from_i64(integer).bits(),
+        }
+    }
 }
 
 /// AtomicStore (0xE4)
@@ -209,7 +214,8 @@ pub(in super::super) fn handle_atomic_store(
     } else {
         ptr_val.as_i64() as usize
     };
-    let val = state.get_reg(val_reg).as_i64();
+    let operand = state.get_reg(val_reg);
+    let val = operand.as_i64();
 
     if ptr == 0 || ptr < 0x1000 {
         return Err(InterpreterError::NullPointer);
@@ -244,11 +250,8 @@ pub(in super::super) fn handle_atomic_store(
                 atomic.store(val as u32, ord);
             }
             8 => {
-                // Re-encode as NaN-boxed Value bit-pattern (task #39
-                // — the storage IS a Value u64 slot, the high 16
-                // bits are the type-tag header).
                 let atomic = &*(ptr as *const std::sync::atomic::AtomicU64);
-                atomic.store(i64_to_nan_box_payload(val), ord);
+                atomic.store(AtomicWordStorage::at(state, ptr).encode_operand(operand, val), ord);
             }
             _ => {
                 return Err(InterpreterError::InvalidOperand {
@@ -280,7 +283,8 @@ pub(in super::super) fn handle_atomic_cas(
         ptr_val.as_i64() as usize
     };
     let expected = state.get_reg(expected_reg).as_i64();
-    let desired = state.get_reg(desired_reg).as_i64();
+    let desired_value = state.get_reg(desired_reg);
+    let desired = desired_value.as_i64();
 
     if ptr == 0 || ptr < 0x1000 {
         return Err(InterpreterError::NullPointer);
@@ -341,34 +345,20 @@ pub(in super::super) fn handle_atomic_cas(
                 }
             }
             8 => {
-                // An 8-byte slot holds a NaN-boxed Value, so "equals
-                // `expected`" is a question about the UNBOXED payload,
-                // not about the 64 raw bits: a never-written cell is
-                // raw zero while a stored zero is `boxed(0)`, and both
-                // read back as the value 0.  Compare on the payload and
-                // swap against the raw word actually observed, retrying
-                // only while the bits moved but the payload still
-                // matches — that is exactly strong-CAS semantics
-                // (failure only when the value differs) expressed over
-                // the boxed representation.
-                //
-                // The previous formulation compared `boxed(expected)`
-                // against the raw word and special-cased the single
-                // raw-zero-vs-boxed-zero collision it had been bitten
-                // by (a `static mut` counter cell whose first
-                // transition could never happen).  Comparing payloads
-                // makes that special case unnecessary.
+                // Equal wide integers can have distinct Value encodings.
+                // Compare their complete values, then swap the observed bits.
                 let atomic = &*(ptr as *const std::sync::atomic::AtomicU64);
-                let desired_boxed = i64_to_nan_box_payload(desired);
+                let storage = AtomicWordStorage::at(state, ptr);
+                let replacement = storage.encode_operand(desired_value, desired);
                 let mut raw = atomic.load(failure_ord);
                 loop {
-                    let observed = nan_box_payload_to_i64(raw);
+                    let observed = storage.decode(raw)?;
                     if observed != expected {
                         break (observed, false);
                     }
                     match atomic.compare_exchange(
                         raw,
-                        desired_boxed,
+                        replacement,
                         success_ord,
                         failure_ord,
                     ) {
@@ -504,19 +494,12 @@ pub(in super::super) fn handle_atomic_rmw(
                 .into()
             }
             8 => {
-                // An 8-byte slot stores a NaN-boxed Value, so a hardware
-                // RMW on the raw word would corrupt the tag header the
-                // moment an add carried (or a subtract borrowed) across
-                // bit 48.  Unbox, apply, re-box, and swap against the
-                // exact word observed — a lock-free CAS retry loop.  It
-                // also makes an untouched raw-zero cell behave like a
-                // stored zero for free, since the comparison is against
-                // the observed bits rather than a synthesized box.
                 let a = &*(ptr as *const std::sync::atomic::AtomicU64);
+                let storage = AtomicWordStorage::at(state, ptr);
                 let mut raw = a.load(Ordering::SeqCst);
                 loop {
-                    let current = nan_box_payload_to_i64(raw);
-                    let next = i64_to_nan_box_payload(op.apply(current, operand));
+                    let current = storage.decode(raw)?;
+                    let next = storage.encode(op.apply(current, operand));
                     match a.compare_exchange_weak(
                         raw,
                         next,

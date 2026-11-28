@@ -184,6 +184,12 @@ impl Heap {
         self.attenuate_reference(reference, allowed).map(Some)
     }
 
+    /// A physical address exported from a live record still holds a VM Value.
+    /// Revoking the owner's projections removes the address before reuse.
+    pub(crate) fn is_exposed_value_field(&self, address: usize) -> bool {
+        self.projections.exposed_fields.contains_key(&address)
+    }
+
     /// The caller proves the live raw allocation's base and extent. Its
     /// deallocator revokes the owner's tickets before releasing that storage.
     pub(crate) fn project_raw_slot(

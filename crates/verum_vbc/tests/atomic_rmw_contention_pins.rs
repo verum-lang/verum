@@ -31,7 +31,10 @@ use verum_vbc::instruction::{AtomicRmwOp, Instruction, Reg, SyncSubOpcode};
 use verum_vbc::interpreter::Interpreter;
 use verum_vbc::module::{FunctionDescriptor, FunctionId, VbcModule};
 use verum_vbc::types::StringId;
-use verum_vbc::value::nanbox::{NAN_INTEGER_HEADER, PAYLOAD_MASK};
+
+#[path = "fixtures/atomic_word.rs"]
+#[cfg(feature = "codegen")]
+mod atomic_word;
 
 /// How many worker threads contend for the shared cell.
 const THREADS: usize = 8;
@@ -44,7 +47,7 @@ const ROUNDS: usize = 12;
 /// against the address baked into the bytecode and returns the value
 /// read before the update.
 fn rmw_module(addr: usize, op: AtomicRmwOp, operand: i64, size: u8) -> Arc<VbcModule> {
-    let instrs = [
+    instruction_module(&[
         Instruction::LoadI {
             dst: Reg(0),
             value: addr as i64,
@@ -55,10 +58,12 @@ fn rmw_module(addr: usize, op: AtomicRmwOp, operand: i64, size: u8) -> Arc<VbcMo
         },
         op.encode(Reg(2), Reg(0), Reg(1), size),
         Instruction::Ret { value: Reg(2) },
-    ];
+    ])
+}
 
+fn instruction_module(instructions: &[Instruction]) -> Arc<VbcModule> {
     let mut bc = Vec::new();
-    for instr in &instrs {
+    for instr in instructions {
         bytecode::encode_instruction(instr, &mut bc);
     }
 
@@ -73,19 +78,100 @@ fn rmw_module(addr: usize, op: AtomicRmwOp, operand: i64, size: u8) -> Arc<VbcMo
     Arc::new(module)
 }
 
-/// An 8-byte atomic slot holds a NaN-boxed `Value`, so reading one back
-/// from Rust means unwrapping the tag the same way the interpreter does.
-fn unbox(raw: u64) -> i64 {
-    let payload = (raw & PAYLOAD_MASK) as i64;
-    if payload & (1 << 47) != 0 {
-        payload | !(PAYLOAD_MASK as i64)
-    } else {
-        payload
-    }
+#[test]
+fn native_atomic_addresses_preserve_words_that_resemble_value_tags() {
+    let initial = 0x7ff9_0000_0000_0009_u64;
+    let cell = AtomicU64::new(initial);
+    let ptr = &cell as *const AtomicU64 as i64;
+    let replace = |expected: u64, desired: u64| {
+        let code = instruction_module(&[
+            Instruction::LoadI {
+                dst: Reg(0),
+                value: ptr,
+            },
+            Instruction::LoadI {
+                dst: Reg(1),
+                value: expected as i64,
+            },
+            Instruction::LoadI {
+                dst: Reg(2),
+                value: desired as i64,
+            },
+            Instruction::AtomicCas {
+                dst: Reg(3),
+                ptr: Reg(0),
+                expected: Reg(1),
+                desired: Reg(2),
+                ordering: 4,
+                size: 8,
+            },
+            Instruction::Unpack {
+                dst_start: Reg(4),
+                tuple: Reg(3),
+                count: 2,
+            },
+            Instruction::Ret { value: Reg(4) },
+        ]);
+        Interpreter::new(code)
+            .execute_function(FunctionId(0))
+            .unwrap()
+            .as_i64() as u64
+    };
+    assert_eq!(replace(9, u64::MAX), initial);
+    assert_eq!(cell.load(Ordering::SeqCst), initial);
+    assert_eq!(replace(initial, u64::MAX), initial);
+    assert_eq!(cell.load(Ordering::SeqCst), u64::MAX);
+    let increment = rmw_module(ptr as usize, AtomicRmwOp::Add, 1, 8);
+    let old = Interpreter::new(increment)
+        .execute_function(FunctionId(0))
+        .unwrap();
+    assert_eq!(old.as_i64() as u64, u64::MAX);
+    assert_eq!(cell.load(Ordering::SeqCst), 0);
+
+    let store_load = instruction_module(&[
+        Instruction::LoadI {
+            dst: Reg(0),
+            value: ptr,
+        },
+        Instruction::LoadI {
+            dst: Reg(1),
+            value: i64::MIN,
+        },
+        Instruction::AtomicStore {
+            ptr: Reg(0),
+            val: Reg(1),
+            ordering: 0,
+            size: 8,
+        },
+        Instruction::AtomicLoad {
+            dst: Reg(2),
+            ptr: Reg(0),
+            ordering: 0,
+            size: 8,
+        },
+        Instruction::Ret { value: Reg(2) },
+    ]);
+    let loaded = Interpreter::new(store_load)
+        .execute_function(FunctionId(0))
+        .unwrap();
+    assert_eq!(loaded.as_i64(), i64::MIN);
+    assert_eq!(cell.load(Ordering::SeqCst), 1 << 63);
 }
 
-fn box_i64(v: i64) -> u64 {
-    NAN_INTEGER_HEADER | ((v as u64) & PAYLOAD_MASK)
+#[test]
+#[cfg(feature = "codegen")]
+fn managed_atomic_words_agree_with_their_exclusive_field_references() {
+    let source = atomic_word::module();
+    let bytes = verum_vbc::serialize::serialize_module(&source).unwrap();
+    let wire = verum_vbc::deserialize::deserialize_module_validated(&bytes).unwrap();
+    for module in [source, wire] {
+        let entry = module
+            .find_function_by_name("core.sync.tests.atomic_words.main")
+            .unwrap();
+        let mut vm = Interpreter::try_new_validated(Arc::new(module)).unwrap();
+        vm.run_global_ctors().unwrap();
+        assert_eq!(vm.execute_function(entry).unwrap().as_i64(), 73);
+    }
 }
 
 /// Run `THREADS` workers, each performing `ITERS` copies of the module's
@@ -125,7 +211,7 @@ fn fetch_add_under_contention_loses_no_updates() {
         let mut olds = contend(module);
 
         assert_eq!(
-            unbox(cell.load(Ordering::SeqCst)),
+            cell.load(Ordering::SeqCst) as i64,
             total,
             "round {round}: {THREADS} threads x {ITERS} increments must total {total} — \
              a smaller number means increments were read-modify-written on top of each other"
@@ -145,13 +231,13 @@ fn fetch_sub_under_contention_loses_no_updates() {
     let total = (THREADS * ITERS) as i64;
 
     for round in 0..ROUNDS {
-        let cell: &'static AtomicU64 = Box::leak(Box::new(AtomicU64::new(box_i64(total))));
+        let cell: &'static AtomicU64 = Box::leak(Box::new(AtomicU64::new(total as u64)));
         let module = rmw_module(cell as *const _ as usize, AtomicRmwOp::Sub, 1, 8);
 
         let mut olds = contend(module);
 
         assert_eq!(
-            unbox(cell.load(Ordering::SeqCst)),
+            cell.load(Ordering::SeqCst) as i64,
             0,
             "round {round}: {total} decrements from {total} must reach exactly 0"
         );
@@ -191,7 +277,7 @@ fn fetch_or_under_contention_sets_every_bit() {
 
         let expected = (1i64 << THREADS) - 1;
         assert_eq!(
-            unbox(cell.load(Ordering::SeqCst)),
+            cell.load(Ordering::SeqCst) as i64,
             expected,
             "round {round}: every worker's bit must survive; a missing bit is a lost OR"
         );
@@ -203,7 +289,7 @@ fn fetch_and_clears_exactly_the_masked_bits() {
     // Start with all THREADS bits set; each worker clears its own.
     for round in 0..ROUNDS {
         let start = (1i64 << THREADS) - 1;
-        let cell: &'static AtomicU64 = Box::leak(Box::new(AtomicU64::new(box_i64(start))));
+        let cell: &'static AtomicU64 = Box::leak(Box::new(AtomicU64::new(start as u64)));
         let addr = cell as *const _ as usize;
 
         let mut handles = Vec::with_capacity(THREADS);
@@ -223,7 +309,7 @@ fn fetch_and_clears_exactly_the_masked_bits() {
         }
 
         assert_eq!(
-            unbox(cell.load(Ordering::SeqCst)),
+            cell.load(Ordering::SeqCst) as i64,
             0,
             "round {round}: every worker must have cleared its bit"
         );
@@ -242,9 +328,13 @@ fn fetch_xor_toggles_an_even_number_of_times() {
         let olds = contend(module);
         assert_eq!(olds.len(), THREADS * ITERS);
 
-        let expected = if (THREADS * ITERS).is_multiple_of(2) { 0 } else { 1 };
+        let expected = if (THREADS * ITERS).is_multiple_of(2) {
+            0
+        } else {
+            1
+        };
         assert_eq!(
-            unbox(cell.load(Ordering::SeqCst)),
+            cell.load(Ordering::SeqCst) as i64,
             expected,
             "round {round}: {} XORs of bit 0 must leave parity {expected}",
             THREADS * ITERS
@@ -258,7 +348,7 @@ fn exchange_under_contention_hands_off_every_value() {
     // With a correct exchange the multiset {final value} ∪ {displaced}
     // minus {initial} is exactly the multiset of values written.
     for round in 0..ROUNDS {
-        let cell: &'static AtomicU64 = Box::leak(Box::new(AtomicU64::new(box_i64(-1))));
+        let cell: &'static AtomicU64 = Box::leak(Box::new(AtomicU64::new(u64::MAX)));
         let addr = cell as *const _ as usize;
 
         let mut handles = Vec::with_capacity(THREADS);
@@ -283,7 +373,7 @@ fn exchange_under_contention_hands_off_every_value() {
         }
 
         let mut observed = displaced;
-        observed.push(unbox(cell.load(Ordering::SeqCst)));
+        observed.push(cell.load(Ordering::SeqCst) as i64);
         observed.sort_unstable();
 
         let mut written: Vec<i64> = (0..THREADS)
@@ -308,7 +398,10 @@ fn sub_word_widths_contend_correctly() {
             // Keep the total inside the width so the check is exact.
             let iters = 20usize;
             let total = (THREADS * iters) as u64;
-            assert!(total < (1u64 << bits), "pin would overflow a {bits}-bit cell");
+            assert!(
+                total < (1u64 << bits),
+                "pin would overflow a {bits}-bit cell"
+            );
 
             let cell: &'static AtomicU64 = Box::leak(Box::new(AtomicU64::new(0)));
             let addr = cell as *const _ as usize;
@@ -342,11 +435,6 @@ fn sub_word_widths_contend_correctly() {
 
 #[test]
 fn rmw_on_an_untouched_cell_starts_from_zero() {
-    // A cell that was never stored through holds raw zero, which is
-    // bit-distinct from a NaN-boxed zero. Reading it as anything other
-    // than 0 is what made a `static mut` counter's first increment
-    // impossible; the RMW compares against the bits it observed, so the
-    // distinction never arises.
     let cell: &'static AtomicU64 = Box::leak(Box::new(AtomicU64::new(0)));
     let module = rmw_module(cell as *const _ as usize, AtomicRmwOp::Add, 7, 8);
     let mut interp = Interpreter::new(module);
@@ -355,7 +443,7 @@ fn rmw_on_an_untouched_cell_starts_from_zero() {
         .execute_function(FunctionId(0))
         .expect("atomic RMW execution failed");
     assert_eq!(old.as_i64(), 0, "an untouched cell must read as 0");
-    assert_eq!(unbox(cell.load(Ordering::SeqCst)), 7);
+    assert_eq!(cell.load(Ordering::SeqCst) as i64, 7);
 }
 
 #[test]

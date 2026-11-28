@@ -1,0 +1,49 @@
+module core.sync.tests.atomic_words;
+
+mount core.sync.atomic.{AtomicInt, AtomicU64, MemoryOrdering};
+
+@test
+fn signed_words_preserve_extrema_and_compare_high_bits() {
+    let order = MemoryOrdering.SeqCst;
+    let maximum: Int = 9223372036854775807;
+    let minimum: Int = -maximum - 1;
+    let mut cell = AtomicInt.new(minimum);
+    assert_eq(cell.load(order), minimum);
+    match cell.compare_exchange(0, maximum, order, order) {
+        Result.Err(old) => assert_eq(old, minimum),
+        Result.Ok(_) => panic("CAS matched only the low bits"),
+    }
+    match cell.compare_exchange(minimum, maximum, order, order) {
+        Result.Ok(old) => assert_eq(old, minimum),
+        Result.Err(_) => panic("CAS rejected the complete word"),
+    }
+    assert_eq(*cell.get_mut(), maximum);
+    cell.store(minimum, order);
+    assert_eq(cell.fetch_or(1, order), minimum);
+    assert_eq(cell.load(order), minimum + 1);
+}
+
+@test
+fn unsigned_words_preserve_every_bit_and_wrap_at_the_word_width() {
+    let order = MemoryOrdering.SeqCst;
+    let maximum: UInt64 = 18446744073709551615_u64;
+    let low_bits: UInt64 = 281474976710655_u64;
+    let tagged_bits: UInt64 = 0x7ff9000000000009_u64;
+    let mut cell = AtomicU64.new(maximum);
+    assert_eq(cell.load(order), maximum);
+    match cell.compare_exchange(low_bits, 9_u64, order, order) {
+        Result.Err(old) => assert_eq(old, maximum),
+        Result.Ok(_) => panic("CAS ignored the upper sixteen bits"),
+    }
+    cell.store(tagged_bits, order);
+    assert_eq(*cell.get_mut(), tagged_bits);
+    *cell.get_mut() = maximum;
+    assert_eq(cell.fetch_add(1_u64, order), maximum);
+    assert_eq(cell.load(order), 0_u64);
+}
+
+fn main() -> Int {
+    signed_words_preserve_extrema_and_compare_high_bits();
+    unsigned_words_preserve_every_bit_and_wrap_at_the_word_width();
+    73
+}
