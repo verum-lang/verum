@@ -963,11 +963,11 @@ impl<'s> CompilationPipeline<'s> {
                 eprintln!("[protostamp]   span={:?} -> {:?}", span, target);
             }
         }
-        verum_types::apply_resolved_call_targets(
-            module,
-            &self.resolved_call_targets,
-            &self.deref_adjustments,
-        );
+        if let Some(registry) = &self.type_registry {
+            registry.apply_checked_source_facts(module, &self.resolved_call_targets, &self.deref_adjustments);
+        } else {
+            verum_types::apply_resolved_call_targets(module, &self.resolved_call_targets, &self.deref_adjustments);
+        }
     }
 
     /// Phase 3b: Dependency analysis for embedded constraints

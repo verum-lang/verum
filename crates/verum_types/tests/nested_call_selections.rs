@@ -200,3 +200,44 @@ fn nested_default_does_not_authorize_invalid_copy() {
         );
     }
 }
+
+#[test]
+fn a_checked_factory_binding_retains_only_its_closed_nominal_arguments() {
+    #[derive(Default)]
+    struct Bindings(Map<Text, Maybe<Text>>);
+    impl Visitor for Bindings {
+        fn visit_stmt(&mut self, statement: &verum_ast::Stmt) {
+            if let verum_ast::StmtKind::Let { pattern, ty, .. } = &statement.kind
+                && let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind
+            {
+                self.0.insert(name.name.clone(), ty.as_ref().map(verum_ast::pretty::format_type));
+            }
+        }
+    }
+    let source = r#"
+        module records {
+            public type Batch<T> is { value: T };
+            fn batch<T>(x: T) -> Batch<T> { Batch {value: x} }
+            fn concrete() -> Batch<Int> { let inferred = batch(17); inferred }
+            fn generic<T>(x: T) -> Batch<T> { let open = batch(x); open }
+        }
+    "#;
+    let (original, mut checker) = check(source);
+    let mut direct = original.clone();
+    checker.commit_resolved_call_targets(&mut direct);
+    let mut transferred = original;
+    let registry = checker.take_type_registry();
+    registry.apply_checked_source_facts(
+        &mut transferred,
+        &checker.take_resolved_call_targets(),
+        &checker.take_deref_adjustments(),
+    );
+    for module in [direct, transferred] {
+        let mut bindings = Bindings::default();
+        for item in &module.items {
+            bindings = verum_ast::visitor::traverse_item_iteratively(bindings, item);
+        }
+        assert_eq!(bindings.0.get(&Text::from("inferred")).and_then(Option::as_deref), Some("fixture.records.Batch<Int>"));
+        assert_eq!(bindings.0.get(&Text::from("open")), Some(&None));
+    }
+}

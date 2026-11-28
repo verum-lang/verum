@@ -257,13 +257,10 @@ impl TypeChecker {
     /// phase so the codegen's `compile_method_call` fast path sees
     /// the resolutions.
     pub fn commit_resolved_call_targets(&self, module: &mut verum_ast::Module) {
-        if self.resolved_call_targets.is_empty() && self.deref_adjustments.is_empty()
-        {
-            return;
-        }
         let table = CommitTables {
             calls: &self.resolved_call_targets,
             derefs: &self.deref_adjustments,
+            inferred: Some((&self.type_registry, Some(&self.unifier))),
         };
         commit_resolved_in_items(&mut module.items, &table);
     }
@@ -323,6 +320,7 @@ pub struct CommitTables<'a> {
         verum_ast::expr::ResolvedCallTarget,
     >,
     pub derefs: &'a std::collections::HashMap<verum_ast::span::Span, usize>,
+    inferred: Option<(&'a crate::TypeRegistry, Option<&'a Unifier>)>,
 }
 
 pub fn apply_resolved_call_targets(
@@ -336,8 +334,62 @@ pub fn apply_resolved_call_targets(
     if calls.is_empty() && derefs.is_empty() {
         return;
     }
-    let table = CommitTables { calls, derefs };
+    let table = CommitTables { calls, derefs, inferred: None };
     commit_resolved_in_items(&mut module.items, &table);
+}
+
+impl crate::TypeRegistry {
+    /// Publish the inferred declarations alongside call selections from this checked module.
+    /// The pipeline already applied its final unifier when it took this registry.
+    pub fn apply_checked_source_facts(
+        &self,
+        module: &mut verum_ast::Module,
+        calls: &std::collections::HashMap<Span, verum_ast::expr::ResolvedCallTarget>,
+        derefs: &std::collections::HashMap<Span, usize>,
+    ) {
+        let table = CommitTables { calls, derefs, inferred: Some((self, None)) };
+        commit_resolved_in_items(&mut module.items, &table);
+    }
+}
+
+impl CommitTables<'_> {
+    /// A generic factory can acquire its type arguments from later uses of a
+    /// local. Only carry a closed, source-representable nominal application.
+    fn inferred_application(&self, value: &verum_ast::Expr) -> Option<verum_ast::Type> {
+        use verum_ast::ExprKind;
+        if !matches!(value.kind, ExprKind::Call { .. } | ExprKind::MethodCall { .. }) {
+            return None;
+        }
+        let (registry, unifier) = self.inferred?;
+        let initial = registry.lookup_expr(value.span)?;
+        let applied = unifier.map(|unifier| unifier.apply(initial));
+        let ty = applied.as_ref().unwrap_or(initial);
+        let Type::Named { path, args } = ty else { return None; };
+        if args.is_empty() || path.segments.len() < 2 { return None; }
+
+        // The general AST bridge uses an inferred placeholder for unsupported
+        // forms. Do not turn such a placeholder into evidence in another phase.
+        let mut pending = vec![(ty, 0)];
+        while let Some((part, depth)) = pending.pop() {
+            if depth >= 32 { return None; }
+            let children = match part {
+                Type::Named { path, args } => {
+                    if path.segments.len() < 2
+                        && !verum_common::well_known_types::type_names::is_primitive_value_type(path.last_segment_name()) {
+                        return None;
+                    }
+                    args
+                }
+                Type::Tuple(elements) => elements,
+                Type::Bool | Type::Int | Type::Float | Type::Char | Type::Text | Type::Unit => continue,
+                _ => return None,
+            };
+            pending.extend(children.iter().map(|child| (child, depth + 1)));
+        }
+        let mut declaration = crate::dependent_helpers::convert_internal_to_ast(ty);
+        declaration.span = value.span;
+        Some(declaration)
+    }
 }
 
 fn commit_resolved_in_items(
@@ -429,8 +481,13 @@ fn commit_resolved_in_stmt(
     use verum_ast::stmt::StmtKind;
     use verum_common::Maybe;
     match &mut stmt.kind {
-        StmtKind::Let { value, .. } => {
+        StmtKind::Let { pattern, ty, value } => {
             if let Maybe::Some(v) = value {
+                if ty.is_none() && matches!(pattern.kind,
+                    verum_ast::PatternKind::Ident { by_ref: false, subpattern: None, .. })
+                {
+                    *ty = table.inferred_application(v);
+                }
                 commit_resolved_in_expr(v, table, false);
             }
         }
