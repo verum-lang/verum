@@ -257,3 +257,36 @@ fn probe() -> Int { identity<Int>(SEED) }
     interpreter.run_global_ctors().unwrap();
     assert_eq!(interpreter.execute_function(entry).unwrap().as_i64(), 37);
 }
+
+#[test]
+fn foreign_tables_keep_their_indices_and_remap_only_wrapper_functions() {
+    use verum_vbc::module::{CType, FfiLibrary, FfiPlatform, FfiSignature, FfiStructLayout, FfiSymbol};
+
+    let mut source = lifecycle_module();
+    let library_name = source.intern_string("libSystem.B.dylib");
+    let library = source.add_ffi_library(FfiLibrary::new(library_name, FfiPlatform::Darwin));
+    let record = source.intern_string("Pair");
+    let layout = source.add_ffi_layout(FfiStructLayout::new(record, 16, 8));
+    let signature = FfiSignature::new(CType::I32, [CType::StructValue].into_iter().collect())
+        .with_param_layout(0, layout as u16);
+    let name = source.intern_string("read_pair");
+    let mut symbol = FfiSymbol::new(name, signature);
+    symbol.wrapper_fn = Some(FunctionId(900));
+    symbol.library_idx = library.0 as i16;
+    let id = source.add_ffi_symbol(symbol.clone());
+
+    let mut missing = source.clone();
+    missing.ffi_symbols[id.0 as usize].wrapper_fn = Some(FunctionId(3));
+    assert!(matches!(merge(missing), Err(MergeError::FunctionNotFound { function_id: FunctionId(3), .. })));
+
+    let merged = merge(source).unwrap();
+    let bytes = verum_vbc::serialize::serialize_module(&merged).unwrap();
+    let wire = verum_vbc::deserialize::deserialize_module(&bytes).unwrap();
+    for module in [merged, wire] {
+        symbol.wrapper_fn = Some(FunctionId(3));
+        assert_eq!(module.get_ffi_symbol(id), Some(&symbol));
+        assert_eq!(module.get_string(module.get_ffi_library(library).unwrap().name), Some("libSystem.B.dylib"));
+        assert_eq!(module.get_string(module.get_ffi_layout(layout).unwrap().name), Some("Pair"));
+        assert_eq!(module.get_string(module.get_function(FunctionId(3)).unwrap().name), Some("__tls_init_library_append"));
+    }
+}

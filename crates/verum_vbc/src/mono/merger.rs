@@ -264,6 +264,23 @@ impl ModuleMerger {
         // compaction has established the exact source-to-output mapping.
         self.copy_lifecycle_functions(&mut output)?;
 
+        // Foreign calls index these tables directly. The string/type tables and
+        // table positions are preserved, while optional wrapper IDs follow the
+        // same function compaction as lifecycle roots.
+        output.ffi_libraries = std::mem::take(&mut self.user_module.ffi_libraries);
+        output.ffi_layouts = std::mem::take(&mut self.user_module.ffi_layouts);
+        output.ffi_symbols = std::mem::take(&mut self.user_module.ffi_symbols);
+        for symbol in &mut output.ffi_symbols {
+            if let Some(wrapper) = symbol.wrapper_fn {
+                symbol.wrapper_fn = Some(self.mapping.get(wrapper).ok_or_else(|| {
+                    MergeError::FunctionNotFound {
+                        module: self.user_module.name.clone(),
+                        function_id: wrapper,
+                    }
+                })?);
+            }
+        }
+
         // Tombstone for the deleted raw-copy stdlib leg: a
         // `StdlibPrecompiled` resolution has no materializer here any
         // more — the raw byte copy it used performed NO string/type/
