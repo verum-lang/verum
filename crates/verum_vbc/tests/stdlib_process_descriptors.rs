@@ -23,6 +23,7 @@ fn process_descriptors_use_the_real_pipe_and_return_kernel_errors() {
             "Result Result<T,E>.is_ok Result<T,E>.is_err",
         ),
         ("base/maybe.vr", "Maybe"),
+        ("io/process.vr", "close_fd"),
         ("text/text.vr", "Text Text.len Text.as_bytes"),
         ("intrinsics/runtime/text.vr", "text_as_bytes text_byte_len"),
         (
@@ -110,9 +111,12 @@ fn process_descriptors_use_the_real_pipe_and_return_kernel_errors() {
         let mut vm = Interpreter::try_new_validated(module.clone()).unwrap();
         vm.run_global_ctors().unwrap();
         let mut call = |name: &str, args: &[Value]| {
-            let entry = module
-                .find_function_by_name(&format!("core.sys.process_native.{name}"))
-                .unwrap();
+            let name = if name.contains('.') {
+                name.to_owned()
+            } else {
+                format!("core.sys.process_native.{name}")
+            };
+            let entry = module.find_function_by_name(&name).unwrap();
             vm.execute_function_with_args(entry, args).unwrap()
         };
         // Enter each declared body directly so a host call interceptor cannot supply the result.
@@ -123,7 +127,7 @@ fn process_descriptors_use_the_real_pipe_and_return_kernel_errors() {
         let bytes = call("fixture_bytes", &[]);
         let written = call("native_fd_write_all", &[writer, bytes]);
         assert_eq!(call("wrote_four", &[written]).try_as_i64(), Some(1));
-        assert_eq!(call("close_port", &[writer]).try_as_i64(), Some(1));
+        call("core.io.process.close_fd", &[writer]);
         for (size, check) in [(3, "read_three"), (99, "read_one"), (99, "read_eof")] {
             let result = call("native_fd_read_chunk", &[reader, Value::from_i64(size)]);
             assert_eq!(call(check, &[result]).try_as_i64(), Some(1), "{check}");

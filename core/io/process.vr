@@ -663,18 +663,16 @@ fn read_all_from_fd(fd: Int) -> List<Byte> {
     out
 }
 
+@cfg(any(target_os = "linux", target_os = "macos"))
+mount core.sys.common.FileDesc;
 @cfg(target_os = "linux")
-fn close_fd(fd: Int) {
-    let _ = core.sys.linux.syscall.close(core.sys.common.FileDesc.from_raw(fd as Int32));
-}
-
+mount core.sys.linux.syscall.close as close_descriptor;
 @cfg(target_os = "macos")
+mount core.sys.darwin.libsystem.safe_close as close_descriptor;
+
+@cfg(any(target_os = "linux", target_os = "macos"))
 fn close_fd(fd: Int) {
-    // Same shape as the Linux arm just above: through the safe
-    // wrapper, since the raw `close` is not reachable by that path.
-    let _ = core.sys.darwin.libsystem.safe_close(
-        core.sys.common.FileDesc.from_raw(fd as Int32),
-    );
+    let _ = close_descriptor(FileDesc.from_raw(fd));
 }
 
 // =============================================================================
