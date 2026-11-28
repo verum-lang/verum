@@ -9,6 +9,8 @@ use verum_ast::{
     Expr, ExprKind, StmtKind, UnOp,
 };
 
+const INDEXED_TEMPORARY: &str = "<temporary indexed container>";
+
 fn unparen(mut expr: &Expr) -> &Expr {
     while let ExprKind::Paren(inner) = &expr.kind {
         expr = inner;
@@ -464,6 +466,7 @@ impl TypeChecker {
             return Ok(None);
         }
         let sources = self.aggregate_origins(value, ty);
+        self.check_temporary_binding(&sources, value.span)?;
         for source in &sources {
             self.retain_origin(source, None, value.span)?;
         }
@@ -556,6 +559,7 @@ impl TypeChecker {
         shared: bool,
     ) -> crate::Result<Option<ReferenceOrigin>> {
         if let Some(origin) = self.reference_result_origin(value) {
+            self.check_temporary_binding(std::slice::from_ref(&origin), value.span)?;
             if shared
                 && matches!(
                     &unparen(value).kind,
@@ -568,6 +572,7 @@ impl TypeChecker {
         }
         let mut candidates = List::new();
         self.collect_reference_candidates(value, &mut candidates);
+        self.check_temporary_binding(&candidates, value.span)?;
         if shared {
             for source in &candidates {
                 self.retain_origin(source, Some(holder), value.span)?;
@@ -833,10 +838,12 @@ impl TypeChecker {
             if borrowed && actual.as_ref().is_some_and(|ty|
                 self.reference_mode(ty, argument.span).is_ok_and(|mode| mode.is_none()))
             {
-                if let Some(origin) = self.borrowed_call_input_origin(
+                if let Some(origins) = self.borrowed_call_input_origins(
                     argument, AutoBorrowRoot::IncludeExclusive,
                 ) {
-                    if !found.contains(&origin) { found.push(origin); }
+                    for origin in origins {
+                        if !found.contains(&origin) { found.push(origin); }
+                    }
                 } else {
                     self.record_evaluated_origins(span, None);
                     return Ok(());
@@ -850,10 +857,12 @@ impl TypeChecker {
         }
         if let Some((receiver, borrowed)) = receiver {
             if borrowed {
-                if let Some(origin) = self.borrowed_call_input_origin(
+                if let Some(origins) = self.borrowed_call_input_origins(
                     receiver, AutoBorrowRoot::IncludeExclusive,
                 ) {
-                    if !found.contains(&origin) { found.push(origin); }
+                    for origin in origins {
+                        if !found.contains(&origin) { found.push(origin); }
+                    }
                 }
             }
             self.collect_evaluated_operand_origins(receiver, &mut found);
@@ -1162,9 +1171,9 @@ impl TypeChecker {
                 // A consumed receiver passes on any loans in its value. Only
                 // a borrowed (or unresolved) receiver also lends its own slot.
                 if !self.type_registry.consumes_receiver(unparen(value).span)
-                    && let Some(source) = self.borrowed_call_input_origin(receiver, AutoBorrowRoot::SharedOnly)
+                    && let Some(sources) = self.borrowed_call_input_origins(receiver, AutoBorrowRoot::SharedOnly)
                 {
-                    add(found, source);
+                    for source in sources { add(found, source); }
                 }
                 self.collect_reference_candidates(receiver, found);
                 for arg in args {
@@ -1667,16 +1676,15 @@ impl TypeChecker {
         }
     }
 
-    fn slot_backing_place(&mut self, owner: &Expr) -> Option<RecordReceiver> {
+    pub(super) fn slot_backing_place(&mut self, owner: &Expr) -> Option<RecordReceiver> {
         self.reference_result_origin(owner).or_else(|| self.call_input_place(owner).map(|place| place.0))
     }
 
     pub(super) fn index_slot_snapshot(
-        &mut self, owner: &Expr, element: &Type,
+        &mut self, backing: &RecordReceiver, element: &Type, span: verum_ast::Span,
     ) -> Option<(RecordReceiver, List<RecordReceiver>)> {
-        let backing = self.slot_backing_place(owner)?;
-        let origins = self.stored_slot_origins(&backing, element, owner.span)?;
-        Some((backing, origins))
+        let origins = self.stored_slot_origins(backing, element, span)?;
+        Some((backing.clone(), origins))
     }
 
     /// Iterating an owned List or fixed array yields its stored elements.
@@ -1716,19 +1724,15 @@ impl TypeChecker {
     }
 
     pub(super) fn observe_indexed_slot(
-        &mut self, span: verum_ast::Span, owner: &Expr, element: &Type,
+        &mut self, span: verum_ast::Span, element: &Type,
         snapshot: Option<(RecordReceiver, List<RecordReceiver>)>,
-    ) -> crate::Result<()> {
+    ) {
         let Some((backing, mut origins)) = snapshot else {
             self.record_owned_value_origins(span, None, false);
-            return Ok(());
+            return;
         };
-        // The key may call arbitrary code. A replacement binding cannot stand
-        // for the receiver that was evaluated first. Include loans that a
-        // checked write installed in its backing storage while evaluating it.
-        if self.slot_backing_place(owner).as_ref() != Some(&backing) {
-            return Err(crate::TypeError::UnknownRecordOrigin { span });
-        }
+        // Include loans a checked write installed in the same storage while
+        // evaluating the key.
         let after = self.stored_slot_origins(&backing, element, span);
         if let Some(after) = &after {
             for origin in after {
@@ -1736,7 +1740,6 @@ impl TypeChecker {
             }
         }
         self.record_owned_value_origins(span, Some(origins), after.is_some());
-        Ok(())
     }
 
     /// Read a stored value, independently of how long the reference to its
@@ -2283,17 +2286,62 @@ impl TypeChecker {
     /// A call borrowing an indexed element can return a reference into its
     /// container. The container is a lifetime bound even when the selected
     /// index is dynamic; it does not identify an exact field for a later write.
-    fn borrowed_call_input_origin(&mut self, expr: &Expr, access: AutoBorrowRoot) -> Option<RecordReceiver> {
-        if let Some((place, _)) = self.record_place_for_auto_borrow(expr, access) {
-            return Some(place);
-        }
+    fn borrowed_call_input_origins(&mut self, expr: &Expr, access: AutoBorrowRoot) -> Option<List<RecordReceiver>> {
+        self.record_place_for_auto_borrow(expr, access).map(|(place, _)| List::from_single(place))
+            .or_else(|| self.observed_indexed_owners(expr))
+            .or_else(|| self.indexed_container_origins(expr))
+    }
+
+    pub(super) fn indexed_container_origins(&mut self, expr: &Expr) -> Option<List<RecordReceiver>> {
         let (indexed, _) = field_root(expr);
         let ExprKind::Index { expr: owner, index } = &indexed.kind else { return None };
         if matches!(unparen(index).kind, ExprKind::Range { .. }) { return None; }
-        let (place, ty) = self.record_place_for_auto_borrow(owner, access)?;
+        let place = self.call_input_place(owner);
+        let ty = place.as_ref().map(|(_, ty)| ty.clone())
+            .or_else(|| self.type_registry.lookup_expr(owner.span).cloned())?;
         let head = self.place_reference_head(&ty, owner.span).ok()?;
         let storage = head.reference_parts().map_or(&head, |(inner, _, _)| inner);
-        (storage.sequence_domain().is_some() || self.declared_list_element(storage).is_some()).then_some(place)
+        if storage.sequence_domain().is_none() && self.declared_list_element(storage).is_none() {
+            return None;
+        }
+        if let Some((place, _)) = place { return Some(List::from_single(place)); }
+        if head.reference_parts().is_some() {
+            let origins = self.aggregate_origins(owner, &ty);
+            if !origins.is_empty() { return Some(origins); }
+        } else if let Some(origins) = self.observed_indexed_owners(owner) {
+            return Some(origins);
+        }
+        // An owned computed container is live while its element is inspected.
+        // No caller storage can extend the lifetime of that temporary.
+        if !self.ctx.env.binds_in_current_scope(INDEXED_TEMPORARY) {
+            self.ctx.env.insert_mono(INDEXED_TEMPORARY, ty);
+            self.ctx.env.set_binding_loan_region(INDEXED_TEMPORARY, self.borrow_tracker.scope_depth() + 1);
+        }
+        self.ctx.env.record_source(INDEXED_TEMPORARY, false).map(List::from_single)
+    }
+
+    fn check_temporary_binding(&mut self, sources: &[RecordReceiver], span: verum_ast::Span) -> crate::Result<()> {
+        let region = self.borrow_tracker.scope_depth();
+        for source in sources {
+            if self.ctx.env.storage_loan_region(source.binding).is_some_and(|origin| origin > region)
+                && self.ctx.env.record_storage_name(source.binding).as_deref() == Some(INDEXED_TEMPORARY)
+            {
+                return Err(crate::TypeError::DanglingReference { var: INDEXED_TEMPORARY.into(), ref_span: span, drop_span: None });
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn check_indexed_temporary_result(&mut self, expr: &Expr, ty: &Type) -> crate::Result<()> {
+        if self.ctx.env.binds_in_current_scope(INDEXED_TEMPORARY)
+            && let Some(temporary) = self.ctx.env.record_source(INDEXED_TEMPORARY, false)
+            && self.aggregate_origins(expr, ty).iter().any(|source| source.binding == temporary.binding)
+        {
+            return Err(crate::TypeError::DanglingReference {
+                var: INDEXED_TEMPORARY.into(), ref_span: self.escaping_operand_span(expr, &temporary), drop_span: None,
+            });
+        }
+        Ok(())
     }
 
     /// A computed reference can designate several callers' places. A write

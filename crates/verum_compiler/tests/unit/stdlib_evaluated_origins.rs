@@ -102,6 +102,41 @@ fn polling_an_owned_element_cannot_return_a_reference_after_removing_its_owner()
         items.remove(0); result
     }").expect_err("a result held beyond the match still borrows its future");
     assert!(held.iter().any(|error| error.code() == Some("E310") && error.message().contains("items")), "{held:#?}");
+    let factory = "fn make_list()->List<FieldFuture> { let mut items:List<FieldFuture> = List.new();
+        items.push(FieldFuture {value:73}); items }";
+    check(&format!("{factory} fn read(cx:&mut Context)->Int {{
+        match make_list()[0].poll(cx) {{ Poll.Ready(value)=>*value, Poll.Pending=>0 }}
+    }}")).expect("read the field while its temporary container is live");
+    let escaped = check(&format!("{factory} fn leak(cx:&mut Context,fallback:&Int)->&Int {{
+        match make_list()[0].poll(cx) {{ Poll.Ready(value)=>value, Poll.Pending=>fallback }}
+    }}")).expect_err("a temporary container cannot outlive the call returning its field");
+    assert!(escaped.iter().any(|error| error.code() == Some("E312")), "{escaped:#?}");
+    let saved = check(&format!("{factory} fn read(cx:&mut Context)->Int {{
+        let saved=make_list()[0].poll(cx);
+        match saved {{ Poll.Ready(value)=>*value, Poll.Pending=>0 }}
+    }}")).expect_err("the saved result outlives the temporary in its initializer");
+    assert!(saved.iter().any(|error| error.code() == Some("E312")), "{saved:#?}");
+    let array = check("fn make_array()->[FieldFuture;1] { [FieldFuture {value:73}] }
+        fn leak(cx:&mut Context,fallback:&Int)->&Int {
+            match make_array()[0].poll(cx) {Poll.Ready(v)=>v,Poll.Pending=>fallback}
+        }").expect_err("a fixed array owns its temporary element too");
+    assert!(array.iter().any(|error| error.code() == Some("E312")), "{array:#?}");
+    check("fn forward(xs:&mut List<FieldFuture>)->&mut List<FieldFuture> {xs}
+        fn read(xs:&mut List<FieldFuture>,cx:&mut Context,fallback:&Int)->&Int {
+            match forward(xs)[0].poll(cx) {Poll.Ready(v)=>v,Poll.Pending=>fallback}
+        }").expect("a computed borrow retains its caller-owned container");
+    for expression in [
+        "current[{ current=replacement; 0 }].poll(cx)",
+        "current[0].poll({ current=replacement; cx })",
+    ] {
+        let code = format!("{factory} fn leak(replacement:&mut List<FieldFuture>,cx:&mut Context,fallback:&Int)->&Int {{
+            let mut local=make_list(); let mut current=&mut local;
+            match {expression} {{ Poll.Ready(v)=>v,Poll.Pending=>fallback }}
+        }}");
+        let errors = check(&code).expect_err("replacing a binding cannot extend an earlier element loan");
+        assert!(errors.iter().any(|error| matches!(error.code(), Some("E310" | "E312"))
+            || error.message().contains("original carrier")), "{expression}: {errors:#?}");
+    }
 }
 
 #[test]

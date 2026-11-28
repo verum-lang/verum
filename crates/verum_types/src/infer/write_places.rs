@@ -13,6 +13,7 @@ pub(super) struct EvaluatedOperand {
     origins: List<RecordReceiver>,
     known_owned_payload: bool,
     raw_address: Option<Box<[RecordReceiver]>>,
+    indexed_owners: Option<List<RecordReceiver>>,
 }
 
 /// Selecting a deeper inline field uses its parent's type without copying the
@@ -125,7 +126,11 @@ impl TypeChecker {
             | ExprKind::MapComprehension { .. } | ExprKind::SetComprehension { .. } | ExprKind::GeneratorComprehension { .. }
             | ExprKind::Typeof(_) | ExprKind::Quote { .. })
         {
-            self.with_origin_merge_scope(evaluate)
+            self.with_origin_merge_scope(|checker| {
+                let result = evaluate(checker)?;
+                checker.check_indexed_temporary_result(expr, &result.ty)?;
+                Ok(result)
+            })
         } else {
             evaluate(self)
         }
@@ -257,7 +262,8 @@ impl TypeChecker {
                 self.raw_store_destinations(expr, inner).map(List::into_boxed_slice),
             _ => None,
         };
-        let observed = EvaluatedOperand { ty: ty.clone(), origins, known_owned_payload, raw_address };
+        let indexed_owners = self.observed_indexed_owners(expr).or_else(|| self.indexed_container_origins(expr));
+        let observed = EvaluatedOperand { ty: ty.clone(), origins, known_owned_payload, raw_address, indexed_owners };
         for scope in &mut self.place_operands {
             if let Some(PlaceOperand::Value(slot)) = scope.get_mut(&key) {
                 *slot = Some(observed.clone());
@@ -623,5 +629,9 @@ impl TypeChecker {
 
     pub(super) fn observed_raw_address(&self, expr: &Expr) -> Option<List<RecordReceiver>> {
         self.observed_operand(expr)?.raw_address.as_deref().map(List::from)
+    }
+
+    pub(super) fn observed_indexed_owners(&self, expr: &Expr) -> Option<List<RecordReceiver>> {
+        self.observed_operand(expr)?.indexed_owners.clone()
     }
 }

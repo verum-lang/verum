@@ -2285,6 +2285,10 @@ impl TypeEnv {
         false
     }
 
+    pub(crate) fn binds_in_current_scope(&self, name: &str) -> bool {
+        self.bindings.contains_key(name)
+    }
+
     /// Whether the first visible binding is a declared type-parameter mirror.
     /// Type equality is not evidence: a value may have the very same type variable.
     pub fn is_type_parameter_mirror(&self, name: &str) -> bool {

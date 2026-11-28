@@ -9401,19 +9401,29 @@ impl TypeChecker {
         self.load_source_index_methods(&resolved_main)?;
         // VBC chooses GetE for the declared List before consulting user Index
         // or Deref methods. Capture that receiver before evaluating the key.
-        let list_element = if !matches!(index.kind, Range { .. }) {
+        let key_can_write = !matches!(index.kind, Literal(_) | Path(_));
+        let (list_element, backing) = if !matches!(index.kind, Range { .. }) {
             let owner = self.place_reference_head(&resolved_main, arr.span)?;
-            match owner.reference_parts() {
-                Some((referent, _, _)) => self.declared_list_element(&self.place_reference_head(referent, arr.span)?),
-                None => self.declared_list_element(&owner),
-            }
-        } else { None };
+            let storage = match owner.reference_parts() {
+                Some((referent, _, _)) => self.place_reference_head(referent, arr.span)?,
+                None => owner,
+            };
+            let element = self.declared_list_element(&storage);
+            let reads_payload = usage == IndexUse::Value && element.as_ref().is_some_and(|ty| self.carries_stored_loan(ty));
+            let backing = if reads_payload || (key_can_write && (element.is_some() || storage.sequence_domain().is_some())) {
+                self.slot_backing_place(arr)
+            } else { None };
+            (element, backing)
+        } else { (None, None) };
         let slot = list_element.as_ref().filter(|element| usage == IndexUse::Value && self.carries_stored_loan(element))
-            .and_then(|element| self.index_slot_snapshot(arr, element));
+            .and_then(|element| self.index_slot_snapshot(backing.as_ref()?, element, arr.span));
 
         // Synthesize index type to determine if this is indexing or slicing
         let index_result = self.synth_expr(index)?;
         let index_ty = self.unifier.apply(&index_result.ty);
+        if key_can_write && backing.is_some() && self.slot_backing_place(arr) != backing {
+            return Err(TypeError::UnknownRecordOrigin { span: index.span });
+        }
 
         // Check for negative literal index (compile-time error)
         // Spec: L0-critical/memory-safety/buffer_overflow/negative_index.vr
@@ -9544,7 +9554,7 @@ impl TypeChecker {
         if let Some(element) = list_element {
             self.unifier.unify(&index_ty, &Type::Int, index.span)?;
             if usage == IndexUse::Value && self.carries_stored_loan(&element) {
-                self.observe_indexed_slot(expr.span, arr, &element, slot)?;
+                self.observe_indexed_slot(expr.span, &element, slot);
             }
             return Ok(InferResult::new(element));
         }
