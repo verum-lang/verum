@@ -177,9 +177,9 @@ fn raw_place_requires_the_selected_local_borrow_and_conversion() {
                 let facts = Analysis::new(&module, &calls, &sites).body(id);
                 let expected = if slot_register == 1 && cast_source == 2 { &place } else { &R::Unknown };
                 assert_eq!(&facts.result, expected);
-                let field_view = |pc| facts.value_inputs.get(&pc).is_some_and(|regs| regs.contains(&3));
-                assert_eq!(field_view(3), *expected != R::Unknown);
-                assert_eq!(field_view(4), *expected == R::MutableLocalSlot);
+                let field_view = |pc| facts.value_inputs.get(&pc).and_then(|regs| regs.get(&3)).copied();
+                assert_eq!(field_view(3), (*expected != R::Unknown).then_some(false));
+                assert_eq!(field_view(4), (*expected == R::MutableLocalSlot).then_some(false));
             }
         }
     }
@@ -228,9 +228,9 @@ fn an_attenuated_variant_payload_cell_only_supplies_its_proven_field_access() {
             let facts = Analysis::new(&module, &calls, &sites).body(id);
             let actual = if source == 1 { &expected } else { &R::Unknown };
             assert_eq!(&facts.result, actual);
-            let adapts = |pc| facts.value_inputs.get(&pc).is_some_and(|regs| regs.contains(&3));
-            assert_eq!(adapts(3), *actual != R::Unknown);
-            assert_eq!(adapts(4), *actual == R::ObjectFieldSlot);
+            let field_view = |pc| facts.value_inputs.get(&pc).and_then(|regs| regs.get(&3)).copied();
+            assert_eq!(field_view(3), (*actual != R::Unknown).then_some(false));
+            assert_eq!(field_view(4), (*actual == R::ObjectFieldSlot).then_some(false));
         }
     }
 }
