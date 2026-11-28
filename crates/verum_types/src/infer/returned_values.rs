@@ -949,22 +949,30 @@ impl TypeChecker {
             // The reborrow can change a different binding's value without
             // replacing the reference stored in the outer record. Retire
             // guards of the input and its known referents when the call runs.
-            let mut changed = List::new();
+            let mut mutable_inputs = List::new();
             for (value, ty) in args.iter().zip(&params).chain(receiver.zip(declared_receiver.as_ref())) {
-                if self.reference_mode(ty, span).ok()? != Some(true) { continue; }
-                let Some(root) = self.reference_result_origin(value)
-                    .or_else(|| self.call_input_place(value).map(|place| place.0)) else {
-                    changed.clear();
-                    break;
-                };
-                if let Some(referents) = self.ctx.env.referent_value_origins(&root) {
-                    changed.extend(referents);
-                }
-                changed.push(root);
+                if self.reference_mode(ty, span).ok()? == Some(true) { mutable_inputs.push(value); }
             }
-            self.refinement_evidence.invalidate_write(&changed);
+            self.invalidate_input_referent_refinements(mutable_inputs);
         }
         Some(origins)
+    }
+
+    pub(super) fn invalidate_input_referent_refinements<'a>(&mut self, inputs: impl IntoIterator<Item = &'a Expr>) {
+        if self.refinement_evidence.is_empty() { return; }
+        let mut changed = List::new();
+        for value in inputs {
+            let Some(root) = self.reference_result_origin(value)
+                .or_else(|| self.call_input_place(value).map(|place| place.0)) else {
+                changed.clear();
+                break;
+            };
+            if let Some(referents) = self.ctx.env.referent_value_origins(&root) {
+                changed.extend(referents);
+            }
+            changed.push(root);
+        }
+        self.refinement_evidence.invalidate_write(&changed);
     }
 
     /// Complete a source signature before caller instantiation. An unknown
@@ -1399,7 +1407,7 @@ impl TypeChecker {
 
     /// A closed sum or empty record can retire its components when every case
     /// has a known cleanup operation and the nominal owner has no destructor.
-    fn write_value_has_structural_cleanup(&mut self, ty: &Type, span: verum_ast::Span) -> bool {
+    pub(super) fn write_value_has_structural_cleanup(&mut self, ty: &Type, span: verum_ast::Span) -> bool {
         let mut pending = List::from_iter([self.unifier.apply(ty)]);
         // This is a proof-search budget; exhaustion retains the unknown-write
         // rule, rather than claiming that a deeper type is reference-free.
@@ -1441,7 +1449,7 @@ impl TypeChecker {
         true
     }
 
-    fn write_value_has_no_selected_drop(&mut self, ty: &Type, span: verum_ast::Span) -> bool {
+    pub(super) fn write_value_has_no_selected_drop(&mut self, ty: &Type, span: verum_ast::Span) -> bool {
         use verum_common::well_known_types::WellKnownProtocol;
         if self.load_source_receiver_methods(ty).is_err()
             || self.load_source_operator_implementation(ty, WellKnownProtocol::Drop, span).is_err()
@@ -1497,7 +1505,7 @@ impl TypeChecker {
         Some(origins)
     }
 
-    fn return_value_has_trivial_cleanup(&self, ty: &Type) -> bool {
+    pub(super) fn return_value_has_trivial_cleanup(&self, ty: &Type) -> bool {
         self.forwarding_scalar(&self.unifier.apply(ty)) || matches!(
             self.unifier.apply(ty),
             Type::Unit

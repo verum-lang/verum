@@ -159,3 +159,33 @@ fn actual_stdlib_value_and_callable_origins_preserve_source_admission() {
     }
     assert!(failures.is_empty(), "actual source admission: {failures:#?}");
 }
+
+#[test]
+fn formatter_writes_preserve_the_output_buffer_loan() {
+    let session = crate::Session::new(crate::options::CompilerOptions::default());
+    let (registry, phase) = release_stdlib_graph(&session);
+    let fixture = include_str!("../../../../core-tests/text/format/unit_test.vr");
+    let mut module = Parser::new(fixture).parse_module().unwrap();
+    let mut selected = 0;
+    module.items.retain(|item| match &item.kind {
+        verum_ast::ItemKind::Function(f) => {
+            let keep = f.name.as_str() == "test_radix_prefix_survives_zero_and_signed_minimum";
+            if keep { selected += 1; }
+            keep
+        }
+        _ => true,
+    });
+    assert_eq!(selected, 1);
+    check_source_module(&mut phase.configured_checker(), "format_unit_tests", &module, &registry)
+        .unwrap_or_else(|errors| panic!("format fixture: {errors:#?}"));
+    let source = r#"module formatter_loan; mount core.base.protocols.{Formatter,FormatSpec};
+        fn render()->Text {
+            let mut text=Text.from("λ:");
+            { let mut f=Formatter.with_spec(&mut text,FormatSpec.new());
+              let _=f.write_int(0); let _=f.width(); }
+            text
+        }"#;
+    let module = Parser::new(source).parse_module().unwrap();
+    check_source_module(&mut phase.configured_checker(), "formatter_loan", &module, &registry)
+        .unwrap_or_else(|errors| panic!("formatter read after write: {errors:#?}"));
+}

@@ -204,6 +204,23 @@ impl SourceFunction {
         }
     }
 
+    fn inherent_method_item(&self) -> Option<verum_ast::Item> {
+        let item = self.source.module().items.get(self.item)?;
+        let ItemKind::Impl(block) = &item.kind else { return None; };
+        if !matches!(block.kind, verum_ast::decl::ImplKind::Inherent(_)) { return None; }
+        let single = verum_ast::decl::ImplDecl {
+            is_unsafe: block.is_unsafe,
+            generics: block.generics.clone(),
+            kind: block.kind.clone(),
+            generic_where_clause: block.generic_where_clause.clone(),
+            meta_where_clause: block.meta_where_clause.clone(),
+            specialize_attr: block.specialize_attr.clone(),
+            items: List::from_single(block.items.get(self.member?)?.clone()),
+            span: block.span,
+        };
+        Some(verum_ast::Item::new_with_attrs(ItemKind::Impl(single), item.attributes.clone(), item.span))
+    }
+
     fn identity(&self) -> usize {
         // This address is used only as identity, never dereferenced. Every
         // visited entry retains its snapshot until this query finishes.
@@ -246,6 +263,8 @@ fn source_call_path(expression: &Expr) -> Option<verum_ast::Path> {
 
 #[path = "selected_callable_evidence.rs"]
 mod selected_callable_evidence;
+#[path = "receiver_write_footprint.rs"]
+mod receiver_write_footprint;
 
 struct Calls<'a> {
     checker: &'a TypeChecker,

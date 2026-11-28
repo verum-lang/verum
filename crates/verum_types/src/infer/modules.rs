@@ -17316,7 +17316,14 @@ impl TypeChecker {
                     && kind.is_some_and(|kind| kind.meta().is_borrowed && kind.meta().allows_mutation)
                     && tc.retain_runtime_append(span, receiver, method, args)?;
                 if !appended {
-                    tc.retain_possible_call_writes(args, parameters, None, borrow)?;
+                    let receiver_writes = if borrowed_deref_target.is_none()
+                        && borrow.is_some_and(|(_, mutable, _)| mutable)
+                        && tc.selected_receiver_preserves_stored_loans(span)
+                    {
+                        tc.invalidate_input_referent_refinements(std::iter::once(receiver));
+                        None
+                    } else { borrow };
+                    tc.retain_possible_call_writes(args, parameters, None, receiver_writes)?;
                 }
             }
             Ok(result)

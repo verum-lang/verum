@@ -60,12 +60,8 @@ impl TypeChecker {
             let checker = prepared.get_mut(&owner).expect("prepared callable owner");
             let item = &selected.source.module().items[selected.item];
             let checked = match (&item.kind, selected.member) {
-                (ItemKind::Impl(implementation), Some(member)) if matches!(implementation.kind, verum_ast::decl::ImplKind::Inherent(_)) => {
-                    let only_member = implementation.items[member].clone();
-                    let mut item = item.clone();
-                    if let ItemKind::Impl(block) = &mut item.kind {
-                        block.items = List::from_single(only_member);
-                    }
+                (ItemKind::Impl(implementation), Some(_)) if matches!(implementation.kind, verum_ast::decl::ImplKind::Inherent(_)) => {
+                    let Some(item) = selected.inherent_method_item() else { return false; };
                     checker.check_item(&item)
                 }
                 (ItemKind::Impl(implementation), _) => {
@@ -122,7 +118,7 @@ impl TypeChecker {
         !calls.bound.may_be_async()
     }
 
-    fn prepare_callable_evidence(
+    pub(super) fn prepare_callable_evidence(
         &self,
         owner: &Text,
         source: &verum_ast::Module,

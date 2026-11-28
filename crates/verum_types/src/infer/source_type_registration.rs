@@ -8,6 +8,8 @@ use verum_modules::ModuleDependencies;
 pub(crate) struct SourceTypeRegistration {
     /// A source evidence query checks its obligations on an iterative worklist.
     pub(super) checking_callable_evidence: bool,
+    /// Each checked occurrence at this operator site received two scalar values.
+    pub(super) scalar_binary_operands: Map<verum_ast::Span, bool>,
     /// Lexical source declarations available while preparing one module.
     pub local_declarations: List<(Text, verum_common::Shared<verum_ast::Module>)>,
     /// Exact source methods index their published lookup locations. Body

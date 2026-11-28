@@ -802,6 +802,18 @@ fn test_text_formatter_write_int_uppercase_hex_via_spec() {
 }
 
 @test
+fn test_radix_prefix_survives_zero_and_signed_minimum() {
+    let mut text = Text.from("λ:");
+    {
+        let spec = FormatSpec.default().with_type('x').alternate_form();
+        let mut formatter = TextFormatter.with_spec(&mut text, spec);
+        let _ = formatter.write_int(0);
+        let _ = formatter.write_int(Int.MIN);
+    }
+    assert_eq(text, "λ:0x0-0x8000000000000000");
+}
+
+@test
 fn test_text_formatter_write_int_alternate_hex_prefix() {
     let mut buf = Text.new();
     let spec = FormatSpec.default().with_type('x').alternate_form();

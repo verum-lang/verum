@@ -15,11 +15,13 @@ fn errors(declarations: &str, caller: &str) -> List<Text> {
     checker.register_primitives();
     checker.set_current_module_path("write_probe");
     let mut errors = checker.prepare_module_declarations(&module);
-    for item in &module.items {
-        if let Err(error) = checker.check_item(item) {
-            errors.push(error);
+    checker.with_module_declarations(&module, |checker| {
+        for item in &module.items {
+            if let Err(error) = checker.check_item(item) {
+                errors.push(error);
+            }
         }
-    }
+    });
     errors.extend(checker.take_deferred_errors());
     errors
         .iter()
@@ -158,4 +160,51 @@ fn a_selected_writer_result_rejects_custom_cleanup_on_an_empty_error_record() {
          }",
     );
     assert!(found.iter().any(|error| error.contains("cannot establish the lifetime")), "{found:?}");
+}
+
+fn receiver_writes(extra: &str, body: &str) -> List<Text> {
+    let declarations = format!("type Sink is {{value:Int}};
+        implement Sink {{ fn put(&mut self,n:Int) {{ self.value=n; }} }}
+        type Writer is {{output:&mut Sink, adjust:Bool}};
+        {extra}
+        implement Writer {{
+            fn dispatch(&mut self,n:Int)->Int {{
+                match self.adjust {{ true=>self.write(n+1), false=>self.write(n) }}
+            }}
+            fn write(&mut self,n:Int)->Int {{ {body} }}
+            fn mode(&self)->Bool {{ self.adjust }}
+        }}");
+    errors(&declarations, "fn caller(output:&mut Sink)->Bool {
+        let mut writer=Writer{output:output,adjust:true};
+        let _=writer.dispatch(1); let _=writer.dispatch(2); writer.mode()
+    }")
+}
+
+#[test]
+fn branching_selected_methods_only_reborrow_the_output_slot() {
+    let found = receiver_writes("", "let mut left=n;
+        while left>0 { self.output.put(left); left=left-1; } n");
+    assert!(found.is_empty(), "{found:?}");
+}
+
+#[test]
+fn forwarding_checks_each_branch_for_unverified_or_escaping_receiver_uses() {
+    for (extra, body) in [
+        ("", "if n>0 { let mut local=Sink{value:1}; self.output=&mut local; } n"),
+        ("fn other_body(value:&mut Writer);", "if n>0 { other_body(self); } n"),
+        ("fn other_body()->Int;", "if n>0 { let _=other_body(); } n"),
+        ("", "self.dispatch(n)"),
+        ("type Marker is {tag:Int};", "let a=Marker{tag:n}; let _=a==a; self.output.put(n); n"),
+        ("", "let mutate=|| { self.output.put(n); }; mutate(); n"),
+        ("type Drop is protocol {fn drop(&mut self);}; type Deferred is {sink:&mut Sink};
+          implement Drop for Deferred {fn drop(&mut self) {self.sink.put(9);}}",
+         "let guard=Deferred{sink:self.output}; n"),
+        ("type Drop is protocol {fn drop(&mut self);}; type Deferred is {};
+          implement Drop for Deferred {fn drop(&mut self) {}} fn guard()->Deferred {Deferred{}}",
+         "guard(); self.output.put(n); n"),
+    ] {
+        let found = receiver_writes(extra, body);
+        assert!(found.iter().any(|error| error.contains("cannot establish the lifetime")
+            || error.contains("does not live long enough")), "{body}: {found:?}");
+    }
 }

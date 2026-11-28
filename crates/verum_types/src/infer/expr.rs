@@ -4116,6 +4116,14 @@ impl TypeChecker {
 
                     // Compute result type
                     let result_ty = self.compute_binop_result(op, &left_ty, &right_ty, span)?;
+                    if self.source_type_registration.checking_callable_evidence && !span.is_empty() {
+                        // The body query needs the operands at the operation.
+                        // A comparison's Bool result does not establish them.
+                        let scalar = [&left_ty, &right_ty].into_iter().all(|ty|
+                            self.place_reference_head(ty, span).is_ok_and(|base| self.forwarding_scalar(&base)));
+                        self.source_type_registration.scalar_binary_operands.entry(span)
+                            .and_modify(|prior| *prior &= scalar).or_insert(scalar);
+                    }
                     value_stack.push(result_ty);
                 }
 
