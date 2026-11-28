@@ -1,402 +1,312 @@
-//! PartialEq derive macro implementation
-//!
-//! Generates `implement PartialEq for Type { fn eq(&self, other: &Self) -> Bool }`
-//!
-//! For record types: compares all fields pairwise with &&. For sum types: matches
-//! variant tags first, then compares payloads field-by-field. Returns false for
-//! mismatched variants. NaN != NaN for float fields (IEEE 754 semantics).
+//! Structural equality visits matching variant payloads and declared fields in source order.
 
-use super::common::DeriveContext;
-use super::{DeriveMacro, DeriveResult, binary_op, bool_lit, ident_expr, self_ref};
-use verum_ast::Span;
-use verum_ast::decl::{FunctionDecl, Item};
-use verum_ast::expr::{BinOp, Block, Expr, ExprKind};
-use verum_ast::ty::{Ident, Path, Type, TypeKind};
-use verum_common::List;
-use verum_common::well_known_types::type_names;
+use super::common::{DeriveContext, path_from_str};
+use super::{
+    DeriveError, DeriveMacro, DeriveResult, binary_op, bool_lit, ident_expr, method_call, self_ref,
+};
+use verum_ast::decl::{Item, ItemKind, Visibility};
+use verum_ast::pattern::{MatchArm, Pattern, PatternKind};
+use verum_ast::ty::{
+    GenericParam, GenericParamKind, Ident, Path, Type, TypeBound, TypeBoundKind, TypeKind,
+    WhereClause, WherePredicate, WherePredicateKind,
+};
+use verum_ast::{BinOp, Block, Expr, ExprKind, Span, Stmt, UnOp};
+use verum_common::{Heap, List};
 
-/// PartialEq derive implementation
+const PARTIAL_EQ: &str = "core.base.protocols.PartialEq";
+const EQ: &str = "core.base.protocols.Eq";
+
+/// Generate the structural implementation of the comparison operation.
 pub struct DerivePartialEq;
+/// Generate reflexivity evidence together with its structural comparison.
+pub struct DeriveEq;
 
 impl DeriveMacro for DerivePartialEq {
     fn name(&self) -> &'static str {
         "PartialEq"
     }
-
     fn protocol_name(&self) -> &'static str {
         "PartialEq"
     }
-
     fn expand(&self, ctx: &DeriveContext) -> DeriveResult<Item> {
-        let span = ctx.span;
-        let type_info = &ctx.type_info;
-
-        // Generate eq method body
-        let body = if type_info.is_enum {
-            self.generate_enum_eq(type_info, span)?
-        } else if type_info.is_newtype {
-            self.generate_newtype_eq(type_info, span)?
-        } else {
-            self.generate_struct_eq(type_info, span)?
-        };
-
-        // Create the eq method
-        let eq_method = self.create_eq_method(ctx, body, span);
-
-        // Generate impl block — auto-emit `where T: PartialEq` for
-        // every field-used type param.
-        Ok(ctx.generate_impl_with_field_bounds(
-            "PartialEq",
-            List::from(vec![eq_method]),
-            span,
-        ))
+        Ok(comparison_impl(ctx, false))
     }
-
     fn doc_comment(&self) -> &'static str {
-        "Auto-generated PartialEq implementation (~30ns CBGR per field comparison)."
+        "Structural equality using the field implementations of PartialEq."
     }
 }
 
-impl DerivePartialEq {
-    /// Generate eq body for struct types
-    fn generate_struct_eq(
-        &self,
-        type_info: &super::common::TypeInfo,
-        span: Span,
-    ) -> DeriveResult<Block> {
-        if type_info.fields.is_empty() {
-            // Empty struct: always equal
-            return Ok(Block {
-                stmts: vec![].into(),
-                expr: Some(Box::new(bool_lit(true, span))),
-                span,
-            });
-        }
-
-        // Build: self.f1 == other.f1 && self.f2 == other.f2 && ...
-        let mut result: Option<Expr> = None;
-
-        for field in type_info.fields.iter() {
-            let self_field = field.access_on_self(span);
-            let other_field = field.access_on_other(span);
-
-            let field_eq = binary_op(self_field, BinOp::Eq, other_field, span);
-
-            result = Some(match result {
-                None => field_eq,
-                Some(prev) => binary_op(prev, BinOp::And, field_eq, span),
-            });
-        }
-
-        let expr = result.unwrap_or_else(|| bool_lit(true, span));
-
-        Ok(Block {
-            stmts: vec![].into(),
-            expr: Some(Box::new(expr)),
-            span,
+impl DeriveMacro for DeriveEq {
+    fn name(&self) -> &'static str {
+        "Eq"
+    }
+    fn protocol_name(&self) -> &'static str {
+        "Eq"
+    }
+    fn companion_protocol(&self) -> Option<&'static str> {
+        Some("PartialEq")
+    }
+    fn expand_group(&self, ctx: &DeriveContext) -> DeriveResult<List<Item>> {
+        // The marker owns the derive argument. Its companion implementation
+        // has a distinct source anchor on the nominal declaration.
+        let comparison = DeriveContext::from_type_decl(&ctx.type_decl, ctx.type_decl.name.span)?;
+        Ok(List::from_iter([
+            comparison_impl(&comparison, true),
+            ctx.generate_impl_inner(EQ, List::new(), component_conditions(ctx, EQ), ctx.span),
+        ]))
+    }
+    fn expand(&self, ctx: &DeriveContext) -> DeriveResult<Item> {
+        Err(DeriveError::RequiresGroup {
+            name: self.name().into(),
+            span: ctx.span,
         })
     }
-
-    /// Generate eq body for newtype
-    fn generate_newtype_eq(
-        &self,
-        _type_info: &super::common::TypeInfo,
-        span: Span,
-    ) -> DeriveResult<Block> {
-        // Compare inner values: self.0 == other.0
-        let self_inner = Expr::new(
-            ExprKind::TupleIndex {
-                expr: Box::new(self_ref(span)),
-                index: 0,
-            },
-            span,
-        );
-        let other_inner = Expr::new(
-            ExprKind::TupleIndex {
-                expr: Box::new(ident_expr("other", span)),
-                index: 0,
-            },
-            span,
-        );
-
-        let eq_expr = binary_op(self_inner, BinOp::Eq, other_inner, span);
-
-        Ok(Block {
-            stmts: vec![].into(),
-            expr: Some(Box::new(eq_expr)),
-            span,
-        })
+    fn doc_comment(&self) -> &'static str {
+        "Reflexive structural equality for fields implementing Eq."
     }
+}
 
-    /// Generate eq body for enum types
-    ///
-    /// Generates match expression:
-    /// ```verum
-    /// match (self, other) {
-    ///  (Self::Unit, Self::Unit) => true,
-    ///  (Self::Tuple(a0, a1), Self::Tuple(b0, b1)) => a0 == b0 && a1 == b1,
-    ///  (Self::Struct { field: a }, Self::Struct { field: b }) => a == b,
-    ///  _ => false,
-    /// }
-    /// ```
-    fn generate_enum_eq(
-        &self,
-        type_info: &super::common::TypeInfo,
-        span: Span,
-    ) -> DeriveResult<Block> {
-        use verum_ast::pattern::{
-            FieldPattern, MatchArm, Pattern, PatternKind, VariantPatternData,
-        };
-        use verum_ast::ty::PathSegment;
-        use verum_common::{Heap, Maybe};
+// Importers consult both declarations before the source owner is checked.
+// Require equality of the stored types, including wrappers that can implement
+// equality independently of their type arguments.
+fn component_conditions(ctx: &DeriveContext, protocol: &str) -> Option<WhereClause> {
+    let info = &ctx.type_info;
+    let mut predicates = ctx
+        .type_decl
+        .generic_where_clause
+        .as_ref()
+        .map(|clause| clause.predicates.clone())
+        .unwrap_or_default();
+    for field in info
+        .fields
+        .iter()
+        .chain(info.variants.iter().flat_map(|variant| &variant.fields))
+    {
+        predicates.push(field_obligation(field.ty.clone(), protocol));
+    }
+    (!predicates.is_empty()).then(|| WhereClause::new(predicates, ctx.span))
+}
 
-        let mut arms = Vec::new();
+fn field_obligation(ty: Type, protocol: &str) -> WherePredicate {
+    let span = ty.span;
+    WherePredicate {
+        kind: WherePredicateKind::Type {
+            ty,
+            bounds: List::from_iter([protocol_bound(protocol, span)]),
+        },
+        span,
+    }
+}
 
-        for variant in type_info.variants.iter() {
-            let variant_name = variant.name.as_str();
+fn protocol_bound(protocol: &str, span: Span) -> TypeBound {
+    TypeBound {
+        kind: TypeBoundKind::Protocol(path_from_str(protocol, span)),
+        span,
+    }
+}
 
-            // Build path: Self::VariantName
-            let variant_path = Path::new(
-                List::from(vec![
-                    PathSegment::SelfValue,
-                    PathSegment::Name(Ident::new(variant_name, span)),
-                ]),
-                span,
-            );
+fn reference(ty: Type, span: Span) -> Type {
+    Type::new(
+        TypeKind::Reference {
+            mutable: false,
+            inner: Heap::new(ty),
+        },
+        span,
+    )
+}
 
-            let (pattern, body) = if variant.fields.is_empty() {
-                // Unit variant: (Self::Variant, Self::Variant) => true
-                let self_pattern = Pattern::new(
-                    PatternKind::Variant {
-                        path: variant_path.clone(),
-                        data: Maybe::None,
-                    },
-                    span,
-                );
-                let other_pattern = Pattern::new(
-                    PatternKind::Variant {
-                        path: variant_path,
-                        data: Maybe::None,
-                    },
-                    span,
-                );
-                let tuple_pattern = Pattern::new(
-                    PatternKind::Tuple(List::from(vec![self_pattern, other_pattern])),
-                    span,
-                );
-                (tuple_pattern, bool_lit(true, span))
-            } else if variant.fields.iter().all(|f| {
-                let name = f.name.as_str();
-                name.starts_with('_')
-                    || name.chars().next().map(|c| c.is_numeric()).unwrap_or(false)
-                    || name.is_empty()
-            }) {
-                // Tuple variant: (Self::Variant(a0, a1), Self::Variant(b0, b1)) => a0 == b0 && a1 == b1
-                let self_field_patterns: List<Pattern> = variant
-                    .fields
-                    .iter()
-                    .enumerate()
-                    .map(|(i, _)| {
-                        Pattern::new(
-                            PatternKind::Ident {
-                                name: Ident::new(format!("a{}", i), span),
-                                mutable: false,
-                                by_ref: false,
-                                subpattern: Maybe::None,
-                            },
-                            span,
-                        )
-                    })
-                    .collect();
-                let other_field_patterns: List<Pattern> = variant
-                    .fields
-                    .iter()
-                    .enumerate()
-                    .map(|(i, _)| {
-                        Pattern::new(
-                            PatternKind::Ident {
-                                name: Ident::new(format!("b{}", i), span),
-                                mutable: false,
-                                by_ref: false,
-                                subpattern: Maybe::None,
-                            },
-                            span,
-                        )
-                    })
-                    .collect();
+fn borrow(value: Expr) -> Expr {
+    let span = value.span;
+    Expr::new(
+        ExprKind::Unary {
+            op: UnOp::Ref,
+            expr: Heap::new(value),
+        },
+        span,
+    )
+}
 
-                let self_pattern = Pattern::new(
-                    PatternKind::Variant {
-                        path: variant_path.clone(),
-                        data: Maybe::Some(VariantPatternData::Tuple(self_field_patterns)),
-                    },
-                    span,
-                );
-                let other_pattern = Pattern::new(
-                    PatternKind::Variant {
-                        path: variant_path,
-                        data: Maybe::Some(VariantPatternData::Tuple(other_field_patterns)),
-                    },
-                    span,
-                );
-                let tuple_pattern = Pattern::new(
-                    PatternKind::Tuple(List::from(vec![self_pattern, other_pattern])),
-                    span,
-                );
+fn compare(helper: &str, left: Expr, right: Expr, span: Span) -> Expr {
+    Expr::new(
+        ExprKind::Call {
+            func: Heap::new(ident_expr(helper, span)),
+            type_args: List::new(),
+            args: List::from_iter([left, right]),
+        },
+        span,
+    )
+}
 
-                // Build: a0 == b0 && a1 == b1 && ...
-                let mut result: Option<Expr> = None;
-                for i in 0..variant.fields.len() {
-                    let a = ident_expr(&format!("a{}", i), span);
-                    let b = ident_expr(&format!("b{}", i), span);
-                    let field_eq = binary_op(a, BinOp::Eq, b, span);
-                    result = Some(match result {
-                        None => field_eq,
-                        Some(prev) => binary_op(prev, BinOp::And, field_eq, span),
-                    });
-                }
-                let body = result.unwrap_or_else(|| bool_lit(true, span));
-                (tuple_pattern, body)
-            } else {
-                // Struct variant: (Self::Variant { field: a }, Self::Variant { field: b }) => a == b
-                let self_field_patterns: List<FieldPattern> = variant
-                    .fields
-                    .iter()
-                    .map(|f| FieldPattern {
-                        name: Ident::new(f.name.as_str(), span),
-                        pattern: Maybe::Some(Pattern::new(
-                            PatternKind::Ident {
-                                name: Ident::new(format!("a_{}", f.name.as_str()), span),
-                                mutable: false,
-                                by_ref: false,
-                                subpattern: Maybe::None,
-                            },
-                            span,
-                        )),
-                        span,
-                    })
-                    .collect();
-                let other_field_patterns: List<FieldPattern> = variant
-                    .fields
-                    .iter()
-                    .map(|f| FieldPattern {
-                        name: Ident::new(f.name.as_str(), span),
-                        pattern: Maybe::Some(Pattern::new(
-                            PatternKind::Ident {
-                                name: Ident::new(format!("b_{}", f.name.as_str()), span),
-                                mutable: false,
-                                by_ref: false,
-                                subpattern: Maybe::None,
-                            },
-                            span,
-                        )),
-                        span,
-                    })
-                    .collect();
-
-                let self_pattern = Pattern::new(
-                    PatternKind::Variant {
-                        path: variant_path.clone(),
-                        data: Maybe::Some(VariantPatternData::Record {
-                            fields: self_field_patterns,
-                            rest: false,
-                        }),
-                    },
-                    span,
-                );
-                let other_pattern = Pattern::new(
-                    PatternKind::Variant {
-                        path: variant_path,
-                        data: Maybe::Some(VariantPatternData::Record {
-                            fields: other_field_patterns,
-                            rest: false,
-                        }),
-                    },
-                    span,
-                );
-                let tuple_pattern = Pattern::new(
-                    PatternKind::Tuple(List::from(vec![self_pattern, other_pattern])),
-                    span,
-                );
-
-                // Build: a_field1 == b_field1 && a_field2 == b_field2 && ...
-                let mut result: Option<Expr> = None;
-                for field in variant.fields.iter() {
-                    let field_name = field.name.as_str();
-                    let a = ident_expr(&format!("a_{}", field_name), span);
-                    let b = ident_expr(&format!("b_{}", field_name), span);
-                    let field_eq = binary_op(a, BinOp::Eq, b, span);
-                    result = Some(match result {
-                        None => field_eq,
-                        Some(prev) => binary_op(prev, BinOp::And, field_eq, span),
-                    });
-                }
-                let body = result.unwrap_or_else(|| bool_lit(true, span));
-                (tuple_pattern, body)
-            };
-
-            arms.push(MatchArm::new(pattern, Maybe::None, Heap::new(body), span));
-        }
-
-        // Add wildcard arm for different variants: _ => false
-        let wildcard_pattern = Pattern::new(PatternKind::Wildcard, span);
-        arms.push(MatchArm::new(
-            wildcard_pattern,
-            Maybe::None,
-            Heap::new(bool_lit(false, span)),
+fn comparator(ctx: &DeriveContext, name: &str, total: bool) -> Stmt {
+    let span = ctx.span;
+    let member = Ident::new("Member", span);
+    let member_ty = Type::new(TypeKind::Path(Path::single(member.clone())), span);
+    let borrowed = reference(member_ty.clone(), span);
+    let call = method_call(
+        ident_expr("left", span),
+        "eq",
+        List::from_iter([ident_expr("right", span)]),
+        span,
+    );
+    let mut function = ctx.method(
+        name,
+        List::from_iter([
+            ctx.param("left", borrowed.clone(), span),
+            ctx.param("right", borrowed, span),
+        ]),
+        Type::bool(span),
+        Block {
+            stmts: List::new(),
+            expr: Some(Heap::new(call)),
+            span,
+        },
+        span,
+    );
+    function.visibility = Visibility::Private;
+    function.generics.push(GenericParam {
+        kind: GenericParamKind::Type {
+            name: member,
+            default: None,
+            bounds: List::from_iter([protocol_bound(PARTIAL_EQ, span)]),
+        },
+        is_implicit: false,
+        span,
+    });
+    if total {
+        function.generic_where_clause = Some(WhereClause::new(
+            List::from_iter([field_obligation(member_ty, EQ)]),
             span,
         ));
+    }
+    Stmt::item(Item::new(ItemKind::Function(function), span))
+}
 
-        // Build tuple: (self, other)
-        let self_expr = self_ref(span);
-        let other_expr = ident_expr("other", span);
-        let tuple_expr = Expr::new(
-            ExprKind::Tuple(List::from(vec![self_expr, other_expr])),
-            span,
-        );
+// Pair adjacent expressions at each level. Source-order short circuiting is
+// preserved and a record with many fields has logarithmic expression depth.
+fn conjunction(mut values: List<Expr>, span: Span) -> Expr {
+    while values.len() > 1 {
+        let mut next = List::with_capacity(values.len().div_ceil(2));
+        let mut current = values.into_iter();
+        while let Some(left) = current.next() {
+            next.push(match current.next() {
+                Some(right) => binary_op(left, BinOp::And, right, span),
+                None => left,
+            });
+        }
+        values = next;
+    }
+    values.pop().unwrap_or_else(|| bool_lit(true, span))
+}
 
-        // Build match expression
-        let match_expr = Expr::new(
-            ExprKind::Match {
-                expr: Heap::new(tuple_expr),
-                arms: List::from(arms),
-            },
-            span,
-        );
-
-        Ok(Block {
-            stmts: vec![].into(),
-            expr: Some(Box::new(match_expr)),
-            span,
+fn sum_comparison(ctx: &DeriveContext, helper: &str) -> Expr {
+    let span = ctx.span;
+    let owner = ctx.type_info.name.as_str();
+    let arms = ctx
+        .type_info
+        .variants
+        .iter()
+        .map(|variant| {
+            let span = variant.span;
+            let (left, left_fields) = variant.binding_pattern(owner, "left");
+            let (right, right_fields) = variant.binding_pattern(owner, "right");
+            let fields = left_fields
+                .iter()
+                .zip(&right_fields)
+                .map(|(a, b)| {
+                    compare(
+                        helper,
+                        ident_expr(a.as_str(), a.span),
+                        ident_expr(b.as_str(), b.span),
+                        a.span,
+                    )
+                })
+                .collect();
+            let same = MatchArm::new(right, None, Heap::new(conjunction(fields, span)), span);
+            let different = MatchArm::new(
+                Pattern::new(PatternKind::Wildcard, span),
+                None,
+                Heap::new(bool_lit(false, span)),
+                span,
+            );
+            let other = Expr::new(
+                ExprKind::Match {
+                    expr: Heap::new(ident_expr("other", span)),
+                    arms: List::from_iter([same, different]),
+                },
+                span,
+            );
+            MatchArm::new(left, None, Heap::new(other), span)
         })
-    }
+        .collect();
+    Expr::new(
+        ExprKind::Match {
+            expr: Heap::new(self_ref(span)),
+            arms,
+        },
+        span,
+    )
+}
 
-    /// Create the eq method declaration
-    fn create_eq_method(&self, ctx: &DeriveContext, body: Block, span: Span) -> FunctionDecl {
-        // Return type: Bool
-        let return_type = Type::new(
-            TypeKind::Path(Path::single(Ident::new(type_names::BOOL, span))),
+fn comparison_impl(ctx: &DeriveContext, total: bool) -> Item {
+    let span = ctx.span;
+    let info = &ctx.type_info;
+    let name = format!(
+        "$eq_field_{}_{}_{}",
+        info.name,
+        span.file_id.raw(),
+        span.start
+    );
+    let equal = if info.is_enum {
+        sum_comparison(ctx, &name)
+    } else {
+        let fields = info
+            .fields
+            .iter()
+            .map(|field| {
+                let span = field.ty.span;
+                compare(
+                    &name,
+                    borrow(field.access_on_self(span)),
+                    borrow(field.access_on_other(span)),
+                    span,
+                )
+            })
+            .collect();
+        conjunction(fields, span)
+    };
+    let has_fields = !info.fields.is_empty()
+        || info
+            .variants
+            .iter()
+            .any(|variant| !variant.fields.is_empty());
+    let stmts = has_fields
+        .then(|| comparator(ctx, &name, total))
+        .into_iter()
+        .collect();
+    let method = ctx.method(
+        "eq",
+        List::from_iter([
+            ctx.self_ref_param(span),
+            ctx.param(
+                "other",
+                reference(DeriveContext::self_type(span), span),
+                span,
+            ),
+        ]),
+        Type::bool(span),
+        Block {
+            stmts,
+            expr: Some(Heap::new(equal)),
             span,
-        );
-
-        // Parameter: other: &Self
-        let other_type = Type::new(
-            TypeKind::Reference {
-                mutable: false,
-                inner: Box::new(DeriveContext::self_type(span)),
-            },
-            span,
-        );
-        let other_param = ctx.param("other", other_type, span);
-
-        ctx.method(
-            "eq",
-            List::from(vec![ctx.self_ref_param(span), other_param]),
-            return_type,
-            body,
-            span,
-        )
-    }
+        },
+        span,
+    );
+    ctx.generate_impl_inner(
+        PARTIAL_EQ,
+        List::from_iter([method]),
+        component_conditions(ctx, if total { EQ } else { PARTIAL_EQ }),
+        span,
+    )
 }
 
 #[cfg(test)]

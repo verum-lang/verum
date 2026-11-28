@@ -80,7 +80,7 @@ fn an_underivable_protocol_is_reported_rather_than_dropped() {
     let parser = FastParser::new();
     let mut module = parser
         .parse_module_str(
-            "@derive(Eq)\ntype Id is { v: Int };\n",
+            "@derive(NoSuchProtocol)\ntype Id is { v: Int };\n",
             verum_ast::FileId::new(0),
         )
         .expect("parse");
@@ -90,5 +90,5 @@ fn an_underivable_protocol_is_reported_rather_than_dropped() {
         1,
         "a derive with no generator must be reported"
     );
-    assert_eq!(unsupported[0].1, "Eq");
+    assert_eq!(unsupported[0].1, "NoSuchProtocol");
 }

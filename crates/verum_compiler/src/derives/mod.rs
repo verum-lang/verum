@@ -70,7 +70,7 @@ pub use display::DeriveDisplay;
 pub use error::DeriveError as DeriveErrorMacro;
 pub use hash::DeriveHash;
 pub use mysql_typed_row::DeriveMysqlTypedRow;
-pub use partial_eq::DerivePartialEq;
+pub use partial_eq::{DeriveEq, DerivePartialEq};
 pub use serialize::DeriveSerialize;
 pub use typed_row::DeriveTypedRow;
 
@@ -83,42 +83,32 @@ pub type DeriveResult<T> = Result<T, DeriveError>;
 pub(crate) fn expand_source_derives(items: &mut List<Item>, enabled: bool) -> anyhow::Result<()> {
     static REGISTRY: std::sync::LazyLock<DeriveRegistry> =
         std::sync::LazyLock::new(DeriveRegistry::new);
-    let is_hash = |arg: &Expr| {
-        matches!(&arg.kind, ExprKind::Path(path)
-        if path.as_ident().is_some_and(|id| id.as_str() == "Hash"))
-    };
+    fn structural_name(arg: &Expr) -> Option<&str> {
+        let ExprKind::Path(path) = &arg.kind else { return None };
+        let name = path.as_ident()?.as_str();
+        matches!(name, "Hash" | "Eq" | "PartialEq").then_some(name)
+    }
 
     let mut pending = List::from(vec![items]);
     while let Some(items) = pending.pop() {
         let mut generated = List::new();
         for item in &mut *items {
-            let ItemKind::Type(decl) = &mut item.kind else {
-                continue;
-            };
-            let requested = decl
-                .attributes
-                .iter()
-                .filter(|attr| attr.name.as_str() == "derive")
+            let ItemKind::Type(decl) = &mut item.kind else { continue };
+            let mut requested: List<(Text, Span)> = List::new();
+            for arg in decl.attributes.iter().filter(|attr| attr.name.as_str() == "derive")
                 .flat_map(|attr| attr.args.iter().flatten())
-                .filter(|arg| is_hash(arg));
-            let mut spans = requested.map(|arg| arg.span);
-            let Some(span) = spans.next() else { continue };
-            anyhow::ensure!(
-                enabled,
-                "`@derive(Hash)` on `{}` is disabled by `[meta] derive` at {span:?}",
-                decl.name
-            );
-            anyhow::ensure!(
-                spans.next().is_none(),
-                "duplicate `@derive(Hash)` on `{}` at {span:?}",
-                decl.name
-            );
-            generated.push(REGISTRY.expand("Hash", decl, span)?);
+            {
+                let Some(name) = structural_name(arg) else { continue };
+                anyhow::ensure!(enabled, "`@derive({name})` on `{}` is disabled by `[meta] derive` at {:?}", decl.name, arg.span);
+                anyhow::ensure!(!requested.iter().any(|(seen, _)| seen.as_str() == name),
+                    "duplicate `@derive({name})` on `{}` at {:?}", decl.name, arg.span);
+                requested.push((name.into(), arg.span));
+            }
+            if requested.is_empty() { continue; }
+            generated.extend(REGISTRY.expand_requested(decl, &requested)?);
             decl.attributes.retain_mut(|attr| {
-                if attr.name.as_str() == "derive"
-                    && let Some(args) = &mut attr.args
-                {
-                    args.retain(|arg| !is_hash(arg));
+                if attr.name.as_str() == "derive" && let Some(args) = &mut attr.args {
+                    args.retain(|arg| structural_name(arg).is_none());
                     return !args.is_empty();
                 }
                 true
@@ -149,10 +139,11 @@ impl DeriveRegistry {
             derives: verum_common::Map::new(),
         };
 
-        // Register all 9 core derives (8 essential + Builder)
+        // Structural and formatting derives
         registry.register("Debug", Box::new(DeriveDebug));
         registry.register("Clone", Box::new(DeriveClone));
         registry.register("PartialEq", Box::new(DerivePartialEq));
+        registry.register("Eq", Box::new(DeriveEq));
         registry.register("Default", Box::new(DeriveDefault));
         registry.register("Serialize", Box::new(DeriveSerialize));
         registry.register("Deserialize", Box::new(DeriveDeserialize));
@@ -220,13 +211,49 @@ impl DeriveRegistry {
         derives: &[Text],
         span: Span,
     ) -> DeriveResult<List<Item>> {
+        let source_args = type_decl
+            .attributes
+            .iter()
+            .filter(|attr| attr.name.as_str() == "derive")
+            .flat_map(|attr| attr.args.iter().flatten());
+        let requested: List<_> = derives
+            .iter()
+            .map(|name| {
+                let source_span = source_args.clone().find_map(|arg| {
+                    let ExprKind::Path(path) = &arg.kind else {
+                        return None;
+                    };
+                    (path.as_ident()?.as_str() == name.as_str()).then_some(arg.span)
+                });
+                (name.clone(), source_span.unwrap_or(span))
+            })
+            .collect();
+        self.expand_requested(type_decl, &requested)
+    }
+
+    pub(crate) fn expand_requested(
+        &self,
+        decl: &TypeDecl,
+        requested: &[(Text, Span)],
+    ) -> DeriveResult<List<Item>> {
+        let companions: List<_> = requested
+            .iter()
+            .filter_map(|(name, _)| self.get(name.as_str())?.companion_protocol())
+            .collect();
         let mut items = List::new();
-
-        for derive_name in derives {
-            let item = self.expand(derive_name.as_str(), type_decl, span)?;
-            items.push(item);
+        for (name, span) in requested {
+            if companions.contains(&name.as_str()) {
+                continue;
+            }
+            let generator = self
+                .get(name.as_str())
+                .ok_or_else(|| DeriveError::UnknownDerive {
+                    name: name.clone(),
+                    span: *span,
+                })?;
+            let context = DeriveContext::from_type_decl(decl, *span)?;
+            items.extend(generator.expand_group(&context)?);
         }
-
         Ok(items)
     }
 }
@@ -247,6 +274,16 @@ pub trait DeriveMacro: Send + Sync {
 
     /// Expand the derive for the given type
     fn expand(&self, ctx: &DeriveContext) -> DeriveResult<Item>;
+
+    /// A companion supplied by this generator also satisfies a separate request for it.
+    fn companion_protocol(&self) -> Option<&'static str> {
+        None
+    }
+
+    /// Expand all declarations this generator supplies for a source attribute.
+    fn expand_group(&self, ctx: &DeriveContext) -> DeriveResult<List<Item>> {
+        Ok(List::from_iter([self.expand(ctx)?]))
+    }
 
     /// Check if this derive can be applied to the given type
     fn can_derive(&self, _ctx: &DeriveContext) -> Result<(), DeriveError> {

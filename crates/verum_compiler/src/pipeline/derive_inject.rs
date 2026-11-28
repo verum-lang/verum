@@ -23,7 +23,7 @@
 //! reinvented either.
 //!
 //! The project parse path invokes this pass for the remaining Ord and Default
-//! derives after shared source preparation has expanded structural Hash.
+//! derives after shared source preparation has expanded structural Hash and equality.
 
 use verum_ast::Module;
 use verum_ast::decl::{TypeDecl, TypeDeclBody};

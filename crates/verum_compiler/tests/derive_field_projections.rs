@@ -10,7 +10,11 @@ use verum_vbc::{
 };
 
 const TUF_TYPES: &str = include_str!("../../../core/security/tuf/types.vr");
-const PARTIAL_EQ: &str = "type PartialEq is protocol { fn eq(&self, other: &Self) -> Bool; };";
+const PARTIAL_EQ: &str = r#"module core.base.protocols;
+    type PartialEq is protocol { fn eq(&self, other: &Self) -> Bool; };
+    implement PartialEq for Int { fn eq(&self, other:&Self)->Bool { *self == *other } }
+    implement PartialEq for Text { fn eq(&self, other:&Self)->Bool { *self == *other } }
+"#;
 
 fn declaration(module: &Module, name: &str) -> Item {
     module
@@ -78,14 +82,76 @@ fn keyid_hash_projects_the_declared_text() {
 }
 
 #[test]
-fn keyid_and_pair_equality_typecheck_both_operands() {
+fn keyid_and_pair_equality_compares_both_operands_before_and_after_serialization() {
     let tuf = Parser::new(TUF_TYPES).parse_module().unwrap();
-    let source = format!("{PARTIAL_EQ} type Pair is (Int, Int);");
+    let source = format!(
+        r#"{PARTIAL_EQ}
+        type Eq is protocol extends PartialEq {{}};
+        implement Eq for Text {{}}
+        type Pair is (Int, Int);
+        fn compare_key(a:&KeyId, b:&KeyId)->Bool {{ a.eq(b) }}
+        fn key_probe(which:Int)->Bool {{
+            let key = KeyId("alpha");
+            let same = KeyId("alpha");
+            let other = KeyId("beta");
+            if which == 0 {{ compare_key(&key, &same) }} else {{ compare_key(&key, &other) }}
+        }}
+    "#
+    );
     let mut module = Parser::new(&source).parse_module().unwrap();
-    module.items.push(declaration(&tuf, "KeyId"));
-    derive(&mut module, "KeyId", "PartialEq");
+    let key = declaration(&tuf, "KeyId");
+    let ItemKind::Type(decl) = &key.kind else {
+        unreachable!()
+    };
+    let implementations = DeriveRegistry::new()
+        .expand_all(decl, &["Eq".into()], key.span)
+        .unwrap();
+    module.items.push(key);
+    module.items.extend(implementations);
     derive(&mut module, "Pair", "PartialEq");
     check(&module);
+    let mut codegen = VbcCodegen::with_config(CodegenConfig::new("core.base.protocols"));
+    let vbc = codegen.compile_module(&module).unwrap();
+    let wire = verum_vbc::serialize::serialize_module(&vbc).unwrap();
+    let restored = verum_vbc::deserialize::deserialize_module(&wire).unwrap();
+    for module in [vbc, restored] {
+        verum_vbc::validate::validate_module(&module).unwrap();
+        let entry = module
+            .find_function_by_name("core.base.protocols.key_probe")
+            .unwrap();
+        let mut vm = Interpreter::new(Arc::new(module));
+        for (input, expected) in [(0, true), (1, false)] {
+            let result = vm
+                .execute_function_with_args(entry, &[Value::from_i64(input)])
+                .unwrap();
+            assert_eq!(result.try_as_bool(), Some(expected));
+        }
+    }
+}
+
+#[test]
+fn a_single_item_request_cannot_detach_the_eq_marker_from_its_comparison() {
+    let tuf = Parser::new(TUF_TYPES).parse_module().unwrap();
+    let item = declaration(&tuf, "KeyId");
+    let ItemKind::Type(decl) = &item.kind else {
+        unreachable!()
+    };
+    let registry = DeriveRegistry::new();
+    assert!(matches!(
+        registry.expand("Eq", decl, item.span),
+        Err(verum_compiler::derives::DeriveError::RequiresGroup { .. })
+    ));
+    let items = registry
+        .expand_all(
+            decl,
+            &["Eq".into(), "PartialEq".into(), "Hash".into()],
+            item.span,
+        )
+        .unwrap();
+    assert_eq!(items.len(), 3);
+    for (index, item) in items.iter().enumerate() {
+        assert!(items.iter().take(index).all(|prior| prior.span != item.span));
+    }
 }
 
 fn assert_hash_body(decl: &str, constructor: &str) {
@@ -157,7 +223,7 @@ fn generated_equality_uses_the_implementing_type_in_its_signature() {
     check(&module);
     let vbc = VbcCodegen::with_config(CodegenConfig::new("projection"))
         .compile_module(&module).expect("generated equality must lower with its real receiver");
-    let entry = vbc.find_function_by_name("projection.probe").unwrap();
+    let entry = vbc.find_function_by_name("core.base.protocols.probe").unwrap();
     let mut vm = Interpreter::new(Arc::new(vbc));
     for (left, right, equal) in [(2, 2, true), (2, 9, false)] {
         let result = vm.execute_function_with_args(entry, &[Value::from_i64(left), Value::from_i64(right)]).unwrap();

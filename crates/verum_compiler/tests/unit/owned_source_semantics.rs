@@ -816,6 +816,9 @@ mod stdlib_local_file_readers;
 #[path = "derived_hash_source.rs"]
 mod derived_hash_source;
 
+#[path = "derived_eq_source.rs"]
+mod derived_eq_source;
+
 #[path = "stdlib_dynamic_protocol_arguments.rs"]
 mod stdlib_dynamic_protocol_arguments;
 

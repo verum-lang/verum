@@ -1610,7 +1610,7 @@ impl MacroExpansionPhase {
                     "`@derive({})` is not allowed: `[meta] derive` is disabled",
                     derives
                         .iter()
-                        .map(|d| d.as_str())
+                        .map(|(name, _)| name.as_str())
                         .collect::<Vec<_>>()
                         .join(", ")
                 ))
@@ -1628,27 +1628,10 @@ impl MacroExpansionPhase {
             derives
         );
 
-        // Expand each derive
-        for derive_name in derives.iter() {
-            match self
-                .derive_registry
-                .expand(derive_name.as_str(), type_decl, item.span)
-            {
-                Ok(impl_item) => {
-                    self.stats.derives_expanded += 1;
-                    result_items.push(impl_item);
-                    tracing::trace!(
-                        "Generated {} implementation for {}",
-                        derive_name,
-                        type_decl.name
-                    );
-                }
-                Err(err) => {
-                    // Convert DeriveError to Diagnostic
-                    return Err(self.derive_error_to_diagnostic(&err));
-                }
-            }
-        }
+        let implementations = self.derive_registry.expand_requested(type_decl, &derives)
+            .map_err(|error| self.derive_error_to_diagnostic(&error))?;
+        self.stats.derives_expanded += derives.len();
+        result_items.extend(implementations);
 
         Ok(result_items)
     }
@@ -1663,7 +1646,7 @@ impl MacroExpansionPhase {
     /// the configuration args (name, version, about, ...); the derive
     /// itself reads those via `type_decl.attributes`. Spec:
     /// cli-framework spec §4.
-    fn extract_derive_names(&self, attributes: &[Attribute]) -> List<Text> {
+    fn extract_derive_names(&self, attributes: &[Attribute]) -> List<(Text, Span)> {
         let mut derives = List::new();
         let mut saw_command = false;
 
@@ -1679,14 +1662,14 @@ impl MacroExpansionPhase {
                                 if n.as_str() == "Command" {
                                     saw_command = true;
                                 }
-                                derives.push(n);
+                                derives.push((n, arg.span));
                             }
                         }
                     }
                 }
             }
             if attr.name.as_str() == "command" && !saw_command {
-                derives.push(Text::from("Command"));
+                derives.push((Text::from("Command"), attr.span));
                 saw_command = true;
             }
         }

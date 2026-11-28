@@ -3,14 +3,16 @@ use crate::phases::semantic_analysis::SemanticAnalysisPhase;
 use verum_ast::decl::{ImplKind, ItemKind};
 
 #[test]
-fn structural_hash_release_keyid() {
+fn structural_hash_and_eq_release_keyid() {
     let session = crate::Session::new(crate::CompilerOptions::default());
     let (registry, phase) = release_stdlib_graph(&session);
-    let source = "module key_client; mount core.security.tuf.types.{KeyId, RoleName}; mount core.cog.resolve.PackageName; mount core.base.protocols.{Hash};
-        fn require_hash<T: Hash>(k: &T) -> Int { 17 }
-        fn check_key(k: &KeyId) -> Int { require_hash(k) }
-        fn check_role(k: &RoleName) -> Int { require_hash(k) }
-        fn check_package(k: &PackageName) -> Int { require_hash(k) }";
+    let source = "module key_client; mount core.security.tuf.types.{KeyId, RoleName}; mount core.cog.resolve.PackageName;
+        mount core.base.protocols.{Eq,Hash,PartialEq};
+        fn require<T:Hash+Eq>(a:&T) -> Int {17}
+        fn compare<T:PartialEq>(a:&T,b:&T) -> Bool {a.eq(b)}
+        fn check_key(a:&KeyId,b:&KeyId)->Bool { require(a) == 17 && compare(a,b) }
+        fn check_role(a:&RoleName,b:&RoleName)->Bool { require(a) == 17 && compare(a,b) }
+        fn check_package(a:&PackageName,b:&PackageName)->Bool { require(a) == 17 && compare(a,b) }";
     let client = Parser::new(source).parse_module().unwrap();
     check_source_module(
         &mut phase.configured_checker(),
@@ -18,7 +20,7 @@ fn structural_hash_release_keyid() {
         &client,
         &registry,
     )
-    .unwrap_or_else(|errors| panic!("release KeyId Hash: {errors:?}"));
+    .unwrap_or_else(|errors| panic!("release Hash and equality: {errors:?}"));
     // Isolate the real declarations and their generated bodies from TUF's
     // independent Map prerequisite in the same release declaration graph.
     for (owner, names) in [
@@ -30,7 +32,7 @@ fn structural_hash_release_keyid() {
             ItemKind::Module(_) | ItemKind::Mount(_) => true,
             ItemKind::Type(td) => names.contains(&td.name.as_str()),
             ItemKind::Impl(implementation) => matches!(&implementation.kind,
-                ImplKind::Protocol {protocol,for_type,..} if protocol.last_segment_name() == "Hash"
+                ImplKind::Protocol {protocol,for_type,..} if ["Hash","PartialEq","Eq"].contains(&protocol.last_segment_name())
                 && names.contains(&verum_ast::pretty::format_type(for_type).as_str())),
             _ => false,
         });
@@ -39,7 +41,7 @@ fn structural_hash_release_keyid() {
             .iter()
             .filter(|item| matches!(item.kind, ItemKind::Impl(_)))
             .count();
-        assert_eq!(count, names.len());
+        assert_eq!(count, 3 * names.len());
         check_source_module(
             &mut phase.configured_checker(),
             owner,
@@ -70,7 +72,8 @@ fn structural_hash_release_keyid() {
             "{diagnostic}"
         );
         assert!(
-            !diagnostic.contains("KeyId: core::base::protocols::Hash"),
+            !diagnostic.contains("KeyId: core::base::protocols::Hash")
+                && !diagnostic.contains("KeyId: core::base::protocols::Eq"),
             "{diagnostic}"
         );
     }
@@ -134,6 +137,7 @@ fn structural_hash_executes_the_canonical_text_body() {
     use verum_vbc::interpreter::Interpreter;
     let source = r#"@no_implicit_prelude module core.base.protocols;
         public type Hasher is { public state:Int };
+        implement Hasher { fn write_byte(&mut self, value:Byte) { self.state = value as Int; } }
         public type Hash is protocol { fn hash(&self, hasher:&mut Hasher); };
         public type Other is protocol { fn hash(&self, hasher:&mut Hasher); };
         implement Other for Text { fn hash(&self, hasher:&mut Hasher) {
@@ -145,6 +149,14 @@ fn structural_hash_executes_the_canonical_text_body() {
         } }
         @derive(Hash) public type Wrap<T> is (T);
         @derive(Hash) public type Pair is { left: Wrap<Text>, right: Text };
+        @derive(Hash) type Role is Empty | Single(Text) | Named {value:Text};
+        fn probe_role(role:&Role) -> Int {
+            let mut sink = Hasher {state:0}; role.hash(&mut sink); sink.state
+        }
+        fn sum_probe() -> Int {
+            let named: Role = Role.Named {value:"alpha"};
+            probe_role(&Role.Empty) + probe_role(&Role.Single("beta")) + probe_role(&named)
+        }
         fn probe() -> Int {
             let mut sink = Hasher {state:0};
             let both = Pair { left: Wrap("alpha"), right: "beta" };
@@ -160,24 +172,31 @@ fn structural_hash_executes_the_canonical_text_body() {
         .compile_test_unit_to_vbc(module)
         .expect("ordinary checked lowering");
     let wire = verum_vbc::serialize::serialize_module(&vbc).unwrap();
-    let vbc = verum_vbc::deserialize::deserialize_module(&wire).unwrap();
-    verum_vbc::validate::validate_module(&vbc).unwrap();
-    let entry = vbc
-        .find_function_by_name("core.base.protocols.probe")
-        .unwrap();
-    assert_eq!(
-        Interpreter::new(vbc.into())
-            .execute_function_with_args(entry, &[])
-            .unwrap()
-            .as_i64(),
-        7113
-    );
+    let restored = verum_vbc::deserialize::deserialize_module(&wire).unwrap();
+    for module in [vbc, restored.into()] {
+        verum_vbc::validate::validate_module(&module).unwrap();
+        let entry = module
+            .find_function_by_name("core.base.protocols.probe")
+            .unwrap();
+        let sum = module
+            .find_function_by_name("core.base.protocols.sum_probe")
+            .unwrap();
+        let mut vm = Interpreter::new(module);
+        assert_eq!(
+            vm.execute_function_with_args(entry, &[]).unwrap().as_i64(),
+            7113
+        );
+        assert_eq!(
+            vm.execute_function_with_args(sum, &[]).unwrap().as_i64(),
+            113 + 271
+        );
+    }
 }
 
 #[test]
-fn structural_hash_respects_selected_fields_inline_owners_and_feature_policy() {
+fn structural_derives_respect_selected_fields_inline_owners_and_feature_policy() {
     let source = r#"module cog; module inner {
-        @derive(Hash, Clone) type Key is { visible: Int, @cfg(windows) hidden: Int };
+        @derive(Hash, Clone, PartialEq, Eq) type Key is { visible: Int, @cfg(windows) hidden: Absent };
     }"#;
     let module = Parser::new(source).parse_module().unwrap();
     let target = TargetConfig::for_target("x86_64-unknown-linux-gnu");
@@ -190,17 +209,20 @@ fn structural_hash_respects_selected_fields_inline_owners_and_feature_policy() {
     assert_eq!(repeated, selected);
     let graph = source_registry([("cog", "mod.vr", prepared)]).unwrap();
     let inner = graph.read().get_by_path("cog.inner").unwrap();
-    let implementation = inner
-        .ast
-        .items
-        .iter()
-        .find(|item| matches!(item.kind, ItemKind::Impl(_)))
-        .unwrap();
-    let body = verum_ast::pretty::format_item(implementation);
-    assert!(
-        body.contains("visible") && !body.contains("hidden"),
-        "{body}"
-    );
+    let mut protocols = List::new();
+    for item in &inner.ast.items {
+        let ItemKind::Impl(imp) = &item.kind else { continue };
+        let ImplKind::Protocol { protocol, .. } = &imp.kind else { unreachable!() };
+        let name = protocol.last_segment_name();
+        protocols.push(name);
+        let body = verum_ast::pretty::format_item(item);
+        assert!(!body.contains("hidden") && !body.contains("Absent"), "{body}");
+        if name != "Eq" {
+            assert!(body.contains("visible"), "{body}");
+        }
+    }
+    protocols.sort_unstable();
+    assert_eq!(protocols.as_slice(), ["Eq", "Hash", "PartialEq"]);
     assert!(inner.ast.items.iter().filter_map(|item| match &item.kind { ItemKind::Type(td) => Some(td), _ => None })
         .any(|td| td.attributes.iter().any(|attr| attr.args.as_ref().is_some_and(|args| args.iter()
             .any(|arg| matches!(&arg.kind, verum_ast::ExprKind::Path(p) if p.last_segment_name() == "Clone"))))));

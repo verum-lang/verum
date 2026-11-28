@@ -14,7 +14,7 @@ use verum_ast::decl::{
     Visibility,
 };
 use verum_ast::expr::{Block, Expr, ExprKind};
-use verum_ast::pattern::{Pattern, PatternKind};
+use verum_ast::pattern::{FieldPattern, Pattern, PatternKind, VariantPatternData};
 use verum_ast::ty::{GenericParam, GenericParamKind, Ident, Path, PathSegment, Type, TypeKind};
 use verum_common::{List, Text};
 
@@ -243,6 +243,50 @@ impl VariantInfo {
             index,
             span: variant.span,
         }
+    }
+
+    /// Bind the payload fields of this constructor in their declared order.
+    pub(super) fn binding_pattern(&self, owner: &str, prefix: &str) -> (Pattern, List<Ident>) {
+        let span = self.span;
+        let path = Path::new(
+            List::from_iter([
+                PathSegment::Name(Ident::new(owner, span)),
+                PathSegment::Name(self.ident(span)),
+            ]),
+            span,
+        );
+        let names: List<_> = self
+            .fields
+            .iter()
+            .enumerate()
+            .map(|(i, field)| Ident::new(format!("{prefix}{i}"), field.ty.span))
+            .collect();
+        let binder = |name: &Ident| Pattern::ident(name.clone(), false, name.span);
+        let data = if self.is_unit {
+            None
+        } else if self.is_tuple {
+            Some(VariantPatternData::Tuple(
+                names.iter().map(binder).collect(),
+            ))
+        } else {
+            Some(VariantPatternData::Record {
+                fields: self
+                    .fields
+                    .iter()
+                    .zip(&names)
+                    .map(|(field, name)| FieldPattern {
+                        name: field.ident(field.span),
+                        pattern: Some(binder(name)),
+                        span: field.span,
+                    })
+                    .collect(),
+                rest: false,
+            })
+        };
+        (
+            Pattern::new(PatternKind::Variant { path, data }, span),
+            names,
+        )
     }
 
     /// Get the variant as an identifier
@@ -505,7 +549,7 @@ impl DeriveContext {
         self.generate_impl_inner(protocol, methods, where_clause, span)
     }
 
-    fn generate_impl_inner(
+    pub(super) fn generate_impl_inner(
         &self,
         protocol: &str,
         methods: List<FunctionDecl>,
@@ -689,6 +733,9 @@ pub enum DeriveError {
     /// Unknown derive macro
     UnknownDerive { name: Text, span: Span },
 
+    /// The derive supplies multiple declarations which must be applied together.
+    RequiresGroup { name: Text, span: Span },
+
     /// Unsupported type kind
     UnsupportedTypeKind { kind: Text, hint: Text, span: Span },
 
@@ -723,6 +770,9 @@ impl std::fmt::Display for DeriveError {
         match self {
             DeriveError::UnknownDerive { name, .. } => {
                 write!(f, "Unknown derive macro: `{}`", name.as_str())
+            }
+            DeriveError::RequiresGroup { name, .. } => {
+                write!(f, "Use grouped expansion for `{name}` to generate all of its implementations")
             }
             DeriveError::UnsupportedTypeKind { kind, hint, .. } => {
                 write!(f, "Cannot derive for {}: {}", kind.as_str(), hint.as_str())

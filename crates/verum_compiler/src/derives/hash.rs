@@ -11,13 +11,13 @@ use super::{DeriveMacro, DeriveResult, ident_expr, int_lit, method_call, self_re
 use verum_ast::Span;
 use verum_ast::decl::{FunctionDecl, FunctionParam, FunctionParamKind, Item, ItemKind, Visibility};
 use verum_ast::expr::{Block, Expr, ExprKind, UnOp};
-use verum_ast::pattern::{FieldPattern, MatchArm, Pattern, PatternKind, VariantPatternData};
+use verum_ast::pattern::{MatchArm, Pattern, PatternKind};
 use verum_ast::stmt::Stmt;
 use verum_ast::ty::{
-    GenericParam, GenericParamKind, Ident, Path, PathSegment, Type, TypeBound, TypeBoundKind,
+    GenericParam, GenericParamKind, Ident, Path, Type, TypeBound, TypeBoundKind,
     TypeKind,
 };
-use verum_common::{Heap, List, Maybe, Text};
+use verum_common::{Heap, List, Maybe};
 
 /// `@derive(Hash)` macro implementation.
 pub struct DeriveHash;
@@ -113,7 +113,7 @@ impl DeriveHash {
     ) -> DeriveResult<Block> {
         let mut arms: Vec<MatchArm> = Vec::new();
         for (idx, variant) in type_info.variants.iter().enumerate() {
-            arms.push(self.variant_arm(variant, idx, helper, variant.span));
+            arms.push(self.variant_arm(type_info.name.as_str(), variant, idx, helper, variant.span));
         }
         let match_expr = Expr::new(
             ExprKind::Match {
@@ -131,53 +131,13 @@ impl DeriveHash {
 
     fn variant_arm(
         &self,
+        owner: &str,
         variant: &VariantInfo,
         index: usize,
         helper: &str,
         span: Span,
     ) -> MatchArm {
-        let variant_path = Path::new(
-            List::from(vec![
-                PathSegment::SelfValue,
-                PathSegment::Name(Ident::new(variant.name.as_str(), span)),
-            ]),
-            span,
-        );
-
-        // Always bind payloads to generated names. A field called `hasher`
-        // must not shadow the method's destination.
-        let names: List<Text> = (0..variant.fields.len())
-            .map(|index| format!("field{index}").into())
-            .collect();
-        let binding = |name: &Text| Pattern::ident(Ident::new(name.as_str(), span), false, span);
-        let data = if variant.is_unit {
-            None
-        } else if variant.is_tuple {
-            Some(VariantPatternData::Tuple(
-                names.iter().map(binding).collect(),
-            ))
-        } else {
-            Some(VariantPatternData::Record {
-                fields: variant
-                    .fields
-                    .iter()
-                    .zip(&names)
-                    .map(|(field, name)| FieldPattern {
-                        name: field.ident(span),
-                        pattern: Some(binding(name)),
-                        span,
-                    })
-                    .collect(),
-                rest: false,
-            })
-        };
-        let pattern = Pattern::new(
-            PatternKind::Variant {
-                path: variant_path,
-                data,
-            },
-            span,
-        );
+        let (pattern, names) = variant.binding_pattern(owner, "field");
         let calls = names
             .iter()
             .zip(&variant.fields)
