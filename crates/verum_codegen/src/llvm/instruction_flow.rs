@@ -87,6 +87,12 @@ impl<'a> Edges<'a> {
     }
 }
 
+pub(in crate::llvm) fn has_linear_fallthrough(body: &[Instruction]) -> bool {
+    let Some((last, prefix)) = body.split_last() else { return false };
+    prefix.iter().all(|op| matches!(Edges::of(op), Edges::Next))
+        && matches!(Edges::of(last), Edges::Next | Edges::Stop)
+}
+
 impl InstructionFlow {
     pub fn build(module: &VbcModule, instructions: &[Instruction]) -> Result<Self> {
         let mut starts = List::new();

@@ -577,9 +577,35 @@ fn a_value_slot_borrow_preserves_the_address_for_scalar_dereference() {
     assert_eq!(value, 37);
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[path = "support/source_image.rs"]
 mod source_image;
+
+#[cfg(target_os = "linux")]
+#[path = "support/native_library.rs"]
+mod native_library;
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn protocol_call_borrows_both_a_named_byte_and_a_packed_slice_element() {
+    let source = include_str!("../../verum_vbc/tests/fixtures/bound_borrowed_byte.vr");
+    let wire = source_image::module(source);
+    #[cfg(target_os = "macos")]
+    source_image::run_module(wire, |_| {});
+    #[cfg(target_os = "linux")]
+    native_library::with_library(
+        &source_image::specialize(wire),
+        &[("verum_main", "observe_borrowed_bytes")],
+        |library| {
+            // SAFETY: the exported source function takes no arguments and returns one Int word.
+            let result = unsafe {
+                let main = library.get::<unsafe extern "C" fn() -> i64>(b"observe_borrowed_bytes").unwrap();
+                main()
+            };
+            assert_eq!(result, 73);
+        },
+    );
+}
 
 #[cfg(target_os = "macos")]
 #[test]

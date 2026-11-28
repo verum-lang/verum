@@ -228,3 +228,46 @@ fn caller_cleanup_allows_prior_access_but_discards_every_storage_fact() {
         "a later unknown read must still refuse"
     );
 }
+
+#[test]
+fn only_unpublished_packed_allocations_keep_their_geometry_across_a_call() {
+    use verum_vbc::instruction::RegRange;
+
+    let call = |argument, count| Instruction::Call {
+        dst: Reg(10), func_id: 0,
+        args: RegRange { start: Reg(argument), count },
+    };
+    let shape = ArrayResultFact::Packed { width: 1, float: false, count: 2 };
+    let simulate = |before: &[Instruction], after: &[Instruction]| {
+        let mut body = before.to_vec();
+        body.extend([
+            Instruction::LoadI { dst: Reg(0), value: 2 },
+            Instruction::LoadI { dst: Reg(2), value: 0 },
+            Instruction::MemExtended {
+                sub_op: MemSubOpcode::NewByteArray as u8, operands: vec![1, 0, 2],
+            },
+            Instruction::Mov { dst: Reg(4), src: Reg(1) },
+        ]);
+        body.extend_from_slice(after);
+        body.push(call(8, 1));
+        let mut storage = ArrayStorage::for_body(&body);
+        for op in &body {
+            storage.begin_instruction(op);
+            storage.finish_instruction(op).unwrap();
+        }
+        (storage.get(Reg(1)), storage.get(Reg(4)))
+    };
+    let borrow = |src| Instruction::RefLocal { dst: Reg(8), src: Reg(src) };
+    assert_eq!(simulate(&[], &[borrow(7)]), (Some(shape), Some(shape)));
+    for (prior, after) in [
+        (vec![], vec![call(1, 1)]),
+        (vec![], vec![borrow(4)]),
+        (vec![borrow(1)], vec![]),
+        (vec![borrow(4)], vec![]),
+        (vec![call(4, 1)], vec![]),
+        (vec![], vec![Instruction::SetF { obj: Reg(8), field_idx: 0, value: Reg(4) }]),
+        (vec![], vec![Instruction::JmpIf { cond: Reg(7), offset: 1 }]),
+    ] {
+        assert_eq!(simulate(&prior, &after), (None, None), "{prior:?}, {after:?}");
+    }
+}

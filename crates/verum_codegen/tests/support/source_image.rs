@@ -21,6 +21,24 @@ pub fn module(source: &str) -> verum_vbc::VbcModule {
     wire
 }
 
+/// Use the serialized bodies and their concrete generic witnesses for native lowering.
+pub fn specialize(mut wire: verum_vbc::VbcModule) -> verum_vbc::VbcModule {
+    for function in &mut wire.functions {
+        function.is_generic = !function.type_params.is_empty();
+        let start = function.bytecode_offset as usize;
+        let mut instructions = verum_vbc::bytecode::decode_instructions(
+            &wire.bytecode[start..start + function.bytecode_length as usize],
+        )
+        .expect("loaded body");
+        verum_vbc::bytecode::jump_offsets_to_instr_indices(&mut instructions);
+        function.instructions = Some(instructions);
+    }
+    let graph = verum_vbc::mono::module_instantiations(&wire).expect("declared generic witnesses");
+    verum_vbc::mono::monomorphize_minimal(wire, &graph)
+        .expect("specialize")
+        .module
+}
+
 pub fn run(source: &str) {
     run_with(source, |_| {});
 }
@@ -64,24 +82,11 @@ pub fn execute_with_arguments(
 
 /// Configure the linked child process before invoking the actual program entry.
 pub fn execute_with_command(
-    mut wire: verum_vbc::VbcModule,
+    wire: verum_vbc::VbcModule,
     configure: impl FnOnce(&verum_llvm::module::Module<'_>),
     configure_command: impl FnOnce(&mut Command),
 ) -> std::process::Output {
-    for function in &mut wire.functions {
-        function.is_generic = !function.type_params.is_empty();
-        let start = function.bytecode_offset as usize;
-        let mut instructions = verum_vbc::bytecode::decode_instructions(
-            &wire.bytecode[start..start + function.bytecode_length as usize],
-        )
-        .expect("loaded body");
-        verum_vbc::bytecode::jump_offsets_to_instr_indices(&mut instructions);
-        function.instructions = Some(instructions);
-    }
-    let graph = verum_vbc::mono::module_instantiations(&wire).expect("declared generic witnesses");
-    let wire = verum_vbc::mono::monomorphize_minimal(wire, &graph)
-        .expect("specialize")
-        .module;
+    let wire = specialize(wire);
     Target::initialize_native(&InitializationConfig::default()).expect("native target");
     let triple = TargetMachine::get_default_triple();
     let machine = Target::from_triple(&triple)

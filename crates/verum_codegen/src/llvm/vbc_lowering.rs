@@ -64,6 +64,7 @@ use super::instruction::{integer_branch_condition, lower_instruction};
 #[path = "instruction_flow.rs"]
 mod instruction_flow;
 use instruction_flow::InstructionFlow;
+pub(super) use instruction_flow::has_linear_fallthrough;
 use super::types::{RefTier, TypeLowering};
 use super::well_known_types::WellKnownType as WKT;
 use verum_common::well_known_types::type_names as tn;
