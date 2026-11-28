@@ -151,6 +151,8 @@ fn a_known_callable_producer_does_not_authorize_an_overwritten_register() {
     let error = lowering.lower_module(&module).unwrap_err();
     assert!(error.to_string().contains("producer-issued parameter convention"), "{error}");
 
+    let diagnostic = error.to_string();
+    assert!(diagnostic.contains("probe at VBC instruction ") && diagnostic.contains("(CallClosure, r"), "{diagnostic}");
 }
 
 #[test]

@@ -1232,11 +1232,13 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
     /// An erased native function pointer carries no parameter convention.
     /// Refuse it when an owned-body target can occur in this module.
-    pub fn require_indirect_parameter_convention(&self) -> Result<()> {
+    pub(super) fn require_indirect_parameter_convention(&self, operation: &str, register: Reg) -> Result<()> {
         if self.vbc_module.is_some_and(|module|
             module.functions.iter().any(|function| function.owned_value_parameters)) {
-            return Err(LlvmLoweringError::unsupported(
-                "native indirect call requires a producer-issued parameter convention"));
+            return Err(LlvmLoweringError::unsupported(format!(
+                "native indirect call requires a producer-issued parameter convention: {} at VBC instruction {} ({operation}, r{})",
+                self.function_name(), self.current_vbc_instr_idx(), register.0,
+            )));
         }
         Ok(())
     }
@@ -1255,7 +1257,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             self.resolve_declared_function(declaration)?;
             return Ok(true);
         }
-        self.require_indirect_parameter_convention()?;
+        self.require_indirect_parameter_convention("CallClosure", register)?;
         Ok(false)
     }
 

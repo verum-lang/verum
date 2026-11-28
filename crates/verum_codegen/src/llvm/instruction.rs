@@ -6756,7 +6756,7 @@ fn lower_instruction_impl<'ctx>(
         // Call Variants: CallR, CallG, CallV
         // ====================================================================
         Instruction::CallR { dst, func, argc } => {
-            ctx.require_indirect_parameter_convention()?;
+            ctx.require_indirect_parameter_convention("CallR", *func)?;
             // #24 CALLM-WITNESS-CONSUME-1 invariant: a pending call
             // witness never survives past ANY call-family instruction —
             // it belongs to the call it precedes.  CallR is dynamic
@@ -6907,7 +6907,7 @@ fn lower_instruction_impl<'ctx>(
             vtable_slot,
             args,
         } => {
-            ctx.require_indirect_parameter_convention()?;
+            ctx.require_indirect_parameter_convention("CallV", *receiver)?;
             // Virtual dispatch via vtable
             // #24 witness invariant: clear-only (dynamic dispatch, no
             // static generic-arg application point).
