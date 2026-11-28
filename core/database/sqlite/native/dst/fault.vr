@@ -25,6 +25,7 @@ mount core.database.sqlite.native.dst.seed.{DstSeed};
 // Fault taxonomy
 // -----------------------------------------------------------------------------
 
+@derive(Clone)
 public type Fault is
       FaultPowerLoss
     | FaultDiskFull
@@ -76,42 +77,47 @@ public fn schedule_empty() -> FaultSchedule { FaultSchedule { entries: List.new(
 implement FaultSchedule {
     public fn len(&self) -> Int { self.entries.len() }
 
-    public fn push(&mut self, e: ScheduledFault) { self.entries.push(e); }
+    fn position(&self, op_idx: Int) -> Int {
+        let mut lo = 0;
+        let mut hi = self.entries.len();
+        while lo < hi {
+            let mid = lo + (hi - lo) / 2;
+            if self.entries[mid].at_op < op_idx { lo = mid + 1; } else { hi = mid; }
+        }
+        lo
+    }
 
-    /// First fault at-or-after `op_idx`.
-    public fn next_after(&self, op_idx: Int) -> Maybe<ScheduledFault> {
-        let mut i: Int = 0;
-        while i < self.entries.len() {
-            if self.entries[i].at_op >= op_idx {
-                return Maybe.Some(scheduled(self.entries[i].at_op, clone_fault(&self.entries[i].fault)));
-            }
-            i = i + 1;
+    /// Each operation has one event. Power loss takes precedence at a shared
+    /// index. Other collisions retain the first event supplied by the caller.
+    public fn push(&mut self, event: ScheduledFault) {
+        assert(event.at_op >= 0, "a fault requires a nonnegative operation index");
+        let pos = self.position(event.at_op);
+        if pos == self.entries.len() {
+            self.entries.push(event);
+        } else if self.entries[pos].at_op != event.at_op {
+            self.entries.insert(pos, event);
+        } else if is_terminal(&event.fault) {
+            self.entries.set(pos, event);
+        }
+    }
+
+    /// Return the selected fault for this zero-based operation.
+    public fn fault_at(&self, op_idx: Int) -> Maybe<Fault> {
+        let pos = self.position(op_idx);
+        if pos < self.entries.len() && self.entries[pos].at_op == op_idx {
+            return Maybe.Some(self.entries[pos].fault.clone());
         }
         Maybe.None
     }
 
-    /// Op index at which the first terminal fault (PowerLoss) fires.
-    /// `len()+1` if none scheduled.
-    public fn terminal_at(&self) -> Int {
-        let mut i: Int = 0;
+    /// Earliest operation interrupted by power loss.
+    public fn terminal_at(&self) -> Maybe<Int> {
+        let mut i = 0;
         while i < self.entries.len() {
-            if is_terminal(&self.entries[i].fault) {
-                return self.entries[i].at_op;
-            }
-            i = i + 1;
+            if is_terminal(&self.entries[i].fault) { return Maybe.Some(self.entries[i].at_op); }
+            i += 1;
         }
-        self.entries.len() + 1
-    }
-}
-
-fn clone_fault(f: &Fault) -> Fault {
-    match f {
-        FaultPowerLoss        => FaultPowerLoss,
-        FaultDiskFull         => FaultDiskFull,
-        FaultIoError(d)       => FaultIoError(d.clone()),
-        FaultSlowFsync(n)     => FaultSlowFsync(*n),
-        FaultPartialWrite(b)  => FaultPartialWrite(*b),
-        FaultClockSkew(s)     => FaultClockSkew(*s),
+        Maybe.None
     }
 }
 
@@ -121,9 +127,9 @@ fn clone_fault(f: &Fault) -> Fault {
 
 public type FaultDensity is {
     /// Probability (out of 1000) any given op is a fault site.
-    site_per_mille: Int,
+    public site_per_mille: Int,
     /// Whether to include a terminal PowerLoss somewhere.
-    include_terminal: Bool,
+    public include_terminal: Bool,
 }
 
 public fn default_density() -> FaultDensity {

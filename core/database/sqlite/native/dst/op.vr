@@ -21,6 +21,7 @@ module core.database.sqlite.native.dst.op;
 mount base.{Text, Bool};
 mount collections.List;
 
+@derive(Clone)
 public type DbOp is
       OpInsert(Int, Text)               // (id, name)
     | OpUpdate(Int, Text)               // (id, new_name)
@@ -77,20 +78,26 @@ implement DstOpStream {
 
     public fn push(&mut self, o: DbOp) { self.ops.push(o); }
 
+    public(in core.database.sqlite.native.dst) fn operation_at(&self, index: Int) -> &DbOp {
+        &self.ops[index]
+    }
+
     /// Take the prefix `[0, n)` — used by the harness to compute "what
     /// was committed before the simulated power loss".
     public fn prefix(&self, n: Int) -> List<DbOp> {
         let mut out: List<DbOp> = List.new();
         let cap = if n < self.ops.len() { n } else { self.ops.len() };
         let mut i: Int = 0;
-        while i < cap { out.push(clone_op(&self.ops[i])); i = i + 1; }
+        while i < cap {
+            let op: DbOp = self.ops[i].clone();
+            out.push(op);
+            i += 1;
+        }
         out
     }
 
-    /// Compute the highest-index op that the database would have
-    /// durably persisted given the supplied `committed_until`.
-    /// "Durable" means the op precedes the most recent OpCommit
-    /// at-or-before `committed_until`.
+    /// Index of the last commit strictly before the exclusive recovery limit.
+    /// Returns -1 when the prefix contains no commit.
     public fn last_durable_index(&self, committed_until: Int) -> Int {
         let cap = if committed_until < self.ops.len() { committed_until } else { self.ops.len() };
         let mut last_commit: Int = -1;
@@ -103,19 +110,5 @@ implement DstOpStream {
             i = i + 1;
         }
         last_commit
-    }
-}
-
-fn clone_op(o: &DbOp) -> DbOp {
-    match o {
-        OpInsert(id, name)  => OpInsert(*id, name.clone()),
-        OpUpdate(id, name)  => OpUpdate(*id, name.clone()),
-        OpDelete(id)        => OpDelete(*id),
-        OpSelectById(id)    => OpSelectById(*id),
-        OpBegin             => OpBegin,
-        OpCommit            => OpCommit,
-        OpRollback          => OpRollback,
-        OpCheckpoint        => OpCheckpoint,
-        OpVacuum            => OpVacuum,
     }
 }

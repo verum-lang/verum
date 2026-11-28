@@ -20,7 +20,7 @@ mount core.database.sqlite.native.dst.op.{
     is_mutation, is_tx_boundary,
 };
 mount core.database.sqlite.native.dst.generator.{
-    Generator, generator_new, default_mix,
+    generator_new, default_mix,
 };
 mount core.database.sqlite.native.dst.fault.{
     Fault, FaultPowerLoss, FaultDiskFull, ScheduledFault, FaultSchedule,
@@ -104,23 +104,23 @@ fn test_fault_terminal_classification() {
 
 fn test_schedule_terminal_at_when_empty() {
     let s = schedule_empty();
-    assert_eq(s.terminal_at(), 1);
+    assert(s.terminal_at().is_none());
 }
 
-fn test_schedule_next_after_finds_pending() {
+fn test_schedule_selects_only_the_requested_index() {
     let mut s = schedule_empty();
     s.push(scheduled(10, FaultDiskFull));
     s.push(scheduled(20, FaultPowerLoss));
-    match s.next_after(15) {
-        Some(_) => {},
-        None    => panic("20 found"),
-    }
+    assert(s.fault_at(15).is_none());
+    assert(s.fault_at(20) is Maybe.Some(FaultPowerLoss));
 }
 
 fn test_generate_schedule_density() {
     let mut s = seed_from_u64(0x9_i64);
     let sched = generate_schedule(&mut s, 100, &default_density());
-    assert(sched.len() >= 0);
+    let crash = sched.terminal_at().unwrap();
+    assert(crash >= 0 && crash < 100);
+    assert(sched.fault_at(crash) is Maybe.Some(FaultPowerLoss));
 }
 
 // -----------------------------------------------------------------------------
@@ -132,8 +132,9 @@ fn test_oracle_replays_committed_prefix() {
     stream.push(OpBegin);
     stream.push(OpInsert(1, "a".clone()));
     stream.push(OpCommit);
-    stream.push(OpInsert(2, "b".clone()));  // un-committed
-    let o = oracle_replay(&stream, 4);
+    stream.push(OpInsert(2, "b".clone()));  // follows the last commit
+    let cut = stream.last_durable_index(stream.len()) + 1;
+    let o = oracle_replay(&stream, cut);
     assert_eq(o.row_count(), 1);
     match o.lookup(1) {
         Some(_) => {},
@@ -168,7 +169,8 @@ fn test_harness_advance_until_terminate() {
         }
         steps = steps + 1;
     }
-    assert(steps > 0);
+    assert(h.is_terminated());
+    assert(steps > 0 && steps <= 50);
 }
 
 fn test_harness_durability_cut_within_bounds() {
@@ -188,7 +190,7 @@ fn main() {
     test_generator_emits_requested_count();
     test_fault_terminal_classification();
     test_schedule_terminal_at_when_empty();
-    test_schedule_next_after_finds_pending();
+    test_schedule_selects_only_the_requested_index();
     test_generate_schedule_density();
     test_oracle_replays_committed_prefix();
     test_oracle_matches_self();

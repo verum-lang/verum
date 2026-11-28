@@ -53,7 +53,7 @@ mount core.database.sqlite.native.dst.op.{
     op_kind_name, is_mutation,
 };
 mount core.database.sqlite.native.dst.fault.{
-    Fault, FaultPowerLoss, fault_kind_name, is_terminal,
+    fault_kind_name,
 };
 mount core.database.sqlite.native.dst.oracle.{
     Oracle, oracle_replay,
@@ -174,14 +174,10 @@ public fn drive(
             Maybe.Some(ref f) => Maybe.Some(fault_kind_name(f)),
             Maybe.None        => Maybe.None,
         };
-        let crash_now = match plan.fault {
-            Maybe.Some(ref f) => is_terminal(f),
-            Maybe.None        => false,
-        };
         report.steps.push(step_record(
             plan.op_idx, op_name, outcome, fault_injected,
         ));
-        if crash_now {
+        if plan.terminate {
             report.crashed = true;
             report.crashed_at = plan.op_idx;
         }

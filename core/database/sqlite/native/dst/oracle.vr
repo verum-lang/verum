@@ -56,10 +56,10 @@ public fn oracle_replay(stream: &DstOpStream, committed_until: Int) -> Oracle {
     let mut o = oracle_empty();
     let mut tx_buf: List<DbOp> = List.new();
     let mut in_tx = false;
-    let cap = if committed_until < stream.ops.len() { committed_until } else { stream.ops.len() };
+    let cap = if committed_until < stream.len() { committed_until } else { stream.len() };
     let mut i: Int = 0;
     while i < cap {
-        let op = &stream.ops[i];
+        let op: &DbOp = stream.operation_at(i);
         match op {
             core.database.sqlite.native.dst.op.OpBegin => {
                 in_tx = true;
@@ -79,8 +79,10 @@ public fn oracle_replay(stream: &DstOpStream, committed_until: Int) -> Oracle {
             }
             _ => {
                 if is_mutation(op) {
-                    if in_tx { tx_buf.push(clone_op(op)); }
-                    else     { o.apply(op); }
+                    if in_tx {
+                        let pending: DbOp = op.clone();
+                        tx_buf.push(pending);
+                    } else { o.apply(op); }
                 }
             }
         }
@@ -153,20 +155,5 @@ implement Oracle {
             i = i + 1;
         }
         true
-    }
-}
-
-fn clone_op(o: &DbOp) -> DbOp {
-    match o {
-        OpInsert(id, name)  => OpInsert(*id, name.clone()),
-        OpUpdate(id, name)  => OpUpdate(*id, name.clone()),
-        OpDelete(id)        => OpDelete(*id),
-        core.database.sqlite.native.dst.op.OpSelectById(id) =>
-            core.database.sqlite.native.dst.op.OpSelectById(*id),
-        core.database.sqlite.native.dst.op.OpBegin       => core.database.sqlite.native.dst.op.OpBegin,
-        OpCommit                                          => OpCommit,
-        OpRollback                                        => OpRollback,
-        core.database.sqlite.native.dst.op.OpCheckpoint  => core.database.sqlite.native.dst.op.OpCheckpoint,
-        core.database.sqlite.native.dst.op.OpVacuum      => core.database.sqlite.native.dst.op.OpVacuum,
     }
 }

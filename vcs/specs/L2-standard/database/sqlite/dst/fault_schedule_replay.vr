@@ -1,0 +1,192 @@
+// @test: run
+// @tier: 0
+// @level: L2
+// @tags: sqlite, dst, pager
+// @timeout: 15000
+// @expected-exit: 0
+// @description: Replay zero-based faults against the harness and the memory pager, including terminal collisions and durable prefixes.
+
+mount core.database.sqlite.native.dst.fault.{
+    Fault, FaultDensity, FaultSchedule, FaultDiskFull, FaultIoError, FaultPowerLoss,
+    FaultPartialWrite, schedule_empty, scheduled, generate_schedule, fault_kind_name,
+};
+mount core.database.sqlite.native.dst.seed.seed_from_u64;
+mount core.database.sqlite.native.dst.op.{DstOpStream, OpBegin, OpCommit, OpInsert, OpUpdate, op_stream_empty};
+mount core.database.sqlite.native.dst.harness.harness_from_stream;
+mount core.database.sqlite.native.l1_pager.dst_wrapped_pager.{
+    dst_wrapped_pager_open_with_schedule, dst_pager_flush, dst_pager_read,
+    dst_pager_write, dst_pager_commit, dst_pager_reopen_after_crash,
+};
+
+fn replay_schedule() -> FaultSchedule {
+    let mut s = schedule_empty();
+    s.push(scheduled(4, FaultPartialWrite(31)));
+    s.push(scheduled(3, FaultDiskFull));
+    s.push(scheduled(0, FaultDiskFull));
+    s.push(scheduled(2, FaultIoError("a repeatable pager error")));
+    s.push(scheduled(0, FaultPartialWrite(13)));
+    s.push(scheduled(3, FaultPowerLoss));
+    s.push(scheduled(3, FaultIoError("another event at the crash")));
+    s
+}
+
+fn stream() -> DstOpStream {
+    let mut ops = op_stream_empty();
+    ops.push(OpCommit);
+    ops.push(OpBegin);
+    ops.push(OpCommit);
+    ops.push(OpBegin);
+    ops.push(OpCommit);
+    ops
+}
+
+fn selected_events() {
+    let mut s = replay_schedule();
+    assert_eq(s.len(), 4);
+    assert(s.fault_at(0) is Maybe.Some(FaultDiskFull));
+    assert(s.fault_at(1).is_none());
+    match s.fault_at(2) {
+        Maybe.Some(FaultIoError(detail)) => assert_eq(detail, "a repeatable pager error"),
+        _ => panic("missing IO payload"),
+    };
+    assert(s.fault_at(3) is Maybe.Some(FaultPowerLoss));
+    assert(s.fault_at(4) is Maybe.Some(FaultPartialWrite(31)));
+    assert(s.terminal_at() is Maybe.Some(3));
+    s.push(scheduled(1, FaultPowerLoss));
+    assert(s.terminal_at() is Maybe.Some(1));
+    assert(s.fault_at(-1).is_none());
+}
+
+fn durable_prefixes() {
+    let empty = harness_from_stream(op_stream_empty(), schedule_empty());
+    assert(empty.is_terminated());
+    assert(empty.next_step().is_none());
+    assert_eq(empty.durability_cut(), 0);
+    assert_eq(harness_from_stream(stream(), schedule_empty()).durability_cut(), 5);
+    let mut sparse = schedule_empty();
+    sparse.push(scheduled(1, FaultDiskFull));
+    assert(sparse.terminal_at().is_none());
+    assert_eq(harness_from_stream(stream(), sparse).durability_cut(), 5);
+    let mut beyond = schedule_empty();
+    beyond.push(scheduled(100, FaultPowerLoss));
+    assert_eq(harness_from_stream(stream(), beyond).durability_cut(), 5);
+    let mut on_commit = schedule_empty();
+    on_commit.push(scheduled(2, FaultPowerLoss));
+    assert_eq(harness_from_stream(stream(), on_commit).durability_cut(), 1);
+    let mut first = schedule_empty();
+    first.push(scheduled(0, FaultPowerLoss));
+    assert_eq(harness_from_stream(stream(), first).durability_cut(), 0);
+}
+
+fn committed_payloads() {
+    let mut ops = op_stream_empty();
+    ops.push(OpBegin);
+    ops.push(OpInsert(17, "committed value"));
+    ops.push(OpCommit);
+    ops.push(OpBegin);
+    ops.push(OpUpdate(17, "interrupted value"));
+    ops.push(OpCommit);
+    let mut schedule = schedule_empty();
+    schedule.push(scheduled(5, FaultPowerLoss));
+    let prefix = ops.prefix(2);
+    assert_eq(prefix.len(), 2);
+    assert(prefix[1] is OpInsert(17, _));
+    let mut h = harness_from_stream(ops, schedule);
+    h.advance();
+    match h.next_step().unwrap().op {
+        OpInsert(id, name) => {
+            assert_eq(id, 17);
+            assert_eq(name, "committed value");
+        },
+        _ => panic("missing planned insert"),
+    };
+    let recovered = h.expected_state();
+    assert_eq(recovered.row_count(), 1);
+    assert_eq(recovered.lookup(17).unwrap(), "committed value");
+}
+
+fn generated_events() {
+    let density = FaultDensity { site_per_mille: 1000, include_terminal: true };
+    let mut seed = seed_from_u64(19_i64);
+    let empty = generate_schedule(&mut seed, 0, &density);
+    assert_eq(empty.len(), 0);
+    assert(empty.terminal_at().is_none());
+    let one = generate_schedule(&mut seed, 1, &density);
+    assert_eq(one.len(), 1);
+    assert(one.fault_at(0) is Maybe.Some(FaultPowerLoss));
+    let dense = generate_schedule(&mut seed, 16, &density);
+    let mut seed_again = seed_from_u64(19_i64);
+    let _ = generate_schedule(&mut seed_again, 1, &density);
+    let repeated = generate_schedule(&mut seed_again, 16, &density);
+    assert_eq(dense.len(), 16);
+    let crash = dense.terminal_at().unwrap();
+    assert(crash >= 0 && crash < 16);
+    assert_eq(repeated.terminal_at().unwrap(), crash);
+    let mut index = 0;
+    while index < 16 {
+        let fault = dense.fault_at(index).unwrap();
+        let again = repeated.fault_at(index).unwrap();
+        assert_eq(fault_kind_name(&fault), fault_kind_name(&again));
+        assert_eq(fault is FaultPowerLoss, index == crash);
+        index += 1;
+    }
+    let silent = FaultDensity { site_per_mille: 0, include_terminal: false };
+    assert_eq(generate_schedule(&mut seed, 8, &silent).len(), 0);
+    let loss_only = FaultDensity { site_per_mille: 0, include_terminal: true };
+    let loss = generate_schedule(&mut seed, 8, &loss_only);
+    assert_eq(loss.len(), 1);
+    assert(loss.fault_at(loss.terminal_at().unwrap()) is Maybe.Some(FaultPowerLoss));
+}
+
+fn pager_and_harness() {
+    let mut h = harness_from_stream(stream(), replay_schedule());
+    let mut pager = dst_wrapped_pager_open_with_schedule(replay_schedule(), 4096).unwrap();
+    assert_eq(h.durability_cut(), 3);
+    let first = h.next_step().unwrap();
+    assert_eq(first.op_idx, 0);
+    assert(first.fault is Maybe.Some(FaultDiskFull));
+    assert(dst_pager_flush(&mut pager).is_err());
+    h.advance();
+    let clean = h.next_step().unwrap();
+    assert_eq(clean.op_idx, 1);
+    assert(clean.fault.is_none());
+    let frame = dst_pager_read(&mut pager, 1).unwrap();
+    h.advance();
+    let written = h.next_step().unwrap();
+    assert_eq(written.op_idx, 2);
+    assert(written.fault is Maybe.Some(FaultIoError(_)));
+    assert(dst_pager_write(&mut pager, &frame).is_err());
+    h.advance();
+    let crash = h.next_step().unwrap();
+    assert_eq(crash.op_idx, 3);
+    assert(crash.terminate);
+    assert(dst_pager_commit(&mut pager).is_err());
+    h.advance();
+    assert(h.is_terminated() && h.next_step().is_none() && pager.is_crashed());
+    assert(dst_pager_read(&mut pager, 1).is_err());
+    assert_eq(pager.op_count(), 4);
+    let events = pager.take_injected();
+    assert_eq(events.len(), 3);
+    assert_eq(events[0].op_idx, first.op_idx);
+    assert_eq(events[0].op_kind, "flush");
+    assert_eq(events[1].op_idx, written.op_idx);
+    assert_eq(events[1].op_kind, "write");
+    assert_eq(events[1].page_no, 1);
+    assert_eq(events[2].op_idx, crash.op_idx);
+    assert(events[2].terminal);
+    assert_eq(pager.injected_count(), 0);
+    assert(dst_pager_reopen_after_crash(&mut pager, 4096).is_ok());
+    assert(dst_pager_flush(&mut pager).is_err());
+    let resumed = pager.take_injected();
+    assert_eq(resumed.len(), 1);
+    assert_eq(resumed[0].op_idx, 4);
+    assert_eq(resumed[0].fault_kind, "partial_write");
+}
+
+fn main() {
+    selected_events();
+    durable_prefixes();
+    generated_events();
+    committed_payloads();
+    pager_and_harness();
+}
