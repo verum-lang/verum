@@ -19115,6 +19115,7 @@ impl VbcCodegen {
             &func.generics, func.generic_where_clause.as_ref(), &caller_generics, &declared_ids, &mut bounds,
         );
         self.current_protocol_bounds = bounds;
+        self.qualify_body_equality_rules()?;
         self.ctx.current_generic_param_ids = caller_generics;
 
         // Add function's generic parameters to context for recognition in expressions.

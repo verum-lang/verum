@@ -930,6 +930,79 @@ fn actual_mapped_iterator_nth_back_uses_the_inherited_item_equation() {
 }
 
 #[test]
+fn actual_filtered_try_collect_preserves_the_declared_predicate_and_result() {
+    use verum_ast::decl::{ImplItemKind, ImplKind};
+    let mut iterator = actual_iterator(&["try_collect"]);
+    let mut actual = parse(include_str!("../../../core/base/iterator.vr"));
+    actual.items.retain_mut(|item| match &mut item.kind {
+        ItemKind::Type(decl) => matches!(decl.name.as_str(), "FilterIter" | "Extend"),
+        ItemKind::Impl(decl) if matches!(&decl.kind, ImplKind::Protocol { protocol, for_type, .. }
+            if protocol.to_string() == "Iterator" && verum_ast::pretty::format_type(for_type) == "FilterIter<I, P>") => {
+            decl.items.retain(|item| match &item.kind {
+                ImplItemKind::Type { name, .. } => name.as_str() == "Item",
+                ImplItemKind::Function(fun) => fun.name.as_str() == "next",
+                _ => false,
+            });
+            true
+        }
+        _ => false,
+    });
+    assert_eq!(actual.items.len(), 3);
+    iterator.items.extend(actual.items);
+    iterator.items.extend(parse("mount core.base.maybe.Maybe; mount core.base.result.Result; mount core.base.protocols.Default;").items);
+    let mut protocols = parse(include_str!("../../../core/base/protocols.vr"));
+    protocols.items.retain(|item| match &item.kind {
+        ItemKind::Module(decl) => decl.items.is_none(),
+        ItemKind::Type(decl) => decl.name.as_str() == "Default",
+        _ => false,
+    });
+    let maybe = parse("module core.base.maybe; public type Maybe<T> is None | Some(T);");
+    let result = parse("module core.base.result; public type Result<T,E> is Ok(T) | Err(E);");
+    let consumer = r#"
+        module consumer;
+        mount core.base.iterator.{Iterator, FilterIter, Extend};
+        mount core.base.maybe.Maybe;
+        mount core.base.result.Result;
+        mount core.base.protocols.Default;
+        type Emissions is { position: Int, fails: Bool };
+        implement Iterator for Emissions {
+            type Item = Result<Int,Int>;
+            fn next(&mut self) -> Maybe<Result<Int,Int>> {
+                self.position += 1;
+                if self.position == 1 { return Maybe.Some(Result.Ok(-6)); }
+                if self.position == 2 { return Maybe.Some(Result.Ok(3)); }
+                if self.position == 3 && self.fails { return Maybe.Some(Result.Err(9)); }
+                if self.position == 3 { return Maybe.Some(Result.Ok(4)); }
+                Maybe.None
+            }
+        }
+        type Total is { value: Int };
+        implement Default for Total { fn default() -> Total { Total { value: 0 } } }
+        implement Extend<Int> for Total {
+            fn extend<I: Iterator<Item = Int>>(&mut self, mut iter: I) {
+                while let Maybe.Some(value) = iter.next() { self.extend_one(value); }
+            }
+            fn extend_one(&mut self, value: Int) { self.value += value; }
+        }
+        fn keep(input: &Result<Int,Int>) -> Bool {
+            match *input { Result.Ok(value) => value > 0, Result.Err(_) => true }
+        }
+        fn collect_values(fails: Bool) -> Result<Total,Int> {
+            let producer = FilterIter { iter: Emissions { position: 0, fails: fails }, predicate: keep };
+            producer.try_collect<Int,Int,Total>()
+        }
+        fn run() -> Int {
+            let sum = match collect_values(false) { Result.Ok(total) => total.value, _ => return 0 };
+            match collect_values(true) { Result.Err(code) => 10 * sum + code, _ => 0 }
+        }
+    "#;
+    execute_source_and_wire(compile(&[&maybe, &result, &protocols, &iterator, &parse(consumer)]).unwrap(), 79);
+    let wrong = parse(&consumer.replace("keep(input: &Result<Int,Int>)", "keep(input: &Result<UInt32,Int>)"));
+    let error = compile(&[&maybe, &result, &protocols, &iterator, &wrong]).unwrap_err().to_string();
+    assert!(error.contains("conflicting source argument evidence"), "{error}");
+}
+
+#[test]
 fn declared_function_values_supply_record_arguments_and_preserve_lexical_shadowing() {
     let provider = parse("module provider; public fn increment(value: Int) -> Int { value + 1 }");
     let consumer = parse(r#"

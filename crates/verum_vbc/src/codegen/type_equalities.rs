@@ -439,6 +439,25 @@ impl VbcCodegen {
         Ok(())
     }
 
+    /// Local equality predicates and retained callees can refer to the same
+    /// member through different spellings. Only the lexical bounds can tie an
+    /// unqualified predicate to that particular protocol application.
+    pub(super) fn qualify_body_equality_rules(&mut self) -> CodegenResult<()> {
+        let qualified: List<_> = self.current_type_equalities.rules.iter().filter_map(|(subject, target)| {
+            let TypeRef::AssociatedProjection { qualifier: None, .. } = subject else { return None };
+            let owner = self.qualify_bound_projections(subject, &self.current_protocol_bounds)?;
+            (owner != *subject).then(|| (owner, target.clone()))
+        }).collect();
+        if !qualified.is_empty() {
+            let mut equalities = std::mem::take(&mut self.current_type_equalities);
+            for (subject, target) in qualified {
+                equalities.add(self, subject, target)?;
+            }
+            self.current_type_equalities = equalities;
+        }
+        Ok(())
+    }
+
     /// Body uses may refine a declaration under this callable's premises.
     /// Published parameters and results retain their original source telescope.
     pub(super) fn body_declaration_type(&self, ty: &TypeRef) -> Maybe<TypeRef> {
