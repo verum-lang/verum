@@ -19228,7 +19228,6 @@ impl VbcCodegen {
                 }
             }
         }
-        self.inherit_implementation_members();
         let parameter_types = self.source_semantic_parameters(
             func, &self.ctx.current_generic_param_ids, &receiver_generics, &declared_ids,
         );
