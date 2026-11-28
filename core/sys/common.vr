@@ -989,10 +989,11 @@ public fn try_lock_region(fd: FileDesc, kind: FcntlLockKind, start: Int, len: In
         // struct flock64: type, whence, start, length, pid. Padding, whence
         // and the OFD owner field must be zero.
         let mut bytes: [Byte; 32] = [0 as Byte; 32];
-        write_flock_word(&mut bytes[..], 0, lock_kind_to_ltype(kind) as UInt64, 2);
-        write_flock_word(&mut bytes[..], 8, start as UInt64, 8);
-        write_flock_word(&mut bytes[..], 16, len as UInt64, 8);
-        let addr = (&bytes[..]).as_ptr() as Int;
+        let fields = &mut bytes[..];
+        write_flock_word(fields, 0, lock_kind_to_ltype(kind) as UInt64, 2);
+        write_flock_word(fields, 8, start as UInt64, 8);
+        write_flock_word(fields, 16, len as UInt64, 8);
+        let addr = fields.as_ptr() as Int;
         let _ = super.linux.syscall.fcntl(fd, 37, addr)?;
         return Result.Ok(());
     }
@@ -1001,10 +1002,11 @@ public fn try_lock_region(fd: FileDesc, kind: FcntlLockKind, start: Int, len: In
     {
         // Darwin struct flock: start, length, pid, type, whence.
         let mut bytes: [Byte; 24] = [0 as Byte; 24];
-        write_flock_word(&mut bytes[..], 0, start as UInt64, 8);
-        write_flock_word(&mut bytes[..], 8, len as UInt64, 8);
-        write_flock_word(&mut bytes[..], 20, lock_kind_to_ltype(kind) as UInt64, 2);
-        let addr = (&bytes[..]).as_ptr() as Int;
+        let fields = &mut bytes[..];
+        write_flock_word(fields, 0, start as UInt64, 8);
+        write_flock_word(fields, 8, len as UInt64, 8);
+        write_flock_word(fields, 20, lock_kind_to_ltype(kind) as UInt64, 2);
+        let addr = fields.as_ptr() as Int;
         let _ = super.darwin.libsystem.safe_fcntl(fd, 90, addr)?;
         return Result.Ok(());
     }

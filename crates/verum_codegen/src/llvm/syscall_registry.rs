@@ -21,23 +21,12 @@
 //! LLVM IR verification then failed with
 //!     `Call parameter type does not match function signature!`
 //!
-//! # Verum ABI choice: uniform i64
+//! # Integer widths at system calls
 //!
-//! Every syscall is declared with `i64` for integer args/returns even
-//! when the underlying C signature uses narrower types
-//! (`clock_gettime(clockid_t /* int */, struct timespec *)`). This is
-//! safe on the platforms Verum targets (x86_64, aarch64) because the
-//! ABI passes integers in registers wider than the C type reads:
-//!   * x86_64: rdi/rsi (64-bit) for the first two integer args; the
-//!     callee reads via edi/esi (32-bit) when the C type is `int` —
-//!     truncation is implicit.
-//!   * aarch64: x0/x1 (64-bit); the callee reads via w0/w1 (32-bit)
-//!     when the C type is narrower.
-//!
-//! On 32-bit targets (not currently supported) the choice would have
-//! to fork; until that exists the i64-everywhere convention is
-//! correct, simple, and lets VBC's NaN-boxed value model flow into FFI
-//! without per-arg width adapters.
+//! Most legacy declarations use i64 Verum slots. Declarations that specify
+//! C `int` use I32 so a negative result is sign-extended at the call boundary.
+//! A variadic declaration records its fixed prefix. In particular, Darwin
+//! arm64 passes the command-dependent third argument of `fcntl` on the stack.
 //!
 //! # Adding a new syscall
 //!
@@ -60,10 +49,10 @@ use super::error::{BuildExt, CallSiteExt, LlvmLoweringError, Result as LlvmResul
 /// these descriptors so the registry table is `const`-friendly.
 #[derive(Copy, Clone)]
 pub enum AbiTy {
-    /// 64-bit integer (Verum-uniform). Used for every integer arg/ret
-    /// regardless of the underlying C type's width — the calling
-    /// convention truncates on the callee side.
+    /// 64-bit Verum integer slot.
     I64,
+    /// Signed 32-bit C integer.
+    I32,
     /// Opaque pointer.
     Ptr,
     /// Void return.
@@ -74,10 +63,12 @@ pub enum AbiTy {
 pub struct SyscallSig {
     /// LLVM symbol name (e.g. `"clock_gettime"`, `"verum_tcp_connect"`).
     pub name: &'static str,
-    /// Argument shape under Verum ABI (i64 / Ptr).
+    /// Fixed argument types, in declaration order.
     pub args: &'static [AbiTy],
-    /// Return shape (`I64`, `Ptr`, or `Void`).
+    /// Result type at the system boundary.
     pub ret: AbiTy,
+    /// Whether further arguments follow the declared fixed parameters.
+    pub variadic: bool,
 }
 
 // Each private time wrapper has the same ABI as its registered syscall.
@@ -86,16 +77,19 @@ const CLOCK_GETTIME: SyscallSig = SyscallSig {
     name: "clock_gettime",
     args: &[AbiTy::I64, AbiTy::Ptr],
     ret: AbiTy::I64,
+    variadic: false,
 };
 const NANOSLEEP: SyscallSig = SyscallSig {
     name: "nanosleep",
     args: &[AbiTy::Ptr, AbiTy::Ptr],
     ret: AbiTy::I64,
+    variadic: false,
 };
 const SCHED_YIELD: SyscallSig = SyscallSig {
     name: "sched_yield",
     args: &[],
     ret: AbiTy::I64,
+    variadic: false,
 };
 const VERUM_CLOCK_GETTIME: SyscallSig = SyscallSig {
     name: "__verum_clock_gettime",
@@ -111,9 +105,8 @@ const VERUM_SCHED_YIELD: SyscallSig = SyscallSig {
 };
 
 /// The canonical registry. Append-only — every syscall reachable from
-/// any LLVM emit path lives here. When adding a new entry, prefer
-/// `AbiTy::I64` for all integer slots even if the C signature is
-/// narrower; see the module-level docstring for the ABI rationale.
+/// any LLVM emit path lives here. Match the system declaration when
+/// choosing fixed argument widths, result type and variadicness.
 const POSIX_SYSCALLS: &[SyscallSig] = &[
     // ── time ────────────────────────────────────────────────────
     CLOCK_GETTIME,
@@ -125,18 +118,21 @@ const POSIX_SYSCALLS: &[SyscallSig] = &[
         name: "close",
         args: &[AbiTy::I64],
         ret: AbiTy::I64,
+        variadic: false,
     },
     // C: ssize_t read(int fd, void *buf, size_t count)
     SyscallSig {
         name: "read",
         args: &[AbiTy::I64, AbiTy::Ptr, AbiTy::I64],
         ret: AbiTy::I64,
+        variadic: false,
     },
     // C: ssize_t write(int fd, const void *buf, size_t count)
     SyscallSig {
         name: "write",
         args: &[AbiTy::I64, AbiTy::Ptr, AbiTy::I64],
         ret: AbiTy::I64,
+        variadic: false,
     },
     // C: int munmap(void *addr, size_t length)
     // (#38 Phase 2: `core.mem.allocator.os_munmap` calls the bodyless
@@ -146,6 +142,7 @@ const POSIX_SYSCALLS: &[SyscallSig] = &[
         name: "munmap",
         args: &[AbiTy::Ptr, AbiTy::I64],
         ret: AbiTy::I64,
+        variadic: false,
     },
     // C: int closedir(DIR *dirp)
     // (#38 Phase 2: `ReadDir.drop` → `sys_closedir` → bodyless `closedir`.)
@@ -153,6 +150,7 @@ const POSIX_SYSCALLS: &[SyscallSig] = &[
         name: "closedir",
         args: &[AbiTy::Ptr],
         ret: AbiTy::I64,
+        variadic: false,
     },
     // C: off_t lseek(int fd, off_t offset, int whence)
     // (LIBSYS-ALIAS-STUB-1: the darwin lseek path routed through the
@@ -164,18 +162,21 @@ const POSIX_SYSCALLS: &[SyscallSig] = &[
         name: "lseek",
         args: &[AbiTy::I64, AbiTy::I64, AbiTy::I64],
         ret: AbiTy::I64,
+        variadic: false,
     },
     // C: int access(const char *pathname, int mode)
     SyscallSig {
         name: "access",
         args: &[AbiTy::Ptr, AbiTy::I64],
         ret: AbiTy::I64,
+        variadic: false,
     },
     // C: int unlink(const char *pathname)
     SyscallSig {
         name: "unlink",
         args: &[AbiTy::Ptr],
         ret: AbiTy::I64,
+        variadic: false,
     },
     // ── sockets ─────────────────────────────────────────────────
     // Each socket syscall is declared exactly once here under
@@ -192,42 +193,49 @@ const POSIX_SYSCALLS: &[SyscallSig] = &[
         name: "socket",
         args: &[AbiTy::I64, AbiTy::I64, AbiTy::I64],
         ret: AbiTy::I64,
+        variadic: false,
     },
     // C: int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen)
     SyscallSig {
         name: "bind",
         args: &[AbiTy::I64, AbiTy::Ptr, AbiTy::I64],
         ret: AbiTy::I64,
+        variadic: false,
     },
     // C: int listen(int sockfd, int backlog)
     SyscallSig {
         name: "listen",
         args: &[AbiTy::I64, AbiTy::I64],
         ret: AbiTy::I64,
+        variadic: false,
     },
     // C: int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen)
     SyscallSig {
         name: "accept",
         args: &[AbiTy::I64, AbiTy::Ptr, AbiTy::Ptr],
         ret: AbiTy::I64,
+        variadic: false,
     },
     // C: int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen)
     SyscallSig {
         name: "connect",
         args: &[AbiTy::I64, AbiTy::Ptr, AbiTy::I64],
         ret: AbiTy::I64,
+        variadic: false,
     },
     // C: ssize_t send(int sockfd, const void *buf, size_t len, int flags)
     SyscallSig {
         name: "send",
         args: &[AbiTy::I64, AbiTy::Ptr, AbiTy::I64, AbiTy::I64],
         ret: AbiTy::I64,
+        variadic: false,
     },
     // C: ssize_t recv(int sockfd, void *buf, size_t len, int flags)
     SyscallSig {
         name: "recv",
         args: &[AbiTy::I64, AbiTy::Ptr, AbiTy::I64, AbiTy::I64],
         ret: AbiTy::I64,
+        variadic: false,
     },
     // C: ssize_t sendto(int, const void *, size_t, int, const struct sockaddr *, socklen_t)
     SyscallSig {
@@ -237,6 +245,7 @@ const POSIX_SYSCALLS: &[SyscallSig] = &[
             AbiTy::I64, AbiTy::Ptr, AbiTy::I64,
         ],
         ret: AbiTy::I64,
+        variadic: false,
     },
     // C: ssize_t recvfrom(int, void *, size_t, int, struct sockaddr *, socklen_t *)
     SyscallSig {
@@ -246,6 +255,7 @@ const POSIX_SYSCALLS: &[SyscallSig] = &[
             AbiTy::I64, AbiTy::Ptr, AbiTy::Ptr,
         ],
         ret: AbiTy::I64,
+        variadic: false,
     },
     // C: int setsockopt(int, int, int, const void *, socklen_t)
     SyscallSig {
@@ -255,12 +265,14 @@ const POSIX_SYSCALLS: &[SyscallSig] = &[
             AbiTy::Ptr, AbiTy::I64,
         ],
         ret: AbiTy::I64,
+        variadic: false,
     },
     // C: pid_t waitpid(pid_t pid, int *wstatus, int options)
     SyscallSig {
         name: "waitpid",
         args: &[AbiTy::I64, AbiTy::Ptr, AbiTy::I64],
         ret: AbiTy::I64,
+        variadic: false,
     },
     // ── pthread TLS (used by core/mem/epoch + verum_runtime tls) ────
     //
@@ -280,12 +292,14 @@ const POSIX_SYSCALLS: &[SyscallSig] = &[
         name: "pthread_key_create",
         args: &[AbiTy::Ptr, AbiTy::Ptr],
         ret: AbiTy::I64,
+        variadic: false,
     },
     // C: int pthread_key_delete(pthread_key_t)
     SyscallSig {
         name: "pthread_key_delete",
         args: &[AbiTy::I64],
         ret: AbiTy::I64,
+        variadic: false,
     },
     // C: void* pthread_getspecific(pthread_key_t) — Verum codegen
     // treats the returned pointer as i64 (bitcast back at call site).
@@ -293,29 +307,31 @@ const POSIX_SYSCALLS: &[SyscallSig] = &[
         name: "pthread_getspecific",
         args: &[AbiTy::I64],
         ret: AbiTy::I64,
+        variadic: false,
     },
     // C: int pthread_setspecific(pthread_key_t, const void*)
     SyscallSig {
         name: "pthread_setspecific",
         args: &[AbiTy::I64, AbiTy::Ptr],
         ret: AbiTy::I64,
+        variadic: false,
     },
     // ── POSIX semaphores (used by core/sync/semaphore) ──────────────
-    SyscallSig { name: "sem_init",    args: &[AbiTy::Ptr, AbiTy::I64, AbiTy::I64], ret: AbiTy::I64 },
-    SyscallSig { name: "sem_wait",    args: &[AbiTy::Ptr], ret: AbiTy::I64 },
-    SyscallSig { name: "sem_post",    args: &[AbiTy::Ptr], ret: AbiTy::I64 },
-    SyscallSig { name: "sem_destroy", args: &[AbiTy::Ptr], ret: AbiTy::I64 },
+    SyscallSig { name: "sem_init",    args: &[AbiTy::Ptr, AbiTy::I64, AbiTy::I64], ret: AbiTy::I64, variadic: false },
+    SyscallSig { name: "sem_wait",    args: &[AbiTy::Ptr], ret: AbiTy::I64, variadic: false },
+    SyscallSig { name: "sem_post",    args: &[AbiTy::Ptr], ret: AbiTy::I64, variadic: false },
+    SyscallSig { name: "sem_destroy", args: &[AbiTy::Ptr], ret: AbiTy::I64, variadic: false },
     // ── CPU topology (AOT-NUM-CPUS-LEG-1) ────────────────────────────
     // C: int sched_getaffinity(pid_t pid, size_t cpusetsize, cpu_set_t *mask)
     // Linux-only symbol — emitted as a direct-syscall wrapper
     // (x86_64=204 / aarch64=123) by `emit_num_cpus`; darwin never
     // declares it (sysconf via libSystem instead).
-    SyscallSig { name: "sched_getaffinity", args: &[AbiTy::I64, AbiTy::I64, AbiTy::Ptr], ret: AbiTy::I64 },
+    SyscallSig { name: "sched_getaffinity", args: &[AbiTy::I64, AbiTy::I64, AbiTy::Ptr], ret: AbiTy::I64, variadic: false },
     // ── Process management (core/sys/process) ───────────────────────
-    SyscallSig { name: "pipe",   args: &[AbiTy::Ptr], ret: AbiTy::I64 },
-    SyscallSig { name: "fork",   args: &[], ret: AbiTy::I64 },
-    SyscallSig { name: "dup2",   args: &[AbiTy::I64, AbiTy::I64], ret: AbiTy::I64 },
-    SyscallSig { name: "execvp", args: &[AbiTy::Ptr, AbiTy::Ptr], ret: AbiTy::I64 },
+    SyscallSig { name: "pipe",   args: &[AbiTy::Ptr], ret: AbiTy::I64, variadic: false },
+    SyscallSig { name: "fork",   args: &[], ret: AbiTy::I64, variadic: false },
+    SyscallSig { name: "dup2",   args: &[AbiTy::I64, AbiTy::I64], ret: AbiTy::I64, variadic: false },
+    SyscallSig { name: "execvp", args: &[AbiTy::Ptr, AbiTy::Ptr], ret: AbiTy::I64, variadic: false },
     // ── Memory mapping ───────────────────────────────────────────────
     // C: void *mmap(void *addr, size_t len, int prot, int flags, int fd, off_t off)
     // Dual-declared symbol: `core/sys/darwin/libsystem.vr` spells the
@@ -331,6 +347,7 @@ const POSIX_SYSCALLS: &[SyscallSig] = &[
         name: "mmap",
         args: &[AbiTy::I64, AbiTy::I64, AbiTy::I64, AbiTy::I64, AbiTy::I64, AbiTy::I64],
         ret: AbiTy::I64,
+        variadic: false,
     },
     // ── kqueue event loop (darwin io-engine) ────────────────────────
     // Dual-declared: `ensure_kqueue_declared` (platform_ir, all-i64)
@@ -338,7 +355,7 @@ const POSIX_SYSCALLS: &[SyscallSig] = &[
     // route through the adaptive call helper, so either spelling makes
     // valid IR — the registry entry pins WHICH one deterministically.
     // C: int kqueue(void)
-    SyscallSig { name: "kqueue", args: &[], ret: AbiTy::I64 },
+    SyscallSig { name: "kqueue", args: &[], ret: AbiTy::I64, variadic: false },
     // C: int kevent(int kq, const struct kevent *changelist, int nchanges,
     //               struct kevent *eventlist, int nevents,
     //               const struct timespec *timeout)
@@ -346,6 +363,7 @@ const POSIX_SYSCALLS: &[SyscallSig] = &[
         name: "kevent",
         args: &[AbiTy::I64, AbiTy::Ptr, AbiTy::I64, AbiTy::Ptr, AbiTy::I64, AbiTy::Ptr],
         ret: AbiTy::I64,
+        variadic: false,
     },
     // ── Socket metadata ──────────────────────────────────────────────
     // C: int getsockopt(int, int, int, void *restrict, socklen_t *restrict)
@@ -353,6 +371,7 @@ const POSIX_SYSCALLS: &[SyscallSig] = &[
         name: "getsockopt",
         args: &[AbiTy::I64, AbiTy::I64, AbiTy::I64, AbiTy::Ptr, AbiTy::Ptr],
         ret: AbiTy::I64,
+        variadic: false,
     },
     // C: int getsockname(int, struct sockaddr *restrict, socklen_t *restrict)
     // The T0218 i64-vs-i32 drift symbol: `runtime.rs::
@@ -362,19 +381,15 @@ const POSIX_SYSCALLS: &[SyscallSig] = &[
         name: "getsockname",
         args: &[AbiTy::I64, AbiTy::Ptr, AbiTy::Ptr],
         ret: AbiTy::I64,
+        variadic: false,
     },
-    // C: int fcntl(int fd, int cmd, ... /* arg */)
-    // Declared FIXED 3-arg here, mirroring the libsystem.vr extern and
-    // every emit-path call shape (F_GETFL passes 0, F_SETFL passes the
-    // flag word). NOTE the true C prototype is variadic; on
-    // arm64-darwin variadic args travel on the stack, so if the
-    // fixed-3 convention is ever shown to misdeliver the third arg the
-    // fix is a `verum_raw_fcntl3` C-shim (the `verum_raw_open3`
-    // precedent), not a variadic declaration here.
+    // C: int fcntl(int fd, int cmd, ...). On Darwin arm64 the command's
+    // optional argument is passed on the stack.
     SyscallSig {
         name: "fcntl",
-        args: &[AbiTy::I64, AbiTy::I64, AbiTy::I64],
-        ret: AbiTy::I64,
+        args: &[AbiTy::I32, AbiTy::I32],
+        ret: AbiTy::I32,
+        variadic: true,
     },
 ];
 
@@ -407,6 +422,7 @@ const VERUM_RUNTIME_SYMBOLS: &[SyscallSig] = &[
         name: "verum_string_join",
         args: &[AbiTy::I64, AbiTy::Ptr],
         ret: AbiTy::Ptr,
+        variadic: false,
     },
     // List in-place reversal — mutates the list buffer in place.
     // Canonical signature matches `runtime.rs::define_list_ir_helpers`
@@ -420,6 +436,7 @@ const VERUM_RUNTIME_SYMBOLS: &[SyscallSig] = &[
         name: "verum_list_reverse",
         args: &[AbiTy::Ptr],
         ret: AbiTy::Void,
+        variadic: false,
     },
     // List in-place pairwise swap — same in-place mutation pattern.
     // verum_list_swap(list: ptr, i: i64, j: i64) -> void
@@ -427,6 +444,7 @@ const VERUM_RUNTIME_SYMBOLS: &[SyscallSig] = &[
         name: "verum_list_swap",
         args: &[AbiTy::Ptr, AbiTy::I64, AbiTy::I64],
         ret: AbiTy::Void,
+        variadic: false,
     },
     // C wrapper for open(3) — avoids ARM64 variadic issues.
     // verum_raw_open3(path: *i8, flags: i64, mode: i64) -> i64
@@ -434,6 +452,7 @@ const VERUM_RUNTIME_SYMBOLS: &[SyscallSig] = &[
         name: "verum_raw_open3",
         args: &[AbiTy::Ptr, AbiTy::I64, AbiTy::I64],
         ret: AbiTy::I64,
+        variadic: false,
     },
     // TCP connect helper.
     // verum_tcp_connect(host: *i8, port: i64) -> i64
@@ -441,6 +460,7 @@ const VERUM_RUNTIME_SYMBOLS: &[SyscallSig] = &[
         name: "verum_tcp_connect",
         args: &[AbiTy::Ptr, AbiTy::I64],
         ret: AbiTy::I64,
+        variadic: false,
     },
 ];
 
@@ -492,14 +512,16 @@ pub fn canonical_fn_type<'ctx>(
         .iter()
         .map(|a| match a {
             AbiTy::I64 => i64_t.into(),
+            AbiTy::I32 => cref.i32_type().into(),
             AbiTy::Ptr => ptr_t.into(),
             AbiTy::Void => unreachable!("Void is a return-only classification"),
         })
         .collect();
     match sig.ret {
-        AbiTy::I64 => i64_t.fn_type(&arg_tys, false),
-        AbiTy::Ptr => ptr_t.fn_type(&arg_tys, false),
-        AbiTy::Void => cref.void_type().fn_type(&arg_tys, false),
+        AbiTy::I32 => cref.i32_type().fn_type(&arg_tys, sig.variadic),
+        AbiTy::I64 => i64_t.fn_type(&arg_tys, sig.variadic),
+        AbiTy::Ptr => ptr_t.fn_type(&arg_tys, sig.variadic),
+        AbiTy::Void => cref.void_type().fn_type(&arg_tys, sig.variadic),
     }
 }
 

@@ -11054,7 +11054,8 @@ fn lower_call<'ctx>(
             if let Some(qname) = xmod_name {
                 let c_name = qname.rsplit('.').next().unwrap_or(qname);
                 if let Some(sig) = super::syscall_registry::lookup_sig(c_name)
-                    && sig.args.len() == args.count as usize
+                    && (sig.args.len() == usize::from(args.count)
+                        || (sig.variadic && sig.args.len() < usize::from(args.count)))
                 {
                     let cfn = super::syscall_registry::get_or_declare(
                         ctx.get_module(),
@@ -11062,11 +11063,11 @@ fn lower_call<'ctx>(
                         c_name,
                     )?;
                     let mut call_args: Vec<BasicMetadataValueEnum> =
-                        Vec::with_capacity(sig.args.len());
-                    for (i, abi) in sig.args.iter().enumerate() {
+                        Vec::with_capacity(usize::from(args.count));
+                    for i in 0..usize::from(args.count) {
                         let raw = ctx.get_register(args.start.0 + i as u16)?;
-                        match abi {
-                            super::syscall_registry::AbiTy::Ptr => {
+                        match sig.args.get(i) {
+                            Some(super::syscall_registry::AbiTy::Ptr) => {
                                 call_args.push(
                                     as_ptr(ctx, raw, "xmod_arg_ptr")?.into(),
                                 );
@@ -11078,25 +11079,10 @@ fn lower_call<'ctx>(
                             }
                         }
                     }
-                    let raw_ret = ctx
-                        .builder()
-                        .build_call(cfn, &call_args, "xmod_posix_call")
-                        .or_llvm_err()?
-                        .basic_value_or("xmod posix call: expected return value")?;
-                    let result: BasicValueEnum =
-                        if let BasicValueEnum::PointerValue(pv) = raw_ret {
-                            ctx.builder()
-                                .build_ptr_to_int(
-                                    pv,
-                                    ctx.types().i64_type(),
-                                    "xmod_ret_i64",
-                                )
-                                .or_llvm_err()?
-                                .into()
-                        } else {
-                            raw_ret
-                        };
-                    ctx.set_register(dst.0, result);
+                    let result = super::syscall_registry::call_c_adapted(
+                        ctx.builder(), cfn, &call_args, "xmod_posix_call",
+                    )?.or_internal("xmod posix call: expected return value")?;
+                    ctx.set_register(dst.0, result.into());
                     return Ok(());
                 }
             }

@@ -1,4 +1,8 @@
 //! Required native declarations fail at the registry boundary (T2781).
+#[cfg(target_os = "macos")]
+#[path = "support/source_image.rs"]
+mod source_image;
+
 use verum_codegen::llvm::error::LlvmLoweringError;
 use verum_codegen::llvm::runtime::RuntimeLowering;
 use verum_codegen::llvm::syscall_registry::{
@@ -120,6 +124,10 @@ fn canonical_declarations_keep_their_types_and_handles() {
             i64_type.fn_type(&[ptr.into(), ptr.into()], false),
         ),
         ("sched_yield", i64_type.fn_type(&[], false)),
+        (
+            "fcntl",
+            context.i32_type().fn_type(&[context.i32_type().into(), context.i32_type().into()], true),
+        ),
     ] {
         let first = get_or_declare(&module, &context, name).unwrap();
         assert_eq!(first.get_type(), expected);
@@ -138,6 +146,27 @@ fn canonical_declarations_keep_their_types_and_handles() {
         assert_eq!(get_or_declare(&module, &context, name).unwrap(), function);
     }
     module.verify().unwrap();
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn darwin_fcntl_uses_the_variadic_argument_and_returns_signed_errors() {
+    let module = source_image::module(r#"
+        extern "C" {
+            fn fcntl(fd: Int32, command: Int32, ...) -> Int32;
+            fn close(fd: Int32) -> Int32;
+        }
+        fn main() -> Int {
+            unsafe {
+                let duplicate = fcntl(1 as Int32, 0 as Int32, 79);
+                if duplicate < 79 { return 1; }
+                if close(duplicate) != 0 { return 2; }
+                if fcntl(duplicate, 1 as Int32) != -1 { return 3; }
+            }
+            73
+        }
+    "#);
+    source_image::run_module(module, |_| {});
 }
 
 #[test]

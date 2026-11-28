@@ -6681,33 +6681,8 @@ impl<'ctx> PlatformIR<'ctx> {
         Ok(())
     }
     fn ensure_socket_option_syscalls(&self, module: &Module<'ctx>) -> super::error::Result<()> {
-        let ctx = self.context;
-        let i64_type = ctx.i64_type();
-        let ptr_type = ctx.ptr_type(AddressSpace::default());
-        let decls: &[(&str, verum_llvm::types::FunctionType<'ctx>)] = &[
-            (
-                "fcntl",
-                i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false),
-            ),
-            (
-                "getsockopt",
-                i64_type.fn_type(
-                    &[
-                        i64_type.into(),
-                        i64_type.into(),
-                        i64_type.into(),
-                        ptr_type.into(),
-                        ptr_type.into(),
-                    ],
-                    false,
-                ),
-            ),
-        ];
-        for (name, fn_type) in decls {
-            if module.get_function(name).is_none() {
-                module.add_function(name, *fn_type, None);
-            }
-        }
+        super::syscall_registry::get_or_declare(module, self.context, "fcntl")?;
+        super::syscall_registry::get_or_declare(module, self.context, "getsockopt")?;
         Ok(())
     }
     fn emit_socket_set_nonblocking(&self, module: &Module<'ctx>) -> super::error::Result<()> {
