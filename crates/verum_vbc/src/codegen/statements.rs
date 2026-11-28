@@ -243,11 +243,23 @@ impl VbcCodegen {
                             if let Some(ref ps) = parent_scope {
                                 self.nested_function_scope.push(ps.clone());
                             }
+                            // A noncapturing local function is registered as a free
+                            // declaration. Its type and value arguments start at
+                            // its own first slot, including inside a generic impl.
+                            let outer_types = std::mem::take(&mut self.ctx.generic_type_params);
+                            let outer_values = std::mem::take(&mut self.ctx.const_generic_params);
+                            let outer_order = std::mem::take(&mut self.ctx.generic_type_params_ordered);
+                            let outer_ids = std::mem::take(&mut self.ctx.current_generic_param_ids);
+                            let outer_receiver = self.ctx.current_impl_type_name.take();
                             let nested_result = self.compile_function(func, None);
+                            self.ctx.current_impl_type_name = outer_receiver;
+                            self.ctx.generic_type_params = outer_types;
+                            self.ctx.const_generic_params = outer_values;
+                            self.ctx.generic_type_params_ordered = outer_order;
+                            self.ctx.current_generic_param_ids = outer_ids;
                             if parent_scope.is_some() {
                                 self.nested_function_scope.pop();
                             }
-                            nested_result?;
 
                             // Restore parent function's compilation context.
                             self.ctx.current_function = saved_function;
@@ -256,6 +268,7 @@ impl VbcCodegen {
                             self.ctx.in_function = saved_in_function;
                             self.ctx.return_type = saved_return_type;
                             self.ctx.restore_closure_context(saved_closure_ctx);
+                            nested_result?;
                         }
                         // Function is fully handled here — the post-hoc
                         // compile_nested_functions pass in mod.rs should

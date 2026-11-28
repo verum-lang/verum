@@ -175,3 +175,28 @@ fn a_bound_instance_method_uses_its_protocol_slot_with_a_same_named_sibling() {
     assert_ne!(probe, target);
     assert_eq!(vm.execute_function(probe).unwrap().as_i64(), 73);
 }
+
+#[test]
+fn a_local_generic_function_and_its_enclosing_method_each_use_their_own_slots() {
+    let ast = Parser::new(r#"
+        module lexical;
+        type Mark is protocol { fn mark(&self) -> Int; };
+        implement Mark for Text { fn mark(&self) -> Int { 7 } }
+        implement Mark for Bool { fn mark(&self) -> Int { 3 } }
+        type Holder<T> is { value:T };
+        implement<T:Mark> Holder<T> {
+            fn pair(&self, text:&Text) -> Int {
+                fn score<U:Mark>(value:&U) -> Int { value.mark() }
+                if T.id == Bool.id { score(text) * 10 + score(&self.value) } else { 0 }
+            }
+        }
+        fn probe() -> Int { let item: Holder<Bool> = Holder { value:true }; item.pair(&"x") }
+    "#).parse_module().unwrap();
+    let module = VbcCodegen::new().compile_module(&ast).unwrap();
+    let wire = verum_vbc::serialize::serialize_module(&module).unwrap();
+    let module = verum_vbc::deserialize::deserialize_module(&wire).unwrap();
+    verum_vbc::validate::validate_module(&module).unwrap();
+    let entry = module.find_function_by_name("lexical.probe").unwrap();
+    let mut vm = Interpreter::new(Arc::new(module));
+    assert_eq!(vm.execute_function(entry).unwrap().as_i64(), 73);
+}
