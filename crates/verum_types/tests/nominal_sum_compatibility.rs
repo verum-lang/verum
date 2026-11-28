@@ -58,6 +58,27 @@ fn errors(source: &str) -> List<Text> {
 const SUMS: &str = "type First<T> is Take(T) | Skip; type Second<T> is Take(T) | Skip;";
 
 #[test]
+fn explicit_call_arguments_select_the_declared_sum_implementation() {
+    let declarations = format!("{SUMS}
+        type Marked is protocol {{}};
+        implement Marked for First<Int> {{}}
+        type Alias<T> is First<T>;
+        fn require<T:Marked>(value:&T)->Int {{ 1 }}
+        type Reader is {{ number:Int }};
+        implement Reader {{ fn read<T:Marked>(&self, value:&T)->Int {{ 1 }} }}");
+    for expression in ["require<First<Int>>(value)", "require<Alias<Int>>(value)", "reader.read<First<Int>>(value)"] {
+        let found = errors(&format!("{declarations} fn probe(reader:Reader, value:&First<Int>)->Int {{ {expression} }}"));
+        assert!(found.is_empty(), "{expression}: {found:?}");
+    }
+    for expression in ["require<Second<Int>>(value)", "reader.read<Second<Int>>(value)"] {
+        let found = errors(&format!("{declarations} fn probe(reader:Reader, value:&Second<Int>)->Int {{ {expression} }}"));
+        assert!(found.iter().any(|error| error.contains("Marked")), "{expression}: {found:?}");
+    }
+    let found = errors(&format!("{declarations} fn probe(value:&Second<Int>)->Int {{ require<First<Int>>(value) }}"));
+    assert!(found.iter().any(|error| error.contains("Mismatch")), "{found:?}");
+}
+
+#[test]
 fn matching_cases_do_not_identify_distinct_sums() {
     for body in [
         "fn convert(value:First<Int>)->Second<Int> {value}",

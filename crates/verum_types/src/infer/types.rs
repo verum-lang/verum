@@ -624,7 +624,7 @@ impl TypeChecker {
         self.ast_to_type_with_form(ast_ty, ApplicationForm::Expanded)
     }
 
-    /// Keep the identity of sums in source signatures and alias targets.
+    /// Keep the identity of sums in source signatures, type arguments and alias targets.
     /// Their representation can be expanded when an operation needs the cases.
     pub(super) fn declared_type(&mut self, ast_ty: &verum_ast::Type) -> Result<Type> {
         self.ast_to_type_with_form(ast_ty, ApplicationForm::DeclaredSum)
@@ -2880,7 +2880,7 @@ fn substitute_refinement_binder(
                     });
                 };
                 self.validate_explicit_array_lengths(&ty)?;
-                let provided = self.ast_to_type(&ty)?;
+                let provided = self.declared_type(&ty)?;
                 use crate::ty::SubstitutionExt;
                 let inferred = self.unifier.unify(&Type::Var(*var), &provided, span)?;
                 combined = combined.compose(&inferred)
@@ -3051,7 +3051,7 @@ fn substitute_refinement_binder(
 
                 for (i, type_arg) in type_args.iter().enumerate() {
                     if let verum_ast::ty::GenericArg::Type(ast_ty) = type_arg {
-                        let provided_ty = self.ast_to_type(ast_ty)?;
+                        let provided_ty = self.declared_type(ast_ty)?;
                         // Unify the fresh var with the provided type
                         self.unifier
                             .unify(&Type::Var(fresh_vars[i]), &provided_ty, span)?;
@@ -3160,7 +3160,7 @@ fn substitute_refinement_binder(
         if !type_args.is_empty() && type_args.len() <= fresh_vars.len() {
             for (i, type_arg) in type_args.iter().enumerate() {
                 if let verum_ast::ty::GenericArg::Type(ast_ty) = type_arg {
-                    let provided_ty = self.ast_to_type(ast_ty)?;
+                    let provided_ty = self.declared_type(ast_ty)?;
                     self.unifier
                         .unify(&Type::Var(fresh_vars[i]), &provided_ty, span)?;
                 }

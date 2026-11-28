@@ -7279,7 +7279,7 @@ impl TypeChecker {
                                         span: expr.span,
                                     }
                                 )?;
-                                let provided_ty = self.ast_to_type(&ast_ty)?;
+                                let provided_ty = self.declared_type(&ast_ty)?;
                                 self.unifier.unify(&Type::Var(*fresh_var), &provided_ty, expr.span)?;
                             }
                             explicit_var_index += 1;
