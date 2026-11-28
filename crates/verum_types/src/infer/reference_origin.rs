@@ -1,6 +1,7 @@
 //! A reference result can identify a carrier only with a derivation for its
 //! referent. Returning the same reference type does not prove pointer identity.
 use super::TypeChecker;
+use super::write_places::lexical_place_root;
 use crate::context::{RecordFieldOrigins, ReferenceOrigin};
 use crate::ty::{RecordReceiver, Type};
 use verum_common::List;
@@ -832,7 +833,7 @@ impl TypeChecker {
             if borrowed && actual.as_ref().is_some_and(|ty|
                 self.reference_mode(ty, argument.span).is_ok_and(|mode| mode.is_none()))
             {
-                if let Some((origin, _)) = self.record_place_for_auto_borrow(
+                if let Some(origin) = self.borrowed_call_input_origin(
                     argument, AutoBorrowRoot::IncludeExclusive,
                 ) {
                     if !found.contains(&origin) { found.push(origin); }
@@ -849,7 +850,7 @@ impl TypeChecker {
         }
         if let Some((receiver, borrowed)) = receiver {
             if borrowed {
-                if let Some((origin, _)) = self.record_place_for_auto_borrow(
+                if let Some(origin) = self.borrowed_call_input_origin(
                     receiver, AutoBorrowRoot::IncludeExclusive,
                 ) {
                     if !found.contains(&origin) { found.push(origin); }
@@ -1033,11 +1034,10 @@ impl TypeChecker {
             return true;
         }
         match &value.kind {
-            ExprKind::Path(path) => {
+            ExprKind::Path(_) => {
                 self.reference_result_origin(value).is_some()
-                    || path
-                        .as_ident()
-                        .is_some_and(|name| self.ctx.env.binding_has_payload_origins(&name.name))
+                    || lexical_place_root(value)
+                        .is_some_and(|name| self.ctx.env.binding_has_payload_origins(name))
             }
             ExprKind::Unary {
                 op: UnOp::Ref | UnOp::RefMut | UnOp::RefChecked | UnOp::RefCheckedMut,
@@ -1092,11 +1092,13 @@ impl TypeChecker {
         }
         match &unparen(value).kind {
             ExprKind::Path(path) => {
-                if let Some(name) = path.as_ident() {
-                    if let Some(place) = self.ctx.env.record_source(&name.name, false) {
+                if let Some(name) = lexical_place_root(value)
+                    && (path.as_ident().is_some() || self.ctx.env.binding_has_payload_origins(name))
+                {
+                    if let Some(place) = self.ctx.env.record_source(name, false) {
                         self.check_payload_origin_observation(&place, value.span);
                     }
-                    for origin in self.ctx.env.reference_candidates(&name.name) {
+                    for origin in self.ctx.env.reference_candidates(name) {
                         add(found, origin);
                     }
                 }
@@ -1160,7 +1162,7 @@ impl TypeChecker {
                 // A consumed receiver passes on any loans in its value. Only
                 // a borrowed (or unresolved) receiver also lends its own slot.
                 if !self.type_registry.consumes_receiver(unparen(value).span)
-                    && let Some((source, _)) = self.borrowed_record_place(receiver)
+                    && let Some(source) = self.borrowed_call_input_origin(receiver, AutoBorrowRoot::SharedOnly)
                 {
                     add(found, source);
                 }
@@ -1675,6 +1677,42 @@ impl TypeChecker {
         let backing = self.slot_backing_place(owner)?;
         let origins = self.stored_slot_origins(&backing, element, owner.span)?;
         Some((backing, origins))
+    }
+
+    /// Iterating an owned List or fixed array yields its stored elements.
+    /// The temporary loan that keeps iteration valid belongs to the loop.
+    pub(super) fn owned_iteration_item_origins(
+        &mut self, source: &Expr, iterable: &Type, item: &Type,
+    ) -> Option<List<RecordReceiver>> {
+        use verum_common::well_known_types::{WellKnownProtocol, WellKnownType};
+        let iterable = self.unifier.apply(iterable);
+        let element = match &iterable {
+            Type::Array { element, .. } => element.as_ref(),
+            _ => {
+                let (owner, [element]) = self.conversion_nominal_head(&iterable)? else { return None };
+                if self.declared_runtime_storage_carrier(&owner) != Some(WellKnownType::List) {
+                    return None;
+                }
+                // A structural iterator or a specialized implementation with
+                // the same concrete Item can yield a loan of its own cursor.
+                let protocol = Self::text_to_path(&self.source_operator_name(WellKnownProtocol::IntoIterator)?);
+                let checker = self.protocol_checker.read();
+                let (implementation, _) = checker.find_impl_with_substitution(&iterable, &protocol)?;
+                let (module, _, _) = checker.method_source_for_implementation(implementation, &"into_iter".into())?;
+                let (_, [Type::Var(parameter)]) = self.conversion_nominal_head(&implementation.for_type)? else { return None };
+                if owner.rsplit_once('.')?.0 != module.as_str()
+                    || !implementation.parameters.contains(&crate::context::GenericBinder::Type(*parameter))
+                    || implementation.ordinary_associated_type(&"Item".into()).ok()?? != &Type::Var(*parameter)
+                {
+                    return None;
+                }
+                element
+            }
+        };
+        if !self.types_equivalent(element, item) || !self.complete_slot_value_origins(source) {
+            return None;
+        }
+        Some(self.aggregate_origins(source, &iterable))
     }
 
     pub(super) fn observe_indexed_slot(
@@ -2242,6 +2280,22 @@ impl TypeChecker {
         self.record_place_for_auto_borrow(expr, AutoBorrowRoot::IncludeExclusive)
     }
 
+    /// A call borrowing an indexed element can return a reference into its
+    /// container. The container is a lifetime bound even when the selected
+    /// index is dynamic; it does not identify an exact field for a later write.
+    fn borrowed_call_input_origin(&mut self, expr: &Expr, access: AutoBorrowRoot) -> Option<RecordReceiver> {
+        if let Some((place, _)) = self.record_place_for_auto_borrow(expr, access) {
+            return Some(place);
+        }
+        let (indexed, _) = field_root(expr);
+        let ExprKind::Index { expr: owner, index } = &indexed.kind else { return None };
+        if matches!(unparen(index).kind, ExprKind::Range { .. }) { return None; }
+        let (place, ty) = self.record_place_for_auto_borrow(owner, access)?;
+        let head = self.place_reference_head(&ty, owner.span).ok()?;
+        let storage = head.reference_parts().map_or(&head, |(inner, _, _)| inner);
+        (storage.sequence_domain().is_some() || self.declared_list_element(storage).is_some()).then_some(place)
+    }
+
     /// A computed reference can designate several callers' places. A write
     /// through an inline field can reach any of them. Keep each candidate
     /// without promoting the set to a unique storage identity.
@@ -2271,12 +2325,7 @@ impl TypeChecker {
         access: AutoBorrowRoot,
     ) -> Option<(RecordReceiver, Type)> {
         let (root, fields) = field_root(expr);
-        let ExprKind::Path(path) = &root.kind else { return None };
-        let name = match path.segments.as_slice() {
-            [verum_ast::ty::PathSegment::Name(name)] => name.name.as_str(),
-            [verum_ast::ty::PathSegment::SelfValue] => "self",
-            _ => return None,
-        };
+        let name = lexical_place_root(root)?;
         let ty = self.ctx.env.lookup(name)?.ty.clone();
         let head = self.place_reference_head(&ty, root.span).ok()?;
         if access == AutoBorrowRoot::SharedOnly && name == "self" && head.reference_parts().is_some() {

@@ -30,7 +30,7 @@ fn unparen(mut expr: &Expr) -> &Expr {
 }
 
 /// Local place roots include the method receiver, whose path has its own AST segment.
-fn lexical_place_root(expr: &Expr) -> Option<&str> {
+pub(super) fn lexical_place_root(expr: &Expr) -> Option<&str> {
     let ExprKind::Path(path) = &unparen(expr).kind else { return None };
     match path.segments.as_slice() {
         [verum_ast::ty::PathSegment::Name(name)] => Some(name.as_str()),

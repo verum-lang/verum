@@ -4,6 +4,107 @@
 use super::*;
 
 #[test]
+fn owned_iteration_transfers_element_loans_to_the_destination() {
+    let session = crate::Session::new(crate::CompilerOptions::default());
+    let (registry, phase) = release_stdlib_graph(&session);
+    let check = |body: &str| {
+        let source = format!("module loan_probe; mount core.collections.list.List; {body}");
+        let module = Parser::new(&source).parse_module().unwrap();
+        check_source_module(&mut phase.configured_checker(), "loan_probe", &module, &registry)
+    };
+    let legal = "fn append<T>(mut out: List<T>, other: List<T>) -> List<T> {
+        for item in other { out.push(item); } out }";
+    check(legal).unwrap_or_else(|errors| panic!("{legal}: {errors:#?}"));
+    check("fn keep(source:&Int) -> List<&Int> {
+        let mut items:List<&Int> = List.new(); items.push(source);
+        let mut out:List<&Int> = List.new(); for item in items { out.push(item); } out
+    }").expect("the stored reference can still reach its caller");
+    for escaping in [
+        "fn escape() -> List<&Int> { let local = 7; let mut items: List<&Int> = List.new();
+         items.push(&local); let mut out: List<&Int> = List.new();
+         for item in items { out.push(item); } out }",
+        "fn escape() -> List<&Int> { let mut out: List<&Int> = List.new(); {
+         let local = 7; let mut items: List<&Int> = List.new(); items.push(&local);
+         for item in items { out.push(item); } } out }",
+        "fn escape() -> List<&Int> { let mut out: List<&Int> = List.new(); {
+         let mut items: List<Int> = List.new(); items.push(7);
+         for item in &items { out.push(item); } } out }",
+        "fn escape(input:&Int) -> List<&&Int> { let mut out:List<&&Int> = List.new(); {
+         let mut items:List<&Int> = List.new(); items.push(input);
+         for ref current in items { out.push(current); } } out }",
+    ] {
+        let errors = check(escaping).expect_err(escaping);
+        assert!(errors.iter().any(|error| error.code() == Some("E312")), "{escaping}: {errors:#?}");
+    }
+    let owner = "core.term.app.command";
+    let command = registry.read().get_by_path(owner).unwrap().ast.clone();
+    check_source_module(&mut phase.configured_checker(), owner, &command, &registry)
+        .unwrap_or_else(|errors| panic!("{owner}: {errors:#?}"));
+}
+
+#[test]
+fn polling_an_owned_element_cannot_return_a_reference_after_removing_its_owner() {
+    let session = crate::Session::new(crate::CompilerOptions::default());
+    let (registry, phase) = release_stdlib_graph(&session);
+    let provider = "module loan_probe; mount core.collections.list.List;
+        mount core.async.future.Future; mount core.async.poll.Poll; mount core.async.waker.Context;
+        type FieldFuture is { value: Int };
+        implement Future for FieldFuture {
+            type Output = &Int;
+            fn poll(&mut self, cx:&mut Context) -> Poll<&Int> { Poll.Ready(&self.value) }
+        }";
+    let check = |consumer: &str| {
+        let source = format!("{provider}\n{consumer}");
+        let id = session.load_source_string(&source, "loan_probe.vr".into()).unwrap();
+        let module = verum_fast_parser::FastParser::new().parse_module_str(&source, id).unwrap();
+        check_source_types(&mut phase.configured_checker(), "loan_probe", &module, &registry,
+            |error| error.to_diagnostic_with_span(Some(|span| session.convert_span(span))))
+    };
+    check("fn read(f:&mut FieldFuture,cx:&mut Context)->Int {
+        match f.poll(cx) { Poll.Ready(value)=>*value, Poll.Pending=>0 }
+    }").expect("the field is live while its future is borrowed");
+    check("fn read_at(mut items:List<FieldFuture>,cx:&mut Context,i:Int)->Int {
+        let copied = match items[i].poll(cx) { Poll.Ready(value)=>*value, Poll.Pending=>0 };
+        items.remove(i); copied
+    }").expect("a scalar copied while the future is live survives its removal");
+    check("type NumberFuture is { value:Int }; implement Future for NumberFuture {
+        type Output=Int; fn poll(&mut self,cx:&mut Context)->Poll<Int> { Poll.Ready(self.value) }
+    } fn take(mut items:List<NumberFuture>,cx:&mut Context,i:Int)->Int {
+        match items[i].poll(cx) { Poll.Ready(n)=>{ items.remove(i); n }, Poll.Pending=>0 }
+    }").expect("a result independent of the future permits removal inside the ready arm");
+    let local = check("fn leak(cx:&mut Context, fallback:&Int)->&Int {
+        let mut local=FieldFuture {value:7};
+        match local.poll(cx) { Poll.Ready(value)=>value, Poll.Pending=>fallback }
+    }").expect_err("the future is destroyed at return");
+    assert!(local.iter().any(|error| error.code() == Some("E312") && error.message().contains("local")), "{local:#?}");
+    for index in ["0", "i"] {
+        let consumer = format!("fn leak(mut items:List<FieldFuture>,cx:&mut Context,fallback:&Int,i:Int)->&Int {{
+            match items[{index}].poll(cx) {{
+                Poll.Ready(value)=>{{ items.remove({index}); value }}, Poll.Pending=>fallback,
+            }}
+        }}");
+        let errors = check(&consumer).expect_err("the result still borrows the indexed element");
+        let conflict = errors.iter().find(|error| error.code() == Some("E310") && error.message().contains("items"))
+            .unwrap_or_else(|| panic!("{errors:#?}"));
+        let source = format!("{provider}\n{consumer}");
+        let removal = format!("items.remove({index})");
+        for (label, expected) in [
+            (&conflict.primary_labels()[0], removal.as_str()),
+            (&conflict.secondary_labels()[0], "Poll.Ready(value)"),
+        ] {
+            let span = &label.span;
+            let line = source.lines().nth(span.line - 1).unwrap();
+            assert_eq!(&line[span.column - 1..span.end_column - 1], expected);
+        }
+    }
+    let held = check("fn leak(mut items:List<FieldFuture>,cx:&mut Context,fallback:&Int)->&Int {
+        let result=match items[0].poll(cx) { Poll.Ready(value)=>value, Poll.Pending=>fallback };
+        items.remove(0); result
+    }").expect_err("a result held beyond the match still borrows its future");
+    assert!(held.iter().any(|error| error.code() == Some("E310") && error.message().contains("items")), "{held:#?}");
+}
+
+#[test]
 fn propagated_success_preserves_the_ownership_of_its_payload() {
     let session = crate::Session::new(crate::options::CompilerOptions::default());
     let (registry, phase) = release_stdlib_graph(&session);

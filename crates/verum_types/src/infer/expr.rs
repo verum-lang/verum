@@ -6461,7 +6461,10 @@ impl TypeChecker {
             let iter_result = checker.synth_expr(iter)?;
             let elem_ty = checker.synchronous_iteration_item(iter, &iter_result.ty)?;
             let elem_ty = checker.unifier.apply(&elem_ty);
-            let mut sources = checker.aggregate_origins(iter, &iter_result.ty);
+            let bindings = checker.collect_pattern_bindings(pattern, &elem_ty)?;
+            let (_, ref_bindings) = checker.match_pattern_use(pattern, &bindings);
+            let stored = checker.owned_iteration_item_origins(iter, &iter_result.ty, &elem_ty);
+            let mut sources = stored.clone().unwrap_or_else(|| checker.aggregate_origins(iter, &iter_result.ty));
             if sources.is_empty() {
                 if let Some((source, _)) = checker.borrowed_record_place(iter) {
                     sources.push(source);
@@ -6477,13 +6480,18 @@ impl TypeChecker {
             for source in &sources {
                 checker.retain_iteration_origin(source, iter.span)?;
             }
-            let bindings = checker.collect_pattern_bindings(pattern, &elem_ty)?;
             checker.affine_tracker.enter_loop();
             checker.refinement_evidence.push_scope();
             let result = (|| {
                 checker.bind_pattern(pattern, &elem_ty)?;
                 for (name, ty) in &bindings {
-                    if checker.carries_stored_loan(ty) && !sources.is_empty() {
+                    if !checker.carries_stored_loan(ty) { continue; }
+                    if let Some(stored) = &stored
+                        && !ref_bindings.iter().any(|binding| &binding.name == name)
+                    {
+                        checker.ctx.env.set_reference_origin(name,
+                            crate::context::ReferenceOrigin::OwnedPayload(stored.clone().into_boxed_slice()));
+                    } else if !sources.is_empty() {
                         checker.ctx.env.set_reference_origin(name,
                             crate::context::ReferenceOrigin::Candidates(sources.clone().into_boxed_slice()));
                     }
@@ -9334,7 +9342,7 @@ impl TypeChecker {
         }
     }
 
-    fn declared_list_element(&self, ty: &Type) -> Option<Type> {
+    pub(super) fn declared_list_element(&self, ty: &Type) -> Option<Type> {
         let (name, args) = self.conversion_nominal_head(ty)?;
         let [element] = args else { return None };
         (self.declared_runtime_storage_carrier(&name) == Some(WKT::List)).then(|| element.clone())

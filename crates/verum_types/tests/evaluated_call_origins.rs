@@ -1,10 +1,11 @@
 //! T2860: call results use evaluated values; later source reads see mutations.
 use verum_ast::FileId;
-use verum_common::{List, Text};
+use verum_common::List;
+use verum_diagnostics::Diagnostic;
 use verum_fast_parser::FastParser;
 use verum_types::TypeChecker;
 
-fn errors(source: &str) -> List<Text> {
+fn errors(source: &str) -> List<Diagnostic> {
     let module = FastParser::new().parse_module_str(source, FileId::new(1))
         .expect("source grammar");
     let mut checker = TypeChecker::with_minimal_context();
@@ -16,7 +17,7 @@ fn errors(source: &str) -> List<Text> {
     }
     errors.extend(checker.take_deferred_errors());
     errors.iter().chain(checker.diagnostic_sources())
-        .map(|error| format!("{error:?}").into()).collect()
+        .map(verum_types::TypeError::to_diagnostic).collect()
 }
 
 #[track_caller]
@@ -28,8 +29,8 @@ fn accepted(source: &str) {
 #[track_caller]
 fn lifetime_rejected(source: &str) {
     let errors = errors(source);
-    assert!(errors.iter().any(|error| error.contains("E312")
-        || error.contains("DanglingReference") || error.contains("BorrowConflict")),
+    assert!(errors.iter().any(|error| error.code() == Some("E312")
+        || (matches!(error.code(), Some("E310" | "E311")) && error.message().starts_with("cannot borrow"))),
         "{errors:#?}");
 }
 
