@@ -1,0 +1,24 @@
+// @test: run
+// @tier: 0
+// @level: L2
+// @tags: net, tcp, timeout
+// @expected-exit: 0
+// @description: A timed connection returns a usable blocking stream; a zero budget is rejected.
+mount core.net.addr.{Ipv4Addr, SocketAddr};
+mount core.net.resolve.ToSocketAddrs;
+mount core.net.tcp.{TcpListener, TcpStream};
+mount core.io.protocols.{Read, Write};
+
+fn main() {
+    let local = SocketAddr.new_v4(Ipv4Addr.localhost(), 0);
+    assert(TcpStream.connect_timeout(local, 0) is Result.Err(_));
+    let listener = TcpListener.bind(local).unwrap();
+    let address = listener.local_addr().unwrap();
+    let mut client = TcpStream.connect_timeout(address, 2000).unwrap();
+    let (mut server, _) = listener.accept().unwrap();
+    let message: [Byte; 3] = [0_u8, 255_u8, 65_u8];
+    client.write_all(&message[..]).unwrap();
+    let mut received: [Byte; 3] = [0_u8; 3];
+    server.read_exact(&mut received[..]).unwrap();
+    assert(received[0] == 0_u8 && received[1] == 255_u8 && received[2] == 65_u8);
+}

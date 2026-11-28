@@ -688,6 +688,9 @@ implement SocketAddrV6 {
     public fn port(&self) -> Int {
         self.port
     }
+
+    /// Interface scope encoded in the native IPv6 socket address.
+    public(in core.net) fn scope_id(&self) -> Int { self.scope_id }
 }
 
 implement PartialEq for SocketAddrV6 {

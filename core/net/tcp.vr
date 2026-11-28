@@ -59,17 +59,25 @@
     lifecycle: Lifecycle.Definition
 )
 module core.net.tcp;
-mount io.*;
+mount core.io.protocols.{Read, Write};
 mount core.async.io_protocols.{AsyncRead, AsyncWrite, IoResult};
 mount core.async.poll.{Poll};
 mount core.async.waker.{Context};
 mount core.async.future.{Future};
-mount core.async.stream.{Stream, StreamNext};
+mount core.async.stream.Stream;
 mount core.async.async_iterator.{AsyncIterator};
 mount core.async.cancellation.{CancellationToken, CancellationError};
 mount core.net.addr.{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 mount core.net.resolve.ToSocketAddrs;
 mount core.net.readiness.AsyncIoReady;
+mount core.time.instant.Instant;
+mount core.intrinsics.runtime.os.__io_wait_writable_raw;
+@cfg(target_os = "linux")
+mount core.sys.linux.errno.EINPROGRESS as CONNECT_PENDING;
+@cfg(target_os = "macos")
+mount core.sys.darwin.errno.EINPROGRESS as CONNECT_PENDING;
+@cfg(target_os = "windows")
+mount core.sys.windows.winerror.WSAEWOULDBLOCK as CONNECT_PENDING;
 
 // =============================================================================
 // V-LLSI Native Socket Imports
@@ -279,6 +287,41 @@ implement TcpStream {
         Result.Err(last_err)
     }
 
+    /// Connect using one timeout, in milliseconds, across all resolved endpoints.
+    /// Synchronous address resolution counts toward the budget. A successful
+    /// stream uses blocking reads and writes.
+    public fn connect_timeout<A: ToSocketAddrs>(addr: A, timeout_ms: Int) -> Result<TcpStream, IoError> {
+        if timeout_ms <= 0 { return Result.Err(IoError.new(IoErrorKind.InvalidInput)); }
+        let start = Instant.now();
+        let addrs = addr.to_socket_addrs()?;
+        let mut result: Result<TcpStream, IoError> = Result.Err(IoError.Other("No addresses resolved"));
+        for address in addrs {
+            if start.elapsed().as_millis() >= timeout_ms { return Result.Err(IoError.new(IoErrorKind.TimedOut)); }
+            result = TcpStream.connect_until(&address, &start, timeout_ms);
+            if result.is_ok() { break; }
+        }
+        result
+    }
+
+    fn connect_until(addr: &SocketAddr, start: &Instant, timeout_ms: Int) -> Result<TcpStream, IoError> {
+        let stream: TcpStream = TcpStream.nonblocking_socket(addr)?;
+        if stream.begin_connect()? {
+            loop {
+                let remaining = timeout_ms - start.elapsed().as_millis();
+                if remaining <= 0 { return Result.Err(IoError.new(IoErrorKind.TimedOut)); }
+                // A native poll takes a signed 32-bit millisecond interval.
+                let wait = remaining.min(2147483647);
+                match __io_wait_writable_raw(stream.fd.as_raw(), wait) {
+                    1 => { stream.check_connect()?; break; },
+                    0 => {},
+                    _ => return Result.Err(IoError.Other("TCP connection readiness failed")),
+                }
+            }
+        }
+        stream.set_nonblocking(false)?;
+        Result.Ok(stream)
+    }
+
     /// Connect to a specific socket address (internal implementation).
     fn connect_addr(addr: &SocketAddr) -> Result<TcpStream, IoError> {
         let domain = if addr.is_ipv4() { AF_INET } else { AF_INET6 };
@@ -447,98 +490,59 @@ implement TcpStream {
         Result.Err(last_err)
     }
 
-    /// Async connect implementation for a specific address.
     async fn connect_addr_async(addr: &SocketAddr) -> Result<TcpStream, IoError> {
+        let stream: TcpStream = TcpStream.nonblocking_socket(addr)?;
+        if stream.begin_connect()? {
+            AsyncIoReady.writable(stream.fd).await;
+            stream.check_connect()?;
+        }
+        Result.Ok(stream)
+    }
+
+    fn nonblocking_socket(addr: &SocketAddr) -> Result<TcpStream, IoError> {
         let domain = if addr.is_ipv4() { AF_INET } else { AF_INET6 };
-
-        // Create socket - use statement-level @cfg to ensure fd is in function scope
-        @cfg(any(target_os = "linux", target_os = "windows"))
-        let fd = socket(domain, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0)
-            .map_err(|e| IoError.from_os(e))?;
-
+        @cfg(target_os = "linux")
+        let fd = socket(domain, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0).map_err(|e| IoError.from_os(e))?;
+        @cfg(target_os = "windows")
+        let fd = socket(domain, SOCK_STREAM, 0).map_err(|e| IoError.from_os(e))?;
         @cfg(target_os = "macos")
         let fd = sys_socket(domain, SOCK_STREAM, 0).map_err(|e| IoError.from_os(e))?;
-
-        // macOS: set non-blocking after creation
+        let stream = TcpStream { fd, peer_addr: *addr };
+        @cfg(any(target_os = "macos", target_os = "windows"))
+        let _ = stream.set_nonblocking(true)?;
         @cfg(target_os = "macos")
-        let _ = safe_set_nonblocking(fd, true).map_err(|e| IoError.from_os(e))?;
+        let _ = safe_set_nosigpipe(fd, true).map_err(|e| IoError.from_os(e))?;
+        Result.Ok(stream)
+    }
 
-        @cfg(target_os = "macos")
-        let _ = safe_set_nosigpipe(fd, true);
-
-        // FFI-BYTE-BUFFER-STRIDE-1: pack the sockaddr in-scope.
-        let addr_bytes = serialize_socket_addr(addr);
+    /// True when the socket needs a readiness wait and a subsequent SO_ERROR check.
+    fn begin_connect(&self) -> Result<Bool, IoError> {
+        let addr_bytes = serialize_socket_addr(&self.peer_addr);
         let addr_n = addr_bytes.len();
         let mut sa: [Byte; 28] = [0; 28];
-        let mut pi = 0;
-        while pi < addr_n { sa[pi] = addr_bytes[pi]; pi = pi + 1; }
+        let mut i = 0;
+        while i < addr_n { sa[i] = addr_bytes[i]; i += 1; }
         let addr_ptr = &sa[0] as &unsafe Byte;
-
-        // Initiate non-blocking connect
         @cfg(any(target_os = "linux", target_os = "windows"))
-        let connect_result = connect(fd, addr_ptr, addr_n as Int);
-
+        let result = connect(self.fd, addr_ptr, addr_n);
         @cfg(target_os = "macos")
-        let connect_result = sys_connect(fd, addr_ptr, addr_n as Int);
-
-        // Platform-specific error codes for "in progress"
-        @cfg(any(target_os = "linux", target_os = "windows"))
-        const EINPROGRESS: Int = 115;
-
-        @cfg(target_os = "macos")
-        const EINPROGRESS: Int = 36;
-
-        match connect_result {
-            Result.Ok(()) => {
-                // Connection completed immediately (rare but possible on localhost)
-                return Result.Ok(TcpStream { fd: fd, peer_addr: *addr });
-            }
-            Result.Err(e) if e.code == EINPROGRESS || io_error_kind_from_os_code(e.code) == IoErrorKind.WouldBlock => {
-                // Expected for non-blocking connect - need to wait for completion
-            }
-            Result.Err(e) => {
-                @cfg(any(target_os = "linux", target_os = "windows"))
-                let _ = close(fd);
-
-                @cfg(target_os = "macos")
-                let _ = sys_close(fd);
-
-                return Result.Err(IoError.from_os(e));
-            }
+        let result = sys_connect(self.fd, addr_ptr, addr_n);
+        match result {
+            Result.Ok(()) => Result.Ok(false),
+            Result.Err(e) if e.code == CONNECT_PENDING || e.would_block() || e.interrupted() => Result.Ok(true),
+            Result.Err(e) => Result.Err(IoError.from_os(e)),
         }
+    }
 
-        // Wait for socket to become writable (connection complete or error)
-        AsyncIoReady.writable(fd).await;
-
-        // Check socket error to verify connection succeeded
+    fn check_connect(&self) -> Result<(), IoError> {
         @cfg(any(target_os = "linux", target_os = "windows"))
-        let sock_err = getsockopt_error(fd);
-
+        let result = getsockopt_error(self.fd);
         @cfg(target_os = "macos")
-        let sock_err = safe_getsockopt_error(fd);
-
-        match sock_err {
-            Result.Ok(0) => {
-                Result.Ok(TcpStream { fd: fd, peer_addr: *addr })
-            }
-            Result.Ok(err_code) => {
-                @cfg(any(target_os = "linux", target_os = "windows"))
-                let _ = close(fd);
-
-                @cfg(target_os = "macos")
-                let _ = sys_close(fd);
-
-                Result.Err(IoError.from_errno(err_code))
-            }
-            Result.Err(e) => {
-                @cfg(any(target_os = "linux", target_os = "windows"))
-                let _ = close(fd);
-
-                @cfg(target_os = "macos")
-                let _ = sys_close(fd);
-
-                Result.Err(IoError.from_os(e))
-            }
+        let result = safe_getsockopt_error(self.fd);
+        match result {
+            Result.Ok(0) => Result.Ok(()),
+            Result.Ok(code) => Result.Err(IoError.from_errno(code)),
+            Result.Err(e) => Result.Err(IoError.from_os(e)),
         }
     }
 
@@ -949,7 +953,8 @@ implement<'a> Future for AsyncReadFut<'a> {
     type Output = Result<Int, IoError>;
 
     fn poll(&mut self, cx: &mut Context) -> Poll<Result<Int, IoError>> {
-        self.stream.poll_read(cx, self.buf)
+        let AsyncReadFut { stream, buf } = self;
+        (**stream).poll_read(cx, *buf)
     }
 }
 
@@ -962,7 +967,8 @@ implement<'a> Future for AsyncWriteFut<'a> {
     type Output = Result<Int, IoError>;
 
     fn poll(&mut self, cx: &mut Context) -> Poll<Result<Int, IoError>> {
-        self.stream.poll_write(cx, self.buf)
+        let AsyncWriteFut { stream, buf } = self;
+        (**stream).poll_write(cx, *buf)
     }
 }
 
@@ -971,8 +977,8 @@ implement Drop for TcpStream {
         // Disarm before releasing the descriptor: a later cleanup must not
         // close a descriptor that the operating system has already reused.
         let owned_fd = self.fd;
-        self.fd = -1;
-        if owned_fd < 0 { return; }
+        self.fd = FileDesc.INVALID;
+        if !owned_fd.is_valid() { return; }
         @cfg(any(target_os = "linux", target_os = "windows")) {
             let _ = close(owned_fd);
         }
@@ -1382,8 +1388,10 @@ implement<'a> AsyncIncoming<'a> {
             Result.Ok(client_fd) => {
                 @cfg(target_os = "macos")
                 {
-                    let setup = safe_set_nonblocking(client_fd, true)
-                        .and_then(|_| safe_set_nosigpipe(client_fd, true));
+                    let setup = match safe_set_nonblocking(client_fd, true) {
+                        Result.Ok(()) => safe_set_nosigpipe(client_fd, true),
+                        Result.Err(e) => Result.Err(e),
+                    };
                     if let Result.Err(error) = setup {
                         let _ = sys_close(client_fd);
                         return Poll.Ready(Result.Err(IoError.from_os(error)));
@@ -1427,7 +1435,10 @@ implement<'a> AsyncIterator for AsyncIncoming<'a> {
 
     @inline
     async fn next(&mut self) -> Maybe<Result<TcpStream, IoError>> {
-        StreamNext { stream: self }.await
+        match self.listener.accept_async().await {
+            Result.Ok((stream, _)) => Maybe.Some(Result.Ok(stream)),
+            Result.Err(error) => Maybe.Some(Result.Err(error)),
+        }
     }
 }
 
@@ -1524,7 +1535,7 @@ fn serialize_socket_addr(addr: &SocketAddr) -> List<Byte> {
             }
 
             // sin_port: network byte order (big-endian)
-            let port = v4.port;
+            let port = v4.port();
             buf.push(((port >> 8) & 0xFF) as Byte);
             buf.push((port & 0xFF) as Byte);
 
@@ -1532,7 +1543,7 @@ fn serialize_socket_addr(addr: &SocketAddr) -> List<Byte> {
             // The field name on SocketAddrV4 is `ip`, not `addr` — the
             // typechecker accepts the wrong name silently (#75) and the
             // mismatch surfaces at runtime as NullPointer.
-            let (a, b, c, d) = v4.ip.octets();
+            let (a, b, c, d) = v4.ip().octets();
             buf.push(a);
             buf.push(b);
             buf.push(c);
@@ -1561,7 +1572,7 @@ fn serialize_socket_addr(addr: &SocketAddr) -> List<Byte> {
             }
 
             // sin6_port (big-endian)
-            let port = v6.port;
+            let port = v6.port();
             buf.push(((port >> 8) & 0xFF) as Byte);
             buf.push((port & 0xFF) as Byte);
 
@@ -1571,7 +1582,7 @@ fn serialize_socket_addr(addr: &SocketAddr) -> List<Byte> {
             // sin6_addr (16 bytes). Ipv6Addr stores the address as
             // eight 16-bit segments; serialize each segment as two
             // big-endian bytes. Field is `ip`, not `addr`.
-            let (s0, s1, s2, s3, s4, s5, s6, s7) = v6.ip.segments();
+            let (s0, s1, s2, s3, s4, s5, s6, s7) = v6.ip().segments();
             buf.push(((s0 >> 8) & 0xFF) as Byte); buf.push((s0 & 0xFF) as Byte);
             buf.push(((s1 >> 8) & 0xFF) as Byte); buf.push((s1 & 0xFF) as Byte);
             buf.push(((s2 >> 8) & 0xFF) as Byte); buf.push((s2 & 0xFF) as Byte);
@@ -1582,7 +1593,7 @@ fn serialize_socket_addr(addr: &SocketAddr) -> List<Byte> {
             buf.push(((s7 >> 8) & 0xFF) as Byte); buf.push((s7 & 0xFF) as Byte);
 
             // sin6_scope_id (4 bytes)
-            let scope = v6.scope_id;
+            let scope = v6.scope_id();
             buf.push((scope & 0xFF) as Byte);
             buf.push(((scope >> 8) & 0xFF) as Byte);
             buf.push(((scope >> 16) & 0xFF) as Byte);
