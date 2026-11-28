@@ -16618,8 +16618,8 @@ impl VbcCodegen {
         let info = self.declare_constant(name, expr, ty, None)?;
         self.ctx.register_function(name.to_string(), info.clone());
         let owner = self.ctx.current_source_module.as_deref().unwrap_or(&self.config.module_name);
-        if !owner.is_empty() && owner != "main" && !name.contains('.') && !name.contains("::") {
-            let qualified = format!("{owner}.{name}");
+        if !owner.is_empty() && owner != "main" {
+            let qualified = crate::module::qualify_module_name(owner, name);
             let alternate = qualified.replace('.', "::");
             for key in [qualified, alternate] {
                 if self.ctx.lookup_function(&key).is_none() {
@@ -16717,8 +16717,9 @@ impl VbcCodegen {
 
         self.module_constant_bindings.insert(key, info.clone());
         let owner = self.ctx.current_source_module.as_deref().unwrap_or(&self.config.module_name);
-        let name = if !owner.is_empty() && owner != "main" && !symbol.contains('.') && !symbol.contains("::") {
-            format!("{owner}.{symbol}")
+        let qualify = local.is_none() || (!symbol.contains('.') && !symbol.contains("::"));
+        let name = if !owner.is_empty() && owner != "main" && qualify {
+            crate::module::qualify_module_name(owner, symbol)
         } else { symbol.to_owned() };
         if let Some(value) = Self::inline_scalar(&info).transpose()? {
             let name_id = StringId(self.intern_string(&name));

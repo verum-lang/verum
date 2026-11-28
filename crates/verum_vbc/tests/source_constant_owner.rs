@@ -95,6 +95,51 @@ fn repeated_method_declaration_keeps_constant_body_identity() {
 }
 
 #[test]
+fn mounted_associated_constants_keep_their_value_and_declared_type() {
+    use verum_ast::FileId;
+    use verum_fast_parser::FastParser;
+
+    let parser = FastParser::new();
+    let provider = |owner: &str, value, id| parser.parse_module_str(&format!(r#"
+        module {owner};
+        public type Descriptor is (Int);
+        implement Descriptor {{
+            public const DEFAULT: Descriptor = Descriptor({value});
+            public fn number(&self) -> Int {{ self.0 }}
+        }}
+    "#), FileId::new(id)).unwrap();
+    let left = provider("left", 37, 1);
+    let right = provider("right", 11, 2);
+    let user = parser.parse_module_str(r#"
+        module consumer;
+        mount left.Descriptor as Device;
+        mount right.Descriptor as Channel;
+        type Reading is { DEFAULT: Int };
+        fn read(value: Device) -> Int { value.0 }
+        fn check() -> Int {
+            let device = Device.DEFAULT;
+            let sample = Reading { DEFAULT: 5 };
+            read(device) + Device.DEFAULT.number() + Channel.DEFAULT.number() + sample.DEFAULT
+        }
+    "#, FileId::new(3)).unwrap();
+    for modules in [[&left, &right, &user], [&right, &user, &left]] {
+        let mut codegen = VbcCodegen::new();
+        codegen.collect_unit_declarations(&modules).unwrap();
+        codegen.resolve_pending_imports();
+        codegen.compile_unit_items(&modules, ItemFailurePolicy::Strict).unwrap();
+        let module = codegen.finalize_module().unwrap();
+        let bytes = verum_vbc::serialize::serialize_module(&module).unwrap();
+        let wire = verum_vbc::deserialize::deserialize_module_validated(&bytes).unwrap();
+        for image in [module, wire] {
+            let entry = image.find_function_by_name("consumer.check").unwrap();
+            let mut vm = Interpreter::try_new_validated(Arc::new(image)).unwrap();
+            vm.run_global_ctors().unwrap();
+            assert_eq!(vm.execute_function(entry).unwrap().try_as_i64(), Some(90));
+        }
+    }
+}
+
+#[test]
 fn archived_socket_classifier_uses_its_target_errno_table() {
     use verum_ast::{ItemKind, cfg::TargetConfig};
     let source = include_str!("../../../core/io/protocols.vr");

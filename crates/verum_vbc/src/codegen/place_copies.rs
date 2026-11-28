@@ -282,10 +282,8 @@ impl VbcCodegen {
                 // The receiver's semantic declaration owns this projection.
                 // A layout offset or a same-named field on another type cannot
                 // supply its ownership or replace missing archive evidence.
-                match nested(receiver, None) {
-                    Some(owner) => self.projected_field_declaration(owner, &field.name),
-                    None => self.constant_expression_result(expr),
-                }
+                self.constant_expression_result(expr).or_else(||
+                    self.projected_field_declaration(nested(receiver, None)?, &field.name))
             }
             ExprKind::TupleIndex { expr: receiver, index } => {
                 let mut owner = nested(receiver, None)?;

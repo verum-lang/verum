@@ -23825,6 +23825,20 @@ impl VbcCodegen {
             return self.compile_type_property(&ty, &property);
         }
 
+        if let Some(path) = Self::constant_path(base)
+            && let Some(declaration) = self.scoped_constant_binding(
+                &format!("{path}.{field}"), self.current_count_module_scope(), None, true)
+        {
+            let dst = self.ctx.alloc_temp();
+            let instruction = match Self::inline_scalar(&declaration).transpose()? {
+                Some(value) => self.load_scalar_constant(dst, value),
+                None => Instruction::Call { dst, func_id: declaration.id.0,
+                    args: crate::instruction::RegRange::new(Reg(0), 0) },
+            };
+            self.ctx.emit(instruction);
+            return Ok(Some(dst));
+        }
+
         // **Type-name + variant-ctor fast path**.  `try_flatten_module_path`
         // intentionally returns `None` when the single-segment base is a
         // known type name (line 15188's `!is_type_name` gate) — pure module
@@ -44530,7 +44544,12 @@ impl VbcCodegen {
             let (owner, leaf) = key.rsplit_once('.').unwrap_or(("", key));
             self.declared_count_bindings.get(&(
                 verum_common::Text::from(owner), verum_common::Text::from(leaf),
-            )).cloned().or_else(|| self.ctx.functions.get(key).cloned()
+            )).or_else(|| {
+                // Inherent constants belong to a source module. Their local
+                // declaration name includes the type, just as it does on export.
+                let (module, nominal) = owner.rsplit_once('.').unwrap_or(("", owner));
+                self.declared_count_bindings.get(&(module.into(), format!("{nominal}.{leaf}").into()))
+            }).cloned().or_else(|| self.ctx.functions.get(key).cloned()
                 .filter(|info| !self.constant_initializers.contains_key(&info.id)))
         };
         if name.contains('.') {
@@ -44544,6 +44563,10 @@ impl VbcCodegen {
                 scope.unwrap_or_else(|| self.lexical_type_scope()), head,
             ) {
                 return exact(&format!("{}.{tail}", binding?));
+            }
+            if let Some(scope) = scope
+                && let Some(info) = self.declared_count_bindings.get(&(scope.into(), name.into())) {
+                return Some(info.clone());
             }
             return self.ctx.functions.get(name).cloned()
                 .filter(|info| !self.constant_initializers.contains_key(&info.id));
