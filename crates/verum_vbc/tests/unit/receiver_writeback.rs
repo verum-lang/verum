@@ -197,11 +197,12 @@ fn swap_validates_both_places_before_any_write() {
     let mut cell = Value::from_i64(37);
     let cell_ptr: *mut Value = &mut cell;
     let readonly = Value::from_thin_ref(ThinRef::new(cell_ptr.cast(), 1, 0, Capabilities::READ_ONLY));
+    let writeonly = Value::from_thin_ref(ThinRef::new(cell_ptr.cast(), 1, 0, Capabilities(Capabilities::WRITE)));
     let stale_generation = machine.registers.get_generation(1);
     machine.registers.bump_generation(1);
     let stale = encode_cbgr_ref_mut(1, stale_generation);
     let outside = encode_cbgr_ref_mut(machine.registers.top() as u32, generation);
-    for invalid in [readonly, encode_cbgr_ref(1, machine.registers.get_generation(1)), stale,
+    for invalid in [readonly, writeonly, encode_cbgr_ref(1, machine.registers.get_generation(1)), stale,
                     outside, Value::nil(), Value::from_i64(5), Value::from_thin_ref(ThinRef::null())] {
         for (a, b) in [(valid, invalid), (invalid, valid)] {
             assert!(swap_referents(&mut machine, a, b).is_err());

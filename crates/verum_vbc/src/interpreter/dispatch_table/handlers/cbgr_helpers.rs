@@ -425,7 +425,7 @@ fn require_reference_capability(state: &InterpreterState, reference: Value, requ
     } else {
         return Ok(());
     };
-    if actual.has(required) {
+    if actual.0 & required == required {
         Ok(())
     } else {
         Err(InterpreterError::CapabilityDenied {
