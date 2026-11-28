@@ -5614,15 +5614,7 @@ impl VbcCodegen {
             }
             let dest = self.ctx.alloc_temp();
 
-            let mut operands = Vec::<u8>::with_capacity(6);
-            Self::write_reg(&mut operands, dest.0);
-            Self::write_reg(&mut operands, list_reg.0);
-            Self::write_reg(&mut operands, index_reg.0);
-            crate::encoding::ElementProjectionAccess::for_borrow(op == UnOp::RefMut).encode(&mut operands);
-            self.ctx.emit(Instruction::CbgrExtended {
-                sub_op: crate::instruction::CbgrSubOpcode::RefListElement as u8,
-                operands,
-            });
+            self.emit_list_element_reference(dest, list_reg, index_reg, op == UnOp::RefMut);
 
             self.ctx.free_temp(list_reg);
             self.ctx.free_temp(index_reg);
@@ -19175,12 +19167,25 @@ impl VbcCodegen {
         iter: &Expr,
         body: &Block,
     ) -> CodegenResult<Option<Reg>> {
+        use crate::types::{Mutability, TypeRef};
+
         // An owned iterable controls the transfer of each element through its
         // declared cursor. Reading its slots directly would leave two owners.
-        let converted = self.source_expression_declaration(iter, None, 0).and_then(|ty|
-            self.proven_implementation_member(&ty,
-                verum_common::well_known_types::WellKnownProtocol::IntoIterator, "IntoIter"));
-        if converted.is_some() || self.is_custom_iterator_type(iter) {
+        let iterable = self.source_expression_declaration(iter, None, 0);
+        let converted = iterable.as_ref().and_then(|ty| self.proven_implementation_member(
+            ty, verum_common::well_known_types::WellKnownProtocol::IntoIterator, "IntoIter",
+        ));
+        let borrowed_list_item = iterable.as_ref().and_then(|ty| {
+            let TypeRef::Reference { inner, mutability, .. } = self.expand_declared_alias(ty.clone())? else {
+                return None;
+            };
+            let TypeRef::Instantiated { base, args } = *inner else { return None; };
+            let [item] = args.as_slice() else { return None; };
+            (self.declared_runtime_carrier(base) == Some(WKT::List)).then(|| TypeRef::Reference {
+                inner: Box::new(item.clone()), mutability, tier: CbgrTier::Tier0,
+            })
+        });
+        if converted.is_some() || (borrowed_list_item.is_none() && self.is_custom_iterator_type(iter)) {
             return self.compile_for_custom_iterator(label, pattern, iter, body, converted);
         }
 
@@ -19189,35 +19194,36 @@ impl VbcCodegen {
             .compile_expr(iter)?
             .or_internal("for iter has no value")?;
 
-        // Create iterator from iterable
-        let iterator_reg = self.ctx.alloc_temp();
-        self.ctx.emit(Instruction::IterNew {
-            dst: iterator_reg,
-            iterable: iter_reg,
-        });
-
-        let loop_ctx = self.ctx.enter_loop(label.map(|s| s.to_string()), None);
-
-        // Allocate element and has_next registers
+        let cursor = self.ctx.alloc_temp();
         let elem_reg = self.ctx.alloc_temp();
-        let has_next_reg = self.ctx.alloc_temp();
-
-        // Loop start
+        let limit = if borrowed_list_item.is_some() {
+            let limit = self.ctx.alloc_temp();
+            self.ctx.emit(Instruction::LoadSmallI { dst: cursor, value: 0 });
+            self.ctx.emit(Instruction::Len { dst: limit, arr: iter_reg, type_hint: WKT::List.len_type_hint() });
+            Some(limit)
+        } else {
+            self.ctx.emit(Instruction::IterNew { dst: cursor, iterable: iter_reg });
+            None
+        };
+        let loop_ctx = self.ctx.enter_loop(label.map(|s| s.to_string()), None);
         self.ctx.define_label(&loop_ctx.continue_label);
-
-        // Get next element
-        self.ctx.emit(Instruction::IterNext {
-            dst: elem_reg,
-            has_next: has_next_reg,
-            iter: iterator_reg,
-        });
-
-        // Exit if no more elements
-        self.ctx
-            .emit_forward_jump(&loop_ctx.break_label, |offset| Instruction::JmpNot {
-                cond: has_next_reg,
-                offset,
+        if let Some(limit) = limit {
+            // A borrowed List yields a reference to its element slot. Loading
+            // the value would give a tuple pattern ownership of its fields.
+            self.ctx.emit_forward_jump(&loop_ctx.break_label, |offset| Instruction::JmpCmp {
+                op: CompareOp::Ge, a: cursor, b: limit, offset,
             });
+            let writable = matches!(borrowed_list_item, Some(TypeRef::Reference { mutability: Mutability::Mutable, .. }));
+            self.emit_list_element_reference(elem_reg, iter_reg, cursor, writable);
+            self.ctx.emit(Instruction::UnaryI { op: UnaryIntOp::Inc, dst: cursor, src: cursor });
+        } else {
+            let has_next = self.ctx.alloc_temp();
+            self.ctx.emit(Instruction::IterNext { dst: elem_reg, has_next, iter: cursor });
+            self.ctx.emit_forward_jump(&loop_ctx.break_label, |offset| Instruction::JmpNot {
+                cond: has_next, offset,
+            });
+            self.ctx.free_temp(has_next);
+        }
 
         // Resolve the item before declaring locals that may shadow the iterable itself.
         let (container_for_element, borrow) = match &iter.kind {
@@ -19229,7 +19235,6 @@ impl VbcCodegen {
             },
             _ => (None, None),
         };
-        let iterable = self.source_expression_declaration(iter, None, 0);
         let native_item = || if matches!(
             pattern.kind,
             verum_ast::PatternKind::Ident { .. } | verum_ast::PatternKind::Tuple(_)
@@ -19253,9 +19258,9 @@ impl VbcCodegen {
         };
         // For a declared iterator or adapter, the actual return value owns Item.
         // The container fallback applies only when the native iterator has no declaration.
-        let declared_item = iterable.as_ref().and_then(|ty| {
+        let declared_item = borrowed_list_item.or_else(|| iterable.as_ref().and_then(|ty| {
             self.declared_protocol_member(ty, verum_common::well_known_types::WellKnownProtocol::IntoIterator, "Item")
-        });
+        }));
         let (item_type, borrow) = match declared_item {
             Some(item) => (Some(item), None),
             None => (native_item(), borrow),
@@ -19392,9 +19397,9 @@ impl VbcCodegen {
         self.ctx.exit_loop();
 
         self.ctx.free_temp(iter_reg);
-        self.ctx.free_temp(iterator_reg);
+        self.ctx.free_temp(cursor);
         self.ctx.free_temp(elem_reg);
-        self.ctx.free_temp(has_next_reg);
+        if let Some(limit) = limit { self.ctx.free_temp(limit); }
 
         // For always returns unit
         let result = self.ctx.alloc_temp();
@@ -21292,6 +21297,18 @@ impl VbcCodegen {
         operands.extend_from_slice(&allowed.0.to_le_bytes());
         self.ctx.emit(Instruction::CbgrExtended {
             sub_op: crate::instruction::CbgrSubOpcode::CapAttenuate as u8,
+            operands,
+        });
+    }
+
+    fn emit_list_element_reference(&mut self, dst: Reg, list: Reg, index: Reg, writable: bool) {
+        let mut operands = List::with_capacity(7).into();
+        Self::write_reg(&mut operands, dst.0);
+        Self::write_reg(&mut operands, list.0);
+        Self::write_reg(&mut operands, index.0);
+        crate::encoding::ElementProjectionAccess::for_borrow(writable).encode(&mut operands);
+        self.ctx.emit(Instruction::CbgrExtended {
+            sub_op: crate::instruction::CbgrSubOpcode::RefListElement as u8,
             operands,
         });
     }

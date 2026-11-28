@@ -6672,9 +6672,16 @@ fn lower_instruction_impl<'ctx>(
         // CBGR: DerefMut, DropRef
         // ====================================================================
         Instruction::DerefMut { ref_reg, value } => {
-            // DerefMut: dereference a mutable reference and store a value
             let ref_val = ctx.get_register(ref_reg.0)?;
             let store_val = ctx.get_register(value.0)?;
+            let replace_text = ctx.is_text_register(value.0) || ctx.is_string_register(value.0);
+            // A projected field can carry its current value alongside its
+            // original address. Replacing a slot must reach that address.
+            let ref_val = if replace_text || ref_val.is_struct_value() {
+                ref_val
+            } else {
+                field_address_or_value(ctx, ref_reg.0, ref_val, "field_store_address")?
+            };
 
             // Extract pointer from the reference (first field of struct)
             let ptr = if ref_val.is_struct_value() {
@@ -6697,7 +6704,7 @@ fn lower_instruction_impl<'ctx>(
             // A mutable reference preserves the destination descriptor's
             // identity. The storage receipt transfers only the source bytes;
             // each descriptor still retires through its issuing allocator.
-            if ctx.is_text_register(value.0) || ctx.is_string_register(value.0) {
+            if replace_text {
                 let word = ctx.types().i64_type();
                 let source = as_i64(ctx, store_val, "replacement_text_source")?;
                 let destination = ctx.builder().build_ptr_to_int(ptr, word, "replacement_text_destination").or_llvm_err()?;
@@ -37260,6 +37267,10 @@ fn lower_len<'ctx>(
         _ => {}
     }
     let i64_type = ctx.types().i64_type();
+    // A local or projected reference can carry the address of the container
+    // slot. Read its selected value before inspecting any storage layout.
+    let container = ctx.get_register(arr.0)?;
+    let container = ctx.reference_value_view(arr.0, container)?;
 
     // Priority 0: a register EXPLICITLY marked as a slice (e.g. the result
     // of `text_as_bytes`) stores {ptr@24, len@32}, so its length is at
@@ -37270,7 +37281,7 @@ fn lower_len<'ctx>(
         // #48: probe FIRST — a canonical 24-byte cell keeps len @8;
         // the legacy Pack keeps it @32 (past a cell's allocation).
         // REAL branch + phi, one set_register.
-        let arr_ptr = as_ptr(ctx, ctx.get_register(arr.0)?, "slice_ptr")?;
+        let arr_ptr = as_ptr(ctx, container, "slice_ptr")?;
         // ONE authority: {cell | stamped-pack | unstamped-list}. The
         // list arm matters because as_slice is an identity cast — a
         // slice-marked register frequently holds a LIST whose len
@@ -37305,7 +37316,7 @@ fn lower_len<'ctx>(
             // (0 = zeroed AOT list, 512/527 = interp-style ids, or
             // legacy noise) takes the pre-existing list read (@24), so
             // real lists behave exactly as before this fix.
-            let arr_ptr = as_ptr(ctx, ctx.get_register(arr.0)?, "list_ptr")?;
+            let arr_ptr = as_ptr(ctx, container, "list_ptr")?;
             let i8_type = ctx.types().i8_type();
             let i32_type = ctx.types().context().i32_type();
             // #48: the canonical slice cell {data@0, len@8, elem@16}
@@ -37441,7 +37452,7 @@ fn lower_len<'ctx>(
             // Map: NewG layout, fields {len, cap, entries, tombstones}
             // (declared map.vr order — MAP-LAYOUT-REALIGN-1).
             // len at offset OBJECT_HEADER_SIZE + 0*8 = 24 (MAP_LEN_OFFSET).
-            let arr_ptr = as_ptr(ctx, ctx.get_register(arr.0)?, "map_ptr")?;
+            let arr_ptr = as_ptr(ctx, container, "map_ptr")?;
             let i8_type = ctx.types().i8_type();
             // SAFETY: GEP into the Map object (NewG layout) to read the length at MAP_LEN_OFFSET (24)
             let len_slot = unsafe {
@@ -37465,7 +37476,7 @@ fn lower_len<'ctx>(
             // Set: wraps Map as field 0. Set layout is {inner: Map<T,()>}.
             // Two-level dereference: read inner Map ptr from Set field 0 (offset 24),
             // then read len from Map's field 1 (offset 32).
-            let set_ptr = as_ptr(ctx, ctx.get_register(arr.0)?, "set_ptr")?;
+            let set_ptr = as_ptr(ctx, container, "set_ptr")?;
             let i8_type = ctx.types().i8_type();
             // Step 1: read inner Map pointer from Set field 0
             // SAFETY: GEP past the 24-byte object header to read the Set's inner Map pointer at field 0 (offset 24)
@@ -37509,7 +37520,7 @@ fn lower_len<'ctx>(
         }
         4 => {
             // Deque: NewG layout, fields {data, head, len, cap} → len at offset 24 + 2*8 = 40.
-            let arr_ptr = as_ptr(ctx, ctx.get_register(arr.0)?, "deque_ptr")?;
+            let arr_ptr = as_ptr(ctx, container, "deque_ptr")?;
             let i8_type = ctx.types().i8_type();
             // SAFETY: GEP into the Deque object (NewG layout) to read the length at DEQUE_LEN_OFFSET (40)
             let len_slot = unsafe {
@@ -37531,7 +37542,7 @@ fn lower_len<'ctx>(
         }
         5 => {
             // Text: flat layout {ptr, len, cap}, len at TEXT_LEN_OFFSET (8)
-            let text_ptr = as_ptr(ctx, ctx.get_register(arr.0)?, "text_ptr")?;
+            let text_ptr = as_ptr(ctx, container, "text_ptr")?;
             let i8_type = ctx.types().i8_type();
             // SAFETY: GEP into the Text object (flat layout {ptr, len, cap}) to read the length at TEXT_LEN_OFFSET (8)
             let len_slot = unsafe {
@@ -37553,7 +37564,7 @@ fn lower_len<'ctx>(
         }
         6 => {
             // Channel: flat C runtime layout, len at offset 0
-            let arr_ptr = as_ptr(ctx, ctx.get_register(arr.0)?, "chan_ptr")?;
+            let arr_ptr = as_ptr(ctx, container, "chan_ptr")?;
             let len = ctx
                 .builder()
                 .build_load(i64_type, arr_ptr, "chan_len")
@@ -37563,7 +37574,7 @@ fn lower_len<'ctx>(
         }
         7 => {
             // Slice: packed {ptr, len} via NewG, len at offset 32 (24 header + 8)
-            let arr_ptr = as_ptr(ctx, ctx.get_register(arr.0)?, "slice_ptr")?;
+            let arr_ptr = as_ptr(ctx, container, "slice_ptr")?;
             let i8_type = ctx.types().i8_type();
             // SAFETY: GEP into the Slice object (NewG layout) to read the length at offset 32 (24-byte header + field 1)
             let len_slot = unsafe {
@@ -37613,7 +37624,7 @@ fn lower_len<'ctx>(
         // `VERUM_NO_LEN_CELLVIEW` restores the hand-rolled select, so
         // both polarities are reachable from one binary.
         if std::env::var_os("VERUM_NO_LEN_CELLVIEW").is_none() {
-            let arr_ptr = as_ptr(ctx, ctx.get_register(arr.0)?, "listv_ptr")?;
+            let arr_ptr = as_ptr(ctx, container, "listv_ptr")?;
             let (_lv_data, lv_len, _lv_elem) = emit_container_view(ctx, arr_ptr, "lenlv")?;
             ctx.set_register(dst.0, lv_len.into());
             return Ok(());
@@ -37627,7 +37638,7 @@ fn lower_len<'ctx>(
         // zeroed header, so select the Pack len slot at runtime when
         // the stamp matches; every other tid keeps the pre-existing
         // list read.
-        let arr_ptr = as_ptr(ctx, ctx.get_register(arr.0)?, "arr_ptr")?;
+        let arr_ptr = as_ptr(ctx, container, "arr_ptr")?;
         let i8_type = ctx.types().i8_type();
         let i32_type = ctx.types().context().i32_type();
         let tid = ctx
@@ -37701,7 +37712,7 @@ fn lower_len<'ctx>(
     // Slice len (#48): ONE authority — {cell | stamped-pack |
     // unstamped-list} classification; see emit_container_view.
     if ctx.is_slice_register(arr.0) {
-        let arr_ptr = as_ptr(ctx, ctx.get_register(arr.0)?, "slice_ptr")?;
+        let arr_ptr = as_ptr(ctx, container, "slice_ptr")?;
         let (_sl_data, sl_len, _sl_elem) = emit_container_view(ctx, arr_ptr, "slen")?;
         ctx.set_register(dst.0, sl_len.into());
         return Ok(());
@@ -37709,7 +37720,7 @@ fn lower_len<'ctx>(
 
     // Channel len: read from header offset 0 (Channel still uses flat layout).
     if ctx.is_chan_register(arr.0) {
-        let arr_ptr = as_ptr(ctx, ctx.get_register(arr.0)?, "arr_ptr")?;
+        let arr_ptr = as_ptr(ctx, container, "arr_ptr")?;
         let len = ctx
             .builder()
             .build_load(i64_type, arr_ptr, "arr_len")
@@ -37725,7 +37736,7 @@ fn lower_len<'ctx>(
     // MAP_LEN_OFFSET now coincides with SET_LEN_OFFSET and this fallback is
     // correct for both receivers.
     if ctx.is_map_register(arr.0) || ctx.is_set_register(arr.0) {
-        let arr_ptr = as_ptr(ctx, ctx.get_register(arr.0)?, "arr_ptr")?;
+        let arr_ptr = as_ptr(ctx, container, "arr_ptr")?;
         let i8_type = ctx.types().i8_type();
         // SAFETY: GEP into the Map/Set object (NewG layout) to read the length at MAP_LEN_OFFSET (24)
         let len_slot = unsafe {
@@ -37748,7 +37759,7 @@ fn lower_len<'ctx>(
 
     // Deque len: fields {data, head, len, cap} → len at offset 24 + 2*8 = 40 (DEQUE_LEN_OFFSET).
     if ctx.is_deque_register(arr.0) {
-        let arr_ptr = as_ptr(ctx, ctx.get_register(arr.0)?, "deque_ptr")?;
+        let arr_ptr = as_ptr(ctx, container, "deque_ptr")?;
         let i8_type = ctx.types().i8_type();
         // SAFETY: GEP into the Deque object (NewG layout) to read the length at DEQUE_LEN_OFFSET (40)
         let len_slot = unsafe {
@@ -37772,7 +37783,7 @@ fn lower_len<'ctx>(
     // Text len: read from TEXT_LEN_OFFSET (offset 8 in flat {ptr, len, cap} layout).
     // Checked AFTER list/map/set/deque so collection registers aren't misrouted.
     if ctx.is_text_register(arr.0) || ctx.is_string_register(arr.0) {
-        let text_ptr = as_ptr(ctx, ctx.get_register(arr.0)?, "text_ptr")?;
+        let text_ptr = as_ptr(ctx, container, "text_ptr")?;
         let i8_type = ctx.types().i8_type();
         // SAFETY: GEP into the Text object (flat layout {ptr, len, cap}) to read the length at TEXT_LEN_OFFSET (8)
         let len_slot = unsafe {
@@ -37795,8 +37806,7 @@ fn lower_len<'ctx>(
 
     // Fallback: use verum_generic_len which handles both List (offset 32) and
     // Map/Set/Deque/Text (flat layout) at runtime via heuristic.
-    let arr_val = ctx.get_register(arr.0)?;
-    let arr_i64 = as_i64(ctx, arr_val, "len_obj")?;
+    let arr_i64 = as_i64(ctx, container, "len_obj")?;
     let module = ctx.get_module();
     let fn_type = i64_type.fn_type(&[i64_type.into()], false);
         let generic_len_fn = super::error::get_or_declare_function(module, "verum_generic_len", fn_type);

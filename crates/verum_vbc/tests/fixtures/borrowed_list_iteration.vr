@@ -80,7 +80,42 @@ fn record_positions() -> Bool {
     prior == 73 && changed == 73 && values[0].number == 42 && values[1].number == 151
 }
 
+type RowEntries is List<(Int, List<Int>)>;
+type Rows is { entries: RowEntries };
+fn find_row(rows: &Rows, needle: Int) -> Maybe<&List<Int>> {
+    for (key, values) in &rows.entries {
+        if *key == needle { return Maybe.Some(values); }
+    }
+    Maybe.None
+}
+fn revise_rows(rows: &mut Rows) {
+    for (key, values) in &mut rows.entries {
+        if *key == 1 { continue; }
+        *key = 4;
+        values[0] = 63;
+    }
+}
+fn read_rows(rows: Rows) -> Int {
+    rows.entries[0].1[0] + rows.entries[1].1[0] + rows.entries[1].0
+}
+fn borrowed_for_loops() -> Int {
+    let first: List<Int> = [6];
+    let second: List<Int> = [8];
+    let mut rows = Rows { entries: [(1, first), (2, second)] };
+    match find_row(&rows, 1) {
+        Maybe.Some(values) => if values[0] != 6 { return -1; },
+        Maybe.None => return -2,
+    }
+    match find_row(&rows, 3) { Maybe.Some(_) => return -3, Maybe.None => {} }
+    revise_rows(&mut rows);
+    let mut scalars: List<Int> = [2, 5];
+    for element in &mut scalars { *element = *element + 1; }
+    if scalars[0] != 3 || scalars[1] != 6 { return -4; }
+    read_rows(rows)
+}
+
 fn main() -> Int {
+    if borrowed_for_loops() != 73 { return 55; }
     let shared = shared_positions();
     if shared != 73 { return 10 + shared; }
     let positions = independent_positions();

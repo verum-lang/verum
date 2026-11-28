@@ -67,3 +67,28 @@ fn both_legacy_element_encodings_execute_from_vbc_2_69() {
         assert_eq!(vm.execute_function(entry).unwrap().try_as_i64(), Some(73));
     }
 }
+
+#[test]
+fn a_shared_loop_cannot_write_its_element_or_tuple_field_through_an_unchecked_caller() {
+    let module = fixture::module_with_client(r#"
+        fn write(slot: &mut Int) { *slot = 17; }
+        fn scalar() {
+            let values: List<Int> = [42];
+            for slot in &values { write(slot); }
+        }
+        fn pair() {
+            let values: List<(Int, Int)> = [(42, 9)];
+            for (left, _) in &values { write(left); }
+        }
+    "#);
+    let wire = verum_vbc::serialize::serialize_module(&module).unwrap();
+    let restored = verum_vbc::deserialize::deserialize_module_validated(&wire).unwrap();
+    for image in [module, restored] {
+        for name in ["scalar", "pair"] {
+            let entry = image.find_function_by_name(&format!("core.collections.list.{name}")).unwrap();
+            let mut vm = verum_vbc::interpreter::Interpreter::try_new_validated(image.clone().into()).unwrap();
+            let error = vm.execute_function(entry).unwrap_err();
+            assert!(matches!(error, verum_vbc::interpreter::InterpreterError::CapabilityDenied { .. }), "{error:?}");
+        }
+    }
+}

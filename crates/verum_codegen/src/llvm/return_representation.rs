@@ -487,7 +487,7 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
         for (pc, op) in instructions.iter().enumerate() {
             match op {
                 I::Jmp { offset } | I::JmpIf { offset, .. } | I::JmpNot { offset, .. }
-                | I::TryBegin { handler_offset: offset } => {
+                | I::JmpCmp { offset, .. } | I::TryBegin { handler_offset: offset } => {
                     let target = pc as i64 + i64::from(*offset);
                     if target < 0 || target as usize >= instructions.len() {
                         return BodyFacts::unknown(instructions.len());
@@ -787,6 +787,11 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                     edges.push((target as usize, state.clone()));
                     next = false;
                 }
+                I::JmpCmp { a, b, offset, .. } => {
+                    use_input(*a, 8, &state);
+                    use_input(*b, 8, &state);
+                    edges.push(((pc as i64 + i64::from(*offset)) as usize, state.clone()));
+                }
                 I::JmpIf { cond, offset } | I::JmpNot { cond, offset } => {
                     let target = pc as i64 + i64::from(*offset);
                     use_input(*cond, 8, &state);
@@ -850,7 +855,6 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                 }
                 I::RethrowException => next = false,
                 I::TailCall { .. }
-                | I::JmpCmp { .. }
                 | I::Switch { .. }
                 | I::CtxProvide { .. } => return BodyFacts::unknown(instructions.len()),
                 I::Call { dst, .. } | I::CallG { dst, .. } | I::CallM { dst, .. } => {
@@ -885,7 +889,16 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                                         ArgumentView::FieldCellOrRegister(_)
                                     ) && state.cells.get(&reg) == Some(&false));
                                 use_input(Reg(reg), if identity { demand } else { 8 }, &state);
-                                if demand == 1 && value.permits_object_view() {
+                                // A shared spill may be opened for a read-only
+                                // argument when the selected body only reads it.
+                                let reads_shared = !callee.may_write
+                                    && matches!(value, R::SharedLocalSlot | R::ReadOnlyFieldSlot)
+                                    && self.module.get_function(FunctionId(*id))
+                                        .and_then(|f| f.semantic_params.as_ref()?.get(index)?.as_ref())
+                                        .is_some_and(|param| matches!(param, TypeRef::Reference {
+                                            mutability: verum_vbc::types::Mutability::Immutable, ..
+                                        }));
+                                if demand == 1 && (value.permits_object_view() || reads_shared) {
                                     call_inputs.entry(pc).or_default().insert(index, matches!(value, R::IndexedSlot));
                                     value = R::Unknown; // contents are not another proved cell
                                 }
@@ -914,6 +927,16 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                 I::GetF { dst, obj, .. } => {
                     use_input(*obj, 1, &state);
                     write = Some((*dst, R::Unknown));
+                }
+                I::Len { dst, arr, .. } => {
+                    // A packed extent can be constant. Only a native length read
+                    // with a value input needs the selected container object.
+                    if sites.get(&pc).is_some_and(|markers|
+                        markers.contains(&ReferenceSiteKind::ValueInput(arr.0)))
+                    {
+                        use_input(*arr, 1, &state);
+                    }
+                    write = Some((*dst, R::Value));
                 }
                 I::GetE { dst, arr, idx } => {
                     // The selected indexed access reads only the container and index.
