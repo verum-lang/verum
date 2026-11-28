@@ -9856,6 +9856,11 @@ impl TypeChecker {
                         if self.reference_mode(&scheme.ty, val.span)?.is_some() {
                             let shared = self.is_shared_reference_head(&scheme.ty, val.span)?;
                             self.bind_reference_result(val, &name.name, shared)?
+                        } else if !is_mutable_binding
+                            && let Some(element) = self.writable_raw_element(&scheme.ty, val.span)
+                        {
+                            self.raw_store_destinations(val, &element)
+                                .map(|targets| crate::context::ReferenceOrigin::RawAddress(targets.into_boxed_slice()))
                         } else {
                             self.bind_aggregate_result(val, &scheme.ty)?
                         }
