@@ -42,6 +42,7 @@
 )
 module core.async.executor;
 mount core.collections.list.List;
+mount core.base.memory.replace;
 mount core.intrinsics.atomic.{atomic_fence, MemoryOrder};
 mount super.poll.*;
 mount super.waker.*;
@@ -340,8 +341,11 @@ implement<F: Future> TaskState<F> {
         match self.future.poll(cx) {
             Poll.Pending => Poll.Pending,
             Poll.Ready(value) => {
-                self.result = Maybe.Some(value);
-                Poll.Ready(())
+                let ready: Maybe<F.Output> = Maybe.Some(value);
+                match replace(&mut self.result, ready) {
+                    Maybe.None => Poll.Ready(()),
+                    Maybe.Some(_) => panic("task driver completed twice"),
+                }
             },
         }
     }

@@ -57,21 +57,31 @@ implement<T> TaskOutcome<T> {
 
     fn request_cancel(&mut self) -> Bool {
         if !(*self is TaskOutcome.Pending) { return false; }
-        *self = TaskOutcome.CancelRequested;
-        true
+        let next: TaskOutcome<T> = TaskOutcome.CancelRequested;
+        match replace(self, next) {
+            TaskOutcome.Pending => true,
+            _ => unreachable(),
+        }
     }
 
     // Refusing a racing producer transfers the losing output back to it.
     fn publish(&mut self, value: T) -> Result<(), T> {
         if *self is TaskOutcome.CancelRequested { return Result.Err(value); }
         if !(*self is TaskOutcome.Pending) { panic("task completed twice"); }
-        *self = TaskOutcome.Ready(Result.Ok(value));
-        Result.Ok(())
+        let next: TaskOutcome<T> = TaskOutcome.Ready(Result.Ok(value));
+        match replace(self, next) {
+            TaskOutcome.Pending => Result.Ok(()),
+            _ => unreachable(),
+        }
     }
 
     fn fail(&mut self, error: JoinError) {
         if self.is_finished() { panic("task completed twice"); }
-        *self = TaskOutcome.Ready(Result.Err(error));
+        let next: TaskOutcome<T> = TaskOutcome.Ready(Result.Err(error));
+        match replace(self, next) {
+            TaskOutcome.Pending | TaskOutcome.CancelRequested => {},
+            _ => unreachable(),
+        }
     }
 
     fn take_result(&mut self) -> Poll<Result<T, JoinError>> {
@@ -81,7 +91,8 @@ implement<T> TaskOutcome<T> {
             TaskOutcome.Ready(Result.Err(JoinError.Cancelled)) => true,
             TaskOutcome.Ready(_) => false,
         };
-        match replace(self, TaskOutcome.Consumed(cancelled)) {
+        let next: TaskOutcome<T> = TaskOutcome.Consumed(cancelled);
+        match replace(self, next) {
             TaskOutcome.Ready(value) => Poll.Ready(value),
             _ => unreachable(),
         }

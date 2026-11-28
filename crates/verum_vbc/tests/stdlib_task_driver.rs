@@ -139,6 +139,7 @@ const PROBE: &str = r#"
 
 #[test]
 fn task_driver_preserves_the_pending_future_and_its_concrete_output() {
+    let memory = declarations(include_str!("../../../core/base/memory.vr"), &["replace"], &[]);
     let maybe = declarations(include_str!("../../../core/base/maybe.vr"), &["Maybe"], &[]);
     let poll = declarations(include_str!("../../../core/async/poll.vr"), &["Poll"], &[]);
     let clock = declarations(
@@ -176,12 +177,12 @@ fn task_driver_preserves_the_pending_future_and_its_concrete_output() {
         &["TaskState", "block_on"],
         &["TaskState"],
     );
-    executor.items.extend(Parser::new("mount core.intrinsics.runtime.time.{monotonic_nanos, sleep_ns};")
+    executor.items.extend(Parser::new("mount core.base.memory.replace; mount core.intrinsics.runtime.time.{monotonic_nanos, sleep_ns};")
         .parse_module().unwrap().items);
     executor
         .items
         .extend(Parser::new(PROBE).parse_module().unwrap().items);
-    let sources = [&maybe, &poll, &waker, &future, &clock, &executor];
+    let sources = [&memory, &maybe, &poll, &waker, &future, &clock, &executor];
     for module in compiled_and_archived(&sources) {
         let drive = module
             .find_function_by_name("core.async.executor.drive")
