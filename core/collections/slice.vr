@@ -1190,6 +1190,23 @@ implement<T> [T] {
 // Slice Iterators
 // =============================================================================
 
+/// Advance one end of a bounded collection iterator toward the other.
+/// Both indices are within 0..=len. Compare against the remaining distance
+/// before arithmetic so even Int.MAX cannot move an index outside the range.
+@inline(always)
+public(in core.collections) fn advance_index(limit: Int, cursor: &mut Int, steps: Int) -> Result<(), Int> {
+    if steps <= 0 { return Result.Ok(()); }
+    let current = *cursor;
+    let forward = current <= limit;
+    let remaining = if forward { limit - current } else { current - limit };
+    if steps > remaining {
+        *cursor = limit;
+        return Result.Err(remaining);
+    }
+    *cursor = if forward { current + steps } else { current - steps };
+    Result.Ok(())
+}
+
 /// Iterator over slice elements.
 ///
 
@@ -1231,15 +1248,12 @@ implement<T> Iterator for SliceIter<T> {
         (remaining, Maybe.Some(remaining))
     }
 
-    public fn count(&mut self) -> Int {
-        let remaining = self.back - self.front;
-        self.front = self.back;
-        remaining
+    public fn count(self) -> Int {
+        self.back - self.front
     }
 
-    public fn nth(&mut self, n: Int) -> Maybe<&T> {
-        self.front = self.front + n;
-        self.next()
+    public fn advance_by(&mut self, n: Int) -> Result<(), Int> {
+        advance_index(self.back, &mut self.front, n)
     }
 }
 
@@ -1252,13 +1266,8 @@ implement<T> DoubleEndedIterator for SliceIter<T> {
         Maybe.Some(&self.slice[self.back])
     }
 
-    public fn nth_back(&mut self, n: Int) -> Maybe<&T> {
-        if n >= self.back - self.front {
-            self.front = self.back;
-            return Maybe.None;
-        }
-        self.back = self.back - n;
-        self.next_back()
+    public fn advance_back_by(&mut self, n: Int) -> Result<(), Int> {
+        advance_index(self.front, &mut self.back, n)
     }
 }
 
@@ -1334,6 +1343,10 @@ implement<T> SliceIterMut<T> {
 implement<T> Iterator for SliceIterMut<T> {
     type Item = &mut T;
 
+    public fn advance_by(&mut self, n: Int) -> Result<(), Int> {
+        advance_index(self.back, &mut self.front, n)
+    }
+
     public fn next(&mut self) -> Maybe<&mut T> {
         if self.front >= self.back {
             return Maybe.None;
@@ -1350,6 +1363,10 @@ implement<T> Iterator for SliceIterMut<T> {
 }
 
 implement<T> DoubleEndedIterator for SliceIterMut<T> {
+    public fn advance_back_by(&mut self, n: Int) -> Result<(), Int> {
+        advance_index(self.front, &mut self.back, n)
+    }
+
     public fn next_back(&mut self) -> Maybe<&mut T> {
         if self.front >= self.back {
             return Maybe.None;

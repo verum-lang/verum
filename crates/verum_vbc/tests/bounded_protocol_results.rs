@@ -1326,6 +1326,63 @@ fn a_for_loop_acquires_and_retires_the_declared_cursor() {
 }
 
 #[test]
+fn bounded_slice_advancement_preserves_the_shared_iterator_contract() {
+    use verum_ast::decl::ImplKind;
+    let mut iterator = actual_iterator(&["count", "advance_by", "nth"]);
+    let mut reverse = parse(include_str!("../../../core/base/iterator.vr"));
+    reverse.items.retain_mut(|item| {
+        let ItemKind::Type(decl) = &mut item.kind else { return false };
+        if decl.name.as_str() != "DoubleEndedIterator" { return false }
+        let TypeDeclBody::Protocol(body) = &mut decl.body else { panic!("DoubleEndedIterator protocol") };
+        body.items.retain(|item| matches!(&item.kind, ProtocolItemKind::Function { decl, .. }
+            if matches!(decl.name.as_str(), "advance_back_by" | "next_back" | "nth_back")));
+        true
+    });
+    iterator.items.extend(reverse.items);
+    let imports = "mount core.base.maybe.Maybe; mount core.base.result.Result;";
+    iterator.items.extend(parse(imports).items);
+    let mut slice = parse(include_str!("../../../core/collections/slice.vr"));
+    slice.items.retain(|item| match &item.kind {
+        ItemKind::Module(decl) => decl.items.is_none(),
+        ItemKind::Type(decl) => decl.name.as_str() == "SliceIter",
+        ItemKind::Function(decl) => decl.name.as_str() == "advance_index",
+        ItemKind::Impl(decl) => match &decl.kind {
+            ImplKind::Protocol { protocol, for_type, .. } => matches!(protocol.to_string().as_str(), "Iterator" | "DoubleEndedIterator")
+                && verum_ast::pretty::format_type(for_type) == "SliceIter<T>",
+            ImplKind::Inherent(ty) => verum_ast::pretty::format_type(ty) == "SliceIter<T>",
+        },
+        _ => false,
+    });
+    slice.items.extend(parse(imports).items);
+    slice.items.extend(parse("mount core.base.iterator.{Iterator, DoubleEndedIterator};").items);
+    let maybe = parse("module core.base.maybe; public type Maybe<T> is None | Some(T);");
+    let result = parse("module core.base.result; public type Result<T,E> is Ok(T) | Err(E);");
+    let consumer = parse(r#"
+        module consumer;
+        mount core.base.iterator.{Iterator, DoubleEndedIterator};
+        mount core.base.maybe.Maybe;
+        mount core.base.result.Result;
+        mount core.collections.slice.SliceIter;
+        fn scan(bytes:&[Byte])->Int {
+            let mut rows = SliceIter.new(bytes);
+            if let Maybe.Some(_) = rows.nth(-1) { return -1; }
+            if let Maybe.Some(_) = rows.nth_back(-1) { return -2; }
+            let a = match rows.nth(1) { Maybe.Some(x) => *x as Int, _ => return -3 };
+            let b = match rows.nth_back(0) { Maybe.Some(x) => *x as Int, _ => return -4 };
+            let advanced = match rows.advance_back_by(9223372036854775807) {
+                Result.Err(n) => n, _ => return -5
+            };
+            let mut beyond = SliceIter.new(bytes);
+            if let Maybe.Some(_) = beyond.nth(9223372036854775807) { return -6; }
+            if beyond.count() != 0 { return -7; }
+            a * 100 + b * 10 + advanced + rows.count()
+        }
+        fn run()->Int { let bytes = [3_u8, 5_u8, 7_u8, 9_u8]; scan(&bytes) }
+    "#);
+    execute_source_and_wire(compile(&[&maybe, &result, &iterator, &slice, &consumer]).unwrap(), 591);
+}
+
+#[test]
 fn the_slice_iterator_keeps_its_borrow_through_enumerate() {
     use verum_ast::decl::{ImplItemKind, ImplKind};
 

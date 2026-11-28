@@ -1637,6 +1637,10 @@ public type DequeIter<T> is {
 implement<T> Iterator for DequeIter<T> {
     type Item = &T;
 
+    fn advance_by(&mut self, n: Int) -> Result<(), Int> {
+        advance_index(self.back, &mut self.idx, n)
+    }
+
     fn next(&mut self) -> Maybe<&T> {
         if self.idx >= self.back {
             Maybe.None
@@ -1663,25 +1667,8 @@ implement<T> DoubleEndedIterator for DequeIter<T> {
         }
     }
 
-    fn nth_back(&mut self, n: Int) -> Maybe<&T> {
-        if n >= self.back - self.idx {
-            self.idx = self.back;
-            Maybe.None
-        } else {
-            self.back = self.back - n;
-            self.next_back()
-        }
-    }
-
     fn advance_back_by(&mut self, n: Int) -> Result<(), Int> {
-        let remaining = self.back - self.idx;
-        if n <= remaining {
-            self.back = self.back - n;
-            Result.Ok(())
-        } else {
-            self.back = self.idx;
-            Result.Err(n - remaining)
-        }
+        advance_index(self.idx, &mut self.back, n)
     }
 }
 
@@ -1701,13 +1688,17 @@ public type DequeIterMut<T> is {
 implement<T> Iterator for DequeIterMut<T> {
     type Item = &mut T;
 
+    fn advance_by(&mut self, n: Int) -> Result<(), Int> {
+        advance_index(self.back, &mut self.idx, n)
+    }
+
     fn next(&mut self) -> Maybe<&mut T> {
         if self.idx >= self.back {
             Maybe.None
         } else {
-            let item = self.deque.get_mut(self.idx);
-            self.idx = self.idx + 1;
-            item
+            let idx = self.idx;
+            self.idx = idx + 1;
+            self.deque.get_mut(idx)
         }
     }
 
@@ -1727,25 +1718,8 @@ implement<T> DoubleEndedIterator for DequeIterMut<T> {
         }
     }
 
-    fn nth_back(&mut self, n: Int) -> Maybe<&mut T> {
-        if n >= self.back - self.idx {
-            self.idx = self.back;
-            Maybe.None
-        } else {
-            self.back = self.back - n;
-            self.next_back()
-        }
-    }
-
     fn advance_back_by(&mut self, n: Int) -> Result<(), Int> {
-        let remaining = self.back - self.idx;
-        if n <= remaining {
-            self.back = self.back - n;
-            Result.Ok(())
-        } else {
-            self.back = self.idx;
-            Result.Err(n - remaining)
-        }
+        advance_index(self.idx, &mut self.back, n)
     }
 }
 

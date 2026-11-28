@@ -209,7 +209,21 @@ fn test_deque_iter_advance_back_by_too_many() {
     d.push_back(2);
     let mut iter = d.iter();
     let result = iter.advance_back_by(5);
-    assert(result.is_err());
+    assert_eq(result, Result.Err(2));
+    assert(iter.next_back().is_none());
+}
+
+@test
+fn test_deque_signed_offsets_preserve_both_ends() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(5);
+    d.push_back(8);
+    let mut iter = d.iter_mut();
+    assert(iter.nth_back(-1).is_none());
+    assert_eq(iter.advance_back_by(-1), Result.Ok(()));
+    assert_eq(*iter.nth(0).unwrap(), 5);
+    assert_eq(iter.advance_by(Int.MAX), Result.Err(1));
+    assert(iter.next_back().is_none());
 }
 
 // =============================================================================

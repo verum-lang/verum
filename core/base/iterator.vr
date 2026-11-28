@@ -171,10 +171,10 @@ public type Iterator is protocol {
         if n < 0 {
             return Maybe.None;
         }
-        for _ in range(0, n) {
-            self.next()?;
+        match self.advance_by(n) {
+            Result.Ok(_) => self.next(),
+            Result.Err(_) => Maybe.None,
         }
-        self.next()
     }
 
     /// Advance by n elements && return the iterator.
@@ -1051,7 +1051,7 @@ public type DoubleEndedIterator is protocol extends Iterator {
     /// Get the next element from the back.
     fn next_back(&mut self) -> Maybe<Self.Item>;
 
-    /// Advance iterator from back by n elements.
+    /// Advance from the back. On exhaustion, return the number actually advanced.
     fn advance_back_by(&mut self, n: Int) -> Result<(), Int> {
         for i in range(0, n) {
             if self.next_back().is_none() {
@@ -1061,10 +1061,13 @@ public type DoubleEndedIterator is protocol extends Iterator {
         Result.Ok(())
     }
 
-    /// Get the nth element from the back (0-indexed).
+    /// Get the nth element from the back (0-indexed). A negative index leaves the cursor in place.
     fn nth_back(&mut self, n: Int) -> Maybe<Self.Item> {
-        self.advance_back_by(n).ok()?;
-        self.next_back()
+        if n < 0 { return Maybe.None; }
+        match self.advance_back_by(n) {
+            Result.Ok(_) => self.next_back(),
+            Result.Err(_) => Maybe.None,
+        }
     }
 
     /// Fold from the back.
