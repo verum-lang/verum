@@ -148,3 +148,30 @@ fn a_branch_cannot_skip_the_bound_receivers_declaration() {
     let error = verum_vbc::validate::validate_module(&module).unwrap_err();
     assert!(format!("{error:?}").contains("JumpOutOfBounds"));
 }
+
+#[test]
+fn a_bound_instance_method_uses_its_protocol_slot_with_a_same_named_sibling() {
+    use verum_vbc::types::{TypeId, TypeRef};
+    let ast = Parser::new(r#"
+        module app;
+        type First is protocol { fn marker(&self) -> Int; };
+        type Second is protocol { fn marker(&self) -> Int; };
+        implement First for Text { fn marker(&self) -> Int { 11 } }
+        implement Second for Text { fn marker(&self) -> Int { 73 } }
+        fn choose<T:Second>(input:&T) -> Int { input.marker() }
+        fn probe() -> Int { choose(&"payload") }
+    "#).parse_module().unwrap();
+    let module = VbcCodegen::new().compile_module(&ast).unwrap();
+    let wire = verum_vbc::serialize::serialize_module(&module).unwrap();
+    let mut module = verum_vbc::deserialize::deserialize_module(&wire).unwrap();
+    module.resolve_protocol_dispatch();
+    let selector = module.strings.lookup("dyn:app.Second.marker").unwrap();
+    let (target, witnesses) = module.try_bound_method(&TypeRef::Concrete(TypeId::TEXT), selector, 0)
+        .unwrap().expect("declared Second.marker implementation");
+    assert!(witnesses.is_empty());
+    assert!(module.try_bound_method(&TypeRef::Concrete(TypeId::BOOL), selector, 0).is_err());
+    let probe = module.find_function_by_name("app.probe").unwrap();
+    let mut vm = Interpreter::new(Arc::new(module));
+    assert_ne!(probe, target);
+    assert_eq!(vm.execute_function(probe).unwrap().as_i64(), 73);
+}

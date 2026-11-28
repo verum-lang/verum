@@ -1531,9 +1531,9 @@ impl VbcModule {
         Ok(crate::mono::canonical_type_args(function, witness).map(|args| (id, args)))
     }
 
-    /// A competing family requires a unique declared receiver. Native lowering
-    /// must propagate a refusal before considering ordinary protocol dispatch.
-    pub fn try_bound_method(
+    /// Resolve a qualified protocol selector against the caller's actual type
+    /// argument. Interpreted and specialized calls use the same declaration slot.
+    pub(crate) fn bound_protocol_method(
         &self, receiver: &TypeRef, method: StringId, argc: u8,
     ) -> Result<Option<(FunctionId, Vec<TypeRef>)>, String> {
         if let Some(selected) = self.bound_static_protocol_method(receiver, method, argc)? {
@@ -1554,6 +1554,17 @@ impl VbcModule {
             let (protocol, _) = self.protocol_member_owner(head, Some(qualifier), member, false)?.ok_or_else(missing)?;
             let target = self.implementation_member(head, Some(receiver), protocol, member, None)?.ok_or_else(missing)?;
             return self.bind_instance_receiver(target, receiver, argc).map(Some).ok_or_else(missing);
+        }
+        Ok(None)
+    }
+
+    /// A competing family requires a unique declared receiver. Native lowering
+    /// must propagate a refusal before considering ordinary protocol dispatch.
+    pub fn try_bound_method(
+        &self, receiver: &TypeRef, method: StringId, argc: u8,
+    ) -> Result<Option<(FunctionId, Vec<TypeRef>)>, String> {
+        if let Some(selected) = self.bound_protocol_method(receiver, method, argc)? {
+            return Ok(Some(selected));
         }
         let specialized = self.receiver_specialization(receiver, method, argc)?;
         let target = specialized.or_else(|| {
