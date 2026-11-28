@@ -17258,7 +17258,7 @@ impl TypeChecker {
             match kind {
                 Some(kind) if !kind.meta().allows_mutation => {}
                 Some(crate::core_metadata::ReceiverKind::SelfValue) => {
-                    if let Some(target) = borrowed_deref_target.as_ref() {
+                    if let Some((target, _)) = borrowed_deref_target.as_ref() {
                         // The selected Deref lends its target; owning the wrapper
                         // does not transfer ownership of the borrowed target.
                         tc.check_resource_copy(target, receiver.span)?;
@@ -17267,6 +17267,19 @@ impl TypeChecker {
                         tc.check_owned_place_read(receiver, &value, Some(source))?;
                     } else {
                         tc.check_write_access(receiver, None, method.span)?;
+                    }
+                }
+                Some(crate::core_metadata::ReceiverKind::SelfMut) => {
+                    if let Some((_, hops)) = borrowed_deref_target {
+                        // A mutable borrow requires DerefMut at every selected
+                        // step, including carriers elided on shared reads.
+                        tc.record_deref_adjustment(receiver.span, hops);
+                        tc.check_write_access(receiver, receiver_type.as_ref(), method.span)?;
+                        if let Some(projection) = tc.deref_adjustments.get_mut(&receiver.span) {
+                            projection.mutable = true;
+                        }
+                    } else {
+                        tc.check_write_access(receiver, receiver_type.as_ref(), method.span)?;
                     }
                 }
                 _ => tc.check_write_access(receiver, receiver_type.as_ref(), method.span)?,
@@ -17367,7 +17380,7 @@ impl TypeChecker {
         args: &[Expr],
         span: Span,
         precomputed_recv_ty: &mut Option<Type>,
-        borrowed_deref_target: &mut Option<Type>,
+        borrowed_deref_target: &mut Option<(Type, usize)>,
         skip_static_lookup: bool,
     ) -> Result<InferResult> {
         self.clear_pending_arity();
@@ -17878,7 +17891,7 @@ impl TypeChecker {
             let found = self.type_or_dyn_has_method(&current, &method_name_t);
             // The remaining resolver receives `current` even when this early
             // lookup has no method. Preserve every actual borrowed step.
-            *borrowed_deref_target = target_value;
+            *borrowed_deref_target = target_value.map(|target| (target, hops));
             (current, if found { materialised } else { 0 })
         };
         self.record_deref_adjustment(receiver.span, materialised_hops);

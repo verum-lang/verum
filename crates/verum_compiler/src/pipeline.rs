@@ -638,7 +638,7 @@ pub struct CompilationPipeline<'s> {
     /// `resolved_call_targets`, so codegen sees an explicit `.deref()`
     /// instead of being expected to re-derive the coercion.
     pub(crate) deref_adjustments:
-        std::collections::HashMap<verum_ast::span::Span, usize>,
+        std::collections::HashMap<verum_ast::span::Span, verum_types::infer::DerefAdjustment>,
 
     /// MOUNT-BINDING-CARRY-1 (T0148): bare name -> the qualified key a
     /// `mount` resolved to, taken from the type checker after type

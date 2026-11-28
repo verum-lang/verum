@@ -307,9 +307,9 @@ impl TypeChecker {
     ) -> Result<()> {
         if let Some(ty) = method_receiver {
             self.check_write_through_reference(ty, true, place.span)?;
-            if let Some(&hops) = self.deref_adjustments.get(&place.span) {
+            if let Some(adjustment) = self.deref_adjustments.get(&place.span).copied() {
                 let mut receiver = self.unwrap_reference_type(ty).clone();
-                for _ in 0..hops {
+                for _ in 0..adjustment.hops {
                     let Some(target) = self.find_deref_target_type(&receiver, place.span)? else { break };
                     self.require_mutable_deref(&receiver, place.span)?;
                     receiver = self.unwrap_reference_type(&target).clone();

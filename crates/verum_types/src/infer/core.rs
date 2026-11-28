@@ -197,17 +197,15 @@ impl TypeChecker {
         if hops == 0 {
             return;
         }
-        let slot = self.deref_adjustments.entry(span).or_insert(hops);
-        if *slot < hops {
-            *slot = hops;
-        }
+        let adjustment = self.deref_adjustments.entry(span).or_default();
+        adjustment.hops = adjustment.hops.max(hops);
     }
 
     /// Take ownership of the deref side-table, leaving an empty one.
     /// Sibling of `take_resolved_call_targets`.
     pub fn take_deref_adjustments(
         &mut self,
-    ) -> std::collections::HashMap<verum_ast::span::Span, usize> {
+    ) -> std::collections::HashMap<verum_ast::span::Span, super::DerefAdjustment> {
         std::mem::take(&mut self.deref_adjustments)
     }
 
@@ -319,7 +317,7 @@ pub struct CommitTables<'a> {
         verum_ast::span::Span,
         verum_ast::expr::ResolvedCallTarget,
     >,
-    pub derefs: &'a std::collections::HashMap<verum_ast::span::Span, usize>,
+    pub derefs: &'a std::collections::HashMap<verum_ast::span::Span, super::DerefAdjustment>,
     inferred: Option<(&'a crate::TypeRegistry, Option<&'a Unifier>)>,
 }
 
@@ -329,7 +327,7 @@ pub fn apply_resolved_call_targets(
         verum_ast::span::Span,
         verum_ast::expr::ResolvedCallTarget,
     >,
-    derefs: &std::collections::HashMap<verum_ast::span::Span, usize>,
+    derefs: &std::collections::HashMap<verum_ast::span::Span, super::DerefAdjustment>,
 ) {
     if calls.is_empty() && derefs.is_empty() {
         return;
@@ -345,7 +343,7 @@ impl crate::TypeRegistry {
         &self,
         module: &mut verum_ast::Module,
         calls: &std::collections::HashMap<Span, verum_ast::expr::ResolvedCallTarget>,
-        derefs: &std::collections::HashMap<Span, usize>,
+        derefs: &std::collections::HashMap<Span, super::DerefAdjustment>,
     ) {
         let table = CommitTables { calls, derefs, inferred: Some((self, None)) };
         commit_resolved_in_items(&mut module.items, &table);
@@ -520,6 +518,13 @@ fn commit_resolved_in_expr(
 ) {
     use verum_ast::expr::ExprKind;
     use verum_common::Maybe;
+    // Synthetic calls reuse the receiver's span. Their children have already
+    // been committed, including any explicit dereferences in the source.
+    if matches!(&expr.kind, ExprKind::MethodCall { method, receiver, .. }
+        if receiver.span == expr.span && matches!(method.name.as_str(), "deref" | "deref_mut"))
+    {
+        return;
+    }
     // Stamp THIS node first if the table has a resolution for its span.
     if matches!(expr.kind, ExprKind::MethodCall { .. } | ExprKind::Path(_))
         && let Some(target) = table.calls.get(&expr.span)
@@ -536,22 +541,15 @@ fn commit_resolved_in_expr(
     if place {
         return;
     }
-    let Some(&hops) = table.derefs.get(&expr.span) else { return };
-    if hops == 0 {
-        return;
-    }
-    if matches!(&expr.kind, ExprKind::MethodCall { method, .. }
-        if method.name.as_str() == "deref")
-    {
-        return;
-    }
+    let Some(adjustment) = table.derefs.get(&expr.span) else { return };
+    let method = if adjustment.mutable { "deref_mut" } else { "deref" };
     let span = expr.span;
-    for _ in 0..hops {
+    for _ in 0..adjustment.hops {
         let inner = expr.clone();
         *expr = verum_ast::Expr::new(
             ExprKind::MethodCall {
                 receiver: verum_common::Heap::new(inner),
-                method: verum_ast::ty::Ident::new("deref", span),
+                method: verum_ast::ty::Ident::new(method, span),
                 type_args: Default::default(),
                 args: Default::default(),
             },

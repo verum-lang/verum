@@ -60,6 +60,13 @@ use crate::const_eval::ConstEvaluator;
 use crate::context::{TypeContext, TypeScheme};
 use crate::context_check::{ContextChecker, ContextRequirement, ContextSet};
 
+/// Protocol projections selected for one source receiver.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DerefAdjustment {
+    hops: usize,
+    mutable: bool,
+}
+
 /// A verification goal deferred from the type-checker to the
 /// pipeline's DependentVerifier. Accumulated during inference
 /// when a check can't be resolved locally.
@@ -1467,7 +1474,7 @@ pub struct TypeChecker {
     /// Codegen used to answer it independently for field access and not
     /// at all for indexing.
     pub(crate) deref_adjustments:
-        std::collections::HashMap<verum_ast::span::Span, usize>,
+        std::collections::HashMap<verum_ast::span::Span, DerefAdjustment>,
 }
 
 /// Generator context tracking for yield expressions
