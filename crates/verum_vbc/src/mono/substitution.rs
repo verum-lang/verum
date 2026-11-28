@@ -114,6 +114,8 @@ pub enum SubstitutionError {
     TypeNodeLimit,
     /// A closed sequence violates its independent payload extent or depth limit.
     ConstSequenceLimit,
+    /// A fixed array extent was specialized with a negative or non-integer value.
+    InvalidArrayExtent,
 }
 
 impl std::fmt::Display for SubstitutionError {
@@ -133,6 +135,7 @@ impl std::fmt::Display for SubstitutionError {
                 "substituted VBC type exceeds component limit {MAX_TYPE_REF_NODES}"
             ),
 
+            Self::InvalidArrayExtent => write!(f, "fixed array count must be a nonnegative integer"),
             Self::ConstSequenceLimit => write!(
                 f,
                 "substituted VBC constant sequence exceeds its structural limit"
@@ -276,6 +279,17 @@ fn map_free_parameters(
         | TypeRef::Generic(_)
         | TypeRef::ConstValue(_) | TypeRef::ConstSequence(_)
         | TypeRef::RecordFieldProjection { .. } => ty.clone(),
+        TypeRef::Instantiated { base, args } if *base == crate::types::TypeId::ARRAY && args.len() == 2 => {
+            let element = map_free_parameters(&args[0], depth, map)?;
+            match map_free_parameters(&args[1], depth, map)? {
+                TypeRef::ConstValue(value) => TypeRef::Array {
+                    element: Box::new(element),
+                    length: u64::try_from(value).map_err(|_| SubstitutionError::InvalidArrayExtent)?,
+                },
+                extent @ TypeRef::Generic(_) => TypeRef::Instantiated { base: *base, args: vec![element, extent] },
+                _ => return Err(SubstitutionError::InvalidArrayExtent),
+            }
+        }
         TypeRef::Instantiated { base, args } => TypeRef::Instantiated {
             base: *base,
             args: args

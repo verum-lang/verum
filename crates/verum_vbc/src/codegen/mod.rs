@@ -17885,9 +17885,32 @@ impl VbcCodegen {
                 // carries an element declaration but no fixed-length claim.
                 return Ok(TypeRef::Instantiated { base: TypeId::ARRAY, args: vec![element] });
             }
-            let length = size.as_ref()
-                .and_then(|count| array_count(count))
-                .unwrap_or(0);
+            let count = size.as_deref().ok_or_else(|| CodegenError::with_span(
+                CodegenErrorKind::InvalidSourceSignature("fixed array has no declared count".into()), ty.span,
+            ))?;
+            if let Some(binder) = values.extent_binder(count, generic_param_map)? {
+                return Ok(TypeRef::Instantiated {
+                    base: TypeId::ARRAY,
+                    args: vec![element, TypeRef::Generic(binder)],
+                });
+            }
+            // An expression mentioning a local value must not capture a
+            // same-named module constant during layout elaboration.
+            let uses_binder = Self::constant_integer_dependencies(count).iter().any(|name| {
+                generic_param_map.contains_key(name.as_str().split('.').next().unwrap_or(name))
+            });
+            let length = if uses_binder {
+                match values.argument(count, generic_param_map)? {
+                    TypeRef::ConstValue(value) => u64::try_from(value).ok(),
+                    _ => None,
+                }
+            } else {
+                array_count(count)
+            }.ok_or_else(|| CodegenError::with_span(
+                CodegenErrorKind::InvalidSourceSignature(
+                    "array count must be an exact nonnegative integer or a declared integer value parameter".into(),
+                ), count.span,
+            ))?;
             return Ok(TypeRef::Array { element: Box::new(element), length });
         }
         // Tuple: recurse elements with the SAME map. `type Item =

@@ -158,7 +158,8 @@ impl SourceTypeSubstitution {
             substitution.bind(TypeParamId(index), witness.ty.clone());
             if let SourceBinding::Value { witness, value_type } = binding {
                 let value = match &witness.ty { TypeRef::ConstValue(value) if witness.semantic && *value_type == TypeRef::Concrete(TypeId::INT) => Some(*value), _ => None };
-                values.0.insert(index, value);
+                let integer_domain = witness.semantic && matches!(value_type, TypeRef::Concrete(id) if id.is_integer());
+                values.0.insert(index, ScopedValue { integer_domain, value });
             }
         }
         substitution
@@ -170,10 +171,29 @@ impl SourceTypeSubstitution {
 /// Scalar facts are indexed by the elaborator's private binder IDs, not names.
 /// Lifting this environment alongside type binders prevents capture under rank2.
 #[derive(Default)]
-pub(super) struct SourceValueScope(BTreeMap<u16, Option<i64>>);
+pub(super) struct SourceValueScope(BTreeMap<u16, ScopedValue>);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ScopedValue {
+    integer_domain: bool,
+    value: Option<i64>,
+}
 
 impl SourceValueScope {
     pub(super) fn contains(&self, id: u16) -> bool { self.0.contains_key(&id) }
+
+    /// Only a declaration-owned integer value binder may occur in a fixed extent.
+    pub(super) fn extent_binder(
+        &self, expr: &Expr, scope: &HashMap<String, u16>,
+    ) -> CodegenResult<Option<TypeParamId>> {
+        let ExprKind::Path(path) = &super::VbcCodegen::normalized_place(expr).kind else { return Ok(None); };
+        let Some(id) = path.as_ident().and_then(|name| scope.get(name.name.as_str())) else { return Ok(None); };
+        if self.0.get(id).is_some_and(|value| value.integer_domain) {
+            Ok(Some(TypeParamId(*id)))
+        } else {
+            Err(invalid("fixed array count requires an integer value parameter", expr.span))
+        }
+    }
 
     pub(super) fn lifted(&self, count: u16, span: verum_ast::Span) -> CodegenResult<Self> {
         self.0
@@ -212,8 +232,7 @@ impl SourceValueScope {
             Ok(path
                 .as_ident()
                 .and_then(|name| scope.get(name.name.as_str()))
-                .and_then(|id| self.0.get(id))
-                .copied().flatten())
+                .and_then(|id| self.0.get(id)?.value))
         })
         .map(TypeRef::ConstValue)
     }
@@ -327,15 +346,16 @@ mod scalar_scope_tests {
 
     #[test]
     fn scalar_scope_lifting_checks_the_entire_index_space() {
-        let scope = SourceValueScope(BTreeMap::from([(u16::MAX, Some(73))]));
+        let integer = ScopedValue { integer_domain: true, value: Some(73) };
+        let scope = SourceValueScope(BTreeMap::from([(u16::MAX, integer)]));
         assert_eq!(
             scope.lifted(0, verum_ast::Span::default()).unwrap().0,
             scope.0
         );
         assert!(scope.lifted(1, verum_ast::Span::default()).is_err());
-        let scope = SourceValueScope(BTreeMap::from([(0, Some(73))]));
+        let scope = SourceValueScope(BTreeMap::from([(0, integer)]));
         let lifted = scope.lifted(1, verum_ast::Span::default()).unwrap();
-        assert_eq!(lifted.0.get(&1), Some(&Some(73)));
+        assert_eq!(lifted.0.get(&1), Some(&integer));
         assert_eq!(
             lifted.0.get(&0),
             None,

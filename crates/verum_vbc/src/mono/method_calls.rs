@@ -29,8 +29,15 @@ fn match_types(pattern: &TypeRef, actual: &TypeRef, bindings: &mut TypeSubstitut
             }
             _ => false,
         },
-        (T::Instantiated { base, args }, T::Array { element, .. }) if *base == TypeId::ARRAY => {
-            matches!(args.as_slice(), [expected] if match_types(expected, element, bindings, concrete_only))
+        (T::Instantiated { base, args }, T::Array { element, length }) if *base == TypeId::ARRAY => {
+            match args.as_slice() {
+                [expected] => match_types(expected, element, bindings, concrete_only),
+                [expected, extent] => i64::try_from(*length).is_ok_and(|count| {
+                    match_types(expected, element, bindings, concrete_only)
+                        && match_types(extent, &T::ConstValue(count), bindings, concrete_only)
+                }),
+                _ => false,
+            }
         }
         (T::Instantiated { base: p, args: pa }, T::Instantiated { base: a, args: aa }) => {
             p == a && pa.len() == aa.len() && pa.iter().zip(aa).all(|(p, a)| match_types(p, a, bindings, concrete_only))

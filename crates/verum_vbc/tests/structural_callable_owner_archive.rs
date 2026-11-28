@@ -532,3 +532,35 @@ fn invalid_forward_strings_are_not_internal_compiler_errors() {
         assert_import_refuses(&invalid, &format!("invalid {role} string"));
     }
 }
+
+#[test]
+fn structural_array_method_retains_its_declared_count_in_source_and_archive() {
+    let source = compile(r#"
+        module api;
+        implement<Element, const Count: Int> [Element; Count] {
+            public fn marker(&self) -> Int { Element.size + 65 }
+        }
+        fn main() -> Int { let values: [Int; 2] = [11, 42]; values.marker() }
+    "#);
+    for module in [source.clone(), wire(&source)] {
+        let marker = method(&module);
+        let params = marker.semantic_params.as_ref().expect("declared source formals");
+        assert!(matches!(&params[0], Some(TypeRef::Reference { inner, .. }) if
+            matches!(inner.as_ref(), TypeRef::Instantiated {base, args}
+                if *base == TypeId::ARRAY && args.as_slice() == [
+                    TypeRef::Generic(TypeParamId(0)), TypeRef::Generic(TypeParamId(1))])),
+            "{params:?}");
+        execute(module);
+    }
+}
+
+#[test]
+fn fixed_extent_does_not_capture_a_shadowed_constant() {
+    for (declaration, count) in [("N", "N"), ("const N: Bool", "N"), ("const N: Int", "N + 1")] {
+        let source = format!("module api; const N:Int=9; fn test<{declaration}>(v:&[Int; {count}])->Int {{ 1 }}");
+        let ast = Parser::new(&source).parse_module().expect("source grammar");
+        let err = VbcCodegen::with_config(CodegenConfig::new("api")).compile_module(&ast)
+            .expect_err("a shadowed constant cannot supply a layout");
+        assert!(matches!(err.kind, CodegenErrorKind::InvalidSourceSignature(_)), "{err}");
+    }
+}

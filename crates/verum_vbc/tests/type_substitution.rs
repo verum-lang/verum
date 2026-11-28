@@ -290,3 +290,30 @@ fn failed_alias_substitution_cannot_authorize_unrestricted_ownership() {
         ResourceDiscipline::Unknown
     );
 }
+
+#[test]
+fn specializing_a_declared_array_extent_retains_exact_storage_identity() {
+    let element = TypeParamId(3);
+    let count = TypeParamId(7);
+    let pattern = TypeRef::Instantiated {
+        base: TypeId::ARRAY,
+        args: vec![TypeRef::Generic(element), TypeRef::Generic(count)],
+    };
+    let mut bindings = TypeSubstitution::empty();
+    bindings.bind(element, TypeRef::Concrete(TypeId::U8));
+    let open = bindings.apply(&pattern).unwrap();
+    assert_eq!(open, TypeRef::Instantiated {
+        base: TypeId::ARRAY,
+        args: vec![TypeRef::Concrete(TypeId::U8), TypeRef::Generic(count)],
+    });
+    for length in [0, 4, i64::MAX] {
+        bindings.bind(count, TypeRef::ConstValue(length));
+        assert_eq!(bindings.apply(&pattern).unwrap(), TypeRef::Array {
+            element: Box::new(TypeRef::Concrete(TypeId::U8)), length: length as u64,
+        });
+    }
+    for invalid in [TypeRef::ConstValue(-1), TypeRef::Concrete(TypeId::INT)] {
+        bindings.bind(count, invalid);
+        assert_eq!(bindings.apply(&pattern), Err(SubstitutionError::InvalidArrayExtent));
+    }
+}
