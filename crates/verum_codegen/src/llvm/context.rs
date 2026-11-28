@@ -619,6 +619,7 @@ pub struct FunctionContext<'a, 'ctx> {
     // Separate storage keeps the existing value ABI while reference consumers
     // receive the original cell. Entry allocas make joins/backedges sound.
     field_reference_slots: verum_common::Map<u16, PointerValue<'ctx>>,
+    pub(super) local_borrow_grants: super::local_borrow_grants::LocalBorrowGrants<'ctx>,
     /// First failure from legacy infallible register writes. Lowering boundaries
     /// must reject the function before any incomplete provenance can be used.
     register_write_error: Option<LlvmLoweringError>,
@@ -966,6 +967,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             generic_type_args: HashMap::new(),
             gete_element_ptrs: std::collections::HashMap::new(),
             field_reference_slots: verum_common::Map::new(),
+            local_borrow_grants: Default::default(),
             register_write_error: None,
             len_list_overrides: std::collections::HashSet::new(),
             current_vbc_instr_idx: 0,
@@ -1091,6 +1093,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             generic_type_args: HashMap::new(),
             gete_element_ptrs: std::collections::HashMap::new(),
             field_reference_slots: verum_common::Map::new(),
+            local_borrow_grants: Default::default(),
             register_write_error: None,
             len_list_overrides: std::collections::HashSet::new(),
             current_vbc_instr_idx: 0,
@@ -3021,6 +3024,14 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
     /// Values are coerced to i64 on store (zext for small ints, ptrtoint for pointers).
     pub fn set_register(&mut self, reg: u16, value: BasicValueEnum<'ctx>) {
         if self.register_write_error.is_some() {
+            return;
+        }
+        if self.local_borrow_grants.tracks(Reg(reg))
+            && let Err(error) = self.local_borrow_grants.set(
+                &self.builder, Reg(reg), self.llvm_context().bool_type().const_zero(),
+            )
+        {
+            self.register_write_error = Some(error);
             return;
         }
         if let Some(slot) = self.field_reference_slots.get(&reg)

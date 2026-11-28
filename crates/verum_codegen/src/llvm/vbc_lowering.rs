@@ -2997,6 +2997,9 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         }
 
         super::instruction::prepare_field_reference_slots(&mut ctx, &vbc_func.instructions)?;
+        ctx.local_borrow_grants = super::local_borrow_grants::LocalBorrowGrants::prepare(
+            &ctx, &vbc_func.instructions,
+        )?;
 
         // Initialize parameters as registers
         // Closure functions use env_ptr convention: fn(env_ptr, user_arg0, arg1, ...)

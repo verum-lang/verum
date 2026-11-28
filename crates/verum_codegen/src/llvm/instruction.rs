@@ -2490,7 +2490,11 @@ pub fn lower_instruction<'ctx>(
     ctx.check_register_writes()?;
     ctx.begin_array_storage_instruction(instr);
     ctx.begin_callable_instruction(instr);
+    let grant = super::local_borrow_grants::before(ctx, instr)?;
     lower_instruction_impl(ctx, instr)?;
+    if let Some((reg, value)) = grant {
+        ctx.local_borrow_grants.set(ctx.builder(), reg, value)?;
+    }
     if matches!(instr, Instruction::CallClosure { .. }) {
         ctx.clear_callable_producers();
     }
@@ -41488,7 +41492,11 @@ fn lower_value_identity<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src
         return Ok(());
     }
     let field_address = ctx.field_reference_address(src.0)?;
+    let readonly = ctx.local_borrow_grants.flag(ctx, src)?;
     ctx.set_register(dst.0, value);
+    if let Some(denied) = readonly {
+        ctx.local_borrow_grants.set(ctx.builder(), dst, denied)?;
+    }
     if let Some(address) = field_address {
         ctx.set_field_reference_address(dst.0, address)?;
     }

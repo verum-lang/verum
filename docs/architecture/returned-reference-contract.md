@@ -876,6 +876,14 @@ that spills a complete word provides a field-read view after the same conversion
 The selected local storage is valid in its issuing frame. Field writes and callee
 argument adaptations require independent evidence.
 
+Within a native frame, a shared borrow or an explicit read-only attenuation
+retains its write restriction through raw address conversion, field projection
+and register moves. Field assignment, whole-place assignment and a retained
+counter check this restriction before writing. Each register definition clears
+its previous restriction. A branch or loop carries the grant of the selected
+value. Registers whose addresses escape and references loaded from aggregate
+storage require independent proof of their grants.
+
 The complete edit plan is computed before changing any sealed body. Field,
 variant and pass-through dereference consumers have use-local native anchors;
 call operands are checked against the recorded actual operand before replacing

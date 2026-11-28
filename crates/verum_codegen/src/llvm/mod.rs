@@ -161,6 +161,7 @@ pub mod permissions;
 // …) routes through these helpers — using `#[cfg(target_os)]` HOST
 // gates miscompiles cross builds.
 mod element_reference;
+mod local_borrow_grants;
 pub mod slice_cell;
 pub mod target_triple;
 
