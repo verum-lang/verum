@@ -943,7 +943,7 @@ public type AsyncRuntime is {
     task_queue: Mutex<List<Heap<TaskEntry>>>,
     /// Ready queue (woken tasks — ready to be polled)
     ready_queue: Mutex<List<Heap<TaskEntry>>>,
-    /// Timer queue (pending timer-driven wakeups, sorted by deadline ascending).
+    /// Timer queue (pending timer-driven wakeups, earliest deadline last).
     ///
 
     /// Replaces the busy-spin `cx.waker().wake_by_ref()` pattern that
@@ -959,7 +959,7 @@ public type AsyncRuntime is {
     /// Pre-fix every timer-bound poll burned ~1000 polls/sec on the
     /// brief_sleep loop; with this queue the loop parks for the
     /// exact remaining duration and wakes once.
-    timer_queue: Mutex<List<TimerEntry>>,
+    timer_queue: Mutex<TimerQueue>,
     /// Next task ID
     next_task_id: AtomicInt,
     /// Pending I/O completion results buffer
@@ -985,18 +985,38 @@ public type AsyncRuntime is {
     worker_pool: Mutex<Maybe<WorkerPool>>,
 };
 
-/// A pending timer registration.
-///
-
-/// `deadline_ns` is the absolute monotonic instant (nanoseconds
-/// since boot) at which `waker` should be invoked. Entries live in
-/// `AsyncRuntime.timer_queue` sorted by deadline ascending.
+/// A pending timer registration in the runtime's deadline-ordered queue.
 public type TimerEntry is {
-    /// Absolute deadline in nanoseconds (monotonic clock).
     deadline_ns: UInt64,
-    /// Waker to invoke when the deadline passes.
     waker: Waker,
 };
+
+// Keep the earliest deadline last. Equal deadlines fire in registration order.
+type TimerQueue is { entries: List<TimerEntry> };
+
+implement TimerQueue {
+    fn new() -> TimerQueue { TimerQueue { entries: List.new() } }
+
+    fn register(&mut self, deadline_ns: UInt64, waker: Waker) {
+        let mut index = self.entries.len();
+        while index > 0 && self.entries[index - 1].deadline_ns <= deadline_ns {
+            index -= 1;
+        }
+        self.entries.insert(index, TimerEntry { deadline_ns, waker });
+    }
+
+    fn next_deadline(&self) -> Maybe<UInt64> {
+        let count = self.entries.len();
+        if count == 0 { Maybe.None } else { Maybe.Some(self.entries[count - 1].deadline_ns) }
+    }
+
+    fn pop_due(&mut self, now_ns: UInt64) -> Maybe<TimerEntry> {
+        match self.next_deadline() {
+            Maybe.Some(deadline) if deadline <= now_ns => self.entries.pop(),
+            _ => Maybe.None,
+        }
+    }
+}
 
 /// Internal task entry for executor scheduling.
 ///
@@ -1046,7 +1066,7 @@ implement AsyncRuntime {
             shutdown: AtomicBool.new(false),
             task_queue: Mutex.new(List.new()),
             ready_queue: Mutex.new(List.new()),
-            timer_queue: Mutex.new(List.new()),
+            timer_queue: Mutex.new(TimerQueue.new()),
             next_task_id: AtomicInt.new(1),
             // `CompletionResult.zeroed()`, not `@zero<...>()` — T1352.
             io_results: [CompletionResult.zeroed(); 64],
@@ -2026,8 +2046,8 @@ implement AsyncRuntime {
 
     /// `deadline_ns` is the absolute monotonic instant at which the
     /// `waker` should fire. The entry is inserted into
-    /// `self.timer_queue` at its sorted position (earliest first)
-    /// so the event-loop head-peek is O(1) and the IOEngine wait
+    /// `self.timer_queue` at its sorted position (earliest last)
+    /// so the event loop can read the next deadline in O(1) and the IOEngine wait
     /// timeout can be computed without sorting.
     ///
 
@@ -2037,22 +2057,7 @@ implement AsyncRuntime {
     /// for the exact remaining duration.
     public fn register_timer(&self, deadline_ns: UInt64, waker: Waker) {
         let mut queue = self.timer_queue.lock().unwrap_or_else(|p| p.into_inner());
-        // Sorted insert by deadline_ns ascending. Linear scan from
-        // the end is O(n) worst-case but the queue is typically
-        // shallow (~1–10 timers) so a heap would be overkill.
-        let mut idx = queue.len();
-        while idx > 0 {
-            match queue.get(idx - 1) {
-                Maybe.Some(prev_entry) if prev_entry.deadline_ns > deadline_ns => {
-                    idx -= 1;
-                }
-                _ => break,
-            }
-        }
-        queue.insert(idx, TimerEntry {
-            deadline_ns: deadline_ns,
-            waker: waker,
-        });
+        (*queue).register(deadline_ns, waker);
     }
 
     /// Peek the earliest pending timer deadline, if any.
@@ -2064,10 +2069,7 @@ implement AsyncRuntime {
     /// to the default `enable_io ? 1ms : brief_sleep_100us`).
     public fn next_timer_deadline(&self) -> Maybe<UInt64> {
         let queue = self.timer_queue.lock().unwrap_or_else(|p| p.into_inner());
-        match queue.get(0) {
-            Maybe.Some(entry) => Maybe.Some(entry.deadline_ns),
-            Maybe.None => Maybe.None,
-        }
+        (*queue).next_deadline()
     }
 
     /// Drain all timer entries whose deadline has passed and wake
@@ -2079,25 +2081,18 @@ implement AsyncRuntime {
     /// are dropped after invocation; clones-on-register-time keep
     /// the original future's waker live.
     fn drain_expired_timers(&self, now_ns: UInt64) {
-        let mut expired: List<TimerEntry> = List.new();
-        {
-            let mut queue = self.timer_queue.lock().unwrap_or_else(|p| p.into_inner());
-            // Pop from the front while the head is expired.
-            while !queue.is_empty() {
-                match queue.get(0) {
-                    Maybe.Some(head_entry) if head_entry.deadline_ns <= now_ns => {
-                        if let Maybe.Some(popped) = queue.remove(0) {
-                            expired.push(popped);
-                        }
-                    }
-                    _ => break,
-                }
-            }
-        }
-        // Wake outside the lock so wakers that re-enter the runtime
-        // (e.g. a waker that schedules another timer) don't deadlock.
-        for fired_entry in expired.into_iter() {
-            fired_entry.waker.wake_by_ref();
+        let count = {
+            let queue = self.timer_queue.lock().unwrap_or_else(|p| p.into_inner());
+            queue.entries.len()
+        };
+        for _ in range(0, count) {
+            let due = {
+                let mut queue = self.timer_queue.lock().unwrap_or_else(|p| p.into_inner());
+                (*queue).pop_due(now_ns)
+            };
+            // A callback can register a new timer or resume another task.
+            // Invoke it after releasing the queue and bound one drain to count.
+            match &due { Maybe.Some(entry) => entry.waker.wake_by_ref(), Maybe.None => return }
         }
     }
 
