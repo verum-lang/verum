@@ -126,7 +126,9 @@ impl VbcCodegen {
             let (owner, name) = identity.rsplit_once('.')?;
             return WKT::from_declaration(name, owner);
         }
-        None
+        // Mounted signatures can precede layout collection. The selected
+        // source header already establishes both the record kind and its owner.
+        self.source_generic_rosters.get(&id)?.record_carrier
     }
 
     pub(super) fn projection_operand_declaration(&self, base: &Expr) -> Option<crate::types::TypeRef> {

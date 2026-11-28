@@ -39,6 +39,7 @@ pub(super) type GenericRoster = Vec<DeclaredGenericParameter>;
 #[derive(Debug, Clone)]
 pub(super) struct SourceGenericRoster {
     identity: verum_common::Text,
+    pub(super) record_carrier: Option<verum_common::well_known_types::WellKnownType>,
     parameters: Option<GenericRoster>,
 }
 
@@ -132,11 +133,7 @@ impl VbcCodegen {
             // carriers. A consumer needing source authority rejects that case.
             return Ok(arguments);
         };
-        let identity = self.source_generic_rosters.get(&nominal)
-            .map(|header| Cow::Borrowed(&header.identity))
-            .or_else(|| self.type_by_id(nominal)
-                .and_then(|descriptor| self.type_declaration_identity(descriptor))
-                .map(Cow::Owned));
+        let identity = self.nominal_declaration_identity(nominal);
         let invalid = |message: String| {
             let mut error =
                 CodegenError::with_span(CodegenErrorKind::InvalidSourceSignature(message), span);
@@ -384,10 +381,23 @@ impl VbcCodegen {
     }
 
     pub(super) fn claim_generic_roster(&mut self, id: TypeId, declaration: &TypeDecl, identity: &str) {
+        let record_carrier = if declaration.body.is_record() {
+            identity.rsplit_once('.').and_then(|(owner, name)|
+                verum_common::well_known_types::WellKnownType::from_declaration(name, owner))
+        } else { None };
         self.source_generic_rosters.insert(id, SourceGenericRoster {
             identity: identity.into(),
+            record_carrier,
             parameters: Self::source_generic_roster(declaration),
         });
+    }
+
+    pub(super) fn nominal_declaration_identity(&self, id: TypeId) -> Option<Cow<'_, verum_common::Text>> {
+        self.source_generic_rosters.get(&id)
+            .map(|header| Cow::Borrowed(&header.identity))
+            .or_else(|| self.type_by_id(id)
+                .and_then(|descriptor| self.type_declaration_identity(descriptor))
+                .map(Cow::Owned))
     }
 
     fn source_generic_roster(declaration: &TypeDecl) -> Option<GenericRoster> {

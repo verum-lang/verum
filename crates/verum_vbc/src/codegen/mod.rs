@@ -10944,12 +10944,26 @@ impl VbcCodegen {
             func, &signature_scope, &dense, &Self::ordered_generic_param_ids(&dense, &shadow),
         );
         if let Some(info) = intrinsic_name.as_deref().and_then(crate::intrinsics::lookup_intrinsic)
-            && let Some(message) = info.intrinsic.opcode_signature_error(
+            && let Some((part, message)) = info.intrinsic.opcode_signature_mismatch(
                 semantic_params.iter().map(Option::as_ref), return_type.as_ref(),
                 |id| self.declared_runtime_carrier(id),
             )
         {
-            return Err(CodegenError::unsupported_expr(message));
+            use crate::intrinsics::registry::SignaturePart;
+            let (span, detail) = match part {
+                SignaturePart::Arity => (func.name.span, format!("{} declared parameters", func.params.len())),
+                SignaturePart::Parameter(index) => (func.params[index].span, format!("invalid parameter {}", index + 1)),
+                SignaturePart::Result => {
+                    let actual = func.return_type.as_ref().map(verum_ast::pretty::format_type).unwrap_or_else(|| "()".into());
+                    let owner = return_type.as_ref().and_then(TypeRef::base_type_id)
+                        .and_then(|id| self.nominal_declaration_identity(id))
+                        .map(|identity| format!(" (declared by `{identity}`)")).unwrap_or_default();
+                    (func.return_type.as_ref().map_or(func.name.span, |ty| ty.span), format!("declared result `{actual}`{owner}"))
+                }
+            };
+            return Err(CodegenError::with_span(CodegenErrorKind::InvalidSourceSignature(format!(
+                "{message}; `{}`: {detail}", func.name.name
+            )), span));
         }
         self.record_source_callable_bounds(id, func, &signature_scope, &semantic_params)?;
         self.ctx.semantic_fn_params.insert(id, semantic_params);

@@ -1396,6 +1396,12 @@ pub enum OpcodeResult {
     ByteList,
 }
 
+pub(crate) enum SignaturePart {
+    Arity,
+    Parameter(usize),
+    Result,
+}
+
 impl OpcodeResult {
     fn accepts(
         self, result: Option<&crate::types::TypeRef>,
@@ -1452,15 +1458,32 @@ impl Intrinsic {
         result: Option<&crate::types::TypeRef>,
         carrier: impl Fn(crate::types::TypeId) -> Option<verum_common::well_known_types::WellKnownType>,
     ) -> Option<verum_common::Text> {
+        self.opcode_signature_mismatch(parameters, result, carrier).map(|(_, message)| message)
+    }
+
+    pub(crate) fn opcode_signature_mismatch<'a>(
+        &self,
+        mut parameters: impl Iterator<Item = Option<&'a crate::types::TypeRef>>,
+        result: Option<&crate::types::TypeRef>,
+        carrier: impl Fn(crate::types::TypeId) -> Option<verum_common::well_known_types::WellKnownType>,
+    ) -> Option<(SignaturePart, verum_common::Text)> {
         use crate::types::TypeRef;
         let (arguments, ret) = self.opcode_signature()?;
-        let signature_matches = parameters.map(|p| p.and_then(|p| match p {
-            TypeRef::Concrete(id) => Some(*id),
-            _ => None,
-        })).eq(arguments.iter().copied().map(Some));
-        if signature_matches && ret.accepts(result, carrier) { return None; }
+        let mut mismatch = None;
+        for (index, expected) in arguments.iter().enumerate() {
+            match parameters.next() {
+                Some(Some(TypeRef::Concrete(actual))) if actual == expected => {}
+                Some(_) => { mismatch = Some(SignaturePart::Parameter(index)); break; }
+                None => { mismatch = Some(SignaturePart::Arity); break; }
+            }
+        }
+        let part = mismatch.or_else(|| {
+            if parameters.next().is_some() { Some(SignaturePart::Arity) }
+            else if ret.accepts(result, carrier) { None }
+            else { Some(SignaturePart::Result) }
+        })?;
         let args = arguments.iter().map(|ty| ty.well_known_name().unwrap()).collect::<verum_common::List<_>>().join(", ");
-        Some(format!("{} requires ({args}) -> {}", self.name, ret.name()).into())
+        Some((part, format!("{} requires ({args}) -> {}", self.name, ret.name()).into()))
     }
 
     /// Validate the complete callable ABI on the wire.

@@ -69,6 +69,30 @@ fn declared_argument_operations_read_the_invocation_and_preserve_source_function
 }
 
 #[test]
+fn mounted_result_carriers_follow_the_declared_record_before_layout_collection() {
+    let parse = |source: &str| Parser::new(source).parse_module().unwrap();
+    for (owner, shape, element, allowed) in [
+        ("core.collections.list", "{ data: T }", "Byte", true),
+        ("other.collections", "{ data: T }", "Byte", false),
+        ("core.collections.list", "{ data: T }", "Int", false),
+        ("core.collections.list", "Present(T) | Empty", "Byte", false),
+    ] {
+        let provider = parse(&format!("module {owner}; public type List<T> is {shape};"));
+        let consumer = parse(&format!(r#"module consumer;
+            mount {owner}.{{List}};
+            @intrinsic("process_environment_bytes") fn snapshot() -> List<{element}>;"#));
+        for providers_first in [false, true] {
+            let files = if providers_first { [&provider, &consumer] } else { [&consumer, &provider] };
+            let result = VbcCodegen::new().collect_unit_declarations(&files);
+            assert_eq!(result.is_ok(), allowed, "{owner} {shape} {element}: {result:?}");
+            if let Err(error) = result {
+                assert!(error.to_string().contains("process_environment_bytes requires"), "{error}");
+            }
+        }
+    }
+}
+
+#[test]
 fn process_argument_signatures_are_checked_before_lowering() {
     for decl in [
         r#"type List<T> is { fake: T }; @intrinsic("process_environment_bytes") fn snapshot() -> List<Byte>;"#,
@@ -84,6 +108,20 @@ fn process_argument_signatures_are_checked_before_lowering() {
         let ast = Parser::new(decl).parse_module().unwrap();
         let error = VbcCodegen::new().compile_module(&ast).unwrap_err();
         assert!(error.to_string().contains("requires ("), "{error}");
+    }
+}
+
+#[test]
+fn opcode_diagnostics_locate_the_wrong_part_of_the_declaration() {
+    for (declaration, location) in [
+        ("fn read(index: Bool) -> &[Byte];", "index: Bool"),
+        ("fn read(index: Int) -> &[Int];", "&[Int]"),
+        ("fn read() -> &[Byte];", "read"),
+    ] {
+        let source = format!(r#"@intrinsic("process_arg_bytes") {declaration}"#);
+        let error = VbcCodegen::new().compile_module(&Parser::new(&source).parse_module().unwrap()).unwrap_err();
+        let span = error.span.expect("source signature location");
+        assert_eq!(&source[span.start as usize..span.end as usize], location, "{error}");
     }
 }
 
