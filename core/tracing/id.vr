@@ -23,6 +23,7 @@
 )
 module core.tracing.id;
 
+mount core.encoding.hex.encode as encode_hex;
 
 // =============================================================================
 // TraceId — 16 bytes
@@ -57,13 +58,7 @@ implement TraceId {
 
     /// Hex-encode into a 32-character lowercase buffer.
     public fn to_hex(&self) -> Text {
-        let mut out = Text.with_capacity(32);
-        let mut i = 0;
-        while i < 16 {
-            push_hex_byte(&mut out, self.bytes[i]);
-            i = i + 1;
-        }
-        out
+        encode_hex(&self.bytes[..])
     }
 
     /// Decode from a 32-character hex string (case-insensitive digits).
@@ -146,13 +141,7 @@ implement SpanId {
     }
 
     public fn to_hex(&self) -> Text {
-        let mut out = Text.with_capacity(16);
-        let mut i = 0;
-        while i < 8 {
-            push_hex_byte(&mut out, self.bytes[i]);
-            i = i + 1;
-        }
-        out
+        encode_hex(&self.bytes[..])
     }
 
     public fn from_hex(hex: &[Byte]) -> Maybe<SpanId> {
@@ -322,19 +311,6 @@ public fn custom_id_generator(generator: Shared<dyn IdGenerator>) -> IdGenerator
 // =============================================================================
 // Internal helpers
 // =============================================================================
-
-@inline
-fn push_hex_byte(out: &mut Text, b: UInt8) {
-    let hi = (b >> 4) & 0x0F;
-    let lo = b & 0x0F;
-    out.push(hex_digit(hi));
-    out.push(hex_digit(lo));
-}
-
-@inline
-fn hex_digit(n: UInt8) -> Char {
-    if n < 10 { (0x30 + n) as Char } else { (0x61 + n - 10) as Char }
-}
 
 @inline
 fn decode_hex_nibble(b: Byte) -> Maybe<UInt8> {

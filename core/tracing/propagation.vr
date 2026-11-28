@@ -22,6 +22,8 @@
 )
 module core.tracing.propagation;
 
+mount core.encoding.hex.encode as encode_hex;
+
 mount core.tracing.id.{TraceId, SpanId};
 mount core.tracing.context.{SpanContext, TraceFlags, TraceState};
 
@@ -150,7 +152,8 @@ fn encode_traceparent(context: &SpanContext) -> Text {
     out.push('-');
     out.push_str(&context.span_id().to_hex());
     out.push('-');
-    push_byte_hex(&mut out, context.flags().to_byte());
+    let flags: [Byte; 1] = [context.flags().to_byte()];
+    out.push_str(&encode_hex(&flags[..]));
     out
 }
 
@@ -271,17 +274,6 @@ fn split_kv(bytes: &[Byte]) -> Maybe<(&[Byte], &[Byte])> {
         i = i + 1;
     }
     Maybe.None
-}
-
-fn push_byte_hex(out: &mut Text, b: UInt8) {
-    let hi = (b >> 4) & 0x0F;
-    let lo = b & 0x0F;
-    out.push(hex_digit(hi));
-    out.push(hex_digit(lo));
-}
-
-fn hex_digit(n: UInt8) -> Char {
-    if n < 10 { (0x30 + n) as Char } else { (0x61 + n - 10) as Char }
 }
 
 fn decode_byte_hex(hi: Byte, lo: Byte) -> Maybe<UInt8> {
