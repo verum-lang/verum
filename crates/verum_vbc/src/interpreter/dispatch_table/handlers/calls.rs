@@ -2765,7 +2765,7 @@ fn try_dispatch_intrinsic_named(
             let type_id = get_i64_arg(state, 0);
             let value = get_i64_arg(state, 1);
             let ctx_type = (type_id as u32) & 0x7fff_ffff;
-            state.context_stack.provide(
+            state.context_stack.provide_explicit(
                 ctx_type,
                 Value::from_i64(value),
                 EXPLICIT_LIFETIME_DEPTH,

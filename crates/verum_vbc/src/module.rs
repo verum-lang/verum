@@ -119,21 +119,21 @@ pub const XMOD_CALL_ID_BAND_BASE: u32 = 0x2000_0000;
 /// `core/sys/common.vr` and the `CTX_DYNAMIC_SLOT_BASE` codegen constant
 /// (`verum_codegen/src/llvm/context.rs`) — the three MUST stay equal.
 pub const CTX_DYNAMIC_SLOT_BASE: u32 = 32;
+/// Whole-context frames exposed by core.sys.common.
+pub const CTX_FRAME_LIMIT: usize = 8;
 
 /// Number of context slots. Mirrors `CONTEXT_SLOT_COUNT` in
 /// `core/sys/common.vr` and `CTX_SLOT_COUNT` in the interpreter's
 /// `dispatch_table/handlers/ctx_runtime.rs`.
 pub const CTX_SLOT_COUNT: u32 = 256;
 
-/// Collect the raw `ctx_type` string-table id of a context instruction
-/// (`CtxGet` / `CtxProvide` / `CtxCheckNegative`) into `ids`; ignores
-/// every other opcode. Shared by both scan representations in
-/// [`VbcModule::ctx_dense_slot_map`].
-fn push_ctx_type_id(instr: &Instruction, ids: &mut Vec<u32>) {
+/// Keep ordinary provide/get slot numbering stable when a named handler is also present.
+fn push_ctx_type_id(instr: &Instruction, lexical: &mut Vec<u32>, named: &mut Vec<u32>) {
     match instr {
         Instruction::CtxGet { ctx_type, .. }
         | Instruction::CtxProvide { ctx_type, .. }
-        | Instruction::CtxCheckNegative { ctx_type, .. } => ids.push(*ctx_type),
+        | Instruction::CtxCheckNegative { ctx_type, .. } => lexical.push(*ctx_type),
+        Instruction::PushContext { name, .. } | Instruction::PopContext { name } => named.push(*name),
         _ => {}
     }
 }
@@ -634,39 +634,37 @@ impl VbcModule {
     ///
     /// Derivation is representation-agnostic: it scans decoded
     /// [`FunctionDescriptor::instructions`] when present (the codegen
-    /// path), else decodes the concatenated [`Self::bytecode`] (the
-    /// interpreter path, whose loaded modules carry only raw bytecode).
+    /// path), else decodes that function’s range in [`Self::bytecode`].
+    /// Raw instruction streams without descriptors are also supported.
     /// Because the numbering depends solely on the *set* of context-type
     /// ids, both representations of the same module yield an identical
     /// map. Ids beyond the dynamic slot capacity are dropped (the caller
     /// turns an out-of-range lookup into a loud error, never a silent
     /// wrap).
     pub fn ctx_dense_slot_map(&self) -> HashMap<u32, u32> {
-        let mut ids: Vec<u32> = Vec::new();
-        let mut saw_decoded = false;
-        for func in &self.functions {
-            if let Some(instrs) = &func.instructions {
-                saw_decoded = true;
-                for instr in instrs {
-                    push_ctx_type_id(instr, &mut ids);
-                }
+        let mut ids = Vec::new();
+        let mut named = Vec::new();
+        for function in &self.functions {
+            if let Some(body) = &function.instructions {
+                for instruction in body { push_ctx_type_id(instruction, &mut ids, &mut named); }
+            } else if let Some(bytes) = self.bytecode.get(function.bytecode_offset as usize..)
+                .and_then(|bytes| bytes.get(..function.bytecode_length as usize))
+                && let Ok(body) = crate::bytecode::decode_instructions(bytes)
+            {
+                for instruction in &body { push_ctx_type_id(instruction, &mut ids, &mut named); }
             }
         }
-        // Interpreter path: the loaded module carries no decoded
-        // instruction lists — recover the context ops from the raw
-        // concatenated bytecode stream instead.
-        if !saw_decoded
-            && !self.bytecode.is_empty()
-            && let Ok(decoded) = crate::bytecode::decode_instructions(&self.bytecode)
+        if self.functions.is_empty()
+            && let Ok(body) = crate::bytecode::decode_instructions(&self.bytecode)
         {
-            for instr in &decoded {
-                push_ctx_type_id(instr, &mut ids);
-            }
+            for instruction in &body { push_ctx_type_id(instruction, &mut ids, &mut named); }
         }
-
         ids.sort_unstable();
         ids.dedup();
-        ids.into_iter()
+        named.sort_unstable();
+        named.dedup();
+        named.retain(|name| ids.binary_search(name).is_err());
+        ids.into_iter().chain(named)
             .take((CTX_SLOT_COUNT - CTX_DYNAMIC_SLOT_BASE) as usize)
             .enumerate()
             .map(|(rank, id)| (id, CTX_DYNAMIC_SLOT_BASE + rank as u32))

@@ -782,6 +782,27 @@ impl<'a> Validator<'a> {
                     reason: format!("invalid immediate fence ordering {ordering}"),
                 });
             }
+            Instruction::SysExtended { sub_op, operands } => {
+                let Some(count) = crate::instruction::SysSubOpcode::from_byte(*sub_op)
+                    .and_then(|operation| operation.context_register_count()) else { return };
+                if self.module.header.version_minor < crate::format::CONTEXT_SLOT_VERSION {
+                    self.errors.push(VbcError::InvalidInstructionEncoding {
+                        offset: instr_start, reason: "context slots require VBC minor 71 or newer".into(),
+                    });
+                }
+                let mut cursor = 0;
+                for _ in 0..count {
+                    match crate::encoding::decode_reg(operands, &mut cursor) {
+                        Ok(register) => self.check_reg(register, max_reg, &func_name),
+                        Err(error) => { self.errors.push(error); break; }
+                    }
+                }
+                if cursor != operands.len() {
+                    self.errors.push(VbcError::InvalidInstructionEncoding {
+                        offset: instr_start, reason: "invalid context store operands".into(),
+                    });
+                }
+            }
             Instruction::CbgrExtended { sub_op, operands }
                 if *sub_op == crate::instruction::CbgrSubOpcode::RefListElement.to_byte() =>
             {

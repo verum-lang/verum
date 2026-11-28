@@ -361,6 +361,49 @@ fn sys_extended_body(
             Ok(DispatchResult::Continue)
         }
 
+        Some(SysSubOpcode::ContextSlotGet | SysSubOpcode::ContextSlotSet | SysSubOpcode::ContextSlotClear) => {
+            let dst = read_reg(state)?;
+            let slot = read_reg(state)?;
+            let slot = state.get_reg(slot).try_as_i64().ok_or(InterpreterError::TypeMismatch {
+                expected: "Int", got: "non-Int", operation: "context slot",
+            })?;
+            let result = match SysSubOpcode::from_byte(sub_op_byte) {
+                Some(SysSubOpcode::ContextSlotSet) => {
+                    let value = read_reg(state)?;
+                    let value = state.get_reg(value).try_as_i64().ok_or(InterpreterError::TypeMismatch {
+                        expected: "Int", got: "non-Int", operation: "context slot value",
+                    })?;
+                    // A raw slot may reinstall a lexical provider. Restore the
+                    // VM object carrier only for an exact, live heap allocation.
+                    let pointer = value as usize as *mut super::super::super::heap::ObjectHeader;
+                    let binding = if state.heap.contains(pointer) {
+                        Value::from_ptr(pointer)
+                    } else {
+                        Value::from_i64(value)
+                    };
+                    super::ctx_runtime::ctx_slot_write(&mut state.context_stack, slot, binding,
+                        super::ctx_runtime::EXPLICIT_LIFETIME_DEPTH);
+                    0
+                }
+                Some(SysSubOpcode::ContextSlotClear) => {
+                    super::ctx_runtime::ctx_slot_clear(&mut state.context_stack, slot);
+                    0
+                }
+                _ => super::ctx_runtime::ctx_slot_get(&state.context_stack, slot),
+            };
+            state.set_reg(dst, Value::from_i64(result));
+            Ok(DispatchResult::Continue)
+        }
+        Some(SysSubOpcode::ContextFramePush | SysSubOpcode::ContextFramePop) => {
+            let dst = read_reg(state)?;
+            let result = if sub_op_byte == SysSubOpcode::ContextFramePush.to_byte() {
+                state.context_stack.push_context_frame().unwrap_or(0) as i64
+            } else {
+                i64::from(state.context_stack.pop_context_frame())
+            };
+            state.set_reg(dst, Value::from_i64(result));
+            Ok(DispatchResult::Continue)
+        }
         Some(SysSubOpcode::ArgumentCount) => {
             let dst = read_reg(state)?;
             state.set_reg(dst, Value::from_i64(state.config.program_arguments.len() as i64));

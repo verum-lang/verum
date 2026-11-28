@@ -1429,6 +1429,12 @@ impl Intrinsic {
         use crate::instruction::SysSubOpcode;
         use crate::types::TypeId;
         match self.strategy {
+            CodegenStrategy::SystemRegisters(SysSubOpcode::ContextSlotGet | SysSubOpcode::ContextSlotClear) =>
+                Some((&[TypeId::INT], OpcodeResult::Scalar(TypeId::INT))),
+            CodegenStrategy::SystemRegisters(SysSubOpcode::ContextSlotSet) =>
+                Some((&[TypeId::INT, TypeId::INT], OpcodeResult::Scalar(TypeId::INT))),
+            CodegenStrategy::SystemRegisters(SysSubOpcode::ContextFramePush | SysSubOpcode::ContextFramePop) =>
+                Some((&[], OpcodeResult::Scalar(TypeId::INT))),
             CodegenStrategy::SystemRegisters(SysSubOpcode::ArgumentCount) => Some((&[], OpcodeResult::Scalar(TypeId::INT))),
             CodegenStrategy::SystemRegisters(SysSubOpcode::ArgumentBytes) => Some((&[TypeId::INT], OpcodeResult::ByteSlice)),
             CodegenStrategy::SystemRegisters(SysSubOpcode::EnvironmentBytes) => Some((&[], OpcodeResult::ByteList)),
@@ -1569,7 +1575,14 @@ impl Intrinsic {
             | CodegenStrategy::InlineSequence(InlineSequenceId::MakeSlice)
             // Reads process state and constructs the result on the calling stack.
             | CodegenStrategy::InlineSequence(InlineSequenceId::EnvGetSeq)
-            | CodegenStrategy::SystemRegisters(crate::instruction::SysSubOpcode::EnvironmentBytes)
+            | CodegenStrategy::SystemRegisters(
+                crate::instruction::SysSubOpcode::EnvironmentBytes
+                | crate::instruction::SysSubOpcode::ContextSlotGet
+                | crate::instruction::SysSubOpcode::ContextSlotSet
+                | crate::instruction::SysSubOpcode::ContextSlotClear
+                | crate::instruction::SysSubOpcode::ContextFramePush
+                | crate::instruction::SysSubOpcode::ContextFramePop,
+            )
             | CodegenStrategy::InlineSequence(InlineSequenceId::FenceSeq | InlineSequenceId::CompilerFenceSeq)
             | CodegenStrategy::DirectOpcode(Opcode::Panic | Opcode::AtomicFence) => IntrinsicCallBound::Synchronous,
             _ => IntrinsicCallBound::Unknown,
@@ -3677,6 +3690,56 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     // =========================================================================
     // TLS Intrinsics
     // =========================================================================
+    Intrinsic {
+        name: "ctx_slot_get",
+        category: IntrinsicCategory::Context,
+        hints: &[],
+        param_count: 1,
+        return_count: 1,
+        strategy: CodegenStrategy::SystemRegisters(crate::instruction::SysSubOpcode::ContextSlotGet),
+        mlir_op: None,
+        doc: "Read the visible context slot or zero",
+    },
+    Intrinsic {
+        name: "ctx_slot_set",
+        category: IntrinsicCategory::Context,
+        hints: &[],
+        param_count: 2,
+        return_count: 1,
+        strategy: CodegenStrategy::SystemRegisters(crate::instruction::SysSubOpcode::ContextSlotSet),
+        mlir_op: None,
+        doc: "Set a numeric context slot",
+    },
+    Intrinsic {
+        name: "ctx_slot_clear",
+        category: IntrinsicCategory::Context,
+        hints: &[],
+        param_count: 1,
+        return_count: 1,
+        strategy: CodegenStrategy::SystemRegisters(crate::instruction::SysSubOpcode::ContextSlotClear),
+        mlir_op: None,
+        doc: "Clear a numeric context slot",
+    },
+    Intrinsic {
+        name: "context_frame_push",
+        category: IntrinsicCategory::Context,
+        hints: &[],
+        param_count: 0,
+        return_count: 1,
+        strategy: CodegenStrategy::SystemRegisters(crate::instruction::SysSubOpcode::ContextFramePush),
+        mlir_op: None,
+        doc: "Fork the active context unless the frame limit is reached",
+    },
+    Intrinsic {
+        name: "context_frame_pop",
+        category: IntrinsicCategory::Context,
+        hints: &[],
+        param_count: 0,
+        return_count: 1,
+        strategy: CodegenStrategy::SystemRegisters(crate::instruction::SysSubOpcode::ContextFramePop),
+        mlir_op: None,
+        doc: "Restore the enclosing context frame",
+    },
     Intrinsic {
         name: "tls_get_base",
         category: IntrinsicCategory::Tls,

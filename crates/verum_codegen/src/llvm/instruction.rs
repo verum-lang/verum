@@ -7853,45 +7853,18 @@ fn lower_instruction_impl<'ctx>(
         // Context Stack (PushContext/PopContext/Attenuate)
         // ====================================================================
         Instruction::PushContext { name, handler } => {
-            // Push named context handler — delegates to runtime
-            let handler_val = ctx.get_register(handler.0)?;
-            let type_id = ctx.types().i64_type().const_int(*name as u64, false);
-            let module = ctx.get_module();
-            let fn_type = ctx.types().void_type().fn_type(
-                &[
-                    ctx.types().i64_type().into(),
-                    ctx.types().ptr_type().into(),
-                    ctx.types().ptr_type().into(),
-                ],
-                false,
-            );
-            let provide_fn = module
-                .get_function("verum_context_provide")
-                .unwrap_or_else(|| module.add_function("verum_context_provide", fn_type, None));
-            let null = ctx.types().ptr_type().const_null();
-            ctx.builder()
-                .build_call(
-                    provide_fn,
-                    &[type_id.into(), handler_val.into(), null.into()],
-                    "",
-                )
-                .or_llvm_err()?;
-            Ok(())
+            let slot = ctx_bridge_slot(ctx, *name)?;
+            let value = as_i64(ctx, ctx.get_register(handler.0)?, "named_context")?;
+            let depth = ctx.types().i64_type().const_zero();
+            RuntimeLowering::new(ctx.llvm_context()).lower_ctx_provide(ctx.builder(), ctx.get_module(), slot, value, depth)
         }
 
         Instruction::PopContext { name } => {
-            // Pop named context
-            let type_id = ctx.types().i64_type().const_int(*name as u64, false);
-            let module = ctx.get_module();
-            let fn_type = ctx
-                .types()
-                .void_type()
-                .fn_type(&[ctx.types().i64_type().into()], false);
-            let pop_fn = module
-                .get_function("verum_context_pop")
-                .unwrap_or_else(|| module.add_function("verum_context_pop", fn_type, None));
-            ctx.builder()
-                .build_call(pop_fn, &[type_id.into()], "")
+            let slot = ctx_bridge_slot(ctx, *name)?;
+            let integer = ctx.types().i32_type();
+            let ty = ctx.types().void_type().fn_type(&[integer.into()], false);
+            let end = super::error::get_or_declare_function(ctx.get_module(), "verum_ctx_end_named", ty);
+            ctx.builder().build_call(end, &[integer.const_int(u64::from(slot), false).into()], "")
                 .or_llvm_err()?;
             Ok(())
         }
@@ -12793,9 +12766,9 @@ fn lower_call<'ctx>(
             // ============================================================
             "__ctx_get_raw" | "__ctx_provide_raw" | "__ctx_end_raw" => {
                 let c_name = match bare_name {
-                    "__ctx_get_raw" => "verum_ctx_get",
-                    "__ctx_provide_raw" => "verum_ctx_provide",
-                    "__ctx_end_raw" => "verum_ctx_end",
+                    "__ctx_get_raw" => "verum_ctx_explicit_get",
+                    "__ctx_provide_raw" => "verum_ctx_explicit_provide",
+                    "__ctx_end_raw" => "verum_ctx_explicit_end",
                     _ => unreachable!(),
                 };
                 let mut call_args: Vec<BasicMetadataValueEnum> = Vec::new();
@@ -32782,6 +32755,34 @@ fn lower_sys_extended<'ctx>(
             Ok(())
         }
 
+        Some(operation) if operation.context_register_count().is_some() => {
+            let name = match operation {
+                SysSubOpcode::ContextSlotGet => "verum_ctx_slot_get",
+                SysSubOpcode::ContextSlotSet => "verum_ctx_slot_set",
+                SysSubOpcode::ContextSlotClear => "verum_ctx_slot_clear",
+                SysSubOpcode::ContextFramePush => "verum_ctx_frame_push",
+                SysSubOpcode::ContextFramePop => "verum_ctx_frame_pop",
+                _ => unreachable!(),
+            };
+            let mut cursor = 0;
+            let dst = read_reg_varlen(operands, &mut cursor)?;
+            let count = operation.context_register_count().expect("context operation");
+            let word = ctx.types().i64_type();
+            let mut args = verum_common::List::new();
+            for _ in 1..count {
+                let register = read_reg_varlen(operands, &mut cursor)?;
+                args.push(as_i64(ctx, ctx.get_register(register)?, "context_operand")?.into());
+            }
+            if cursor != operands.len() {
+                return Err(LlvmLoweringError::internal("invalid context store operands"));
+            }
+            let types = verum_common::List::from_elem(word.into(), args.len());
+            let function = super::error::get_or_declare_function(ctx.get_module(), name, word.fn_type(&types, false));
+            let value = ctx.builder().build_call(function, &args, "context_result")
+                .or_llvm_err()?.basic_value_or("context operation result")?;
+            ctx.set_register(dst, value);
+            Ok(())
+        }
         Some(op @ (SysSubOpcode::ArgumentCount | SysSubOpcode::ArgumentBytes)) => {
             let mut pos = 0;
             let dst = read_reg_varlen(operands, &mut pos)?;
@@ -36380,6 +36381,17 @@ fn ctx_bridge_slot(ctx: &mut FunctionContext<'_, '_>, ctx_type: u32) -> Result<u
     })
 }
 
+/// Presence is distinct from the bits of the injected value, which may be zero.
+fn context_binding_present<'ctx>(ctx: &FunctionContext<'_, 'ctx>, slot: u32) -> Result<IntValue<'ctx>> {
+    let word = ctx.types().i64_type();
+    let key = ctx.types().i32_type();
+    let query = super::error::get_or_declare_function(ctx.get_module(), "verum_ctx_has_binding",
+        word.fn_type(&[key.into()], false));
+    let result = ctx.builder().build_call(query, &[key.const_int(u64::from(slot), false).into()], "context_present")
+        .or_llvm_err()?.basic_value_or("context binding presence")?.into_int_value();
+    ctx.builder().build_int_compare(IntPredicate::NE, result, word.const_zero(), "has_context").or_llvm_err()
+}
+
 /// Lower CtxGet instruction.
 ///
 /// Retrieves a context value by type ID from the thread-local context stack.
@@ -36404,6 +36416,15 @@ fn lower_ctx_get<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, ctx_type: 
     // Emit LLVM IR directly via RuntimeLowering. Uses the dense slot from
     // the ONE authority (VbcModule::ctx_dense_slot_map) so every ctx op in
     // the module — and the Tier-0 interpreter — shares one id namespace.
+    let present = context_binding_present(ctx, slot)?;
+    let found = ctx.llvm_context().append_basic_block(ctx.function(), "context_bound");
+    let missing = ctx.llvm_context().append_basic_block(ctx.function(), "context_missing");
+    ctx.builder().build_conditional_branch(present, found, missing).or_llvm_err()?;
+    ctx.builder().position_at_end(missing);
+    let name = ctx.vbc_module().and_then(|module| module.get_string(verum_vbc::types::StringId(ctx_type))).unwrap_or("unknown");
+    emit_runtime_abort(ctx, &format!("Context {name} not provided"), "missing_context")?;
+    ctx.builder().build_unreachable().or_llvm_err()?;
+    ctx.builder().position_at_end(found);
     let runtime = RuntimeLowering::new(ctx.llvm_context());
     let value = runtime.lower_ctx_get(ctx.builder(), &module, slot)?;
     ctx.set_register(dst.0, value.into());
@@ -36561,25 +36582,7 @@ fn lower_ctx_check_negative<'ctx>(
     // negative checks must query the SAME key the provide installed.
     let slot = ctx_bridge_slot(ctx, ctx_type)?;
 
-    // Step 1: Get the context value (reuse CtxGet logic) from the ONE
-    // canonical Tier-1 opcode store. If the context is NOT provided, the
-    // result is 0 (null/nil).
-    let ctx_value: BasicValueEnum = {
-        let runtime = RuntimeLowering::new(llvm_ctx);
-        let value = runtime.lower_ctx_get(ctx.builder(), &module, slot)?;
-        value.into()
-    };
-
-    // Step 2: Check if value is non-zero (context IS present -- violation)
-    let is_present = ctx
-        .builder()
-        .build_int_compare(
-            IntPredicate::NE,
-            ctx_value.into_int_value(),
-            i64_type.const_zero(),
-            "ctx_neg_violation",
-        )
-        .or_llvm_err()?;
+    let is_present = context_binding_present(ctx, slot)?;
 
     // Step 3: Conditional branch -- if present, panic; otherwise continue
     let current_fn = ctx.function();

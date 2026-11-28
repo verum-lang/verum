@@ -1301,20 +1301,9 @@ public fn random_bytes(buf: &mut [Byte]) -> Result<(), OSError> {
 // =============================================================================
 // Cross-Platform Context System
 // =============================================================================
-// V-LLSI Context System provides unified access to thread-local context slots
-// across all platforms. This replaces tokio.task_local! with native TLS.
-//
+// The VM context stack and native thread-local bindings implement the same VBC operations.
 
-// Performance comparison (from new-arch-spec.md Appendix F.3):
-// - tokio HashMap lookup: ~20ns
-// - V-LLSI array index: ~2ns (10x faster)
-//
-
-// Spec: new-arch-spec.md Appendix F.3
-// =============================================================================
-
-/// Maximum number of context slots per thread.
-/// 256 slots = 2KB per thread, sufficient for most applications.
+/// Number of addressable context slots per thread.
 public const MAX_CONTEXT_SLOTS: Int = 256;
 
 /// Alias for MAX_CONTEXT_SLOTS for capability context usage.
@@ -1333,7 +1322,7 @@ public const CONTEXT_SLOT_COUNT: Int = 256;
 /// MUST stay equal.
 public const CONTEXT_DYNAMIC_SLOT_BASE: Int = 32;
 
-/// Context stack depth for nested provide blocks.
+/// Maximum number of explicitly pushed context frames.
 public const CONTEXT_STACK_DEPTH: Int = 8;
 
 // =============================================================================
@@ -1345,24 +1334,6 @@ public const CONTEXT_STACK_DEPTH: Int = 8;
 public type ContextSlots is {
     /// Bitmap tracking which slots are occupied (256 bits = 4 u64s).
     active: [UInt64; 4],
-    // T1367/T1320 — a `slots: [ContextEntry; 256]` field stood here and
-    // was DEAD: no literal of this type set it, no method of this type
-    // read it, and `get`/`set`/`clear` keep only the `active` bitmap and
-    // delegate the storage itself to `ctx_get` / `ctx_set`. Every other
-    // `.slots` in this file belongs to `EmbeddedContextSlots`, a
-    // different type.
-    //
-    // It also named a type that DOES NOT EXIST. `ContextEntry` has no
-    // declaration anywhere in core/ in any form — what exists is
-    // `DarwinContextEntry` (sys/darwin/tls.vr:157) and
-    // `WindowsContextEntry` (sys/windows/tls.vr:152), identical to each
-    // other and to nothing here. A Rust struct of that name lives in
-    // crates/verum_vbc/src/interpreter/state.rs:1019, which is what a
-    // whole-tree grep finds first.
-    //
-    // Removing it rather than declaring the missing type: the field had
-    // no reader to satisfy, so inventing a shape for it would have
-    // cemented a guess.
 };
 
 implement ContextSlots {
@@ -1485,359 +1456,57 @@ implement PartialEq for SysContextError {
 
 implement Eq for SysContextError {}
 
-// =============================================================================
-// Tier-0 Store-Authority Raw Intrinsics (CTX-STORE-AUTHORITY-1)
-// =============================================================================
-//
-// ONE store authority per tier.  The `provide` / `using` context system
-// executes through the CtxProvide/CtxGet/CtxEnd opcodes, which under the
-// Tier-0 interpreter read/write the InterpreterState context stack.  The
-// user-callable slot surface below (`ctx_get` / `ctx_set` / `ctx_clear`)
-// MUST read/write that SAME store — not a parallel one.
-//
-// Mechanism: the declarations below are bodiless `@intrinsic` forward
-// declarations.  The VBC codegen leaves their bytecode empty
-// (bytecode_length == 0), so the Tier-0 interpreter intercepts calls by
-// name in `try_dispatch_intrinsic_by_name`
-// (crates/verum_vbc/src/interpreter/dispatch_table/handlers/calls.rs) and
-// routes them to `state.context_stack` — the exact store the opcodes use
-// (slot-flat semantics implemented in handlers/ctx_runtime.rs).
-//
-// Under Tier-1 AOT there is no interceptor: the empty declarations lower
-// to default-return-0 stubs (vbc_lowering.rs Phase 3.6 safety net), so
-// `__ctx_store_tier0_raw()` yields 0 and the functions below fall through
-// to the platform TLS bodies (`sys.<os>.tls.*`) — the real Tier-1 store
-// that the AOT `CtxGet`/`CtxProvide` opcodes also reach via the
-// `runtime.ctx_bridge.env_ctx_*` strategy-1 lowering.  Same key namespace
-// on both tiers: the opcode's ctx_type IS the slot id.
-
-/// Tier oracle for the context store. Tier-0 interpreter intercept
-/// returns 1; Tier-1 AOT executes the default-return stub → 0.
-@intrinsic("ctx_store_tier0")
-fn __ctx_store_tier0_raw() -> Int;
-
-/// Tier-0 slot read against the interpreter ContextStack.
-/// Returns the stored value, or 0 when the slot is empty.
+// Numeric slots and lexical providers share the current execution context.
 @intrinsic("ctx_slot_get")
 fn __ctx_slot_get_raw(slot: Int) -> Int;
 
-/// Tier-0 slot overwrite against the interpreter ContextStack
-/// (replaces the topmost entry for the slot, else pushes one).
 @intrinsic("ctx_slot_set")
 fn __ctx_slot_set_raw(slot: Int, value: Int) -> Int;
 
-/// Tier-0 slot clear against the interpreter ContextStack
-/// (removes every entry for the slot — flat-slot semantics).
 @intrinsic("ctx_slot_clear")
 fn __ctx_slot_clear_raw(slot: Int) -> Int;
 
-// =============================================================================
-// Cross-Platform Context API
-// =============================================================================
+@intrinsic("context_frame_push")
+fn __ctx_frame_push_raw() -> Int;
 
-/// Get a value from a context slot.
-///
+@intrinsic("context_frame_pop")
+fn __ctx_frame_pop_raw() -> Int;
 
-/// Returns Maybe.None if the slot is not set or TLS is not initialized.
-/// This is the hot path - optimized for ~2ns access.
-///
-
-/// # Arguments
-///
-
-/// * `slot` - Slot index (0-255)
-///
-
-/// # Example
-///
-
-/// ```verum
-/// if let Maybe.Some(db) = ctx_get(SLOT_DATABASE) {
-///  let conn = db as &DatabaseConnection;
-///  // use connection...
-/// }
-/// ```
+/// Return the visible pointer in the slot. Zero denotes an empty slot.
 @inline
 public fn ctx_get(slot: UInt8) -> Maybe<&unsafe Byte> {
-    // Tier-0: the interpreter ContextStack is the ONE store authority
-    // (same store the CtxProvide/CtxGet opcodes use).  The Maybe is
-    // constructed HERE, in compiled Verum code — the caller always
-    // receives a genuine variant, never a raw nil.
-    if __ctx_store_tier0_raw() == 1 {
-        let v = __ctx_slot_get_raw(slot as Int);
-        if v == 0 {
-            return Maybe.None;
-        }
-        return Maybe.Some(unsafe { v as &unsafe Byte });
-    }
-
-    // Tier-1 AOT: platform TLS store (the real slot table).
-    //
-    // NB: each @cfg arm must `return` explicitly — an @cfg-attributed
-    // block is a STATEMENT, not the function's tail expression; the
-    // pre-fix bodies (`{ super.darwin.tls.ctx_get(slot) }`) discarded
-    // the platform Maybe and fell off the end returning raw nil, which
-    // then panicked on `.is_some()` (`<nil>` receiver).  That was the
-    // CTX-STORE-AUTHORITY-1 nil-Maybe leg.
-    @cfg(target_os = "linux")
-    { return super.linux.tls.ctx_get(slot); }
-
-    @cfg(target_os = "macos")
-    { return super.darwin.tls.ctx_get(slot); }
-
-    @cfg(target_os = "windows")
-    { return super.windows.tls.ctx_get(slot); }
-
-    @cfg(runtime = "embedded")
-    { return embedded_ctx_get(slot); }
-
-    Maybe.None
+    let address = __ctx_slot_get_raw(slot as Int);
+    if address == 0 { Maybe.None } else { Maybe.Some(unsafe { address as &unsafe Byte }) }
 }
 
-/// Get a mutable value from a context slot.
-///
-
-/// Returns the same raw pointer as ctx_get - the caller is responsible
-/// for ensuring exclusive access when modifying the value.
-///
-
-/// # Arguments
-///
-
-/// * `slot` - Slot index (0-255)
+/// The caller owns the exclusive access required to modify the pointed-to value.
 @inline
-public fn ctx_get_mut(slot: UInt8) -> Maybe<&unsafe Byte> {
-    ctx_get(slot)
-}
+public fn ctx_get_mut(slot: UInt8) -> Maybe<&unsafe Byte> { ctx_get(slot) }
 
-/// Set a value in a context slot.
-///
-
-/// # Arguments
-///
-
-/// * `slot` - Slot index (0-255)
-/// * `value` - Pointer to context value
-///
-
-/// # Safety
-///
-
-/// The value must remain valid for the lifetime of the context scope.
+/// The pointer must remain valid while the binding is visible.
 @inline
 public fn ctx_set(slot: UInt8, value: &unsafe Byte) {
-    // Tier-0: write the interpreter ContextStack (ONE store authority).
-    if __ctx_store_tier0_raw() == 1 {
-        __ctx_slot_set_raw(slot as Int, value as Int);
-        return;
-    }
-
-    // Tier-1 AOT: platform TLS store.
-    @cfg(target_os = "linux")
-    { super.linux.tls.ctx_set(slot, value) }
-
-    @cfg(target_os = "macos")
-    { super.darwin.tls.ctx_set(slot, value) }
-
-    @cfg(target_os = "windows")
-    { super.windows.tls.ctx_set(slot, value) }
-
-    @cfg(runtime = "embedded")
-    { embedded_ctx_set(slot, value) }
+    let _ = __ctx_slot_set_raw(slot as Int, value as Int);
 }
 
-/// Check if a context slot is set.
-///
-
-/// Uses bitmask for O(1) check (~1ns).
 @inline
-public fn ctx_has(slot: UInt8) -> Bool {
-    ctx_get(slot).is_some()
-}
+public fn ctx_has(slot: UInt8) -> Bool { ctx_get(slot).is_some() }
 
-/// Clear a context slot.
 @inline
-public fn ctx_clear(slot: UInt8) {
-    // Tier-0: clear in the interpreter ContextStack (ONE store authority).
-    if __ctx_store_tier0_raw() == 1 {
-        __ctx_slot_clear_raw(slot as Int);
-        return;
-    }
+public fn ctx_clear(slot: UInt8) { let _ = __ctx_slot_clear_raw(slot as Int); }
 
-    // Tier-1 AOT: platform TLS store.
-    @cfg(target_os = "linux")
-    { super.linux.tls.ctx_clear(slot) }
-
-    @cfg(target_os = "macos")
-    { super.darwin.tls.ctx_clear(slot) }
-
-    @cfg(target_os = "windows")
-    { super.windows.tls.ctx_clear(slot) }
-
-    @cfg(runtime = "embedded")
-    { embedded_ctx_clear(slot) }
-}
-
-/// Push a new context frame (for nested provide blocks).
-///
-
-/// The new frame inherits from the current frame but allows overrides.
-/// Returns the previous frame for restoration.
+/// Inherit all visible bindings. The frame token remains valid until the matching pop.
 public fn ctx_push_frame() -> Result<&unsafe Byte, SysContextError> {
-    // NB: explicit `return` in each @cfg arm — an @cfg-attributed block
-    // is a statement, not the tail expression (same nil-return defect
-    // class as ctx_get, see CTX-STORE-AUTHORITY-1).
-    @cfg(target_os = "linux")
-    {
-        let current = super.linux.tls.get_context_slots();
-        let new_frame = super.linux.tls.ctx_push(current);
-        super.linux.tls.set_context_slots(&new_frame);
-        return Result.Ok(current as &unsafe Byte);
-    }
-
-    @cfg(target_os = "macos")
-    {
-        // The implementation lives in `darwin/tls.vr`, not here, and that
-        // is not a style choice: `DarwinContextSlots` is declared there,
-        // so a frame push written in THIS file cannot reach `slots.slots`
-        // — the field type is invisible from a sibling module and the
-        // expression types as `!`.  The call below is what the original
-        // author intended; the function it names simply had never been
-        // written (T0822).
-        // The platform function reports `SysTlsError`;
-        // this one reports `SysContextError`.  The mapping is written out
-        // rather than left to inference, because a cross-module return type
-        // resolves to `!` in a single-file check and a mismatch here would
-        // be invisible until some other mode looked.
-        match super.darwin.tls.ctx_push_frame() {
-            Result.Ok(frame) => { return Result.Ok(frame); }
-            Result.Err(_) => { return Result.Err(SysContextError.TlsNotInitialized); }
-        }
-    }
-
-    @cfg(target_os = "windows")
-    {
-        // Windows agrees with Darwin, not with Linux — the same per-slot
-        // entries and the same `ctx_push(slot, value)` signature.  The
-        // body that stood here was copied from the Linux arm and could
-        // not have compiled for this target: `get_context_slots` returns
-        // `Maybe<&mut WindowsContextSlots>`, and `ctx_push` takes
-        // (slot, value), not a slots value.  An excluded @cfg arm is
-        // never type-checked (T0810), so nothing said so.
-        // The platform function reports `WindowsTlsError`;
-        // this one reports `SysContextError`.  The mapping is written out
-        // rather than left to inference, because a cross-module return type
-        // resolves to `!` in a single-file check and a mismatch here would
-        // be invisible until some other mode looked.
-        match super.windows.tls.ctx_push_frame() {
-            Result.Ok(frame) => { return Result.Ok(frame); }
-            Result.Err(_) => { return Result.Err(SysContextError.TlsNotInitialized); }
-        }
-    }
-
-    @cfg(runtime = "embedded")
-    { return embedded_ctx_push_frame(); }
-
-    Result.Err(SysContextError.TlsNotInitialized)
-}
-
-/// Pop a context frame (restore previous provide scope).
-public fn ctx_pop_frame() {
-    @cfg(target_os = "linux")
-    { super.linux.tls.ctx_pop() }
-
-    @cfg(target_os = "macos")
-    {
-        // NOT `ctx_pop()`: Darwin's `ctx_pop` takes a SLOT and returns the
-        // popped value.  Calling it with no argument is the mirror of the
-        // push arm's defect (T0822) — a whole frame is what this function
-        // promises, and `darwin.tls.ctx_pop_frame` is what restores one.
-        let _ = super.darwin.tls.ctx_pop_frame();
-    }
-
-    @cfg(target_os = "windows")
-    {
-        // Same shape as Darwin: `ctx_pop` takes a slot, `ctx_pop_frame`
-        // restores the frame.
-        let _ = super.windows.tls.ctx_pop_frame();
-    }
-
-    @cfg(runtime = "embedded")
-    { embedded_ctx_pop_frame() }
-}
-
-// =============================================================================
-// Embedded Runtime Support (Single-Threaded, No TLS)
-// =============================================================================
-
-@cfg(runtime = "embedded")
-module embedded_context {
-    /// Global context slots for embedded (single-threaded) runtime.
-    static mut EMBEDDED_CONTEXT: EmbeddedContextSlots = EmbeddedContextSlots {
-        slots: [0 as &unsafe Byte; MAX_CONTEXT_SLOTS],
-        active: [0_u64; 4],
-        stack_depth: 0,
-        stack: [[0 as &unsafe Byte; MAX_CONTEXT_SLOTS]; CONTEXT_STACK_DEPTH],
-    };
-
-    type EmbeddedContextSlots is {
-        slots: [&unsafe Byte; 256],
-        active: [UInt64; 4],
-        stack_depth: Int,
-        stack: [[&unsafe Byte; 256]; 8],
-    };
-
-    public fn embedded_ctx_get(slot: UInt8) -> Maybe<&unsafe Byte> {
-        unsafe {
-            let word = slot / 64;
-            let bit = slot % 64;
-            if (EMBEDDED_CONTEXT.active[word] & (1 << bit)) != 0 {
-                Maybe.Some(EMBEDDED_CONTEXT.slots[slot])
-            } else {
-                Maybe.None
-            }
-        }
-    }
-
-    public fn embedded_ctx_set(slot: UInt8, value: &unsafe Byte) {
-        unsafe {
-            let word = slot / 64;
-            let bit = slot % 64;
-            EMBEDDED_CONTEXT.slots[slot] = value;
-            EMBEDDED_CONTEXT.active[word] |= 1 << bit;
-        }
-    }
-
-    public fn embedded_ctx_clear(slot: UInt8) {
-        unsafe {
-            let word = slot / 64;
-            let bit = slot % 64;
-            EMBEDDED_CONTEXT.slots[slot] = 0 as &unsafe Byte;
-            EMBEDDED_CONTEXT.active[word] &= !(1 << bit);
-        }
-    }
-
-    public fn embedded_ctx_push_frame() -> Result<&unsafe Byte, SysContextError> {
-        unsafe {
-            if EMBEDDED_CONTEXT.stack_depth >= CONTEXT_STACK_DEPTH {
-                return Result.Err(SysContextError.StackOverflow { depth: EMBEDDED_CONTEXT.stack_depth });
-            }
-            // Save current slots to stack
-            EMBEDDED_CONTEXT.stack[EMBEDDED_CONTEXT.stack_depth] = EMBEDDED_CONTEXT.slots;
-            EMBEDDED_CONTEXT.stack_depth += 1;
-            Result.Ok(0 as &unsafe Byte)  // No actual pointer for embedded
-        }
-    }
-
-    public fn embedded_ctx_pop_frame() {
-        unsafe {
-            if EMBEDDED_CONTEXT.stack_depth > 0 {
-                EMBEDDED_CONTEXT.stack_depth -= 1;
-                EMBEDDED_CONTEXT.slots = EMBEDDED_CONTEXT.stack[EMBEDDED_CONTEXT.stack_depth];
-            }
-        }
+    let address = __ctx_frame_push_raw();
+    if address == 0 {
+        Result.Err(SysContextError.StackOverflow { depth: CONTEXT_STACK_DEPTH })
+    } else {
+        Result.Ok(unsafe { address as &unsafe Byte })
     }
 }
+
+/// Discard changes in the current frame and restore its parent.
+public fn ctx_pop_frame() { let _ = __ctx_frame_pop_raw(); }
 
 // =============================================================================
 // Runtime Initialization Status

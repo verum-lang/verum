@@ -126,7 +126,7 @@ use handlers::async_nursery::{
 
 // Context + Capability operations
 use handlers::context::{
-    handle_attenuate, handle_ctx_get, handle_ctx_pop, handle_ctx_provide, handle_ctx_push,
+    handle_attenuate, handle_ctx_get, handle_ctx_pop, handle_ctx_pop_named, handle_ctx_provide, handle_ctx_push,
     handle_has_capability, handle_require_capability,
 };
 
@@ -429,7 +429,7 @@ const fn build_dispatch_table() -> [Handler; 256] {
     table[0xB1] = handle_ctx_provide; // CtxProvide = 0xB1
     table[0xB2] = handle_ctx_pop; // CtxEnd = 0xB2
     table[0xB3] = handle_ctx_push; // PushContext = 0xB3
-    table[0xB4] = handle_ctx_pop; // PopContext = 0xB4
+    table[0xB4] = handle_ctx_pop_named; // PopContext = 0xB4
     table[0xB5] = handle_attenuate; // Attenuate = 0xB5
     table[0xB6] = handle_has_capability; // HasCapability = 0xB6
     table[0xB7] = handle_require_capability; // RequireCapability = 0xB7

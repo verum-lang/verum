@@ -84,11 +84,7 @@ pub(in super::super) fn handle_ctx_provide(
     Ok(DispatchResult::Continue)
 }
 
-/// CtxEnd (0xB2) / PopContext (0xB4) - End a context scope.
-///
-/// Pops the most recently-provided context entry. CtxProvide + CtxEnd come
-/// in matched pairs for `provide X = v in { body }` blocks, so a LIFO pop
-/// correctly handles both flat and nested provides.
+/// End the innermost lexical context.
 pub(in super::super) fn handle_ctx_pop(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
@@ -96,13 +92,23 @@ pub(in super::super) fn handle_ctx_pop(
     Ok(DispatchResult::Continue)
 }
 
-/// PushContext (0xB3) - Push a context handler (for advanced context patterns).
-///
-/// In the simple implementation, this is a no-op.
+/// PushContext carries an interned name followed by the handler register.
 pub(in super::super) fn handle_ctx_push(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
-    let _handler_offset = read_signed_varint(state)?;
+    let name = read_varint(state)? as u32;
+    let handler = read_reg(state)?;
+    let slot = state.ctx_dense_slot(name);
+    state.context_stack.provide(slot, state.get_reg(handler), state.call_stack.depth());
+    Ok(DispatchResult::Continue)
+}
+
+pub(in super::super) fn handle_ctx_pop_named(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    let name = read_varint(state)? as u32;
+    let slot = state.ctx_dense_slot(name);
+    state.context_stack.end_lexical_by_type(slot);
     Ok(DispatchResult::Continue)
 }
 

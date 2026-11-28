@@ -15094,208 +15094,24 @@ impl<'ctx> PlatformIR<'ctx> {
     // ========================================================================
 
     fn emit_context_system_ir(&self, module: &Module<'ctx>) -> super::error::Result<()> {
-        let ctx = self.context;
-        let i64_type = ctx.i64_type();
-        let i32_type = ctx.i32_type();
-        let void_type = ctx.void_type();
-        let ptr_type = ctx.ptr_type(AddressSpace::default());
-        let get_ctx_fn = self.get_or_declare_fn(
-            module,
-            "get_or_create_context",
-            ptr_type.fn_type(&[], false),
+        use super::error::LlvmLoweringError;
+        use verum_llvm::memory_buffer::MemoryBuffer;
+        let bytes = MemoryBuffer::create_from_memory_range_copy(
+            include_bytes!("context_slots.ll"), "VBC context bindings",
         );
-        let get_fn = self.get_or_declare_fn(
-            module,
-            "verum_ctx_get",
-            i64_type.fn_type(&[i32_type.into()], false),
-        );
-        if get_fn.count_basic_blocks() == 0 {
-            let builder = ctx.create_builder();
-            let entry = ctx.append_basic_block(get_fn, "entry");
-            let search_loop = ctx.append_basic_block(get_fn, "search_loop");
-            let check_match = ctx.append_basic_block(get_fn, "check_match");
-            let found = ctx.append_basic_block(get_fn, "found");
-            let not_found = ctx.append_basic_block(get_fn, "not_found");
-            builder.position_at_end(entry);
-            let tid32 = get_fn
-                .get_first_param()
-                .or_internal("missing first param")?
-                .into_int_value();
-            let tid = builder
-                .build_int_z_extend(tid32, i64_type, "tid")
-                .or_llvm_err()?;
-            let ec = builder
-                .build_call(get_ctx_fn, &[], "ctx")
-                .or_llvm_err()?
-            .basic_value_or("expected basic value")?
-                .into_pointer_value();
-            let i8_type = ctx.i8_type();
-            // SAFETY: GEP into the execution context at offset 2048 (context bindings count)
-            let cnt_p = unsafe {
-                builder
-                    .build_gep(i8_type, ec, &[i64_type.const_int(2048, false)], "cnt_p")
-                    .or_llvm_err()?
-            };
-            let cnt = builder
-                .build_load(i64_type, cnt_p, "cnt")
-                .or_llvm_err()?
-                .into_int_value();
-            // SAFETY: GEP into the execution context at offset 2056 (context bindings array base)
-            let cb = unsafe {
-                builder
-                    .build_gep(i8_type, ec, &[i64_type.const_int(2056, false)], "cb")
-                    .or_llvm_err()?
-            };
-            let si = builder
-                .build_int_sub(cnt, i64_type.const_int(1, false), "si")
-                .or_llvm_err()?;
-            let has = builder
-                .build_int_compare(IntPredicate::SGT, cnt, i64_type.const_zero(), "has")
-                .or_llvm_err()?;
-            builder
-                .build_conditional_branch(has, search_loop, not_found)
-                .or_llvm_err()?;
-            builder.position_at_end(search_loop);
-            let ip = builder.build_phi(i64_type, "idx").or_llvm_err()?;
-            ip.add_incoming(&[(&si, entry)]);
-            let idx = ip.as_basic_value().into_int_value();
-            let eo = builder
-                .build_int_mul(idx, i64_type.const_int(16, false), "eo")
-                .or_llvm_err()?;
-            // SAFETY: GEP at a fixed offset within a known struct layout; the pointer is valid from prior allocation
-            let ep = unsafe { builder.build_gep(i8_type, cb, &[eo], "ep").or_llvm_err()? };
-            let st = builder
-                .build_load(i64_type, ep, "st")
-                .or_llvm_err()?
-                .into_int_value();
-            let m = builder
-                .build_int_compare(IntPredicate::EQ, st, tid, "m")
-                .or_llvm_err()?;
-            builder
-                .build_conditional_branch(m, found, check_match)
-                .or_llvm_err()?;
-            // SAFETY: GEP into the context binding entry at offset 8 (value field); entry found by backward search
-            builder.position_at_end(found);
-            let vo = builder
-                .build_int_add(eo, i64_type.const_int(8, false), "vo")
-                .or_llvm_err()?;
-            let vp = unsafe { builder.build_gep(i8_type, cb, &[vo], "vp").or_llvm_err()? };
-            let val = builder.build_load(i64_type, vp, "val").or_llvm_err()?;
-            builder.build_return(Some(&val)).or_llvm_err()?;
-            builder.position_at_end(check_match);
-            let ni = builder
-                .build_int_sub(idx, i64_type.const_int(1, false), "ni")
-                .or_llvm_err()?;
-            let cs = builder
-                .build_int_compare(IntPredicate::SGE, ni, i64_type.const_zero(), "cs")
-                .or_llvm_err()?;
-            ip.add_incoming(&[(&ni, check_match)]);
-            builder
-                .build_conditional_branch(cs, search_loop, not_found)
-                .or_llvm_err()?;
-            builder.position_at_end(not_found);
-            builder
-                .build_return(Some(&i64_type.const_zero()))
-                .or_llvm_err()?;
+        let ir = self.context.create_module_from_ir(bytes)
+            .map_err(|error| LlvmLoweringError::internal(error.to_string()))?;
+        ir.set_triple(&module.get_triple());
+        ir.set_data_layout(&module.get_data_layout());
+        if super::target_triple::target_is_linux(module) || super::target_triple::target_is_freebsd(module) {
+            // ELF initial-exec addresses the thread's loader-assigned storage
+            // directly, including in PIC code, without a libc TLS resolver.
+            for name in ["context.head", "context.depth"] {
+                let global = ir.get_global(name).or_internal("missing context TLS storage")?;
+                global.set_thread_local_mode(Some(verum_llvm::ThreadLocalMode::InitialExecTLSModel));
+            }
         }
-        let prov_fn = self.get_or_declare_fn(
-            module,
-            "verum_ctx_provide",
-            void_type.fn_type(&[i32_type.into(), i64_type.into(), i64_type.into()], false),
-        );
-        if prov_fn.count_basic_blocks() == 0 {
-            let builder = ctx.create_builder();
-            let entry = ctx.append_basic_block(prov_fn, "entry");
-            builder.position_at_end(entry);
-            let tid32 = prov_fn
-                .get_nth_param(0)
-                .or_internal("missing param 0")?
-                .into_int_value();
-            let tid = builder
-                .build_int_z_extend(tid32, i64_type, "tid")
-                .or_llvm_err()?;
-            let value = prov_fn
-                .get_nth_param(1)
-                .or_internal("missing param 1")?
-                .into_int_value();
-            let ec = builder
-                .build_call(get_ctx_fn, &[], "ctx")
-                .or_llvm_err()?
-            .basic_value_or("expected basic value")?
-                .into_pointer_value();
-            let i8_type = ctx.i8_type();
-            // SAFETY: GEP into the execution context at offset 2048 (context bindings count)
-            let cnt_p = unsafe {
-                builder
-                    .build_gep(i8_type, ec, &[i64_type.const_int(2048, false)], "cnt_p")
-                    .or_llvm_err()?
-            };
-            let cnt = builder
-                .build_load(i64_type, cnt_p, "cnt")
-                .or_llvm_err()?
-                .into_int_value();
-            // SAFETY: GEP into the execution context at offset 2056 (start of context bindings array)
-            let cb = unsafe {
-                builder
-                    .build_gep(i8_type, ec, &[i64_type.const_int(2056, false)], "cb")
-                    .or_llvm_err()?
-            };
-            // SAFETY: GEP into the context bindings array at entry[cnt] to store the type_id
-            let eo = builder
-                .build_int_mul(cnt, i64_type.const_int(16, false), "eo")
-                .or_llvm_err()?;
-            let tp = unsafe { builder.build_gep(i8_type, cb, &[eo], "tp").or_llvm_err()? };
-            builder.build_store(tp, tid).or_llvm_err()?;
-            // SAFETY: GEP into the context binding entry at offset 8 to store the value
-            let vo = builder
-                .build_int_add(eo, i64_type.const_int(8, false), "vo")
-                .or_llvm_err()?;
-            let vp = unsafe { builder.build_gep(i8_type, cb, &[vo], "vp").or_llvm_err()? };
-            builder.build_store(vp, value).or_llvm_err()?;
-            let nc = builder
-                .build_int_add(cnt, i64_type.const_int(1, false), "nc")
-                .or_llvm_err()?;
-            builder.build_store(cnt_p, nc).or_llvm_err()?;
-            builder.build_return(None).or_llvm_err()?;
-        }
-        let end_fn = self.get_or_declare_fn(
-            module,
-            "verum_ctx_end",
-            void_type.fn_type(&[i64_type.into()], false),
-        );
-        if end_fn.count_basic_blocks() == 0 {
-            let builder = ctx.create_builder();
-            let entry = ctx.append_basic_block(end_fn, "entry");
-            builder.position_at_end(entry);
-            let ec = builder
-                .build_call(get_ctx_fn, &[], "ctx")
-                .or_llvm_err()?
-            .basic_value_or("expected basic value")?
-                .into_pointer_value();
-            let i8_type = ctx.i8_type();
-            // SAFETY: GEP into the execution context at offset 2048 (context bindings count) for ctx_end
-            let cnt_p = unsafe {
-                builder
-                    .build_gep(i8_type, ec, &[i64_type.const_int(2048, false)], "cnt_p")
-                    .or_llvm_err()?
-            };
-            let cnt = builder
-                .build_load(i64_type, cnt_p, "cnt")
-                .or_llvm_err()?
-                .into_int_value();
-            let has = builder
-                .build_int_compare(IntPredicate::SGT, cnt, i64_type.const_zero(), "has")
-                .or_llvm_err()?;
-            let nc = builder
-                .build_int_sub(cnt, i64_type.const_int(1, false), "nc")
-                .or_llvm_err()?;
-            let fc = builder
-                .build_select(has, nc, i64_type.const_zero(), "fc")
-                .or_llvm_err()?;
-            builder.build_store(cnt_p, fc).or_llvm_err()?;
-            builder.build_return(None).or_llvm_err()?;
-        }
-        Ok(())
+        module.link_in_module(ir).map_err(|error| LlvmLoweringError::internal(error.to_string()))
     }
 
     // ========================================================================

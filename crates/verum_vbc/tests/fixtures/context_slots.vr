@@ -1,0 +1,67 @@
+context Counter { fn number() -> Int; }
+type Reading is { value: Int };
+implement Counter for Reading { fn number(&self) -> Int { self.value } }
+fn observe() -> Int using [Counter] { Counter.number() }
+
+fn read_slot(slot: UInt8) -> Int {
+    match ctx_get(slot) {
+        Maybe.Some(pointer) => pointer as Int,
+        Maybe.None => 0,
+    }
+}
+
+fn write_slot(slot: UInt8, value: Int) {
+    ctx_set(slot, unsafe { value as &unsafe Byte });
+}
+
+fn main() -> Int {
+    let side = 17 as UInt8;
+    let typed = 32 as UInt8;
+    let last = 255 as UInt8;
+    if read_slot(side) != 0 || ctx_has(last) { return 1; }
+    write_slot(last, 42);
+    provide Counter = Reading { value: 11 } in {
+        if observe() != 11 || !ctx_has(typed) { return 2; }
+        write_slot(side, 73);
+        provide Counter = Reading { value: 29 } in {
+            if observe() != 29 { return 3; }
+        };
+        if observe() != 11 || read_slot(side) != 73 { return 4; }
+        if ctx_push_frame() is Result.Err(_) { return 5; }
+        match ctx_get(typed) {
+            Maybe.Some(provider) => ctx_set(typed, provider),
+            Maybe.None => return 15,
+        };
+        if observe() != 11 { return 16; }
+        provide Counter = Reading { value: 31 } in {
+            ctx_clear(typed);
+            if ctx_has(typed) { return 17; }
+        };
+        ctx_clear(last);
+        if ctx_has(typed) || ctx_has(last) { return 6; }
+        write_slot(side, 5);
+        ctx_pop_frame();
+        if observe() != 11 || read_slot(last) != 42 || read_slot(side) != 73 { return 7; }
+    };
+    if ctx_has(typed) || read_slot(side) != 73 { return 8; }
+    let mut depth = 1;
+    while depth <= 8 {
+        match ctx_push_frame() {
+            Result.Ok(frame) => if (frame as Int) == 0 { return 9; },
+            Result.Err(_) => return 10,
+        };
+        write_slot(last, depth);
+        depth += 1;
+    }
+    if !(ctx_push_frame() is Result.Err(SysContextError.StackOverflow { depth: 8 })) { return 11; }
+    let mut expected = 8;
+    while expected > 0 {
+        if read_slot(last) != expected { return 12; }
+        ctx_pop_frame();
+        expected -= 1;
+    }
+    if read_slot(last) != 42 { return 13; }
+    ctx_clear(last);
+    ctx_pop_frame();
+    if ctx_has(last) { 14 } else { read_slot(side) }
+}

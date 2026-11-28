@@ -1047,117 +1047,160 @@ impl ExceptionHandlerStack {
 // Context System
 // ============================================================================
 
-/// A scoped context value.
 #[derive(Debug, Clone)]
-pub struct ContextEntry {
-    /// Context type ID.
-    pub ctx_type: u32,
-    /// Context value.
-    pub value: Value,
-    /// Stack depth when this context was provided (for scoping).
-    pub stack_depth: usize,
+enum ContextEntryKind {
+    Lexical,
+    Explicit,
+    Frame { _token: Arc<u8> },
 }
 
-/// Stack of context values for the context system.
+/// A scoped value, an explicitly managed slot, or the boundary of a fork.
+#[derive(Debug, Clone)]
+pub struct ContextEntry {
+    pub ctx_type: u32,
+    pub value: Value,
+    pub stack_depth: usize,
+    kind: ContextEntryKind,
+    present: bool,
+}
+
+impl ContextEntry {
+    fn is_frame(&self) -> bool { matches!(self.kind, ContextEntryKind::Frame { .. }) }
+}
+
+/// Binding order and frame boundaries travel together across suspension.
 #[derive(Debug, Clone, Default)]
 pub struct ContextStack {
-    /// Active context entries.
-    entries: Vec<ContextEntry>,
+    entries: verum_common::List<ContextEntry>,
 }
 
 impl ContextStack {
-    /// Creates a new empty context stack.
-    pub fn new() -> Self {
-        Self {
-            entries: Vec::new(),
-        }
-    }
+    pub fn new() -> Self { Self::default() }
 
-    /// Provides a context value, pushing it onto the stack.
     pub fn provide(&mut self, ctx_type: u32, value: Value, stack_depth: usize) {
         self.entries.push(ContextEntry {
-            ctx_type,
-            value,
-            stack_depth,
+            ctx_type, value, stack_depth, kind: ContextEntryKind::Lexical, present: true,
         });
     }
 
-    /// Gets the most recent context value of a given type.
+    pub(crate) fn provide_explicit(&mut self, ctx_type: u32, value: Value, stack_depth: usize) {
+        self.entries.push(ContextEntry {
+            ctx_type, value, stack_depth, kind: ContextEntryKind::Explicit, present: true,
+        });
+    }
+
+    fn frame_start(&self) -> usize {
+        self.entries.iter().rposition(ContextEntry::is_frame).map_or(0, |index| index + 1)
+    }
+
     pub fn get(&self, ctx_type: u32) -> Option<Value> {
-        self.entries
-            .iter()
-            .rev()
-            .find(|e| e.ctx_type == ctx_type)
-            .map(|e| e.value)
+        self.entries.iter().rev()
+            .find(|entry| !entry.is_frame() && entry.ctx_type == ctx_type)
+            .and_then(|entry| entry.present.then_some(entry.value))
     }
 
-    /// Ends a context scope, removing all entries at or above the given stack depth.
-    pub fn end_scope(&mut self, stack_depth: usize) {
-        self.entries.retain(|e| e.stack_depth < stack_depth);
+    pub(crate) fn set_slot(&mut self, ctx_type: u32, value: Value, depth: usize) {
+        let start = self.frame_start();
+        if let Some(entry) = self.entries.as_mut_slice()[start..].iter_mut().rev()
+            .find(|entry| entry.ctx_type == ctx_type)
+            .filter(|entry| entry.stack_depth == depth)
+        {
+            entry.value = value;
+            entry.present = true;
+        } else {
+            self.provide_explicit(ctx_type, value, depth);
+        }
     }
 
-    /// Pops the most recently provided context entry.
-    ///
-    /// Used by `CtxEnd` to close a `provide X = v in { body }` block. CtxProvide
-    /// and CtxEnd come in matched pairs for scoped provides, so LIFO pop is
-    /// correct even when nested provides occur in the same stack frame.
-    pub fn pop_one(&mut self) {
-        self.entries.pop();
+    pub(crate) fn clear_slot(&mut self, ctx_type: u32) {
+        let start = self.frame_start();
+        let mut visited = 0;
+        self.entries.retain_mut(|entry| {
+            let current = visited >= start;
+            visited += 1;
+            if !current || entry.ctx_type != ctx_type { return true; }
+            // Retain the delimiter of a cleared lexical binding for CtxEnd.
+            entry.present = false;
+            !matches!(entry.kind, ContextEntryKind::Explicit)
+        });
+        if start > 0 {
+            // A cleared lexical node can end before this frame. Keep its
+            // parent masked independently until the matching frame pop.
+            self.entries.push(ContextEntry {
+                ctx_type, value: Value::nil(), stack_depth: 0,
+                kind: ContextEntryKind::Explicit, present: false,
+            });
+        }
     }
 
-    /// Removes the topmost entry whose `ctx_type` matches.  Returns true
-    /// if an entry was removed.  Used by the V-LLSI raw intrinsic
-    /// `__ctx_end_raw(type_id)` from `core.sys.context_ops`, which
-    /// addresses the entry by type_id rather than by stack depth.
-    /// Depth of the topmost entry for `ctx_type`, if any (T0317 —
-    /// lets the flat-slot set distinguish same-frame overwrite from
-    /// an outer entry that must be SHADOWED, not destroyed).
-    pub fn top_depth_by_type(&self, ctx_type: u32) -> Option<usize> {
-        self.entries
-            .iter()
-            .rev()
-            .find(|e| e.ctx_type == ctx_type)
-            .map(|e| e.stack_depth)
+    pub(crate) fn push_context_frame(&mut self) -> Option<usize> {
+        if self.entries.iter().filter(|entry| entry.is_frame()).count() >= crate::module::CTX_FRAME_LIMIT {
+            return None;
+        }
+        let token = Arc::new(0u8);
+        let address = Arc::as_ptr(&token) as usize;
+        self.entries.push(ContextEntry {
+            ctx_type: 0, value: Value::nil(), stack_depth: 0,
+            kind: ContextEntryKind::Frame { _token: token }, present: false,
+        });
+        Some(address)
     }
 
-    /// Removes the most recent entry of the given context type.
-    pub fn end_by_type(&mut self, ctx_type: u32) -> bool {
-        if let Some(idx) = self.entries.iter().rposition(|e| e.ctx_type == ctx_type) {
-            self.entries.remove(idx);
+    pub(crate) fn pop_context_frame(&mut self) -> bool {
+        if let Some(index) = self.entries.iter().rposition(ContextEntry::is_frame) {
+            self.entries.truncate(index);
             true
         } else {
             false
         }
     }
 
-    /// Clears all context entries.
-    pub fn clear(&mut self) {
-        self.entries.clear();
+    pub fn end_scope(&mut self, stack_depth: usize) {
+        self.entries.retain(|entry| entry.stack_depth < stack_depth);
     }
 
-    /// Returns the number of active context entries.
-    pub fn len(&self) -> usize {
-        self.entries.len()
+    /// An explicit slot or a fork boundary cannot close a lexical provide.
+    pub fn pop_one(&mut self) {
+        self.end_lexical(None);
     }
 
-    /// Returns true if there are no active context entries.
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
+    pub(crate) fn end_lexical_by_type(&mut self, slot: u32) { self.end_lexical(Some(slot)); }
+
+    fn end_lexical(&mut self, slot: Option<u32>) {
+        let start = self.frame_start();
+        if let Some(index) = self.entries.as_slice()[start..].iter().rposition(|entry|
+            matches!(entry.kind, ContextEntryKind::Lexical) && slot.is_none_or(|slot| slot == entry.ctx_type))
+        {
+            self.entries.remove(start + index);
+        }
     }
 
-    /// Clones all context entries (for generator state saving).
-    ///
-    /// Generator state machine: saves/restores context entries on yield/resume for correct DI scoping
-    pub fn clone_entries(&self) -> Vec<ContextEntry> {
-        self.entries.clone()
+    pub fn top_depth_by_type(&self, ctx_type: u32) -> Option<usize> {
+        self.entries.iter().rev()
+            .find(|entry| !entry.is_frame() && entry.ctx_type == ctx_type)
+            .filter(|entry| entry.present)
+            .map(|entry| entry.stack_depth)
     }
 
-    /// Restores context entries from a saved state (for generator resumption).
-    ///
-    /// Generator state machine: saves/restores context entries on yield/resume for correct DI scoping
-    pub fn restore_entries(&mut self, entries: Vec<ContextEntry>) {
-        self.entries = entries;
+    pub fn end_by_type(&mut self, ctx_type: u32) -> bool {
+        let start = self.frame_start();
+        if let Some(index) = self.entries.as_slice()[start..].iter().rposition(|entry| entry.ctx_type == ctx_type) {
+            self.entries.remove(start + index);
+            true
+        } else {
+            false
+        }
     }
+
+    pub fn clear(&mut self) { self.entries.clear(); }
+
+    pub fn len(&self) -> usize { self.entries.iter().filter(|entry| entry.present).count() }
+
+    pub fn is_empty(&self) -> bool { !self.entries.iter().any(|entry| entry.present) }
+
+    pub fn clone_entries(&self) -> Vec<ContextEntry> { self.entries.clone().into() }
+
+    pub fn restore_entries(&mut self, entries: Vec<ContextEntry>) { self.entries = entries.into(); }
 
     // =========================================================================
     // PrecisionMode Context Helpers

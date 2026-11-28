@@ -1,44 +1,6 @@
-//! CTX-STORE-AUTHORITY-1 — slot-flat view over the ONE `ContextStack`.
-//!
-//! `core/sys/common.vr` exposes the user-callable context-slot surface
-//! (`ctx_get` / `ctx_set` / `ctx_clear`).  Under the Tier-0 interpreter
-//! those functions delegate to the bodiless `@intrinsic` declarations
-//! `__ctx_slot_get_raw` / `__ctx_slot_set_raw` / `__ctx_slot_clear_raw`
-//! (plus the tier oracle `__ctx_store_tier0_raw`), which the by-name
-//! dispatch in `calls.rs::try_dispatch_intrinsic_by_name` routes to the
-//! helpers below.  The helpers operate on `state.context_stack` — the
-//! SAME store the `CtxProvide` / `CtxGet` / `CtxEnd` opcode handlers
-//! (`context.rs`, opcodes 0xB0-0xB2) use — so `provide`/`using` and the
-//! user-callable surface can never drift.
-//!
-//! Semantics are slot-flat, mirroring the Tier-1 platform TLS slot
-//! table (`core/sys/<os>/tls.vr`), where each slot holds exactly one
-//! value:
-//!   * set    — replace the topmost entry for the slot, else push one
-//!   * clear  — remove EVERY entry for the slot
-//!   * get    — topmost entry's value, or 0 when empty
-//!
-//! Key namespace: the slot id shares the u32 ctx_type namespace the
-//! opcodes use — intentionally.  At Tier-1 the AOT `CtxGet` lowering
-//! maps its ctx_type through the dense per-module slot table
-//! (CTX-AOT-INCOHERENCE-1 leg 2, `FunctionContext::ctx_dense_slot` in
-//! `verum_codegen/src/llvm/context.rs`: raw string-table ids are ≥ 256
-//! under the baked stdlib and can never fit the TLS slot table) and
-//! passes the DENSE slot as the `env_ctx_get(slot_id)` argument.  On
-//! Tier-0 the opcode store still keys raw ctx_type string-ids; keying
-//! the interpreter store by the same dense table is the remaining
-//! CTX-STORE-AUTHORITY-1 unification step.
-//!
-//! History: this module previously held `try_intercept_ctx_runtime`, a
-//! pre-gate intercept for the V-LLSI `__ctx_*_raw` / `__defer_*_raw`
-//! intrinsics.  That path was superseded by the widened
-//! `bytecode_length` gate + per-name match arms inside
-//! `try_dispatch_intrinsic_by_name` (see the `__ctx_get_raw` /
-//! `__defer_push_raw` arms in `calls.rs`), the module declaration was
-//! dropped, and the file was orphaned.  The duplicate intercept has
-//! been removed — `calls.rs` arms are the single dispatch authority;
-//! this module now carries only the slot-store semantics (pure
-//! functions, unit-tested below).
+//! Numeric slot operations on the VM context stack shared by lexical providers and
+//! explicit runtime frames. A child frame inherits its parent. Writes and clears
+//! apply to the current frame until it is popped.
 
 use super::super::super::state::ContextStack;
 use crate::value::Value;
@@ -85,7 +47,7 @@ fn slot_key(slot: i64) -> Option<u32> {
 /// Slot read: topmost value for the slot, or 0 when empty / out of range.
 pub(in super::super) fn ctx_slot_get(stack: &ContextStack, slot: i64) -> i64 {
     match slot_key(slot) {
-        Some(key) => stack.get(key).map(|v| v.as_i64()).unwrap_or(0),
+        Some(key) => stack.get(key).map(|value| value.as_integer_compatible()).unwrap_or(0),
         None => 0,
     }
 }
@@ -98,26 +60,23 @@ pub(in super::super) fn ctx_slot_set(
     value: i64,
     stack_depth: usize,
 ) {
+    ctx_slot_write(stack, slot, Value::from_i64(value), stack_depth);
+}
+
+pub(in super::super) fn ctx_slot_write(stack: &mut ContextStack, slot: i64, value: Value, depth: usize) {
     if let Some(key) = slot_key(slot) {
-        // Depth-aware set (T0317 leg 2): replace only an entry this SAME
-        // frame provided; an OUTER frame's entry is shadowed by a push,
-        // and the frame-return end_scope (leg 1) restores it. The old
-        // end_by_type-then-provide destroyed the outer value — the exact
-        // divergence the ctx_nested_provide_pins encode (the opcode
-        // CtxProvide/CtxEnd path was always proper LIFO).
-        if stack.top_depth_by_type(key) == Some(stack_depth) {
-            stack.end_by_type(key);
+        if value.try_as_i64() == Some(0) {
+            stack.clear_slot(key);
+        } else {
+            stack.set_slot(key, value, depth);
         }
-        stack.provide(key, Value::from_i64(value), stack_depth);
     }
 }
 
-/// Slot clear: remove EVERY entry for the slot (flat-slot semantics —
-/// after clear the slot reads as empty regardless of provide nesting,
-/// matching the Tier-1 TLS `ctx_clear` which zeroes the slot outright).
+/// Hide this slot throughout the current frame, including any inherited entry.
 pub(in super::super) fn ctx_slot_clear(stack: &mut ContextStack, slot: i64) {
     if let Some(key) = slot_key(slot) {
-        while stack.end_by_type(key) {}
+        stack.clear_slot(key);
     }
 }
 

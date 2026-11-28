@@ -5304,7 +5304,17 @@ pub enum SysSubOpcode {
     ArgumentBytes = 0x34,
     /// Owned bytes of the current process environment, each entry terminated by NUL.
     EnvironmentBytes = 0x35,
-    // 0x36-0x3F  RESERVED for environment / process metadata.
+    /// Read the visible binding of a numeric context slot, or zero if absent.
+    ContextSlotGet = 0x36,
+    /// Set a context slot with an explicit lifetime.
+    ContextSlotSet = 0x37,
+    /// Clear a context slot within the current inherited frame.
+    ContextSlotClear = 0x38,
+    /// Fork the current context, yielding a live token or zero on overflow.
+    ContextFramePush = 0x39,
+    /// Restore the enclosing context frame, returning whether one was present.
+    ContextFramePop = 0x3a,
+    // 0x3B-0x3F  RESERVED for execution environment operations.
     // 0x40-0xFF  RESERVED.
 }
 
@@ -5329,6 +5339,21 @@ impl SysSubOpcode {
             0x33 => Some(Self::ArgumentCount),
             0x34 => Some(Self::ArgumentBytes),
             0x35 => Some(Self::EnvironmentBytes),
+            0x36 => Some(Self::ContextSlotGet),
+            0x37 => Some(Self::ContextSlotSet),
+            0x38 => Some(Self::ContextSlotClear),
+            0x39 => Some(Self::ContextFramePush),
+            0x3a => Some(Self::ContextFramePop),
+            _ => None,
+        }
+    }
+
+    /// Register count including the destination of a context-store operation.
+    pub fn context_register_count(self) -> Option<usize> {
+        match self {
+            Self::ContextSlotGet | Self::ContextSlotClear => Some(2),
+            Self::ContextSlotSet => Some(3),
+            Self::ContextFramePush | Self::ContextFramePop => Some(1),
             _ => None,
         }
     }
@@ -17383,13 +17408,18 @@ mod tests {
         );
         assert_eq!(
             sweep(SysSubOpcode::from_byte, SysSubOpcode::to_byte),
-            17,
+            22,
             "SysSubOpcode variant count drift"
         );
         for (byte, operation) in [
             (0x33, SysSubOpcode::ArgumentCount),
             (0x34, SysSubOpcode::ArgumentBytes),
             (0x35, SysSubOpcode::EnvironmentBytes),
+            (0x36, SysSubOpcode::ContextSlotGet),
+            (0x37, SysSubOpcode::ContextSlotSet),
+            (0x38, SysSubOpcode::ContextSlotClear),
+            (0x39, SysSubOpcode::ContextFramePush),
+            (0x3a, SysSubOpcode::ContextFramePop),
         ] {
             assert_eq!(SysSubOpcode::from_byte(byte), Some(operation));
             assert_eq!(operation.to_byte(), byte);
