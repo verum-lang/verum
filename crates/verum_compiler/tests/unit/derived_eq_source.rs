@@ -82,6 +82,56 @@ fn structural_eq_checks_and_executes_the_declared_components() {
 }
 
 #[test]
+fn derived_comparison_restricts_a_read_only_relation_to_refined_fields() {
+    let source = format!(
+        r#"{PROTOCOLS}
+        implement PartialEq for Int {{ fn eq(&self, other:&Int)->Bool {{ *self == *other }} }}
+        implement Eq for Int {{}}
+        @derive(Eq) type Quantity is {{ value:Int {{ >= 1 }} }};
+        @derive(Eq) type Expiry is Infinite | Seconds(Int {{ >= 1 }});
+        fn compare<T:Eq>(a:&T,b:&T)->Bool {{ a.eq(b) }}
+        fn probe()->Bool {{
+            let qty = Quantity {{value:2}};
+            compare(&qty, &Quantity {{value:2}}) && !compare(&qty, &Quantity {{value:3}})
+                && compare(&Expiry.Seconds(2), &Expiry.Seconds(2))
+                && !compare(&Expiry.Seconds(2), &Expiry.Seconds(3))
+                && !compare(&Expiry.Infinite, &Expiry.Seconds(2))
+        }}"#
+    );
+    let mut session = crate::Session::new(crate::CompilerOptions::default());
+    let file = session
+        .load_source_string(&source, "refined_equality.vr".into())
+        .unwrap();
+    let mut pipeline = crate::CompilationPipeline::new_interpreter(&mut session);
+    let ast = pipeline.phase_parse(file).unwrap();
+    let module = pipeline
+        .compile_test_unit_to_vbc(ast)
+        .expect("both generated contracts");
+    let wire = verum_vbc::serialize::serialize_module(&module).unwrap();
+    let restored = verum_vbc::deserialize::deserialize_module(&wire).unwrap();
+    for module in [module, restored.into()] {
+        let entry = module
+            .find_function_by_name("core.base.protocols.probe")
+            .unwrap();
+        let mut vm = Interpreter::try_new_validated(module).unwrap();
+        assert_eq!(
+            vm.execute_function(entry).unwrap().try_as_bool(),
+            Some(true)
+        );
+    }
+}
+
+#[test]
+fn refined_fields_do_not_create_totality_evidence_for_partial_relations() {
+    check_unproved_component(
+        "Eq",
+        "module app; mount core.base.protocols.PartialEq;
+        implement PartialEq for Float { fn eq(&self, other:&Float)->Bool { *self == *other } }
+        @derive(Eq) public type Wrap is (Float { != 7.0 });",
+    );
+}
+
+#[test]
 fn structural_eq_rejects_a_partial_only_field_in_the_owner_and_an_importer() {
     check_unproved_component(
         "Eq",

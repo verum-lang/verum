@@ -144,6 +144,12 @@ impl VbcCodegen {
             && let Some(result) = self.ctx.declared_result_types.get(&expr.span) {
             return result.clone();
         }
+        // A borrow of an enum constructor must retain the same declared payload
+        // and generic witnesses as the top-level expression, even without a register.
+        if matches!(&expr.kind, ExprKind::Field { .. } | ExprKind::MethodCall { .. })
+            && let Some(owner) = self.constructor_declaration(expr, None, None, depth + 1) {
+            return Some(owner);
+        }
         let nested = |value, emitted| self.copy_source_type_inner(value, emitted, depth + 1);
         match &expr.kind {
             ExprKind::InterpolatedString { .. }

@@ -7,8 +7,8 @@ use super::{
 use verum_ast::decl::{Item, ItemKind, Visibility};
 use verum_ast::pattern::{MatchArm, Pattern, PatternKind};
 use verum_ast::ty::{
-    GenericParam, GenericParamKind, Ident, Path, Type, TypeBound, TypeBoundKind, TypeKind,
-    WhereClause, WherePredicate, WherePredicateKind,
+    GenericArg, GenericParam, GenericParamKind, Ident, Path, Type, TypeBound, TypeBoundKind,
+    TypeKind, WhereClause, WherePredicate, WherePredicateKind,
 };
 use verum_ast::{BinOp, Block, Expr, ExprKind, Span, Stmt, UnOp};
 use verum_common::{Heap, List};
@@ -66,6 +66,15 @@ impl DeriveMacro for DeriveEq {
     }
 }
 
+/// Comparing shared borrows only observes a field. Restrict the carrier's
+/// relation to its refinement, retaining nominal wrappers and every nested type.
+fn comparison_carrier(mut ty: &Type) -> &Type {
+    while let TypeKind::Refined { base, .. } = &ty.kind {
+        ty = base;
+    }
+    ty
+}
+
 // Importers consult both declarations before the source owner is checked.
 // Require equality of the stored types, including wrappers that can implement
 // equality independently of their type arguments.
@@ -82,7 +91,10 @@ fn component_conditions(ctx: &DeriveContext, protocol: &str) -> Option<WhereClau
         .iter()
         .chain(info.variants.iter().flat_map(|variant| &variant.fields))
     {
-        predicates.push(field_obligation(field.ty.clone(), protocol));
+        predicates.push(field_obligation(
+            comparison_carrier(&field.ty).clone(),
+            protocol,
+        ));
     }
     (!predicates.is_empty()).then(|| WhereClause::new(predicates, ctx.span))
 }
@@ -126,11 +138,11 @@ fn borrow(value: Expr) -> Expr {
     )
 }
 
-fn compare(helper: &str, left: Expr, right: Expr, span: Span) -> Expr {
+fn compare(helper: &str, field: &Type, left: Expr, right: Expr, span: Span) -> Expr {
     Expr::new(
         ExprKind::Call {
             func: Heap::new(ident_expr(helper, span)),
-            type_args: List::new(),
+            type_args: List::from_iter([GenericArg::Type(comparison_carrier(field).clone())]),
             args: List::from_iter([left, right]),
         },
         span,
@@ -212,9 +224,11 @@ fn sum_comparison(ctx: &DeriveContext, helper: &str) -> Expr {
             let fields = left_fields
                 .iter()
                 .zip(&right_fields)
-                .map(|(a, b)| {
+                .zip(&variant.fields)
+                .map(|((a, b), field)| {
                     compare(
                         helper,
+                        &field.ty,
                         ident_expr(a.as_str(), a.span),
                         ident_expr(b.as_str(), b.span),
                         a.span,
@@ -266,6 +280,7 @@ fn comparison_impl(ctx: &DeriveContext, total: bool) -> Item {
                 let span = field.ty.span;
                 compare(
                     &name,
+                    &field.ty,
                     borrow(field.access_on_self(span)),
                     borrow(field.access_on_other(span)),
                     span,

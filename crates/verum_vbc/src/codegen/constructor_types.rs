@@ -180,6 +180,10 @@ impl VbcCodegen {
             return None;
         }
         let expr = Self::normalized_place(expr);
+        if let ExprKind::Field { expr: receiver, .. } | ExprKind::MethodCall { receiver, .. } = &expr.kind
+            && Self::named_place_binding(receiver).is_some_and(|name| self.is_value_receiver_binding(name)) {
+            return None;
+        }
         let (owner, arguments) = match &expr.kind {
             ExprKind::Record {
                 path,
