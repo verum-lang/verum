@@ -82,6 +82,7 @@ module core.net.weft.metrics_otlp;
 
 mount core.collections.list.{List};
 mount core.collections.map.{Map};
+mount core.metrics.histogram.HistogramSnapshot;
 mount core.protobuf.wire.{
     WireType, write_tag, write_varint, write_bytes, write_string as write_utf8,
     write_fixed64, write_float64,
@@ -90,7 +91,7 @@ mount core.time.{Instant, Duration, SystemTime};
 mount core.async.task;
 mount core.async.timer;
 mount core.async.cancellation.{CancellationToken};
-mount core.sync.atomic.{AtomicBool, MemoryOrdering};
+mount core.sync.atomic.{AtomicBool, AtomicInt, MemoryOrdering};
 mount core.net.weft.metrics.{WeftMetricsRegistry, WeftCounter, WeftHistogram};
 
 // =============================================================================
@@ -173,11 +174,11 @@ public type OtlpExporter is {
     cancel:     Shared<AtomicBool>,
     /// Strict-monotonic counter of attempted pushes — observability
     /// of the exporter itself.
-    pushes:     Shared<core.sync.atomic.AtomicInt>,
+    pushes:     Shared<AtomicInt>,
     /// Pushes that returned 2xx.
-    pushes_ok:  Shared<core.sync.atomic.AtomicInt>,
+    pushes_ok:  Shared<AtomicInt>,
     /// Last push wall-clock millis (0 when never pushed).
-    last_ok_ms: Shared<core.sync.atomic.AtomicInt>,
+    last_ok_ms: Shared<AtomicInt>,
 };
 
 implement OtlpExporter {
@@ -186,9 +187,9 @@ implement OtlpExporter {
             cfg:        cfg,
             registry:   registry,
             cancel:     Shared.new(AtomicBool.new(false)),
-            pushes:     Shared.new(core.sync.atomic.AtomicInt.new(0)),
-            pushes_ok:  Shared.new(core.sync.atomic.AtomicInt.new(0)),
-            last_ok_ms: Shared.new(core.sync.atomic.AtomicInt.new(0)),
+            pushes:     Shared.new(AtomicInt.new(0)),
+            pushes_ok:  Shared.new(AtomicInt.new(0)),
+            last_ok_ms: Shared.new(AtomicInt.new(0)),
         }
     }
 
@@ -298,16 +299,16 @@ implement OtlpExporter {
         let counters = self.registry.counter_snapshot();
         let mut ci: Int = 0;
         while ci < counters.len() {
-            let (name, value) = &counters[ci];
-            let m = encode_counter_metric(name, *value, time_unix_nano);
+            let metric = &counters[ci];
+            let m = encode_counter_metric(&metric.0, metric.1, time_unix_nano);
             write_tag_len(&mut sm, 2, &m);
             ci = ci + 1;
         }
         let histograms = self.registry.histogram_snapshot();
         let mut hi: Int = 0;
         while hi < histograms.len() {
-            let (name, snap) = &histograms[hi];
-            let m = encode_histogram_metric(name, snap, time_unix_nano);
+            let metric = &histograms[hi];
+            let m = encode_histogram_metric(&metric.0, &metric.1, time_unix_nano);
             write_tag_len(&mut sm, 2, &m);
             hi = hi + 1;
         }
@@ -456,13 +457,13 @@ fn encode_histogram_data_point(snap: &OtlpHistogramSnapshot, time_unix_nano: UIn
     write_tag(&mut dp, 3, WireType.Fixed64);
     write_fixed64(&mut dp, time_unix_nano);
     write_tag(&mut dp, 4, WireType.Fixed64);
-    write_fixed64(&mut dp, snap.total as UInt64);
+    write_fixed64(&mut dp, snap.total);
     write_tag(&mut dp, 5, WireType.Fixed64);
     write_float64(&mut dp, snap.sum_ms as Float);
 
     let mut counts: List<Byte> = [];
     for count in snap.bucket_counts.iter() {
-        write_fixed64(&mut counts, *count as UInt64);
+        write_fixed64(&mut counts, *count);
     }
     write_tag_len(&mut dp, 6, &counts);
 
@@ -480,7 +481,28 @@ fn encode_histogram_data_point(snap: &OtlpHistogramSnapshot, time_unix_nano: UIn
 
 public type OtlpHistogramSnapshot is {
     bounds_ms:     List<Int>,
-    bucket_counts: List<Int>,
-    total:         Int,
+    bucket_counts: List<UInt64>,
+    total:         UInt64,
     sum_ms:        Int,
 };
+
+implement OtlpHistogramSnapshot {
+    public(in super.metrics) fn from_milliseconds(distribution: &HistogramSnapshot, sum_ms: Int) -> OtlpHistogramSnapshot {
+        let limits = distribution.bounds();
+        let cumulative = distribution.counts();
+        let mut bounds_ms: List<Int> = [];
+        let mut bucket_counts: List<UInt64> = [];
+        let mut previous: UInt64 = 0;
+        let mut i = 0;
+        while i < limits.len() {
+            bounds_ms.push(limits[i] as Int);
+            let count = cumulative[i];
+            bucket_counts.push(count - previous);
+            previous = count;
+            i = i + 1;
+        }
+        let total = distribution.count();
+        bucket_counts.push(total - previous);
+        OtlpHistogramSnapshot { bounds_ms, bucket_counts, total, sum_ms }
+    }
+}

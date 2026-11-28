@@ -6,17 +6,9 @@
 // =============================================================================
 //
 
-// A minimal metrics registry that records per-request counters and
-// latency histograms in a Prometheus-compatible shape. Phase 1 exports
-// a text endpoint rendering (same as `/metrics` in a Prometheus job);
-// OTLP push and exemplars arrive in phase 5 (§7.7).
-//
-
-// The registry itself is thread-safe via a single Mutex. Hot paths (the
-// MetricsHandler below) take the lock only to update counters; for the
-// baseline 4 metrics that each handler touches this is uncontended in
-// practice. A future lock-free per-shard variant is straightforward.
-//
+// Request counters and millisecond latency histograms are exported through
+// Prometheus text and OTLP. The registry synchronizes instrument lookup;
+// each returned instrument owns its observations.
 
 // =============================================================================
 
@@ -28,34 +20,23 @@
 module core.net.weft.metrics;
 
 mount core.text.builder.{TextBuilder};
+mount core.base.protocols.DerefMut;
 mount core.collections.map.{Map};
 mount core.collections.list.{List};
 mount core.time.{Instant};
+mount core.metrics.histogram.{Histogram, HistogramBuckets, HistogramSnapshot};
+mount core.net.weft.metrics_otlp.OtlpHistogramSnapshot;
 mount core.sync.Mutex;
 mount core.sync.atomic.{AtomicInt, MemoryOrdering};
 mount core.net.http.{Response};
 mount core.net.weft.service.{Layer};
 mount core.net.weft.handler.{WeftRequest, Handler};
-mount core.net.weft.error.{WeftError};
 
 // =============================================================================
 // Metric types
 // =============================================================================
 
-/// Lock-free counter — single AtomicInt with `Relaxed` ordering on
-/// the hot path. Pre-fix (#319) used `Mutex<Int>`, which forced
-/// every `incr()` to take a system mutex (one cmpxchg + a syscall
-/// in the contended path). Post-fix every increment is a single
-/// fetch_add, ~2 ns on modern x86 / 10 ns on aarch64 — three
-/// orders of magnitude better than the locked path under
-/// contention.
-///
-
-/// `Relaxed` is sufficient: the metric value is read by Prometheus
-/// scrape (eventual-consistency) and the increments don't need
-/// happens-before with surrounding work. If a future scenario
-/// needs a coherent multi-counter snapshot, a stronger ordering
-/// can be added on-demand.
+/// Integral counter exported as an OTLP monotonic sum.
 public type WeftCounter is {
     inner: AtomicInt,
 };
@@ -64,11 +45,19 @@ implement WeftCounter {
     public fn new() -> WeftCounter { WeftCounter { inner: AtomicInt.new(0) } }
 
     public fn incr(&self) {
-        let _ = self.inner.fetch_add(1, MemoryOrdering.Relaxed);
+        self.add(1);
     }
 
     public fn add(&self, n: Int) {
-        let _ = self.inner.fetch_add(n, MemoryOrdering.Relaxed);
+        assert(n >= 0, "Weft counter increments must be nonnegative");
+        let mut current = self.inner.load(MemoryOrdering.Relaxed);
+        loop {
+            let next = current.checked_add(n).expect("Weft counter exceeds Int");
+            match self.inner.compare_exchange(current, next, MemoryOrdering.Relaxed, MemoryOrdering.Relaxed) {
+                Result.Ok(_) => return,
+                Result.Err(observed) => { current = observed; }
+            }
+        }
     }
 
     public fn value(&self) -> Int {
@@ -76,68 +65,39 @@ implement WeftCounter {
     }
 }
 
-/// Fixed-bucket histogram. The default set of bucket boundaries is the
-/// Prometheus client default (in ms — SLI-style), adjusted for web
-/// handlers: 5 15 30 60 120 250 500 1000 2500 5000 10000.
-///
+const LATENCY_BOUNDS_MS: [Float; 11] = [
+    5.0, 15.0, 30.0, 60.0, 120.0, 250.0, 500.0, 1000.0, 2500.0, 5000.0, 10000.0,
+];
 
-/// Pre-fix (#319) `count` and `sum_ms` were each `Mutex<Int>` and
-/// `counts` was `Mutex<List<Int>>` — a single observe_ms() took
-/// THREE separate lock-acquire-release cycles. Worse, a reader
-/// observing between the count-lock and sum_ms-lock could see
-/// inconsistent ratios (count > sum_ms / count). Post-fix
-/// `count` and `sum_ms` are AtomicInt (single fetch_add each, no
-/// lock contention). `counts` retains a Mutex<List<Int>> for now
-/// because Verum's List<AtomicInt> ergonomics are not yet
-/// optimised — that follow-up is tracked but the high-impact
-/// per-observation cost is already eliminated by the count+sum
-/// atomic split.
-public type WeftHistogram is {
-    bounds_ms: List<Int>,
-    counts: Mutex<List<Int>>,
-    sum_ms: AtomicInt,
-    count: AtomicInt,
+type LatencyObservations is {
+    distribution: Histogram,
+    sum_ms: Int,
 };
+
+/// Records integer milliseconds. An observation and its snapshot share one lock
+/// so the total and every bucket describe the same set of requests.
+public type WeftHistogram is { observations: Mutex<LatencyObservations> };
 
 implement WeftHistogram {
     public fn new() -> WeftHistogram {
-        let bounds = List.from([5, 15, 30, 60, 120, 250, 500, 1000, 2500, 5000, 10000]);
-        let mut zero = List.with_capacity(bounds.len() + 1);
-        let mut i: Int = 0;
-        while i <= bounds.len() { zero.push(0); i = i + 1; }
-        WeftHistogram {
-            bounds_ms: bounds,
-            counts: Mutex.new(zero),
-            sum_ms: AtomicInt.new(0),
-            count: AtomicInt.new(0),
-        }
+        let buckets = HistogramBuckets.custom(&LATENCY_BOUNDS_MS[..]);
+        WeftHistogram { observations: Mutex.new(LatencyObservations {
+            distribution: Histogram.new(buckets), sum_ms: 0,
+        }) }
     }
 
     public fn observe_ms(&self, ms: Int) {
-        // Lock-free count + sum updates. Two atomic fetch_adds
-        // (Relaxed) instead of two mutex lock-release cycles.
-        let _ = self.count.fetch_add(1, MemoryOrdering.Relaxed);
-        let _ = self.sum_ms.fetch_add(ms, MemoryOrdering.Relaxed);
-        // Bucket update still requires a brief Mutex (List<Int>
-        // doesn't yet have an atomic-element API). The lock is
-        // held only for the bucket-find + single increment — no
-        // I/O, no awaits. Tracked as a follow-up for
-        // [AtomicInt; N] migration.
-        let mut cs = self.counts.lock().unwrap_or_else(|p| p.into_inner());
-        let mut placed = false;
-        let mut i: Int = 0;
-        while i < self.bounds_ms.len() {
-            if ms <= self.bounds_ms[i] {
-                cs[i] = cs[i] + 1;
-                placed = true;
-                break;
-            }
-            i = i + 1;
-        }
-        if !placed {
-            let last = cs.len() - 1;
-            cs[last] = cs[last] + 1;
-        }
+        assert(ms >= 0, "Request durations must be nonnegative");
+        let mut guard = self.observations.lock().unwrap_or_else(|p| p.into_inner());
+        let observations: &mut LatencyObservations = guard.deref_mut();
+        let sum = observations.sum_ms.checked_add(ms).expect("Weft duration sum exceeds Int");
+        observations.distribution.observe(ms as Float);
+        observations.sum_ms = sum;
+    }
+
+    fn snapshot(&self) -> (HistogramSnapshot, Int) {
+        let observations = self.observations.lock().unwrap_or_else(|p| p.into_inner());
+        (observations.distribution.snapshot(), observations.sum_ms)
     }
 }
 
@@ -160,26 +120,28 @@ implement WeftMetricsRegistry {
 
     /// Get-or-create a counter with the given name.
     public fn counter(&self, name: &Text) -> Shared<WeftCounter> {
-        let mut m = self.counters.lock().unwrap_or_else(|p| p.into_inner());
-        match m.get(name) {
-            Maybe.Some(c) => c.clone(),
+        let mut guard = self.counters.lock().unwrap_or_else(|p| p.into_inner());
+        let instruments: &mut Map<Text, Shared<WeftCounter>> = guard.deref_mut();
+        match instruments.get_key_value(name) {
+            Maybe.Some((_, instrument)) => instrument.clone(),
             Maybe.None => {
-                let c = Shared.new(WeftCounter.new());
-                m.insert(name.clone(), c.clone());
-                c
+                let instrument = Shared.new(WeftCounter.new());
+                instruments.insert(name.clone(), instrument.clone());
+                instrument
             }
         }
     }
 
     /// Get-or-create a histogram with the given name.
     public fn histogram(&self, name: &Text) -> Shared<WeftHistogram> {
-        let mut m = self.histograms.lock().unwrap_or_else(|p| p.into_inner());
-        match m.get(name) {
-            Maybe.Some(h) => h.clone(),
+        let mut guard = self.histograms.lock().unwrap_or_else(|p| p.into_inner());
+        let instruments: &mut Map<Text, Shared<WeftHistogram>> = guard.deref_mut();
+        match instruments.get_key_value(name) {
+            Maybe.Some((_, instrument)) => instrument.clone(),
             Maybe.None => {
-                let h = Shared.new(WeftHistogram.new());
-                m.insert(name.clone(), h.clone());
-                h
+                let instrument = Shared.new(WeftHistogram.new());
+                instruments.insert(name.clone(), instrument.clone());
+                instrument
             }
         }
     }
@@ -191,33 +153,21 @@ implement WeftMetricsRegistry {
         let mut out: core.collections.list.List<(Text, Int)> = [];
         let cs = self.counters.lock().unwrap_or_else(|p| p.into_inner());
         for (name, counter) in cs.iter() {
-            out.push((name.clone(), counter.value()));
+            out.push((name, counter.value()));
         }
-        // Stable order across runs — sort alphabetically.
-        out.sort_by(|a, b| a.0.cmp(&b.0));
+        out.sort_unstable_by(|a, b| a.0.cmp(&b.0));
         out
     }
 
-    /// Snapshot every histogram as `(name, OtlpHistogramSnapshot)` pairs.
-    public fn histogram_snapshot(&self)
-        -> core.collections.list.List<(Text, core.net.weft.metrics_otlp.OtlpHistogramSnapshot)>
-    {
-        let mut out = core.collections.list.List.new();
-        let hs = self.histograms.lock().unwrap_or_else(|p| p.into_inner());
-        for (name, hist) in hs.iter() {
-            let counts = hist.counts.lock().clone();
-            // #319: count + sum_ms are now AtomicInt (lock-free
-            // load) — was Mutex<Int> pre-fix.
-            let total = hist.count.load(MemoryOrdering.Relaxed);
-            let sum_ms = hist.sum_ms.load(MemoryOrdering.Relaxed);
-            out.push((name.clone(), core.net.weft.metrics_otlp.OtlpHistogramSnapshot {
-                bounds_ms:     hist.bounds_ms.clone(),
-                bucket_counts: counts,
-                total:         total,
-                sum_ms:        sum_ms,
-            }));
+    /// Export disjoint millisecond buckets in metric-name order.
+    public fn histogram_snapshot(&self) -> List<(Text, OtlpHistogramSnapshot)> {
+        let mut out: List<(Text, OtlpHistogramSnapshot)> = [];
+        let histograms = self.histograms.lock().unwrap_or_else(|p| p.into_inner());
+        for (name, histogram) in histograms.iter() {
+            let (distribution, sum_ms) = histogram.snapshot();
+            out.push((name, OtlpHistogramSnapshot.from_milliseconds(&distribution, sum_ms)));
         }
-        out.sort_by(|a, b| a.0.cmp(&b.0));
+        out.sort_unstable_by(|a, b| a.0.cmp(&b.0));
         out
     }
 
@@ -235,17 +185,16 @@ implement WeftMetricsRegistry {
         let hs = self.histograms.lock().unwrap_or_else(|p| p.into_inner());
         for (name, hist) in hs.iter() {
             out.push(&f"# TYPE {name} histogram\n");
-            let counts = hist.counts.lock().unwrap_or_else(|p| p.into_inner());
-            let mut cumulative: Int = 0;
-            let mut i: Int = 0;
-            while i < hist.bounds_ms.len() {
-                cumulative = cumulative + counts[i];
-                out.push(&f"{name}_bucket{{le=\"{hist.bounds_ms[i]}\"}} {cumulative}\n");
+            let (distribution, sum_ms_val) = hist.snapshot();
+            let bounds = distribution.bounds();
+            let counts = distribution.counts();
+            let mut i = 0;
+            while i < bounds.len() {
+                let bound_ms = bounds[i] as Int;
+                out.push(&f"{name}_bucket{{le=\"{bound_ms}\"}} {counts[i]}\n");
                 i = i + 1;
             }
-            // #319: AtomicInt lock-free reads.
-            let total = hist.count.load(MemoryOrdering.Relaxed);
-            let sum_ms_val = hist.sum_ms.load(MemoryOrdering.Relaxed);
+            let total = distribution.count();
             out.push(&f"{name}_bucket{{le=\"+Inf\"}} {total}\n");
             out.push(&f"{name}_sum {sum_ms_val}\n");
             out.push(&f"{name}_count {total}\n");
@@ -290,21 +239,23 @@ public type MetricsHandler<H> is {
 };
 
 implement<H: Handler> Handler for MetricsHandler<H> {
-    async fn handle(&self, req: WeftRequest) -> Result<Response, WeftError> {
+    type Error = H.Error;
+
+    async fn handle(&self, req: WeftRequest) -> Result<Response, H.Error> {
         let total = self.registry.counter(&Text.from("http_requests_total"));
         let latency = self.registry.histogram(&Text.from("http_request_duration_ms"));
 
         total.incr();
         let start = Instant.now();
         let result = self.inner.handle(req).await;
-        let dt = Instant.now().duration_since(start).as_millis();
+        let dt = start.elapsed().as_millis();
         latency.observe_ms(dt);
 
         match &result {
             Result.Err(_) => self.registry.counter(&Text.from("http_requests_errors_total")).incr(),
-            Result.Ok(r) if r.status.is_server_error() =>
+            Result.Ok(r) if r.status_code().is_server_error() =>
                 self.registry.counter(&Text.from("http_requests_5xx_total")).incr(),
-            Result.Ok(r) if r.status.is_client_error() =>
+            Result.Ok(r) if r.status_code().is_client_error() =>
                 self.registry.counter(&Text.from("http_requests_4xx_total")).incr(),
             _ => {}
         }

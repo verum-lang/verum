@@ -1,6 +1,6 @@
 module core.net.weft.tests.metrics_wire;
 
-mount core.net.weft.metrics.{WeftCounter, WeftHistogram, WeftMetricsRegistry};
+mount core.net.weft.metrics.WeftMetricsRegistry;
 mount core.net.weft.metrics_otlp.{OtlpExporter, OtlpExporterConfig};
 mount core.protobuf.wire.{ProtobufCursor, WireType, read_fixed64};
 
@@ -78,6 +78,13 @@ fn registry_snapshot_uses_otlp_field_types_and_millisecond_buckets() {
     }
     histogram.observe_ms(10);
     histogram.observe_ms(10001);
+    let scrape = registry.render_prometheus();
+    assert(scrape.contains(&"requests 257\n"));
+    assert(scrape.contains(&"duration_bucket{le=\"5\"} 258\n"));
+    assert(scrape.contains(&"duration_bucket{le=\"15\"} 259\n"));
+    assert(scrape.contains(&"duration_bucket{le=\"+Inf\"} 260\n"));
+    assert(scrape.contains(&"duration_count 260\n"));
+    assert(scrape.contains(&"duration_sum 11301\n"));
     let exporter = OtlpExporter.new(OtlpExporterConfig.new("http://collector/v1/metrics", "weft"), registry);
     let request = exporter.encode_snapshot();
     let resource = messages(&request, 1)[0];
@@ -87,4 +94,38 @@ fn registry_snapshot_uses_otlp_field_types_and_millisecond_buckets() {
     check_metric_points(&metrics[0], &metrics[1]);
 }
 
-fn main() { registry_snapshot_uses_otlp_field_types_and_millisecond_buckets(); }
+@test
+fn snapshot_order_is_independent_of_registration() {
+    let registry = WeftMetricsRegistry.new();
+    registry.counter(&"zz").incr();
+    registry.counter(&"aa").add(2);
+    registry.histogram(&"zz").observe_ms(30);
+    registry.histogram(&"aa").observe_ms(5);
+    let counters = registry.counter_snapshot();
+    let histograms = registry.histogram_snapshot();
+    assert_eq(counters[0].0, "aa");
+    assert_eq(counters[0].1, 2);
+    assert_eq(counters[1].0, "zz");
+    assert_eq(histograms[0].0, "aa");
+    assert_eq(histograms[1].0, "zz");
+}
+
+@test
+fn integer_instruments_preserve_values_above_float_precision() {
+    let registry = WeftMetricsRegistry.new();
+    let value: Int = 9007199254740993;
+    let counter = registry.counter(&"requests");
+    counter.add(value);
+    counter.incr();
+    assert_eq(counter.value(), value + 1);
+    registry.histogram(&"duration").observe_ms(value);
+    let scrape = registry.render_prometheus();
+    assert(scrape.contains(&"duration_sum 9007199254740993\n"));
+    assert(scrape.contains(&"duration_bucket{le=\"+Inf\"} 1\n"));
+}
+
+fn main() {
+    registry_snapshot_uses_otlp_field_types_and_millisecond_buckets();
+    snapshot_order_is_independent_of_registration();
+    integer_instruments_preserve_values_above_float_precision();
+}
