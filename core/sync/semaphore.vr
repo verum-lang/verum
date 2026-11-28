@@ -18,30 +18,9 @@
     lifecycle: Lifecycle.Definition
 )
 module core.sync.semaphore;
-mount super.atomic.*;
-
-// Cross-platform futex for blocking acquire
-@cfg(target_os = "linux")
-mount sys.linux.thread.{
-    futex_wait as sys_futex_wait,
-    futex_wake as sys_futex_wake,
-};
-
-@cfg(target_os = "macos")
-mount sys.darwin.thread.{
-    futex_wait as sys_futex_wait,
-    futex_wake as sys_futex_wake,
-};
-
-// Mounted rather than inherited: §4ter — the prelude carries only what
-// the LANGUAGE requires, and this is library API.
-mount core.sync.atomic.{AtomicInt};
-
-@cfg(target_os = "windows")
-mount sys.windows.thread.{
-    futex_wait as sys_futex_wait,
-    futex_wake as sys_futex_wake,
-};
+mount core.sync.atomic.{AtomicInt, MemoryOrdering};
+mount core.sync.condvar.Condvar;
+mount core.sync.mutex.Mutex;
 
 // =============================================================================
 // Semaphore
@@ -51,171 +30,109 @@ mount sys.windows.thread.{
 // Uses futex-based blocking under contention instead of spin-waiting.
 public type Semaphore is {
     permits: AtomicInt,
-    max_permits: AtomicInt,
-    /// Waiter count for futex notification — incremented when a thread sleeps.
-    waiters: AtomicInt,
+    // Capacity changes, permit returns, and entry into the wait set are
+    // serialized. Uncontended acquisitions only touch the permit counter.
+    capacity: Mutex<Int>,
+    changed: Condvar,
 };
 
 implement Semaphore {
-    // Create semaphore with initial number of permits.
-    @inline(always)
     public fn new(permits: Int) -> Semaphore {
         assert(permits >= 0, "Semaphore permits must be non-negative");
         Semaphore {
             permits: AtomicInt.new(permits),
-            max_permits: AtomicInt.new(permits),
-            waiters: AtomicInt.new(0),
+            capacity: Mutex.new(permits),
+            changed: Condvar.new(),
         }
     }
 
-    // Create binary semaphore (mutex-like).
-    @inline(always)
-    public fn binary() -> Semaphore {
-        Semaphore.new(1)
-    }
+    public fn binary() -> Semaphore { Semaphore.new(1) }
 
-    // Acquire a permit, blocking via futex until available.
-    // Does NOT busy-wait — threads sleep via OS futex when no permits available.
-    //
+    public fn acquire(&self) { self.acquire_permits(1); }
 
-    // **Memory ordering on `waiters` counter**: `fetch_add` uses
-    // `Release` (not `Relaxed`) so the waiter-registration
-    // happens-before-paired with the `Acquire` load in
-    // `release()` / `release_many()` / `add_permits()`. With
-    // `Relaxed` the registration could be invisible to a
-    // concurrent releaser, leading to a missed wakeup
-    // (waiter sleeps on futex(0); releaser reads waiters==0
-    // and skips the wake; waiter never wakes up). The
-    // `Release` ⇄ `Acquire` pair closes the race.
-    public fn acquire(&self) {
-        loop {
-            let current = self.permits.load(MemoryOrdering.Acquire);
-            if current > 0 {
-                if self.permits.compare_exchange(current, current - 1, MemoryOrdering.AcqRel, MemoryOrdering.Relaxed).is_ok() {
-                    return;
-                }
-                // CAS failed, retry without sleeping
-                continue;
-            }
-            // No permits available — sleep via futex.
-            // Release on the fetch_add publishes the
-            // registration to any concurrent releaser's
-            // Acquire load.
-            self.waiters.fetch_add(1, MemoryOrdering.Release);
-            // Re-check permits before sleeping (avoid missed wakeup)
-            let snap = self.permits.load(MemoryOrdering.Acquire);
-            if snap == 0 {
-                let _ = sys_futex_wait(&self.permits.value, 0, Maybe.None);
-            }
-            self.waiters.fetch_sub(1, MemoryOrdering.Relaxed);
-        }
-    }
-
-    // Acquire multiple permits, blocking via futex until available.
-    // See `acquire()` doc for the Release ordering rationale on
-    // `waiters.fetch_add`.
     public fn acquire_many(&self, n: Int) {
         assert(n > 0, "Must acquire at least one permit");
-        assert(n <= self.max_permits.load(MemoryOrdering.Relaxed), "Cannot acquire more than max permits");
+        assert(n <= self.max_permits(), "Cannot acquire more than max permits");
+        self.acquire_permits(n);
+    }
 
-        loop {
-            let current = self.permits.load(MemoryOrdering.Acquire);
-            if current >= n {
-                if self.permits.compare_exchange(current, current - n, MemoryOrdering.AcqRel, MemoryOrdering.Relaxed).is_ok() {
-                    return;
-                }
-                continue;
-            }
-            // Not enough permits — sleep via futex.
-            self.waiters.fetch_add(1, MemoryOrdering.Release);
-            let snap = self.permits.load(MemoryOrdering.Acquire);
-            if snap < n {
-                let _ = sys_futex_wait(&self.permits.value, snap, Maybe.None);
-            }
-            self.waiters.fetch_sub(1, MemoryOrdering.Relaxed);
+    fn acquire_permits(&self, n: Int) {
+        if self.try_acquire_many(n) { return; }
+        let mut capacity = self.capacity.lock().unwrap_or_else(|p| p.into_inner());
+        while !self.try_acquire_many(n) {
+            capacity = self.changed.wait(capacity).unwrap_or_else(|p| p.into_inner());
         }
     }
 
-    // Try to acquire permit without blocking.
-    public fn try_acquire(&self) -> Bool {
-        let current = self.permits.load(MemoryOrdering.Acquire);
-        if current > 0 {
-            self.permits.compare_exchange(current, current - 1, MemoryOrdering.AcqRel, MemoryOrdering.Relaxed).is_ok()
-        } else {
-            false
-        }
-    }
+    public fn try_acquire(&self) -> Bool { self.try_acquire_many(1) }
 
-    // Try to acquire multiple permits without blocking.
+    /// Reserve all requested permits in one atomic transition.
     public fn try_acquire_many(&self, n: Int) -> Bool {
         assert(n > 0, "Must acquire at least one permit");
-
-        let current = self.permits.load(MemoryOrdering.Acquire);
-        if current >= n {
-            self.permits.compare_exchange(current, current - n, MemoryOrdering.AcqRel, MemoryOrdering.Relaxed).is_ok()
-        } else {
-            false
+        let mut available = self.permits.load(MemoryOrdering.Relaxed);
+        while available >= n {
+            match self.permits.compare_exchange(available, available - n, MemoryOrdering.Acquire, MemoryOrdering.Relaxed) {
+                Result.Ok(_) => return true,
+                Result.Err(observed) => { available = observed; },
+            }
         }
+        false
     }
 
-    // Release a permit, waking a blocked acquirer if any.
-    public fn release(&self) {
-        let old = self.permits.fetch_add(1, MemoryOrdering.Release);
-        assert(old < self.max_permits.load(MemoryOrdering.Relaxed), "Semaphore released more than acquired");
-        // Wake one waiter if any are blocked
-        if self.waiters.load(MemoryOrdering.Acquire) > 0 {
-            let _ = sys_futex_wake(&self.permits.value, 1);
-        }
-    }
+    public fn release(&self) { self.release_many(1); }
 
-    // Release multiple permits, waking blocked acquirers.
     public fn release_many(&self, n: Int) {
         assert(n > 0, "Must release at least one permit");
-        let old = self.permits.fetch_add(n, MemoryOrdering.Release);
-        assert(old + n <= self.max_permits.load(MemoryOrdering.Relaxed), "Semaphore released more than acquired");
-        // Wake up to N waiters
-        let num_waiters = self.waiters.load(MemoryOrdering.Acquire);
-        if num_waiters > 0 {
-            let to_wake = if n < num_waiters { n } else { num_waiters };
-            let _ = sys_futex_wake(&self.permits.value, to_wake);
-        }
+        let capacity = self.capacity.lock().unwrap_or_else(|p| p.into_inner());
+        assert(n <= *capacity - self.available_permits(), "Semaphore released more than acquired");
+        self.publish_permits(n);
     }
 
-    // Get current available permits.
-    @inline(always)
-    public fn available_permits(&self) -> Int {
-        self.permits.load(MemoryOrdering.Relaxed).max(0)
+    // Called under the capacity mutex. A waiter registered before this
+    // check is visible through the mutex. Later waiters recheck permits.
+    // Different requests can need different counts, so waking a single
+    // ineligible waiter could strand another with enough permits.
+    fn publish_permits(&self, n: Int) {
+        self.permits.fetch_add(n, MemoryOrdering.Release);
+        if self.changed.waiter_count() > 0 { self.changed.notify_all(); }
     }
 
-    // Get total capacity (max permits).
-    @inline(always)
+    public fn available_permits(&self) -> Int { self.permits.load(MemoryOrdering.Relaxed) }
+
     public fn max_permits(&self) -> Int {
-        self.max_permits.load(MemoryOrdering.Relaxed)
+        let capacity = self.capacity.lock().unwrap_or_else(|p| p.into_inner());
+        *capacity
     }
 
-    // Add permits (increases capacity), waking blocked acquirers.
     public fn add_permits(&self, n: Int) {
         assert(n >= 0, "Cannot add negative permits");
-        self.max_permits.fetch_add(n, MemoryOrdering.Release);
-        self.permits.fetch_add(n, MemoryOrdering.Release);
-        // Wake waiters — new permits available
-        let num_waiters = self.waiters.load(MemoryOrdering.Acquire);
-        if num_waiters > 0 {
-            let to_wake = if n < num_waiters { n } else { num_waiters };
-            let _ = sys_futex_wake(&self.permits.value, to_wake);
-        }
+        if n == 0 { return; }
+        let mut capacity = self.capacity.lock().unwrap_or_else(|p| p.into_inner());
+        assert(n <= Int.MAX - *capacity, "Semaphore capacity overflow");
+        *capacity += n;
+        self.publish_permits(n);
     }
 
-    // Forget a permit (decreases capacity permanently).
-    // Must only be called when a permit has been acquired but should not be returned.
+    /// Permanently remove one acquired permit from the capacity.
     public fn forget_permit(&self) {
-        self.max_permits.fetch_sub(1, MemoryOrdering.Release);
+        let mut capacity = self.capacity.lock().unwrap_or_else(|p| p.into_inner());
+        assert(*capacity > self.available_permits(), "No acquired semaphore permit to forget");
+        *capacity -= 1;
     }
 
     // Acquire && return RAII guard.
     public fn acquire_guard(&self) -> SemaphoreGuard {
         self.acquire();
         SemaphoreGuard { semaphore: self, permits: 1 }
+    }
+
+    /// Acquire one permit immediately and return it when the guard is dropped.
+    public fn try_acquire_guard(&self) -> Maybe<SemaphoreGuard> {
+        if self.try_acquire() {
+            Maybe.Some(SemaphoreGuard { semaphore: self, permits: 1 })
+        } else {
+            Maybe.None
+        }
     }
 
     // Acquire multiple && return RAII guard.
@@ -236,7 +153,7 @@ implement Debug for Semaphore {
         f.write_str("Semaphore { permits: ")?;
         self.available_permits().fmt_debug(f)?;
         f.write_str("/")?;
-        self.max_permits.load(MemoryOrdering.Relaxed).fmt_debug(f)?;
+        self.max_permits().fmt_debug(f)?;
         f.write_str(" }")
     }
 }
@@ -246,7 +163,7 @@ implement Debug for Semaphore {
 // =============================================================================
 
 // RAII guard that releases permits on drop.
-public type SemaphoreGuard is {
+public type affine SemaphoreGuard is {
     semaphore: &Semaphore,
     permits: Int,
 };
