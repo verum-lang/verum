@@ -1,0 +1,15 @@
+// @test: run
+// @tier: 0
+// @level: L2
+// @tags: redis, net, errors
+// @expected-exit: 0
+// @description: Invalid configuration and unsupported TLS return typed errors before the TCP handshake.
+mount core.context.standard.Logger;
+mount core.redis.client.{connect_url, RedisError};
+
+async fn main() using [Logger] {
+    assert(connect_url(&"http://127.0.0.1").await is Result.Err(RedisError.Backend(_)));
+    assert(connect_url(&"redis://127.0.0.1:1/16").await is Result.Err(RedisError.Backend(_)));
+    assert(connect_url(&"redis://127.0.0.1:1/x").await is Result.Err(RedisError.Backend(_)));
+    assert(connect_url(&"rediss://:secret@127.0.0.1:1").await is Result.Err(RedisError.Network(_)));
+}
