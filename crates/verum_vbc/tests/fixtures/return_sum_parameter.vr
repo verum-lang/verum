@@ -1,0 +1,31 @@
+mount core.base.protocols.Drop;
+type affine Ticket is { weight: Int };
+static mut DROPPED: Int = 0;
+implement Drop for Ticket { fn drop(&mut self) { DROPPED = DROPPED + self.weight; } }
+type Parcel<T> is Empty | Pair(T, T);
+implement<T> Parcel<T> {
+    fn take(self, second: Bool) -> T {
+        match self {
+            Parcel.Pair(_, selected) if second => selected,
+            Parcel.Pair(selected, _) => selected,
+            Parcel.Empty => panic("empty parcel"),
+        }
+    }
+}
+fn probe() -> Int {
+    {
+        let ticket = Parcel.Pair(Ticket { weight: 7 }, Ticket { weight: 66 }).take(false);
+        assert_eq(DROPPED, 66);
+        assert_eq(ticket.weight, 7);
+    }
+    assert_eq(DROPPED, 73);
+    DROPPED = 0;
+    {
+        let ticket = Parcel.Pair(Ticket { weight: 7 }, Ticket { weight: 66 }).take(true);
+        assert_eq(DROPPED, 7);
+        assert_eq(ticket.weight, 66);
+    }
+    DROPPED
+}
+
+fn main() -> Int { probe() }

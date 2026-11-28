@@ -19502,6 +19502,12 @@ impl VbcCodegen {
         demand: ResultDemand,
         span: verum_ast::Span,
     ) -> CodegenResult<Option<Reg>> {
+        let subject = Self::named_place_binding(scrutinee);
+        let returning_parameter = if demand.is_callable_return() && !self.ctx.has_pending_defers() {
+            subject.and_then(|name| self.ctx.registers.unobserved_owned_parameter(name))
+        } else {
+            None
+        };
         let scrutinee_start = self.ctx.instructions.len();
         let scrutinee_reg = self
             .compile_expr(scrutinee)?
@@ -19509,13 +19515,12 @@ impl VbcCodegen {
         let scrutinee_type = self.declared_expression_result(
             scrutinee, Some(scrutinee_reg), scrutinee_start, self.ctx.instructions.len(),
         );
-        // A by-value call owns its result. Only structural sums can surrender
-        // a field: a custom destructor may inspect every field of its receiver.
-        let owns_sum = matches!(Self::normalized_place(scrutinee).kind,
-            ExprKind::Call { .. } | ExprKind::MethodCall { .. })
-            && scrutinee_type.as_ref().and_then(crate::types::TypeRef::base_type_id)
-                .and_then(|id| self.type_by_id(id)).is_some_and(|ty| ty.kind == crate::types::TypeKind::Sum
-                && ty.drop_fn.is_none() && !ty.is_transparent_wrapper);
+        // A call temporary or a retiring by-value argument owns its sum shell.
+        // A user destructor must always see the original active variant.
+        let retires_owner = returning_parameter == Some(scrutinee_reg)
+            || matches!(Self::normalized_place(scrutinee).kind, ExprKind::Call { .. } | ExprKind::MethodCall { .. });
+        let mut can_transfer = retires_owner && demand.is_used()
+            && scrutinee_type.as_ref().is_some_and(|ty| self.can_extract_sum_field(ty));
 
         // Record the scrutinee's static type (+ tuple element types, +
         // Heap<T>/Shared<T> unwrap) for the payload-type inference in
@@ -19550,12 +19555,19 @@ impl VbcCodegen {
             self.ctx.enter_scope();
             let bind_start = self.ctx.instructions.len();
             self.compile_pattern_bind_from_expr(&arm.pattern, scrutinee_reg, scrutinee)?;
+            let bind_end = self.ctx.instructions.len();
 
             // Check guard if present (pattern variables are now available)
             if let Some(ref guard) = arm.guard {
+                let inputs = can_transfer.then(|| self.ctx.registers.observe_match_inputs(subject));
                 let guard_reg = self
                     .compile_expr(guard)?
                     .or_internal("match guard has no value")?;
+                // A guard may publish a loan even when it returns false.
+                // Preserve the shell for subsequent arms on that path, too.
+                if inputs.is_some_and(|inputs| inputs.iter().any(|input| input.was_observed())) {
+                    can_transfer = false;
+                }
 
                 self.ctx
                     .emit_forward_jump(&next_arm_label, |offset| Instruction::JmpNot {
@@ -19567,8 +19579,8 @@ impl VbcCodegen {
 
             // Compile arm body
             let arm_start = self.ctx.instructions.len();
-            let field = (owns_sum && demand.is_used() && arm.guard.is_none())
-                .then(|| self.forwarded_variant_field(&arm.body, scrutinee_reg, bind_start, arm_start))
+            let field = can_transfer
+                .then(|| self.forwarded_variant_field(&arm.body, scrutinee_reg, bind_start, bind_end))
                 .flatten();
             let arm_demand = demand.for_branch();
             let arm_demand = if field.is_some() { arm_demand.for_transferred_value() } else { arm_demand };
@@ -19591,7 +19603,7 @@ impl VbcCodegen {
                 });
                 if let Some(field) = field {
                     // Typed cleanup already treats Unit as a retired slot. The
-                    // temporary still owns its shell and every sibling field.
+                    // subject still owns its shell and every sibling field.
                     let retired = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::LoadUnit { dst: retired });
                     self.ctx.emit(Instruction::SetVariantData {
@@ -33313,7 +33325,7 @@ impl VbcCodegen {
                         // through captures and shadowing. Destructuring itself observes
                         // the input and cannot authorize disposal here.
                         let unused = matches!(&param.pattern.kind, verum_ast::PatternKind::Wildcard)
-                            || observed.is_some_and(|flag| !flag.load(std::sync::atomic::Ordering::Relaxed));
+                            || observed.is_some_and(|binding| !binding.was_observed());
                         if unused {
                             self.ctx.instructions[entry] = Instruction::DiscardException { dst: error };
                         } else {

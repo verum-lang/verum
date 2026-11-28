@@ -121,6 +121,56 @@ fn forwarding_a_field_from_a_named_sum_preserves_both_values() {
 }
 
 #[test]
+fn returning_an_owned_generic_sum_transfers_only_the_selected_field() {
+    run(include_str!("fixtures/return_sum_parameter.vr"));
+}
+
+#[test]
+fn a_destructor_borrowing_the_match_parameter_observes_the_original_payload() {
+    run(r#"
+        mount core.base.protocols.Drop;
+        type Packet is Empty | Data(Text);
+        fn intact(input: &Packet) -> Bool {
+            match input { Packet.Data(text) => text == "payload text", _ => false }
+        }
+        type Witness is { owner: &Packet };
+        implement Drop for Witness {
+            fn drop(&mut self) { assert(intact(self.owner)); }
+        }
+        fn extract(input: Packet) -> Text {
+            let witness = Witness { owner: &input };
+            match input { Packet.Data(text) => text, _ => "" }
+        }
+        fn probe() -> Int {
+            if extract(Packet.Data("payload text")) == "payload text" { 73 } else { 0 }
+        }
+    "#);
+}
+
+#[test]
+fn a_guard_that_publishes_a_payload_loan_preserves_its_owner_on_fallthrough() {
+    let source = r#"
+        type affine Ticket is { value: Int };
+        type Packet is Empty | Data(Ticket);
+        type Shelf is Empty | Loan(&Ticket);
+        fn remember(slot: &mut Shelf, value: &Ticket) -> Bool {
+            *slot = Shelf.Loan(value);
+            false
+        }
+        fn extract(input: Packet, slot: &mut Shelf) -> Ticket {
+            match input {
+                Packet.Data(ticket) if remember(slot, &ticket) => Ticket { value: 0 },
+                Packet.Data(ticket) => ticket,
+                _ => Ticket { value: 0 },
+            }
+        }
+    "#;
+    let ast = Parser::new(source).parse_module().unwrap();
+    let error = VbcCodegen::new().compile_module(&ast).expect_err("an observed owner remains live");
+    assert!(error.to_string().contains("still owned by the scrutinee"), "{error}");
+}
+
+#[test]
 fn assignment_preserves_nested_ownership() {
     run(r#"
         type Leaf is { value: Int };

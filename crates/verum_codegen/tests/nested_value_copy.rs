@@ -356,6 +356,18 @@ fn run_native(source: &str) {
 }
 
 #[test]
+fn native_return_from_a_sum_parameter_releases_each_affine_field_once() {
+    let ast = Parser::new(include_str!("../../verum_vbc/tests/fixtures/return_sum_parameter.vr"))
+        .parse_module().unwrap();
+    let mut compiler = VbcCodegen::new();
+    canonical_drop::initialize(&mut compiler);
+    let source = compiler.compile_additional_module(&ast).unwrap();
+    let wire = deserialize_module(&serialize_module(&source).unwrap()).unwrap();
+    verum_vbc::validate::validate_module(&wire).unwrap();
+    run_native_module(wire);
+}
+
+#[test]
 fn native_match_transfers_an_owned_field_and_retires_its_sibling() {
     run_native(r#"
         type Item is { value: Int };

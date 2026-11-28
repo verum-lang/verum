@@ -19549,6 +19549,17 @@ impl VbcCodegen {
 
         // Compile the body
         if let Some(ref body) = func.body {
+            // Once source code can observe a sum argument, a later cleanup
+            // could reach its payload through a loan. Track the actual binding.
+            for param in &func.params {
+                if let Some((name, _)) = self.extract_param_name_and_mutable(param)
+                    && let Some(binding) = self.ctx.lookup_var(&name)
+                    && let Some((_, ty)) = self.ctx.registers.parameter_owners.get(&binding.reg)
+                    && self.can_extract_sum_field(ty)
+                {
+                    self.ctx.registers.observe_binding_lookups(&name);
+                }
+            }
             match body {
                 verum_ast::FunctionBody::Block(block) => {
                     let result = self

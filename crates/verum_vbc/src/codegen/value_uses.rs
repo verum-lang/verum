@@ -575,6 +575,11 @@ impl super::VbcCodegen {
         Ok(())
     }
 
+    pub(super) fn can_extract_sum_field(&self, ty: &TypeRef) -> bool {
+        ty.base_type_id().and_then(|id| self.type_by_id(id)).is_some_and(|sum|
+            sum.kind == crate::types::TypeKind::Sum && sum.drop_fn.is_none() && !sum.is_transparent_wrapper)
+    }
+
     fn emit_parameter_cleanup(&mut self, returned: Option<BindingId>) {
         for (_, binding) in self.ctx.registers.function_exit_bindings() {
             let Some((identity, ty)) = self.ctx.registers.parameter_owners.get(&binding.reg).cloned()

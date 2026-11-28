@@ -14,13 +14,31 @@
 
 use crate::instruction::Reg;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use verum_common::Shared;
 
+/// Marks the start of an observation interval for one lexical binding. Nested
+/// code generation can open another interval without erasing the first.
+pub(super) struct BindingObservation {
+    reads: Shared<AtomicUsize>,
+    start: usize,
+}
+
+impl BindingObservation {
+    pub(super) fn was_observed(&self) -> bool {
+        self.start == usize::MAX || self.reads.load(Ordering::Relaxed) != self.start
+    }
+}
+
 impl RegisterInfo {
+    fn observe_from_now(&mut self) -> BindingObservation {
+        let reads = self.lookup_observer.get_or_insert_with(|| Shared::new(AtomicUsize::new(0)));
+        BindingObservation { start: reads.load(Ordering::Relaxed), reads: reads.clone() }
+    }
+
     fn observe_lookup(&self) {
-        if let Some(observed) = &self.lookup_observer {
-            observed.store(true, Ordering::Relaxed);
+        if let Some(reads) = &self.lookup_observer {
+            let _ = reads.try_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1));
         }
     }
 }
@@ -72,9 +90,8 @@ pub struct RegisterAllocator {
 /// Information about a register binding.
 #[derive(Debug, Clone)]
 pub struct RegisterInfo {
-    /// An optional observation of this exact binding while lowering a recovery
-    /// body. Shadowing creates a fresh binding, and snapshots share this flag.
-    lookup_observer: Option<Shared<AtomicBool>>,
+    /// Tracks observations of this exact binding across nested scopes and captures.
+    lookup_observer: Option<Shared<AtomicUsize>>,
     /// Exact source declaration identity, local to this function body.
     pub binding_id: verum_common::value_use::BindingId,
     /// The allocated register.
@@ -347,11 +364,34 @@ impl RegisterAllocator {
         Some(binding)
     }
 
-    pub(super) fn observe_binding_lookups(&mut self, name: &str) -> Option<Shared<AtomicBool>> {
-        let binding = self.variables.get_mut(name)?;
-        let observed = Shared::new(AtomicBool::new(false));
-        binding.lookup_observer = Some(observed.clone());
-        Some(observed)
+    pub(super) fn observe_binding_lookups(&mut self, name: &str) -> Option<BindingObservation> {
+        self.variables.get_mut(name).map(RegisterInfo::observe_from_now)
+    }
+
+    /// Only the subject and bindings introduced by its pattern can expose
+    /// this uniquely owned value to code run by a guard.
+    pub(super) fn observe_match_inputs(&mut self, subject: Option<&str>) -> Vec<BindingObservation> {
+        let mut inputs = Vec::new();
+        if let Some(scope) = self.scope_stack.last() {
+            for name in &scope.scope_vars {
+                if let Some(binding) = self.variables.get_mut(name) {
+                    inputs.push(binding.observe_from_now());
+                }
+            }
+        }
+        if let Some(observation) = subject.and_then(|name| self.observe_binding_lookups(name)) {
+            inputs.push(observation);
+        }
+        inputs
+    }
+
+    /// Inspect before compiling the scrutinee, which itself observes the binding.
+    pub(super) fn unobserved_owned_parameter(&self, name: &str) -> Option<Reg> {
+        let binding = self.variables.get(name)?;
+        let (owner, _) = self.parameter_owners.get(&binding.reg)?;
+        let observed = binding.lookup_observer.as_ref()?;
+        (binding.kind == RegisterKind::Parameter && binding.binding_id == *owner
+            && !binding.is_cell && observed.load(Ordering::Relaxed) == 0).then_some(binding.reg)
     }
 
     /// Checks if a variable exists.

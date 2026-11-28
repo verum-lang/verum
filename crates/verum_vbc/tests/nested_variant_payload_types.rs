@@ -125,12 +125,30 @@ fn probe() -> Int { inspect(true) * 10000 + inspect(false) }
 }
 
 #[test]
-fn matching_an_exclusive_payload_does_not_transfer_it_out_of_its_owner() {
-    let ast = Parser::new(r#"
+fn returning_an_exclusive_payload_consumes_the_retiring_parameter() {
+    let value = run(r#"
         type affine Token is { value: Int };
         type Message is Data(Token) | Empty;
         fn extract(input: Message) -> Token {
             match input { Message.Data(token) => token, Message.Empty => Token { value: 0 } }
+        }
+        fn probe() -> Int {
+            let selected = extract(Message.Data(Token { value: 73 }));
+            selected.value
+        }
+    "#, None);
+    assert_eq!(value, 73);
+}
+
+#[test]
+fn matching_an_exclusive_payload_does_not_transfer_it_out_of_a_live_owner() {
+    let ast = Parser::new(r#"
+        type affine Token is { value: Int };
+        type Message is Data(Token) | Empty;
+        fn extract(input: Message) -> Token {
+            let selected = match input { Message.Data(token) => token, Message.Empty => Token { value: 0 } };
+            match input { Message.Data(token) => assert_eq(token.value, selected.value), _ => {} };
+            selected
         }
     "#).parse_module().expect("parse");
     let error = VbcCodegen::with_config(CodegenConfig::new("ownership"))
