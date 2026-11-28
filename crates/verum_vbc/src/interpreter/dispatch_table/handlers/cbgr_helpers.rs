@@ -244,6 +244,7 @@ pub(super) fn raw_record_field_slot(
 pub(super) enum MutableValueSlot {
     Register(u32),
     Memory(*mut Value),
+    Byte(*mut u8),
 }
 
 impl MutableValueSlot {
@@ -265,7 +266,14 @@ impl MutableValueSlot {
             validate_cbgr_generation(state, index, generation)?;
             return Ok(Self::Register(index));
         }
-        require_reference_write(state, reference)?;
+        if let Some((pointer, encoding)) = state.heap.mutable_projection_storage(reference)? {
+            use crate::interpreter::heap::ProjectionEncoding;
+            return Ok(match encoding {
+                ProjectionEncoding::Value => Self::Memory(pointer.cast()),
+                ProjectionEncoding::Byte => Self::Byte(pointer),
+            });
+        }
+        require_reference_capability(state, reference, Capabilities::READ | Capabilities::WRITE)?;
         reference_value_slot(state, reference)?.map(Self::Memory).ok_or_else(invalid)
     }
 
@@ -281,6 +289,9 @@ impl MutableValueSlot {
                 }
                 Ok(RetainCounter::Register(index))
             }
+            Self::Byte(_) => Err(InterpreterError::InvalidOperand {
+                message: "retain_copy counter requires a complete UInt32 slot".into(),
+            }),
             Self::Memory(address) => {
                 let little_endian = 1u64.to_ne_bytes()[0] == 1;
                 let low = usize::from(!little_endian);
@@ -303,7 +314,20 @@ impl MutableValueSlot {
             Self::Register(index) => state.registers.get_absolute(index),
             // SAFETY: resolve established an aligned initialized slot, still live.
             Self::Memory(address) => unsafe { address.read() },
+            // SAFETY: resolution checked the live single-byte element and its read permission.
+            Self::Byte(address) => Value::from_i64(i64::from(unsafe { address.read() })),
         }
+    }
+
+    fn validate_write(&self, value: Value) -> InterpreterResult<()> {
+        if matches!(self, Self::Byte(_))
+            && !value.try_as_i64().is_some_and(|n| u8::try_from(n).is_ok())
+        {
+            return Err(InterpreterError::InvalidOperand {
+                message: "value exceeds packed byte storage".into(),
+            });
+        }
+        Ok(())
     }
 
     fn write(&self, state: &mut InterpreterState, value: Value) {
@@ -311,6 +335,8 @@ impl MutableValueSlot {
             Self::Register(index) => state.registers.set_absolute(index, value),
             // SAFETY: resolve established write access to this exact slot.
             Self::Memory(address) => unsafe { address.write(value); },
+            // SAFETY: both destinations and incoming values were checked before either write.
+            Self::Byte(address) => unsafe { address.write(value.as_i64() as u8) },
         }
     }
 }
@@ -377,6 +403,8 @@ pub(super) fn swap_referents(
     let second = MutableValueSlot::resolve(state, right)?;
     let a = first.read(state);
     let b = second.read(state);
+    first.validate_write(b)?;
+    second.validate_write(a)?;
     first.write(state, b);
     second.write(state, a);
     state.cbgr_epoch = state.cbgr_epoch.wrapping_add(1);

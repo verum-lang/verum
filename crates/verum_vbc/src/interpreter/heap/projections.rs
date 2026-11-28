@@ -552,6 +552,27 @@ impl Heap {
         Ok(true)
     }
 
+    /// Resolve an initialized, readable and writable element before an exchange.
+    pub(crate) fn mutable_projection_storage(
+        &self,
+        reference: Value,
+    ) -> InterpreterResult<Option<(*mut u8, ProjectionEncoding)>> {
+        let Some(id) = reference.projection_id() else {
+            return Ok(None);
+        };
+        let target = self.projection_target(id)?;
+        let ProjectionShape::Element(encoding) = target.shape else {
+            return Err(invalid("a sequence view is not an element slot"));
+        };
+        let slot = self.resolve_slot(target)?;
+        let mut required = Capabilities::READ | Capabilities::WRITE;
+        if target.container.is_some() {
+            required |= Capabilities::EXCLUSIVE;
+        }
+        require(slot.capabilities(), required)?;
+        Ok(Some((slot.ptr, encoding)))
+    }
+
     pub(crate) fn read_projected_element(&self, value: Value) -> InterpreterResult<Value> {
         let target = self.projection_target(
             value

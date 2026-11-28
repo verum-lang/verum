@@ -76,6 +76,7 @@ fn fixture() -> Interpreter {
             I::Ret { value: Reg(4) },
         ],
     );
+    function(&mut module, "swap", &[mem(M::Swap, &[0, 1]), I::RetV]);
     for width in [1, 2, 4, 8] {
         function(
             &mut module,
@@ -377,4 +378,35 @@ fn native_scalar_pointer_reads_and_writes_keep_their_contract() {
     );
     call(&mut vm, "write4", &[pointer, Value::from_i64(73)]).unwrap();
     assert_eq!(storage, 73);
+}
+
+#[test]
+fn swap_checks_both_encodings_and_permissions_before_writing() {
+    let mut vm = fixture();
+    let (owner, ordinary) = field(&mut vm, Value::from_i64(99));
+    let (_, backing, _, byte) = packed(&mut vm);
+    call(&mut vm, "swap", &[ordinary, byte]).unwrap();
+    assert_slots(&owner, Value::from_i64(254));
+    assert_bytes(&backing, 99);
+
+    let readonly = call(&mut vm, "readonly", &[byte]).unwrap();
+    for args in [[readonly, ordinary], [ordinary, readonly]] {
+        denied(call(&mut vm, "swap", &args), Capabilities::WRITE);
+        assert_slots(&owner, Value::from_i64(254));
+        assert_bytes(&backing, 99);
+    }
+
+    call(&mut vm, "write8", &[ordinary, Value::from_i64(300)]).unwrap();
+    for args in [[byte, ordinary], [ordinary, byte]] {
+        invalid(call(&mut vm, "swap", &args));
+        assert_slots(&owner, Value::from_i64(300));
+        assert_bytes(&backing, 99);
+    }
+
+    // SAFETY: the surviving field is used directly; only its checked peer ticket is used after retirement.
+    unsafe { vm.state.heap.free(backing) };
+    for args in [[byte, ordinary], [ordinary, byte]] {
+        stale(call(&mut vm, "swap", &args));
+        assert_slots(&owner, Value::from_i64(300));
+    }
 }
