@@ -79,6 +79,7 @@ module core.database.sqlite.native.l1_pager.wal_index;
 
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.l1_pager.journal.wal.{WalChecksum, WAL_MAGIC_BE};
 
 // -----------------------------------------------------------------------------
 // Hash-table tuning constants (walformat.html §3.4)
@@ -143,7 +144,7 @@ public type WalIndexHdr is {
     /// Database size in pages at the last commit.  Used to detect
     /// the truncate-or-grow boundary on snapshot.
     n_page: u32,
-    /// Rolling-Fossil-checksum state at end of last commit
+    /// Rolling checksum at the end of the last commit
     /// (s1, s2 packed into a single struct).  Matches the
     /// `WalChecksum` carried by `wal_writer.WalWriter.running`.
     frame_cksum_s1: u32,
@@ -324,7 +325,7 @@ public fn wal_index_new(page_size: Int) -> WalIndex {
 implement WalIndex {
     /// Replace the searchable frames while preserving active reader marks and backfill.
     public(in core.database.sqlite.native.l1_pager) fn restore_frames(
-        &mut self, pages: &[Int], db_size: Int, salt1: u32, salt2: u32,
+        &mut self, pages: &[Int], db_size: Int, salt1: u32, salt2: u32, checksum: &WalChecksum,
     ) {
         self.sections.clear();
         let mut i = 0;
@@ -332,14 +333,32 @@ implement WalIndex {
             self.append_frame(pages[i], i + 1);
             i = i + 1;
         }
-        if pages.len() > 0 {
-            self.commit_header(pages.len(), db_size as u32, salt1, salt2);
+        self.publish_commit(pages.len(), db_size as u32, salt1, salt2, checksum);
+    }
+
+    public(in core.database.sqlite.native.l1_pager) fn publish_commit(
+        &mut self, frame: Int, db_size: u32, salt1: u32, salt2: u32, checksum: &WalChecksum,
+    ) {
+        self.hdr.big_end_cksum = checksum.magic() == WAL_MAGIC_BE;
+        if frame > 0 {
+            let (s1, s2) = checksum.words();
+            self.hdr.frame_cksum_s1 = s1;
+            self.hdr.frame_cksum_s2 = s2;
+            self.commit_header(frame, db_size, salt1, salt2);
         } else {
             self.hdr.mx_frame = 0;
-            self.hdr.n_page = 0 as u32;
+            self.hdr.n_page = 0_u32;
+            self.hdr.salt1 = salt1;
+            self.hdr.salt2 = salt2;
+            self.hdr.frame_cksum_s1 = 0_u32;
+            self.hdr.frame_cksum_s2 = 0_u32;
             self.hdr.is_init = false;
             self.hdr_backup = clone_hdr(&self.hdr);
         }
+    }
+
+    public(in core.database.sqlite.native.l1_pager) fn frame_checksum(&self) -> WalChecksum {
+        WalChecksum.from_words(self.hdr.frame_cksum_s1, self.hdr.frame_cksum_s2, self.hdr.big_end_cksum)
     }
 
     /// True iff the index has been initialised by a writer (vs
@@ -463,6 +482,9 @@ implement WalIndex {
         self.hdr.n_page = 0 as u32;
         self.hdr.salt1 = new_salt1;
         self.hdr.salt2 = new_salt2;
+        self.hdr.frame_cksum_s1 = 0_u32;
+        self.hdr.frame_cksum_s2 = 0_u32;
+        self.hdr.is_init = false;
         let cur: Int = self.hdr.change_count as Int;
         self.hdr.change_count = ((cur + 1) % 4294967296) as u32;
         self.hdr_backup = clone_hdr(&self.hdr);

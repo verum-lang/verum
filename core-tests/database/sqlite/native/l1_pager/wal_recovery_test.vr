@@ -6,8 +6,10 @@ mount core.collections.List;
 mount core.database.sqlite.native.l0_vfs.memdb_vfs.{MemDbFile, open_memory_rwc, memdb_write, memdb_close};
 mount core.database.sqlite.native.l1_pager.wal_writer.{
     WalBackend, WalWriter, wal_writer_create, wal_writer_open, wal_writer_append_frame, wal_writer_reset,
+    wal_writer_commit, wal_writer_running,
 };
 mount core.database.sqlite.native.l1_pager.wal_reader.recover_state;
+mount core.database.sqlite.native.l0_vfs.vfs_protocol.sync_default;
 mount core.database.sqlite.native.l1_pager.journal.wal.{WalChecksum, wal_running_checksum};
 mount core.database.sqlite.native.l1_pager.recovery.wal_scan;
 
@@ -252,4 +254,28 @@ fn restarted_wal_keeps_word_order_and_create_truncates_existing_files() {
     assert_eq(hdr[9], 1 as Byte);
     assert_eq(hdr[11], 0 as Byte);
     match fresh.read_at(&mut hdr, 32) { Result.Ok(false) => {}, _ => panic("stale WAL frames") }
+}
+
+@test
+fn syncing_pending_frames_preserves_the_last_commit_in_the_index() {
+    let bytes = sqlite_wal(true);
+    let data = bytes.as_slice();
+    let mut w = open_wal(&data[..568]);
+    let first = w.index().frame_checksum();
+    assert_eq(first.magic(), 0x377F0683_u32);
+    assert(first.matches(0x3313856e_u32, 0xf2bf3134_u32));
+    assert(wal_writer_append_frame(&mut w, 2, &data[592..1104], 0).is_ok());
+    assert(wal_writer_commit(&mut w, sync_default()).is_ok());
+    assert_eq(w.index().mx_frame(), 1);
+    let unchanged = w.index().frame_checksum();
+    assert(unchanged.matches(first.words().0, first.words().1));
+    assert(wal_writer_append_frame(&mut w, 2, &data[592..1104], 2).is_ok());
+    assert(wal_writer_commit(&mut w, sync_default()).is_ok());
+    assert_eq(w.index().mx_frame(), 3);
+    let running = wal_writer_running(&w);
+    assert(w.index().frame_checksum().matches(running.words().0, running.words().1));
+    assert(wal_writer_reset(&mut w, 33_u32, 44_u32).is_ok());
+    let reset = w.index().frame_checksum();
+    assert_eq(reset.magic(), 0x377F0683_u32);
+    assert(reset.matches(0_u32, 0_u32));
 }

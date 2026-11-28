@@ -109,6 +109,9 @@ public type affine WalWriter is {
     /// the whole WAL.  See `wal_running_checksum` in journal/wal.vr.
     running: WalChecksum,
     header_seed: WalChecksum,
+    /// The last commit marker may precede the write cursor during a transaction.
+    commit_frame: Int,
+    commit_checksum: WalChecksum,
     /// In-memory WAL-index (#150 + #163).  Updated atomically with
     /// every `wal_writer_append_frame` so concurrent readers see
     /// the new frame via `WalIndex.find_frame` without walking the
@@ -168,6 +171,8 @@ public fn wal_writer_create(
         backend: backend,
         state: state,
         write_cursor: file_header_size(),
+        commit_frame: 0,
+        commit_checksum: initial_cksum.clone(),
         header_seed: initial_cksum.clone(),
         running: initial_cksum,
         index: index,
@@ -229,6 +234,8 @@ public fn wal_writer_open(backend: WalBackend) -> Result<WalWriter, PagerError> 
     let mut writer = WalWriter {
         backend, state, index,
         write_cursor: file_header_size(),
+        commit_frame: 0,
+        commit_checksum: seed.clone(),
         header_seed: seed.clone(),
         running: seed.clone(),
     };
@@ -283,7 +290,9 @@ implement WalWriter {
     ) {
         let (salt1, salt2) = self.salts();
         self.state.restore_committed_pages(pages, db_size);
-        self.index.restore_frames(pages, db_size, salt1, salt2);
+        self.index.restore_frames(pages, db_size, salt1, salt2, &checksum);
+        self.commit_frame = pages.len();
+        self.commit_checksum = checksum.clone();
         self.running = checksum;
         self.write_cursor = file_header_size() + pages.len() * (frame_header_size() + self.page_size());
     }
@@ -360,6 +369,10 @@ public fn wal_writer_append_frame(
     }
     w.write_cursor = w.write_cursor + frame_header_size() + w.page_size();
     w.state.record_appended_frame(page_no, is_commit, commit_db_size);
+    if is_commit {
+        w.commit_frame = w.mx_frame();
+        w.commit_checksum = after_body.clone();
+    }
     // Persist the post-frame rolling state for the next append.
     w.running = after_body;
     // Publish the new frame to the in-memory WAL-index (#163) so
@@ -390,10 +403,10 @@ public fn wal_writer_commit(
     // Publish the new mx_frame + n_page to the WalIndex (#163).
     // Concurrent readers' next snapshot will see the post-commit
     // state via WalIndex.commit_header — no WAL-walk needed.
-    let mx = w.mx_frame();
+    let mx = w.commit_frame;
     let n_pg = w.state.last_commit_db_size() as u32;
     let (s1, s2) = w.salts();
-    w.index.commit_header(mx, n_pg, s1, s2);
+    w.index.publish_commit(mx, n_pg, s1, s2, &w.commit_checksum);
     Result.Ok(())
 }
 
@@ -414,6 +427,8 @@ public fn wal_writer_reset(
         Result.Err(e) => return Result.Err(io_error("wal reset: header write failed", e)),
     }
     w.state.reset_for_restart(new_salt1, new_salt2);
+    w.commit_frame = 0;
+    w.commit_checksum = initial_cksum.clone();
     w.header_seed = initial_cksum.clone();
     w.write_cursor = file_header_size();
     w.running = initial_cksum;
