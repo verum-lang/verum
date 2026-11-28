@@ -3,7 +3,7 @@ mount core.async.waker.noop_waker;
 mount core.intrinsics.runtime.time.sleep_ns;
 fn probe_deferred_shell() -> Int {
     let signal = JobCancellation.new();
-    let mut job = background_process("sleep 0.05; printf xy; printf z >&2; exit 37", signal, Duration.from_millis(20));
+    let mut job = background_process("test \"$VERUM_TEST_BACKGROUND_ENV\" = inherit-73 || exit 91; sleep 0.05; printf xy; printf z >&2; exit 37", signal, Duration.from_millis(20));
     if job.active.is_some() || job.request.is_none() { return -1; }
     let waker = noop_waker();
     let mut cx = Context.from_waker(&waker);

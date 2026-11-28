@@ -72,12 +72,16 @@ mount core.sys.common.{OSError, FileDesc};
 // lookup.
 @cfg(target_os = "linux")
 mount core.sys.linux.syscall as platform_syscall;
+@cfg(target_os = "linux")
+mount core.sys.linux.errno.EINTR;
 
 @cfg(target_os = "linux")
 mount core.sys.linux.syscall.{close as close_descriptor, read as read_descriptor, write as write_descriptor};
 
 @cfg(target_os = "macos")
 mount core.sys.darwin.libsystem as platform_syscall;
+@cfg(target_os = "macos")
+mount core.sys.darwin.errno.EINTR;
 @cfg(target_os = "macos")
 mount core.sys.darwin.libsystem.{safe_close as close_descriptor, safe_read as read_descriptor, safe_write as write_descriptor};
 
@@ -160,29 +164,22 @@ public fn native_spawn(
 ) -> Result<SpawnResult, Text> {
     @cfg(any(target_os = "linux", target_os = "macos"))
     {
-        // 1. Build pipes.
-        let mut stdin_pipe:  [Int32; 2] = [-1 as Int32, -1 as Int32];
-        let mut stdout_pipe: [Int32; 2] = [-1 as Int32, -1 as Int32];
-        let mut stderr_pipe: [Int32; 2] = [-1 as Int32, -1 as Int32];
-
-        if capture_stdin {
-            if let Result.Err(e) = make_pipe(&mut stdin_pipe) {
-                return Result.Err(f"pipe(stdin) failed: {e}");
-            }
-        }
-        if capture_stdout {
-            if let Result.Err(e) = make_pipe(&mut stdout_pipe) {
-                close_pipe(&stdin_pipe);
-                return Result.Err(f"pipe(stdout) failed: {e}");
-            }
-        }
-        if capture_stderr {
-            if let Result.Err(e) = make_pipe(&mut stderr_pipe) {
-                close_pipe(&stdin_pipe);
-                close_pipe(&stdout_pipe);
-                return Result.Err(f"pipe(stderr) failed: {e}");
-            }
-        }
+        let stdin_pipe = make_pipe(capture_stdin)?;
+        let stdout_pipe = match make_pipe(capture_stdout) {
+            Result.Ok(pipe) => pipe,
+            Result.Err(error) => {
+                close_pipe(stdin_pipe.reader, stdin_pipe.writer);
+                return Result.Err(error);
+            },
+        };
+        let stderr_pipe = match make_pipe(capture_stderr) {
+            Result.Ok(pipe) => pipe,
+            Result.Err(error) => {
+                close_pipe(stdin_pipe.reader, stdin_pipe.writer);
+                close_pipe(stdout_pipe.reader, stdout_pipe.writer);
+                return Result.Err(error);
+            },
+        };
 
         // 2. Pre-build argv as a single contiguous, fork-stable blob.
         //  Owned by the parent; read by the child via absolute pointers.
@@ -198,8 +195,10 @@ public fn native_spawn(
         let pid = match do_fork() {
             Result.Ok(p)  => p,
             Result.Err(e) => {
-                close_pipe(&stdin_pipe); close_pipe(&stdout_pipe); close_pipe(&stderr_pipe);
-                return Result.Err(f"fork() failed: {e}");
+                close_pipe(stdin_pipe.reader, stdin_pipe.writer);
+                close_pipe(stdout_pipe.reader, stdout_pipe.writer);
+                close_pipe(stderr_pipe.reader, stderr_pipe.writer);
+                return Result.Err(f"fork failed (errno {e.code})");
             }
         };
 
@@ -207,7 +206,9 @@ public fn native_spawn(
             // ── Child path ───────────────────────────────────────────
             // ASYNC-SIGNAL-SAFE ONLY. No allocation, no locking, no
             // Verum runtime. Just dup2/close/execve/_exit.
-            child_setup_stdio(&stdin_pipe, &stdout_pipe, &stderr_pipe);
+            child_setup_stdio(stdin_pipe.reader, 0, stdin_pipe.writer);
+            child_setup_stdio(stdout_pipe.writer, 1, stdout_pipe.reader);
+            child_setup_stdio(stderr_pipe.writer, 2, stderr_pipe.reader);
             child_execve(prog_ptr_raw, argv_ptr_raw);
             // execve returned → exec failed → bail with conventional 127
             child_exit(127);
@@ -215,27 +216,22 @@ public fn native_spawn(
 
         // ── Parent path ─────────────────────────────────────────────
         // Close child-only pipe ends; keep parent ends.
-        if capture_stdin  { let _ = close_descriptor(FileDesc.from_raw(stdin_pipe[0])); }
-        if capture_stdout { let _ = close_descriptor(FileDesc.from_raw(stdout_pipe[1])); }
-        if capture_stderr { let _ = close_descriptor(FileDesc.from_raw(stderr_pipe[1])); }
+        if capture_stdin  { let _ = close_descriptor(FileDesc.from_raw(stdin_pipe.reader)); }
+        if capture_stdout { let _ = close_descriptor(FileDesc.from_raw(stdout_pipe.writer)); }
+        if capture_stderr { let _ = close_descriptor(FileDesc.from_raw(stderr_pipe.writer)); }
 
-        // The parent's `blob` lives until function return — its drop
-        // happens AFTER we have observed the spawn success. The child's
-        // execve has already replaced its image at this point, so the
-        // child no longer references any of these bytes.
-        let _ = blob;
-
-        Result.Ok(SpawnResult {
+        // After fork the child has its own mappings for the prepared arguments.
+        return Result.Ok(SpawnResult {
             pid:       pid,
-            stdin_fd:  if capture_stdin  { stdin_pipe[1]  as Int } else { -1 },
-            stdout_fd: if capture_stdout { stdout_pipe[0] as Int } else { -1 },
-            stderr_fd: if capture_stderr { stderr_pipe[0] as Int } else { -1 },
-        })
+            stdin_fd:  if capture_stdin  { stdin_pipe.writer  as Int } else { -1 },
+            stdout_fd: if capture_stdout { stdout_pipe.reader as Int } else { -1 },
+            stderr_fd: if capture_stderr { stderr_pipe.reader as Int } else { -1 },
+        });
     }
 
     @cfg(target_os = "windows")
     {
-        Result.Err("native_spawn not implemented for Windows (use io.process.spawn directly)".into())
+        return Result.Err("native_spawn not implemented for Windows (use io.process.spawn directly)");
     }
 }
 
@@ -245,16 +241,13 @@ public fn native_spawn(
 
 @cfg(target_os = "linux")
 fn child_execve(prog_ptr: Int, argv_ptr: Int) {
-    // Direct syscall — bypass all wrappers that might allocate.
-    // execve(prog: &Byte, argv: &(&Byte), envp: &(&Byte))
-    // envp = NULL means "inherit environment of caller" via the runtime
-    // ld.so init contract; equivalent to execv on most libcs.
+    let envp = core.sys.common.get_environ();
     let _ = unsafe {
         core.sys.linux.syscall.syscall_raw(
             core.sys.linux.syscall.SYS_EXECVE,
             prog_ptr,
             argv_ptr,
-            0,         // envp = NULL → inherit (kernel reads /proc/self/environ on first deref)
+            envp as Int,
             0, 0, 0,
         )
     };
@@ -262,39 +255,53 @@ fn child_execve(prog_ptr: Int, argv_ptr: Int) {
 
 @cfg(target_os = "macos")
 fn child_execve(prog_ptr: Int, argv_ptr: Int) {
-    // libSystem.B.dylib execve. Inheriting environ via NULL envp is
-    // the documented contract on Darwin too.
-    let _ = platform_syscall.execve(
-        prog_ptr as &Byte,
-        argv_ptr as &(&Byte),
-        0 as &(&Byte),
-    );
+    // Read the child’s own environment table after fork. The parent may
+    // subsequently change its copy without invalidating this one.
+    let envp = platform_syscall.process_environment();
+    let _ = unsafe { platform_syscall.execve(
+        prog_ptr as *const Byte,
+        argv_ptr as *const *const Byte,
+        envp,
+    ) };
+}
+
+// The child must exit before exec if its redirection could not be installed.
+@cfg(target_os = "macos")
+fn duplicate_child_fd(source: Int32, target: Int32) {
+    if source == target { return; }
+    loop {
+        if unsafe { platform_syscall.dup2(source, target) } >= 0 { return; }
+        if platform_syscall.errno() != EINTR { child_exit(127); }
+    }
+}
+
+@cfg(target_os = "linux")
+fn duplicate_child_fd(source: Int32, target: Int32) {
+    if source == target { return; }
+    loop {
+        // dup3(flags=0) is available on both supported Linux architectures.
+        let result = unsafe { platform_syscall.syscall_raw(platform_syscall.SYS_DUP3,
+            source as Int, target as Int, 0, 0, 0, 0) };
+        if result >= 0 { return; }
+        if result != -EINTR { child_exit(127); }
+    }
 }
 
 @cfg(any(target_os = "linux", target_os = "macos"))
-fn child_setup_stdio(
-    stdin_pipe:  &[Int32; 2],
-    stdout_pipe: &[Int32; 2],
-    stderr_pipe: &[Int32; 2],
-) {
-    // STDIN_FILENO = 0, STDOUT_FILENO = 1, STDERR_FILENO = 2.
-    // Each dup2/close is a single syscall — async-signal-safe.
-    if stdin_pipe[0] >= 0 {
-        let _ = platform_syscall.dup2(FileDesc.from_raw(stdin_pipe[0]), FileDesc.from_raw(0 as Int32));
-        let _ = close_descriptor(FileDesc.from_raw(stdin_pipe[0]));
-        let _ = close_descriptor(FileDesc.from_raw(stdin_pipe[1]));
-    }
-    if stdout_pipe[1] >= 0 {
-        let _ = platform_syscall.dup2(FileDesc.from_raw(stdout_pipe[1]), FileDesc.from_raw(1 as Int32));
-        let _ = close_descriptor(FileDesc.from_raw(stdout_pipe[0]));
-        let _ = close_descriptor(FileDesc.from_raw(stdout_pipe[1]));
-    }
-    if stderr_pipe[1] >= 0 {
-        let _ = platform_syscall.dup2(FileDesc.from_raw(stderr_pipe[1]), FileDesc.from_raw(2 as Int32));
-        let _ = close_descriptor(FileDesc.from_raw(stderr_pipe[0]));
-        let _ = close_descriptor(FileDesc.from_raw(stderr_pipe[1]));
-    }
+fn child_setup_stdio(source: Int32, target: Int32, unused: Int32) {
+    if source < 0 { return; }
+    duplicate_child_fd(source, target);
+    if source != target { child_close(source); }
+    if unused != target { child_close(unused); }
 }
+
+@cfg(target_os = "linux")
+fn child_close(fd: Int32) {
+    let _ = unsafe { platform_syscall.syscall_raw(platform_syscall.SYS_CLOSE, fd as Int, 0, 0, 0, 0, 0) };
+}
+
+@cfg(target_os = "macos")
+fn child_close(fd: Int32) { let _ = unsafe { platform_syscall.close(fd) }; }
 
 @cfg(target_os = "linux")
 fn child_exit(code: Int) -> ! {
@@ -303,36 +310,38 @@ fn child_exit(code: Int) -> ! {
 
 @cfg(target_os = "macos")
 fn child_exit(code: Int) -> ! {
-    platform_syscall._exit(code as Int32)
+    unsafe { platform_syscall._exit(code as Int32) }
 }
 
 @cfg(any(target_os = "linux", target_os = "macos"))
-fn close_pipe(p: &[Int32; 2]) {
-    if p[0] >= 0 { let _ = close_descriptor(FileDesc.from_raw(p[0])); }
-    if p[1] >= 0 { let _ = close_descriptor(FileDesc.from_raw(p[1])); }
+fn close_pipe(reader: Int32, writer: Int32) {
+    if reader >= 0 { let _ = close_descriptor(FileDesc.from_raw(reader)); }
+    if writer >= 0 { let _ = close_descriptor(FileDesc.from_raw(writer)); }
 }
 
-// =============================================================================
-// Pipe + fork helpers (parent-only — heap is fine here)
-// =============================================================================
+type PipePair is { reader: Int32, writer: Int32 };
 
-@cfg(target_os = "linux")
-fn make_pipe(fds: &mut [Int32; 2]) -> Result<(), OSError> {
-    platform_syscall.pipe(fds)
-}
-
-@cfg(target_os = "macos")
-fn make_pipe(fds: &mut [Int32; 2]) -> Result<(), Text> {
+@cfg(any(target_os = "linux", target_os = "macos"))
+fn make_pipe(requested: Bool) -> Result<PipePair, Text> {
+    if !requested { return Result.Ok(PipePair { reader: -1 as Int32, writer: -1 as Int32 }); }
     let mut storage: [Byte; 8] = [0; 8];
-    let output = (&mut storage[..]).as_mut_ptr() as *mut Int32;
-    if unsafe { platform_syscall.pipe(output) } != 0 {
-        let code = platform_syscall.errno();
-        return Result.Err(f"pipe failed (errno {code})");
+    let address = (&mut storage[..]).as_mut_ptr() as Int;
+    @cfg(target_os = "macos")
+    {
+        if unsafe { platform_syscall.pipe(address as *mut Int32) } != 0 {
+            let code = platform_syscall.errno();
+            return Result.Err(f"pipe failed (errno {code})");
+        }
     }
-    let address = output as Int;
-    fds[0] = @intrinsic("load_i32", address) as Int32;
-    fds[1] = @intrinsic("load_i32", address + 4) as Int32;
-    Result.Ok(())
+    @cfg(target_os = "linux")
+    {
+        let rc = unsafe { platform_syscall.syscall_raw(platform_syscall.SYS_PIPE2, address, 0, 0, 0, 0, 0) };
+        if rc < 0 { return Result.Err(f"pipe failed (errno {-rc})"); }
+    }
+    Result.Ok(PipePair {
+        reader: @intrinsic("load_i32", address) as Int32,
+        writer: @intrinsic("load_i32", address + 4) as Int32,
+    })
 }
 
 @cfg(target_os = "linux")
@@ -341,9 +350,10 @@ fn do_fork() -> Result<Int, OSError> {
 }
 
 @cfg(target_os = "macos")
-fn do_fork() -> Result<Int, Text> {
-    let r = platform_syscall.fork();
-    if r < 0 { Result.Err("fork failed".into()) } else { Result.Ok(r as Int) }
+fn do_fork() -> Result<Int, OSError> {
+    let r = unsafe { platform_syscall.fork() };
+    if r >= 0 { return Result.Ok(r as Int); }
+    Result.Err(OSError.from_code(platform_syscall.errno()))
 }
 
 // =============================================================================
@@ -384,7 +394,8 @@ public fn native_fd_write_all(fd: Int, data: &[Byte]) -> Result<Int, Text> {
     @cfg(any(target_os = "linux", target_os = "macos"))
     {
         if (fd as Int32) as Int != fd { return Result.Err("file descriptor does not fit a POSIX C int"); }
-        let mut buffer: [Byte; 4096] = [0; 4096];
+        let mut storage: [Byte; 4096] = [0; 4096];
+        let buffer = &mut storage[..];
         let mut total = 0;
         while total < data.len() {
             let size: Int = (data.len() - total).min(PIPE_CHUNK_SIZE);
@@ -421,26 +432,33 @@ public fn native_fd_read_chunk(fd: Int, max: Int) -> Result<List<Byte>, Text> {
         if max == 0 { return Result.Ok([]); }
         let size: Int = max.min(PIPE_CHUNK_SIZE);
         if (fd as Int32) as Int != fd { return Result.Err("file descriptor does not fit a POSIX C int"); }
-        let mut buffer: [Byte; 4096] = [0; 4096];
-        loop {
-            match read_descriptor(FileDesc.from_raw(fd as Int32), &mut buffer[..size]) {
-                Result.Ok(count) => {
-                    let mut bytes: List<Byte> = List.with_capacity(count);
-                    let mut offset = 0;
-                    while offset < count {
-                        bytes.push(buffer[offset]);
-                        offset += 1;
-                    }
-                    return Result.Ok(bytes);
-                },
-                Result.Err(error) => if !error.interrupted() {
-                    return Result.Err(f"read failed (errno {error.code})");
-                },
-            }
-        }
+        let descriptor = FileDesc.from_raw(fd as Int32);
+        let mut storage: [Byte; 4096] = [0; 4096];
+        let destination = &mut storage[..size];
+        return read_pipe_bytes(descriptor, destination);
     }
     @cfg(target_os = "windows")
     {
         return Result.Err("native_fd_read_chunk not implemented for Windows");
+    }
+}
+
+@cfg(any(target_os = "linux", target_os = "macos"))
+fn read_pipe_bytes(fd: FileDesc, buffer: &mut [Byte]) -> Result<List<Byte>, Text> {
+    loop {
+        match read_descriptor(fd, &mut *buffer) {
+            Result.Ok(count) => {
+                let mut bytes: List<Byte> = List.with_capacity(count);
+                let mut offset = 0;
+                while offset < count {
+                    bytes.push(buffer[offset]);
+                    offset += 1;
+                }
+                return Result.Ok(bytes);
+            },
+            Result.Err(error) => if !error.interrupted() {
+                return Result.Err(f"read failed (errno {error.code})");
+            },
+        }
     }
 }

@@ -37,11 +37,11 @@ sync/condvar.vr Condvar
 collections/map.vr Map Slot
 async/task.vr TaskId Task TaskCompletion TaskOutcome JoinError
 sys/darwin/thread.vr Thread DarwinThread futex_wait __ulock_wait __ulock_wake
-sys/darwin/libsystem.vr PthreadT try_waitpid waitpid_raw safe_waitpid safe_close waitpid close errno __error errno_to_message execve_raw fork pipe dup2 execve _exit kill safe_read safe_write read write poll poll_descriptors PthreadMutex
+sys/darwin/libsystem.vr PthreadT try_waitpid waitpid_raw safe_waitpid safe_close waitpid close errno __error errno_to_message _NSGetEnviron process_environment fork pipe dup2 execve _exit kill safe_read safe_write read write poll poll_descriptors PthreadMutex
 text/case_fold.vr equal_ascii_nocase fold_byte_ascii
 intrinsics/arithmetic.vr checked_mul checked_add
 intrinsics/atomic.vr atomic_fence MemoryOrder fence_order ORDERING_SEQ_CST atomic_fetch_sub_u32 ORDERING_RELEASE ORDERING_ACQUIRE ORDERING_RELAXED ORDERING_ACQ_REL atomic_fetch_add_u32 atomic_load_u32 atomic_load_u8 atomic_store_u8 atomic_cas_u64 atomic_load_u64
-sys/common.vr MAX_CONTEXT_SLOTS poll_readable_now OSError ctx_get FileDesc FileDesc.from_raw OSError.new FileDesc.STDERR PollDescriptor probe_descriptor OSError.interrupted OSError.kind OSErrorKind OSError.from_code __ctx_slot_get_raw
+sys/common.vr MAX_CONTEXT_SLOTS poll_readable_now OSError ctx_get FileDesc FileDesc.from_raw OSError.new FileDesc.STDERR PollDescriptor probe_descriptor OSError.interrupted OSError.kind OSErrorKind OSError.from_code __ctx_slot_get_pointer
 base/env.vr shell var_opt var VarError get_env_impl
 intrinsics/runtime/cbgr.vr cbgr_deallocate
 sys/darwin/errno.vr errno_name *const

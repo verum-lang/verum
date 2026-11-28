@@ -92,7 +92,7 @@ extern {
 
     /// Duplicate file descriptor to specific number.
     /// C: `int dup2(int oldfd, int newfd)`. T0.4.2 fix.
-    fn dup2(oldfd: Int32, newfd: Int32) -> Int32;
+    public(in core.sys) fn dup2(oldfd: Int32, newfd: Int32) -> Int32;
 
     /// Create pipe (fds[0]=read end, fds[1]=write end).
     /// C: `int pipe(int pipefd[2])`. T0.4.2: fd-array element type is Int32.
@@ -219,14 +219,14 @@ extern {
     fn exit(status: Int32) -> !;
 
     /// Exit process (alternate). C: `void _exit(int status);`.
-    fn _exit(status: Int32) -> !;
+    public(in core.sys) fn _exit(status: Int32) -> !;
 
     /// Fork process. C: `pid_t fork(void);` (`pid_t = int32_t`).
-    fn fork() -> Int32;
+    public(in core.sys) fn fork() -> Int32;
 
     /// Execute program (absolute path).
     /// C: `int execve(const char *path, char *const argv[], char *const envp[]);`.
-    fn execve(path: &Byte, argv: &(&Byte), envp: &(&Byte)) -> Int32;
+    public(in core.sys) fn execve(path: *const Byte, argv: *const *const Byte, envp: *const *const Byte) -> Int32;
 
     /// Execute program (search PATH).
     /// C: `int execvp(const char *file, char *const argv[]);`.
