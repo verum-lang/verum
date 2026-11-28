@@ -89,7 +89,7 @@ fn user_deref_receiver_emits_the_same_calls_as_explicit_deref() {
         implicit.iter().any(|op| op.ends_with("Guard.deref")),
         "{implicit:?}"
     );
-    assert!(implicit.iter().any(|op| op == "*"), "{implicit:?}");
+    assert!(!implicit.iter().any(|op| op == "*"), "{implicit:?}");
     assert!(
         implicit.iter().any(|op| op.ends_with("Cell.read")),
         "{implicit:?}"
@@ -102,6 +102,25 @@ fn user_deref_receiver_executes_the_target_method() {
         "fn probe() -> Int { let g: Guard<Cell> = Guard { marker: 13, value: Cell { padding: 99, value: 7 } }; g.read() }",
         Some(7),
     );
+}
+
+#[test]
+fn a_borrowed_method_can_return_its_projected_receiver() {
+    let operations = check(
+        r#"
+type Pinned is { cell: &Cell };
+implement Cell { fn pin(&self) -> Pinned { Pinned { cell: self } } }
+fn probe() -> Int {
+    let outer: Guard<Guard<Cell>> = Guard { marker: 5,
+        value: Guard { marker: 11, value: Cell { padding: 13, value: 73 } } };
+    let pin = outer.pin();
+    pin.cell.read()
+}
+"#,
+        Some(73),
+    );
+    assert_eq!(operations.iter().filter(|op| op.ends_with("Guard.deref")).count(), 2);
+    assert!(!operations.iter().any(|op| op == "*"), "{operations:?}");
 }
 
 #[test]

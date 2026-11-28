@@ -10,7 +10,7 @@ pub(super) struct ProjectionMethod {
     name: String,
     id: crate::module::FunctionId,
     witnesses: Vec<crate::types::TypeRef>,
-    result: crate::types::TypeRef,
+    pub(super) result: crate::types::TypeRef,
 }
 
 enum ReceiverAdjustment {

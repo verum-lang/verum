@@ -12791,9 +12791,9 @@ impl VbcCodegen {
         self.ctx.free_temp(reference);
     }
 
-    /// Borrow the final projected storage as the receiver of an `&mut self`
-    /// method. Materializing a copied value here loses whole-value writes.
-    fn compile_mutable_deref_receiver(
+    /// A method with a borrowed receiver may return a reference into the
+    /// projection. Keep that storage live across the call and any returned guard.
+    fn compile_borrowed_deref_receiver(
         &mut self,
         origin: &Expr,
         owner: &str,
@@ -12815,15 +12815,20 @@ impl VbcCodegen {
         else {
             return Ok(None);
         };
-        if !selected.takes_self_mut_ref {
-            return Ok(None);
-        }
+        use verum_ast::method_dispatch::ReceiverKind;
+        let mutable = match self.declared_receiver_kind(selected) {
+            Some(ReceiverKind::SelfRef) => false,
+            Some(ReceiverKind::SelfMut) => true,
+            None if selected.takes_self_mut_ref => true,
+            _ => return Ok(None),
+        };
         let refusal = || CodegenError::with_span(
             CodegenErrorKind::TypeInference(
-                "method requires a mutable dereference of the original place".into()),
+                if mutable { "method requires a mutable dereference of the original place" }
+                else { "method requires a declared shared dereference of the original place" }.into()),
             origin.span,
         );
-        if !self.mutable_projection_place(origin, 0) {
+        if mutable && !self.mutable_projection_place(origin, 0) {
             return Err(refusal());
         }
         let mut declaration = self.projection_operand_declaration(origin).ok_or_else(refusal)?;
@@ -12832,11 +12837,14 @@ impl VbcCodegen {
         }
         let mut projections = verum_common::List::with_capacity(depth);
         for _ in 0..depth {
-            let (projection, next) = self.dereference_projection(&declaration, true)
+            let (projection, next) = self.dereference_projection(&declaration, mutable)
                 .ok_or_else(refusal)?;
             projections.push(projection);
             declaration = next;
         }
+        let Some(reference_type) = projections.last().map(|p| p.result.clone()) else {
+            return Ok(None);
+        };
         let mut value = self.compile_expr(origin)?.or_internal("missing dereference receiver")?;
         for projection in projections {
             let reference = self.emit_projection_method(value, projection, None);
@@ -12844,9 +12852,8 @@ impl VbcCodegen {
             value = reference;
         }
         self.compile_method_on_adjusted_value(
-            value, &format!("&mut {target}"), Some(crate::types::TypeRef::reference(
-                declaration, crate::types::Mutability::Mutable, crate::types::CbgrTier::Tier0,
-            )), origin.span, method, args,
+            value, &format!("&{}{target}", if mutable { "mut " } else { "" }), Some(reference_type),
+            origin.span, method, args,
             resolved_target, type_args, true,
         )
     }
@@ -13255,7 +13262,7 @@ impl VbcCodegen {
                 && let Some(target) = self.extract_expr_type_name(receiver)
             {
                 let depth = explicit - native + self.method_receiver_deref_count(&target, method.name.as_str());
-                if let Some(result) = self.compile_mutable_deref_receiver(
+                if let Some(result) = self.compile_borrowed_deref_receiver(
                     origin, after_refs, depth, method, args, resolved_target, type_args,
                 )? {
                     return Ok(Some(result));
@@ -13312,7 +13319,7 @@ impl VbcCodegen {
         if let Some(receiver_type) = receiver_declaration.as_deref() {
             let depth = self.method_receiver_deref_count(receiver_type, method.name.as_str());
             if depth > 0 {
-                if let Some(result) = self.compile_mutable_deref_receiver(
+                if let Some(result) = self.compile_borrowed_deref_receiver(
                     receiver, receiver_type, depth, method, args, resolved_target, type_args,
                 )? {
                     return Ok(Some(result));
@@ -16575,12 +16582,8 @@ impl VbcCodegen {
         let field_borrow = if !receiver_is_borrowed
             && !reference_receiver
             && let Some((owner, field, false, _)) = field_writeback_target.as_ref()
-            && let Some(kind) = dynamic.as_ref().map(|member| member.receiver).or_else(|| {
-                let method = resolved_method.as_ref()?;
-                let signature = self.declared_callable_descriptors
-                    .get(&method.id)?.source_signature.as_ref()?;
-                Some(verum_ast::method_dispatch::ReceiverKind::from_declaration(signature))
-            })
+            && let Some(kind) = dynamic.as_ref().map(|member| member.receiver)
+                .or_else(|| resolved_method.as_ref().and_then(|method| self.declared_receiver_kind(method)))
             && kind.meta().is_borrowed
         {
             // A returned guard can retain this borrow after the extracted receiver

@@ -3,12 +3,15 @@ use crate::receiver_methods::{pointee, select};
 use crate::types::TypeRef;
 
 impl VbcCodegen {
-    /// A receiver is a source parameter role, not a display name in FunctionInfo.
-    pub(super) fn has_declared_method_receiver(&self, function: &FunctionInfo) -> CodegenResult<bool> {
+    pub(super) fn declared_receiver_kind(&self, function: &FunctionInfo) -> Option<verum_ast::method_dispatch::ReceiverKind> {
         self.declared_callable_descriptors
             .get(&function.id)
             .and_then(|descriptor| descriptor.source_signature.as_ref())
-            .map(|signature| signature.is_method())
+            .map(verum_ast::method_dispatch::ReceiverKind::from_declaration)
+    }
+
+    pub(super) fn has_declared_method_receiver(&self, function: &FunctionInfo) -> CodegenResult<bool> {
+        self.declared_receiver_kind(function).map(|role| role.meta().has_self)
             .ok_or_else(|| {
                 CodegenError::new(CodegenErrorKind::InvalidSourceSignature(format!(
                     "missing declared receiver role for {:?}",
