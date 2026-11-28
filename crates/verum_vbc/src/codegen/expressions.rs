@@ -8527,7 +8527,7 @@ impl VbcCodegen {
             return Err(CodegenError::with_span(CodegenErrorKind::InvalidSourceSignature(
                 "selected parameter has no declared array construction".into()), argument.span));
         }
-        if !Self::admits_constructor_context(value) {
+        if !Self::admits_constructor_context(value) && !matches!(value.kind, ExprKind::Closure { .. }) {
             return self.compile_expr(argument);
         }
         let prior_type = std::mem::replace(&mut self.ctx.expected_value_type, expected.cloned());
@@ -8559,7 +8559,7 @@ impl VbcCodegen {
             let function = self.ctx.lookup_function_by_id(crate::module::FunctionId(func_id))?;
             let mut bindings = crate::mono::TypeSubstitution::empty();
             let selected = self.bind_source_type_arguments(function, explicit, &mut bindings)
-                .map(|()| self.selected_argument_bindings_in(function, count, operands, captured, bindings));
+                .and_then(|()| self.selected_argument_bindings_in(function, count, operands, captured, bindings)).map(Some);
             return Some(CallInstantiation::declared(function, selected));
         }
         if let Some(declared) = self.declared_argument_witnesses(func_id, count, operands.clone(), captured) {
@@ -9037,7 +9037,7 @@ impl VbcCodegen {
         self.prepare_nominal_constructor(function)?;
         let mut bindings = crate::mono::TypeSubstitution::empty();
         let selected = self.bind_source_type_arguments(function, explicit, &mut bindings)
-            .map(|()| self.selected_argument_bindings_in(function, args.len(), args.iter(), None, bindings));
+            .and_then(|()| self.selected_argument_bindings_in(function, args.len(), args.iter(), None, bindings)).map(Some);
         let inferred = Some(CallInstantiation::declared(function, selected));
         let witnesses = self.apply_explicit_generic_args(Some(function), explicit, inferred)?;
         let name = function.return_type_name.as_deref().ok_or_else(|| CodegenError::internal("constructor has no declared name"))?;
@@ -13011,6 +13011,7 @@ impl VbcCodegen {
         type_args: &verum_common::List<verum_ast::ty::GenericArg>,
         receiver_is_borrowed: bool,
     ) -> CodegenResult<Option<Reg>> {
+        self.constrain_open_list_receiver(receiver, method.as_str(), args, type_args)?;
         // ──────────────────────────────────────────────────────────
         // Resolve callback parameter types from the same owner used for
         // method dispatch. Each closure claims only its own span-keyed hints.
@@ -16658,9 +16659,13 @@ impl VbcCodegen {
                 let function = self.ctx.lookup_function_by_id(crate::module::FunctionId(fid))?;
                 let mut bindings = crate::mono::TypeSubstitution::empty();
                 let selected = self.bind_source_type_arguments(function, type_args, &mut bindings)
-                    .map(|()| self.bind_static_receiver_declaration(function, receiver_result_declaration.as_ref()?, &mut bindings)
-                        .and_then(|()| self.selected_argument_bindings_in(function, args.len(), args.iter(),
-                            generic_operand_declarations.as_deref(), bindings)));
+                    .and_then(|()| {
+                        if receiver_result_declaration.as_ref().and_then(|owner|
+                            self.bind_static_receiver_declaration(function, owner, &mut bindings)).is_none()
+                        { return Ok(None); }
+                        self.selected_argument_bindings_in(function, args.len(), args.iter(),
+                            generic_operand_declarations.as_deref(), bindings).map(Some)
+                    });
                 Some(CallInstantiation::declared(function, selected))
             } else {
                 self.infer_call_instantiation_with_declarations(
@@ -18191,7 +18196,7 @@ impl VbcCodegen {
             let mut bindings = crate::mono::TypeSubstitution::empty();
             self.bind_source_type_arguments(func_info, type_args, &mut bindings)?;
             let selected = self.selected_argument_bindings_in(func_info, args.len(), args.iter(), None, bindings)
-                .and_then(|ordinary| {
+                .map(|ordinary| {
                     let (owner, fixed) = match owner {
                         FactoryReceiver::ExplicitSelf(owner) => (owner, true),
                         FactoryReceiver::Enclosing(owner) => (owner, false),
@@ -18207,7 +18212,7 @@ impl VbcCodegen {
                         Some(ordinary)
                     }
                 });
-            Some(CallInstantiation::declared(func_info, Ok(selected)))
+            Some(CallInstantiation::declared(func_info, selected))
         } else {
             self.infer_call_instantiation(func_info.id.0, None, args, type_args)
         };
@@ -31898,6 +31903,13 @@ impl VbcCodegen {
         // and closures compiled inside the receiver keep their own entries.
         let elem_hints = hint_key.and_then(|key| self.ctx.closure_param_type_hints.remove(&key));
         let return_hint = hint_key.and_then(|key| self.ctx.closure_return_type_hints.remove(&key));
+        let expected_result = hint_key.filter(|span| Some(*span) == self.ctx.expected_value_span)
+            .and_then(|_| self.ctx.expected_value_type.as_ref())
+            .and_then(|expected| match expected {
+                crate::types::TypeRef::Function { params: inputs, is_async: mode, return_type, .. }
+                    if *mode == is_async && inputs.len() == params.len() => Some((**return_type).clone()),
+                _ => None,
+            });
         // Step 1: Extract parameter info for the closure
         // For simple ident patterns, use the name directly
         // For complex patterns (tuple, etc.), generate synthetic names
@@ -32017,6 +32029,7 @@ impl VbcCodegen {
             body,
             return_type,
             return_hint,
+            expected_result,
             signature_is_plain,
             is_async,
         )?;
@@ -32122,6 +32135,7 @@ impl VbcCodegen {
         body: &Expr,
         return_type_ast: Option<&verum_ast::ty::Type>,
         return_hint: verum_common::Maybe<verum_common::Text>,
+        expected_result: Option<crate::types::TypeRef>,
         signature_is_plain: bool,
         is_async: bool,
     ) -> CodegenResult<u32> {
@@ -32255,6 +32269,9 @@ impl VbcCodegen {
             self.ctx.registers.callable_bound_signatures.get(id).map(|result| (*id, result.clone()))
         }).collect();
         self.ctx.begin_function(&closure_name, &all_params, closure_return_type_ref.clone());
+        // A selected callback signature gives context to its return edges.
+        // The emitted body's receipts still determine its inferred signature.
+        self.ctx.function_return_declaration = closure_return_type_ref.clone().or(expected_result);
         self.ctx.registers.callable_bound_signatures.extend(captured_bounds);
         self.ctx.bind_captured_array_facts(captured_arrays);
         self.bind_capture_declarations(captures, capture_types);

@@ -175,3 +175,33 @@ fn a_payload_cannot_borrow_a_different_nominal_variants_declaration() {
         "{error}"
     );
 }
+
+#[test]
+fn selected_callback_result_reaches_independent_variant_branches() {
+    run(r#"
+        module callback_scope;
+        type Decision<T,E> is Accept(T) | Reject(E);
+        fn validate<T>(flag:Bool, check:fn(Bool)->Decision<T,Int>) -> T {
+            match check(flag) { Decision.Accept(value) => value, Decision.Reject(_) => panic("rejected") }
+        }
+        fn number(flag:Bool) -> Int {
+            validate(flag, |ok| if ok { Decision.Accept(73) } else { Decision.Reject(9) })
+        }
+        fn probe() -> Int { number(true) }
+    "#, 73);
+}
+
+#[test]
+fn conflicting_generic_arguments_identify_the_parameter_and_the_source_operand() {
+    let source = "module callback_scope;
+        fn pair<T>(first:T, second:T) -> T { first }
+        fn probe() -> Int { pair(71, false) }";
+    let ast = verum_fast_parser::Parser::new(source).parse_module().unwrap();
+    let mut compiler = VbcCodegen::with_config(CodegenConfig::new("callback_scope"));
+    compiler.collect_unit_declarations(&[&ast]).unwrap();
+    let error = compiler.compile_unit_items(&[&ast], ItemFailurePolicy::Strict).unwrap_err();
+    let span = error.span.expect("offending call operand");
+    assert_eq!(&source[span.start as usize..span.end as usize], "false");
+    let message = error.to_string();
+    assert!(message.contains("second") && message.contains("Int") && message.contains("Bool"), "{message}");
+}

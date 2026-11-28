@@ -217,3 +217,22 @@ fn probe() -> Int { let mut xs = make(); xs.push(6 as Byte);
     assert_eq(xs.len(), 3); assert_eq(xs[0], 4); assert_eq(xs[1], 5); 1 }
 "#);
 }
+
+#[test]
+fn empty_list_infers_its_receiver_from_the_selected_method_arguments() {
+    let module = declared_list::compile_consumer(r#"
+        module consumer;
+        mount core.collections.list.List;
+        fn collect<T>(item:T) -> List<T> { let mut values = []; values.push(item); values }
+        fn probe() -> Int {
+            let mut values = collect(31);
+            values.push(11);
+            values[0] + values[1]
+        }
+    "#);
+    for module in declared_list::source_and_wire(module) {
+        let entry = module.find_function_by_name("consumer.probe").expect("consumer entry");
+        let mut vm = Interpreter::try_new_validated(Arc::new(module)).unwrap();
+        assert_eq!(vm.execute_function(entry).unwrap().as_i64(), 42);
+    }
+}

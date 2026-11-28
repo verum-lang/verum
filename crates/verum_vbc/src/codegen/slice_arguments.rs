@@ -83,28 +83,26 @@ impl VbcCodegen {
         output: Reg,
         start: usize,
     ) -> Option<crate::types::TypeId> {
-        let ExprKind::MethodCall {
-            receiver,
-            type_args,
-            ..
-        } = &Self::normalized_place(initializer).kind
-        else {
+        let crate::Instruction::NewList { dst, .. } = self.ctx.instructions.get(start..)?.last()? else {
             return None;
         };
-        let ExprKind::Path(path) = &receiver.kind else {
-            return None;
+        if *dst != output { return None; }
+        let owner = match &Self::normalized_place(initializer).kind {
+            ExprKind::Array(verum_ast::ArrayExpr::List(items)) if items.is_empty() => {
+                let list = WellKnownType::List;
+                list.canonical_archive_modules().iter().find_map(|module| {
+                    self.nominal_type_id(&format!("{module}.{}", list.as_str()))
+                })?
+            }
+            ExprKind::MethodCall { receiver, type_args, .. } if type_args.is_empty() => {
+                let ExprKind::Path(path) = &receiver.kind else { return None; };
+                let name = path.as_ident()?.as_str();
+                if self.is_value_receiver_binding(name) { return None; }
+                self.nominal_type_id(name)?
+            }
+            _ => return None,
         };
-        let name = path.as_ident()?;
-        if !type_args.is_empty() || self.is_value_receiver_binding(name.as_str()) {
-            return None;
-        }
-        let crate::Instruction::NewList { dst, .. } = self.ctx.instructions.get(start..)?.last()?
-        else {
-            return None;
-        };
-        let owner = self.nominal_type_id(name.as_str())?;
-        (*dst == output && self.declared_runtime_carrier(owner) == Some(WellKnownType::List))
-            .then_some(owner)
+        (self.declared_runtime_carrier(owner) == Some(WellKnownType::List)).then_some(owner)
     }
 
     /// Bind the local element from a selected collection parameter before the

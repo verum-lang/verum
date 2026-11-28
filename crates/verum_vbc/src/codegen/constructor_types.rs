@@ -568,26 +568,69 @@ impl VbcCodegen {
         &self, info: &FunctionInfo, count: usize, args: impl Iterator<Item = &'a Expr>,
         captured: Option<&[Option<TypeRef>]>, bindings: TypeSubstitution,
     ) -> Option<Vec<TypeRef>> {
-        let bindings = self.selected_argument_bindings_in(info, count, args, captured, bindings)?;
+        let bindings = self.selected_argument_bindings_in(info, count, args, captured, bindings).ok()?;
         info.type_param_ids.iter().map(|id| bindings.get(*id).cloned()).collect()
+    }
+
+    /// An unescaped empty allocation owns no element yet. Use the nominal
+    /// method's other arguments to instantiate its receiver before dispatch.
+    pub(super) fn constrain_open_list_receiver(
+        &mut self, receiver: &Expr, method: &str, args: &[Expr], explicit: &[verum_ast::ty::GenericArg],
+    ) -> CodegenResult<()> {
+        let Some(name) = Self::named_place_binding(receiver) else { return Ok(()); };
+        let Some(binding) = self.ctx.lookup_var(name) else { return Ok(()); };
+        let Some(owner) = binding.pending_list_element else { return Ok(()); };
+        if !self.ctx.array_result_facts.is_fresh_list(binding.reg) { return Ok(()); }
+        let Some(nominal) = self.declaration_type_name(&TypeRef::Concrete(owner), 0) else { return Ok(()); };
+        let Some(key) = self.registered_receiver_method(&nominal, method) else { return Ok(()); };
+        let Some(info) = self.ctx.lookup_qualified_function(&key) else { return Ok(()); };
+        if !self.has_declared_method_receiver(info)? { return Ok(()); }
+        let Some(TypeRef::Function { params, .. }) = &info.callable_signature else { return Ok(()); };
+        let Some(first) = params.first() else { return Ok(()); };
+        let carrier = crate::receiver_methods::pointee(first);
+        if carrier.base_type_id() != Some(owner) { return Ok(()); }
+        let mut bindings = TypeSubstitution::empty();
+        self.bind_source_type_arguments(info, explicit, &mut bindings)?;
+        let operands = (1..).zip(args);
+        let Ok(bindings) = self.bind_indexed_operands(info, args.len() + 1, operands, None, bindings)
+        else { return Ok(()); };
+        if !fully_bound(carrier, &bindings) { return Ok(()); }
+        let Ok(inferred) = bindings.apply(carrier) else { return Ok(()); };
+        if !self.declared_type_in_scope(&inferred) { return Ok(()); }
+        self.ctx.lookup_var_mut(name).unwrap().pending_list_element = None;
+        self.publish_resolved_binding_type(name, &inferred);
+        Ok(())
     }
 
     /// Inference may leave a declaration-owned slot open for explicit arguments.
     /// Failed evidence is distinct from a successful, incomplete substitution.
     pub(super) fn selected_argument_bindings_in<'a>(
         &self, info: &FunctionInfo, count: usize, args: impl Iterator<Item = &'a Expr>,
+        captured: Option<&[Option<TypeRef>]>, bindings: TypeSubstitution,
+    ) -> CodegenResult<TypeSubstitution> {
+        self.bind_indexed_operands(info, count, args.enumerate(), captured, bindings)
+    }
+
+    fn bind_indexed_operands<'a>(
+        &self, info: &FunctionInfo, count: usize, args: impl Iterator<Item = (usize, &'a Expr)>,
         captured: Option<&[Option<TypeRef>]>, mut bindings: TypeSubstitution,
-    ) -> Option<TypeSubstitution> {
-        if count > info.param_count { return None; }
+    ) -> CodegenResult<TypeSubstitution> {
+        let invalid = |message: String| CodegenError::new(CodegenErrorKind::TypeInference(message));
+        let missing = |index: usize| invalid(format!(
+            "missing source argument evidence for parameter {} (`{}`)", index + 1,
+            info.param_names.get(index).map(String::as_str).unwrap_or("_")));
+        if count > info.param_count {
+            return Err(invalid(format!("call takes {} arguments but received {count}", info.param_count)));
+        }
         for index in count..info.param_count {
             let constant = self.declared_callable_descriptors.get(&info.id)
                 .and_then(|declaration| declaration.params.get(index))
                 .is_some_and(|parameter| parameter.default.is_some());
             let expression = self.declared_callable_defaults.get(&info.id)
                 .and_then(|defaults| defaults.get(index)).is_some_and(Option::is_some);
-            if !constant && !expression { return None; }
+            if !constant && !expression { return Err(missing(index)); }
         }
-        if info.type_param_ids.is_empty() { return Some(bindings); }
+        if info.type_param_ids.is_empty() { return Ok(bindings); }
         // Async, generator and contextual functions do not have an ordinary
         // synchronous function result. Their source parameter declarations
         // still bind generic witnesses, independently of the result carrier.
@@ -606,8 +649,8 @@ impl VbcCodegen {
                 bindings = result_bindings;
             }
         }
-        for (index, arg) in args.enumerate() {
-            let formal = parameter(index)?;
+        for (index, arg) in args {
+            let formal = parameter(index).ok_or_else(|| missing(index))?;
             if !formal.is_generic() { continue; }
             let expected = fully_bound(formal, &bindings).then(|| bindings.apply(formal).ok()).flatten();
             // An unsuffixed literal has the selected scalar carrier only when
@@ -636,14 +679,22 @@ impl VbcCodegen {
             if std::env::var_os("VERUM_TRACE_MONO").is_some() {
                 eprintln!("[declared-operand] function={:?} slot={index} formal={formal:?} actual={actual:?}", info.id);
             }
-            let actual = actual?;
+            let display = |ty: &TypeRef| self.declaration_type_name(ty, 0).unwrap_or_else(|| format!("{ty:?}"));
+            let diagnosis = |reason: &str, actual: Option<&TypeRef>| {
+                let name = info.param_names.get(index).map(String::as_str).unwrap_or("_");
+                let wanted = expected.as_ref().unwrap_or(formal);
+                let mut message = format!("{reason} source argument evidence for `{name}` (argument {}), expected {}", index + 1, display(wanted));
+                if let Some(ty) = actual { message.push_str(&format!(", found {}", display(ty))); }
+                invalid(message).at_source(arg.span)
+            };
+            let actual = actual.ok_or_else(|| diagnosis("missing", None))?;
             // Only an owned receiver needs an implicit borrow. An existing
             // reference goes through the ordinary argument adaptation, which
             // preserves permission and can borrow a fixed array as a slice.
             let formal = match formal {
                 TypeRef::Reference { inner, .. } if index == 0
                     && !matches!(actual, TypeRef::Reference { .. })
-                    && self.has_declared_method_receiver(info).ok()? => inner.as_ref(),
+                    && self.has_declared_method_receiver(info)? => inner.as_ref(),
                 _ => formal,
             };
             let actual = &actual;
@@ -652,28 +703,32 @@ impl VbcCodegen {
                 let bound: verum_common::List<_> = info.type_param_ids.iter().map(|id| (id, bindings.get(*id))).collect();
                 eprintln!("[declared-call] function={:?} slot={index} formal={formal:?} actual={actual:?} accepted={} bindings={bound:?}", info.id, accepted.is_some());
             }
-            accepted?;
-            self.complete_declared_callable_arguments(info, &mut bindings)?;
+            accepted.ok_or_else(|| diagnosis("conflicting", Some(actual)))?;
+            self.complete_declared_callable_arguments(info, &mut bindings)
+                .ok_or_else(|| diagnosis("conflicting", Some(actual)))?;
         }
         // Omitted arguments are real producers emitted from this declaration's
         // defaults. Their receipts can bind an otherwise unconstrained slot;
         // neither the omitted syntax nor the formal type supplies that evidence.
         for index in count..info.param_count {
-            let formal = parameter(index)?;
+            let formal = parameter(index).ok_or_else(|| missing(index))?;
             if !formal.is_generic() { continue; }
             let expected = fully_bound(formal, &bindings).then(|| bindings.apply(formal).ok()).flatten();
             let contextual_literal = expected.as_ref().and_then(|expected|
                 self.declared_callable_defaults.get(&info.id)?.get(index)?.as_ref()
                     .and_then(|expression| self.contextual_numeric_literal(expression, expected)));
             let actual = match contextual_literal {
-                Some(literal) => literal?,
-                None => captured?.get(index)?.as_ref()?.clone(),
+                Some(literal) => literal.ok_or_else(|| missing(index))?,
+                None => captured.and_then(|args| args.get(index)).and_then(Option::as_ref)
+                    .cloned().ok_or_else(|| missing(index))?,
             };
-            self.bind_declared_operand(info, index, formal, &actual, &mut bindings)?;
-            self.complete_declared_callable_arguments(info, &mut bindings)?;
+            self.bind_declared_operand(info, index, formal, &actual, &mut bindings)
+                .and_then(|()| self.complete_declared_callable_arguments(info, &mut bindings))
+                .ok_or_else(|| missing(index))?;
         }
-        self.complete_declared_callable_arguments(info, &mut bindings)?;
-        Some(bindings)
+        self.complete_declared_callable_arguments(info, &mut bindings)
+            .ok_or_else(|| invalid("conflicting source argument evidence for the selected callable's bounds".into()))?;
+        Ok(bindings)
     }
 
     pub(super) fn bind_static_receiver_declaration(
