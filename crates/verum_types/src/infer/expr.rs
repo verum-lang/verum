@@ -139,6 +139,7 @@ struct BranchPatternScope {
 
 #[derive(Default)]
 struct ConditionFailures {
+    payload_writes: crate::context::BranchPayloadWrites,
     ownership: List<crate::affine::AffineAlternatives>,
     loans: Option<crate::aliasing::BorrowTracker>,
     evidence: Option<crate::refinement_evidence::RefinementEvidence>,
@@ -5147,6 +5148,7 @@ impl TypeChecker {
         let mut evidence = self.refinement_evidence.clone();
         for _ in 0..=scopes.len() { evidence.pop_scope(); }
         evidence.join_into(&mut failures.evidence);
+        self.ctx.env.collect_branch_payload_writes(scopes.len() + 1, &mut failures.payload_writes);
         failures.ownership.push(ownership);
         if let Some(existing) = &mut failures.loans {
             existing.merge_live_loans(&loans);
@@ -5233,6 +5235,11 @@ impl TypeChecker {
         let then_result = then_result?;
         if let Some(error) = linear_error { return Err(error); }
         let then_reaches_join = !self.is_never_type(&then_result.ty);
+        let mut taken_writes = crate::context::BranchPayloadWrites::default();
+        if then_reaches_join {
+            self.ctx.env.collect_branch_payload_writes(0, &mut taken_writes);
+        }
+        self.ctx.env.restore_branch_payload_writes(failures.payload_writes);
         let taken_affine = self.affine_tracker.snapshot_alternatives();
         let failed_loans = failures.loans.ok_or_else(|| TypeError::OtherWithCodeSpanned {
             code: "E400".into(), msg: "if requires a condition".into(), span: condition.span,
@@ -5277,6 +5284,7 @@ impl TypeChecker {
                 self.affine_tracker.merge_alternatives(&[
                     self.affine_tracker.snapshot_alternatives(), taken_affine,
                 ]);
+                self.ctx.env.collect_branch_payload_writes(0, &mut taken_writes);
                 self.refinement_evidence.intersect(&taken_evidence);
                 self.borrow_tracker.merge_live_loans(&taken_loans);
             } else {
@@ -5284,6 +5292,7 @@ impl TypeChecker {
                 self.refinement_evidence = taken_evidence;
                 self.borrow_tracker = taken_loans;
             }
+            self.ctx.env.restore_branch_payload_writes(taken_writes);
         }
         let ty = match (expected, then_reaches_join, else_reaches_join) {
             (_, false, false) => Type::Never,

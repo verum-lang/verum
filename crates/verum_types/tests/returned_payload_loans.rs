@@ -933,3 +933,43 @@ fn disjoint_field_access_keeps_its_own_local_loan_and_opaque_capture_writes() {
             || error.contains("borrow")), "{body}: {errors:?}");
     }
 }
+
+#[test]
+fn generic_storage_handoff_is_independent_of_branch_order() {
+    let declarations = "type Error<T> is { guard:T };
+        implement<T> Error<T> { fn make(guard:T)->Error<T> { Error { guard } } }
+        type Response<T> is Yes(T) | No(Error<T>);
+        type Envelope<T> is { poisoned:Bool, data:T };";
+    for (yes, no) in [
+        ("Response.No(Error.make(self.data))", "Response.Yes(self.data)"),
+        ("Response.Yes(self.data)", "Response.No(Error.make(self.data))"),
+    ] {
+        let body = format!("implement<T> Envelope<T> {{ fn take(self)->Response<T> {{
+            if self.poisoned {{ {yes} }} else {{ {no} }} }} }}");
+        let errors = diagnostics(declarations, &body);
+        assert!(errors.is_empty(), "{body}: {errors:?}");
+    }
+}
+
+#[test]
+fn an_uncertain_write_reaches_only_its_possible_successors() {
+    let declarations = "type Carrier is { item:&Int };
+        fn change(p:&mut Carrier);
+        fn writes(p:&mut Carrier)->Bool;";
+    let accepted = diagnostics(declarations,
+        "fn inspect(mut p:Carrier, flag:Bool, anchor:&Int)->&Int {
+            if flag { change(&mut p); return anchor; } p.item }");
+    assert!(accepted.is_empty(), "{accepted:?}");
+    for body in [
+        "fn after(mut p:Carrier, flag:Bool)->&Int {
+            if flag { change(&mut p); } p.item }",
+        "fn after_else(mut p:Carrier, flag:Bool)->&Int {
+            if flag {} else { change(&mut p); } p.item }",
+        "fn guard(mut p:Carrier, flag:Bool, anchor:&Int)->&Int {
+            if flag && writes(&mut p) { return anchor; } p.item }",
+    ] {
+        let errors = diagnostics(declarations, body);
+        assert!(errors.iter().any(|error| error.contains("cannot establish the lifetime")),
+            "{body}: {errors:?}");
+    }
+}

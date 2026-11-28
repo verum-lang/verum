@@ -1317,6 +1317,35 @@ enum StoredRead {
     InlineField,
 }
 
+/// Only uncertain writes travel along control-flow edges. The frame distance
+/// is measured from the join's lexical scope, so shadowed names stay distinct.
+#[derive(Default)]
+pub(crate) struct BranchPayloadWrites(Map<usize, Map<Text, UnverifiedWrites>>);
+
+#[derive(Clone, Debug, Default)]
+struct UnverifiedWrites(List<(List<Text>, Span)>);
+
+impl UnverifiedWrites {
+    fn insert(&mut self, fields: &[Text], span: Span) {
+        if self.0.iter().any(|(written, _)| fields.starts_with(written)) {
+            return;
+        }
+        self.0.retain(|(written, _)| !written.starts_with(fields));
+        self.0.push((List::from(fields), span));
+    }
+
+    fn merge(&mut self, other: &Self) {
+        for (fields, span) in &other.0 {
+            self.insert(fields, *span);
+        }
+    }
+
+    fn overlapping(&self, fields: &[Text]) -> Option<Span> {
+        self.0.iter().find_map(|(written, span)|
+            (written.starts_with(fields) || fields.starts_with(written)).then_some(*span))
+    }
+}
+
 /// Identity changes on a write. An old alias can never attach its evidence
 /// to a subsequently installed value, even when the binding name is reused.
 #[derive(Clone, Debug, Default)]
@@ -1333,7 +1362,7 @@ struct RecordPlace {
     inserted_origins: List<crate::ty::RecordReceiver>,
     /// Each path identifies an inline subplace whose previous stored loans
     /// no longer describe its payload. An empty path covers the entire binding.
-    unverified_writes: List<(List<Text>, Span)>,
+    unverified_writes: UnverifiedWrites,
 }
 
 impl RecordPlace {
@@ -1343,19 +1372,6 @@ impl RecordPlace {
         if let Some(ReferenceOrigin::Exact(origin)) = &self.reference {
             self.reference = Some(ReferenceOrigin::Candidates(Box::new([origin.clone()])));
         }
-    }
-
-    fn invalidate_payload(&mut self, fields: &[Text], span: Span) {
-        if self.unverified_writes.iter().any(|(written, _)| fields.starts_with(written)) {
-            return;
-        }
-        self.unverified_writes.retain(|(written, _)| !written.starts_with(fields));
-        self.unverified_writes.push((List::from(fields), span));
-    }
-
-    fn unverified_write(&self, fields: &[Text]) -> Option<Span> {
-        self.unverified_writes.iter().find_map(|(written, span)|
-            (written.starts_with(fields) || fields.starts_with(written)).then_some(*span))
     }
 
     fn identity(&mut self) -> Option<u64> {
@@ -1904,7 +1920,7 @@ impl TypeEnv {
                 place.reference = Some(if complete { ReferenceOrigin::OwnedPayload(sources.into()) }
                     else { ReferenceOrigin::Candidates(sources.into()) });
                 place.inserted_origins.clear();
-                place.unverified_writes.clear();
+                place.unverified_writes.0.clear();
                 return true;
             }
             if !scope.origins_dominate_parent { return false; }
@@ -1953,7 +1969,7 @@ impl TypeEnv {
 
     pub(crate) fn binding_has_payload_origins(&mut self, name: &str) -> bool {
         self.local_record_place(name).is_some_and(|place| {
-            place.unverified_writes.is_empty()
+            place.unverified_writes.0.is_empty()
                 && matches!(place.reference, Some(ReferenceOrigin::OwnedPayload(_) | ReferenceOrigin::OwnedRecord { .. }))
         })
     }
@@ -1974,11 +1990,38 @@ impl TypeEnv {
                             | ReferenceOrigin::Parameter
                             | ReferenceOrigin::Exact(_)
                     )
-                ) && place.unverified_writes.is_empty();
+                ) && place.unverified_writes.0.is_empty();
             }
             scope = env.parent.as_deref();
         }
         false
+    }
+
+    /// Accumulate writes on a reachable predecessor, excluding bindings local
+    /// to its pattern guards. Clean bindings and the module scope cost no copies.
+    pub(crate) fn collect_branch_payload_writes(&self, skip: usize, into: &mut BranchPayloadWrites) {
+        let scopes = std::iter::successors(Some(self), |env| env.parent.as_deref());
+        for (depth, env) in scopes.skip(skip).take_while(|env| env.parent.is_some()).enumerate() {
+            for (name, place) in &env.record_places {
+                if !place.unverified_writes.0.is_empty() {
+                    into.0.entry(depth).or_default().entry(name.clone()).or_default()
+                        .merge(&place.unverified_writes);
+                }
+            }
+        }
+    }
+
+    pub(crate) fn restore_branch_payload_writes(&mut self, mut state: BranchPayloadWrites) {
+        let mut env = self;
+        let mut depth = 0;
+        while env.parent.is_some() {
+            let mut writes = state.0.remove(&depth).unwrap_or_default();
+            for (name, place) in &mut env.record_places {
+                place.unverified_writes = writes.remove(name).unwrap_or_default();
+            }
+            env = env.parent.as_deref_mut().expect("lexical parent");
+            depth += 1;
+        }
     }
 
     pub(crate) fn invalidate_payload_origins(
@@ -1995,7 +2038,7 @@ impl TypeEnv {
                 if destination.fields.is_empty() {
                     place.may_replace_reference();
                 }
-                place.invalidate_payload(inline_fields, span);
+                place.unverified_writes.insert(inline_fields, span);
                 return;
             }
             let Some(parent) = scope.parent.as_deref_mut() else { return; };
@@ -2012,7 +2055,7 @@ impl TypeEnv {
         while scope.parent.is_some() {
             for place in scope.record_places.values_mut() {
                 if matches!(place.reference, Some(ReferenceOrigin::Parameter)) {
-                    place.invalidate_payload(&[], span);
+                    place.unverified_writes.insert(&[], span);
                 }
             }
             scope = scope.parent.as_deref_mut().expect("lexical parent");
@@ -2027,7 +2070,7 @@ impl TypeEnv {
                 if matches!(place.reference, Some(ReferenceOrigin::Parameter | ReferenceOrigin::Exact(_)
                     | ReferenceOrigin::Candidates(_) | ReferenceOrigin::OwnedPayload(_) | ReferenceOrigin::OwnedRecord { .. })) {
                     place.may_replace_reference();
-                    place.invalidate_payload(&[], span);
+                    place.unverified_writes.insert(&[], span);
                 }
             }
             scope = scope.parent.as_deref_mut().expect("lexical parent");
@@ -2038,7 +2081,7 @@ impl TypeEnv {
         let mut scope = Some(self);
         while let Some(env) = scope {
             if let Some(place) = env.record_places.values().find(|place| place.id == Some(source.binding)) {
-                return place.unverified_write(&source.fields);
+                return place.unverified_writes.overlapping(&source.fields);
             }
             scope = env.parent.as_deref();
         }
