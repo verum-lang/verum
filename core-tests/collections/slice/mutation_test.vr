@@ -1,0 +1,63 @@
+module core.collections.tests.slice_mutation;
+
+mount core.collections.list.List;
+mount core.collections.slice.*;
+
+@test
+fn swap_preserves_each_element_in_both_index_orders() {
+    let mut storage: List<Int> = List.new();
+    storage.push(10);
+    storage.push(20);
+    storage.push(30);
+    storage.push(40);
+    {
+        let values = storage.as_mut_slice();
+        values.swap(3, 1);
+        values.swap(0, 3);
+        values.swap(1, 1);
+    }
+    assert_eq(storage[0], 20);
+    assert_eq(storage[1], 40);
+    assert_eq(storage[2], 30);
+    assert_eq(storage[3], 10);
+}
+
+@test
+fn swapping_distinct_slice_owners_updates_both() {
+    let mut first: List<Int> = List.new();
+    first.push(13);
+    first.push(21);
+    let mut second: List<Int> = List.new();
+    second.push(34);
+    second.push(55);
+    first.as_mut_slice().swap_with_slice(second.as_mut_slice());
+    assert_eq(first[0], 34);
+    assert_eq(first[1], 55);
+    assert_eq(second[0], 13);
+    assert_eq(second[1], 21);
+}
+
+@test
+fn empty_slices_can_be_exchanged() {
+    let mut first: List<Int> = List.new();
+    let mut second: List<Int> = List.new();
+    first.as_mut_slice().swap_with_slice(second.as_mut_slice());
+    assert_eq(first.len(), 0);
+    assert_eq(second.len(), 0);
+}
+
+@test
+@should_panic(expected = "swap indices out of bounds")
+fn equal_indices_still_require_an_element() {
+    let mut storage: List<Int> = List.new();
+    storage.as_mut_slice().swap(0, 0);
+}
+
+@test
+@should_panic(expected = "slice lengths must match")
+fn swap_with_slice_requires_equal_lengths() {
+    let mut first: List<Int> = List.new();
+    first.push(3);
+    let mut second: List<Int> = List.new();
+    first.as_mut_slice().swap_with_slice(second.as_mut_slice());
+}

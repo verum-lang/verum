@@ -42,6 +42,7 @@ module core.collections.slice;
 // Explicitly import comparison Ordering to avoid conflict with core.sync.atomic.Ordering
 mount core.base.ordering.{Ordering};
 mount core.base.protocols.equal_elements;
+mount core.base.memory.swap as swap_values;
 
 // Import intrinsics as functions
 mount core.intrinsics.{slice_len};
@@ -707,9 +708,9 @@ implement<T> [T] {
         assert(a >= 0 && a < self.len() && b >= 0 && b < self.len(),
                "swap indices out of bounds");
         if a != b {
-            let tmp = self[a];
-            self[a] = self[b];
-            self[b] = tmp;
+            let (first, second) = if a < b { (a, b) } else { (b, a) };
+            let (left, right) = self.split_at_mut(second);
+            swap_values(&mut left[first], &mut right[0]);
         }
     }
 
@@ -753,9 +754,7 @@ implement<T> [T] {
     public fn swap_with_slice(&mut self, other: &mut [T]) {
         assert(self.len() == other.len(), "slice lengths must match");
         for i in range(0, self.len()) {
-            let tmp = self[i];
-            self[i] = other[i];
-            other[i] = tmp;
+            swap_values(&mut self[i], &mut other[i]);
         }
     }
 
