@@ -28,6 +28,25 @@ fn run(source: &str) -> Result<Value, InterpreterError> {
 }
 
 #[test]
+fn pointer_named_methods_on_borrowed_records_use_the_declared_bodies() {
+    let result = run(r#"
+type Counter is { value: Int };
+implement Counter {
+    public fn as_ptr(&self) -> Int { self.value }
+    public fn as_mut_ptr(&mut self) -> Int { self.value = self.value + 1; self.value }
+}
+fn read(c: &Counter) -> Int { c.as_ptr() }
+fn update(c: &mut Counter) -> Int { c.as_mut_ptr() }
+fn probe() -> Int {
+    let mut counter = Counter { value: 36 };
+    let old = read(&counter);
+    old + update(&mut counter)
+}
+"#).expect("nominal pointer-named methods on shared and mutable references");
+    assert_eq!(result.as_i64(), 73);
+}
+
+#[test]
 fn subslice_of_a_borrowed_collection_reads_its_elements() {
     let result = run(r#"
 fn read(values: &[Int]) -> Int {
