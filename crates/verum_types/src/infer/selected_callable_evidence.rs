@@ -118,6 +118,27 @@ impl TypeChecker {
         !calls.bound.may_be_async()
     }
 
+    /// Check a selected inherent method in its declaring module. Its body can
+    /// then supply the resolved inner calls and field types to a client.
+    pub(in crate::infer) fn checked_projection_owner(
+        &self,
+        call: Span,
+        graph: &Shared<parking_lot::RwLock<verum_modules::ModuleRegistry>>,
+        remaining: &mut usize,
+    ) -> Option<TypeChecker> {
+        let (owner, declaration) = self.type_registry.callable_declaration(call)?;
+        let selected = self.selected_callable_source(call, owner, declaration)?;
+        let item = selected.inherent_method_item()?;
+        let module = selected.source.module();
+        *remaining = remaining.checked_sub(module.items.len())?;
+        let mut checker = self.prepare_callable_evidence(owner, module, graph)?;
+        checker.check_item(&item).ok()?;
+        (checker.take_deferred_errors().is_empty()
+            && checker.diagnostic_sources().is_empty()
+            && !checker.diagnostics().iter().any(|error| error.is_error()))
+        .then_some(checker)
+    }
+
     pub(super) fn prepare_callable_evidence(
         &self,
         owner: &Text,

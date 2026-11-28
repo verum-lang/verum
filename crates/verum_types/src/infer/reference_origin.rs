@@ -1381,6 +1381,11 @@ impl TypeChecker {
                     .then_some(origin)
             }
             ExprKind::Call { args, .. } | ExprKind::MethodCall { args, .. } => {
+                if let ExprKind::MethodCall { receiver, .. } = &unparen(expr).kind
+                    && let Some(place) = self.forwarded_receiver_place(expr.span, receiver)
+                {
+                    return Some(place);
+                }
                 let body = self.type_registry.returned_value(expr.span)?;
                 if matches!(body.nodes.get(body.result)?, crate::context::ReturnedValueNode::BorrowedField { .. }) {
                     let origins = self.returned_value_origins(unparen(expr))?;

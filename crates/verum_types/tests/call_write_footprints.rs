@@ -1064,3 +1064,52 @@ fn storing_a_local_loan_through_a_returned_field_still_checks_the_store() {
     assert!(found.iter().any(|e| e.contains("lifetime") || e.contains("does not live long enough")),
         "{found:?}");
 }
+
+#[test]
+fn a_forwarded_accessor_composes_checked_receiver_field_paths() {
+    let declarations = "type Slot is { n:Int }; type Part is { slot:Slot };
+        type Shell is { part:Part, hook:fn() }; type Root is { shell:Shell };
+        implement Part { fn select(&mut self)->&mut Slot { &mut self.slot } }
+        implement Shell { fn select(&mut self)->&mut Slot { self.part.select() } }
+        implement Root { fn target(&mut self)->&mut Slot { self.shell.select() } }
+        fn store(s:&mut Slot) { s.n=3; }";
+    let valid = errors(
+        declarations,
+        "fn keep(mut root:Root)->Root { store(root.target()); root }",
+    );
+    assert!(valid.is_empty(), "{valid:?}");
+    let invalid = errors(
+        &declarations.replace("self.part.select()", "(self.hook)(); self.part.select()"),
+        "fn keep(mut root:Root)->Root { store(root.target()); root }",
+    );
+    assert!(
+        invalid.iter().any(|e| e.contains("lifetime")),
+        "{invalid:?}"
+    );
+}
+
+#[test]
+fn a_mounted_accessor_composes_only_its_selected_module_bodies() {
+    let found = registered_errors([
+        (
+            "storage",
+            "public type Slot is { n:Int }; public type Part is { slot:Slot };
+            implement Part { public fn select(&mut self)->&mut Slot { &mut self.slot } }
+            implement Slot { public fn write(&mut self) { self.n=3; } }"
+                .into(),
+        ),
+        (
+            "service",
+            "mount storage.{Part,Slot}; public type Service is { part:Part, hook:fn() };
+            implement Service { public fn select(&mut self)->&mut Slot { self.part.select() } }"
+                .into(),
+        ),
+        (
+            "consumer",
+            "mount service.Service;
+            fn keep(mut s:Service)->Service { s.select().write(); s }"
+                .into(),
+        ),
+    ]);
+    assert!(found.is_empty(), "{found:?}");
+}

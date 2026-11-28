@@ -796,6 +796,175 @@ impl TypeChecker {
         self.returned_call_value_origins(expression.span, args, receiver, false)
     }
 
+    /// Compose pure accessor bodies on borrowed receivers. Every hop checks
+    /// the selected call signature against the actual inline field type.
+    /// No detached structural type or method spelling identifies a place.
+    fn forwarded_receiver_field(&self, mut span: verum_ast::Span) -> Option<List<Text>> {
+        let mut seen = Set::new();
+        let mut fields = List::new();
+        let mut budget = MAX_RETURNED_VALUE_STEPS;
+        let mut graph = None;
+        let mut provider = None;
+        loop {
+            if !seen.insert(span) {
+                return None;
+            }
+            let checker = provider.as_ref().unwrap_or(self);
+            let body = checker.type_registry.returned_value(span)?;
+            budget = budget.checked_sub(body.nodes.len().max(1))?;
+            if !body.locals.is_empty() || !body.writes.is_empty() {
+                return None;
+            }
+            let Type::Function {
+                params,
+                contexts,
+                return_type,
+                ..
+            } = checker.type_registry.lookup_call_target(span)?
+            else {
+                return None;
+            };
+            if !params.is_empty() || contexts.as_ref().is_some_and(|scope| !scope.is_empty()) {
+                return None;
+            }
+            let receiver = checker.type_registry.declared_receiver(span)?;
+            let Type::Reference {
+                mutable,
+                inner: result,
+            } = checker.place_reference_head(return_type, span).ok()?
+            else {
+                return None;
+            };
+            if body.nodes.iter().enumerate().any(|(i, node)| {
+                i != body.result
+                    && !matches!(
+                        node,
+                        ReturnedValueNode::Receiver | ReturnedValueNode::Field { .. }
+                    )
+            }) {
+                return None;
+            }
+            match body.nodes.get(body.result)? {
+                ReturnedValueNode::BorrowedField {
+                    input,
+                    fields: tail,
+                    mutable: borrowed,
+                } => {
+                    if borrowed != &mutable
+                        || !matches!(body.nodes.get(*input)?, ReturnedValueNode::Receiver)
+                    {
+                        return None;
+                    }
+                    let target =
+                        checker.borrowed_input_field_type(receiver, mutable, tail, span)?;
+                    if checker.reference_mode(&target, span).ok()?.is_some() || target != *result {
+                        return None;
+                    }
+                    fields.extend(tail.iter().cloned());
+                    return Some(fields);
+                }
+                ReturnedValueNode::SelectedCall {
+                    span: next,
+                    receiver: Some(node),
+                    arguments,
+                } if arguments.is_empty() => {
+                    let next = *next;
+                    let mut current = *node;
+                    let mut path = List::new();
+                    while let ReturnedValueNode::Field { source, name } = body.nodes.get(current)? {
+                        if *source >= current {
+                            return None;
+                        }
+                        path.push(name.clone());
+                        current = *source;
+                    }
+                    if !matches!(body.nodes.get(current)?, ReturnedValueNode::Receiver) {
+                        return None;
+                    }
+                    path.reverse();
+                    let projected =
+                        checker.borrowed_input_field_type(receiver, false, &path, span)?;
+                    let Type::Reference {
+                        mutable: writable, ..
+                    } = checker.place_reference_head(receiver, span).ok()?
+                    else {
+                        return None;
+                    };
+                    let returned = checker.unifier.apply(return_type);
+                    if checker.type_registry.declared_receiver(next).is_none() {
+                        // Inference variables are local to their checker. A
+                        // call-site type crossing this boundary must be closed.
+                        if self.source_type_registration.checking_callable_evidence
+                            || [&projected, &returned].into_iter().any(|ty| {
+                                ty.contains_type(|part| {
+                                    matches!(
+                                        part,
+                                        Type::Var(_)
+                                            | Type::RecordField { .. }
+                                            | Type::Meta {
+                                                value: crate::ty::ValueTerm::Inference(_),
+                                                ..
+                                            }
+                                    )
+                                }) || checker.contains_unresolved_projection(ty)
+                            })
+                        {
+                            return None;
+                        }
+                        let graph = graph.get_or_insert_with(|| {
+                            Shared::new(parking_lot::RwLock::new(
+                                self.module_registry.read().clone(),
+                            ))
+                        });
+                        provider =
+                            Some(checker.checked_projection_owner(span, graph, &mut budget)?);
+                    }
+                    let checker = provider.as_ref().unwrap_or(self);
+                    let nested = checker.type_registry.declared_receiver(next)?;
+                    let Type::Reference {
+                        mutable: needed,
+                        inner: input,
+                    } = checker.place_reference_head(nested, next).ok()?
+                    else {
+                        return None;
+                    };
+                    let Type::Function {
+                        return_type: output,
+                        ..
+                    } = checker.type_registry.lookup_call_target(next)?
+                    else {
+                        return None;
+                    };
+                    if (needed && !writable)
+                        || projected != *input
+                        || returned != checker.unifier.apply(output)
+                    {
+                        return None;
+                    }
+                    fields.extend(path);
+                    span = next;
+                }
+                _ => return None,
+            }
+        }
+    }
+
+    pub(super) fn forwarded_receiver_place(
+        &mut self,
+        span: verum_ast::Span,
+        receiver: &Expr,
+    ) -> Option<RecordReceiver> {
+        let fields = self.forwarded_receiver_field(span)?;
+        let declared = self.type_registry.declared_receiver(span)?.clone();
+        let origins = self.closed_call_input_origins(receiver, &declared, false)?;
+        let [origin] = origins.as_slice() else {
+            return None;
+        };
+        let mut origin = origin.clone();
+        origin.fields.extend(fields);
+        Some(origin)
+    }
+
     pub(super) fn returned_call_value_origins(
         &mut self,
         span: verum_ast::Span,
@@ -821,6 +990,11 @@ impl TypeChecker {
             return None;
         }
 
+        if matches!(derivation.nodes.get(derivation.result)?, ReturnedValueNode::SelectedCall { .. })
+            && let Some(place) = receiver.and_then(|value| self.forwarded_receiver_place(span, value))
+        {
+            return Some(List::from_single(place));
+        }
         let declared_receiver = self.type_registry.declared_receiver(span).cloned();
         let facts = self.returned_body_types(
             &derivation,
