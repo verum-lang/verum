@@ -104,6 +104,14 @@ public type WalChecksum is {
     s2: UInt32,
 };
 
+implement WalChecksum {
+    public(in core.database.sqlite.native.l1_pager) fn from_words(s1: u32, s2: u32) -> WalChecksum {
+        WalChecksum { s1, s2 }
+    }
+
+    public(in core.database.sqlite.native.l1_pager) fn words(&self) -> (u32, u32) { (self.s1, self.s2) }
+}
+
 /// Live WAL state — runtime accumulator used by the pager actor.
 public type Wal is {
     header: WalHeader,
@@ -140,7 +148,7 @@ public fn wal_new(
     let seed_bytes = wal_header_serialize_seed(&header);
     let running = wal_running_checksum(
         WalChecksum { s1: 0 as UInt32, s2: 0 as UInt32 },
-        &seed_bytes,
+        seed_bytes.as_slice(),
     );
 
     // Patch the header to carry the computed checksum.

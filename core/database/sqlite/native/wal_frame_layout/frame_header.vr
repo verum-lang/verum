@@ -19,6 +19,15 @@ public type WalFrameHeader is {
     checksum2: u32,
 };
 
+implement WalFrameHeader {
+    public(in core.database.sqlite.native) fn page_number(&self) -> u32 { self.page_number }
+    public(in core.database.sqlite.native) fn commit_size(&self) -> u32 { self.commit_size }
+
+    public(in core.database.sqlite.native) fn words(&self) -> [u32; 6] {
+        [self.page_number, self.commit_size, self.salt1, self.salt2, self.checksum1, self.checksum2]
+    }
+}
+
 public fn new(
     page_number: u32,
     commit_size: u32,

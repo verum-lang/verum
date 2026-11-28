@@ -146,6 +146,12 @@ public type PagerError is {
     message: Text,
 };
 
+implement PagerError {
+    public(in core.database.sqlite.native.l1_pager) fn new(kind: PagerErrorKind, message: Text) -> PagerError {
+        PagerError { kind, message }
+    }
+}
+
 public type PagerErrorKind is
       InvalidPageSize
     | PageOutOfRange

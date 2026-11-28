@@ -44,6 +44,9 @@ fn borrowed_format_pieces_and_byte_subslices_use_the_release_source_contracts() 
 #[path = "sqlite_scanner_boundary.rs"]
 mod sqlite_scanner_boundary;
 
+#[path = "sqlite_wal_boundary.rs"]
+mod sqlite_wal_boundary;
+
 #[path = "stdlib_list_construction.rs"]
 mod stdlib_list_construction;
 

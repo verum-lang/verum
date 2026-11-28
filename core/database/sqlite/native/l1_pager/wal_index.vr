@@ -322,6 +322,26 @@ public fn wal_index_new(page_size: Int) -> WalIndex {
 }
 
 implement WalIndex {
+    /// Replace the searchable frames while preserving active reader marks and backfill.
+    public(in core.database.sqlite.native.l1_pager) fn restore_frames(
+        &mut self, pages: &[Int], db_size: Int, salt1: u32, salt2: u32,
+    ) {
+        self.sections.clear();
+        let mut i = 0;
+        while i < pages.len() {
+            self.append_frame(pages[i], i + 1);
+            i = i + 1;
+        }
+        if pages.len() > 0 {
+            self.commit_header(pages.len(), db_size as u32, salt1, salt2);
+        } else {
+            self.hdr.mx_frame = 0;
+            self.hdr.n_page = 0 as u32;
+            self.hdr.is_init = false;
+            self.hdr_backup = clone_hdr(&self.hdr);
+        }
+    }
+
     /// True iff the index has been initialised by a writer (vs
     /// freshly-created).  Readers attaching to `is_init=false`
     /// must trigger recovery.
@@ -478,11 +498,12 @@ implement WalIndex {
         // Walk slots looking for a compatible mark.
         let mut i: Int = 1;
         while i < N_READER_MARK {
-            let m = &self.ckpt.read_marks[i];
-            if m.mx_frame == want {
+            let mark = self.ckpt.read_marks[i].mx_frame;
+            if mark == want {
+                let readers = self.ckpt.read_marks[i].refcount;
                 self.ckpt.read_marks[i] = WalReaderMark {
                     mx_frame: want,
-                    refcount: m.refcount + 1,
+                    refcount: readers + 1,
                 };
                 return i;
             }
@@ -491,8 +512,7 @@ implement WalIndex {
         // No exact match — try to claim a free slot.
         let mut j: Int = 1;
         while j < N_READER_MARK {
-            let m = &self.ckpt.read_marks[j];
-            if m.mx_frame == READMARK_NOT_USED {
+            if self.ckpt.read_marks[j].mx_frame == READMARK_NOT_USED {
                 self.ckpt.read_marks[j] = WalReaderMark {
                     mx_frame: want,
                     refcount: 1,
@@ -509,16 +529,17 @@ implement WalIndex {
     /// future readers may claim it at a different mx_frame.
     public fn release_reader_mark(&mut self, slot: Int) {
         if slot < 1 || slot >= N_READER_MARK { return; }
-        let m = &self.ckpt.read_marks[slot];
-        if m.refcount <= 1 {
+        let readers = self.ckpt.read_marks[slot].refcount;
+        let frame = self.ckpt.read_marks[slot].mx_frame;
+        if readers <= 1 {
             self.ckpt.read_marks[slot] = WalReaderMark {
                 mx_frame: READMARK_NOT_USED,
                 refcount: 0,
             };
         } else {
             self.ckpt.read_marks[slot] = WalReaderMark {
-                mx_frame: m.mx_frame,
-                refcount: m.refcount - 1,
+                mx_frame: frame,
+                refcount: readers - 1,
             };
         }
     }

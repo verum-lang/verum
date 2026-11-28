@@ -52,13 +52,13 @@ mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l0_vfs.posix_vfs.PosixFile;
 mount core.database.sqlite.native.l0_vfs.memdb_vfs.MemDbFile;
 mount core.database.sqlite.native.l0_vfs.vfs_protocol.{
-    VfsError, SyncFlags, sync_default, sync_full,
+    VfsError, VfsErrorKind, SqliteFile, SyncFlags, sync_default, sync_full,
 };
 mount core.database.sqlite.native.wal_frame_layout.constants.{
-    file_header_size, frame_header_size, magic_little, current_format_version,
+    file_header_size, frame_header_size, magic_little, current_format_version, is_valid_page_size,
 };
 mount core.database.sqlite.native.wal_frame_layout.file_header.{
-    WalFileHeader,
+    WalFileHeader, is_little_endian,
 };
 // `mount X as Y` rename-alias doesn't surface to AOT codegen (task #11).
 // Use full path `core.database.sqlite.native.wal_frame_layout.file_header.new`.
@@ -67,7 +67,7 @@ mount core.database.sqlite.native.wal_frame_layout.frame_header.{
 };
 // task #11: use full path `core.database.sqlite.native.wal_frame_layout.frame_header.new`
 mount core.database.sqlite.native.l1_pager.wal_state.{
-    WalState, wal_state_new,
+    WalState, wal_state_from_header,
 };
 mount core.database.sqlite.native.l1_pager.pager.{PagerError, PagerErrorKind};
 mount core.database.sqlite.native.l1_pager.journal.wal.{
@@ -139,11 +139,8 @@ public fn wal_writer_create(
     salt1: u32,
     salt2: u32,
 ) -> Result<WalWriter, PagerError> {
-    if !is_power_of_two_or_sentinel(page_size) {
-        return Result.Err(PagerError {
-            kind: PagerErrorKind.InvalidPageSize,
-            message: "WAL page size must be 512..65536 power-of-two or sentinel 1",
-        });
+    if !is_valid_page_size(page_size) {
+        return Result.Err(PagerError.new(PagerErrorKind.InvalidPageSize, "WAL page size must be 512..65536 power-of-two or sentinel 1"));
     }
 
     // Build the file header (#149): compute the rolling-checksum
@@ -162,9 +159,10 @@ public fn wal_writer_create(
     );
     let prefix_bytes = encode_file_header_prefix_24(&hdr_no_cksum);
     let initial_cksum = wal_running_checksum(
-        WalChecksum { s1: 0 as u32, s2: 0 as u32 },
+        WalChecksum.from_words(0 as u32, 0 as u32),
         prefix_bytes.as_slice(),
     );
+    let (s1, s2) = initial_cksum.words();
     let hdr = core.database.sqlite.native.wal_frame_layout.file_header.new(
         magic_little(),
         current_format_version(),
@@ -172,20 +170,18 @@ public fn wal_writer_create(
         0 as u32,
         salt1,
         salt2,
-        initial_cksum.s1,
-        initial_cksum.s2,
+        s1,
+        s2,
     );
 
     let mut backend = backend;
     let header_bytes = encode_file_header(&hdr);
-    match backend_write(&mut backend, &header_bytes, 0) {
+    match backend_write(&mut backend, header_bytes.as_slice(), 0) {
         Result.Ok(_) => {}
         Result.Err(e) => return Result.Err(io_error("wal create header write failed", e)),
     }
 
-    let mut state = wal_state_new(page_size);
-    state.salt1 = salt1;
-    state.salt2 = salt2;
+    let state = wal_state_from_header(&hdr, 0, 0, Map.new(), 0);
 
     // Initialise the WAL-index (#163).  Fresh WAL ⇒ fresh index;
     // header isn't committed yet (`is_init = false`) — first
@@ -221,10 +217,7 @@ where V: VfsProtocol
         Result.Err(e) => return Result.Err(io_error("wal create: random_bytes failed", e)),
     };
     if bytes.len() < 8 {
-        return Result.Err(PagerError {
-            kind: PagerErrorKind.Corrupt,
-            message: "WAL create: vfs.random_bytes returned < 8 bytes",
-        });
+        return Result.Err(PagerError.new(PagerErrorKind.Corrupt, "WAL create: vfs.random_bytes returned < 8 bytes"));
     }
     let salt1 = bytes_to_u32_be(&bytes, 0);
     let salt2 = bytes_to_u32_be(&bytes, 4);
@@ -247,57 +240,65 @@ fn bytes_to_u32_be(b: &List<Byte>, off: Int) -> u32 {
 public fn wal_writer_open(
     backend: WalBackend,
 ) -> Result<WalWriter, PagerError> {
-    let mut backend = backend;
     let mut buf: List<Byte> = List.new();
     let mut i: Int = 0;
     while i < file_header_size() {
         buf.push(0 as Byte);
         i = i + 1;
     }
-    match backend_read(&mut backend, &mut buf, 0) {
+    match backend_read(&backend, &mut buf, 0) {
         Result.Ok(_) => {}
         Result.Err(e) => return Result.Err(io_error("wal open header read failed", e)),
     }
-    let hdr = decode_file_header(&buf);
-    if hdr.magic != magic_little() {
-        return Result.Err(PagerError {
-            kind: PagerErrorKind.Corrupt,
-            message: "WAL file magic mismatch",
-        });
+    let hdr = decode_file_header(buf.as_slice());
+    if !is_little_endian(&hdr) {
+        return Result.Err(PagerError.new(PagerErrorKind.Corrupt, "WAL file magic mismatch"));
     }
-    let mut state = wal_state_new(hdr.page_size);
-    state.salt1 = hdr.salt1;
-    state.salt2 = hdr.salt2;
-    state.checkpoint_seq = hdr.checkpoint_seq;
-    // Seed the rolling-checksum from the file header's stored
-    // checksum1/2 (#149).  After recovery walks the frame stream
-    // and validates the rolling chain frame-by-frame, the writer's
-    // `running` field will hold the post-last-frame state — but
-    // `wal_writer_open` itself doesn't walk frames; the `recover`
-    // entry in wal_reader.vr does that and updates `running` via
-    // `wal_writer_set_running` before any append is attempted.
-    //
-    // The WalIndex (#163) starts uninitialised; recovery populates
-    // it via `wal_writer_index_replay` (called from wal_reader's
-    // recover_state path) so readers don't have to re-walk the
-    // WAL on every reopen.
-    let index = wal_index_new(hdr.page_size);
+    if !is_valid_page_size(hdr.page_size()) {
+        return Result.Err(PagerError.new(PagerErrorKind.InvalidPageSize, "invalid WAL header page size"));
+    }
+    let state = wal_state_from_header(&hdr, 0, 0, Map.new(), 0);
+    // Opening reads the file header. The reader rebuilds both page indexes
+    // from the committed prefix of the frame stream.
+    let index = wal_index_new(hdr.page_size());
+    let (s1, s2) = hdr.checksums();
     Result.Ok(WalWriter {
         backend: backend,
         state: state,
         write_cursor: file_header_size(),
-        running: WalChecksum { s1: hdr.checksum1, s2: hdr.checksum2 },
+        running: WalChecksum.from_words(s1, s2),
         index: index,
     })
 }
 
 implement WalWriter {
-    public fn page_size(&self) -> Int { self.state.page_size }
-    public fn mx_frame(&self) -> Int { self.state.mx_frame }
-    public fn n_backfill(&self) -> Int { self.state.n_backfill }
+    public fn page_size(&self) -> Int { self.state.page_size() }
+    public fn mx_frame(&self) -> Int { self.state.snapshot_mx_frame() }
+    public fn n_backfill(&self) -> Int { self.state.n_backfill() }
     public fn pending_frames(&self) -> Int { self.state.pending_frame_count() }
-    public fn salts(&self) -> (u32, u32) { (self.state.salt1, self.state.salt2) }
-    public fn checkpoint_seq(&self) -> u32 { self.state.checkpoint_seq }
+    public fn salts(&self) -> (u32, u32) { self.state.salts() }
+    public fn checkpoint_seq(&self) -> u32 { self.state.checkpoint_seq() }
+
+    public(in core.database.sqlite.native.l1_pager) fn read_at(
+        &self, buf: &mut List<Byte>, offset: Int,
+    ) -> Result<Bool, PagerError> {
+        match backend_read(&self.backend, buf, offset) {
+            Result.Ok(_) => Result.Ok(true),
+            Result.Err(e) => match e.kind {
+                VfsErrorKind.ShortRead => Result.Ok(false),
+                _ => Result.Err(io_error("wal read failed", e)),
+            },
+        }
+    }
+
+    /// Install the committed page sequence in the writer and its shared reader index.
+    public(in core.database.sqlite.native.l1_pager) fn publish_recovery(
+        &mut self, pages: &[Int], db_size: Int,
+    ) {
+        let (salt1, salt2) = self.salts();
+        self.state.restore_committed_pages(pages, db_size);
+        self.index.restore_frames(pages, db_size, salt1, salt2);
+    }
 
     /// Borrow the state for read access (no mutation).  Used by
     /// the snapshot machinery and the pager's read fast path.
@@ -351,11 +352,8 @@ public fn wal_writer_append_frame(
     page_data: &[Byte],
     commit_db_size: Int,
 ) -> Result<(), PagerError> {
-    if page_data.len() != w.state.page_size {
-        return Result.Err(PagerError {
-            kind: PagerErrorKind.InvalidPageSize,
-            message: "WAL append: page_data length must equal page_size",
-        });
+    if page_data.len() != w.page_size() {
+        return Result.Err(PagerError.new(PagerErrorKind.InvalidPageSize, "WAL append: page_data length must equal page_size"));
     }
     let is_commit = commit_db_size > 0;
     // Compute the rolling Fossil checksum (#149) over the 8-byte
@@ -369,18 +367,20 @@ public fn wal_writer_append_frame(
     let after_prefix = wal_running_checksum(w.running.clone(), prefix.as_slice());
     let after_body = wal_running_checksum(after_prefix, page_data);
 
+    let (salt1, salt2) = w.salts();
+    let (s1, s2) = after_body.words();
     let frame_hdr = core.database.sqlite.native.wal_frame_layout.frame_header.new(
         page_no as u32,
         commit_db_size as u32,
-        w.state.salt1,
-        w.state.salt2,
-        after_body.s1,
-        after_body.s2,
+        salt1,
+        salt2,
+        s1,
+        s2,
     );
     let hdr_bytes = encode_frame_header(&frame_hdr);
 
     // Write header at the current cursor.
-    match backend_write(&mut w.backend, &hdr_bytes, w.write_cursor) {
+    match backend_write(&mut w.backend, hdr_bytes.as_slice(), w.write_cursor) {
         Result.Ok(_) => {}
         Result.Err(e) => return Result.Err(io_error("wal append: frame header write failed", e)),
     }
@@ -390,7 +390,7 @@ public fn wal_writer_append_frame(
         Result.Ok(_) => {}
         Result.Err(e) => return Result.Err(io_error("wal append: frame payload write failed", e)),
     }
-    w.write_cursor = w.write_cursor + frame_header_size() + w.state.page_size;
+    w.write_cursor = w.write_cursor + frame_header_size() + w.page_size();
     w.state.record_appended_frame(page_no, is_commit, commit_db_size);
     // Persist the post-frame rolling state for the next append.
     w.running = after_body;
@@ -399,7 +399,7 @@ public fn wal_writer_append_frame(
     // without walking the WAL file.  `mx_frame` was just bumped
     // by `record_appended_frame`, so we use the post-bump value
     // as the new frame number.
-    w.index.append_frame(page_no, w.state.mx_frame);
+    w.index.append_frame(page_no, w.mx_frame());
     Result.Ok(())
 }
 
@@ -422,10 +422,9 @@ public fn wal_writer_commit(
     // Publish the new mx_frame + n_page to the WalIndex (#163).
     // Concurrent readers' next snapshot will see the post-commit
     // state via WalIndex.commit_header — no WAL-walk needed.
-    let mx = w.state.mx_frame;
-    let n_pg = w.state.last_commit_db_size as u32;
-    let s1 = w.state.salt1;
-    let s2 = w.state.salt2;
+    let mx = w.mx_frame();
+    let n_pg = w.state.last_commit_db_size() as u32;
+    let (s1, s2) = w.salts();
     w.index.commit_header(mx, n_pg, s1, s2);
     Result.Ok(())
 }
@@ -447,8 +446,8 @@ public fn wal_writer_reset(
     let hdr_no_cksum = core.database.sqlite.native.wal_frame_layout.file_header.new(
         magic_little(),
         current_format_version(),
-        w.state.page_size,
-        w.state.checkpoint_seq,
+        w.page_size(),
+        w.checkpoint_seq(),
         new_salt1,
         new_salt2,
         0 as u32,
@@ -456,21 +455,22 @@ public fn wal_writer_reset(
     );
     let prefix_bytes = encode_file_header_prefix_24(&hdr_no_cksum);
     let initial_cksum = wal_running_checksum(
-        WalChecksum { s1: 0 as u32, s2: 0 as u32 },
+        WalChecksum.from_words(0 as u32, 0 as u32),
         prefix_bytes.as_slice(),
     );
+    let (s1, s2) = initial_cksum.words();
     let hdr = core.database.sqlite.native.wal_frame_layout.file_header.new(
         magic_little(),
         current_format_version(),
-        w.state.page_size,
-        w.state.checkpoint_seq,
+        w.page_size(),
+        w.checkpoint_seq(),
         new_salt1,
         new_salt2,
-        initial_cksum.s1,
-        initial_cksum.s2,
+        s1,
+        s2,
     );
     let header_bytes = encode_file_header(&hdr);
-    match backend_write(&mut w.backend, &header_bytes, 0) {
+    match backend_write(&mut w.backend, header_bytes.as_slice(), 0) {
         Result.Ok(_) => {}
         Result.Err(e) => return Result.Err(io_error("wal reset: header write failed", e)),
     }
@@ -499,22 +499,14 @@ where V: VfsProtocol
         Result.Err(e) => return Result.Err(io_error("wal reset: random_bytes failed", e)),
     };
     if bytes.len() < 8 {
-        return Result.Err(PagerError {
-            kind: PagerErrorKind.Corrupt,
-            message: "WAL reset: vfs.random_bytes returned < 8 bytes",
-        });
+        return Result.Err(PagerError.new(PagerErrorKind.Corrupt, "WAL reset: vfs.random_bytes returned < 8 bytes"));
     }
     let salt1 = bytes_to_u32_be(&bytes, 0);
     let salt2 = bytes_to_u32_be(&bytes, 4);
     wal_writer_reset(w, salt1, salt2)
 }
 
-/// Override the rolling-checksum state after recovery.  Used by
-/// `wal_reader.recover_state` once it has walked the on-disk frame
-/// stream and verified each frame's checksum chain end-to-end.
-/// Without this seam the writer would re-start the chain from the
-/// file-header initial value — breaking integrity on the very next
-/// append after a reopen.
+/// Install the rolling checksum supplied by a caller that has verified the frame chain.
 public fn wal_writer_set_running(w: &mut WalWriter, running: WalChecksum) {
     w.running = running;
 }
@@ -545,7 +537,7 @@ fn backend_write(b: &mut WalBackend, buf: &[Byte], offset: Int) -> Result<(), Vf
     }
 }
 
-fn backend_read(b: &mut WalBackend, buf: &mut List<Byte>, offset: Int) -> Result<(), VfsError> {
+fn backend_read(b: &WalBackend, buf: &mut List<Byte>, offset: Int) -> Result<(), VfsError> {
     match b {
         WbFile(f) => f.read(buf, offset),
         WbMem(f)  => f.read(buf, offset),
@@ -587,31 +579,21 @@ fn decode_u32_be(buf: &[Byte], offset: Int) -> u32 {
 }
 
 fn encode_file_header(h: &WalFileHeader) -> List<Byte> {
-    let mut out: List<Byte> = List.new();
-    encode_u32_be(h.magic,           &mut out);
-    encode_u32_be(h.format_version,  &mut out);
-    // page_size is i32 in our type; cast to u32 for encoding.
-    // Per spec, value 1 in the file header sentinels for 65536.
-    encode_u32_be(h.page_size as u32, &mut out);
-    encode_u32_be(h.checkpoint_seq,  &mut out);
-    encode_u32_be(h.salt1,           &mut out);
-    encode_u32_be(h.salt2,           &mut out);
-    encode_u32_be(h.checksum1,       &mut out);
-    encode_u32_be(h.checksum2,       &mut out);
+    let mut out = encode_file_header_prefix_24(h);
+    let (s1, s2) = h.checksums();
+    encode_u32_be(s1, &mut out);
+    encode_u32_be(s2, &mut out);
     out
 }
 
-/// First 24 bytes of the file header (everything except checksum1/2).
-/// Fed to `wal_running_checksum` to compute the file-header checksum
-/// per SQLite's WAL spec §6.4.
 fn encode_file_header_prefix_24(h: &WalFileHeader) -> List<Byte> {
+    let words = h.prefix_words();
     let mut out: List<Byte> = List.new();
-    encode_u32_be(h.magic,           &mut out);
-    encode_u32_be(h.format_version,  &mut out);
-    encode_u32_be(h.page_size as u32, &mut out);
-    encode_u32_be(h.checkpoint_seq,  &mut out);
-    encode_u32_be(h.salt1,           &mut out);
-    encode_u32_be(h.salt2,           &mut out);
+    let mut i = 0;
+    while i < 6 {
+        encode_u32_be(words[i], &mut out);
+        i = i + 1;
+    }
     out
 }
 
@@ -625,7 +607,7 @@ fn encode_frame_prefix_8(page_no: u32, commit_db_size: u32) -> List<Byte> {
     out
 }
 
-fn decode_file_header(buf: &List<Byte>) -> WalFileHeader {
+fn decode_file_header(buf: &[Byte]) -> WalFileHeader {
     core.database.sqlite.native.wal_frame_layout.file_header.new(
         decode_u32_be(buf, 0),
         decode_u32_be(buf, 4),
@@ -639,30 +621,25 @@ fn decode_file_header(buf: &List<Byte>) -> WalFileHeader {
 }
 
 fn encode_frame_header(h: &WalFrameHeader) -> List<Byte> {
+    let words = h.words();
     let mut out: List<Byte> = List.new();
-    encode_u32_be(h.page_number, &mut out);
-    encode_u32_be(h.commit_size, &mut out);
-    encode_u32_be(h.salt1,       &mut out);
-    encode_u32_be(h.salt2,       &mut out);
-    encode_u32_be(h.checksum1,   &mut out);
-    encode_u32_be(h.checksum2,   &mut out);
+    let mut i = 0;
+    while i < 6 {
+        encode_u32_be(words[i], &mut out);
+        i = i + 1;
+    }
     out
 }
 
 public fn decode_frame_header(buf: &List<Byte>, offset: Int) -> WalFrameHeader {
-    let mut tmp: List<Byte> = List.new();
-    let mut i: Int = 0;
-    while i < frame_header_size() {
-        tmp.push(buf[offset + i]);
-        i = i + 1;
-    }
+    let bytes = buf.as_slice();
     core.database.sqlite.native.wal_frame_layout.frame_header.new(
-        decode_u32_be(&tmp, 0),
-        decode_u32_be(&tmp, 4),
-        decode_u32_be(&tmp, 8),
-        decode_u32_be(&tmp, 12),
-        decode_u32_be(&tmp, 16),
-        decode_u32_be(&tmp, 20),
+        decode_u32_be(bytes, offset),
+        decode_u32_be(bytes, offset + 4),
+        decode_u32_be(bytes, offset + 8),
+        decode_u32_be(bytes, offset + 12),
+        decode_u32_be(bytes, offset + 16),
+        decode_u32_be(bytes, offset + 20),
     )
 }
 
@@ -670,22 +647,7 @@ public fn decode_frame_header(buf: &List<Byte>, offset: Int) -> WalFrameHeader {
 // Helpers
 // -----------------------------------------------------------------------------
 
-fn is_power_of_two_or_sentinel(n: Int) -> Bool {
-    if n == 1 { return true; }   // sentinel for 65536
-    if n < 512 { return false; }
-    if n > 65536 { return false; }
-    let mut x = n;
-    while x > 1 {
-        if (x % 2) != 0 { return false; }
-        x = x / 2;
-    }
-    true
-}
-
 fn io_error(context: &Text, e: VfsError) -> PagerError {
     let _ = e;
-    PagerError {
-        kind: IoFailure,
-        message: context.to_owned(),
-    }
+    PagerError.new(PagerErrorKind.IoFailure, context.clone())
 }

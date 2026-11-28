@@ -43,7 +43,7 @@ module core.database.sqlite.native.l1_pager.wal_state;
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.wal_frame_layout.file_header.WalFileHeader;
-mount core.database.sqlite.native.wal_frame_layout.frame_header.WalFrameHeader;
+mount core.database.sqlite.native.wal_frame_layout.frame_header.{WalFrameHeader, salts_match};
 
 // -----------------------------------------------------------------------------
 // WalState — runtime state of a WAL session
@@ -100,19 +100,38 @@ public fn wal_state_from_header(
     frame_index: Map<Int, Int>,
     last_commit_db_size: Int,
 ) -> WalState {
+    let (salt1, salt2) = hdr.salts();
     WalState {
-        salt1: hdr.salt1,
-        salt2: hdr.salt2,
-        page_size: hdr.page_size,
+        salt1: salt1,
+        salt2: salt2,
+        page_size: hdr.page_size(),
         mx_frame: mx_frame,
         n_backfill: n_backfill,
         frame_index: frame_index,
         last_commit_db_size: last_commit_db_size,
-        checkpoint_seq: hdr.checkpoint_seq,
+        checkpoint_seq: hdr.checkpoint_seq(),
     }
 }
 
 implement WalState {
+    public(in core.database.sqlite.native.l1_pager) fn page_size(&self) -> Int { self.page_size }
+    public(in core.database.sqlite.native.l1_pager) fn n_backfill(&self) -> Int { self.n_backfill }
+    public(in core.database.sqlite.native.l1_pager) fn salts(&self) -> (u32, u32) { (self.salt1, self.salt2) }
+    public(in core.database.sqlite.native.l1_pager) fn checkpoint_seq(&self) -> u32 { self.checkpoint_seq }
+    public(in core.database.sqlite.native.l1_pager) fn last_commit_db_size(&self) -> Int { self.last_commit_db_size }
+
+    public(in core.database.sqlite.native.l1_pager) fn restore_committed_pages(&mut self, pages: &[Int], db_size: Int) {
+        let mut newest: Map<Int, Int> = Map.new();
+        let mut i = 0;
+        while i < pages.len() {
+            newest.insert(pages[i], i + 1);
+            i = i + 1;
+        }
+        self.frame_index = newest;
+        self.mx_frame = pages.len();
+        self.last_commit_db_size = db_size;
+    }
+
     /// `true` iff the WAL contains any committed frames not yet
     /// checkpointed.  Used by the auto-checkpoint policy.
     public fn has_pending_frames(&self) -> Bool {
@@ -174,14 +193,14 @@ implement WalState {
         // Walk frame_index and drop entries whose frame_no exceeds
         // the keep boundary.  The frame_index is small (one entry per
         // page touched in the txn) so the linear sweep is cheap.
-        let keys = self.frame_index.keys();
+        let keys = self.frame_index.keys_list();
         let mut i: Int = 0;
         while i < keys.len() {
             let page_no = keys[i];
             match map_get_int(&self.frame_index, page_no) {
                 Maybe.Some(frame_no) => {
                     if frame_no > keep_through_frame {
-                        self.frame_index.remove(&page_no);
+                        self.frame_index.remove(page_no);
                     }
                 }
                 Maybe.None => {}
@@ -222,7 +241,7 @@ implement WalState {
     /// salts — the standard §6.4 check that callers run on every
     /// frame before applying it.
     public fn frame_salts_valid(&self, fh: &WalFrameHeader) -> Bool {
-        fh.salt1 == self.salt1 && fh.salt2 == self.salt2
+        salts_match(fh, self.salt1, self.salt2)
     }
 
     /// Snapshot the visible mx_frame for a fresh reader.  Once a
@@ -239,7 +258,7 @@ implement WalState {
 // -----------------------------------------------------------------------------
 
 fn map_get_int(m: &Map<Int, Int>, k: Int) -> Maybe<Int> {
-    m.get(&k)
+    m.get(k)
 }
 
 // -----------------------------------------------------------------------------
@@ -263,7 +282,7 @@ public fn snapshot_wal(state: &WalState) -> WalReaderSnapshot {
     // Map.clone deep-copies the entries — readers see a stable view
     // immune to writer mutations.
     let mut idx_clone: Map<Int, Int> = Map.new();
-    let keys = state.frame_index.keys();
+    let keys = state.frame_index.keys_list();
     let mut i: Int = 0;
     while i < keys.len() {
         let k = keys[i];

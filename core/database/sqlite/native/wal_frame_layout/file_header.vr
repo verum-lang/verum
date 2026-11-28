@@ -23,6 +23,18 @@ public type WalFileHeader is {
     checksum2: u32,
 };
 
+implement WalFileHeader {
+    public(in core.database.sqlite.native) fn page_size(&self) -> Int { self.page_size }
+    public(in core.database.sqlite.native) fn salts(&self) -> (u32, u32) { (self.salt1, self.salt2) }
+    public(in core.database.sqlite.native) fn checkpoint_seq(&self) -> u32 { self.checkpoint_seq }
+    public(in core.database.sqlite.native) fn checksums(&self) -> (u32, u32) { (self.checksum1, self.checksum2) }
+
+    public(in core.database.sqlite.native) fn prefix_words(&self) -> [u32; 6] {
+        [self.magic, self.format_version, self.page_size as u32,
+         self.checkpoint_seq, self.salt1, self.salt2]
+    }
+}
+
 public fn new(
     magic: u32,
     format_version: u32,
