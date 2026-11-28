@@ -33,13 +33,14 @@ pub(crate) fn declared_members(protocol: &TypeDescriptor) -> Option<impl Iterato
 /// A reference has its own complete storage representation. Operations that
 /// inspect a semantic signature, including calls to user code, need its target.
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum WitnessUse { Signature, Storage }
+pub(crate) enum WitnessUse { Signature, Storage, CallableContract }
 
 impl WitnessUse {
     pub(crate) fn child_scope(self, ty: &TypeRef) -> Option<Self> {
         match ty {
             TypeRef::Reference { .. } if self == Self::Storage => None,
-            TypeRef::Function { .. } | TypeRef::Rank2Function { .. } | TypeRef::Dynamic(_) => Some(Self::Signature),
+            TypeRef::Function { .. } | TypeRef::Rank2Function { .. } | TypeRef::Dynamic(_)
+                if self == Self::Storage => Some(Self::Signature),
             _ => Some(self),
         }
     }
@@ -142,6 +143,31 @@ pub(crate) fn normalize_for(declarations: &impl DeclarationLookup, ty: &mut Type
             return Err(VbcError::AssociatedType("associated-type expansion exceeds the type nesting or work limit".into()));
         }
         *remaining -= 1;
+        if scope == WitnessUse::CallableContract
+            && let Some(owner) = ty.base_type_id().and_then(|id| declarations.descriptor(id))
+            && owner.kind == crate::types::TypeKind::Alias
+            && owner.source_declaration.is_none()
+            && !matches!(owner.resource_discipline,
+                verum_common::ResourceDiscipline::Affine | verum_common::ResourceDiscipline::Linear)
+        {
+            // Aliases with extra source obligations keep their nominal witness.
+            // A plain alias forwards only its own explicit target and arguments.
+            let args = match ty {
+                TypeRef::Concrete(_) => &[][..],
+                TypeRef::Instantiated { args, .. } => args.as_slice(),
+                _ => unreachable!("only concrete and instantiated types have alias declarations"),
+            };
+            let target = owner.alias_target.as_ref().filter(|_| args.len() == owner.type_params.len())
+                .ok_or_else(|| VbcError::AssociatedType("callable alias lacks its declared target or arguments".into()))?;
+            if matches!(target, TypeRef::Concrete(TypeId::UNIT | TypeId::PTR))
+                && owner.alias_target_name.and_then(|name| declarations.spelling(name))
+                    .and_then(TypeId::from_well_known_scalar_name) != target.base_type_id()
+            {
+                return Err(VbcError::AssociatedType("callable alias lacks scalar declaration evidence".into()));
+            }
+            *ty = TypeSubstitution::new(&owner.type_params, args).apply(target)?;
+            return normalize(declarations, ty, scope, depth + 1, remaining);
+        }
         let Some(child_scope) = scope.child_scope(ty) else { return Ok(()); };
         let mut child = |ty: &mut TypeRef| normalize(declarations, ty, child_scope, depth + 1, remaining);
         match ty {

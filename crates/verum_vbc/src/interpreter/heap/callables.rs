@@ -104,7 +104,7 @@ impl Heap {
         };
         let producer = module.resolve_callable_producer(function, captures, witnesses)
             .map_err(|message| invalid(&message))?;
-        crate::parameter_convention::validate_callable_contract(&producer.signature, expected)
+        module.validate_callable_contract(&producer.signature, expected)
             .map_err(|message| invalid(&message))?;
         Ok(owner)
     }

@@ -1287,7 +1287,8 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
     pub(super) fn require_callable_copy(&self, register: Reg, expected: &verum_vbc::TypeRef) -> Result<()> {
         let signature = self.callable_signature(register)?;
-        verum_vbc::parameter_convention::validate_callable_contract(&signature, expected)
+        let module = self.vbc_module.or_internal("native callable contract requires a VBC module")?;
+        module.validate_callable_contract(&signature, expected)
             .map_err(|reason| LlvmLoweringError::unsupported(format!(
                 "native callable copy producer does not match the declared signature: {reason}")))?;
         Ok(())

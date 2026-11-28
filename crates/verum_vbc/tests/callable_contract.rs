@@ -12,6 +12,35 @@ fn scalar(is_async: bool) -> TypeRef {
     function(is_async, TypeRef::Concrete(TypeId::INT), TypeRef::Concrete(TypeId::INT))
 }
 
+#[cfg(feature = "codegen")]
+#[test]
+fn source_aliases_share_a_callable_contract_without_erasing_nominals_or_permissions() {
+    use verum_vbc::types::{CbgrTier, Mutability};
+    let source = include_str!("fixtures/callable_alias.vr");
+    let ast = verum_fast_parser::Parser::new(source).parse_module().unwrap();
+    let root = verum_vbc::codegen::VbcCodegen::new().compile_module(&ast).unwrap();
+    let wire = verum_vbc::serialize::serialize_module(&root).unwrap();
+    for module in [root, verum_vbc::deserialize::deserialize_module_validated(&wire).unwrap()] {
+        let declared = |name| TypeRef::Concrete(module.types.iter()
+            .find(|ty| module.get_string(ty.name) == Some(name)).unwrap().id);
+        let int = TypeRef::Concrete(TypeId::INT);
+        let callable = |input| function(false, input, int.clone());
+        let nested = |input| TypeRef::Tuple(vec![TypeRef::Slice(Box::new(input))]);
+        let plain = callable(nested(declared("Failure")));
+        let alias = callable(nested(declared("RetryFailure")));
+        assert!(module.validate_callable_contract(&plain, &alias).is_ok());
+        assert!(module.validate_callable_contract(&alias, &plain).is_ok());
+        for name in ["Status", "Positive"] {
+            assert!(module.validate_callable_contract(&callable(declared(name)), &callable(int.clone())).is_err());
+        }
+        let borrow = |ty, access| callable(TypeRef::reference(ty, access, CbgrTier::Tier0));
+        assert!(module.validate_callable_contract(&borrow(declared("RetryFailure"), Mutability::Mutable),
+            &borrow(declared("Failure"), Mutability::Immutable)).is_err());
+        let probe = module.functions.iter().find(|f| module.get_string(f.name).is_some_and(|n| n.rsplit('.').next() == Some("probe"))).unwrap().id;
+        assert_eq!(verum_vbc::interpreter::Interpreter::new(module.into()).execute_function(probe).unwrap().try_as_i64(), Some(73));
+    }
+}
+
 #[test]
 fn async_allowance_is_directional_and_keeps_exact_scalar_identity() {
     assert!(validate_callable_contract(&scalar(false), &scalar(true)).is_ok());

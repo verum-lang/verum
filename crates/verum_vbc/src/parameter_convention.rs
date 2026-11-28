@@ -96,6 +96,20 @@ pub fn validate_body(function: &FunctionDescriptor) -> Result<(), Text> {
 }
 
 impl VbcModule {
+    /// Resolve plain aliases in both closed signatures using this declaration table.
+    pub fn validate_callable_contract(&self, provided: &TypeRef, expected: &TypeRef) -> Result<(), Text> {
+        let normalize = |ty: &TypeRef| -> Result<TypeRef, Text> {
+            if !crate::mono::is_concrete_type(ty) {
+                return Err("callable ownership has an unresolved semantic signature".into());
+            }
+            let mut result = ty.clone();
+            crate::associated_types::normalize_for(self, &mut result, crate::associated_types::WitnessUse::CallableContract)
+                .map_err(|error| Text::from(error.to_string()))?;
+            Ok(result)
+        };
+        validate_callable_contract(&normalize(provided)?, &normalize(expected)?)
+    }
+
     /// A source call must use the parameter lifecycle implemented by both
     /// declarations. Intrinsics own their independent ABI.
     pub fn validate_parameter_call(

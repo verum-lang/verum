@@ -1,0 +1,13 @@
+type Failure is { code: Int };
+type PublicFailure is Failure;
+type RetryFailure is PublicFailure;
+type Status is (Int);
+type Positive is Int { it > 0 };
+
+fn from_failure(value: PublicFailure) -> Int { value.code }
+
+fn probe() -> Int {
+    let convert: fn(RetryFailure) -> Int = from_failure;
+    let copied: fn(Failure) -> Int = convert;
+    copied(Failure { code: 73 })
+}

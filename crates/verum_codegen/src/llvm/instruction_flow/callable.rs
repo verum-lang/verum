@@ -36,7 +36,33 @@ fn borrowed_slot(instruction: &I) -> Option<Reg> {
     }
 }
 
-fn transfer(module: &VbcModule, instruction: &I, exposed: &Set<Reg>, facts: &mut Declarations) {
+fn transfer(
+    module: &VbcModule,
+    instruction: &I,
+    exposed: &Set<Reg>,
+    facts: &mut Declarations,
+    fresh_record: &mut Option<(Reg, u32)>,
+) {
+    // Initializing a field of this block's new allocation cannot modify an
+    // existing callable. Keep its extent only while the isolated allocation
+    // and its local address are known. A call, an alias or a join ends it.
+    match instruction {
+        I::New { dst, field_count, .. } => {
+            *fresh_record = (!exposed.contains(dst)).then_some((*dst, *field_count));
+            facts.remove(dst);
+            return;
+        }
+        I::SetF { obj, field_idx, .. }
+            if fresh_record.is_some_and(|(reg, count)| reg == *obj && *field_idx < count) =>
+        {
+            return;
+        }
+        I::LoadI { dst, .. } | I::LoadSmallI { dst, .. } | I::LoadK { dst, .. }
+        | I::LoadT { dst, .. } | I::LoadF { dst, .. } | I::LoadTrue { dst }
+        | I::LoadFalse { dst } | I::LoadUnit { dst }
+            if fresh_record.is_some_and(|(reg, _)| reg != *dst) => {}
+        _ => *fresh_record = None,
+    }
     match instruction {
         I::NewClosure {
             dst,
@@ -207,6 +233,7 @@ impl InstructionFlow {
                 .copied()
                 .unwrap_or(instructions.len());
             let mut last = None;
+            let mut fresh_record = None;
             for pc in start..end {
                 if !self.reachable[pc] {
                     break;
@@ -219,7 +246,7 @@ impl InstructionFlow {
                         inputs.remove(&pc);
                     }
                 }
-                transfer(module, instruction, &exposed, &mut facts);
+                transfer(module, instruction, &exposed, &mut facts, &mut fresh_record);
                 last = Some(pc);
             }
             let Some(pc) = last else {

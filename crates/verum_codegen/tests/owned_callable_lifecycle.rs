@@ -95,6 +95,13 @@ fn native_capture_telescope_copies_multiple_roots_in_one_transaction() {
 }
 
 #[test]
+fn native_callable_copy_resolves_the_producers_declared_alias() {
+    for wire in [false, true] {
+        run(include_str!("../../verum_vbc/tests/fixtures/callable_alias.vr"), wire, false);
+    }
+}
+
+#[test]
 fn native_empty_owned_environment_releases_its_final_owner() {
     for wire in [false, true] { run("fn probe()->Int {let callback=||73; let copied=callback; copied()}", wire, true); }
 }
