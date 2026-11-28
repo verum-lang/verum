@@ -2704,6 +2704,9 @@ fn substitute_refinement_binder(
         if scheme.impl_self_type.is_none() {
             scheme.impl_self_type = self.current_self_type.clone();
         }
+        if matches!(&scheme.impl_self_type, Some(Type::Slice { .. })) {
+            scheme.indexed_receiver_writes = super::structural_clone::indexed_receiver_writes(func);
+        }
         scheme.value_parameters = scheme.impl_self_type.as_ref()
             .map(Type::value_parameters).unwrap_or_default();
         scheme.explicit_method_vars = Some(func.generics.iter().filter_map(|parameter| {

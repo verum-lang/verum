@@ -1,6 +1,6 @@
 //! Structural resource operations use the declared layout of each owned component.
 use super::TypeChecker;
-use crate::{Result, TypeError, context::FieldOverwrite, ty::{Type, TypeVar}};
+use crate::{Result, TypeError, context::{OverwriteProjection, ReferentOverwrite}, ty::{Type, TypeVar}};
 use verum_ast::Span;
 use verum_common::{List, ResourceDiscipline, Set, Text, well_known_types::RuntimeCopyStorage};
 
@@ -24,42 +24,41 @@ impl TypeChecker {
             })
     }
 
-    fn overwrite_field_type(&self, write: &FieldOverwrite, span: Span) -> Option<Type> {
+    fn overwritten_value_type(&self, write: &ReferentOverwrite, span: Span) -> Option<Type> {
         let mut field = self.unifier.apply(&write.owner);
-        for (index, name) in write.fields.iter().enumerate() {
-            field = match self.place_reference_head(&field, span).ok()? {
-                Type::Reference {
-                    mutable: true,
-                    inner,
-                }
-                | Type::CheckedReference {
-                    mutable: true,
-                    inner,
-                }
-                | Type::UnsafeReference {
-                    mutable: true,
-                    inner,
-                } => *inner,
-                Type::Reference { .. }
-                | Type::CheckedReference { .. }
-                | Type::UnsafeReference { .. } => return None,
-                owned if index != 0 => owned,
-                _ => return None,
-            };
+        let fields = match &write.projection {
+            OverwriteProjection::SliceElement => {
+                let Type::Slice { element } = field else { return None; };
+                return Some(*element);
+            }
+            OverwriteProjection::Fields(fields) => fields,
+        };
+        let head = self.place_reference_head(&field, span).ok()?;
+        let (referent, true, _) = head.reference_parts()? else { return None };
+        field = referent.clone();
+        for (index, name) in fields.iter().enumerate() {
+            if index > 0 {
+                let head = self.place_reference_head(&field, span).ok()?;
+                field = match head.reference_parts() {
+                    Some((referent, true, _)) => referent.clone(),
+                    Some(_) => return None,
+                    None => head,
+                };
+            }
             field = self.lookup_field_type(&field, name)?;
         }
         Some(self.unifier.apply(&field))
     }
 
-    pub(super) fn check_instantiated_field_overwrite(
+    pub(super) fn check_instantiated_referent_overwrite(
         &self,
-        write: &FieldOverwrite,
+        write: &ReferentOverwrite,
         span: Span,
     ) -> Result<()> {
-        let field = self.overwrite_field_type(write, span).ok_or_else(|| {
+        let field = self.overwritten_value_type(write, span).ok_or_else(|| {
             TypeError::OtherWithCodeSpanned {
                 code: "E310".into(),
-                msg: "cannot establish the type of the selected field to overwrite".into(),
+                msg: "cannot establish the type of the selected value to overwrite".into(),
                 span,
             }
         })?;
@@ -73,11 +72,11 @@ impl TypeChecker {
         let ty = self.unifier.apply(ty);
         let permitted = self
             .source_type_registration
-            .field_overwrites
+            .referent_overwrites
             .iter()
             .filter(|_| self.borrow_tracker.current_closure_id().is_none())
             .find(|write| {
-                write.place == span && self.overwrite_field_type(write, span).as_ref() == Some(&ty)
+                write.place == span && self.overwritten_value_type(write, span).as_ref() == Some(&ty)
             })
             .map(|write| {
                 write
@@ -228,4 +227,58 @@ impl TypeChecker {
         }
         Ok(())
     }
+}
+
+/// Track writes directly rooted at the lexical receiver across statement blocks.
+/// An unrecognized place or nested callable retains its ordinary body check.
+pub(super) fn indexed_receiver_writes(function: &verum_ast::FunctionDecl) -> List<Span> {
+    use verum_ast::{Block, Expr, ExprKind, FunctionParamKind, PathSegment, StmtKind, decl::FunctionBody};
+    enum Scope<'a> { Expr(&'a Expr), Block(&'a Block) }
+    if !matches!(function.params.first().map(|parameter| &parameter.kind),
+        Some(FunctionParamKind::SelfRefMut | FunctionParamKind::SelfRefCheckedMut | FunctionParamKind::SelfRefUnsafeMut))
+    { return List::new(); }
+    let first = match &function.body {
+        Some(FunctionBody::Block(block)) => Scope::Block(block),
+        Some(FunctionBody::Expr(expr)) => Scope::Expr(expr),
+        None => return List::new(),
+    };
+    let mut pending = List::from_single(first);
+    let mut writes = List::new();
+    let mut remaining = 4096usize;
+    while let Some(scope) = pending.pop() {
+        let Some(rest) = remaining.checked_sub(1) else { return List::new(); };
+        remaining = rest;
+        match scope {
+            Scope::Block(block) => {
+                if block.stmts.len() > remaining { return List::new(); }
+                pending.extend(block.stmts.iter().filter_map(|statement| match &statement.kind {
+                    StmtKind::Expr { expr, .. } => Some(Scope::Expr(expr)),
+                    _ => None,
+                }));
+                pending.extend(block.expr.as_deref().map(Scope::Expr));
+            }
+            Scope::Expr(expr) => match &expr.kind {
+                ExprKind::Binary { op, left, .. } if op.is_assignment() => {
+                    if let ExprKind::Index { expr, .. } = &left.kind
+                        && let ExprKind::Path(path) = &expr.kind
+                        && matches!(path.segments.as_slice(), [PathSegment::SelfValue])
+                    { writes.push(left.span); }
+                }
+                ExprKind::Block(block) | ExprKind::Loop { body: block, .. }
+                | ExprKind::While { body: block, .. } | ExprKind::For { body: block, .. } =>
+                    pending.push(Scope::Block(block)),
+                ExprKind::If { then_branch, else_branch, .. } => {
+                    pending.push(Scope::Block(then_branch));
+                    pending.extend(else_branch.as_deref().map(Scope::Expr));
+                }
+                ExprKind::Match { arms, .. } => {
+                    if arms.len() > remaining { return List::new(); }
+                    pending.extend(arms.iter().map(|arm| Scope::Expr(&arm.body)));
+                }
+                _ => {}
+            },
+        }
+        if pending.len() > remaining { return List::new(); }
+    }
+    writes
 }

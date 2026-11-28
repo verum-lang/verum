@@ -274,3 +274,38 @@ fn selected_deref_receivers_do_not_transfer_the_borrowed_resource() {
     let found=errors(&source);
     assert!(found.is_empty(), "owning wrapper's own method: {found:?}");
 }
+
+#[test]
+fn indexed_slice_writes_check_the_element_discipline_of_the_selected_receiver() {
+    let declarations = r#"
+        type Default is protocol { fn default() -> Self; };
+        type linear Ticket is { id: Int };
+        type Token is { id: Int };
+        implement Default for Token { fn default() -> Self { Token { id: 73 } } }
+        implement Default for Ticket { fn default() -> Self { Ticket { id: 1 } } }
+        implement<T> [T] {
+            fn reset_at(&mut self, slot: Int) where T: Default {
+                if slot >= 0 { self[slot] = T.default(); }
+            }
+            fn inspect(&self) -> Int { 73 }
+        }
+    "#;
+    for caller in [
+        "fn run(items: &mut [Token]) { items.reset_at(0); }",
+        "fn run(items: &mut [Ticket]) -> Int { items.inspect() }",
+    ] {
+        let found = errors(&format!("{declarations} {caller}"));
+        assert!(found.is_empty(), "{caller}: {found:?}");
+    }
+    for (caller, reason) in [
+        ("fn lose(items: &mut [Ticket]) { items.reset_at(0); }", "Linear"),
+        ("fn hide<T: Default>(items: &mut [T]) { items.reset_at(0); }", "discarded"),
+    ] {
+        let found = errors(&format!("{declarations} {caller}"));
+        assert!(found.iter().any(|error| error.contains("overwrite") && error.to_lowercase().contains(&reason.to_lowercase())), "{caller}: {found:?}");
+    }
+    let erased = errors(
+        "type Clear is protocol {fn clear(&mut self);}; type Default is protocol {fn default() -> Self;}; implement<T: Default> Clear for [T] {fn clear(&mut self) {self[0] = T.default();}}",
+    );
+    assert!(erased.iter().any(|error| error.contains("cannot overwrite")), "{erased:?}");
+}

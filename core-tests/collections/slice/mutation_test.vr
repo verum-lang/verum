@@ -1,7 +1,14 @@
 module core.collections.tests.slice_mutation;
 
+mount core.base.protocols.Default;
 mount core.collections.list.List;
 mount core.collections.slice.*;
+
+type CustomDefault is { code: Int };
+
+implement Default for CustomDefault {
+    fn default() -> Self { CustomDefault { code: 73 } }
+}
 
 @test
 fn swap_preserves_each_element_in_both_index_orders() {
@@ -44,6 +51,16 @@ fn empty_slices_can_be_exchanged() {
     first.as_mut_slice().swap_with_slice(second.as_mut_slice());
     assert_eq(first.len(), 0);
     assert_eq(second.len(), 0);
+}
+
+@test
+fn fill_default_uses_the_selected_element_implementation() {
+    let mut storage: List<CustomDefault> = List.new();
+    storage.push(CustomDefault { code: 2 });
+    storage.push(CustomDefault { code: 5 });
+    storage.as_mut_slice().fill_default();
+    assert_eq(storage[0].code, 73);
+    assert_eq(storage[1].code, 73);
 }
 
 @test

@@ -258,6 +258,8 @@ pub struct TypeScheme {
     pub(crate) callable_source: Option<(Text, Shared<verum_ast::FunctionDecl>)>,
     /// A directly declared receiver method takes precedence over protocol entries in the dispatch cache.
     pub(crate) declared_inherent: bool,
+    /// Direct indexed writes in this source receiver's body, in its lexical scope.
+    pub(crate) indexed_receiver_writes: List<Span>,
     pub(crate) value_declaration: Option<Shared<ValueDeclaration>>,
     /// Universally quantified type variables
     pub vars: List<TypeVar>,
@@ -311,13 +313,19 @@ pub struct TypeScheme {
     pub explicit_method_vars: Option<List<Option<GenericBinder>>>,
 }
 
-/// Replacing this named field retires its previous initialized value. The
-/// owner type carries the declaration's quantified slots through instantiation.
+/// A selected declaration can replace a live value only when its instantiated
+/// storage type permits the previous value to be discarded.
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct FieldOverwrite {
+pub(crate) struct ReferentOverwrite {
     pub place: Span,
     pub owner: Type,
-    pub fields: List<Text>,
+    pub projection: OverwriteProjection,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum OverwriteProjection {
+    Fields(List<Text>),
+    SliceElement,
 }
 
 /// One call's fresh body and obligations. All fields use the same simultaneous
@@ -336,7 +344,7 @@ pub struct InstantiatedScheme {
     pub where_clauses: List<crate::protocol::WhereClause>,
     pub type_equalities: List<TypeEquality>,
     pub(crate) nominal_applications: List<NominalApplication>,
-    pub(crate) field_overwrites: List<FieldOverwrite>,
+    pub(crate) referent_overwrites: List<ReferentOverwrite>,
     pub impl_self_type: Option<Type>,
     pub explicit_method_vars: Option<List<Option<GenericBinder>>>,
 }
@@ -366,10 +374,16 @@ impl InstantiatedScheme {
 }
 
 impl TypeScheme {
-    /// A selected free function carries its input-field obligations through
-    /// the same scheme as its argument types. A protocol implementation cannot
-    /// add premises to an independently selected protocol declaration.
-    pub(crate) fn field_overwrites(&self) -> List<FieldOverwrite> {
+    /// Only a source-selected free function or inherent method can impose
+    /// body-derived obligations on its caller. A protocol owns its own contract.
+    pub(crate) fn referent_overwrites(&self, inherent: bool) -> List<ReferentOverwrite> {
+        if inherent && let Some(owner @ Type::Slice { .. }) = &self.impl_self_type {
+            return self.indexed_receiver_writes.iter().map(|place| ReferentOverwrite {
+                place: *place,
+                owner: owner.clone(),
+                projection: OverwriteProjection::SliceElement,
+            }).collect();
+        }
         let (Some(body), Some((_, source)), Type::Function { params, .. }) = (
             self.returned_value.as_ref(),
             self.callable_source.as_ref(),
@@ -403,10 +417,10 @@ impl TypeScheme {
                 if !self.vars.iter().any(|var| variables.contains(var)) {
                     return None;
                 }
-                Some(FieldOverwrite {
+                Some(ReferentOverwrite {
                     place: write.place,
                     owner: owner.clone(),
-                    fields: write.fields.clone(),
+                    projection: OverwriteProjection::Fields(write.fields.clone()),
                 })
             })
             .collect()
@@ -531,8 +545,8 @@ impl TypeScheme {
                         argument.try_apply_subst(&subst)).collect::<Result<List<_>, Text>>()?,
                 })
             }).collect::<Result<List<_>, Text>>()?,
-            field_overwrites: self.field_overwrites().into_iter().map(|write| {
-                Ok(FieldOverwrite { owner: write.owner.try_apply_subst(&subst)?, ..write })
+            referent_overwrites: self.referent_overwrites(self.declared_inherent).into_iter().map(|write| {
+                Ok(ReferentOverwrite { owner: write.owner.try_apply_subst(&subst)?, ..write })
             }).collect::<Result<List<_>, Text>>()?,
             impl_self_type: self
                 .impl_self_type
@@ -567,6 +581,7 @@ impl TypeScheme {
             universe_params: List::new(),
             callable_source: None,
             declared_inherent: false,
+            indexed_receiver_writes: List::new(),
             value_declaration: None,
         }
     }

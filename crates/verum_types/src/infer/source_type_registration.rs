@@ -16,7 +16,7 @@ pub(crate) struct SourceTypeRegistration {
     /// checking updates these locations without scanning unrelated methods.
     pub method_publications: Map<(Text, verum_ast::Span), List<(Text, Text)>>,
     /// Input fields whose previous values are checked at source instantiation.
-    pub(super) field_overwrites: List<crate::context::FieldOverwrite>,
+    pub(super) referent_overwrites: List<crate::context::ReferentOverwrite>,
     /// Result declared by the current catch_unwind wrapper and the enclosing closure identity.
     pub(super) catch_unwind_body: Option<(Option<crate::aliasing::RefId>, Type)>,
     /// The unsafe function currently authorizing raw operations. A nested
