@@ -16,6 +16,9 @@ mount base.{Bool};
 
 fn noop() {}
 
+static mut FIRINGS: Int = 0;
+fn record_firing() { FIRINGS += 1; }
+
 fn test_disarmed_never_elapsed() {
     let d = disarmed();
     assert(!has_elapsed(&d, 1_000_000_000 as Int64));
@@ -50,11 +53,16 @@ fn test_remaining_ns_after_deadline_zero() {
     assert_eq(remaining_ns(&d, 1500 as Int64), 0 as Int64);
 }
 
+fn test_remaining_ns_saturates_at_the_clock_boundary() {
+    let d = armed_at(Int64.MAX);
+    assert_eq(remaining_ns(&d, Int64.MIN), Int64.MAX);
+}
+
 fn test_engine_arm_initialises() {
     let mut e = new_engine();
     e.arm(5000_i64);
-    assert(!e.fired);
-    assert_eq(e.ticks_observed, 0 as Int64);
+    assert(!e.has_fired());
+    assert_eq(e.ticks_observed(), 0 as Int64);
 }
 
 fn test_engine_tick_before_deadline_no_fire() {
@@ -62,17 +70,23 @@ fn test_engine_tick_before_deadline_no_fire() {
     e.arm(5000_i64);
     let fired = e.tick(100 as Int64, noop);
     assert(!fired);
-    assert_eq(e.ticks_observed, 1 as Int64);
-    assert(!e.fired);
+    assert_eq(e.ticks_observed(), 1 as Int64);
+    assert(!e.has_fired());
 }
 
 fn test_engine_tick_after_deadline_fires_once() {
     let mut e = new_engine();
+    FIRINGS = 0;
     e.arm(1000_i64);
-    assert(e.tick(1500 as Int64, noop));
-    assert(e.fired);
-    // Second tick should NOT re-fire.
-    assert(!e.tick(2000 as Int64, noop));
+    assert(e.tick(1000_i64, record_firing));
+    assert(e.has_fired());
+    assert(!e.tick(2000_i64, record_firing));
+    assert_eq(FIRINGS, 1);
+    e.arm(3000_i64);
+    assert_eq(e.ticks_observed(), 0_i64);
+    assert(!e.has_fired());
+    assert(e.tick(3000_i64, record_firing));
+    assert_eq(FIRINGS, 2);
 }
 
 fn test_engine_disarm_prevents_fire() {
@@ -80,7 +94,7 @@ fn test_engine_disarm_prevents_fire() {
     e.arm(1000_i64);
     e.disarm();
     assert(!e.tick(5000 as Int64, noop));
-    assert(!e.fired);
+    assert(!e.has_fired());
 }
 
 fn test_engine_remaining_ns_via_engine() {
@@ -96,6 +110,7 @@ fn main() {
     test_disarm_cancels();
     test_remaining_ns_before_deadline();
     test_remaining_ns_after_deadline_zero();
+    test_remaining_ns_saturates_at_the_clock_boundary();
     test_engine_arm_initialises();
     test_engine_tick_before_deadline_no_fire();
     test_engine_tick_after_deadline_fires_once();

@@ -30,6 +30,10 @@ public fn empty_slot() -> PathSlot {
 
 public fn freeze(s: &mut PathSlot) { s.frozen = true; }
 
+implement PathSlot {
+    public fn is_frozen(&self) -> Bool { self.frozen }
+}
+
 public fn set_path(s: &mut PathSlot, path: Maybe<Text>) -> TempPathSetOutcome {
     if s.frozen { return SoFrozen; }
     s.path = path;
@@ -37,8 +41,5 @@ public fn set_path(s: &mut PathSlot, path: Maybe<Text>) -> TempPathSetOutcome {
 }
 
 public fn get_path(s: &PathSlot) -> Maybe<Text> {
-    match &s.path {
-        Maybe.Some(t) => Maybe.Some(t.clone()),
-        Maybe.None => Maybe.None,
-    }
+    s.path.clone()
 }

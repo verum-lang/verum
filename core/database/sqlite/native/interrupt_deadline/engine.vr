@@ -20,7 +20,7 @@ module core.database.sqlite.native.interrupt_deadline.engine;
 
 mount base.{Bool};
 mount core.database.sqlite.native.interrupt_deadline.deadline.{
-    Deadline, disarmed, armed_at, has_elapsed, remaining_ns,
+    Deadline, disarmed, armed_at, disarm as disarm_deadline, has_elapsed, remaining_ns,
 };
 
 public type DeadlineEngine is {
@@ -46,13 +46,13 @@ implement DeadlineEngine {
     }
 
     public fn disarm(&mut self) {
-        self.deadline.armed = false;
+        disarm_deadline(&mut self.deadline);
     }
 
     /// Observe a tick. Returns true iff this tick caused the deadline
     /// to fire for the first time.
     public fn tick(&mut self, now_ns: Int64, on_fire: fn()) -> Bool {
-        self.ticks_observed = self.ticks_observed + 1_i64;
+        self.ticks_observed = self.ticks_observed.saturating_add(1_i64);
         if self.fired { return false; }
         if !has_elapsed(&self.deadline, now_ns) { return false; }
         self.fired = true;
@@ -63,4 +63,7 @@ implement DeadlineEngine {
     public fn remaining_ns_at(&self, now_ns: Int64) -> Int64 {
         remaining_ns(&self.deadline, now_ns)
     }
+
+    public fn has_fired(&self) -> Bool { self.fired }
+    public fn ticks_observed(&self) -> Int64 { self.ticks_observed }
 }

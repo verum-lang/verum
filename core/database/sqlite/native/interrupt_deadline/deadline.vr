@@ -14,8 +14,7 @@ module core.database.sqlite.native.interrupt_deadline.deadline;
 mount base.{Bool};
 
 public type Deadline is {
-    /// Absolute monotonic ns at which interruption fires. 0 means
-    /// "disarmed"; negative values are normalised to 0.
+    /// Absolute monotonic nanoseconds. An armed zero deadline fires at time zero.
     absolute_ns: Int64,
     /// Set via `disarm` — allows the embedder to cancel the deadline
     /// without waiting for the callback to observe.
@@ -44,5 +43,5 @@ public fn has_elapsed(d: &Deadline, now_ns: Int64) -> Bool {
 public fn remaining_ns(d: &Deadline, now_ns: Int64) -> Int64 {
     if !d.armed { return 0 as Int64; }
     if now_ns >= d.absolute_ns { return 0 as Int64; }
-    d.absolute_ns - now_ns
+    d.absolute_ns.saturating_sub(now_ns)
 }

@@ -6,13 +6,13 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.temp_path.slot.{
-    PathSlot, SetOutcome, SoOk, SoFrozen,
+    TempPathSetOutcome,
     empty_slot, freeze, set_path, get_path,
 };
 mount core.database.sqlite.native.temp_path.engine.{
     TempPathEngine, new_engine,
 };
-mount base.{Bool, Maybe};
+mount core.base.maybe.Maybe;
 
 fn test_empty_slot_none() {
     let s = empty_slot();
@@ -20,13 +20,13 @@ fn test_empty_slot_none() {
         Maybe.None => {},
         Maybe.Some(_) => assert(false),
     }
-    assert(!s.frozen);
+    assert(!s.is_frozen());
 }
 
 fn test_set_path_works_before_freeze() {
     let mut s = empty_slot();
     match set_path(&mut s, Maybe.Some("/tmp".clone())) {
-        SoOk => {},
+        TempPathSetOutcome.SoOk => {},
         _ => assert(false),
     }
     match get_path(&s) {
@@ -39,7 +39,7 @@ fn test_set_path_rejected_after_freeze() {
     let mut s = empty_slot();
     freeze(&mut s);
     match set_path(&mut s, Maybe.Some("/tmp".clone())) {
-        SoFrozen => {},
+        TempPathSetOutcome.SoFrozen => {},
         _ => assert(false),
     }
 }
@@ -53,7 +53,7 @@ fn test_engine_initial_both_empty() {
 fn test_engine_set_temp_directory() {
     let mut e = new_engine();
     match e.set_temp_directory(Maybe.Some("/tmp".clone())) {
-        SoOk => {},
+        TempPathSetOutcome.SoOk => {},
         _ => assert(false),
     }
     match e.sqlite3_temp_directory() {
@@ -78,7 +78,7 @@ fn test_after_initialize_freezes_both() {
     assert(e.temp_frozen());
     assert(e.data_frozen());
     match e.set_temp_directory(Maybe.Some("/x".clone())) {
-        SoFrozen => {},
+        TempPathSetOutcome.SoFrozen => {},
         _ => assert(false),
     }
 }
