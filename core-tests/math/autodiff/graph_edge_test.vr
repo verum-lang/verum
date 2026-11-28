@@ -1,3 +1,5 @@
+mount core.base.protocols.{Eq, Hash, Hasher, DefaultHasher};
+mount core.collections.map.Map;
 mount core.math.autodiff.{NodeId, AutodiffTensorId, GraphEdge, autodiff_edge_to_graph_edge, autodiff_edges_as_graph};
 
 @test
@@ -20,6 +22,37 @@ fn graph_projection_preserves_direction_labels_and_order() {
     assert_eq(result[1].src.0, 7 as USize);
     assert_eq(result[1].tgt.0, 3 as USize);
     assert_eq(result[1].label.0, 17 as USize);
+}
+
+fn same_key<T: Eq>(left: &T, right: &T) -> Bool { left.eq(right) }
+
+fn hash_key<T: Hash>(key: &T) -> Int {
+    let mut hasher = DefaultHasher.new();
+    key.hash(&mut hasher);
+    hasher.finish()
+}
+
+@test
+fn graph_identifiers_are_structural_map_keys() {
+    assert(same_key(&AutodiffTensorId(13), &AutodiffTensorId(13)));
+    assert(!same_key(&AutodiffTensorId(13), &AutodiffTensorId(17)));
+    assert(same_key(&NodeId(3), &NodeId(3)));
+    assert(!same_key(&NodeId(3), &NodeId(7)));
+    let mut tensor_hash = DefaultHasher.new();
+    AutodiffTensorId(13).hash(&mut tensor_hash);
+    assert_eq(tensor_hash.finish(), hash_key(&(13 as USize)));
+    let mut node_hash = DefaultHasher.new();
+    NodeId(7).hash(&mut node_hash);
+    assert_eq(node_hash.finish(), hash_key(&(7 as USize)));
+
+    let mut sizes: Map<AutodiffTensorId, USize> = Map.new();
+    assert_eq(sizes.insert(AutodiffTensorId(13), 96), Maybe.None);
+    assert_eq(sizes.insert(AutodiffTensorId(17), 32), Maybe.None);
+    assert_eq(sizes.insert(AutodiffTensorId(13), 128), Maybe.Some(96 as USize));
+    assert_eq(sizes.len(), 2);
+    assert_eq(sizes.remove(AutodiffTensorId(13)), Maybe.Some(128 as USize));
+    assert_eq(sizes.get(AutodiffTensorId(17)), Maybe.Some(32 as USize));
+    assert_eq(sizes.get(AutodiffTensorId(13)), Maybe.None);
 }
 
 fn main() {}

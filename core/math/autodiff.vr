@@ -1027,9 +1027,11 @@ context AutodiffContext {
 // =============================================================================
 
 // Unique identifier for graph nodes
+@derive(Eq, Hash)
 public type NodeId is (USize);
 
 // Unique identifier for tensors
+@derive(Eq, Hash)
 public type AutodiffTensorId is (USize);
 
 /// Public alias — short canonical name.
@@ -1128,7 +1130,7 @@ implement MemoryTracker {
     fn record_deallocation(&mut self, tensor_id: AutodiffTensorId) {
         // remove() returns Maybe<USize> (Some iff the id was tracked);
         // a single lookup both removes and yields the freed size.
-        if let Maybe.Some(size) = self.tensor_sizes.remove(&tensor_id) {
+        if let Maybe.Some(size) = self.tensor_sizes.remove(tensor_id) {
             self.current_usage -= size;
         }
     }
