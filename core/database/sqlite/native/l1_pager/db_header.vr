@@ -137,6 +137,14 @@ public type DatabaseHeader is {
     sqlite_version_number: UInt32,
 };
 
+implement DatabaseHeader {
+    public(in core.database.sqlite.native) fn page_bytes(&self) -> Int { self.page_size }
+    public(in core.database.sqlite.native) fn change_counter(&self) -> UInt32 { self.file_change_counter }
+    public(in core.database.sqlite.native) fn uses_wal(&self) -> Bool {
+        self.file_format_read is FileFormat.Wal || self.file_format_write is FileFormat.Wal
+    }
+}
+
 // -----------------------------------------------------------------------------
 // Helpers
 // -----------------------------------------------------------------------------

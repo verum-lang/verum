@@ -45,6 +45,7 @@ mount core.database.sqlite.native.l6_session.row_store.{CellAddress, ConnectionR
 mount core.database.sqlite.native.l4_vdbe.cursor_table.CursorWriteback;
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Text, Maybe};
+mount core.base.memory.Shared;
 mount core.database.sqlite.native.l0_vfs.OpenFlags;
 mount core.database.sqlite.native.l1_pager.{
     Pager, pager_open_memory, pager_open_file_rwc, pager_open_file_ro,
@@ -170,6 +171,7 @@ implement Eq for ConnectionError {}
 public type SqliteNativeConnection is {
     mode: ConnectionMode,
     pager: Pager,
+    identity: Shared<Int>,
     schema: SchemaCache,
     tx: TxState,
     path: Text,                  // ":memory:" / absolute path / URI
@@ -215,6 +217,7 @@ public fn open_memory(mode: ConnectionMode) -> Result<SqliteNativeConnection, Co
     Result.Ok(SqliteNativeConnection {
         mode: mode,
         pager: pager,
+        identity: Shared.new(0),
         schema: schema_cache_new(),
         tx: tx_state_autocommit(),
         path: ":memory:".clone(),
@@ -254,6 +257,7 @@ public fn open_file(path: &Text, mode: ConnectionMode) -> Result<SqliteNativeCon
     Result.Ok(SqliteNativeConnection {
         mode: mode,
         pager: pager,
+        identity: Shared.new(0),
         schema: schema_cache_new(),
         tx: tx_state_autocommit(),
         path: path.clone(),
@@ -266,9 +270,17 @@ public fn open_file(path: &Text, mode: ConnectionMode) -> Result<SqliteNativeCon
 }
 
 implement SqliteNativeConnection {
+    public(in core.database.sqlite.native) fn connection_scope(&self) -> Shared<Int> { self.identity.clone() }
+
     public fn mode(&self) -> ConnectionMode { self.mode }
     public fn path_text(&self) -> &Text { &self.path }
     public fn schema_generation(&self) -> Int { self.schema.gen() }
+
+    /// SQL writes currently live in the session catalog and row store.
+    public(in core.database.sqlite.native) fn has_unpersisted_sql(&self) -> Bool {
+        self.schema.cookie() != 0 || self.schema.table_count() > 0
+            || self.schema.index_count() > 0 || self.table_store.has_changes()
+    }
     public fn is_in_tx(&self) -> Bool { self.tx.active }
     public fn tx_depth(&self) -> Int { self.tx.depth }
 

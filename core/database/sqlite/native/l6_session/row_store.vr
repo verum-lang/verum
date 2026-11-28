@@ -21,15 +21,20 @@ public(in core.database.sqlite.native) type ConnectionRows is {
     revisions: Map<Int, Int>,
     scope: Shared<Int>,
     transaction: Bool,
+    changes: Bool,
+    changes_before_tx: Bool,
     undo: List<SavedRows>,
 };
 
 public(in core.database.sqlite.native) fn connection_rows() -> ConnectionRows {
     ConnectionRows { tables: Map.new(), revisions: Map.new(), scope: Shared.new(0),
-        transaction: false, undo: [] }
+        transaction: false, changes: false, changes_before_tx: false, undo: [] }
 }
 
 implement ConnectionRows {
+    /// Row mutations are held by this connection until the SQL engine can write its page images.
+    public(in core.database.sqlite.native) fn has_changes(&self) -> Bool { self.changes }
+
     public(in core.database.sqlite.native) fn scope(&self) -> Shared<Int> { self.scope.clone() }
     public(in core.database.sqlite.native) fn revision(&self, root: Int) -> Int {
         self.revisions.get_or(root, 0)
@@ -65,6 +70,7 @@ implement ConnectionRows {
     }
 
     fn record_change(&mut self, root: Int) {
+        self.changes = true;
         let next = self.revision(root) + 1;
         let _ = self.revisions.insert(root, next);
         if self.transaction {
@@ -84,20 +90,23 @@ implement ConnectionRows {
         }
     }
     public(in core.database.sqlite.native) fn begin(&mut self) {
+        self.changes_before_tx = self.changes;
         self.transaction = true;
     }
     public(in core.database.sqlite.native) fn finish(&mut self, rollback: Bool) {
         self.transaction = false;
         self.scope = Shared.new(0);
         if rollback {
-            for saved in self.undo.iter() {
-                match &saved.previous {
-                    Maybe.Some(rows) => { let _ = self.tables.insert(saved.root, rows.clone()); }
+            self.changes = self.changes_before_tx;
+            while let Maybe.Some(saved) = self.undo.pop() {
+                match saved.previous {
+                    Maybe.Some(rows) => { let _ = self.tables.insert(saved.root, rows); }
                     Maybe.None => { let _ = self.tables.remove(saved.root); }
                 }
             }
+        } else {
+            self.undo.clear();
         }
-        self.undo.clear();
     }
 
     // Validate every destination before publishing the first changed root.
