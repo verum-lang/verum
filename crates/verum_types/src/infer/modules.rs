@@ -2866,7 +2866,7 @@ impl TypeChecker {
         {
             return Err(TypeError::VisibilityError {
                 declaration_span: None,
-                name: name.clone(), visibility: item.visibility.as_str().into(),
+                name: name.clone(), visibility: item.visibility.source_spelling().into(),
                 module_path: module.path.to_string().into(), span: span.unwrap_or(item.span),
             });
         }
@@ -3908,7 +3908,7 @@ impl TypeChecker {
                 if !visibility.visible_from(parent.split('.'), self.current_module_path.as_str().split('.')) {
                     return Err(TypeError::VisibilityError {
                         declaration_span: Some(declaration.name.span),
-                        name: name.into(), visibility: visibility.as_str().into(),
+                        name: name.into(), visibility: visibility.source_spelling().into(),
                         module_path: parent.into(), span,
                     });
                 }
@@ -6630,7 +6630,7 @@ impl TypeChecker {
                             if scope.reject_inaccessible {
                                 return Err(TypeError::VisibilityError {
                                     declaration_span: None,
-                                    name: scope.name, visibility: export.visibility.as_str().into(),
+                                    name: scope.name, visibility: export.visibility.source_spelling().into(),
                                     module_path: scope.owner, span: export.span,
                                 });
                             }
@@ -6672,7 +6672,7 @@ impl TypeChecker {
                             return Err(TypeError::VisibilityError {
                                 declaration_span: Some(declaration.name.span),
                                 name: declaration.name.name.clone(),
-                                visibility: declaration.visibility.as_str().into(),
+                                visibility: declaration.visibility.source_spelling().into(),
                                 module_path: scope.owner, span: declaration.span,
                             });
                         }
@@ -6716,7 +6716,7 @@ impl TypeChecker {
                             },
                         );
                         if denied_binding && scope.reject_inaccessible && denied_mount.is_none() {
-                            denied_mount = Some((Text::from(mount.visibility.as_str()), item.span));
+                            denied_mount = Some((Text::from(mount.visibility.source_spelling()), item.span));
                         }
                     }
                     // A private lexical mount cannot cancel an accessible named
@@ -6768,7 +6768,7 @@ impl TypeChecker {
                                 return Err(TypeError::VisibilityError {
                                     declaration_span: Some(declaration.name.span),
                                     name: declaration.name.name.clone(),
-                                    visibility: declaration.visibility.as_str().into(),
+                                    visibility: declaration.visibility.source_spelling().into(),
                                     module_path: owner, span: declaration.span,
                                 });
                             }

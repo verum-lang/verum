@@ -391,7 +391,7 @@ impl TypeChecker {
         {
             return Err(TypeError::VisibilityError {
                 declaration_span: None,
-                name: declared_name, visibility: "Private".into(),
+                name: declared_name, visibility: "private".into(),
                 module_path: declared_owner, span,
             });
         }
@@ -509,7 +509,7 @@ impl TypeChecker {
         if !descriptor.is_public {
             return Err(TypeError::VisibilityError {
                 declaration_span: None,
-                name: declared, visibility: "Private".into(), module_path: owner, span,
+                name: declared, visibility: "private".into(), module_path: owner, span,
             });
         }
         if let Some(resolved) =
@@ -647,7 +647,7 @@ impl TypeChecker {
         if !is_public && module_owner != self.current_module_path {
             return Err(TypeError::VisibilityError {
                 declaration_span: None,
-                name: type_name.into(), visibility: "Private".into(),
+                name: type_name.into(), visibility: "private".into(),
                 module_path: module_owner, span,
             });
         }
@@ -726,7 +726,7 @@ impl TypeChecker {
         if VisibilityChecker::new().is_visible(
             visibility.clone(), &ModulePath::from_str(owner),
             &ModulePath::from_str(&self.current_module_path),
-        ) { Ok(()) } else { Err(denied(format!("{visibility:?}").into())) }
+        ) { Ok(()) } else { Err(denied(visibility.source_spelling().into())) }
     }
 
     pub(super) fn load_source_type_declaration_with_parameter_key(

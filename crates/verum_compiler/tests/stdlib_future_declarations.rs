@@ -238,7 +238,7 @@ fn relative_record_constructors_execute_with_the_declaring_layout() {
         let value = super.other.Packet { body: true }; value.body
     }").unwrap();
     let error = format!("{:#}", try_bootstrap(&core).err().expect("private record constructed"));
-    assert!(error.contains("E202") && error.contains("body") && error.contains("Private"), "{error}");
+    assert!(error.contains("E202") && error.contains("body") && error.contains("private"), "{error}");
 }
 
 #[test]

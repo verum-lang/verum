@@ -300,7 +300,7 @@ impl TypeChecker {
         } else {
             Err(TypeError::VisibilityError {
                 name: field.clone(),
-                visibility: format!("{visibility:?}").into(),
+                visibility: visibility.source_spelling().into(),
                 module_path: owner.clone(),
                 span,
                 declaration_span: declaration_span(),

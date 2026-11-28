@@ -2310,16 +2310,22 @@ impl Visibility {
         )
     }
 
-    pub fn as_str(&self) -> &'static str {
-        match self {
+    /// Canonical source spelling of the whole policy, independent of source spans.
+    pub fn source_spelling(&self) -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed(match self {
             Visibility::Public => "public",
-            Visibility::PublicCrate => "public(crate)",
+            Visibility::PublicCrate => "public(cog)",
             Visibility::PublicSuper => "public(super)",
-            Visibility::PublicIn(_) => "public(in ...)",
+            Visibility::PublicIn(path) => {
+                let mut spelling = String::from("public(in ");
+                path.write_source(|part| spelling.push_str(part));
+                spelling.push(')');
+                return std::borrow::Cow::Owned(spelling);
+            }
             Visibility::Private => "private",
             Visibility::Internal => "internal",
             Visibility::Protected => "protected",
-        }
+        })
     }
 }
 

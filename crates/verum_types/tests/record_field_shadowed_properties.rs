@@ -110,7 +110,7 @@ fn assert_private_errors(errors: &List<Text>) {
             && errors.iter().all(|error| {
                 error.contains("VisibilityError")
                     && error.contains("name: Text { inner: \"min\" }")
-                    && error.contains("visibility: Text { inner: \"Private\" }")
+                    && error.contains("visibility: Text { inner: \"private\" }")
                     && error.contains("module_path: Text { inner: \"core.field_shadow\" }")
             }),
         "the actual value's private field must be refused: {errors:?}"

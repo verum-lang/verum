@@ -659,7 +659,7 @@ mod project_tests {
         let output = run_mounted_reading("print(reading.secret);");
         assert!(!output.status.success(), "{output:?}");
         let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(stderr.contains("error<E202>") && stderr.contains("'secret' is Private"), "{stderr}");
+        assert!(stderr.contains("error<E202>") && stderr.contains("'secret' is private"), "{stderr}");
     }
 
     /// Test new command creates project

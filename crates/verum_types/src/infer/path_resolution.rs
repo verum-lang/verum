@@ -582,7 +582,7 @@ impl TypeChecker {
             if !descriptor.is_public && owner != self.current_module_path.as_str() {
                 return Err(TypeError::VisibilityError {
                     declaration_span: None,
-                    name: name.into(), visibility: "Private".into(), module_path: owner.into(), span,
+                    name: name.into(), visibility: "private".into(), module_path: owner.into(), span,
                 });
             }
             return self.ensure_mounted_type_loaded_with_parameter_key(name, owner)
@@ -1078,10 +1078,7 @@ impl TypeChecker {
                                     return Err(TypeError::VisibilityError {
                                         declaration_span: Some(type_decl.name.span),
                                         name: verum_common::Text::from(segment_name),
-                                        visibility: verum_common::Text::from(format!(
-                                            "{:?}",
-                                            type_decl.visibility
-                                        )),
+                                        visibility: type_decl.visibility.source_spelling().into(),
                                         module_path: verum_common::Text::from(
                                             current_module.name.name.as_str(),
                                         ),
@@ -1119,10 +1116,7 @@ impl TypeChecker {
                                     return Err(TypeError::VisibilityError {
                                         declaration_span: Some(const_decl.name.span),
                                         name: verum_common::Text::from(segment_name),
-                                        visibility: verum_common::Text::from(format!(
-                                            "{:?}",
-                                            const_decl.visibility
-                                        )),
+                                        visibility: const_decl.visibility.source_spelling().into(),
                                         module_path: verum_common::Text::from(
                                             current_module.name.name.as_str(),
                                         ),
@@ -1584,7 +1578,7 @@ impl TypeChecker {
             if !VisibilityChecker::new().is_visible(visibility.clone(), &ModulePath::from_str(module_name), &owner_scope) {
                 return Err(TypeError::VisibilityError {
                     declaration_span: Some(declaration.name.span),
-                    name: type_name.into(), visibility: format!("{visibility:?}").into(),
+                    name: type_name.into(), visibility: visibility.source_spelling().into(),
                     module_path: module_name.into(), span });
             }
         }

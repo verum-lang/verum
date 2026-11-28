@@ -35,6 +35,33 @@ fn create_test_module(file_id: FileId) -> Module {
 }
 
 #[test]
+fn changing_a_visibility_scope_invalidates_the_public_interface() {
+    use verum_compiler::hash::{ChangeKind, compute_item_hashes_from_module};
+    use verum_fast_parser::Parser;
+
+    let classify = |before: &str, after: &str| {
+        let hashes = |source: &str| {
+            let module = Parser::new(source).parse_module().expect("valid declaration");
+            compute_item_hashes_from_module(&module)
+        };
+        hashes(before).compare(&hashes(after))
+    };
+    // Equal-length scopes keep every source position fixed.
+    for declaration in [
+        "public(in app.blue) fn read() -> Int { 1 }",
+        "public(in app.blue) const WIDTH: Int = 1;",
+        "public(in app.blue) type Count is Int;",
+        "public(in app.blue) type Relation is protocol {};",
+        "public type Row is { public(in app.blue) value: Int };",
+    ] {
+        assert_eq!(classify(declaration, declaration), ChangeKind::NoChange);
+        assert_eq!(classify(declaration, &declaration.replace("app.blue", "app.gold")), ChangeKind::Signature, "{declaration}");
+    }
+    let record = "public type Row is { private value: Int };";
+    assert_eq!(classify(record, &record.replace("private", "public ")), ChangeKind::Signature);
+}
+
+#[test]
 fn test_basic_cache_operations() {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
     let root_dir = temp_dir.path().to_path_buf();

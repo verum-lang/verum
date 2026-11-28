@@ -782,7 +782,7 @@ pub fn compute_item_hashes_from_module(module: &Module) -> ItemHashes {
 fn compute_function_hashes(func: &FunctionDecl) -> FunctionHashes {
     let mut builder = FunctionHashBuilder::new()
         .with_name(func.name.name.as_str())
-        .with_visibility(func.visibility.as_str());
+        .with_visibility(&func.visibility.source_spelling());
 
     // Hash function modifiers (part of signature)
     if func.is_async {
@@ -1017,7 +1017,7 @@ fn compute_type_hash(type_decl: &TypeDecl) -> HashValue {
     hasher.update(b"\x00");
 
     hasher.update_str("vis:");
-    hasher.update_str(type_decl.visibility.as_str());
+    hasher.update_str(&type_decl.visibility.source_spelling());
     hasher.update(b"\x00");
 
     // Hash generics
@@ -1044,6 +1044,8 @@ fn compute_type_hash(type_decl: &TypeDecl) -> HashValue {
         TypeDeclBody::Record(fields) => {
             hasher.update_str("record:");
             for field in fields.iter() {
+                hasher.update_str(&field.visibility.source_spelling());
+                hasher.update(b"\x00");
                 hasher.update_str(field.name.name.as_ref());
                 hasher.update(b":");
                 hasher.update_str(&format!("{:?}", field.ty));
@@ -1113,7 +1115,7 @@ fn compute_const_hash(const_decl: &ConstDecl) -> HashValue {
     hasher.update(b"\x00");
 
     hasher.update_str("vis:");
-    hasher.update_str(const_decl.visibility.as_str());
+    hasher.update_str(&const_decl.visibility.source_spelling());
     hasher.update(b"\x00");
 
     hasher.update_str("type:");
@@ -1136,7 +1138,7 @@ fn compute_protocol_hash(proto: &verum_ast::decl::ProtocolDecl) -> HashValue {
     hasher.update(b"\x00");
 
     hasher.update_str("vis:");
-    hasher.update_str(proto.visibility.as_str());
+    hasher.update_str(&proto.visibility.source_spelling());
     hasher.update(b"\x00");
 
     // Hash generics

@@ -149,7 +149,7 @@ fn assert_private_left(errors: &List<Text>, owner: &str) {
     assert!(
         error.contains("VisibilityError")
             && error.contains("name: Text { inner: \"left\" }")
-            && error.contains("visibility: Text { inner: \"Private\" }")
+            && error.contains("visibility: Text { inner: \"private\" }")
             && error.contains(&format!("module_path: Text {{ inner: \"{owner}\" }}")),
         "the field must keep its exact declaring owner: {errors:?}"
     );

@@ -434,7 +434,7 @@ fn refused_policy(policy: Option<Visibility>, expected: &str) {
 
 #[test]
 fn archive_export_private_field_uses_actual_owner() {
-    refused_policy(Some(Visibility::Private), "Private");
+    refused_policy(Some(Visibility::Private), "private");
 }
 
 #[test]
@@ -554,7 +554,7 @@ fn bundle_refused_policy(policy: Option<Visibility>, expected: &str) {
 
 #[test]
 fn archive_bundle_private_field_keeps_its_policy() {
-    bundle_refused_policy(Some(Visibility::Private), "Private");
+    bundle_refused_policy(Some(Visibility::Private), "private");
 }
 
 #[test]

@@ -321,7 +321,7 @@ fn archived_qualified_bindings_cannot_grant_cross_owner_private_access() {
     for eager in [false, true] {
         let (_, errors) = check(decode_metadata(&bytes).unwrap(),
             "fn value(x: core.parent.api.Carrier<Int>) -> Int { x.payload.value }", eager);
-        assert!(errors.iter().any(|error| error.contains("Private") && error.contains("core.parent.core.deep")),
+        assert!(errors.iter().any(|error| error.contains("private") && error.contains("core.parent.core.deep")),
             "eager={eager}: {errors:?}");
     }
 }

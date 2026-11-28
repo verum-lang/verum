@@ -316,7 +316,7 @@ fn metadata_homonym_cannot_supply_a_missing_explicit_source_export() {
                 .iter()
                 .any(|error| error.contains("ImportItemNotFound")
                     || error.contains("ImportNotFound")
-                    || error.contains("Private")),
+                    || error.contains("private")),
             "{declaration}: {errors:?}"
         );
     }

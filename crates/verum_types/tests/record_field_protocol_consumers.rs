@@ -167,7 +167,7 @@ fn assert_private(helpers: &str, probe: &str) {
     let is_target_refusal = |error: &Text| {
         error.contains("VisibilityError")
             && error.contains("name: Text { inner: \"hidden\" }")
-            && error.contains("visibility: Text { inner: \"Private\" }")
+            && error.contains("visibility: Text { inner: \"private\" }")
             && error.contains("module_path: Text { inner: \"core.field_protocol\" }")
     };
     assert!(

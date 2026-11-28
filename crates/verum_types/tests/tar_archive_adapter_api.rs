@@ -443,7 +443,7 @@ fn parent_and_foreign_consumers_cannot_read_tar_metadata_fields() {
             assert!(
                 !errors.is_empty()
                     && errors.iter().all(|error| error.contains("VisibilityError")
-                        && error.contains("Private")
+                        && error.contains("private")
                         && error.contains(TAR)
                         && error.contains(field)),
                 "{owner} must not read private {field}: {errors:?}"

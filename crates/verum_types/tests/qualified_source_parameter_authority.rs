@@ -93,7 +93,7 @@ fn qualified_private_template_cannot_borrow_a_public_homonym() {
         );
         assert!(
             errors.iter().any(|error| error.contains("VisibilityError")
-                && error.contains("Private")
+                && error.contains("private")
                 && error.contains("demo.alpha")
                 && error.contains("Hidden")),
             "{errors:?}"
@@ -138,7 +138,7 @@ fn qualified_cog_visible_template_checks_the_actual_caller() {
     let errors = check("other.main", source, &modules);
     assert!(
         errors.iter().any(|error| error.contains("VisibilityError")
-            && error.contains("PublicCrate")
+            && error.contains("public(cog)")
             && error.contains("demo.alpha")
             && error.contains("Shared")),
         "foreign cog: {errors:?}"

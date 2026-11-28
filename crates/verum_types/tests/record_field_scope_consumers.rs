@@ -412,6 +412,10 @@ fn self_restricted_field_scope_belongs_to_the_declaration() {
 fn super_restricted_field_scope_belongs_to_the_declaration() {
     let modifier = "public(in super.trusted)";
     assert_declared_scope(modifier, "core.field_scope.trusted");
+    for input in declared_inputs() {
+        let denied = errors(modifier, input, "other.reader", "body");
+        assert!(denied.iter().any(|error| error.contains("public(in core.field_scope.trusted)")), "{input:?}: {denied:?}");
+    }
     assert_policy(
         modifier,
         &[

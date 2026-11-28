@@ -1274,6 +1274,22 @@ impl Path {
         }
     }
 
+    /// Write a path in Verum source syntax, including a leading relative dot.
+    pub(crate) fn write_source(&self, mut write: impl FnMut(&str)) {
+        let mut separator = "";
+        for segment in &self.segments {
+            write(separator);
+            write(match segment {
+                PathSegment::Name(name) => name.as_str(),
+                PathSegment::SelfValue => "self",
+                PathSegment::Super => "super",
+                PathSegment::Cog => "cog",
+                PathSegment::Relative => ".",
+            });
+            separator = if matches!(segment, PathSegment::Relative) { "" } else { "." };
+        }
+    }
+
     /// Returns the name of the last `Name` segment in the path, or `""` if none.
     pub fn last_segment_name(&self) -> &str {
         for seg in self.segments.iter().rev() {

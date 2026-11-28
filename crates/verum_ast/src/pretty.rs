@@ -33,7 +33,7 @@ use crate::stmt::{Stmt, StmtKind};
 #[cfg(test)]
 use crate::ty::Ident;
 use crate::ty::{
-    GenericArg, GenericParam, GenericParamKind, Path, PathSegment, RefinementPredicate,
+    GenericArg, GenericParam, GenericParamKind, Path, RefinementPredicate,
     TensorLayout, Type, TypeBinding, TypeBound, TypeBoundKind, TypeKind, UniverseLevelExpr,
     WhereClause, WherePredicate, WherePredicateKind,
 };
@@ -260,18 +260,9 @@ impl PrettyPrinter {
     // ==================== VISIBILITY ====================
 
     fn format_visibility(&mut self, vis: &Visibility) {
-        match vis {
-            Visibility::Public => self.write("public "),
-            Visibility::PublicCrate => self.write("public(crate) "),
-            Visibility::PublicSuper => self.write("public(super) "),
-            Visibility::PublicIn(path) => {
-                self.write("public(in ");
-                self.format_path(path);
-                self.write(") ");
-            }
-            Visibility::Internal => self.write("internal "),
-            Visibility::Protected => self.write("protected "),
-            Visibility::Private => {} // No keyword for private
+        if !matches!(vis, Visibility::Private) {
+            self.write(&vis.source_spelling());
+            self.write(" ");
         }
     }
 
@@ -1782,20 +1773,7 @@ impl PrettyPrinter {
     // ==================== PATHS ====================
 
     fn format_path(&mut self, path: &Path) {
-        let mut first = true;
-        for seg in &path.segments {
-            if !first {
-                self.write(".");
-            }
-            first = false;
-            match seg {
-                PathSegment::Name(ident) => self.write(ident.as_str()),
-                PathSegment::SelfValue => self.write("self"),
-                PathSegment::Super => self.write("super"),
-                PathSegment::Cog => self.write("cog"),
-                PathSegment::Relative => self.write("."),
-            }
-        }
+        path.write_source(|piece| self.write(piece));
     }
 
     // ==================== EXPRESSIONS ====================

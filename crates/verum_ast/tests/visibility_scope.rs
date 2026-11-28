@@ -42,6 +42,19 @@ fn absolute_scopes_are_span_free_and_importer_independent() {
     resolved(&["other", "scope"], "app.owner", "other.scope");
     resolved(&["other", "scope"], "", "other.scope");
 }
+
+#[test]
+fn visibility_spelling_preserves_the_complete_source_path() {
+    assert_eq!(Visibility::PublicCrate.source_spelling(), "public(cog)");
+    assert_eq!(Visibility::PublicSuper.source_spelling(), "public(super)");
+    for (segments, spelling) in [
+        (&["core", "sqlite"][..], "public(in core.sqlite)"),
+        (&["super", "super", "api"], "public(in super.super.api)"),
+        (&[".", "api"], "public(in .api)"),
+    ] {
+        assert_eq!(scope(segments).source_spelling(), spelling);
+    }
+}
 #[test]
 fn self_scopes_use_the_declaring_module() {
     resolved(

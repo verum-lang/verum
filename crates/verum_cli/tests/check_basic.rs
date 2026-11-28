@@ -332,7 +332,7 @@ fn glob_imports_preserve_generic_declarations_when_arguments_are_aliases() {
         (
             "",
             "fn wrong(a: core.source.Internal<Atom>)->Int {a.value}",
-            Some("visibility error: 'Internal' is Private"),
+            Some("visibility error: 'Internal' is private"),
         ),
         (
             "",
@@ -385,7 +385,7 @@ fn foreign_private_source_types_are_not_ambient_bindings() {
         ("fn leak(x: PrivateCount)->Int { x }", Some("type not found: PrivateCount")),
         ("fn leak(x: PrivateChoice)->Int { 0 }", Some("type not found: PrivateChoice")),
         ("fn leak(x: CogCount)->Int { x }", Some("type not found: CogCount")),
-        ("fn leak(x: core.source.Hidden<Int>)->Int { x.body }", Some("visibility error: 'Hidden' is Private")),
+        ("fn leak(x: core.source.Hidden<Int>)->Int { x.body }", Some("visibility error: 'Hidden' is private")),
         ("mount core.source.Hidden; fn name()->Int { 1 }", Some("cannot find `Hidden`")),
         ("mount core.source.{make, open}; fn wrong()->Bool { open(make(7)) }", Some("expected 'Bool', found 'Int'")),
     ] {
@@ -423,12 +423,12 @@ fn hidden_source_case_names_require_their_declaring_scope() {
         ("mount core.ledger.Entry as Visible;", "let x:Visible=Visible.Detail { n:7 };", None),
         ("type Local is Issued(Bool) | Here;", "let x=Local.Issued(true);", None),
         ("", "let x=Issued(7);", Some("Issued")),
-        ("", "let x=core.ledger.Receipt.Issued(7);", Some("Private")),
+        ("", "let x=core.ledger.Receipt.Issued(7);", Some("private")),
         ("", "let x=core.ledger.Receipt.Issued; let y=x(7);", Some("Receipt")),
         ("", "let x=Blank;", Some("Blank")),
         ("", "let x=Annotated { n:7 };", Some("Annotated")),
-        ("", "let x=core.ledger.Receipt.Annotated { n:7 };", Some("Private")),
-        ("", "let n=number(core.ledger.Receipt.Annotated { n:7 });", Some("Private")),
+        ("", "let x=core.ledger.Receipt.Annotated { n:7 };", Some("private")),
+        ("", "let n=number(core.ledger.Receipt.Annotated { n:7 });", Some("private")),
         ("fn invalid(x:Blank)->Int {0}", "", Some("Blank")),
         ("", "let n=number(Blank);", Some("Blank")),
         ("", "let n=number(Issued(7));", Some("Issued")),

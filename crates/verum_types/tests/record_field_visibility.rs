@@ -208,7 +208,7 @@ fn relative_record_constructors_preserve_private_fields() {
             let source = "fn probe() { let value = super.field_alpha.Packet { body: 1, alpha_only: 3 }; }";
             let (_, errors) = check_in_module("core.client", source, input, reverse, false);
             assert!(errors.iter().any(|error| error.contains("VisibilityError")
-                && error.contains("body") && error.contains("Private")
+                && error.contains("body") && error.contains("private")
                 && error.contains("core.field_alpha")), "{input:?}: {errors:?}");
         }
     }

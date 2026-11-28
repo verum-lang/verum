@@ -185,7 +185,7 @@ fn assert_private(errors: &List<Text>, field: &str) {
     assert!(
         !errors.is_empty()
             && errors.iter().all(|error| error.contains("VisibilityError")
-                && error.contains("Private")
+                && error.contains("private")
                 && error.contains(OWNER)
                 && error.contains(field)),
         "exact private declaring field {field}: {errors:?}"
