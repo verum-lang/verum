@@ -1550,9 +1550,9 @@ impl VbcModule {
     /// Resolve a qualified protocol selector against the caller's actual type
     /// argument. Interpreted and specialized calls use the same declaration slot.
     pub(crate) fn bound_protocol_method(
-        &self, receiver: &TypeRef, method: StringId, argc: u8,
+        &self, receiver: &TypeRef, method: StringId, argc: u8, method_arguments: &[TypeRef],
     ) -> Result<Option<(FunctionId, Vec<TypeRef>)>, String> {
-        if let Some(selected) = self.bound_static_protocol_method(receiver, method, argc)? {
+        if let Some(selected) = self.bound_static_protocol_method(receiver, method, argc, method_arguments)? {
             return Ok(Some(selected));
         }
         // A source protocol owns its member even if another protocol on the
@@ -1601,7 +1601,14 @@ impl VbcModule {
     pub fn try_bound_method(
         &self, receiver: &TypeRef, method: StringId, argc: u8,
     ) -> Result<Option<(FunctionId, Vec<TypeRef>)>, String> {
-        if let Some(selected) = self.bound_protocol_method(receiver, method, argc)? {
+        self.try_bound_method_with_arguments(receiver, method, argc, &[])
+    }
+
+    /// Bind the caller's method arguments to slots on the selected impl.
+    pub fn try_bound_method_with_arguments(
+        &self, receiver: &TypeRef, method: StringId, argc: u8, method_arguments: &[TypeRef],
+    ) -> Result<Option<(FunctionId, Vec<TypeRef>)>, String> {
+        if let Some(selected) = self.bound_protocol_method(receiver, method, argc, method_arguments)? {
             return Ok(Some(selected));
         }
         let specialized = self.receiver_specialization(receiver, method, argc)?;
@@ -1619,7 +1626,7 @@ impl VbcModule {
     /// Static members have no self parameter. Only the selected implementation's
     /// source receiver can bind its type parameters from a type application.
     pub(crate) fn bound_static_protocol_method(
-        &self, receiver: &TypeRef, method: StringId, argc: u8,
+        &self, receiver: &TypeRef, method: StringId, argc: u8, method_arguments: &[TypeRef],
     ) -> Result<Option<(FunctionId, Vec<TypeRef>)>, String> {
         let Some(selector) = self.get_string(method) else { return Ok(None) };
         if !selector.starts_with(crate::receiver_methods::STATIC_PROTOCOL_PREFIX) { return Ok(None); }
@@ -1628,11 +1635,24 @@ impl VbcModule {
         let id = self.static_protocol_method(head, selector, argc)?
             .ok_or_else(|| format!("missing static method `{selector}` for {receiver:?}"))?;
         let function = self.get_function(id).ok_or_else(|| format!("missing static method {id:?}"))?;
+        if function.explicit_type_param_ids.len() != method_arguments.len() {
+            return Err(format!("static method `{selector}` has a different method parameter roster"));
+        }
         if function.type_params.is_empty() { return Ok(Some((id, Vec::new()))); }
-        let arguments = function.source_receiver.as_ref()
-            .and_then(|pattern| function.arguments_from_receiver_pattern(pattern, receiver))
-            .ok_or_else(|| format!("receiver {receiver:?} does not establish the parameters of {}",
-                self.get_string(function.name).unwrap_or("<unnamed method>")))?;
+        let mut bindings = crate::mono::TypeSubstitution::empty();
+        let pattern = function.source_receiver.as_ref()
+            .ok_or_else(|| format!("static method `{selector}` has no declared receiver"))?;
+        if !crate::mono::unify_declared_types(pattern, receiver, &mut bindings) {
+            return Err(format!("receiver {receiver:?} does not match static method `{selector}`"));
+        }
+        for (slot, actual) in function.explicit_type_param_ids.iter().zip(method_arguments) {
+            if !slot.is_some_and(|slot| crate::mono::unify_declared_types(&TypeRef::Generic(slot), actual, &mut bindings)) {
+                return Err(format!("static method `{selector}` has an invalid method argument"));
+            }
+        }
+        let arguments = function.type_params.iter().map(|parameter| bindings.get(parameter.id).cloned())
+            .collect::<Option<Vec<_>>>().ok_or_else(|| format!(
+                "receiver {receiver:?} and method arguments do not establish the parameters of {selector}"))?;
         Ok(Some((id, arguments)))
     }
 

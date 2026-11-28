@@ -15036,7 +15036,8 @@ fn lower_call_method<'ctx>(
         return refuse_unresolved_witness(ctx, dst);
     }
     let selection = if let Some(declaration) = receiver_declaration {
-        vbc_mod.try_bound_method(&declaration, StringId(method_id), args.count)
+        vbc_mod.try_bound_method_with_arguments(&declaration, StringId(method_id), args.count,
+            call_witness.as_deref().unwrap_or_default())
     } else if let Some(witness) = &call_witness {
         vbc_mod.witnessed_source_method(StringId(method_id), args.count, witness)
     } else {

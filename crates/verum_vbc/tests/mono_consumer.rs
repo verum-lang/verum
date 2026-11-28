@@ -235,6 +235,7 @@ fn type_method_module(argument: T, include_authority: bool) -> (VbcModule, u32, 
         vec![I::Ret { value: Reg(0) }],
     );
     m.functions[target as usize].parent_type = Some(TypeId(100));
+    m.functions[target as usize].source_receiver = Some(applied(100, generic(0)));
     let _sibling = add_function(
         &mut m,
         "beta.Sink.from_iter",
@@ -549,7 +550,11 @@ fn distinct_type_tokens_at_control_flow_join_do_not_choose_the_last_arm() {
 #[test]
 fn source_generic_chain_seeds_and_specializes_without_environment_flags() {
     use verum_vbc::codegen::{CodegenConfig, VbcCodegen};
-    let source = "module calls; type Sink is { value: Int }; implement Sink { fn make<U>(value: U) -> Int { 7 } } fn outer<C>(value: Int) -> Int { C.make(value) } fn probe() -> Int { outer<Sink>(7) }";
+    let source = "module calls; type Factory is protocol { fn make<U>(value: U) -> Int; }; type Sink is { value: Int }; implement Factory for Sink { fn make<Value>(value: Value) -> Int { 7 } } fn outer<C: Factory>(value: Int) -> Int { C.make(value) } fn probe() -> Int { outer<Sink>(7) }";
+    let unbound = source.replace("C: Factory", "C");
+    let unbound = verum_fast_parser::Parser::new(&unbound).parse_module().unwrap();
+    let error = VbcCodegen::with_config(CodegenConfig::new("calls")).compile_module(&unbound).unwrap_err();
+    assert!(error.to_string().contains("owned parameter requires a complete declaration"), "{error}");
     let ast = verum_fast_parser::Parser::new(source)
         .parse_module()
         .unwrap();

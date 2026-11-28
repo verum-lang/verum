@@ -368,8 +368,7 @@ impl VbcCodegen {
                     return Some(pointer);
                 }
                 if let Some(witness) = self.type_parameter_static_receiver(receiver).ok()? {
-                    if type_args.is_empty()
-                        && let Some(member) = self.bounded_static_method(&witness, method.name.as_str(), args.len()).transpose().ok()?
+                    if let Some(member) = self.bounded_static_method(&witness, method.name.as_str(), args, type_args, depth + 1).transpose().ok()?
                         && !member.is_async {
                         return Some(member.output);
                     }

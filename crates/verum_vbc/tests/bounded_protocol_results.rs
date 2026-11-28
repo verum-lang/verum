@@ -52,6 +52,107 @@ fn compile(files: &[&Module]) -> CodegenResult<VbcModule> {
 }
 
 #[test]
+fn actual_maybe_iterator_collect_passes_its_owned_receiver_to_from_iter() {
+    use verum_ast::decl::{ImplItemKind, ImplKind};
+
+    let mut iterator = actual_iterator(&["collect"]);
+    let from_iterator = parse(include_str!("../../../core/base/iterator.vr")).items.into_iter()
+        .find(|item| matches!(&item.kind, ItemKind::Type(decl) if decl.name.as_str() == "FromIterator")).unwrap();
+    iterator.items.push(from_iterator);
+    iterator.items.extend(parse("mount core.base.maybe.Maybe;").items);
+    let mut memory = parse(include_str!("../../../core/base/memory.vr"));
+    memory.items.retain(|item| match &item.kind {
+        ItemKind::Module(decl) => decl.items.is_none(),
+        ItemKind::Function(decl) => decl.name.as_str() == "replace",
+        _ => false,
+    });
+    let mut maybe = parse(include_str!("../../../core/base/maybe.vr"));
+    maybe.items.retain_mut(|item| match &mut item.kind {
+        ItemKind::Module(decl) => decl.items.is_none(),
+        ItemKind::Type(decl) => matches!(decl.name.as_str(), "Maybe" | "MaybeIter"),
+        ItemKind::Impl(decl) => {
+            match &decl.kind {
+                ImplKind::Inherent(ty) if verum_ast::pretty::format_type(ty) == "Maybe<T>" => {
+                    decl.items.retain(|item| matches!(&item.kind, ImplItemKind::Function(fun) if fun.name.as_str() == "take"));
+                }
+                ImplKind::Protocol { protocol, for_type, .. } if protocol.to_string() == "Iterator"
+                    && verum_ast::pretty::format_type(for_type) == "MaybeIter<T>" => {
+                    decl.items.retain(|item| match &item.kind {
+                        ImplItemKind::Type { name, .. } => name.as_str() == "Item",
+                        ImplItemKind::Function(fun) => fun.name.as_str() == "next",
+                        _ => false,
+                    });
+                }
+                _ => return false,
+            }
+            !decl.items.is_empty()
+        }
+        _ => false,
+    });
+    maybe.items.extend(parse(r#"
+        mount core.base.memory.replace as replace_value;
+        mount core.base.iterator.Iterator;
+        public fn single<T>(value: T) -> MaybeIter<T> { MaybeIter { inner: Maybe.Some(value) } }
+    "#).items);
+    let consumer = parse(r#"
+        module consumer;
+        mount core.base.iterator.{Iterator, FromIterator};
+        mount core.base.maybe.{Maybe, single};
+        type Captured<T> is { value: T };
+        implement<T> FromIterator<T> for Captured<T> {
+            fn from_iter<Sequence: Iterator<Item = T>>(iter: Sequence) -> Self {
+                let mut source = iter;
+                match source.next() {
+                    Maybe.Some(value) => Captured { value },
+                    Maybe.None => panic("expected a value"),
+                }
+            }
+        }
+        fn run() -> Int {
+            let row: Captured<Int> = single(73).collect<Captured<Int>>();
+            row.value
+        }
+    "#);
+    let module = compile(&[&memory, &maybe, &iterator, &consumer]).unwrap();
+    execute_source_and_wire(module, 73);
+}
+
+#[test]
+fn static_protocol_method_arguments_respect_the_selected_declaration() {
+    let source = |call: &str| parse(&format!(r#"
+        module consumer;
+        type Factory is protocol {{ fn measure<U>(left: U, right: U) -> Int; }};
+        type Pair<A,B> is {{ first: A, second: B }};
+        implement<B,A> Factory for Pair<A,B> {{
+            fn measure<Value>(left: Value, right: Value) -> Int {{ A.size * 100 + B.size * 10 + Value.size }}
+        }}
+        fn width<C: Factory, V>(value: V) -> Int {{ {call} }}
+        fn run() -> Int {{ width<Pair<UInt8, UInt32>, UInt16>(1_u16) }}
+    "#));
+    for call in ["C.measure(value, value)", "C.measure<V>(value, value)", "C.measure<_>(value, value)"] {
+        let mut module = compile(&[&source(call)]).unwrap();
+        execute_source_and_wire(module.clone(), 142);
+        module.resolve_protocol_dispatch();
+        let graph = verum_vbc::mono::module_instantiations(&module).unwrap();
+        let specialized = verum_vbc::mono::monomorphize_minimal(module, &graph).unwrap().module;
+        let target = specialized.find_function_by_name("consumer.Pair.measure").unwrap();
+        use verum_vbc::types::{TypeId, TypeRef};
+        let arguments: List<_> = specialized.get_function(target).unwrap().type_params.iter().map(|parameter| {
+            TypeRef::Concrete(match specialized.get_string(parameter.name).unwrap() {
+                "A" => TypeId::U8, "B" => TypeId::U32, "Value" => TypeId::U16,
+                other => panic!("unexpected implementation binder {other}"),
+            })
+        }).collect();
+        assert!(specialized.specialized_function_id(target, &arguments).is_some());
+        execute_source_and_wire(specialized, 142);
+    }
+    for call in ["C.measure(value, true)", "C.measure<Bool>(value, value)"] {
+        let error = compile(&[&source(call)]).unwrap_err().to_string();
+        assert!(error.contains("operand does not establish its declared type"), "{error}");
+    }
+}
+
+#[test]
 fn associated_results_complete_protocol_defaults_before_matching_the_implementation() {
     for (application, operand, accepted) in [("Pick", "Self", true), ("Pick<Bool>", "Bool", false)] {
         let source = parse(&format!(r#"

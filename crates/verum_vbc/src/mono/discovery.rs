@@ -187,7 +187,7 @@ pub(super) fn discover_with_limit(
         for (callee, args) in concrete_call(module, instr, function_base)
             .into_iter()
             .chain(concrete_drop_calls(module, instr))
-            .chain(bound_method_call(module, instr, instructions.get(index + 1))
+            .chain(bound_method_call(module, index.checked_sub(1).map(|i| &instructions[i]), instr, instructions.get(index + 1))
                 .map_err(super::SpecializationError::InvalidWitness)?)
         {
             record_concrete_instantiation(
@@ -205,6 +205,7 @@ pub(super) fn discover_with_limit(
 /// same pair after the caller's generic arguments have become concrete.
 pub(super) fn bound_method_call(
     module: &VbcModule,
+    previous: Option<&Instruction>,
     witness: &Instruction,
     call: Option<&Instruction>,
 ) -> Result<Option<(FunctionId, Vec<TypeRef>)>, String> {
@@ -216,8 +217,15 @@ pub(super) fn bound_method_call(
     };
     let method = crate::types::StringId(*method_id);
     match witness {
-        Instruction::BindMethodReceiver { type_ref } if concrete(type_ref) =>
-            Ok(module.try_bound_method(type_ref, method, args.count)?.filter(|(_, args)| !args.is_empty())),
+        Instruction::BindMethodReceiver { type_ref } if concrete(type_ref) => {
+            let method_arguments = match previous {
+                Some(Instruction::SetCallWitness { type_args }) => type_args.as_slice(),
+                _ => &[],
+            };
+            if !method_arguments.iter().all(concrete) { return Ok(None); }
+            Ok(module.try_bound_method_with_arguments(type_ref, method, args.count, method_arguments)?
+                .filter(|(_, args)| !args.is_empty()))
+        }
         Instruction::SetCallWitness { type_args } => {
             module.witnessed_source_method(method, args.count, type_args)
         }

@@ -19,8 +19,15 @@ impl From<TypeRef> for BoundProtocol {
 #[derive(Clone, Copy)]
 enum Receiver<'a> {
     Value(Option<&'a TypeRef>),
-    Static(&'a TypeRef),
+    Static(&'a TypeRef, Option<StaticMethodCall<'a>>),
     Operator { value: &'a TypeRef, owner: crate::types::TypeId },
+}
+
+#[derive(Clone, Copy)]
+struct StaticMethodCall<'a> {
+    operands: &'a [Expr],
+    explicit: &'a [verum_ast::ty::GenericArg],
+    depth: usize,
 }
 
 pub(super) struct ProtocolMethod {
@@ -30,6 +37,7 @@ pub(super) struct ProtocolMethod {
     pub receiver: verum_ast::method_dispatch::ReceiverKind,
     pub output: TypeRef,
     pub inputs: Vec<TypeRef>,
+    pub method_arguments: Vec<TypeRef>,
     pub is_async: bool,
 }
 
@@ -82,7 +90,7 @@ impl VbcCodegen {
             List::from_iter([declared.into()]),
             method,
             arity,
-            Receiver::Static(&scope.receiver.ty),
+            Receiver::Static(&scope.receiver.ty, None),
         )
         .transpose()
     }
@@ -463,11 +471,14 @@ impl VbcCodegen {
     /// Synchronous static members return a type instantiated with the actual
     /// caller's binder, including occurrences of Self inside the result.
     pub(super) fn bounded_static_method(
-        &self, receiver: &TypeRef, member: &str, arity: usize,
+        &self, receiver: &TypeRef, member: &str, operands: &[Expr],
+        explicit: &[verum_ast::ty::GenericArg], depth: usize,
     ) -> Maybe<CodegenResult<ProtocolMethod>> {
+        if depth >= 64 { return None; }
         let subject = self.protocol_bound_subject(receiver)?;
         let bounds = self.current_protocol_bounds.get(&subject)?.clone();
-        self.protocol_method(bounds, member, arity, Receiver::Static(&subject))
+        let call = StaticMethodCall { operands, explicit, depth };
+        self.protocol_method(bounds, member, operands.len(), Receiver::Static(&subject, Some(call)))
     }
 
     pub(super) fn bounded_binary_method(
@@ -554,6 +565,65 @@ impl VbcCodegen {
         Some(selected)
     }
 
+    /// Bind the method's own parameters in its protocol telescope before
+    /// substituting caller types. An implementation can choose different names
+    /// and witness slots for the same positional parameters.
+    fn bind_static_method_arguments(
+        &self,
+        protocol: &crate::types::TypeDescriptor,
+        member: &crate::types::VariantDescriptor,
+        name: &str,
+        formals: &[TypeRef],
+        call: StaticMethodCall<'_>,
+        bindings: &mut crate::mono::TypeSubstitution,
+    ) -> CodegenResult<Vec<(crate::types::TypeParamId, TypeRef)>> {
+        use verum_ast::decl::{ProtocolItemKind, TypeDeclBody};
+        use crate::types::TypeParamId;
+
+        let invalid = |reason: &str| CodegenError::new(CodegenErrorKind::TypeInference(
+            format!("static protocol method `{name}`: {reason}")));
+        let source = protocol.source_declaration.as_ref().ok_or_else(|| invalid("missing protocol source declaration"))?;
+        let TypeDeclBody::Protocol(body) = &source.body else { return Err(invalid("invalid protocol declaration")); };
+        let declaration = body.items.iter().filter_map(|item| match &item.kind {
+            ProtocolItemKind::Function { decl, .. } => Some(decl), _ => None,
+        }).nth(member.tag as usize).filter(|decl| decl.name.as_str() == name)
+            .ok_or_else(|| invalid("source declaration differs from selected slot"))?;
+        let mut owner = std::collections::HashMap::new();
+        for parameter in &protocol.type_params {
+            let key = self.ctx.strings.get(parameter.name.0 as usize).ok_or_else(|| invalid("missing protocol binder"))?;
+            owner.insert(key.to_string(), parameter.id.0);
+        }
+        let self_id = TypeParamId::protocol_self(source.generics.len()).ok_or_else(|| invalid("invalid Self binder"))?;
+        owner.insert("Self".into(), self_id.0);
+        if declaration.generics.iter().any(|p| p.is_implicit || !matches!(p.kind, verum_ast::ty::GenericParamKind::Type { .. })) {
+            return Err(invalid("method parameter requires a declaration-owned non-type or implicit witness"));
+        }
+        let (dense, shadow) = Self::extend_function_generic_scope(declaration, owner);
+        let slots = Self::explicit_generic_param_ids(declaration, &dense, &shadow)
+            .into_iter().collect::<Option<Vec<_>>>().ok_or_else(|| invalid("unsupported method binder"))?;
+        if call.explicit.len() > slots.len() { return Err(invalid("too many explicit arguments")); }
+        for (id, argument) in slots.iter().zip(call.explicit) {
+            let ty = argument.type_for_declared_slot().ok_or_else(|| invalid("expected a declared type argument"))?;
+            if !matches!(ty.kind, verum_ast::TypeKind::Inferred) {
+                let actual = self.explicit_type_witness(&ty, None).ok_or_else(|| invalid("unresolved explicit argument"))?;
+                if !self.bind_source_declaration(&TypeRef::Generic(*id), &actual, bindings) {
+                    return Err(invalid("conflicting explicit argument"));
+                }
+            }
+        }
+        for (formal, operand) in formals.iter().zip(call.operands) {
+            let expected = super::constructor_types::fully_bound(formal, bindings)
+                .then(|| bindings.apply(formal).ok()).flatten();
+            let actual = self.source_expression_declaration(operand, expected.as_ref(), call.depth + 1);
+            if !actual.is_some_and(|actual| self.bind_source_declaration(formal, &actual, bindings)) {
+                return Err(invalid("operand does not establish its declared type").at_source(operand.span));
+            }
+        }
+        slots.into_iter().map(|id| {
+            bindings.get(id).cloned().map(|ty| (id, ty)).ok_or_else(|| invalid("missing method type argument"))
+        }).collect()
+    }
+
     fn protocol_method(
         &self,
         protocols: List<BoundProtocol>,
@@ -563,7 +633,7 @@ impl VbcCodegen {
     ) -> Maybe<CodegenResult<ProtocolMethod>> {
         let subject = match receiver {
             Receiver::Value(value) => value,
-            Receiver::Static(ty) | Receiver::Operator { value: ty, .. } => Some(ty),
+            Receiver::Static(ty, _) | Receiver::Operator { value: ty, .. } => Some(ty),
         };
         let protocols = self.protocol_hierarchy(protocols, subject)?;
         let mut output = None;
@@ -587,7 +657,7 @@ impl VbcCodegen {
                     .is_some_and(|name| name == method)
             }) {
                 let dispatch = member.method_dispatch?;
-                if matches!(receiver, Receiver::Static(_))
+                if matches!(receiver, Receiver::Static(_, _))
                     != (dispatch.receiver == verum_ast::method_dispatch::ReceiverKind::None) {
                     continue;
                 }
@@ -607,7 +677,6 @@ impl VbcCodegen {
                         "ambiguous protocol method `{method}` on the receiver"
                     ))));
                 }
-                if dispatch.has_generics { return None; }
                 let mut ids: Vec<_> = declaration
                     .type_params
                     .iter()
@@ -616,7 +685,7 @@ impl VbcCodegen {
                 let mut substitution = crate::mono::TypeSubstitution::new(&declaration.type_params, arguments);
                 let actual = match receiver {
                     Receiver::Value(value) => value,
-                    Receiver::Static(ty) | Receiver::Operator { value: ty, .. } => Some(ty),
+                    Receiver::Static(ty, _) | Receiver::Operator { value: ty, .. } => Some(ty),
                 };
                 let self_id = declaration.source_declaration.as_ref()
                     .and_then(|source| crate::types::TypeParamId::protocol_self(source.generics.len()));
@@ -627,6 +696,20 @@ impl VbcCodegen {
                 } else {
                     None
                 };
+                let method_arguments = if dispatch.has_generics {
+                    let Receiver::Static(_, Some(call)) = receiver else { return None; };
+                    match self.bind_static_method_arguments(declaration, member, method, params, call, &mut substitution) {
+                        Ok(arguments) => {
+                            ids.extend(arguments.iter().map(|(id, _)| *id));
+                            arguments.into_iter().map(|(_, ty)| ty).collect()
+                        }
+                        Err(error) => return Some(Err(error)),
+                    }
+                } else if matches!(receiver, Receiver::Static(_, Some(call)) if !call.explicit.is_empty()) {
+                    return Some(Err(CodegenError::new(CodegenErrorKind::TypeInference(format!(
+                        "non-generic static protocol method `{method}` takes no type arguments"
+                    )))));
+                } else { Vec::new() };
                 if !super::formal_parameters::resolved(return_type, &ids, 0) {
                     return None;
                 }
@@ -645,6 +728,7 @@ impl VbcCodegen {
                     slot: member.tag,
                     receiver: dispatch.receiver,
                     inputs,
+                    method_arguments,
                     output: instantiated,
                     is_async: dispatch.is_async,
                 });

@@ -13559,7 +13559,7 @@ impl VbcCodegen {
         // Static calls on declaration-owned type parameters and associated
         // projections use the same witness as a type annotation in this frame.
         if let Some(type_ref) = self.type_parameter_static_receiver(receiver)? {
-            let member = self.bounded_static_method(&type_ref, method.as_str(), args.len()).transpose()?;
+            let member = self.bounded_static_method(&type_ref, method.as_str(), args, type_args, 0).transpose()?;
             let selector = match &member {
                 Some(member) => {
                     let owner = self.type_by_id(member.owner).and_then(|ty| self.type_declaration_identity(ty))
@@ -13598,10 +13598,13 @@ impl VbcCodegen {
             let method_id = self.ctx.intern_string_raw(&selector);
             let result = self.ctx.alloc_temp();
             let recv_reg = self.ctx.alloc_temp();
-            if member.is_some() {
+            if let Some(member) = member {
                 // A static protocol member has no self operand. Its declared
                 // type application is the sole authority for this call.
                 self.ctx.emit(Instruction::LoadUnit { dst: recv_reg });
+                if !member.method_arguments.is_empty() {
+                    self.ctx.emit(Instruction::SetCallWitness { type_args: member.method_arguments });
+                }
                 self.ctx.emit(Instruction::BindMethodReceiver { type_ref });
             } else {
                 self.ctx.emit(Instruction::LoadT { dst: recv_reg, type_ref });
