@@ -158,3 +158,23 @@ fn inactive_variants_cannot_invent_arguments_or_change_nominal_owner() {
         assert!(compile(&source).is_err(), "unproved constructor accepted: {call}");
     }
 }
+
+#[test]
+fn byte_and_character_literals_supply_distinct_generic_witnesses() {
+    let module = compile(r#"
+        fn width<T>(value: T) -> Int { T.size }
+        fn probe() -> Int {
+            let byte = b'+';
+            let character = '+';
+            if width(byte) != 1 || width(b'+') != 1 { return 0; }
+            if width<Byte>(b'+') != 1 || width<Char>('+') != Char.size { return 0; }
+            if width(character) == Char.size && width('+') == Char.size { 1 } else { 0 }
+        }
+    "#).unwrap();
+    source_and_wire(module, 1);
+
+    for call in ["width<Char>(b'+')", "width<Byte>('+')"] {
+        let source = format!("fn width<T>(value:T)->Int {{T.size}} fn probe()->Int {{{call}}}");
+        assert!(compile(&source).is_err(), "accepted mismatched literal: {call}");
+    }
+}

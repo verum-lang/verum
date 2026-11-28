@@ -8401,6 +8401,7 @@ impl VbcCodegen {
             },
             LiteralKind::Bool(_) => Some("Bool"),
             LiteralKind::Char(_) => Some("Char"),
+            LiteralKind::ByteChar(_) => Some("Byte"),
             LiteralKind::Text(_) => Some("Text"),
             _ => None,
         }
@@ -29463,7 +29464,9 @@ impl VbcCodegen {
                     | LiteralKind::InterpolatedString(_) => Some("Text".to_string()),
                     LiteralKind::Float(_) => Some("Float".to_string()),
                     LiteralKind::Bool(_) => Some("Bool".to_string()),
-                    LiteralKind::Char(_) | LiteralKind::ByteChar(_) => Some("Char".to_string()),
+                    LiteralKind::Char(_) | LiteralKind::ByteChar(_) => {
+                        Self::literal_type_name(lit, false).map(str::to_owned)
+                    }
                     _ => None, // Int literals default to Int (already the default)
                 }
             }
