@@ -1025,3 +1025,42 @@ fn indexed_values_keep_local_loans_and_require_known_storage() {
         assert!(found.iter().any(|error| error.contains(expected)), "{caller}: {found:?}");
     }
 }
+
+#[test]
+fn a_returned_inline_field_borrow_only_writes_that_field() {
+    let declarations = "type Slot is { n:Int }; type Part is { slot:Slot };
+        type Shell is { part:Part, hook:fn() };
+        implement Part { fn slot_mut(&mut self)->&mut Slot { &mut self.slot } }
+        implement Shell {
+            fn slot_mut(&mut self)->&mut Slot { &mut self.part.slot }
+            fn part_mut(&mut self)->&mut Part { &mut self.part }
+        }
+        fn project(s:&mut Shell)->&mut Slot { &mut s.part.slot }
+        fn store(s:&mut Slot, n:Int) { s.n=n; }";
+    for argument in ["shell.slot_mut()", "shell.part_mut().slot_mut()", "project(&mut shell)", "&mut shell.part.slot"] {
+        let caller = format!("fn keep(mut shell:Shell)->Shell {{ store({argument},3); shell }}");
+        let found = errors(declarations, &caller);
+        assert!(found.is_empty(), "{argument}: {found:?}");
+    }
+}
+
+#[test]
+fn returning_a_projected_local_borrow_still_checks_its_owner_lifetime() {
+    let found = errors("type Slot is { n:Int };
+        type Shell is { slot:Slot };
+        implement Shell { fn slot_mut(&mut self)->&mut Slot { &mut self.slot } }",
+        "fn escape()->&mut Slot { let mut shell=Shell { slot:Slot { n:0 } }; shell.slot_mut() }");
+    assert!(found.iter().any(|e| e.contains("does not live long enough") || e.contains("local")),
+        "{found:?}");
+}
+
+#[test]
+fn storing_a_local_loan_through_a_returned_field_still_checks_the_store() {
+    let found = errors("type Slot is { pointer:&Int };
+        type Shell is { slot:Slot, hook:fn() };
+        implement Shell { fn slot_mut(&mut self)->&mut Slot { &mut self.slot } }
+        fn assign(s:&mut Slot, pointer:&Int) { s.pointer=pointer; }",
+        "fn leak(mut shell:Shell)->Shell { let local=3; assign(shell.slot_mut(),&local); shell }");
+    assert!(found.iter().any(|e| e.contains("lifetime") || e.contains("does not live long enough")),
+        "{found:?}");
+}

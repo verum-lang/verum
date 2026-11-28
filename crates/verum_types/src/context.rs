@@ -204,6 +204,8 @@ pub(crate) enum ReturnedValueNode {
     Tuple(List<usize>),
     Record { owner: Text, fields: List<(Text, usize)> },
     Variant { owner: Text, name: Text, fields: List<usize> },
+    /// A direct, typed borrow of inline fields of a borrowed input.
+    BorrowedField { input: usize, fields: List<Text>, mutable: bool },
     BorrowedVariant {
         input: usize,
         fields: List<Text>,

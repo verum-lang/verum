@@ -1381,7 +1381,13 @@ impl TypeChecker {
                     .then_some(origin)
             }
             ExprKind::Call { args, .. } | ExprKind::MethodCall { args, .. } => {
-                let index = self.type_registry.returned_value(expr.span)?.forwarded_parameter()?;
+                let body = self.type_registry.returned_value(expr.span)?;
+                if matches!(body.nodes.get(body.result)?, crate::context::ReturnedValueNode::BorrowedField { .. }) {
+                    let origins = self.returned_value_origins(unparen(expr))?;
+                    let [place] = origins.as_slice() else { return None; };
+                    return Some(place.clone());
+                }
+                let index = body.forwarded_parameter()?;
                 let Type::Function { params, return_type, .. } =
                     self.type_registry.lookup_call_target(expr.span)? else { return None };
                 if self.unifier.apply(params.get(index)?) != self.unifier.apply(return_type) {

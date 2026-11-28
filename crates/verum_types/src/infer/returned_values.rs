@@ -346,15 +346,13 @@ fn declared_tuple_variant_owner(checker: &TypeChecker, path: &str, name: &Text, 
 /// A borrowed sum lends its payload in place. Recognize all returning arms
 /// and inspect the complete body of every terminal arm. Computed patterns,
 /// guards, local cleanup and unproved calls keep the unknown-write rule.
-fn borrowed_variant_match(
-    checker: &TypeChecker,
-    scrutinee: &Expr,
-    arms: &[verum_ast::pattern::MatchArm],
+fn borrowed_input_path(
+    value: &Expr,
     bindings: &Map<Text, usize>,
     nodes: &[ReturnedValueNode],
-) -> Option<ReturnedValueNode> {
-    use verum_ast::{UnOp, VariantPatternData};
-    let ExprKind::Unary { op, expr } = &unparen(scrutinee).kind else { return None; };
+) -> Option<(usize, List<Text>, bool)> {
+    use verum_ast::UnOp;
+    let ExprKind::Unary { op, expr } = &unparen(value).kind else { return None; };
     let mutable = match op { UnOp::Ref => false, UnOp::RefMut => true, _ => return None };
     let mut place = unparen(expr);
     let mut fields = List::new();
@@ -373,6 +371,18 @@ fn borrowed_variant_match(
     if !matches!(nodes.get(input)?, ReturnedValueNode::Parameter(_) | ReturnedValueNode::Receiver) {
         return None;
     }
+    Some((input, fields, mutable))
+}
+
+fn borrowed_variant_match(
+    checker: &TypeChecker,
+    scrutinee: &Expr,
+    arms: &[verum_ast::pattern::MatchArm],
+    bindings: &Map<Text, usize>,
+    nodes: &[ReturnedValueNode],
+) -> Option<ReturnedValueNode> {
+    use verum_ast::VariantPatternData;
+    let (input, fields, mutable) = borrowed_input_path(scrutinee, bindings, nodes)?;
     let mut remaining = MAX_RETURNED_VALUE_STEPS.checked_sub(arms.len())?;
     let mut owner = None;
     let mut cases = List::new();
@@ -472,6 +482,11 @@ fn append_expression(
         if pending.len() > remaining || nodes.len() >= MAX_RETURNED_VALUE_STEPS { return None; }
         let node = match step {
             Step::Enter(expression) => match &unparen(expression).kind {
+                ExprKind::Unary { op: verum_ast::UnOp::Ref | verum_ast::UnOp::RefMut, .. } => {
+                    let (input, fields, mutable) = borrowed_input_path(expression, bindings, nodes)?;
+                    if fields.is_empty() { return None; }
+                    ReturnedValueNode::BorrowedField { input, fields, mutable }
+                }
                 ExprKind::Match { expr, arms } => borrowed_variant_match(checker, expr, arms, bindings, nodes)?,
                 ExprKind::Path(path) => {
                     let slot = match path.segments.as_slice() {
@@ -855,7 +870,8 @@ impl TypeChecker {
                 ReturnedValueNode::Field { source, .. }
                 | ReturnedValueNode::TupleIndex { source, .. } => mark(*source)?,
                 ReturnedValueNode::RetainedCopy { handle, .. } => mark(*handle)?,
-                ReturnedValueNode::BorrowedVariant { input, .. } => mark(*input)?,
+                ReturnedValueNode::BorrowedField { input, .. }
+                | ReturnedValueNode::BorrowedVariant { input, .. } => mark(*input)?,
                 ReturnedValueNode::Choice { arms, .. } => {
                     for arm in arms { mark(*arm)?; }
                 }
@@ -889,6 +905,11 @@ impl TypeChecker {
                     self.read_value_origins(
                         facts.nodes.get(*handle)?.clone(), values.get(*handle)?.clone(), span, true,
                     )?.1
+                }
+                ReturnedValueNode::BorrowedField { input, fields, .. } => {
+                    let mut places = values.get(*input)?.clone();
+                    for place in &mut places { place.fields.extend(fields.iter().cloned()); }
+                    places
                 }
                 ReturnedValueNode::BorrowedVariant { input, fields, cases, .. } => {
                     // The reference addresses storage inside the input. Following the
@@ -1127,15 +1148,15 @@ impl TypeChecker {
                 }
                 ReturnedValueNode::Receiver => self.unifier.apply(receiver?),
                 ReturnedValueNode::Literal(ty) => ty.clone(),
+                ReturnedValueNode::BorrowedField { input, fields, mutable } => {
+                    let field = self.borrowed_input_field_type(nodes.get(*input)?, *mutable, fields, span)?;
+                    // Borrowing a field holding a reference introduces an additional
+                    // indirection. Its slot and referent need distinct identities.
+                    if self.reference_mode(&field, span).ok()?.is_some() { return None; }
+                    Type::reference(*mutable, field)
+                }
                 ReturnedValueNode::BorrowedVariant { input, fields, mutable, owner, cases, terminal_wildcard } => {
-                    let root = self.place_reference_head(nodes.get(*input)?, span).ok()?;
-                    let Type::Reference { mutable: writable, inner } = root else { return None; };
-                    if *mutable && !writable { return None; }
-                    let mut sum = *inner;
-                    for field in fields {
-                        if self.reference_mode(&sum, span).ok()?.is_some() { return None; }
-                        sum = self.unifier.apply(&self.lookup_field_type(&sum, field)?);
-                    }
+                    let sum = self.borrowed_input_field_type(nodes.get(*input)?, *mutable, fields, span)?;
                     if &self.conversion_nominal_head(&sum)?.0 != owner { return None; }
                     let Type::Variant(variants) = self.expand_generic_to_variant(&sum).ok()? else { return None; };
                     let mut covered = Set::new();
@@ -1456,6 +1477,21 @@ impl TypeChecker {
         { return false; }
         let Some(protocol) = self.source_operator_name(WellKnownProtocol::Drop) else { return false; };
         self.protocol_checker.read().find_impl(ty, &Self::text_to_path(&protocol)).is_none()
+    }
+
+    fn borrowed_input_field_type(
+        &self, input: &Type, mutable: bool, fields: &[Text], span: verum_ast::Span,
+    ) -> Option<Type> {
+        let Type::Reference { mutable: writable, inner } = self.place_reference_head(input, span).ok()? else {
+            return None;
+        };
+        if mutable && !writable { return None; }
+        let mut target = *inner;
+        for field in fields {
+            if self.reference_mode(&target, span).ok()?.is_some() { return None; }
+            target = self.unifier.apply(&self.lookup_field_type(&target, field)?);
+        }
+        Some(target)
     }
 
     fn closed_call_input_origins(
