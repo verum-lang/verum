@@ -11,17 +11,17 @@
 )
 module core.database.sqlite.native.column_origin.info;
 
-mount base.{Bool, Maybe, Text};
+mount base.{Bool, Text};
 
 public type ColumnOriginInfo is {
     /// Source schema ("main", "temp", ATTACH-ed).
-    database: Text,
+    public(in super) database: Text,
     /// Source table — empty if the column is a computed expression.
-    table: Text,
+    public(in super) table: Text,
     /// Source column — empty if derived.
-    origin: Text,
+    public(in super) origin: Text,
     /// Declared type (e.g. "INTEGER").
-    decltype: Text,
+    public(in super) decltype: Text,
 }
 
 public fn new_info(
@@ -39,12 +39,7 @@ public fn new_info(
 }
 
 public fn derived_expression() -> ColumnOriginInfo {
-    ColumnOriginInfo {
-        database: "".clone(),
-        table: "".clone(),
-        origin: "".clone(),
-        decltype: "".clone(),
-    }
+    new_info("", "", "", "")
 }
 
 public fn is_derived(c: &ColumnOriginInfo) -> Bool {

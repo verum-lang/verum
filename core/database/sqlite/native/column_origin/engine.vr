@@ -11,11 +11,9 @@
 )
 module core.database.sqlite.native.column_origin.engine;
 
-mount base.{Bool, Maybe, Text};
+mount base.{Bool, Text};
 mount collections.List;
-mount core.database.sqlite.native.column_origin.info.{
-    ColumnOriginInfo, derived_expression,
-};
+mount core.database.sqlite.native.column_origin.info.ColumnOriginInfo;
 
 public type ColumnOriginTable is {
     columns: List<ColumnOriginInfo>,
@@ -36,33 +34,27 @@ implement ColumnOriginTable {
         self.columns.push(info);
     }
 
-    fn fetch(&self, col: Int) -> ColumnOriginInfo {
-        if col < 0 || col >= self.columns.len() || !self.metadata_enabled {
-            return derived_expression();
+    fn read(&self, col: Int, select: fn(&ColumnOriginInfo) -> Text) -> Text {
+        if !self.metadata_enabled || col < 0 || col >= self.columns.len() {
+            return "";
         }
-        let entry = self.columns.get(col);
-        ColumnOriginInfo {
-            database: entry.database.clone(),
-            table: entry.table.clone(),
-            origin: entry.origin.clone(),
-            decltype: entry.decltype.clone(),
-        }
+        select(&self.columns[col])
     }
 
     public fn sqlite3_column_database_name(&self, col: Int) -> Text {
-        self.fetch(col).database
+        self.read(col, |entry| entry.database.clone())
     }
 
     public fn sqlite3_column_table_name(&self, col: Int) -> Text {
-        self.fetch(col).table
+        self.read(col, |entry| entry.table.clone())
     }
 
     public fn sqlite3_column_origin_name(&self, col: Int) -> Text {
-        self.fetch(col).origin
+        self.read(col, |entry| entry.origin.clone())
     }
 
     public fn sqlite3_column_decltype(&self, col: Int) -> Text {
-        self.fetch(col).decltype
+        self.read(col, |entry| entry.decltype.clone())
     }
 
     public fn len(&self) -> Int { self.columns.len() }

@@ -1,4 +1,4 @@
-// @test: typecheck-pass
+// @test: run
 // @tier: 0
 // @level: L2
 // @tags: sqlite, column_origin, metadata, capi
@@ -6,21 +6,13 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.column_origin.info.{
-    ColumnOriginInfo,
     new_info, derived_expression, is_derived,
 };
-mount core.database.sqlite.native.column_origin.engine.{
-    ColumnOriginTable, new_table,
-};
-mount base.{Bool};
+mount core.database.sqlite.native.column_origin.engine.new_table;
 
 fn test_new_info_flags() {
-    let ci = new_info(
-        "main".clone(), "users".clone(),
-        "id".clone(), "INTEGER".clone(),
-    );
+    let ci = new_info("main", "users", "id", "INTEGER");
     assert(!is_derived(&ci));
-    assert(ci.database == "main".clone());
 }
 
 fn test_derived_expression_is_derived() {
@@ -30,16 +22,24 @@ fn test_derived_expression_is_derived() {
 
 fn test_table_returns_info_when_enabled() {
     let mut t = new_table(true);
-    t.push(new_info("main".clone(), "users".clone(), "id".clone(), "INTEGER".clone()));
-    assert(t.sqlite3_column_database_name(0) == "main".clone());
-    assert(t.sqlite3_column_table_name(0) == "users".clone());
-    assert(t.sqlite3_column_origin_name(0) == "id".clone());
-    assert(t.sqlite3_column_decltype(0) == "INTEGER".clone());
+    t.push(new_info("main", "users", "id", "INTEGER"));
+    t.push(new_info("temp", "log", "message", "TEXT"));
+    t.push(derived_expression());
+    assert(t.sqlite3_column_database_name(0) == "main");
+    assert(t.sqlite3_column_table_name(0) == "users");
+    assert(t.sqlite3_column_origin_name(0) == "id");
+    assert(t.sqlite3_column_decltype(0) == "INTEGER");
+    assert(t.sqlite3_column_database_name(1) == "temp");
+    assert(t.sqlite3_column_table_name(1) == "log");
+    assert(t.sqlite3_column_origin_name(1) == "message");
+    assert(t.sqlite3_column_decltype(1) == "TEXT");
+    assert(t.sqlite3_column_origin_name(2).is_empty());
+    assert(t.sqlite3_column_database_name(3).is_empty());
 }
 
 fn test_table_returns_empty_when_disabled() {
     let mut t = new_table(false);
-    t.push(new_info("main".clone(), "users".clone(), "id".clone(), "INTEGER".clone()));
+    t.push(new_info("main", "users", "id", "INTEGER"));
     assert_eq(t.sqlite3_column_database_name(0).len(), 0);
     assert_eq(t.sqlite3_column_table_name(0).len(), 0);
     assert_eq(t.sqlite3_column_origin_name(0).len(), 0);
@@ -54,8 +54,8 @@ fn test_table_out_of_range_returns_empty() {
 
 fn test_table_length() {
     let mut t = new_table(true);
-    t.push(new_info("main".clone(), "t".clone(), "a".clone(), "INTEGER".clone()));
-    t.push(new_info("main".clone(), "t".clone(), "b".clone(), "TEXT".clone()));
+    t.push(new_info("main", "t", "a", "INTEGER"));
+    t.push(new_info("main", "t", "b", "TEXT"));
     assert_eq(t.len(), 2);
 }
 

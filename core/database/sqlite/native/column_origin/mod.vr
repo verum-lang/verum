@@ -11,8 +11,7 @@
 //  sqlite3_column_decltype(stmt, col) → declared type
 //
 
-// Needs the SQLITE_ENABLE_COLUMN_METADATA compile option; otherwise
-// all accessors return NULL.
+// With column metadata disabled, these Text accessors return an empty string.
 //
 
 // Submodules:
