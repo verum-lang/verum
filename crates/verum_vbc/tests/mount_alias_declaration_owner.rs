@@ -7,7 +7,7 @@ use verum_vbc::codegen::{CodegenConfig, VbcCodegen};
 
 fn roundtrip(source: &str) -> verum_vbc::module::VbcModule {
     let ast = Parser::new(source).parse_module().expect("source syntax");
-    let module = VbcCodegen::with_config(CodegenConfig::new("test"))
+    let module = VbcCodegen::new()
         .compile_module(&ast)
         .expect("source compiles");
     verum_vbc::deserialize::deserialize_module(
@@ -53,6 +53,32 @@ fn a_real_reexport_retains_its_exact_declared_target() {
         .mount_alias_target("facade.choose")
         .expect("real reexport");
     assert_eq!(target, "upstream.choose");
+}
+
+#[test]
+fn renamed_nominal_reexports_select_the_declaring_static_method() {
+    let sources = [
+        "module core.provider; public type RealCursor is { marker: Int }; implement RealCursor { public fn new(n: Int) -> RealCursor { RealCursor { marker: n } } public fn read(&self) -> Int { self.marker } }",
+        "module core.facade; public mount core.provider.RealCursor as Cursor;",
+        "module core.other; public type Cursor is { marker: Int }; implement Cursor { public fn new(n: Int) -> Cursor { Cursor { marker: 0 } } public fn read(&self) -> Int { self.marker } }",
+        "module client; mount core.facade.Cursor; fn run() -> Int { let cursor: Cursor = Cursor.new(73); cursor.read() }",
+    ];
+    let modules: Vec<_> = sources.iter().map(|source| Parser::new(source).parse_module().unwrap()).collect();
+    for units in [modules.iter().collect::<Vec<_>>(), modules.iter().rev().collect()] {
+        let mut compiler = VbcCodegen::with_config(CodegenConfig::new("client"));
+        compiler.collect_unit_declarations(&units).unwrap();
+        compiler.resolve_pending_imports();
+        compiler.compile_unit_items(&units, verum_vbc::codegen::ItemFailurePolicy::Strict).unwrap();
+        let module = compiler.finalize_module_from_state().unwrap();
+        let wire = verum_vbc::deserialize::deserialize_module(
+            &verum_vbc::serialize::serialize_module(&module).unwrap(),
+        ).unwrap();
+        for module in [module, wire] {
+            let run = module.find_function_by_name("client.run").unwrap();
+            let mut vm = verum_vbc::interpreter::Interpreter::try_new_validated(module.into()).unwrap();
+            assert_eq!(vm.execute_function(run).unwrap().try_as_i64(), Some(73));
+        }
+    }
 }
 
 #[test]
@@ -114,7 +140,7 @@ fn a_name_resolved_placeholder_does_not_block_a_genuine_reexport() {
 
 #[test]
 fn declaration_ownership_does_not_survive_a_new_compilation() {
-    let mut codegen = VbcCodegen::with_config(CodegenConfig::new("test"));
+    let mut codegen = VbcCodegen::new();
     let first = Parser::new("module facade { public fn choose()->Int {37} }")
         .parse_module()
         .unwrap();

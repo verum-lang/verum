@@ -14181,8 +14181,19 @@ impl VbcCodegen {
                 self.ctx.pending_static_call_type_args = static_witness_args.clone();
                 return self.compile_static_method_call(&info, args, type_args);
             }
-            let qualified_rust = format!("{}::{}", type_name, method.name);
-            let qualified_verum = format!("{}.{}", type_name, method.name);
+            // A nominal selected through a source mount owns its static methods
+            // even when the consumer renames it. An unrelated short registry
+            // key has no authority over this call.
+            let mounted_owner = self.source_type_binding(self.lexical_type_scope(), type_name)
+                .and_then(|binding| binding)
+                .and_then(|_| self.source_nominal_type_id(type_name).flatten())
+                .and_then(|id| self.type_by_id(id))
+                .filter(|descriptor| descriptor.kind != crate::types::TypeKind::Alias)
+                .and_then(|descriptor| self.type_declaration_identity(descriptor));
+            let owner = mounted_owner.as_deref().unwrap_or(type_name);
+            let qualified_rust = format!("{owner}::{}", method.name);
+            let qualified_verum = self.registered_receiver_method(owner, method.name.as_str())
+                .unwrap_or_else(|| format!("{owner}.{}", method.name));
             // CONST-GENERIC-VALUE-CARRY-1: alias statics resolve against
             // the alias TARGET's method table (`TinyStackAllocator.new` →
             // `StackAllocator.new`) — appended AFTER the literal
@@ -14190,7 +14201,7 @@ impl VbcCodegen {
             // still wins.  Only aliases with a recorded instantiated
             // target participate (everything else keeps the legacy flow).
             let alias_candidates: Vec<String> =
-                if self.alias_instantiation_targets.contains_key(type_name.as_str()) {
+                if mounted_owner.is_none() && self.alias_instantiation_targets.contains_key(type_name.as_str()) {
                     let base = self.resolve_type_alias(type_name);
                     if &base != type_name {
                         vec![
@@ -14224,7 +14235,8 @@ impl VbcCodegen {
                     self.ctx.pending_static_call_type_args = static_witness_args.clone();
                     return self.compile_static_call_on(&func_info, args, type_args, lexical_owner.as_ref().map(FactoryReceiver::Enclosing));
                 }
-                if let Some(func_info) = self.ctx.lookup_function(candidate).cloned()
+                if mounted_owner.is_none()
+                    && let Some(func_info) = self.ctx.lookup_function(candidate).cloned()
                     && func_info.param_count == args.len()
                 {
                     if let Some(tag) = func_info.variant_tag {
@@ -14279,7 +14291,9 @@ impl VbcCodegen {
                 let declaration = self.source_nominal_type_id(&owner).flatten()
                     .and_then(|id| self.type_by_id(id));
                 let alias = declaration.filter(|ty| ty.kind == crate::types::TypeKind::Alias && ty.type_params.is_empty());
-                if namespace || alias.is_some() {
+                // A public re-export names the same nominal owner even when
+                // its facade gives the type a different leaf name.
+                if namespace || declaration.is_some() {
                     self.validate_rooted_type_owner(&owner, receiver.span)?;
                     // A mounted alias may already be a qualified path. Use the
                     // selected declaration for the provider and its fixed type arguments.
