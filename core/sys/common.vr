@@ -890,8 +890,7 @@ public fn sync_directory(path: &[Byte]) -> Result<(), OSError> {
 //  * `F_OFD_SETLK` (Linux 3.15+) — locks are owned by the
 //  (open-file-description, inode) pair. Each `open()` gets its own
 //  lock, solving the traditional problem.
-// Darwin does not expose F_OFD_SETLK; we use traditional F_SETLK there
-// and the SQLite-style convention of a single VFS-owned fd per db.
+// Darwin also provides F_OFD_SETLK, with its own command, layout and tags.
 //
 
 // Windows uses `LockFileEx` / `UnlockFileEx` via kernel32 — direct
@@ -900,10 +899,8 @@ public fn sync_directory(path: &[Byte]) -> Result<(), OSError> {
 // = "windows")` arm of `try_lock_region` below.
 // =============================================================================
 
-/// POSIX `struct flock` — pointer-argument for `fcntl(F_SETLK, &flock)`.
-/// Layout is ABI-critical: Linux and Darwin both order the fields as
-/// (l_type: short, l_whence: short, l_start: off_t, l_len: off_t,
-/// l_pid: pid_t) with the natural C padding.
+/// Linux byte-range locking descriptor.
+@cfg(not(target_os = "macos"))
 @repr(C)
 public type Flock is {
     l_type: Int16,     // F_RDLCK | F_WRLCK | F_UNLCK
@@ -913,9 +910,26 @@ public type Flock is {
     l_pid: Int32,      // output only — set by F_GETLK
 };
 
+/// Darwin's sys/fcntl.h places the two offsets before the owner and lock type.
+@cfg(target_os = "macos")
+@repr(C)
+public type Flock is {
+    l_start: Int64,
+    l_len: Int64,
+    l_pid: Int32,
+    l_type: Int16,
+    l_whence: Int16,
+};
+
 public const SEEK_SET: Int16 = 0;
+@cfg(not(target_os = "macos"))
 public const F_RDLCK: Int16 = 0;
+@cfg(not(target_os = "macos"))
 public const F_WRLCK: Int16 = 1;
+@cfg(target_os = "macos")
+public const F_RDLCK: Int16 = 1;
+@cfg(target_os = "macos")
+public const F_WRLCK: Int16 = 3;
 public const F_UNLCK: Int16 = 2;
 
 /// Kind of byte-range lock — the caller's side of the type.
@@ -941,6 +955,16 @@ fn lock_kind_to_ltype(k: FcntlLockKind) -> Int16 {
     }
 }
 
+fn write_flock_word(buf: &mut [Byte], offset: Int, value: UInt64, width: Int) {
+    let little = core.intrinsics.platform.target_is_little_endian();
+    let mut i = 0;
+    while i < width {
+        let shift = if little { i * 8 } else { (width - i - 1) * 8 };
+        buf[offset + i] = ((value >> shift) & 255) as Byte;
+        i = i + 1;
+    }
+}
+
 /// Non-blocking acquire / release of an advisory byte-range lock.
 ///
 
@@ -952,7 +976,7 @@ fn lock_kind_to_ltype(k: FcntlLockKind) -> Int16 {
 /// Semantics:
 ///  * Linux — uses `F_OFD_SETLK` (open-file-description locks). Per-fd
 ///  ownership, so a stray `close()` elsewhere cannot drop the lock.
-///  * Darwin — uses `F_SETLK`. Traditional POSIX semantics apply.
+///  * Darwin — uses its `F_OFD_SETLK`; separate opens own independent locks.
 ///  * Windows — uses `LockFileEx` / `UnlockFileEx` with the
 ///  `LOCKFILE_FAIL_IMMEDIATELY` flag for the try-lock semantics
 ///  (returns `ERROR_LOCK_VIOLATION` rather than blocking).
@@ -960,27 +984,28 @@ fn lock_kind_to_ltype(k: FcntlLockKind) -> Int16 {
 ///  advisory-shared. Region offset is mapped through an
 ///  `OVERLAPPED` structure (no shared file pointer mutation).
 public fn try_lock_region(fd: FileDesc, kind: FcntlLockKind, start: Int, len: Int) -> Result<(), OSError> {
-    let mut fl: Flock = Flock {
-        l_type: lock_kind_to_ltype(kind),
-        l_whence: SEEK_SET,
-        l_start: start as Int64,
-        l_len: len as Int64,
-        l_pid: 0 as Int32,
-    };
-
     @cfg(target_os = "linux")
     {
-        // F_OFD_SETLK = 37 on Linux; the third arg is `&Flock`.
-        let ptr = &fl as Int;
-        let _ = super.linux.syscall.fcntl(fd, 37 /* F_OFD_SETLK */, ptr)?;
+        // struct flock64: type, whence, start, length, pid. Padding, whence
+        // and the OFD owner field must be zero.
+        let mut bytes: [Byte; 32] = [0 as Byte; 32];
+        write_flock_word(&mut bytes[..], 0, lock_kind_to_ltype(kind) as UInt64, 2);
+        write_flock_word(&mut bytes[..], 8, start as UInt64, 8);
+        write_flock_word(&mut bytes[..], 16, len as UInt64, 8);
+        let addr = (&bytes[..]).as_ptr() as Int;
+        let _ = super.linux.syscall.fcntl(fd, 37, addr)?;
         return Result.Ok(());
     }
 
     @cfg(target_os = "macos")
     {
-        // F_SETLK = 8 on Darwin (see libsystem.vr constants).
-        let ptr = &fl as Int;
-        let _ = super.darwin.libsystem.safe_fcntl(fd, 8 /* F_SETLK */, ptr)?;
+        // Darwin struct flock: start, length, pid, type, whence.
+        let mut bytes: [Byte; 24] = [0 as Byte; 24];
+        write_flock_word(&mut bytes[..], 0, start as UInt64, 8);
+        write_flock_word(&mut bytes[..], 8, len as UInt64, 8);
+        write_flock_word(&mut bytes[..], 20, lock_kind_to_ltype(kind) as UInt64, 2);
+        let addr = (&bytes[..]).as_ptr() as Int;
+        let _ = super.darwin.libsystem.safe_fcntl(fd, 90, addr)?;
         return Result.Ok(());
     }
 

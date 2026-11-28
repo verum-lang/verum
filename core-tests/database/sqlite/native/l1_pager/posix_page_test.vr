@@ -7,7 +7,7 @@ mount core.id.nanoid.generate_len;
 mount core.io.fs.{read, remove_file, write};
 mount core.io.path.Path;
 mount core.database.sqlite.native.l0_vfs.posix_vfs.PosixVfs;
-mount core.database.sqlite.native.l0_vfs.vfs_protocol.{VfsErrorKind, VfsProtocol, flags_ro, flags_rwc};
+mount core.database.sqlite.native.l0_vfs.vfs_protocol.{LockKind, SqliteFile, VfsErrorKind, VfsProtocol, flags_ro, flags_rwc};
 mount core.database.sqlite.native.l1_pager.pager.{PageFrame, pager_open_file, pager_write, pager_read, pager_commit, pager_close};
 
 fn write_and_reopen(name: &Text) -> Bool {
@@ -86,4 +86,35 @@ fn closing_a_temporary_pager_releases_its_file_and_partial_pages_fail() {
     let removed = read(&path).is_err();
     if !removed { let _ = remove_file(&path); }
     assert(rejected && closed && removed);
+}
+
+@cfg(any(target_os = "macos", target_os = "linux"))
+@test
+fn record_locks_belong_to_each_open_file_description() {
+    let name = f"{temp_dir()}/verum-sqlite-lock-{generate_len(12)}";
+    let vfs = PosixVfs {};
+    let mut writer = vfs.open(&name, flags_rwc()).unwrap();
+    let mut reader = vfs.open(&name, flags_ro()).unwrap();
+    let mut other = vfs.open(&name, flags_ro()).unwrap();
+    assert(reader.lock(LockKind.Shared).is_ok());
+    assert(other.lock(LockKind.Shared).is_ok());
+    assert(writer.lock(LockKind.Shared).is_ok());
+    assert(writer.lock(LockKind.Reserved).is_ok());
+    assert(other.close().is_ok());
+    assert(writer.lock(LockKind.Pending).is_ok());
+    match writer.lock(LockKind.Exclusive) {
+        Result.Err(e) => assert(e.kind is VfsErrorKind.LockConflict),
+        Result.Ok(_) => panic("closing a different reader released a live read lock"),
+    }
+    assert(reader.close().is_ok());
+    assert(writer.lock(LockKind.Exclusive).is_ok());
+    let mut next = vfs.open(&name, flags_ro()).unwrap();
+    match next.lock(LockKind.Shared) {
+        Result.Err(e) => assert(e.kind is VfsErrorKind.LockConflict),
+        Result.Ok(_) => panic("a reader entered an exclusive SQLite lock"),
+    }
+    assert(writer.close().is_ok());
+    assert(next.lock(LockKind.Shared).is_ok());
+    assert(next.close().is_ok());
+    assert(remove_file(&Path.new(&name)).is_ok());
 }

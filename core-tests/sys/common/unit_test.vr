@@ -530,10 +530,14 @@ fn test_seek_set_canonical() {
 
 @test
 fn test_fcntl_lock_tag_constants() {
-    // F_RDLCK = 0, F_WRLCK = 1, F_UNLCK = 2 — the contiguous tag set
-    // POSIX uses in the `l_type` field of `struct flock`.
-    assert_eq(F_RDLCK, 0 as Int16);
-    assert_eq(F_WRLCK, 1 as Int16);
+    @cfg(target_os = "macos") {
+        assert_eq(F_RDLCK, 1 as Int16);
+        assert_eq(F_WRLCK, 3 as Int16);
+    }
+    @cfg(not(target_os = "macos")) {
+        assert_eq(F_RDLCK, 0 as Int16);
+        assert_eq(F_WRLCK, 1 as Int16);
+    }
     assert_eq(F_UNLCK, 2 as Int16);
 }
 

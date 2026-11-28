@@ -50,8 +50,8 @@ module core.database.sqlite.native.l0_vfs.locking;
 //  from RESERVED or PENDING; the writer now has the file.
 //
 
-// Backend: `core.sys.try_lock_region` (F_OFD_SETLK on Linux,
-// F_SETLK on Darwin, LockFileEx on Windows).
+// Backend: `core.sys.try_lock_region` (F_OFD_SETLK on Linux and Darwin,
+// LockFileEx on Windows).
 // =============================================================================
 
 mount core.sys.common.{FileDesc, OSError, FcntlLockKind, try_lock_region, unlock_region};
@@ -89,6 +89,25 @@ public type SqliteLockManager is {
 implement SqliteLockManager {
     public(in core.database.sqlite.native.l0_vfs) fn holds_shared_only(&self) -> Bool {
         self.state == LockKind.Shared
+    }
+
+    /// Claim all three SQLite lock regions in one nonblocking operation. The
+    /// backup owns this open file description until it publishes or closes.
+    public(in core.database.sqlite.native.l0_vfs) fn reserve_backup(&self) -> Result<(), VfsError> {
+        if self.state != LockKind.Unlocked {
+            return Result.Err(VfsError { kind: LockConflict, message: "destination already has a database lock" });
+        }
+        match try_lock_region(self.fd, FcntlLockKind.Exclusive, PENDING_BYTE, 2 + SHARED_SIZE) {
+            Result.Ok(_) => Result.Ok(()),
+            Result.Err(e) => Result.Err(to_vfs_error(e)),
+        }
+    }
+
+    public(in core.database.sqlite.native.l0_vfs) fn release_backup(&self) -> Result<(), VfsError> {
+        match unlock_region(self.fd, PENDING_BYTE, 2 + SHARED_SIZE) {
+            Result.Ok(_) => Result.Ok(()),
+            Result.Err(e) => Result.Err(to_vfs_error(e)),
+        }
     }
 }
 
@@ -159,13 +178,10 @@ public fn acquire_shared(manager: &mut SqliteLockManager) -> Result<(), VfsError
     match manager.state {
         Shared | Reserved | Pending | Exclusive => Result.Ok(()),
         Unlocked => {
-            // PENDING_BYTE must be clear first; take an exclusive lock
-            // on it transiently to ensure no writer is pending, then
-            // release it before taking SHARED. This is the "fairness"
-            // step in SQLite's protocol — without it, a long reader can
-            // starve a waiting writer.
+            // Readers share the pending byte until their shared-range lock is
+            // held. A pending writer owns it exclusively and blocks new readers.
             match try_lock_region(
-                manager.fd, FcntlLockKind.Exclusive, PENDING_BYTE, 1,
+                manager.fd, FcntlLockKind.Shared, PENDING_BYTE, 1,
             ) {
                 Result.Ok(_) => {},
                 Result.Err(e) => { return Result.Err(to_vfs_error(e)); }
