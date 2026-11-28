@@ -24384,20 +24384,6 @@ fn emit_slice_cell_probe<'ctx>(
     env.probe(ctx.builder(), base_ptr, tag)
 }
 
-/// #48 — thin wrapper over `slice_cell::CellEnv::elem_load`.
-fn emit_slice_cell_elem_load<'ctx>(
-    ctx: &mut FunctionContext<'_, 'ctx>,
-    elem_w: IntValue<'ctx>,
-    elem_ptr: PointerValue<'ctx>,
-    tag: &str,
-) -> Result<IntValue<'ctx>> {
-    let env = super::slice_cell::CellEnv {
-        llvm: ctx.llvm_context(),
-        heap_floor: super::target_triple::heap_floor(&ctx.get_module()),
-    };
-    env.elem_load(ctx.builder(), elem_w, elem_ptr, tag)
-}
-
 /// #48 — thin wrapper over `slice_cell::CellEnv::elem_store`.
 fn emit_slice_cell_elem_store<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
@@ -37443,129 +37429,17 @@ fn lower_get_element<'ctx>(
     }
     let arr_ptr = as_ptr(ctx, ctx.get_register(arr.0)?, "arr_ptr")?;
     let index = as_i64(ctx, ctx.get_register(idx.0)?, "index")?;
-    let i64_type = ctx.types().i64_type();
-    let is_list = ctx.is_list_register(arr.0);
-    let is_slice = ctx.is_slice_register(arr.0);
-
-    // GETE-ELEM-OBJ-MARK-1 (#34): propagate the container's element type onto
-    // the loaded-element register — the twin of CALLM-RETNAME-OBJ-MARK-1
-    // (commit 540819218) for the GetE path.  Without it, a boxed-record
-    // element (`List<PoolTaskHandle>[j]`, any `List<UserRecord>`) comes out
-    // UNMARKED: a later `Ref` of it (auto-`&mut self`/`&self` on the element)
-    // then falls to `lower_ref`'s non-heap branch and SPILLS the heap object
-    // pointer into a fresh stack cell, handing the SLOT ADDRESS to the method.
-    // The method body reads its fields at header-relative offsets against the
-    // stack cell → garbage (POOL-BATCH-AOT-SIGNAL-1: `handles[j].join()` read
-    // `self.handle` as 0x1 → `verum_pool_await(0x1)` → EXC_BAD_ACCESS).  The
-    // direct-local path (`let mut h = pool.submit(..); h.join()`) already
-    // works precisely because the CallM result carried this obj-type mark.
-    // `mark_register_from_return_type` is conservative (primitive/byte
-    // elements are skipped), so scalar/typed-array reads are unaffected.
-    let gete_elem_type: Option<TypeRef> = ctx
-        .get_generic_type_args(arr.0)
-        .and_then(|a| a.first().cloned());
-
-    // For list registers, arr_ptr is a NewG object: [header(24)][ptr:i64][len:i64][cap:i64].
-    // Load the backing pointer from LIST_PTR_OFFSET (field 0 = offset 24).
-    let _data_ptr = if is_list {
-        let ptr_type = ctx.types().ptr_type();
-        let i8_type = ctx.types().i8_type();
-        // SAFETY: GEP into the List object (NewG layout) to read the backing data pointer at LIST_PTR_OFFSET (24)
-        let backing_slot = unsafe {
-            ctx.builder()
-                .build_in_bounds_gep(
-                    i8_type,
-                    arr_ptr,
-                    &[i64_type.const_int(super::runtime::LIST_PTR_OFFSET, false)],
-                    "backing_slot",
-                )
-                .or_llvm_err()?
-        };
-        let backing_int = ctx
-            .builder()
-            .build_load(i64_type, backing_slot, "backing_int")
-            .or_llvm_err()?
-            .into_int_value();
-        ctx.builder()
-            .build_int_to_ptr(backing_int, ptr_type, "backing_ptr")
-            .or_llvm_err()?
-    } else if is_slice {
-        // #48: do NOT load the Pack data slot (@24) here — the marked
-        // register may hold a 24-byte cell where @24 is past the
-        // allocation. The marked-slice branch below probes first and
-        // loads @24 only on its legacy (non-cell) arm.
-        arr_ptr
-    } else {
-        arr_ptr
-    };
-
-    // For marked slices: probe FIRST — the register may hold THE
-    // canonical 24-byte cell {data@0, len@8, elem@16} (#48), whose
-    // word0 is a data POINTER; the legacy Pack byte-path (data@24 +
-    // i8 zext) reads past a cell into the neighbouring allocation.
-    // REAL branch (never select: different valid extents), ONE
-    // set_register on the phi.
-    if is_slice {
-        // ONE authority: classify {cell | stamped-pack | unstamped-list}
-        // and read with the carried stride. A marked register can hold
-        // any of the three at runtime (as_slice is an identity cast, so
-        // slice-marked registers frequently hold LIST objects).
-        let ptr_type = ctx.types().ptr_type();
-        let (gm_data, _gm_len, gm_elem) = emit_container_view(ctx, arr_ptr, "getem")?;
-        let gm_off = ctx
-            .builder()
-            .build_int_mul(index, gm_elem, "getem_off")
-            .or_llvm_err()?;
-        let gm_addr = ctx
-            .builder()
-            .build_int_add(gm_data, gm_off, "getem_addr")
-            .or_llvm_err()?;
-        let gm_eptr = ctx
-            .builder()
-            .build_int_to_ptr(gm_addr, ptr_type, "getem_eptr")
-            .or_llvm_err()?;
-        let gm_val = emit_slice_cell_elem_load(ctx, gm_elem, gm_eptr, "getem")?;
-        ctx.set_register(dst.0, gm_val.into());
-        if let Some(ref et) = gete_elem_type {
-            mark_register_from_return_type(ctx, dst.0, et);
-        }
-        return Ok(());
-    }
-
-    // #47/#48 unification: the unmarked tail is the SAME 3-arm
-    // classification as every marked consumer — {canonical cell |
-    // stamped Pack | unstamped List} through emit_container_view.
-    // The retired hand-rolled tail's legacy arm read elements from
-    // the RAW OBJECT BASE for unstamped lists (header words came back
-    // as "elements": prog.seqs[i][j] in the regex engine returned
-    // item 0 for every j — the anchor truth-table class), because the
-    // is_list fast path above only fires when the register carries a
-    // compile-time list mark that nested GET_E results don't have.
-    let ptr_type = ctx.types().ptr_type();
-    let (ug_data, _ug_len, ug_elem) = emit_container_view(ctx, arr_ptr, "geteu")?;
-    let ug_off = ctx
-        .builder()
-        .build_int_mul(index, ug_elem, "geteu_off")
-        .or_llvm_err()?;
-    let ug_addr = ctx
-        .builder()
-        .build_int_add(ug_data, ug_off, "geteu_addr")
-        .or_llvm_err()?;
-    let ug_eptr = ctx
-        .builder()
-        .build_int_to_ptr(ug_addr, ptr_type, "geteu_eptr")
-        .or_llvm_err()?;
-    let ug_val = emit_slice_cell_elem_load(ctx, ug_elem, ug_eptr, "geteu")?;
-    ctx.set_register(dst.0, ug_val.into());
-    if let Some(ref et) = gete_elem_type {
-        mark_register_from_return_type(ctx, dst.0, et);
+    let element = ctx.get_generic_type_args(arr.0).and_then(|args| args.first().cloned());
+    let tag = if ctx.is_slice_register(arr.0) { "getem" } else { "geteu" };
+    let loaded = indexed_storage_access(ctx, arr_ptr, index, None, tag)?
+        .or_internal("indexed load returned no value")?;
+    ctx.set_register(dst.0, loaded.into());
+    if let Some(element) = element {
+        mark_register_from_return_type(ctx, dst.0, &element);
     }
     Ok(())
 }
 
-/// Lower SetE instruction (array element assignment).
-///
-/// Generates GEP + store for array element assignment.
 fn lower_set_element<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
     arr: Reg,
@@ -37597,102 +37471,101 @@ fn lower_set_element<'ctx>(
     let arr_ptr = as_ptr(ctx, ctx.get_register(arr.0)?, "arr_ptr")?;
     let index = as_i64(ctx, ctx.get_register(idx.0)?, "index")?;
     let val = ctx.get_register(value.0)?;
-    let i64_type = ctx.types().i64_type();
-    let i8_type = ctx.types().i8_type();
-    let ptr_type = ctx.types().ptr_type();
-    let is_list = ctx.is_list_register(arr.0);
-    let is_slice = ctx.is_slice_register(arr.0);
     let val_i64 = as_i64(ctx, val, "sete_val")?;
-
-    // AOT-SETE-SLICE-PARITY-1: the WRITE side must mirror the READ side's
-    // slice model exactly (the read/write representation asymmetry on
-    // slices is a kernel-soundness class — the Tier-0 twin was
-    // SET_E-FATREF-1).  Pre-fix `lower_set_element` had NO slice handling
-    // at all: `buf[i] = v` through a slice-shaped value treated the Pack
-    // DESCRIPTOR `{ptr@24, len@32}` as the element array and stored an
-    // i64 at descriptor_base + idx*8 — stomping the descriptor's data
-    // pointer/len words (later reads through the descriptor then SEGV or
-    // return garbage; a large share of the AOT text-suite signal-crash
-    // cluster).  Byte-slices store the TRUNCATED byte through the
-    // descriptor's data ptr, exactly inverse to `lower_get_element`'s
-    // zext byte read.
-    //
-    // Marked-slice fast path (compile-time slice mark).
-    // VERUM_SETE_LEGACY=1 restores the pre-parity direct i64 store for
-    // A/B attribution (build-13 broad-AOT-drop bisect).
-    let sete_legacy = std::env::var("VERUM_SETE_LEGACY").is_ok();
-    if is_slice && !sete_legacy {
-        // #48 cell-probe FIRST: the canonical slice cell {data@0, len@8,
-        // elem@16} has no descriptor slot @24 — the legacy byte-store
-        // below would stomp bytes PAST the 24-byte cell. Probe and
-        // branch (never select: different valid extents).
-        // ONE authority (mirror of GET_E's marked branch): classify
-        // {cell | stamped-pack | unstamped-list}, store with the
-        // carried stride.
-        let (sm_data, _sm_len, sm_elem) = emit_container_view(ctx, arr_ptr, "setem")?;
-        let sm_off = ctx
-            .builder()
-            .build_int_mul(index, sm_elem, "setem_off")
-            .or_llvm_err()?;
-        let sm_addr = ctx
-            .builder()
-            .build_int_add(sm_data, sm_off, "setem_addr")
-            .or_llvm_err()?;
-        let sm_eptr = ctx
-            .builder()
-            .build_int_to_ptr(sm_addr, ptr_type, "setem_eptr")
-            .or_llvm_err()?;
-        emit_slice_cell_elem_store(ctx, sm_elem, sm_eptr, val_i64, "setem")?;
-        return Ok(());
-    }
-
-    // **SETE-LIST-JOINS-THE-AUTHORITY-1 (T1192)** — the list-marked
-    // branch used to hard-code the List OBJECT layout: read a backing
-    // pointer from `arr_ptr + LIST_PTR_OFFSET` (24) and GEP by `index`
-    // at an 8-byte stride.
-    //
-    // A `[T; N]` PARAMETER is marked `mark_list_register` regardless of
-    // element type (`vbc_lowering.rs`, CONV-AOT-BYTEARRAY-1), so a
-    // `&mut [Byte; 8]` arrived here and offset 24 was already PAST the
-    // array. The "backing pointer" was whatever followed it, and the
-    // store went through that:
-    //
-    //     fn wr(a: &mut [Byte; 8]) { a[2] = 9 as Byte; }   rc=139
-    //
-    // while READING the same parameter answered correctly — because
-    // GET_E's `is_list` arm computes its data pointer into `_data_ptr`
-    // and DISCARDS it, falling through to `emit_container_view`. The two
-    // sides were only claiming to mirror each other; this arm was the
-    // asymmetry, and its own bottom comment already called the tail
-    // "the write twin of GET_E's unmarked tail" while an early return
-    // kept the write from reaching it.
-    //
-    // `emit_container_view` classifies {cell | stamped Pack | unstamped
-    // List} and handles a real List through its unstamped-List arm —
-    // `{len@24, cap@32, ptr@40}`, Value stride — which is the same
-    // answer this branch computed by hand for the case it was written
-    // for. So the list case keeps its behaviour and the array case
-    // stops reading past its own end.
-    let _ = (is_list, i8_type, i64_type, ptr_type, val);
-
-    // #47/#48 unification (write twin of GET_E's unmarked tail): ONE
-    // 3-arm classification via emit_container_view; stride-honouring
-    // store. VERUM_SETE_LEGACY handled above.
-    let (us_data, _us_len, us_elem) = emit_container_view(ctx, arr_ptr, "seteu")?;
-    let us_off = ctx
-        .builder()
-        .build_int_mul(index, us_elem, "seteu_off")
-        .or_llvm_err()?;
-    let us_addr = ctx
-        .builder()
-        .build_int_add(us_data, us_off, "seteu_addr")
-        .or_llvm_err()?;
-    let us_eptr = ctx
-        .builder()
-        .build_int_to_ptr(us_addr, ptr_type, "seteu_eptr")
-        .or_llvm_err()?;
-    emit_slice_cell_elem_store(ctx, us_elem, us_eptr, val_i64, "seteu")?;
+    let tag = if ctx.is_slice_register(arr.0) && std::env::var_os("VERUM_SETE_LEGACY").is_none() {
+        "setem"
+    } else {
+        "seteu"
+    };
+    indexed_storage_access(ctx, arr_ptr, index, Some(val_i64), tag)?;
     Ok(())
+}
+
+/// A stamped List owns its allocation extent and its packed or value-slot encoding.
+/// Other indexable carriers obtain their element width from the native slice view.
+fn indexed_storage_access<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    owner: PointerValue<'ctx>,
+    index: IntValue<'ctx>,
+    write: Option<IntValue<'ctx>>,
+    tag: &str,
+) -> Result<Option<IntValue<'ctx>>> {
+    let llvm = ctx.llvm_context();
+    let env = super::slice_cell::CellEnv {
+        llvm,
+        heap_floor: super::target_triple::heap_floor(ctx.get_module()),
+    };
+    let builder = ctx.builder();
+    let view = env.view(
+        builder,
+        owner,
+        u64::from(TypeId::TUPLE.0),
+        u64::from(TypeId::BYTE_SLICE.0),
+        super::runtime::LIST_LEN_OFFSET,
+        super::runtime::LIST_PTR_OFFSET,
+        tag,
+    )?;
+    let list = llvm.append_basic_block(ctx.function(), "index_owned_list");
+    let slice = llvm.append_basic_block(ctx.function(), "index_slice");
+    let done = llvm.append_basic_block(ctx.function(), "index_done");
+    builder
+        .build_conditional_branch(view.is_owned_list, list, slice)
+        .or_llvm_err()?;
+
+    builder.position_at_end(list);
+    let list_result = if let Some(value) = write {
+        let store = ctx
+            .get_module()
+            .get_function("verum_list_storage_write")
+            .or_missing_fn("verum_list_storage_write")?;
+        builder
+            .build_call(store, &[owner.into(), index.into(), value.into()], "")
+            .or_llvm_err()?;
+        None
+    } else {
+        let read = ctx
+            .get_module()
+            .get_function("verum_list_storage_read")
+            .or_missing_fn("verum_list_storage_read")?;
+        Some(
+            builder
+                .build_call(read, &[owner.into(), index.into()], "list_element")
+                .or_llvm_err()?
+                .basic_value_or("List storage read returned void")?
+                .into_int_value(),
+        )
+    };
+    builder.build_unconditional_branch(done).or_llvm_err()?;
+
+    builder.position_at_end(slice);
+    let offset = builder
+        .build_int_mul(index, view.elem, &format!("{tag}_off"))
+        .or_llvm_err()?;
+    let address = builder
+        .build_int_add(view.data, offset, &format!("{tag}_addr"))
+        .or_llvm_err()?;
+    let pointer = builder
+        .build_int_to_ptr(address, ctx.types().ptr_type(), &format!("{tag}_eptr"))
+        .or_llvm_err()?;
+    let slice_result = if let Some(value) = write {
+        env.elem_store(builder, view.elem, pointer, value, tag)?;
+        None
+    } else {
+        Some(env.elem_load(builder, view.elem, pointer, tag)?)
+    };
+    let slice_end = builder
+        .get_insert_block()
+        .or_internal("indexed slice access has no exit")?;
+    builder.build_unconditional_branch(done).or_llvm_err()?;
+    builder.position_at_end(done);
+    if let (Some(list_result), Some(slice_result)) = (list_result, slice_result) {
+        let result = builder
+            .build_phi(ctx.types().i64_type(), "indexed_element")
+            .or_llvm_err()?;
+        result.add_incoming(&[(&list_result, list), (&slice_result, slice_end)]);
+        return Ok(Some(result.as_basic_value().into_int_value()));
+    }
+    Ok(None)
 }
 
 fn lower_len<'ctx>(

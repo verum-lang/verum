@@ -44,6 +44,7 @@
 //! FunctionContext). One implementation, two consumers, zero drift.
 
 use super::error::{BuildExt, OptionExt, Result};
+use verum_vbc::types::TypeId;
 use verum_llvm::IntPredicate;
 use verum_llvm::builder::Builder;
 use verum_llvm::context::Context;
@@ -74,6 +75,7 @@ pub struct ContainerView<'ctx> {
     pub data: IntValue<'ctx>,
     pub len: IntValue<'ctx>,
     pub elem: IntValue<'ctx>,
+    pub is_owned_list: IntValue<'ctx>,
 }
 
 impl<'ctx> CellEnv<'ctx> {
@@ -420,7 +422,16 @@ impl<'ctx> CellEnv<'ctx> {
         builder.build_unconditional_branch(bb_done).or_llvm_err()?;
 
         builder.position_at_end(bb_list);
-        // SAFETY: real (unstamped) List object — canonical layout.
+        let is_packed_list = builder.build_int_compare(IntPredicate::EQ, tid,
+            i32_ty.const_int(u64::from(TypeId::BYTE_LIST.0), false), "is_packed_list").or_llvm_err()?;
+        let is_slot_list = builder.build_int_compare(IntPredicate::EQ, tid,
+            i32_ty.const_int(u64::from(TypeId::LIST.0), false), "is_slot_list").or_llvm_err()?;
+        let is_owned_list = builder.build_or(is_packed_list, is_slot_list, "is_owned_list").or_llvm_err()?;
+        let one = i64_ty.const_int(1, false);
+        let list_width = builder.build_select(is_packed_list, one,
+            i64_ty.const_int(verum_common::layout::VALUE_SLOT_SIZE, false), "list_element_width")
+            .or_llvm_err()?.into_int_value();
+        // SAFETY: the object branch uses the List header's data and length offsets.
         let ls_data_slot = unsafe {
             builder
                 .build_in_bounds_gep(
@@ -452,8 +463,6 @@ impl<'ctx> CellEnv<'ctx> {
         builder.build_unconditional_branch(bb_done).or_llvm_err()?;
 
         builder.position_at_end(bb_done);
-        let one = i64_ty.const_int(1, false);
-        let eight = i64_ty.const_int(8, false);
         let data_phi = builder
             .build_phi(i64_ty, &format!("{}_cv_data", tag))
             .or_llvm_err()?;
@@ -465,11 +474,15 @@ impl<'ctx> CellEnv<'ctx> {
         let elem_phi = builder
             .build_phi(i64_ty, &format!("{}_cv_elem", tag))
             .or_llvm_err()?;
-        elem_phi.add_incoming(&[(&cell_elem, bb_cell), (&one, bb_pack), (&eight, bb_list)]);
+        elem_phi.add_incoming(&[(&cell_elem, bb_cell), (&one, bb_pack), (&list_width, bb_list)]);
+        let list_phi = builder.build_phi(self.llvm.bool_type(), "owned_list").or_llvm_err()?;
+        let other = self.llvm.bool_type().const_zero();
+        list_phi.add_incoming(&[(&other, bb_cell), (&other, bb_pack), (&is_owned_list, bb_list)]);
         Ok(ContainerView {
             data: data_phi.as_basic_value().into_int_value(),
             len: len_phi.as_basic_value().into_int_value(),
             elem: elem_phi.as_basic_value().into_int_value(),
+            is_owned_list: list_phi.as_basic_value().into_int_value(),
         })
     }
 }

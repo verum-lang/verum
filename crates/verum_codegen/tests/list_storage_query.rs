@@ -1,12 +1,7 @@
 //! Actual List source methods use their runtime storage encoding, not T.size.
 use std::cell::{Cell, RefCell};
-use verum_ast::{
-    ItemKind,
-    decl::{ImplItemKind, ImplKind},
-};
 use verum_codegen::llvm::{LoweringConfig, VbcToLlvmLowering};
 use verum_common::{Heap, List, Set, Text};
-use verum_fast_parser::Parser;
 use verum_llvm::{
     OptimizationLevel,
     context::Context,
@@ -14,7 +9,6 @@ use verum_llvm::{
     targets::{InitializationConfig, Target},
     values::{AnyValue, CallSiteValue},
 };
-use verum_vbc::codegen::{ItemFailurePolicy, VbcCodegen};
 
 thread_local! {
     static STORAGE: RefCell<List<(u64, Heap<[u64]>)>> = RefCell::new(List::new());
@@ -48,171 +42,22 @@ const BOUNDARIES: &[(&str, &str)] = &[
     ("verum_os_free", "declare void @verum_os_free(ptr, i64)\n"),
     ("verum_os_exit", "declare void @verum_os_exit(i32)\n"),
 ];
-fn is_list(ty: &verum_ast::Type) -> bool {
-    match &ty.kind {
-        verum_ast::ty::TypeKind::Path(p) => p.as_ident().is_some_and(|i| i.name == "List"),
-        verum_ast::ty::TypeKind::Generic { base, .. } => is_list(base),
-        _ => false,
-    }
-}
+#[path = "../../verum_vbc/tests/fixtures/list_storage.rs"]
+mod list_storage;
+
 fn with_source(
     source: &str,
-    check: impl FnOnce(&str, &verum_llvm::execution_engine::ExecutionEngine),
+    check: impl FnOnce(&verum_llvm::module::Module, &verum_llvm::execution_engine::ExecutionEngine),
 ) {
-    let mut ast = Parser::new(source).parse_module().expect("caller grammar");
-    let mut core = Parser::new(include_str!("../../../core/collections/list.vr"))
-        .parse_module()
-        .expect("core grammar");
-    core.items.retain_mut(|item| match &mut item.kind {
-        ItemKind::Type(t) => t.name.name == "List",
-        ItemKind::Function(f) => f.name.name == "list_max_len",
-        ItemKind::Impl(i) if matches!(&i.kind, ImplKind::Inherent(t) if is_list(t)) => {
-            // clear/truncate retain their real call to the original pop body.
-            let original_pop = i
-                .items
-                .iter()
-                .find(|item| {
-                    matches!(&item.kind,
-                ImplItemKind::Function(function) if function.name.name == "pop")
-                })
-                .cloned();
-            i.items.retain_mut(|m| {
-                let ImplItemKind::Function(f) = &mut m.kind else {
-                    return false;
-                };
-                if [
-                    "with_capacity",
-                    "try_with_capacity",
-                    "clear",
-                    "truncate",
-                    "get",
-                    "set",
-                    "push",
-                    "pop",
-                    "insert",
-                    "remove",
-                    "swap",
-                    "swap_remove",
-                ]
-                .contains(&f.name.name.as_str())
-                {
-                    // Keep the actual source body while avoiding native method
-                    // intercepts: these tests exercise the source implementation.
-                    f.name.name = format!("checked_{}", f.name.name).into();
-                    true
-                } else {
-                    [
-                        "new",
-                        "len",
-                        "capacity",
-                        "reserve",
-                        "shrink_to_fit",
-                        "resize_buffer",
-                        "try_resize_buffer",
-                        "free_buffer",
-                        "grow",
-                        "next_cap",
-                    ]
-                    .contains(&f.name.name.as_str())
-                }
-            });
-            if let Some(original_pop) = original_pop {
-                i.items.push(original_pop);
-            }
-            true
-        }
-        _ => false,
-    });
-    ast.items.extend(core.items);
-    let mut memory = Parser::new(include_str!("../../../core/intrinsics/memory.vr"))
-        .parse_module()
-        .expect("memory grammar");
-    memory.items.retain(|item| matches!(&item.kind, ItemKind::Function(f) if ["list_storage_read", "list_storage_write", "list_storage_move", "list_storage_resize"].contains(&f.name.name.as_str())));
-    ast.items.extend(memory.items);
-    let mut primitives = Parser::new(include_str!("../../../core/base/primitives.vr"))
-        .parse_module()
-        .expect("primitive grammar");
-    primitives.items.retain_mut(|item| {
-        let ItemKind::Impl(decl) = &mut item.kind else { return false; };
-        if !matches!(&decl.kind, ImplKind::Inherent(ty) if matches!(&ty.kind,
-            verum_ast::ty::TypeKind::Int)) {
-            return false;
-        }
-        decl.items.retain(|item| matches!(&item.kind, ImplItemKind::Function(function) if function.name.name == "checked_mul"));
-        true
-    });
-    ast.items.extend(primitives.items);
-    let mut arithmetic = Parser::new(include_str!("../../../core/intrinsics/arithmetic.vr"))
-        .parse_module()
-        .expect("arithmetic grammar");
-    arithmetic.items.retain(|item| matches!(&item.kind, ItemKind::Function(function) if function.name.name == "checked_mul"));
-    ast.items.extend(arithmetic.items);
-    let mut allocation = Parser::new(include_str!("../../../core/mem/allocator.vr"))
-        .parse_module()
-        .expect("allocator grammar");
-    allocation.items.retain(
-        |item| matches!(&item.kind, ItemKind::Type(decl) if decl.name.name == "AllocError"),
-    );
-    ast.items.extend(allocation.items);
-    let result_owner =
-        Parser::new("module core.base.result; public type Result<T,E> is Ok(T) | Err(E);")
-            .parse_module()
-            .expect("canonical Result source owner");
-    let mut maybe_owner =
-        Parser::new("module core.base.maybe; public type Maybe<T> is None | Some(T);")
-            .parse_module()
-            .expect("canonical Maybe source owner");
-    let mut maybe_methods = Parser::new(include_str!("../../../core/base/maybe.vr"))
-        .parse_module()
-        .expect("actual Maybe source");
-    maybe_methods.items.retain_mut(|item| {
-        let ItemKind::Impl(decl) = &mut item.kind else {
-            return false;
-        };
-        if !matches!(&decl.kind, ImplKind::Inherent(_)) {
-            return false;
-        }
-        decl.items.retain(|item| {
-            matches!(&item.kind, ImplItemKind::Function(function)
-            if function.name.name == "is_some")
-        });
-        !decl.items.is_empty()
-    });
-    maybe_owner.items.extend(maybe_methods.items);
+    with_methods(source, true, check);
+}
 
-    let mut codegen = VbcCodegen::new();
-    codegen.register_builtin_variants();
-    codegen.register_stdlib_constants();
-    codegen.register_stdlib_intrinsics();
-    codegen
-        .collect_unit_declarations(&[&maybe_owner, &result_owner, &ast])
-        .expect("declarations");
-    codegen
-        .compile_unit_items(
-            &[&maybe_owner, &result_owner, &ast],
-            ItemFailurePolicy::Strict,
-        )
-        .expect("source bodies");
-    let mut vbc = codegen.finalize_module().expect("source VBC");
-    vbc.resolve_protocol_dispatch();
-    for function in &mut vbc.functions {
-        function.is_generic = !function.type_params.is_empty();
-    }
-    let mut graph = verum_vbc::mono::InstantiationGraph::new();
-    for function in &vbc.functions {
-        let body = &vbc.bytecode[function.bytecode_offset as usize
-            ..(function.bytecode_offset + function.bytecode_length) as usize];
-        verum_vbc::mono::discover_call_instantiations(
-            &vbc,
-            &verum_vbc::bytecode::decode_instructions(body).unwrap(),
-            function.func_id_base,
-            &mut graph,
-        )
-        .expect("source call discovery");
-    }
-    let vbc = verum_vbc::mono::monomorphize_minimal(vbc, &graph)
-        .expect("source mono")
-        .module;
+fn with_methods(
+    source: &str,
+    rename_methods: bool,
+    check: impl FnOnce(&verum_llvm::module::Module, &verum_llvm::execution_engine::ExecutionEngine),
+) {
+    let vbc = list_storage::compile(source, rename_methods);
     let context = Context::create();
     let mut lower = VbcToLlvmLowering::new(
         &context,
@@ -240,14 +85,7 @@ fn with_source(
     builder.build_return(Some(&result)).unwrap();
     let mut todo = List::new();
     todo.push(pop);
-    for fd in &vbc.functions {
-        todo.push(
-            lower
-                .module()
-                .get_function(vbc.get_string(fd.name).unwrap())
-                .unwrap(),
-        );
-    }
+    todo.extend(vbc.functions.iter().filter_map(|function| lower.get_function_by_id(function.id.0)));
     let mut seen = Set::<Text>::new();
     let mut ir = Text::new();
     // Follow actual direct calls so the JIT includes the real allocation,
@@ -302,7 +140,7 @@ fn with_source(
     if std::env::var_os("VERUM_TEST_TRACE_LIST_IR").is_some() {
         eprintln!("{ir}");
     }
-    check(&ir, &engine);
+    check(&executable, &engine);
     STORAGE.with(|s| s.borrow_mut().clear());
 }
 #[test]
@@ -530,9 +368,9 @@ fn nominal_byte_constructor_preserves_record_slots_across_capacity_changes() {
             values[0].y
         }
         "#,
-        |ir, jit| {
+        |module, jit| {
             assert!(
-                !ir.contains("verum_alloc_byte_list_packed"),
+                module.get_function("verum_alloc_byte_list_packed").is_none(),
                 "nominal Byte selected packed allocator"
             );
             let actual = unsafe {
@@ -573,37 +411,31 @@ fn owned_storage_read_write_and_overlap_preserve_value_slots() {
 
 #[test]
 fn packed_storage_access_uses_existing_exact_carrier_encoding() {
-    // This pins the consumer ABI using a real emitted CBGR allocation. It
-    // intentionally does not claim a completed native List<Byte> constructor.
     with_source(
         r#"
         fn make()->List<Int> { List<Int>.new() }
-        fn make_backing()->Int { @intrinsic("cbgr_allocate", 4) }
-        fn read(values:List<Byte>, index:Int)->Int { @intrinsic("list_storage_read", values, index) }
-        fn storage_write_probe(values:List<Byte>, index:Int, value:Int) { @intrinsic("list_storage_write", values, index, value) }
-        fn move_range(values:List<Byte>, source:Int, target:Int, count:Int) { @intrinsic("list_storage_move", values, source, target, count) }
+        fn storage_read_probe(values:&List<Byte>, index:Int)->Int { @intrinsic("list_storage_read", values, index) }
+        fn storage_write_probe(values:&mut List<Byte>, index:Int, value:Int) { @intrinsic("list_storage_write", values, index, value) }
+        fn move_range(values:&mut List<Byte>, source:Int, target:Int, count:Int) { @intrinsic("list_storage_move", values, source, target, count) }
         "#,
         |_, jit| unsafe {
+            let encoding = verum_vbc::types::TypeId::BYTE_LIST.0;
             let handle = jit
-                .get_function::<unsafe extern "C" fn() -> u64>("make")
+                .get_function::<unsafe extern "C" fn(u64, u32) -> u64>("verum_list_allocate_storage")
                 .unwrap()
-                .call();
-            let backing = jit
-                .get_function::<unsafe extern "C" fn() -> *mut u8>("make_backing")
-                .unwrap()
-                .call();
+                .call(4, encoding);
+            assert_eq!(*(handle as *const u32), encoding);
+            assert_eq!(*((handle as *const u64).add(4)), 4);
+            let backing = *((handle as *const u64).add(5)) as *const u8;
             assert_eq!(
                 *(backing.sub(verum_common::layout::ALLOCATION_HEADER_SIZE as usize) as *const u32),
                 4
             );
-            *(handle as *mut u32) = verum_vbc::types::TypeId::BYTE_LIST.0;
-            *((handle as *mut u64).add(4)) = 4;
-            *((handle as *mut u64).add(5)) = backing as u64;
             let write = jit
                 .get_function::<unsafe extern "C" fn(u64, i64, i64)>("storage_write_probe")
                 .unwrap();
             let read = jit
-                .get_function::<unsafe extern "C" fn(u64, i64) -> i64>("read")
+                .get_function::<unsafe extern "C" fn(u64, i64) -> i64>("storage_read_probe")
                 .unwrap();
             let movement = jit
                 .get_function::<unsafe extern "C" fn(u64, i64, i64, i64)>("move_range")
@@ -617,6 +449,40 @@ fn packed_storage_access_uses_existing_exact_carrier_encoding() {
             movement.call(handle, 1, 0, 3);
             assert_eq!(std::slice::from_raw_parts(backing, 4), [0, 255, 42, 42]);
             assert_eq!(read.call(handle, 1) + read.call(handle, 2), 297);
+        },
+    );
+}
+
+#[test]
+fn indexing_reads_and_writes_the_owners_storage_width() {
+    with_source(
+        r#"
+        fn replace_middle(values:&mut List<Byte>)->Int {
+            values.checked_push(7); values.checked_push(42); values.checked_push(91);
+            let previous = values[1];
+            values[1] = 255 as Byte;
+            previous as Int
+        }
+        "#,
+        |module, jit| unsafe {
+            let replace = module.get_function("replace_middle").expect("source replacement");
+            let body = replace.print_to_string();
+            let body = body.to_str().unwrap();
+            assert!(body.contains("@verum_list_storage_read("));
+            assert!(body.contains("@verum_list_storage_write("));
+            let allocate = jit.get_function::<unsafe extern "C" fn(u64, u32) -> u64>(
+                "verum_list_allocate_storage").unwrap();
+            let replace = jit.get_function::<unsafe extern "C" fn(u64) -> i64>("replace_middle").unwrap();
+            for (encoding, width) in [(verum_vbc::TypeId::LIST, 8), (verum_vbc::TypeId::BYTE_LIST, 1)] {
+                let list = allocate.call(3, encoding.0);
+                assert_eq!(replace.call(list), 42);
+                let data = *((list as *const u64).add(5)) as *const u8;
+                if width == 1 {
+                    assert_eq!(std::slice::from_raw_parts(data, 3), [7, 255, 91]);
+                } else {
+                    assert_eq!(std::slice::from_raw_parts(data.cast::<u64>(), 3), [7, 255, 91]);
+                }
+            }
         },
     );
 }
@@ -643,9 +509,9 @@ fn owned_storage_invalid_range_and_extent_refuse_before_writing() {
         with_source(
             r#"
             fn make()->List<Int> {List<Int>.with_capacity(2)}
-            fn copied(values:List<Int>)->List<Int> {values.clone()}
-            fn storage_write_probe(values:List<Int>, index:Int)->Int {@intrinsic("list_storage_write",values,index,37); 0}
-            fn movement(values:List<Int>, source:Int,target:Int,count:Int)->Int {@intrinsic("list_storage_move",values,source,target,count); 0}
+            fn copied(values:&List<Int>)->List<Int> {values.clone()}
+            fn storage_write_probe(values:&mut List<Int>, index:Int)->Int {@intrinsic("list_storage_write",values,index,37); 0}
+            fn movement(values:&mut List<Int>, source:Int,target:Int,count:Int)->Int {@intrinsic("list_storage_move",values,source,target,count); 0}
             "#,
             |_, jit| unsafe {
                 let handle = jit
@@ -754,16 +620,16 @@ fn owned_storage_invalid_range_and_extent_refuse_before_writing() {
 fn owned_storage_float_bits_survive_argument_return_and_move() {
     for ty in ["Float", "Float32"] {
         let source = r#"
-        fn store(values:List<Float>, value:Float)->Int {
+        fn store(values:&mut List<Float>, value:Float)->Int {
             let done = 0;
             @intrinsic("list_storage_write", values, 0, value); done
         }
-        fn fetch(values:List<Float>)->Float { let value = @intrinsic("list_storage_read", values, 1); value }
+        fn fetch(values:&List<Float>)->Float { let value = @intrinsic("list_storage_read", values, 1); value }
         fn probe()->Float {
-            let values:List<Float> =List<Float>.with_capacity(2);
-            store(values,1.25);
+            let mut values:List<Float> =List<Float>.with_capacity(2);
+            store(&mut values,1.25);
             @intrinsic("list_storage_move", values, 0, 1, 1);
-            fetch(values)
+            fetch(&values)
         }
     "#.replace("Float", ty).replace("fn probe()->Float32", "fn probe()->Float");
         with_source(&source, |_, jit| unsafe {
@@ -816,7 +682,8 @@ fn owned_storage_wide_unboxed_value_is_refused() {
 #[test]
 fn public_storage_functions_accept_list_borrows() {
     with_source(
-        r#"type Triple is {x:Int,y:Int,z:Int}; fn probe()->Int {
+        r#"mount core.intrinsics.memory.{list_storage_write, list_storage_move, list_storage_read};
+        type Triple is {x:Int,y:Int,z:Int}; fn probe()->Int {
         let mut values:List<Triple> =List<Triple>.with_capacity(2);
         unsafe {
             list_storage_write(&mut values,0,Triple{x:11,y:37,z:99});
@@ -873,8 +740,8 @@ fn packed_and_slot_source_value_methods_survive_shrink_and_regrow() {
     with_source(
         r#"
         fn ordinary()->List<Int> {List<Int>.new()}
-        fn copy(values:List<Byte>)->List<Byte> {values.clone()}
-        fn exercise(values:List<Byte>)->Int {
+        fn copy(values:&List<Byte>)->List<Byte> {values.clone()}
+        fn exercise(values:&mut List<Byte>)->Int {
             values.shrink_to_fit();
             values.reserve(3);
             values.checked_push(0);
@@ -892,18 +759,20 @@ fn packed_and_slot_source_value_methods_survive_shrink_and_regrow() {
             removed+popped+first+second
         }
     "#,
-        |ir, jit| unsafe {
-            let source_get = ir
-                .split("\ndefine ")
-                .find(|body| {
-                    body.lines()
-                        .next()
-                        .is_some_and(|line| line.contains("@List.checked_get("))
+        |module, jit| unsafe {
+            let exercise = module.get_function("exercise").expect("compiled source caller");
+            let source_get = exercise.get_basic_blocks().into_iter()
+                .flat_map(|block| block.get_instructions())
+                .filter_map(|instruction| CallSiteValue::try_from(instruction).ok())
+                .filter_map(|call| call.get_called_fn_value())
+                .find(|callee| {
+                    callee.get_name().to_str().is_ok_and(|name| {
+                        name.split('$').next() == Some("core.collections.list.List.checked_get")
+                    })
                 })
-                .expect("source get body")
-                .split("\n}")
-                .next()
-                .unwrap();
+                .expect("exercise calls the actual source get body");
+            let source_get = source_get.print_to_string();
+            let source_get = source_get.to_str().unwrap();
             assert!(
                 source_get.contains("list_storage_read"),
                 "get still uses raw pointee layout: {source_get}"
@@ -989,9 +858,10 @@ fn allocator_rejects_unknown_encoding_and_overflow_before_allocating() {
 fn resize_failure_preserves_owner_and_only_initialized_prefix_moves() {
     with_source(
         r#"
+        mount core.intrinsics.memory.list_storage_resize;
         fn ordinary()->List<Int>{List<Int>.new()}
-        fn initialize(values:List<Int>) {values.checked_push(37);}
-        fn resize(values:List<Int>,cap:Int)->Bool {unsafe {list_storage_resize(values,cap)}}
+        fn initialize(values:&mut List<Int>) {values.checked_push(37);}
+        fn resize(values:&mut List<Int>,cap:Int)->Bool {unsafe {list_storage_resize(values,cap)}}
     "#,
         |_, jit| unsafe {
             let allocate = jit
@@ -1045,8 +915,8 @@ fn fallible_source_resize_reports_oom_without_losing_values() {
     with_source(
         r#"
         fn ordinary()->List<Int>{List<Int>.new()}
-        fn initialize(values:List<Int>) {values.checked_push(37);}
-        fn attempt(values:List<Int>)->Int {
+        fn initialize(values:&mut List<Int>) {values.checked_push(37);}
+        fn attempt(values:&mut List<Int>)->Int {
             match values.try_resize_buffer(8) {
                 Result.Ok(())=>1,
                 Result.Err(AllocError.OutOfMemory{requested})=>2,
