@@ -5467,34 +5467,8 @@ impl VbcCodegen {
             });
             self.ctx.free_temp(end_reg);
 
-            let dest = self.ctx.alloc_temp();
-            let mut operands = Vec::<u8>::with_capacity(8);
-            Self::write_reg(&mut operands, dest.0);
-            Self::write_reg(&mut operands, arr_reg.0);
-            Self::write_reg(&mut operands, start_reg.0);
-            Self::write_reg(&mut operands, len_reg.0);
-            // **SLICE-STATIC-ELEM-1 (T1213)** — the element stride the
-            // DECLARATION already fixes, or 0 when unknown here.
-            //
-            // Without it Tier 1 classifies the source at runtime by
-            // reading its first word as a `type_id`, and for a packed
-            // `[Byte; N]` that word IS the array's own data: three
-            // arrays differing only in byte 0 took three different
-            // branches and gave three different wrong answers, two of
-            // them reading 24 bytes past a 16-byte array.
-            //
-            // Additive: readers taking only operands 0..3 are
-            // unaffected, and 1/2/4/8 fit the one-byte encoding.
-            //
-            // COVERAGE BOUNDARY, stated so it is not later read as
-            // "that case does not arise": the hint is only available
-            // for a BARE VARIABLE. `get_typed_array_elem_size` is keyed
-            // by NAME (`byte_array_vars` / `typed_array_vars` are sets
-            // of identifiers), so `self.buf[..]` and `xs[i][..]` have
-            // no key and get 0 — and 0 sends Tier 1 back to reading the
-            // array's first word as a type_id, i.e. back to the defect.
-            // Widening this match is not enough; the TRACKING would
-            // have to become place-based rather than name-based.
+            // A declared packed local supplies its static stride. Other layouts
+            // are supplied by the runtime projection or the selected AOT storage.
             let elem_hint: u16 = match &arr_expr.kind {
                 ExprKind::Path(ep) if ep.segments.len() == 1 => {
                     match &ep.segments[0] {
@@ -5508,14 +5482,7 @@ impl VbcCodegen {
                 }
                 _ => 0,
             };
-            crate::encoding::SliceProjectionLayout {
-                stride: elem_hint,
-                access: crate::encoding::ProjectionAccess::for_borrow(op == UnOp::RefMut),
-            }.encode(&mut operands);
-            self.ctx.emit(Instruction::CbgrExtended {
-                sub_op: crate::instruction::CbgrSubOpcode::RefSlice as u8,
-                operands,
-            });
+            let dest = self.emit_slice_projection(arr_reg, start_reg, len_reg, elem_hint, op == UnOp::RefMut);
 
             self.ctx.free_temp(arr_reg);
             self.ctx.free_temp(start_reg);
@@ -5591,25 +5558,9 @@ impl VbcCodegen {
                     type_hint: 0,
                 });
             }
-            let dest = self.ctx.alloc_temp();
-            let mut operands = Vec::<u8>::with_capacity(8);
-            Self::write_reg(&mut operands, dest.0);
-            Self::write_reg(&mut operands, arr_reg.0);
-            Self::write_reg(&mut operands, start_reg.0);
-            Self::write_reg(&mut operands, len_reg.0);
-            // SLICE-STATIC-ELEM-1 (T1213): the stride the DECLARATION
-            // fixed, carried as a fifth operand so Tier 1 need not
-            // re-derive it by reading the array's own first word as a
-            // type_id. T1269: it is `elem_sz`, not the constant 1, now
-            // that the arm admits `[T; N]`.
-            crate::encoding::SliceProjectionLayout {
-                stride: elem_sz as u16,
-                access: crate::encoding::ProjectionAccess::for_borrow(op == UnOp::RefMut),
-            }.encode(&mut operands);
-            self.ctx.emit(Instruction::CbgrExtended {
-                sub_op: crate::instruction::CbgrSubOpcode::RefSlice as u8,
-                operands,
-            });
+            let dest = self.emit_slice_projection(
+                arr_reg, start_reg, len_reg, elem_sz as u16, op == UnOp::RefMut,
+            );
             self.ctx.free_temp(arr_reg);
             self.ctx.free_temp(start_reg);
             self.ctx.free_temp(len_reg);
@@ -25062,8 +25013,8 @@ impl VbcCodegen {
         }
         if let ExprKind::Field { expr: receiver, field } = &base.kind
             && let Some(owner) = self.packed_field_receiver_type(receiver)
-            && let Some(crate::types::TypeRef::Array { element, .. }) =
-                self.field_array_type(&owner, field.name.as_str())
+            && let Some((element, _)) =
+                self.field_array_type(&owner, field.name.as_str()).and_then(crate::types::TypeRef::fixed_array_parts)
         {
             return self.array_element_signed_bits(element);
         }
@@ -25418,10 +25369,8 @@ impl VbcCodegen {
     ) -> Option<(usize, bool, u64, Option<u8>)> {
         let (elem_size, is_float, declared_len) =
             self.field_array_spec(owner_type, field_name)?;
-        let signed_bits = match self.field_array_type(owner_type, field_name)? {
-            crate::types::TypeRef::Array { element, .. } => self.array_element_signed_bits(element),
-            _ => None,
-        };
+        let (element, _) = self.field_array_type(owner_type, field_name)?.fixed_array_parts()?;
+        let signed_bits = self.array_element_signed_bits(element);
         // Byte fields keep the packed representation (#37).
         if elem_size == 1 {
             return None;
@@ -25432,21 +25381,10 @@ impl VbcCodegen {
         if tracked != elem_size {
             return None;
         }
-        // The declared length answers for a literal size (measured: a
-        // `[UInt32; 44]` field arrives as 44). A CONST-GENERIC size arrives
-        // as 0 — the established "statically unknown" carrier — and there the
-        // packed SOURCE local still knows its own count, set beside the packed
-        // mark by `set_fixed_array_count`; the type checker has already proved
-        // the two agree. With neither there is nothing to size the loop with,
-        // and the value is left alone.
-        let len = if declared_len > 0 {
-            declared_len
-        } else {
-            self.ctx.fixed_array_count(src_name)? as u64
+        let len = match declared_len {
+            crate::types::ArrayExtent::Known(count) => count,
+            crate::types::ArrayExtent::Parameter(_) => self.ctx.fixed_array_count(src_name)? as u64,
         };
-        if len == 0 {
-            return None;
-        }
         Some((elem_size, is_float, len, signed_bits))
     }
 

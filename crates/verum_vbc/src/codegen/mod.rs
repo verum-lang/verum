@@ -17604,8 +17604,21 @@ impl VbcCodegen {
         declaration_scope: Option<&str>,
         array_count: &mut dyn FnMut(&verum_ast::Expr) -> Option<u64>,
     ) -> CodegenResult<TypeRef> {
+        self.resolve_type_ref_with_substitution(ty, generic_param_map, preserve_refs, declaration_scope,
+            array_count, &self.current_source_substitution)
+    }
+
+    fn resolve_type_ref_with_substitution(
+        &self,
+        ty: &verum_ast::ty::Type,
+        generic_param_map: &HashMap<String, u16>,
+        preserve_refs: bool,
+        declaration_scope: Option<&str>,
+        array_count: &mut dyn FnMut(&verum_ast::Expr) -> Option<u64>,
+        substitution: &source_substitution::SourceTypeSubstitution,
+    ) -> CodegenResult<TypeRef> {
         let self_type = self.impl_self_type_ref(generic_param_map);
-        self.current_source_substitution.elaborate(generic_param_map, |scope, values| {
+        substitution.elaborate(generic_param_map, |scope, values| {
             self.resolve_type_ref_in_scope(ty, scope, preserve_refs, declaration_scope, array_count, self_type.as_ref(), values, &[])
         }).map_err(|mut error| {
             if error.context.is_none() {
@@ -19774,15 +19787,12 @@ impl VbcCodegen {
         // `parent_type` at None, which is the correct fallback.
         if let Some(type_name) = impl_type_name {
             descriptor.parent_type = match &self.current_impl_receiver {
-                Some(receiver) => receiver.ty.base_type_id().or_else(|| {
-                    // Structural values have no nominal TypeId. Their method
-                    // catalogue was selected when this declaration was registered.
-                    let parent = self.declared_callable_descriptors.get(&func_info.id)?.parent_type?;
-                    let catalogue = self.type_by_id(parent)?;
-                    matches!((&receiver.ty, catalogue.kind),
-                        (TypeRef::Slice(_), crate::types::TypeKind::Slice)
-                        | (TypeRef::Array { .. }, crate::types::TypeKind::Array)).then_some(parent)
-                }),
+                Some(receiver) => match receiver.ty.structural_receiver_kind() {
+                    Some(kind) => self.declared_callable_descriptors.get(&func_info.id)
+                        .and_then(|declaration| declaration.parent_type)
+                        .filter(|parent| self.type_by_id(*parent).is_some_and(|catalogue| catalogue.kind == kind)),
+                    None => receiver.ty.base_type_id(),
+                },
                 None => self.type_name_to_id.get(type_name.as_str()).copied()
                     .or_else(|| self.get_well_known_type_id(type_name)),
             };
@@ -22019,35 +22029,12 @@ impl VbcCodegen {
             .map(|s| s.as_str())
     }
 
-    /// If `field_name` on record `type_name` is declared with a
-    /// fixed-size array of a PRIMITIVE element (`[Byte; SIZE]`,
-    /// `[UInt64; N]`, `[Float; N]`, …), return `(elem_size, is_float)`.
-    ///
-    /// This is the DECLARATION authority behind PACKED-FIELD-INIT-DYNCOUNT-1
-    /// (#37): the field-init value `Self { buffer: [0; SIZE] }` carries no
-    /// element type (`0` is a bare int literal), so the decision to
-    /// allocate a packed `[Byte; N]` (`NewByteArray`) instead of a generic
-    /// heap `List` — and to address `&mut self.buffer[i] as *mut Byte`
-    /// through `ByteArrayElementAddr` — must read the field's own declared
-    /// type.  The const-generic length (`SIZE`) is statically unknown here
-    /// (archived / lowered as `length == 0`), so only the ELEMENT geometry
-    /// is returned; the element COUNT is taken from the field-init value's
-    /// repeat/list shape at the call site.
-    ///
-    /// Nested arrays (`[[Byte; N]; M]`) and compound / non-primitive
-    /// elements return `None` — the caller keeps the generic heap path.
-    ///
-    /// The third tuple element is the DECLARED length, `0` when it is not a
-    /// plain integer literal (the const-generic carrier described above).
-    /// `PACKED-FIELD-ONE-REPRESENTATION-1` (T1463) needs it to size the
-    /// normalising unpack loop, and treats `0` as "not normalisable".
-    fn field_array_spec(&self, type_name: &str, field_name: &str) -> Option<(usize, bool, u64)> {
-        match self.field_array_type(type_name, field_name)? {
-            TypeRef::Array { element, length } => self
-                .primitive_array_element_spec(element)
-                .map(|(sz, is_float)| (sz, is_float, *length)),
-            _ => None,
-        }
+    /// Packed field allocation and access share the declared element geometry.
+    /// A value parameter fixes the geometry even before its extent is specialized.
+    fn field_array_spec(&self, type_name: &str, field_name: &str) -> Option<(usize, bool, crate::types::ArrayExtent)> {
+        let (element, extent) = self.field_array_type(type_name, field_name)?.fixed_array_parts()?;
+        let (size, is_float) = self.primitive_array_element_spec(element)?;
+        Some((size, is_float, extent))
     }
 
     /// The exact field declaration supplies element semantics independently of

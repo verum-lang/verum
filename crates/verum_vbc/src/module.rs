@@ -18,7 +18,7 @@ use crate::instruction::Instruction;
 use crate::metadata::{AutodiffGraph, DeviceHints, DistributionMetadata, MlirHints, ShapeMetadata};
 use crate::types::{
     CbgrTier, ContextRef, Mutability, PropertySet, ProtocolId, StringId, TypeDescriptor, TypeId,
-    TypeParamDescriptor, TypeRef, Visibility,
+    TypeKind, TypeParamDescriptor, TypeRef, Visibility,
 };
 
 /// Combine a declaring module with a bare or already-promoted descriptor name.
@@ -162,15 +162,33 @@ pub enum EntryMain {
 pub struct TypeTable {
     entries: Vec<TypeDescriptor>,
     #[serde(skip)]
-    by_id: std::sync::OnceLock<HashMap<TypeId, usize>>,
+    index: std::sync::OnceLock<TypeLookupIndex>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct TypeLookupIndex {
+    by_id: HashMap<TypeId, usize>,
+    structural: HashMap<TypeKind, Vec<TypeId>>,
+}
+
+impl TypeLookupIndex {
+    fn insert(&mut self, position: usize, descriptor: &TypeDescriptor) {
+        if let std::collections::hash_map::Entry::Vacant(entry) = self.by_id.entry(descriptor.id) {
+            entry.insert(position);
+            if matches!(descriptor.kind, TypeKind::Array | TypeKind::Slice) {
+                self.structural.entry(descriptor.kind).or_default().push(descriptor.id);
+            }
+        }
+    }
 }
 
 impl TypeTable {
-    fn id_index(&self) -> &HashMap<TypeId, usize> {
-        self.by_id.get_or_init(|| {
-            let mut index = HashMap::with_capacity(self.entries.len());
+    fn lookup_index(&self) -> &TypeLookupIndex {
+        self.index.get_or_init(|| {
+            let mut index = TypeLookupIndex::default();
+            index.by_id.reserve(self.entries.len());
             for (position, descriptor) in self.entries.iter().enumerate() {
-                index.entry(descriptor.id).or_insert(position);
+                index.insert(position, descriptor);
             }
             index
         })
@@ -178,8 +196,8 @@ impl TypeTable {
 
     /// Append without discarding an already populated index.
     pub fn push(&mut self, descriptor: TypeDescriptor) {
-        if let Some(index) = self.by_id.get_mut() {
-            index.entry(descriptor.id).or_insert(self.entries.len());
+        if let Some(index) = self.index.get_mut() {
+            index.insert(self.entries.len(), &descriptor);
         }
         self.entries.push(descriptor);
     }
@@ -190,7 +208,7 @@ impl TypeTable {
         if position == self.entries.len() {
             self.push(descriptor);
         } else {
-            self.by_id.take();
+            self.index.take();
             self.entries.insert(position, descriptor);
         }
     }
@@ -198,7 +216,7 @@ impl TypeTable {
 
 impl From<Vec<TypeDescriptor>> for TypeTable {
     fn from(entries: Vec<TypeDescriptor>) -> Self {
-        Self { entries, by_id: Default::default() }
+        Self { entries, index: Default::default() }
     }
 }
 
@@ -212,7 +230,7 @@ impl std::ops::Deref for TypeTable {
 
 impl std::ops::DerefMut for TypeTable {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        self.by_id.take();
+        self.index.take();
         &mut self.entries
     }
 }
@@ -876,19 +894,19 @@ impl VbcModule {
     /// The first descriptor declaring this ID. Descriptor IDs may be sparse,
     /// duplicated, or in the builtin range, and are never vector positions.
     pub fn type_index_by_id(&self, id: TypeId) -> Option<usize> {
-        self.types.id_index().get(&id).copied()
+        self.types.lookup_index().by_id.get(&id).copied()
     }
 
     /// Activates indexed reads for immutable VM modules. A builder that later
     /// edits the descriptors automatically returns to ordinary linear reads.
     pub(crate) fn prepare_type_lookups(&self) {
-        self.types.id_index();
+        self.types.lookup_index();
     }
 
     /// Gets the first descriptor by ID, including IDs in the builtin range.
     pub fn get_type(&self, id: TypeId) -> Option<&TypeDescriptor> {
-        if let Some(index) = self.types.by_id.get() {
-            return index.get(&id).map(|&position| &self.types[position]);
+        if let Some(index) = self.types.index.get() {
+            return index.by_id.get(&id).map(|&position| &self.types[position]);
         }
         self.types.iter().find(|desc| desc.id == id)
     }
@@ -1548,9 +1566,31 @@ impl VbcModule {
                     && self.get_string(declaration.name) == Some(*qualifier)))
         {
             let missing = || format!("no implementation of declared protocol member `{qualifier}.{member}` for {receiver:?}");
-            let head = receiver.base_type_id().ok_or_else(missing)?;
-            let (protocol, _) = self.protocol_member_owner(head, Some(qualifier), member, false)?.ok_or_else(missing)?;
-            let target = self.implementation_member(head, Some(receiver), protocol, member, None)?.ok_or_else(missing)?;
+            let resolve = |head| -> Result<Option<FunctionId>, String> {
+                let Some((protocol, _)) = self.protocol_member_owner(head, Some(qualifier), member, false)?
+                else { return Ok(None) };
+                self.implementation_member(head, Some(receiver), protocol, member, None)
+            };
+            let target = if let Some(kind) = receiver.structural_receiver_kind() {
+                let mut selected = None;
+                for &head in self.types.lookup_index().structural.get(&kind).into_iter().flatten() {
+                    if let Some(id) = resolve(head)? {
+                        let function = self.get_function(id).ok_or_else(missing)?;
+                        if function.parent_type != Some(head)
+                            || function.source_receiver.as_ref().and_then(TypeRef::structural_receiver_kind) != Some(kind)
+                        {
+                            return Err(format!("structural protocol member `{qualifier}.{member}` lacks its declared receiver"));
+                        }
+                        if selected.is_some_and(|previous| previous != id) {
+                            return Err(format!("multiple structural implementations of `{qualifier}.{member}` apply to {receiver:?}"));
+                        }
+                        selected = Some(id);
+                    }
+                }
+                selected
+            } else {
+                resolve(receiver.base_type_id().ok_or_else(missing)?)?
+            }.ok_or_else(missing)?;
             return self.bind_instance_receiver(target, receiver, argc).map(Some).ok_or_else(missing);
         }
         Ok(None)

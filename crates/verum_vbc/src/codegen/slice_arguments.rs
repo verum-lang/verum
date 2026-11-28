@@ -2,13 +2,32 @@
 //! Materialization reuses explicit range-borrow lowering and its storage facts.
 use super::{CodegenError, CodegenErrorKind, CodegenResult, VbcCodegen};
 use crate::{
-    instruction::Reg,
+    instruction::{Instruction, Reg},
     types::{CbgrTier, Mutability, TypeRef},
 };
 use verum_ast::{Expr, ExprKind, UnOp};
 use verum_common::{Heap, well_known_types::WellKnownType};
 
 impl VbcCodegen {
+    pub(super) fn emit_slice_projection(
+        &mut self, source: Reg, start: Reg, length: Reg, stride: u16, mutable: bool,
+    ) -> Reg {
+        let result = self.ctx.alloc_temp();
+        let mut operands = Vec::with_capacity(12);
+        for reg in [result, source, start, length] {
+            Self::write_reg(&mut operands, reg.0);
+        }
+        crate::encoding::SliceProjectionLayout {
+            stride,
+            access: crate::encoding::ProjectionAccess::for_borrow(mutable),
+        }.encode(&mut operands);
+        self.ctx.emit(Instruction::CbgrExtended {
+            sub_op: crate::instruction::CbgrSubOpcode::RefSlice.to_byte(),
+            operands,
+        });
+        result
+    }
+
     pub(super) fn slice_parameter_element(&self, ty: &TypeRef) -> Option<TypeRef> {
         let TypeRef::Reference {
             inner,
@@ -54,7 +73,7 @@ impl VbcCodegen {
             return None;
         }
         let element = match self.expand_declared_alias(*inner)? {
-            TypeRef::Array { element, .. } | TypeRef::Slice(element) => *element,
+            TypeRef::Slice(element) => *element,
             TypeRef::Instantiated { base, args }
                 if self.declared_runtime_carrier(base) == Some(WellKnownType::List) =>
             {
@@ -63,7 +82,7 @@ impl VbcCodegen {
                 };
                 element.clone()
             }
-            _ => return None,
+            array => array.fixed_array_parts()?.0.clone(),
         };
         if !self.declared_type_in_scope(&element) {
             return None;
@@ -260,6 +279,22 @@ impl VbcCodegen {
             .ok_or_else(|| invalid("slice argument requires its source declaration"))?;
         if matches!(source_type, TypeRef::Slice(_)) {
             return Ok(None);
+        }
+        if let Some((_, crate::types::ArrayExtent::Parameter(count))) = source_type.fixed_array_parts() {
+            // The count belongs to the array declaration. Reading it through
+            // LoadT preserves the same slot under forwarding and specialization.
+            let source = self.compile_expr(argument)?.ok_or_else(|| invalid("array borrow requires a source place"))?;
+            let start = self.ctx.alloc_temp();
+            let length = self.ctx.alloc_temp();
+            self.ctx.emit(Instruction::LoadSmallI { dst: start, value: 0 });
+            self.ctx.emit(Instruction::LoadT { dst: length, type_ref: TypeRef::Generic(count) });
+            // Abstract element types supply no physical stride. The projection
+            // uses the managed descriptor or the selected native storage.
+            let view = self.emit_slice_projection(source, start, length, 0, wanted == Mutability::Mutable);
+            self.ctx.free_temp(source);
+            self.ctx.free_temp(start);
+            self.ctx.free_temp(length);
+            return Ok(Some(view));
         }
 
         // A direct borrow uses the original place. A saved List reference must

@@ -548,7 +548,7 @@ impl VbcCodegen {
             value.and_then(|value| {
                 if let verum_ast::expr::ExprKind::Field { expr: base, field } = &value.kind
                     && let Some(owner) = self.packed_field_receiver_type(base)
-                    && let Some((1, is_float, count)) = self.field_array_spec(&owner, field.name.as_str())
+                    && let Some((1, is_float, crate::types::ArrayExtent::Known(count))) = self.field_array_spec(&owner, field.name.as_str())
                     && count > 0
                 {
                     return Some((1, is_float, count as usize));

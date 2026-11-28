@@ -29,11 +29,7 @@ impl VbcCodegen {
         arity: usize,
     ) -> CodegenResult<Option<String>> {
         let actual = pointee(receiver);
-        let kind = match actual {
-            TypeRef::Array { .. } => crate::types::TypeKind::Array,
-            TypeRef::Slice(_) => crate::types::TypeKind::Slice,
-            _ => return Ok(None),
-        };
+        let Some(kind) = actual.structural_receiver_kind() else { return Ok(None) };
         let mut selected: Option<(crate::module::FunctionId, String)> = None;
         let mut declared = false;
         for catalogue in self.types.iter().filter(|catalogue| catalogue.kind == kind) {

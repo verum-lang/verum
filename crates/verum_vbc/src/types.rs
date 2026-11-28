@@ -868,7 +868,33 @@ impl Default for TypeRef {
     }
 }
 
+/// The extent of a declared fixed array before or after monomorphization.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ArrayExtent {
+    Known(u64),
+    Parameter(TypeParamId),
+}
+
 impl TypeRef {
+    /// These source types have method catalogues independent of their storage ID.
+    pub(crate) fn structural_receiver_kind(&self) -> Option<TypeKind> {
+        match self {
+            Self::Slice(_) => Some(TypeKind::Slice),
+            array => array.fixed_array_parts().map(|_| TypeKind::Array),
+        }
+    }
+
+    pub(crate) fn fixed_array_parts(&self) -> Option<(&Self, ArrayExtent)> {
+        match self {
+            Self::Array { element, length } => Some((element, ArrayExtent::Known(*length))),
+            Self::Instantiated { base: TypeId::ARRAY, args } => match args.as_slice() {
+                [element, Self::Generic(count)] => Some((element, ArrayExtent::Parameter(*count))),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
     /// Whether this template needs a record receiver before it can be used
     /// outside the owning declaration's field telescope.
     pub fn contains_record_field_projection(&self) -> bool {

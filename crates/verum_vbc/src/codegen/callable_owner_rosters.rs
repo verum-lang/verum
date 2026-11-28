@@ -81,15 +81,12 @@ impl VbcCodegen {
                         CodegenErrorKind::InvalidSourceSignature("receiver has no remapped declaring nominal".into())))?;
                 let mut nominal = &receiver;
                 while let TypeRef::Reference { inner, .. } = nominal { nominal = inner; }
-                if matches!(nominal, TypeRef::Slice(_) | TypeRef::Array { .. }) {
+                if let Some(receiver_kind) = nominal.structural_receiver_kind() {
                     // Structural receivers have no nominal application. The
                     // catalogue only identifies the method family; the retained
                     // implementation owns the element/extent binder roles.
                     let kind = self.type_by_id(parent).map(|catalogue| catalogue.kind);
-                    if !matches!((nominal, kind),
-                        (TypeRef::Slice(_), Some(crate::types::TypeKind::Slice))
-                        | (TypeRef::Array { .. }, Some(crate::types::TypeKind::Array)))
-                    {
+                    if kind != Some(receiver_kind) {
                         return Err(CodegenError::new(CodegenErrorKind::InvalidSourceSignature(
                             "structural receiver conflicts with its declaring method catalogue".into())));
                     }

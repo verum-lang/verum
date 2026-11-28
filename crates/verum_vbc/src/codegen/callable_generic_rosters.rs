@@ -711,7 +711,13 @@ impl VbcCodegen {
                     "value parameter has no declaration-owned witness slot".into(),
                 ))
             })?;
-            let value_type = self.resolve_signature_type_ref(ty, scope)?;
+            // A later value parameter can be indexed by an earlier one,
+            // including a binder inherited from the selected implementation.
+            let value_type = self.resolve_type_ref_with_substitution(
+                ty, scope, true, None, &mut |count| {
+                    self.const_eval_i64(count).ok().flatten().and_then(|value| u64::try_from(value).ok())
+                }, substitution,
+            )?;
             substitution.insert_value(
                 name.to_owned(),
                 ImplReceiverWitness {

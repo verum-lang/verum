@@ -564,3 +564,36 @@ fn fixed_extent_does_not_capture_a_shadowed_constant() {
         assert!(matches!(err.kind, CodegenErrorKind::InvalidSourceSignature(_)), "{err}");
     }
 }
+
+#[test]
+fn bounded_method_dispatch_recovers_the_concrete_array_extent() {
+    let source = compile(r#"
+        module api;
+        type Measured is protocol { fn measured(&self)->Int; };
+        fn view_length<T>(values: &[T])->USize { @intrinsic("slice_len", values) }
+        implement<T, const N: Int> Measured for [T; N] {
+            fn measured(&self)->Int { view_length(self) as Int }
+        }
+        fn observe<A:Measured>(x:&A)->Int { x.measured() }
+        fn main()->Int { observe(&[1,2])*10 + observe(&[4,5,6]) + 50 }
+    "#);
+    for module in [source.clone(), wire(&source)] {
+        execute(module);
+    }
+}
+
+#[test]
+fn dependent_value_domains_resolve_earlier_and_inherited_binders() {
+    let source = compile(r#"
+        module api;
+        type Lanes<T, N:meta USize> is { values:[T; N] };
+        implement<T, N:meta USize> Lanes<T,N> {
+            fn marker<Mask:meta [UInt32; N]>(&self)->Int { 73 }
+        }
+        fn free<N:meta USize, Mask:meta [UInt32; N]>(values:&[UInt32; N])->Int { 73 }
+        fn main()->Int { 73 }
+    "#);
+    for module in [source.clone(), wire(&source)] {
+        verum_vbc::validate::validate_module(&module).expect("well-scoped value domains");
+    }
+}
