@@ -163,9 +163,7 @@ impl SourceTypeSubstitution {
         }
         substitution
             .apply(&lower(&scope, &values)?)
-            .map_err(|error| {
-                CodegenError::new(CodegenErrorKind::InvalidSourceSignature(error.to_string()))
-            })
+            .map_err(|error| CodegenError::new(CodegenErrorKind::SourceSubstitution(error)))
     }
 }
 

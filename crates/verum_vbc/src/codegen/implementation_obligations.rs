@@ -82,59 +82,13 @@ impl Goal {
         let mut nodes = 0;
         while let Some((ty, depth)) = pending.pop() {
             nodes += 1;
-            if depth >= 64 || nodes > 4096 {
+            if depth >= crate::types::MAX_TYPE_REF_DEPTH || nodes > crate::types::MAX_TYPE_REF_NODES {
                 return Err(invalid(
                     "implementation obligation type budget exceeded",
                     span,
                 ));
             }
-            let mut push = |ty| pending.push((ty, depth + 1));
-            match ty {
-                TypeRef::Instantiated { args, .. } | TypeRef::Tuple(args) => {
-                    for ty in args {
-                        push(ty);
-                    }
-                }
-                TypeRef::Function {
-                    params,
-                    return_type,
-                    ..
-                }
-                | TypeRef::Rank2Function {
-                    params,
-                    return_type,
-                    ..
-                } => {
-                    for ty in params {
-                        push(ty);
-                    }
-                    push(return_type);
-                }
-                TypeRef::Reference { inner, .. } | TypeRef::Slice(inner) => push(inner),
-                TypeRef::Array { element, .. } => push(element),
-                TypeRef::AssociatedProjection {
-                    base,
-                    qualifier,
-                    args,
-                    ..
-                } => {
-                    push(base);
-                    for ty in args {
-                        push(ty);
-                    }
-                    if let Some(application) = qualifier {
-                        for ty in &application.args {
-                            push(ty);
-                        }
-                    }
-                }
-                TypeRef::Dynamic(object) => object.types().for_each(push),
-                TypeRef::Concrete(_)
-                | TypeRef::Generic(_)
-                | TypeRef::ConstValue(_)
-                | TypeRef::ConstSequence(_)
-                | TypeRef::RecordFieldProjection { .. } => {}
-            }
+            ty.for_each_child(|child| pending.push((child, depth + 1)));
         }
         Ok(())
     }
@@ -815,7 +769,20 @@ impl VbcCodegen {
                 if matches!(protocol_heads, ProtocolHeadFilter::Declared(heads) if !heads.contains(&goal.protocol)) {
                     continue;
                 }
-                let Some((premises, _)) = self.implementation_alternative(header, implementation, &goal, assumptions)? else {
+                let alternative = self.implementation_alternative(header, implementation, &goal, assumptions)
+                    .map_err(|mut error| {
+                        use crate::mono::SubstitutionError::{TypeDepthLimit, TypeNodeLimit};
+                        if matches!(error.kind, CodegenErrorKind::SourceSubstitution(TypeDepthLimit | TypeNodeLimit)) {
+                            let context = "implementation obligation type budget exceeded";
+                            error.context = Some(match error.context.take() {
+                                Some(source) => format!("{context} while checking {source}"),
+                                None => context.to_owned(),
+                            });
+                            error.span.get_or_insert(span);
+                        }
+                        error
+                    })?;
+                let Some((premises, _)) = alternative else {
                     continue;
                 };
                 if premises.impossible {

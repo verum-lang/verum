@@ -207,6 +207,8 @@ fn growing_obligations_are_rejected_on_an_ordinary_thread_stack() {
                 error.to_string().contains("obligation type budget"),
                 "{error}"
             );
+            assert!(error.span.is_some(), "{error}");
+            assert!(error.to_string().contains("depth limit"), "{error}");
             run(
                 &compile(
                     "implement<X: A> Granted for X { fn flag(&self) -> Int { 59 } }",

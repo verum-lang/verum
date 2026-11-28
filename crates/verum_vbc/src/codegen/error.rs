@@ -223,6 +223,8 @@ pub enum CodegenErrorKind {
 
     /// Declaration evidence cannot be erased even in lenient bootstrap mode.
     InvalidSourceSignature(String),
+    /// A declaration substitution failed before it could establish its type.
+    SourceSubstitution(crate::mono::SubstitutionError),
     /// A qualified source mount has no unique declaring callable.
     InvalidSourceMount(Vec<String>),
 }
@@ -407,6 +409,7 @@ impl CodegenError {
             | CodegenErrorKind::AmbiguousConstructor { .. }
             | CodegenErrorKind::MissingRecordField { .. }
             | CodegenErrorKind::InvalidSourceSignature(_)
+            | CodegenErrorKind::SourceSubstitution(_)
             | CodegenErrorKind::InvalidSourceMount(_) => SkipClass::Fatal,
             _ => SkipClass::BugClass,
         }
@@ -586,6 +589,7 @@ impl fmt::Display for CodegenErrorKind {
             Self::NotImplemented(feature) => write!(f, "not yet implemented: {}", feature),
             Self::InvalidSourceMount(messages) => write!(f, "invalid source mount: {}", messages.join("\n  ")),
             Self::InvalidSourceSignature(message) => write!(f, "invalid source signature: {message}"),
+            Self::SourceSubstitution(error) => write!(f, "invalid source signature: {error}"),
         }
     }
 }
