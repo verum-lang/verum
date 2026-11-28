@@ -135,17 +135,74 @@ fn reference_opcode_does_not_prove_a_native_passthrough() {
 }
 
 #[test]
+fn raw_place_requires_the_selected_local_borrow_and_conversion() {
+    use verum_vbc::instruction::CbgrSubOpcode;
+
+    let ast = verum_fast_parser::Parser::new("fn check(value: Int) -> Int { value }")
+        .parse_module()
+        .unwrap();
+    let mut module = verum_vbc::codegen::VbcCodegen::new().compile_module(&ast).unwrap();
+    let id = module.find_function_by_name("check").unwrap();
+    let mut calls = Map::new();
+    calls.insert(id.0, List::new());
+
+    for (producer, place) in [
+        (I::RefLocal { dst: Reg(1), src: Reg(0) }, R::MutableLocalSlot),
+        (I::Ref { dst: Reg(1), src: Reg(0) }, R::SharedLocalSlot),
+        (I::MemExtended { sub_op: Mem::DerefValue as u8, operands: vec![1, 0] }, R::Unknown),
+    ] {
+        module.functions.iter_mut().find(|f| f.id == id).unwrap().instructions = Some(vec![
+            producer,
+            I::Mov { dst: Reg(2), src: Reg(1) },
+            I::CbgrExtended { sub_op: CbgrSubOpcode::ToRawPtr.to_byte(), operands: vec![3, 2] },
+            I::GetF { dst: Reg(4), obj: Reg(3), field_idx: 0 },
+            I::SetF { obj: Reg(3), field_idx: 0, value: Reg(4) },
+            I::Ret { value: Reg(3) },
+        ]);
+        for slot_register in [0, 1] {
+            for cast_source in [1, 2] {
+                let mut sites = Map::new();
+                let mut receipts = List::new();
+                receipts.push(ReferenceSite {
+                    instruction: 0,
+                    kind: ReferenceSiteKind::SlotOutput(slot_register),
+                    anchor: None,
+                });
+                receipts.push(ReferenceSite {
+                    instruction: 2,
+                    kind: ReferenceSiteKind::PassthroughOutput { register: 3, source: cast_source },
+                    anchor: None,
+                });
+                sites.insert(id.0, receipts);
+                let facts = Analysis::new(&module, &calls, &sites).body(id);
+                let expected = if slot_register == 1 && cast_source == 2 { &place } else { &R::Unknown };
+                assert_eq!(&facts.result, expected);
+                let field_view = |pc| facts.value_inputs.get(&pc).is_some_and(|regs| regs.contains(&3));
+                assert_eq!(field_view(3), *expected != R::Unknown);
+                assert_eq!(field_view(4), *expected == R::MutableLocalSlot);
+            }
+        }
+    }
+    assert_eq!(R::MutableLocalSlot.join(&R::Slot), R::Slot);
+    assert_eq!(R::MutableLocalSlot.join(&R::SharedLocalSlot), R::Unknown);
+    for local in [R::MutableLocalSlot, R::SharedLocalSlot] {
+        assert_eq!(local.substitute(&[], 0), R::Unknown);
+        assert_eq!(R::Parameter(0, None).substitute(std::slice::from_ref(&local), 0), local);
+    }
+}
+
+#[test]
 fn sparse_sidecars_are_bounded_even_after_register_facts_are_lost() {
     let mut cells = State::default();
     let mut origins = State::default();
     for reg in 0..256 {
         cells.cells.insert(reg, false);
-        origins.parameter_origins.insert(reg, 0);
+        origins.parameter_origins.entry(reg).or_default().insert(0);
     }
     assert!(cells.bounded());
     assert!(origins.bounded());
     cells.cells.insert(256, false);
-    origins.parameter_origins.insert(256, 0);
+    origins.parameter_origins.entry(256).or_default().insert(0);
     assert!(!cells.bounded());
     assert!(!origins.bounded());
 }

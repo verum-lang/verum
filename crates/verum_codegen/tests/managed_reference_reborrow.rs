@@ -52,3 +52,26 @@ fn shared_indexed_records_survive_a_sibling_borrow_at_a_call() {
         }
     "#);
 }
+
+#[test]
+fn raw_reference_to_a_mutable_local_supports_field_access_and_whole_value_replacement() {
+    let wire = source_image::module(r#"
+        type Pair is { first: Int, second: Int };
+        fn main() -> Int {
+            let mut pair = Pair { first: 3, second: 5 };
+            let pointer = &mut pair as &unsafe mut Pair;
+            unsafe {
+                if (*pointer).first != 3 || (*pointer).second != 5 { return 0; }
+                (*pointer).first = 42;
+            }
+            if pair.first != 42 || pair.second != 5 { return 0; }
+            unsafe { *pointer = Pair { first: 42, second: 31 }; }
+            let shared = &pair as &unsafe Pair;
+            unsafe { (*shared).first + (*shared).second }
+        }
+    "#);
+    let entry = wire.find_function_by_name("main").unwrap();
+    let mut vm = verum_vbc::interpreter::Interpreter::new(wire.clone().into());
+    assert_eq!(vm.execute_function(entry).unwrap().try_as_i64(), Some(73));
+    source_image::run_module(wire, |_| {});
+}

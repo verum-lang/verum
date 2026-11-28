@@ -19,6 +19,10 @@ pub(super) enum Representation {
     Unknown,
     Value,
     Slot,
+    /// A mutable local address issued by the selected native RefLocal producer.
+    MutableLocalSlot,
+    /// A complete word spilled by a shared borrow, usable for field reads.
+    SharedLocalSlot,
     Parameter(u16, Option<TypeId>),
     Projection(Heap<Representation>, TypeId, u32, u32),
     Sum(TypeId, List<(u32, List<Representation>)>),
@@ -40,6 +44,9 @@ impl Nodes {
     }
 }
 impl R {
+    fn permits_object_view(&self) -> bool {
+        matches!(self, Self::Slot | Self::MutableLocalSlot)
+    }
     fn copy_bounded(&self, budget: &mut Nodes, depth: usize) -> Option<Self> {
         budget.take(depth)?;
         Some(match self {
@@ -156,7 +163,9 @@ impl R {
                     }
                     R::Sum(*owner, result)
                 }
-                R::Allocation(_) | R::Test(..) => R::Unknown,
+                // A native local cannot outlive its issuing frame. A forwarded
+                // caller slot enters through the Parameter substitution above.
+                R::MutableLocalSlot | R::SharedLocalSlot | R::Allocation(_) | R::Test(..) => R::Unknown,
                 leaf => leaf.clone(),
             })
         }
@@ -167,6 +176,9 @@ impl R {
             budget.take(depth)?;
             if a == b {
                 return a.copy_bounded(budget, depth + 1);
+            }
+            if a.permits_object_view() && b.permits_object_view() {
+                return Some(R::Slot);
             }
             if let (R::Sum(owner, xs), R::Sum(other, ys)) = (a, b) {
                 if owner != other {
@@ -529,7 +541,10 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                     for &origin in origins {
                         parameter_uses[usize::from(origin)] |= demand;
                     }
-                } else if state.raw(reg) == R::Slot && demand == 1 {
+                } else if demand == 1 && state.registers.get(&reg.0).is_some_and(|value| {
+                    value.permits_object_view()
+                        || (*value == R::SharedLocalSlot && matches!(instruction, I::GetF { .. }))
+                }) {
                     value_inputs.entry(pc).or_default().insert(reg.0);
                 }
             };
@@ -558,13 +573,30 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                     write = Some((*dst, R::Value));
                 }
                 I::CbgrExtended { sub_op, operands }
-                    if *sub_op == verum_vbc::instruction::CbgrSubOpcode::ToRawPtr.to_byte() => {
-                    let mut pos = 0;
-                    let mut reg = || verum_vbc::encoding::decode_reg(operands, &mut pos);
-                    let (Ok(dst), Ok(src)) = (reg(), reg()) else { return BodyFacts::unknown(instructions.len()) };
-                    if pos != operands.len() { return BodyFacts::unknown(instructions.len()); }
+                    if *sub_op == verum_vbc::instruction::CbgrSubOpcode::ToRawPtr.to_byte() =>
+                {
+                    let mut cursor = 0;
+                    let mut reg = || verum_vbc::encoding::decode_reg(operands, &mut cursor);
+                    let (Ok(dst), Ok(src)) = (reg(), reg()) else {
+                        return BodyFacts::unknown(instructions.len());
+                    };
+                    if cursor != operands.len() {
+                        return BodyFacts::unknown(instructions.len());
+                    }
+                    // The conversion consumes the address. A word-preserving conversion
+                    // retains the selected local producer's original access.
                     use_input(src, 8, &state);
-                    write = Some((dst, R::Unknown));
+                    let preserved = sites.get(&pc).is_some_and(|sites| {
+                        sites.contains(&ReferenceSiteKind::PassthroughOutput {
+                            register: dst.0,
+                            source: src.0,
+                        })
+                    });
+                    let value = match state.registers.get(&src.0) {
+                        Some(local @ (R::MutableLocalSlot | R::SharedLocalSlot)) if preserved => local.clone(),
+                        _ => R::Unknown,
+                    };
+                    write = Some((dst, value));
                 }
                 I::TextExtended { sub_op, operands }
                     if TextSubOpcode::from_byte(*sub_op)
@@ -752,7 +784,7 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                                         ArgumentView::FieldCellOrRegister(_)
                                     ) && state.cells.get(&reg) == Some(&false));
                                 use_input(Reg(reg), if identity { demand } else { 8 }, &state);
-                                if demand == 1 && value == R::Slot {
+                                if demand == 1 && value.permits_object_view() {
                                     call_inputs.entry(pc).or_default().insert(index);
                                     value = R::Unknown; // contents are not another proved cell
                                 }
@@ -790,10 +822,12 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                     write = Some((*dst, R::Unknown));
                 }
                 I::Ref { dst, src } | I::RefMut { dst, src } => {
-                    // These legacy producers do not specify the result convention.
-                    // Only the borrowed register can acquire that uncertainty.
                     use_input(*src, 8, &state);
-                    write = Some((*dst, R::Unknown));
+                    let shared_slot = matches!(instruction, I::Ref { .. })
+                        && sites.get(&pc).is_some_and(|sites| {
+                            sites.contains(&ReferenceSiteKind::SlotOutput(dst.0))
+                        });
+                    write = Some((*dst, if shared_slot { R::SharedLocalSlot } else { R::Unknown }));
                 }
                 I::CmpG { dst, a, b, .. } => {
                     use_input(*a, 8, &state);
@@ -846,7 +880,7 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                     use_input(*src, 8, &state);
                     let issued_slot = sites.get(&pc).is_some_and(|sites|
                         sites.contains(&ReferenceSiteKind::SlotOutput(dst.0)));
-                    write = Some((*dst, if issued_slot { R::Slot } else { R::Unknown }));
+                    write = Some((*dst, if issued_slot { R::MutableLocalSlot } else { R::Unknown }));
                 }
                 I::SetF { obj, value, .. } => {
                     use_input(*obj, 1, &state);
@@ -994,7 +1028,7 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                     // same instruction. A word's carrier and argument origins
                     // survive, but a previous allocation's tag cannot prove it.
                     incoming.registers.retain(|_, value| {
-                        matches!(value, R::Value | R::Slot | R::Parameter(..))
+                        matches!(value, R::Value | R::Slot | R::MutableLocalSlot | R::SharedLocalSlot | R::Parameter(..))
                     });
                     incoming.guards.clear();
                     incoming.objects.clear();

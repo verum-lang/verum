@@ -26365,13 +26365,20 @@ fn lower_cbgr_extended<'ctx>(
         0x32 => {
             // ToRawPtr consumes the address of a referenced field, not its
             // preloaded value. Other pointer producers already hold addresses.
-            if operands.len() < 2 {
-                return Ok(());
+            let mut cursor = 0;
+            let dst = read_reg_varlen(operands, &mut cursor)?;
+            let src = read_reg_varlen(operands, &mut cursor)?;
+            if cursor != operands.len() {
+                return Err(LlvmLoweringError::unsupported("unexpected ToRawPtr operands"));
             }
-            let dst = op_reg(operands, 0);
-            let src_reg = op_reg(operands, 1);
-            let src = field_address_or_value(ctx, src_reg, ctx.get_register(src_reg)?, "refield_raw_addr")?;
-            ctx.set_register(dst, src);
+            let original = ctx.get_register(src)?;
+            let address = field_address_or_value(ctx, src, original, "refield_raw_addr")?;
+            ctx.set_register(dst, address);
+            if address == original {
+                ctx.record_reference_site(super::native_call::ReferenceSiteKind::PassthroughOutput {
+                    register: dst, source: src,
+                });
+            }
             Ok(())
         }
         0x33 => {
@@ -44451,51 +44458,26 @@ fn lower_ref<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg) -> R
                 // because subsequent code may overwrite that slot (VBC register
                 // reuse). The reference must point to its own stable storage.
                 let val = ctx.get_register(src.0)?;
-                if let BasicValueEnum::IntValue(iv) = val {
-                    let alloca = ctx
-                        .builder()
+                let word = match val {
+                    BasicValueEnum::IntValue(bits) => Some(bits),
+                    // An erased generic value can use the pointer register ABI.
+                    BasicValueEnum::PointerValue(pointer) => Some(ctx.builder()
+                        .build_ptr_to_int(pointer, ctx.types().i64_type(), "ref_ptrval")
+                        .or_llvm_err()?),
+                    _ => None,
+                };
+                if let Some(bits) = word {
+                    let alloca = ctx.builder()
                         .build_alloca(ctx.types().i64_type(), "ref_prim")
                         .or_llvm_err()?;
-                    ctx.builder()
-                        .build_store(alloca, iv)
-                        .or_llvm_err()?;
-                    let ptr_as_i64 = ctx
-                        .builder()
+                    ctx.builder().build_store(alloca, bits).or_llvm_err()?;
+                    let address = ctx.builder()
                         .build_ptr_to_int(alloca, ctx.types().i64_type(), "ref_prim_ptr")
                         .or_llvm_err()?;
-                    ctx.set_register(dst.0, ptr_as_i64.into());
-                    // #18: a locally-produced scalar ref holds the ADDRESS of a
-                    // stack slot — mark it so compare lowering (deref_if_lone_ref)
-                    // dereferences it, exactly as scalar-&-params are marked.
-                    // Without this, `x == r` compared 5 against the slot address.
-                    ctx.mark_ref_param_register(dst.0);
-                } else if let BasicValueEnum::PointerValue(pv) = val {
-                    // PointerValue that's NOT a heap type — this is a generic
-                    // type parameter compiled as `ptr` (value-as-pointer via
-                    // inttoptr). Create alloca + store ptrtoint so downstream
-                    // Deref in a different function can load the value correctly.
-                    // Without this, Ref passes through the fake pointer and
-                    // cross-function Deref crashes (e.g., BTreeMap *key).
-                    let iv = ctx
-                        .builder()
-                        .build_ptr_to_int(pv, ctx.types().i64_type(), "ref_ptrval")
-                        .or_llvm_err()?;
-                    let alloca = ctx
-                        .builder()
-                        .build_alloca(ctx.types().i64_type(), "ref_prim")
-                        .or_llvm_err()?;
-                    ctx.builder()
-                        .build_store(alloca, iv)
-                        .or_llvm_err()?;
-                    let ptr_as_i64 = ctx
-                        .builder()
-                        .build_ptr_to_int(alloca, ctx.types().i64_type(), "ref_prim_ptr")
-                        .or_llvm_err()?;
-                    ctx.set_register(dst.0, ptr_as_i64.into());
-                    // #18: a locally-produced scalar ref holds the ADDRESS of a
-                    // stack slot — mark it so compare lowering (deref_if_lone_ref)
-                    // dereferences it, exactly as scalar-&-params are marked.
-                    // Without this, `x == r` compared 5 against the slot address.
+                    ctx.set_register(dst.0, address.into());
+                    if bits.get_type().get_bit_width() == 64 {
+                        ctx.record_reference_site(super::native_call::ReferenceSiteKind::SlotOutput(dst.0));
+                    }
                     ctx.mark_ref_param_register(dst.0);
                 } else {
                     // Float/other — pass through as fallback.

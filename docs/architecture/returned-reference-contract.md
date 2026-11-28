@@ -854,6 +854,15 @@ itself contain a reference. Existing eager returned-slot and payload loads are
 recorded as already adapted and cannot be reclassified as the raw slot by this
 consumer. This unit does not certify or replace all older normalization paths.
 
+A native `RefLocal` can issue the address of a mutable local holding a record.
+When `ToRawPtr` forwards that exact word, a field access loads the current
+record handle from the local. Whole-value replacement writes to the original
+local. Register moves carry the producer evidence. At a join the mutable-local
+origin survives only when every incoming word has that origin. A shared `Ref`
+that spills a complete word provides a field-read view after the same conversion.
+The selected local storage is valid in its issuing frame. Field writes and callee
+argument adaptations require independent evidence.
+
 The complete edit plan is computed before changing any sealed body. Field,
 variant and pass-through dereference consumers have use-local native anchors;
 call operands are checked against the recorded actual operand before replacing
