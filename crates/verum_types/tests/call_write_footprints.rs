@@ -1113,3 +1113,31 @@ fn a_mounted_accessor_composes_only_its_selected_module_bodies() {
     ]);
     assert!(found.is_empty(), "{found:?}");
 }
+
+#[test]
+fn inserting_a_constructed_or_forwarded_payload_requires_its_original_loans() {
+    let list = list_with_push();
+    let declarations = "type Entry<T> is Occupied(T) | Empty;
+        fn forward<T>(value:T)->T { value }";
+    for (caller, expected_error) in [
+        ("fn append<T>(mut out:List<Entry<T>>, value:T)->List<Entry<T>> {
+             out.push(Entry.Occupied(value)); out }", None),
+        ("fn append<T>(mut out:List<T>, value:T)->List<T> {
+             out.push(forward(forward(value))); out }", None),
+        ("fn append<T>(mut out:List<Entry<T>>, value:T)->List<Entry<T>> {
+             let entry=Entry.Occupied(forward(value)); out.push(entry); out }", None),
+        ("fn leak(mut out:List<Entry<&Int>>)->List<Entry<&Int>> {
+             let local=23; out.push(Entry.Occupied(forward(&local))); out }", Some("local")),
+        ("fn opaque<T>(mut out:List<Entry<T>>, make:fn()->T)->List<Entry<T>> {
+             out.push(Entry.Occupied(forward(make()))); out }", Some("cannot establish the lifetime")),
+    ] {
+        let found = registered_errors([
+            ("core.collections.list", list.clone()),
+            ("consumer", format!("mount core.collections.list.List; {declarations} {caller}").into()),
+        ]);
+        match expected_error {
+            None => assert!(found.is_empty(), "{caller}: {found:?}"),
+            Some(message) => assert!(found.iter().any(|error| error.contains(message)), "{caller}: {found:?}"),
+        }
+    }
+}

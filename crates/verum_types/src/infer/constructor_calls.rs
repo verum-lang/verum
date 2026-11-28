@@ -178,7 +178,6 @@ impl TypeChecker {
         } else {
             result
         };
-        self.observe_call_result_origins(span, &result, args, Some(params), None, None, None)?;
         // Only the selected data constructor owns this bound. Arguments retain
         // their own properties in ordinary expression traversal.
         let target = Type::function_with_requirement(
@@ -190,6 +189,7 @@ impl TypeChecker {
             PropertyRequirement::value_construction(),
         );
         self.type_registry.register_data_constructor_target(span, target, result.clone());
+        self.observe_call_result_origins(span, &result, args, Some(params), None, None, None)?;
         Ok(InferResult::method(
             result,
             Some(crate::core_metadata::ReceiverKind::None),

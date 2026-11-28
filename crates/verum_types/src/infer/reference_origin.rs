@@ -806,7 +806,13 @@ impl TypeChecker {
             return Ok(());
         }
         if let Some(origins) = precise {
-            self.record_evaluated_origins(span, Some(origins));
+            // A checked whole-value forward transfers exactly the payload
+            // observed at its argument, including any uncertainty.
+            let complete = self.type_registry.returned_value(span)
+                .and_then(|body| body.forwarded_parameter())
+                .and_then(|index| args.get(index))
+                .is_some_and(|argument| self.operand_has_complete_payload(argument));
+            self.record_owned_value_origins(span, Some(origins), complete);
             return Ok(());
         }
         if matches!(self.type_registry.lookup_call_target(span),
@@ -851,7 +857,11 @@ impl TypeChecker {
             }
             self.collect_evaluated_operand_origins(receiver, &mut found);
         }
-        self.record_evaluated_origins(span, Some(found));
+        // A data constructor can only store its explicit fields. Read their
+        // evaluation-time evidence before the enclosing call retires its operands.
+        let complete = self.type_registry.constructed_value(span).is_some()
+            && args.iter().all(|argument| self.operand_has_complete_payload(argument));
+        self.record_owned_value_origins(span, Some(found), complete);
         Ok(())
     }
 
