@@ -71,6 +71,15 @@ impl AssociatedTypeAssignment {
     }
 
     pub fn instantiate(&self, arguments: &[Type], owners: &Substitution) -> Result<Type, Text> {
+        let (body, substitution) = self.application_scope(arguments, owners)?;
+        body.try_apply_subst(&substitution)
+    }
+
+    pub(super) fn application_scope(
+        &self,
+        arguments: &[Type],
+        owners: &Substitution,
+    ) -> Result<(&Type, Substitution), Text> {
         if arguments.len() != self.parameters.len() {
             return Err(
                 "associated family arguments do not match the implementation telescope".into(),
@@ -92,9 +101,9 @@ impl AssociatedTypeAssignment {
             }
         }
         for (parameter, argument) in self.parameters.iter().zip(arguments) {
-            parameter.bind_argument( argument, &mut substitution)?;
+            parameter.bind_argument(argument, &mut substitution)?;
         }
-        self.body.try_apply_subst(&substitution)
+        Ok((&self.body, substitution))
     }
 
     /// Transport only owner substitutions; local parameters remain bound here.

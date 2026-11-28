@@ -10,6 +10,10 @@ use crate::{
 };
 use verum_common::{List, Text};
 
+#[path = "protocol_associated_components.rs"]
+mod components;
+use components::ComponentPlan;
+
 /// A resolved family application also records completed local arguments. A
 /// symbolic application must retain these arguments when emitted or substituted.
 pub(super) struct AssignmentFailure {
@@ -51,6 +55,7 @@ pub(crate) struct AssociatedDeclarationHeader<'a> {
 pub struct FamilyApplication {
     pub arguments: List<Type>,
     pub result: Type,
+    components: Option<ComponentPlan>,
 }
 
 impl ProtocolChecker {
@@ -158,6 +163,14 @@ impl ProtocolChecker {
         &self, receiver: &Type, owner: &ProtocolBound, name: &Text,
         arguments: &[Type], environment: ConstraintEnvironment<'_>,
     ) -> Result<Option<FamilyApplication>, Text> {
+        self.select_owned_family(receiver, owner, name, arguments, environment)?
+            .map(|application| self.complete_family_components(application, environment)).transpose()
+    }
+
+    fn select_owned_family(
+        &self, receiver: &Type, owner: &ProtocolBound, name: &Text,
+        arguments: &[Type], environment: ConstraintEnvironment<'_>,
+    ) -> Result<Option<FamilyApplication>, Text> {
         let key = self.make_protocol_key(&owner.protocol);
         let Some(declaration) = self.associated_declaration_application(
             &key, &owner.args, receiver, name, &mut Vec::new(),
@@ -165,7 +178,7 @@ impl ProtocolChecker {
         if let Some(application) = self.assumed_family(
             receiver, name, arguments, environment.protocols, None, Some(&declaration),
         )? { return Ok(Some(application)); }
-        self.resolve_family_implementations(
+        self.select_family_implementation(
             self.impls_by_protocol.get_key_value(&key),
             receiver, name, arguments, environment, Some((&owner.args, &declaration)), None,
         )
@@ -242,6 +255,11 @@ impl ProtocolChecker {
         left.arguments.len() == right.arguments.len()
             && left.arguments.iter().zip(&right.arguments).all(|(a, b)| self.types_structurally_equal(a, b))
             && self.types_structurally_equal(&left.result, &right.result)
+            && match (&left.components, &right.components) {
+                (Some(left), Some(right)) => left.agrees_with(right, self),
+                (None, None) => true,
+                _ => false,
+            }
     }
 
     /// Equations supplied by actual declaration premises for one selected
@@ -414,6 +432,7 @@ impl ProtocolChecker {
                     args: List::from_iter([receiver.clone()]),
                 };
                 let application = FamilyApplication {
+                    components: None,
                     result: equality.cloned().unwrap_or_else(|| {
                         if completed.is_empty() { projection } else {
                             Type::TypeApp { constructor: Box::new(projection), args: completed.clone() }
@@ -445,6 +464,17 @@ impl ProtocolChecker {
     /// A known owner narrows the index search. Every remaining candidate must
     /// prove its domain in the caller's scope and agree on the same application.
     fn resolve_family_implementations<'a>(
+        &self,
+        indices: impl IntoIterator<Item = (&'a Text, &'a super::ImplOverlapIndex)>,
+        receiver: &Type, name: &Text, arguments: &[Type], environment: ConstraintEnvironment<'_>,
+        owner: Option<(&[Type], &DeclarationApplication)>,
+        header: Option<AssociatedDeclarationHeader<'_>>,
+    ) -> Result<Option<FamilyApplication>, Text> {
+        self.select_family_implementation(indices, receiver, name, arguments, environment, owner, header)?
+            .map(|application| self.complete_family_components(application, environment)).transpose()
+    }
+
+    fn select_family_implementation<'a>(
         &self,
         indices: impl IntoIterator<Item = (&'a Text, &'a super::ImplOverlapIndex)>,
         receiver: &Type, name: &Text, arguments: &[Type], environment: ConstraintEnvironment<'_>,
@@ -502,7 +532,7 @@ impl ProtocolChecker {
                     &substitution,
                     environment,
                 )?;
-                if let Some((prior_protocol, prior_owner, prior)) = &selected {
+                if let Some((prior_protocol, prior_owner, prior)) = &mut selected {
                     if prior_protocol != &declaration.owner
                         || prior_owner != &declaration.arguments
                         || !self.same_family_application(prior, &application)
@@ -511,6 +541,11 @@ impl ProtocolChecker {
                             "associated family application has competing declaration bindings"
                                 .into(),
                         );
+                    }
+                    if let (Some(kept), Some(additional)) = (&mut prior.components, application.components) {
+                        for bound in additional.result_bounds {
+                            if !kept.result_bounds.contains(&bound) { kept.result_bounds.push(bound); }
+                        }
                     }
                 } else {
                     selected = Some((declaration.owner.clone(), declaration.arguments.clone(), application));
@@ -651,10 +686,13 @@ impl ProtocolChecker {
                 .collect::<Result<_, _>>()?,
         );
         self.check_universal_bounds_in(receiver, &[protocol], environment)?;
-        let result = if let Some(body) = implementation.associated_types.get(name) {
-            body.instantiate(&arguments, implementation_scope)?
+        let (result, components) = if let Some(body) = implementation.associated_types.get(name) {
+            let (body, scope) = body.application_scope(&arguments, implementation_scope)?;
+            let result = body.try_apply_subst(&scope)?;
+            let components = self.family_component_plan(body, &scope, implementation)?;
+            (result, components)
         } else if let Some(body) = &declaration.default {
-            body.try_apply_subst(&declaration_scope)?
+            (body.try_apply_subst(&declaration_scope)?, None)
         } else {
             return Err("associated family has no assignment or declared default".into());
         };
@@ -687,8 +725,13 @@ impl ProtocolChecker {
         let bounds = self.family_result_bounds(
             implementation, name, declaration, &declaration_scope, implementation_scope,
         )?;
-        self.check_universal_bounds_in(&result, &bounds, environment)?;
-        Ok(FamilyApplication { arguments, result })
+        let mut application = FamilyApplication { arguments, result, components };
+        if let Some(plan) = &mut application.components {
+            plan.result_bounds = bounds;
+        } else {
+            self.check_universal_bounds_in(&application.result, &bounds, environment)?;
+        }
+        Ok(application)
     }
 
     fn family_result_bounds(

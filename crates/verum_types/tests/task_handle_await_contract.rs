@@ -45,6 +45,10 @@ const MOUNTS: &str = r#"
 "#;
 
 fn check(body: &str, reverse: bool) -> (TypeChecker, List<Text>) {
+    check_with_tasks(body, reverse, TASKS)
+}
+
+fn check_with_tasks(body: &str, reverse: bool, tasks: &str) -> (TypeChecker, List<Text>) {
     let consumer = format!("{MOUNTS}\n{body}");
     let mut checker = TypeChecker::new();
     checker.register_primitives();
@@ -53,7 +57,7 @@ fn check(body: &str, reverse: bool) -> (TypeChecker, List<Text>) {
     let mut registry = ModuleRegistry::new();
     let mut providers = [
         ("core.async.future", FUTURE),
-        ("demo.tasks", TASKS),
+        ("demo.tasks", tasks),
         ("demo.foreign", FOREIGN),
     ];
     let consumer_file = FileId::new(providers.len() as u32);
@@ -328,4 +332,65 @@ fn structural_await_distinguishes_a_nominal_future_from_a_tuple_implementation()
     "#;
     accepts(&format!("{implemented} async fn actual(pair:(Int,Int))->Bool {{ pair.await }}"));
     refuses_type_mismatch(&format!("{implemented} async fn wrong(pair:(Int,Int))->(Int,Int) {{ pair.await }}"));
+}
+
+#[test]
+fn composed_outputs_keep_the_projection_owner_of_each_implementation_parameter() {
+    let declarations = r#"
+        mount core.async.future.{Poll, Context};
+        type Pair<X:Future,Y:Future> is { first:X, second:Y };
+        implement<X:Future,Y:Future> Future for Pair<X,Y> {
+            type Output = (X.Output,Y.Output);
+            fn poll(&mut self, _cx:&mut Context)->Poll<(X.Output,Y.Output)> { Poll.Pending }
+        }
+        type Other is protocol { type Output; };
+        implement<T> Other for JoinHandle<T> { type Output=Bool; }
+        implement<X:Future,Y:Future> Other for Pair<X,Y> { type Output=Bool; }
+        fn pair<X:Future,Y:Future>(x:X,y:Y)->Pair<X,Y> { Pair {first:x,second:y} }
+    "#;
+    let probe = r#"
+        async fn unpack<A,X:Future<Output=A>>(f:Pair<Pair<X,JoinHandle<Bool>>,JoinHandle<Int>>)->A {
+            let ((value, status), outer) = f.await;
+            let first: Result<Bool,JoinError> = status;
+            let second: Result<Int,JoinError> = outer;
+            value
+        }
+        async fn compose<A,B,C,X:Future<Output=A>,Y:Future<Output=B>,Z:Future<Output=C>>(
+            x:X,y:Y,z:Z
+        )->(A,B,C) {
+            let ((a,b),c) = pair(pair(x,y),z).await;
+            (a,b,c)
+        }
+    "#;
+    accepts(&format!("{declarations}{probe}"));
+    refuses_type_mismatch(&format!("{declarations}{}",
+        probe.replace("first: Result<Bool,JoinError>", "first: Bool")));
+    let provider = format!("{TASKS}\n{}", declarations
+        .replace("type Pair<", "public type Pair<")
+        .replace("fn pair<", "public fn pair<"));
+    for reverse in [false, true] {
+        let source = format!("mount demo.tasks.{{Pair, pair as group}}; type Output is {{ exit:Int }}; {}",
+            probe.replace("pair(pair(x,y),z)", "group(group(x,y),z)"));
+        let (_, errors) = check_with_tasks(&source, reverse, &provider);
+        assert!(errors.is_empty(), "imported reverse={reverse}: {errors:?}");
+    }
+}
+
+#[test]
+fn equal_concrete_receivers_do_not_merge_distinct_component_protocols() {
+    let declarations = r#"
+        mount core.async.future.{Poll,Context};
+        type Left is protocol { type Item; };
+        type Right is protocol { type Item; };
+        type Value is { value:Int };
+        implement Left for Value { type Item=Int; }
+        implement Right for Value { type Item=Bool; }
+        type Both<A:Left,B:Right> is { first:A, second:B };
+        implement<A:Left,B:Right> Future for Both<A,B> {
+            type Output=(A.Item,B.Item);
+            fn poll(&mut self,_cx:&mut Context)->Poll<(A.Item,B.Item)> { Poll.Pending }
+        }
+    "#;
+    accepts(&format!("{declarations} async fn read(f:Both<Value,Value>)->(Int,Bool) {{ f.await }}"));
+    refuses_type_mismatch(&format!("{declarations} async fn read(f:Both<Value,Value>)->(Bool,Int) {{ f.await }}"));
 }
