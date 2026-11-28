@@ -1,0 +1,20 @@
+fn byte_positions(bytes: &List<Byte>) -> Int {
+    let mut total = 0;
+    for byte in bytes.iter() { total += *byte as Int; }
+    total
+}
+
+fn main() -> Int {
+    let empty: List<Byte> = [];
+    let bytes: List<Byte> = [240 as Byte, 241 as Byte];
+    if byte_positions(&empty) != 0 || byte_positions(&bytes) != 481 { return 2; }
+    let mut positions = bytes.iter();
+    match positions.next_back() {
+        Maybe.Some(last) => match positions.next() {
+            Maybe.Some(first) => if (*last as Int) == 241 && (*first as Int) == 240 &&
+                positions.len() == 0 { 73 } else { 3 },
+            Maybe.None => 4,
+        },
+        Maybe.None => 5,
+    }
+}

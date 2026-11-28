@@ -24378,7 +24378,9 @@ fn lower_cbgr_extended<'ctx>(
                     .map_err(|error| LlvmLoweringError::unsupported(error.to_string()))?;
             let dst = dst.0;
 
-            let list_ptr = as_ptr(ctx, ctx.get_register(list_reg.0)?, "rle_list_ptr")?;
+            let container = ctx.get_register(list_reg.0)?;
+            let container = ctx.reference_value_view(list_reg.0, container)?;
+            let list_ptr = as_ptr(ctx, container, "rle_list_ptr")?;
             let index = as_i64(ctx, ctx.get_register(index_reg.0)?, "rle_idx")?;
             let i64_type = ctx.types().i64_type();
             let ptr_type = ctx.types().ptr_type();
@@ -24905,6 +24907,11 @@ fn lower_cbgr_extended<'ctx>(
                     .map_err(|error| LlvmLoweringError::unsupported(error.to_string()))?;
             let dst = dst.0;
             let src = ctx.get_register(source.0)?;
+            let src = if layout.stride == 0 {
+                ctx.reference_value_view(source.0, src)?
+            } else {
+                src
+            };
             let start = ctx.get_register(start.0)?;
             let len = ctx.get_register(len.0)?;
             let i64_ty = ctx.types().i64_type();

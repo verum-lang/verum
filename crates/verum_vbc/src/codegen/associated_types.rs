@@ -93,7 +93,7 @@ impl VbcCodegen {
         self.selected_protocol_implementation_member(actual, selected, &[], member)
     }
 
-    fn nominal_protocol_role(
+    pub(super) fn nominal_protocol_role(
         &self, actual: &TypeRef, protocol: verum_common::well_known_types::WellKnownProtocol,
     ) -> Option<TypeId> {
         let owner = self.type_by_id(actual.base_type_id()?)?;

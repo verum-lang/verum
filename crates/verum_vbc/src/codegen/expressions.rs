@@ -19198,7 +19198,16 @@ impl VbcCodegen {
         let opt_reg = self.ctx.alloc_temp();
         let tag_reg = self.ctx.alloc_temp();
         let elem_reg = self.ctx.alloc_temp();
-        let next_method = self.intern_string("next");
+        // Iterator::next owns the loop step even when another protocol on
+        // this cursor declares a method with the same name.
+        let iterator_protocol = iterator.as_ref()
+            .and_then(|cursor| self.nominal_protocol_role(
+                cursor, verum_common::well_known_types::WellKnownProtocol::Iterator,
+            ))
+            .and_then(|protocol| self.type_by_id(protocol))
+            .and_then(|descriptor| self.type_declaration_identity(descriptor));
+        let selector = iterator_protocol.map(|owner| format!("dyn:{owner}.next"));
+        let next_method = self.intern_string(selector.as_deref().unwrap_or("next"));
         let none_tag = verum_common::well_known_types::maybe_none_tag();
 
         // Loop start

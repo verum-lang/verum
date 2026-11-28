@@ -713,10 +713,8 @@ implement<T> List<T> {
 
     // Iterator over references.
     public fn iter(&self) -> ListIter<T> {
-        ListIter {
-            ptr: self.ptr,
-            end: unsafe { self.ptr.offset(self.len) },
-        }
+        let back = self.len;
+        ListIter { items: &self[0..back], front: 0, back }
     }
 
     // Iterator over mutable references.
@@ -3193,63 +3191,45 @@ implement<T> Length for List<T> {
 
 // Iterator over list references.
 public type ListIter<T> is {
-    ptr: &unsafe T,
-    end: &unsafe T,
+    items: &[T],
+    front: Int,
+    back: Int,
 };
 
 implement<T> Iterator for ListIter<T> {
     type Item = &T;
 
     fn next(&mut self) -> Maybe<&T> {
-        // Compare raw pointers by ADDRESS (identity), not via `==` on
-        // `&unsafe T`. Under AOT, `ptr == end` on raw pointers lowers to
-        // `verum_generic_eq`, which DEREFERENCES its operands to compare
-        // contents — and `self.end` is the one-past-the-end sentinel, so
-        // dereferencing it reads past the backing array and SIGSEGVs
-        // (AOT-ITER-1). Casting to `Int` forces an address-identity integer
-        // compare (the same `as Int` form `size_hint`/`len` already use).
-        if (self.ptr as Int) == (self.end as Int) {
+        if self.front == self.back {
             return Maybe.None;
         }
-        unsafe {
-            let item = &*self.ptr;
-            self.ptr = self.ptr.offset(1);
-            Maybe.Some(item)
-        }
+        let index = self.front;
+        self.front += 1;
+        Maybe.Some(&self.items[index])
     }
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
-        let remaining = (self.end as Int - self.ptr as Int) / T.size;
+        let remaining = self.back - self.front;
         (remaining, Maybe.Some(remaining))
     }
 }
 
 implement<T> DoubleEndedIterator for ListIter<T> {
     fn next_back(&mut self) -> Maybe<&T> {
-        // Compare raw pointers by ADDRESS (identity), not via `==` on
-        // `&unsafe T`. Under AOT, `ptr == end` on raw pointers lowers to
-        // `verum_generic_eq`, which DEREFERENCES its operands to compare
-        // contents — and `self.end` is the one-past-the-end sentinel, so
-        // dereferencing it reads past the backing array and SIGSEGVs
-        // (AOT-ITER-1). Casting to `Int` forces an address-identity integer
-        // compare (the same `as Int` form `size_hint`/`len` already use).
-        if (self.ptr as Int) == (self.end as Int) {
+        if self.front == self.back {
             return Maybe.None;
         }
-        unsafe {
-            self.end = self.end.offset(-1);
-            Maybe.Some(&*self.end)
-        }
+        self.back -= 1;
+        Maybe.Some(&self.items[self.back])
     }
 }
 
 implement<T> ExactSizeIterator for ListIter<T> {
     fn len(&self) -> Int {
-        (self.end as Int - self.ptr as Int) / T.size
+        self.back - self.front
     }
 }
 
-// IntoIterator for ListIter so it can be used in for loops
 implement<T> IntoIterator for ListIter<T> {
     type Item = &T;
     type IntoIter = ListIter<T>;

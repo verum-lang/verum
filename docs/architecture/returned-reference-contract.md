@@ -100,9 +100,8 @@ result does not validate the native carrier.
 
     let item: &T = unsafe { &*self.ptr.offset(i) };
 
-`core/collections/list.vr` is written in this idiom — `unique`, `iter`,
-`ListIter.next`, `fmt_debug` — and for a long time it produced neither
-convention: the register held a bare ADDRESS with nothing saying so.
+The former raw-pointer list cursor used this idiom. Its register held a bare
+address and carried no indication that the caller had to load the element.
 `&*p` folds to `p` (the identity `&*p ≡ p`, which exists so the
 reference cannot dangle when the producing frame pops), and a raw
 address is INT-tagged, so `*item` reached the generic `Deref`'s integer
@@ -553,15 +552,19 @@ fn enum_over_slice(bs: &[Byte]) -> Int {
 
 `0x6c` is the byte `'l'` — the element VALUE used as an address.
 
-Both iterators declare `-> Maybe<&T>` and bind `Item = &T`. At Tier 1,
-their native lowerings disagree about what the payload word holds:
+These two historical cursor bodies declared `-> Maybe<&T>` and bound
+`Item = &T`. Their native lowerings used different payload words.
 
 | producer | body | payload word |
 |---|---|---|
-| `ListIter.next` | `&*self.ptr` (`RefRawAddr`, 0x0D) | ADDRESS |
+| Former `ListIter.next` | `&*self.ptr` (`RefRawAddr`, 0x0D) | ADDRESS |
 | `SliceIter.next` | `&self.slice[i]` (`RefListElement`, 0x0B) | pre-loaded VALUE |
 
-Read in `lower_cbgr_extended`, the two arms are starker than the table:
+The current shared `ListIter` retains the list's slice and its two cursor
+indices. Both `next` and `next_back` project the stored slice with
+`RefListElement`. Creating the slice preserves the actual element stride.
+
+The historic comparison uses these instructions from `lower_cbgr_extended`.
 0x0B computes `elem_ptr`, LOADS through it with a width switch, stores
 the VALUE and calls `mark_interior_list_ref`; 0x0D stores the ADDRESS
 unchanged and calls `mark_interior_list_ref`. **Both producers set the

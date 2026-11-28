@@ -579,6 +579,42 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                     write = Some((*dst, R::Value));
                 }
                 I::CbgrExtended { sub_op, operands }
+                    if *sub_op == verum_vbc::instruction::CbgrSubOpcode::RefListElement.to_byte() =>
+                {
+                    let Ok(([dst, container, index], _)) =
+                        verum_vbc::encoding::decode_element_projection(operands, &mut 0)
+                    else { return BodyFacts::unknown(instructions.len()); };
+                    use_input(container, 1, &state);
+                    use_input(index, 8, &state);
+                    write = Some((dst, R::Unknown));
+                }
+                I::CbgrExtended { sub_op, operands }
+                    if *sub_op == verum_vbc::instruction::CbgrSubOpcode::RefSlice.to_byte() =>
+                {
+                    let Ok(([dst, source, start, len], _)) =
+                        verum_vbc::encoding::SliceProjectionLayout::decode(operands, &mut 0)
+                    else { return BodyFacts::unknown(instructions.len()); };
+                    let container = sites.get(&pc).is_some_and(|markers|
+                        markers.contains(&ReferenceSiteKind::ValueInput(source.0)))
+                        && state.parameter_origins.get(&source.0).is_some_and(|origins|
+                            origins.iter().all(|origin| {
+                                let ty = &fd.params[usize::from(*origin)].type_ref;
+                                let referent = match ty {
+                                    TypeRef::Reference { inner, .. } => inner.as_ref(),
+                                    ty => ty,
+                                };
+                                matches!(referent, TypeRef::Slice(_))
+                                    || nominal(referent).is_some_and(|id|
+                                        id == TypeId::LIST || id == TypeId::BYTE_LIST ||
+                                        self.module.declared_runtime_carrier(id)
+                                            == Some(verum_common::well_known_types::WellKnownType::List))
+                            }));
+                    use_input(source, if container { 1 } else { 8 }, &state);
+                    use_input(start, 8, &state);
+                    use_input(len, 8, &state);
+                    write = Some((dst, R::Value));
+                }
+                I::CbgrExtended { sub_op, operands }
                     if *sub_op == verum_vbc::instruction::CbgrSubOpcode::CapAttenuate.to_byte() =>
                 {
                     let mut cursor = 0;
