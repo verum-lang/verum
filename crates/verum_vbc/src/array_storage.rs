@@ -63,7 +63,7 @@ impl ArrayResultFacts {
     }
 
     /// The value still comes from an empty List allocation and has not escaped.
-    #[cfg(feature = "codegen")]
+    #[cfg(any(feature = "codegen", test))]
     pub(crate) fn is_fresh_list(&self, register: Reg) -> bool {
         self.fresh_lists.contains(&register)
     }

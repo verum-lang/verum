@@ -17383,9 +17383,17 @@ mod tests {
         );
         assert_eq!(
             sweep(SysSubOpcode::from_byte, SysSubOpcode::to_byte),
-            14,
+            17,
             "SysSubOpcode variant count drift"
         );
+        for (byte, operation) in [
+            (0x33, SysSubOpcode::ArgumentCount),
+            (0x34, SysSubOpcode::ArgumentBytes),
+            (0x35, SysSubOpcode::EnvironmentBytes),
+        ] {
+            assert_eq!(SysSubOpcode::from_byte(byte), Some(operation));
+            assert_eq!(operation.to_byte(), byte);
+        }
         assert_eq!(
             sweep(MachSubOpcode::from_byte, MachSubOpcode::to_byte),
             9,
@@ -17393,9 +17401,11 @@ mod tests {
         );
         assert_eq!(
             sweep(SyncSubOpcode::from_byte, SyncSubOpcode::to_byte),
-            21,
+            23,
             "SyncSubOpcode variant count drift"
         );
+        assert_eq!(SyncSubOpcode::from_byte(0x41), Some(SyncSubOpcode::ThreadFence));
+        assert_eq!(SyncSubOpcode::from_byte(0x42), Some(SyncSubOpcode::CompilerFence));
         assert_eq!(
             MemSubOpcode::from_byte(0x07),
             Some(MemSubOpcode::ListStorageStride)
@@ -17414,7 +17424,7 @@ mod tests {
         );
         assert_eq!(
             sweep(MemSubOpcode::from_byte, MemSubOpcode::to_byte),
-            50, // Includes allocation from a source List storage encoding.
+            57, // Includes checked Heap slots and ownership transfers into raw records.
             "MemSubOpcode variant count drift"
         );
     }
