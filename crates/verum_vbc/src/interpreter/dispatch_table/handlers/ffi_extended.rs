@@ -495,32 +495,15 @@ fn ffi_extended_body(
         // Struct Field Address (#37 — atomic-stdlib runtime enabler)
         // ================================================================
         Some(SystemSubOpcode::StructFieldAddr) => {
-            // Get the raw heap address of a struct field.
-            //
-
-            // Format: dst:reg, obj:reg, field_offset_lo:u8, field_offset_hi:u8
-            // Returns: dst = obj_heap_ptr + OBJECT_HEADER_SIZE + field_offset
-            //
-
-            // Used by the codegen path for `&self.field as *const T`
-            // — without this, the cast falls through compile_cast's
-            // generic _ arm (a passthrough), and the resulting Value
-            // is a register-encoded CBGR ref bit-pattern that
-            // atomic_load_* misreads as a raw address (silent
-            // ptr<0x1000 → returns 0).
+            // Expose a physical field address for a pointer cast. Managed records
+            // and raw ABI storage have distinct payload layouts.
             let dst = read_reg(state)?;
             let obj_reg = read_reg(state)?;
             let offset_lo = read_u8(state)? as u16;
             let offset_hi = read_u8(state)? as u16;
             let field_offset = (offset_hi << 8) | offset_lo;
-            // **FIELDADDR-HEADERLESS-1 (T1159)** — the emitter now says
-            // whether the receiver is a record behind a RAW POINTER (no
-            // ObjectHeader) rather than a heap object. This tier does
-            // not need the hint — its live-extent index answers the same
-            // question more precisely, and that test stays below — but
-            // the byte MUST be consumed or every instruction after this
-            // one decodes at the wrong offset.
-            let _headerless_hint = read_u8(state)?;
+            // An address outside the heap is valid only for a raw ABI receiver.
+            let headerless = read_u8(state)? != 0;
 
             let obj_val = state.get_reg(obj_reg);
 
@@ -604,75 +587,45 @@ fn ffi_extended_body(
                 return Err(InterpreterError::NullPointer);
             }
 
-            // SAFETY: the codegen only emits StructFieldAddr when
-            // (a) the receiver Type is a registered struct in the
-            // type-field-layouts table, and (b) the field_offset
-            // came from compute_field_offset for that type — so it
-            // is always within the object's data section.
-            // OBJECT_HEADER_SIZE adds the standard 24-byte header
-            // skip to reach the data section's first byte.
-            // **T0705 — bridge blocks are HEADERLESS.**
-            // The +24 skip reaches the data section of a HEAP OBJECT. A
-            // `cbgr_alloc` bridge block has no object header: its field
-            // slots start at the user pointer, and adding the skip lands
-            // 24 bytes past the field (or outside the block entirely).
-            // The discriminator is the live-extent index — the same fact
-            // `bridge_scalar_slot` uses to decide provenance — not the
-            // value's tag, which says nothing about layout.
-            let header_skip = if super::cbgr::bridge_extent_room(state, obj_ptr as usize).is_some()
-            {
-                0
+            let owner = obj_ptr as usize;
+            let offset = usize::from(field_offset);
+            let field_addr = if let Some(room) = super::cbgr::bridge_extent_room(state, owner) {
+                if offset >= room {
+                    return Err(InterpreterError::InvalidOperand {
+                        message: format!("StructFieldAddr: offset {offset} exceeds {room} bytes of raw storage"),
+                    });
+                }
+                obj_ptr.wrapping_add(offset)
+            } else if state.heap.contains(obj_ptr.cast()) {
+                // SAFETY: exact membership proves a live allocation header.
+                let header = unsafe { &*obj_ptr.cast::<super::super::super::heap::ObjectHeader>() };
+                if offset >= header.size as usize {
+                    return Err(InterpreterError::InvalidOperand {
+                        message: format!("StructFieldAddr: offset {offset} exceeds {} bytes of record storage", header.size),
+                    });
+                }
+                // Only a field in the object's declared Value layout can later
+                // be borrowed as a typed place. Raw scalar ABI offsets stay raw.
+                if state.module.get_type(header.type_id).is_some_and(|ty| {
+                    ty.fields.get(offset / std::mem::size_of::<Value>())
+                        .is_some_and(|field| field.offset as usize == offset)
+                }) {
+                    state.heap.expose_object_field(owner, offset)?;
+                }
+                obj_ptr.wrapping_add(super::super::super::heap::OBJECT_HEADER_SIZE + offset)
             } else {
-                super::super::super::heap::OBJECT_HEADER_SIZE
+                // An unsafe external record uses its declared ABI layout.
+                // A managed object requires a live allocation in this heap.
+                if !headerless {
+                    return Err(InterpreterError::InvalidOperand {
+                        message: "StructFieldAddr: managed record has no live allocation".into(),
+                    });
+                }
+                obj_ptr.wrapping_add(offset)
             };
-            let field_addr = unsafe { obj_ptr.add(header_skip + field_offset as usize) };
-            // T0705 diagnosis aid, SUCCESS path (the existing FIELDADDR
-            // trace fires only on refusal). The bridge-headerless
-            // hypothesis was implemented and measured inert — but if
-            // `resolve_arg_value` materializes cbgr_allocate's Int-tagged
-            // bridge address into a PTR-tagged value BEFORE the is_int
-            // test, that fix never executed and stands unmeasured rather
-            // than refuted. This prints the receiver's post-resolution
-            // tag and both addresses so the question closes on data.
             if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceFieldaddr) {
-                eprintln!(
-                    "[fieldaddr-ok] tag={:?} is_int={} is_ptr={} obj={:p} field_addr={:p} off={}",
-                    obj_val.tag(),
-                    obj_val.is_int(),
-                    obj_val.is_ptr(),
-                    obj_ptr,
-                    field_addr,
-                    field_offset
-                );
+                eprintln!("[fieldaddr-ok] obj={obj_ptr:p} field_addr={field_addr:p} offset={offset}");
             }
-            // **FIELDADDR-TRACKED-1 (T1158)** — register the slot, the
-            // way the sibling opcode already does.
-            //
-            // `RefField` (handlers/cbgr.rs:1836) ends with
-            // `state.cbgr_mutable_ptrs.insert(field_ptr as usize)`, and
-            // that membership is what `handle_deref` consults to decide
-            // whether an address names a Value SLOT (read through it) or
-            // a heap object (identity, return the pointer). This opcode
-            // produced the same kind of address and told nobody, so a
-            // later `*f` fell to the identity arm (cbgr.rs:447) and the
-            // register kept a POINTER:
-            //
-            //     let f = unsafe { &(*p).b };  print(f"{*f}")
-            //     -> Variant(15622936) / Variant(750552) / `Low`
-            //
-            // — the formatter rendering the address as whatever object
-            // its bits happened to name, differently on each run, and
-            // once as a bare variant NAME that reads like a real value.
-            //
-            // Paired implementations are an oracle: two opcodes minting
-            // interior pointers, one registers and one does not. The
-            // registering one is right.
-            //
-            // Narrow by construction: this adds a slot that a Deref can
-            // read through. It cannot turn a heap-object address into a
-            // slot, because `cbgr_allocations` is tested FIRST in
-            // `handle_deref` — the sum-type `match *self` case (IpAddr
-            // and family) still reaches its identity arm.
             state.cbgr_mutable_ptrs.insert(field_addr as usize);
             state.set_reg(dst, Value::from_ptr(field_addr));
             Ok(DispatchResult::Continue)

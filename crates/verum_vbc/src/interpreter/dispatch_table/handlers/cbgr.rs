@@ -3422,6 +3422,9 @@ fn cbgr_extended_body(
             if src_val.is_thin_ref() {
                 let attenuated = state.heap.attenuate_reference(src_val, cap_mask as u16)?;
                 state.set_reg(dst, attenuated);
+            } else if src_val.is_fat_ref() {
+                let view = src_val.as_fat_ref().attenuate(!(cap_mask as u16));
+                state.set_reg(dst, Value::from_fat_ref(view));
             } else if is_cbgr_ref(&src_val) {
                 // Register-based CBGR reference: attenuate by stripping mutability if WRITE not in mask
                 let can_write = (cap_mask & caps::WRITE) != 0;
@@ -3432,9 +3435,13 @@ fn cbgr_extended_body(
                     let attenuated = strip_cbgr_ref_mutability(src_val);
                     state.set_reg(dst, attenuated);
                 }
-            } else if src_val.is_ptr() && !src_val.is_nil() {
+            } else if src_val.is_regular_ptr() && !src_val.is_nil() {
                 // Heap-based reference: attenuate by removing from mutable set if WRITE not in mask
                 let ptr_addr = src_val.as_ptr::<u8>() as usize;
+                if let Some(view) = state.heap.borrow_exposed_field(ptr_addr, cap_mask as u16)? {
+                    state.set_reg(dst, view);
+                    return Ok(DispatchResult::Continue);
+                }
                 let can_write = (cap_mask & caps::WRITE) != 0;
                 if !can_write {
                     state.cbgr_mutable_ptrs.remove(&ptr_addr);

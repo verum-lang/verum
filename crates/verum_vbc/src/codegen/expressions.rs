@@ -5120,7 +5120,7 @@ impl VbcCodegen {
                         }
                         self.emit_field_reference(dst, ptr_reg, ordinal);
                         if matches!(op, UnOp::Ref | UnOp::RefChecked) {
-                            self.emit_reference_attenuation(dst, crate::value::Capabilities::READ_ONLY);
+                            self.emit_reference_attenuation(dst, dst, crate::value::Capabilities::READ_ONLY);
                         }
                         self.ctx.free_temp(ptr_reg);
                         return Ok(Some(dst));
@@ -5181,7 +5181,7 @@ impl VbcCodegen {
                 let reference = self.ctx.alloc_temp();
                 self.ctx.emit(Instruction::Mov { dst: reference, src: source });
                 if op == UnOp::Ref {
-                    self.emit_reference_attenuation(reference, crate::value::Capabilities::READ_ONLY);
+                    self.emit_reference_attenuation(reference, reference, crate::value::Capabilities::READ_ONLY);
                 }
                 self.ctx.free_temp(source);
                 return Ok(Some(reference));
@@ -5319,21 +5319,20 @@ impl VbcCodegen {
                         self.ctx.free_temp(ptr_reg);
                         return Ok(Some(loaded));
                     }
-                    // `&*p ≡ p` — `ptr_reg` already holds the heap-anchored
-                    // pointer, which is the exact `&T` the surrounding code
-                    // expects and which survives every frame boundary.
-                    // NOTE (#48, 2026-07-12): a RefRawAddr materialization
-                    // here (interior-registered `Value::from_ptr`) was
-                    // built and REVERTED — the erased-T deref downstream
-                    // reads `*(addr as *const Value)`, but List literal-
-                    // coerced buffers hold RAW unboxed i64 elements, so
-                    // the read misinterprets (float-bits) and widening
-                    // the interior-deref surface SIGSEGVed async/poll
-                    // (stale `cbgr_mutable_ptrs` entries — the set is
-                    // never cleaned on free). The REAL contract fix is
-                    // element-repr carried facts on the buffer (see
-                    // task #48 notes / [[session_2026-07-11_glob_mount_
-                    // ctor_pattern_rigidity_47]]).
+                    // Form the declared borrow while the raw operand still names
+                    // the field. The VM can issue an owner-bound view here;
+                    // native code retains the field's physical address.
+                    if matches!(op, UnOp::Ref | UnOp::RefMut) {
+                        let view = self.ctx.alloc_temp();
+                        let access = if op == UnOp::RefMut {
+                            crate::value::Capabilities::MUT_EXCLUSIVE
+                        } else {
+                            crate::value::Capabilities::READ_ONLY
+                        };
+                        self.emit_reference_attenuation(view, ptr_reg, access);
+                        self.ctx.free_temp(ptr_reg);
+                        return Ok(Some(view));
+                    }
                     if declared_raw_address || is_raw_cast {
                         self.ctx.mark_raw_pointer(ptr_reg);
                     }
@@ -5778,7 +5777,7 @@ impl VbcCodegen {
             let dest = self.ctx.alloc_temp();
             self.emit_field_reference(dest, base_reg, field_idx);
             if op == UnOp::Ref {
-                self.emit_reference_attenuation(dest, crate::value::Capabilities::READ_ONLY);
+                self.emit_reference_attenuation(dest, dest, crate::value::Capabilities::READ_ONLY);
             }
             self.ctx.free_temp(base_reg);
             return Ok(Some(dest));
@@ -16591,7 +16590,7 @@ impl VbcCodegen {
             let reference = self.ctx.alloc_temp();
             self.emit_field_reference(reference, *owner, *field);
             if !kind.meta().allows_mutation {
-                self.emit_reference_attenuation(reference, crate::value::Capabilities::READ_ONLY);
+                self.emit_reference_attenuation(reference, reference, crate::value::Capabilities::READ_ONLY);
             }
             Some(reference)
         } else {
@@ -21468,10 +21467,10 @@ impl VbcCodegen {
         self.compile_pattern_bind_mode(pattern, scrutinee, &PatternBindingMode::Value, declaration.as_ref())
     }
 
-    fn emit_reference_attenuation(&mut self, reference: Reg, allowed: crate::value::Capabilities) {
+    fn emit_reference_attenuation(&mut self, destination: Reg, source: Reg, allowed: crate::value::Capabilities) {
         let mut operands = verum_common::List::<u8>::with_capacity(6).into();
-        Self::write_reg(&mut operands, reference.0);
-        Self::write_reg(&mut operands, reference.0);
+        Self::write_reg(&mut operands, destination.0);
+        Self::write_reg(&mut operands, source.0);
         operands.extend_from_slice(&allowed.0.to_le_bytes());
         self.ctx.emit(Instruction::CbgrExtended {
             sub_op: crate::instruction::CbgrSubOpcode::CapAttenuate as u8,

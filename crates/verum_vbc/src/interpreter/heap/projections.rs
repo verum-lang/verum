@@ -10,6 +10,9 @@ use verum_common::Map;
 pub(super) struct ProjectionTable {
     owners: Map<usize, OwnerProjections>,
     slots: Map<u64, HeapSlotRef>,
+    /// Physical addresses exported to unsafe code remain usable by the native
+    /// ABI. Only the field producer can associate one with a managed place.
+    exposed_fields: Map<usize, Value>,
 }
 #[derive(Debug, Default)]
 struct OwnerProjections {
@@ -154,6 +157,33 @@ impl Heap {
         self.cache_projection(target)
     }
 
+    /// Keep the exact owner incarnation alongside a declared record field's
+    /// physical address. Repeated exports of the same field reuse its ticket.
+    pub(crate) fn expose_object_field(
+        &mut self,
+        owner: usize,
+        offset: usize,
+    ) -> InterpreterResult<()> {
+        // A physical field address supplies ordinary storage access. It does
+        // not convey ownership, delegation, exclusivity or destruction rights.
+        let access = Capabilities::new(Capabilities::READ | Capabilities::WRITE);
+        let reference = self.project_object_field(owner, offset, access)?;
+        let address = owner + OBJECT_HEADER_SIZE + offset;
+        self.projections.exposed_fields.insert(address, reference);
+        Ok(())
+    }
+
+    pub(crate) fn borrow_exposed_field(
+        &mut self,
+        address: usize,
+        allowed: u16,
+    ) -> InterpreterResult<Option<Value>> {
+        let Some(reference) = self.projections.exposed_fields.get(&address).copied() else {
+            return Ok(None);
+        };
+        self.attenuate_reference(reference, allowed).map(Some)
+    }
+
     /// The caller proves the live raw allocation's base and extent. Its
     /// deallocator revokes the owner's tickets before releasing that storage.
     pub(crate) fn project_raw_slot(
@@ -236,8 +266,15 @@ impl Heap {
 
     pub(crate) fn revoke_projections(&mut self, owner: usize) {
         if let Some(slots) = self.projections.owners.remove(&owner) {
-            for id in slots.slots.into_values() {
+            for (target, id) in slots.slots {
                 self.projections.slots.remove(&id);
+                if let SlotStorage::Object { backing_field: None, backing, .. } = target.storage
+                    && backing == owner
+                    && !self.projections.exposed_fields.is_empty()
+                {
+                    let address = owner + OBJECT_HEADER_SIZE + target.offset;
+                    self.projections.exposed_fields.remove(&address);
+                }
             }
         }
     }
@@ -789,4 +826,38 @@ fn require(actual: Capabilities, required: u16) -> InterpreterResult<()> {
 /// that borrow authority.
 fn restrict_storage_access(reference: Capabilities, allocation: u16) -> Capabilities {
     reference.attenuate((Capabilities::READ | Capabilities::WRITE) & !allocation)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::TypeId;
+
+    #[test]
+    fn exposed_record_field_views_restrict_rights_and_expire_with_the_owner() {
+        let mut heap = Heap::new();
+        let stride = std::mem::size_of::<Value>();
+        let object = heap.alloc(TypeId(50_001), 2 * stride).unwrap();
+        let first = object.data_ptr() as usize;
+        let second = first + stride;
+        let owner = object.as_ptr() as usize;
+        heap.expose_object_field(owner, stride).unwrap();
+
+        let read = heap.borrow_exposed_field(second, Capabilities::READ_ONLY.0).unwrap().unwrap();
+        let write = heap.borrow_exposed_field(second, u16::MAX).unwrap().unwrap();
+        let rights = |heap: &Heap, view| heap.projection_capabilities(view).unwrap().unwrap().0;
+        assert_eq!(rights(&heap, read), Capabilities::READ);
+        assert_eq!(rights(&heap, write), Capabilities::READ | Capabilities::WRITE);
+        assert!(heap.borrow_exposed_field(first, u16::MAX).unwrap().is_none());
+        heap.expose_object_field(owner, stride).unwrap();
+        assert_eq!(heap.borrow_exposed_field(second, u16::MAX).unwrap().unwrap().bits(), write.bits());
+
+        // SAFETY: the heap owns this live object. Only tickets are examined after free.
+        unsafe { heap.free(object) };
+        assert!(heap.borrow_exposed_field(second, u16::MAX).unwrap().is_none());
+        for view in [read, write] {
+            assert!(matches!(heap.projection_capabilities(view),
+                Err(InterpreterError::CbgrViolation { kind: CbgrViolationKind::UseAfterFree, .. })));
+        }
+    }
 }
