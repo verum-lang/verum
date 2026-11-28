@@ -714,6 +714,11 @@ impl TypeChecker {
         self.record_owned_value_origins(field.span, Some(origins), complete);
     }
 
+    fn operand_has_complete_payload(&mut self, value: &Expr) -> bool {
+        self.observed_operand_type(value).is_some_and(|ty|
+            !self.carries_stored_loan(&ty) || self.observed_known_owned_payload(value))
+    }
+
     /// Aggregate fields are evaluated individually, before later fields can
     /// replace the places from which earlier field values were copied.
     pub(super) fn observe_aggregate_result_origins(&mut self, value: &Expr, ty: &Type) {
@@ -722,9 +727,14 @@ impl TypeChecker {
         let mut field_origins = None;
         match &unparen(value).kind {
             ExprKind::Tuple(values) | ExprKind::Array(verum_ast::ArrayExpr::List(values)) => {
-                for value in values { self.collect_evaluated_operand_origins(value, &mut origins); }
+                complete = true;
+                for value in values {
+                    complete &= self.operand_has_complete_payload(value);
+                    self.collect_evaluated_operand_origins(value, &mut origins);
+                }
             }
             ExprKind::Array(verum_ast::ArrayExpr::Repeat { value, .. }) => {
+                complete = self.operand_has_complete_payload(value);
                 self.collect_evaluated_operand_origins(value, &mut origins);
             }
             ExprKind::Record { fields, base, .. } => {
@@ -734,8 +744,7 @@ impl TypeChecker {
                 }
                 for field in fields {
                     let retained = if let Some(value) = &field.value {
-                        complete &= self.observed_operand_type(value).is_some_and(|ty|
-                            !self.carries_stored_loan(&ty) || self.observed_known_owned_payload(value));
+                        complete &= self.operand_has_complete_payload(value);
                         let mut retained = List::new();
                         self.collect_evaluated_operand_origins(value, &mut retained);
                         retained
@@ -756,8 +765,7 @@ impl TypeChecker {
                     }
                 }
                 if let Some(base) = base {
-                    complete &= self.observed_operand_type(base).is_some_and(|ty|
-                        !self.carries_stored_loan(&ty) || self.observed_known_owned_payload(base));
+                    complete &= self.operand_has_complete_payload(base);
                     self.collect_evaluated_operand_origins(base, &mut origins);
                 }
             }

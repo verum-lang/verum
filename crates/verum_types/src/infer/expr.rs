@@ -9790,16 +9790,29 @@ impl TypeChecker {
         Ok(InferResult::new(Type::never()))
     }
 
+    fn declared_list_literal_owner(&self) -> Option<Path> {
+        let list = WKT::List;
+        list.canonical_archive_modules().iter().find_map(|owner| {
+            let key = Self::source_type_declaration_key(owner, list.as_str());
+            (self.declared_runtime_storage_carrier(&key) == Some(list))
+                .then(|| Self::text_to_path(&key))
+        })
+    }
+
     fn infer_expr_array(&mut self, expr: &Expr) -> Result<InferResult> {
         use ExprKind::*;
         let ExprKind::Array(arr_expr) = &expr.kind else { unreachable!() };
         match arr_expr {
             verum_ast::expr::ArrayExpr::List(exprs) => {
                 if exprs.is_empty() {
-                    // Empty array: [T; 0] - element type needs annotation
-                    let elem_ty = TypeVar::fresh();
-                    // Spec: Fixed-size arrays [T; N] have known size at compile time
-                    Ok(InferResult::new(Type::array(Type::Var(elem_ty), Some(0))))
+                    // An expected fixed extent is checked by check_array_expr. In
+                    // synthesis the growable literal requires the actual List carrier.
+                    let element = Type::Var(TypeVar::fresh());
+                    let ty = match self.declared_list_literal_owner() {
+                        Some(path) => Type::Named { path, args: List::from_iter([element]) },
+                        None => Type::array(element, Some(0)),
+                    };
+                    Ok(InferResult::new(ty))
                 } else {
                     let first_result = self.synth_expr(&exprs[0])?;
                     let elem_ty = first_result.ty;

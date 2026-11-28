@@ -14023,11 +14023,9 @@ impl TypeChecker {
         match ty {
             // Refined types: delegate to base type
             Type::Refined { base, .. } => self.get_fallback_type_names(base),
-            // Arrays can also use Slice and List methods (push, pop, etc.)
-            Type::Array { .. } => List::from_iter([
-                verum_common::Text::from("Slice"),
-                verum_common::Text::from(WKT::List.as_str()),
-            ]),
+            // Fixed extents admit slice operations. Capacity belongs to the
+            // declared growable owner, including when inferred from a literal.
+            Type::Array { .. } => List::from_iter([verum_common::Text::from("Slice")]),
             // References to arrays/slices can use their methods
             Type::Reference { inner, .. }
             | Type::CheckedReference { inner, .. }

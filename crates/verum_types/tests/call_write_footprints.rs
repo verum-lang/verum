@@ -614,6 +614,9 @@ fn dynamic_list_push_retains_the_inserted_value_in_its_canonical_owner() {
     let list = list_with_push();
     for (provider, caller, expected) in [
         ("core.collections.list", "fn collect<T>(mut items:List<T>, a:T, b:T)->List<T> {items.push(a);items.push(b);items}", None),
+        ("core.collections.list", "fn collect<T>(item:T)->List<T> {let mut items=[];items.push(item);items}", None),
+        ("core.collections.list", "fn collect(a:&Int)->List<&Int> {let mut items=[]; items.push(a);items}", None),
+        ("core.collections.list", "fn collect()->List<&Int> {let mut items=[];{let local=11;items.push(&local);}items}", Some("local")),
         ("core.collections.list", "fn collect(mut items:List<&Int>, a:&Int)->List<&Int> {items.push(a);items}", None),
         ("core.collections.list", "fn collect(mut items:List<&Int>)->List<&Int> {{let local=11;items.push(&local);}items}", Some("local")),
         ("core.collections.list", "fn collect(mut items:List<&Int>, a:&Int,f:fn(&mut List<&Int>))->List<&Int> {f(&mut items);items.push(a);items}", Some("cannot establish the lifetime")),

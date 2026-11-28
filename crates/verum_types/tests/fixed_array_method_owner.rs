@@ -1,5 +1,4 @@
-//! T1615: declared slice methods and existing contextual List behavior.
-//! Fixed/inferred array capacity identity remains tracked in T1620.
+//! Capacity operations belong to a declared growable owner.
 use verum_ast::{
     ItemKind,
     decl::{ImplItemKind, ImplKind},
@@ -13,16 +12,19 @@ fn errors(source: &str) -> List<Text> {
     let ast = Parser::new(source).parse_module().expect("caller grammar");
     let mut checker = TypeChecker::new();
     checker.register_primitives();
-    for (source, methods) in [
+    for (owner, source, methods) in [
         (
+            "core.collections.list",
             include_str!("../../../core/collections/list.vr"),
             &["push", "reserve"][..],
         ),
         (
+            "core.collections.slice",
             include_str!("../../../core/collections/slice.vr"),
             &["swap", "reverse", "len"][..],
         ),
     ] {
+        checker.set_current_module_path(owner);
         let core = Parser::new(source)
             .parse_module()
             .expect("actual core grammar");
@@ -39,6 +41,9 @@ fn errors(source: &str) -> List<Text> {
                         if matches!(&base.kind, TypeKind::Path(p) if p.as_ident().is_some_and(|i| i.name == "List")))) =>
                 {
                     decl.items.retain(|item| matches!(&item.kind, ImplItemKind::Function(f) if methods.contains(&f.name.name.as_str())));
+                    if decl.items.is_empty() {
+                        continue;
+                    }
                     checker
                         .register_impl_block(decl)
                         .expect("actual method signatures");
@@ -47,6 +52,7 @@ fn errors(source: &str) -> List<Text> {
             }
         }
     }
+    checker.set_current_module_path("fixture.consumer");
     for item in &ast.items {
         if let ItemKind::Function(function) = &item.kind {
             checker
@@ -124,7 +130,24 @@ fn contextual_list_argument_keeps_its_capacity_methods() {
 
 #[test]
 fn inferred_empty_literal_keeps_its_existing_capacity_surface() {
-    // T1620 tracks the inconsistent fixed-array type of this existing pattern.
     let actual = errors("fn probe() {let mut values=[];values.push(7);}");
     assert!(actual.is_empty(), "{actual:?}");
+}
+
+#[test]
+fn inferred_empty_list_transfers_its_element_type_to_the_return() {
+    let actual = errors("fn collect(value:Int)->List<Int> {let mut xs=[]; xs.push(value); xs}");
+    assert!(actual.is_empty(), "{actual:?}");
+}
+
+#[test]
+fn fixed_storage_cannot_gain_capacity_and_inferred_elements_cannot_change_type() {
+    for source in [
+        "fn fixed(mut xs:[Int;0]) { xs.push(7); }",
+        "fn fixed() { let mut xs:[Int;0] = []; xs.reserve(3); }",
+        "fn fixed() { let mut xs=[1,2,3]; xs.push(4); }",
+        "fn mixed() { let mut xs=[]; xs.push(7); xs.push(false); }",
+    ] {
+        assert!(!errors(source).is_empty(), "{source}");
+    }
 }
