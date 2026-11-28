@@ -29,6 +29,16 @@ fn unparen(mut expr: &Expr) -> &Expr {
     expr
 }
 
+/// Local place roots include the method receiver, whose path has its own AST segment.
+fn lexical_place_root(expr: &Expr) -> Option<&str> {
+    let ExprKind::Path(path) = &unparen(expr).kind else { return None };
+    match path.segments.as_slice() {
+        [verum_ast::ty::PathSegment::Name(name)] => Some(name.as_str()),
+        [verum_ast::ty::PathSegment::SelfValue] => Some("self"),
+        _ => None,
+    }
+}
+
 fn place_operand(expr: &Expr) -> Option<(&Expr, bool)> {
     match &expr.kind {
         ExprKind::Field { expr, .. }
@@ -460,14 +470,7 @@ impl TypeChecker {
             }
             step = unparen(operand);
         }
-        let ExprKind::Path(path) = &step.kind else {
-            return None;
-        };
-        let root = match path.segments.as_slice() {
-            [verum_ast::ty::PathSegment::Name(name)] => name.name.clone(),
-            [verum_ast::ty::PathSegment::SelfValue] => "self".into(),
-            _ => return None,
-        };
+        let root = Text::from(lexical_place_root(step)?);
         projection.reverse();
         Some((root, (!projection.is_empty()).then(|| projection.join(".")), exact))
     }
@@ -483,12 +486,7 @@ impl TypeChecker {
         if fields.is_empty() {
             return None;
         }
-        let ExprKind::Path(path) = &step.kind else { return None };
-        let root = match path.segments.as_slice() {
-            [verum_ast::ty::PathSegment::Name(name)] => name.name.clone(),
-            [verum_ast::ty::PathSegment::SelfValue] => "self".into(),
-            _ => return None,
-        };
+        let root = Text::from(lexical_place_root(step)?);
         fields.reverse();
         Some((root, fields.join(".")))
     }
@@ -587,9 +585,8 @@ impl TypeChecker {
 
     fn place_operand_type(&self, expr: &Expr) -> Result<Type> {
         let expr = unparen(expr);
-        if let ExprKind::Path(path) = &expr.kind
-            && path.segments.len() == 1
-            && let Some(scheme) = self.ctx.env.lookup(path.last_segment_name())
+        if let Some(name) = lexical_place_root(expr)
+            && let Some(scheme) = self.ctx.env.lookup(name)
         {
             return Ok(self.unifier.apply(&scheme.ty));
         }

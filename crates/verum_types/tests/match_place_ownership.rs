@@ -223,3 +223,17 @@ fn a_failed_later_guard_preserves_consumption_from_earlier_guards() {
     let found = errors(&source);
     assert!(found.iter().any(|error| error.contains("moved") || error.contains("consum")), "{found:?}");
 }
+
+#[test]
+fn mutable_payload_patterns_use_the_declared_method_receiver_permission() {
+    let inspect = |receiver: &str| errors(&format!("{TYPES} implement Holder {{
+        fn inspect({receiver})->Int {{
+            if let Choice.Owned(ref mut token)=self.choice {{token.value=73; token.value}} else {{0}}
+        }}
+    }}"));
+    let valid = inspect("&mut self");
+    assert!(valid.is_empty(), "{valid:?}");
+    let invalid = inspect("&self");
+    assert!(invalid.iter().any(|message| message.contains("shared") || message.contains("immutable")),
+        "{invalid:?}");
+}
