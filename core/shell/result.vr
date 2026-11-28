@@ -150,8 +150,7 @@ implement ShellResult {
         ShellResult {
             stdout_bytes: [],
             stderr_bytes: err.to_string().into_bytes(),
-            // raw=255 is the conventional "unknown error" exit code in POSIX
-            status:   ExitStatus { raw: (255 << 8) },
+            status:   ExitStatus.from_exit_code(255),
             command:  cmd,
             duration: Duration.from_millis(0),
         }

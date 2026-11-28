@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use verum_ast::cfg::CfgEvaluator;
+use verum_ast::cfg::{CfgEvaluator, TargetConfig};
 use verum_ast::decl::{ImplItemKind, ImplKind, ProtocolItemKind};
 use verum_ast::{FunctionParamKind, GenericArg, ItemKind, TypeDeclBody, TypeKind};
 use verum_fast_parser::Parser;
@@ -114,6 +114,52 @@ fn actual_engine_duration_construction_and_conversion_execute() {
                 .try_as_i64(),
             Some(7000001)
         );
+    }
+}
+
+#[test]
+fn synthetic_exit_codes_round_trip_through_the_target_status_representation() {
+    let mut process = parse("core/io/process.vr");
+    process.items.retain_mut(|item| match &mut item.kind {
+        ItemKind::Module(module) => module.items.is_none(),
+        ItemKind::Type(ty) => ty.name.as_str() == "ExitStatus",
+        ItemKind::Impl(implementation) => {
+            let ImplKind::Inherent(ty) = &implementation.kind else { return false };
+            if !matches!(&ty.kind, TypeKind::Path(path) if path.to_string() == "ExitStatus") {
+                return false;
+            }
+            implementation.items.retain(|item| matches!(&item.kind,
+                ImplItemKind::Function(f) if matches!(f.name.as_str(),
+                    "from_exit_code" | "success" | "is_exited" | "is_signaled" | "code")
+            ));
+            true
+        }
+        _ => false,
+    });
+    process.items.extend(Parser::new(r#"
+        fn exit_code_probe(value: Int) -> Int {
+            let status = ExitStatus.from_exit_code(value);
+            if !status.is_exited() || status.is_signaled() { return -1; }
+            if status.success() != (status.code() == 0) { return -2; }
+            status.code()
+        }
+    "#).parse_module().unwrap().items);
+    for (target, expected_large) in [
+        (TargetConfig::macos_aarch64(), 120),
+        (TargetConfig::linux_aarch64(), 120),
+        (TargetConfig::windows_x86_64(), 0x12345678),
+    ] {
+        let mut generator = VbcCodegen::with_config(CodegenConfig::new("").with_target(target));
+        let module = generator.compile_module(&process).unwrap();
+        let wire = verum_vbc::serialize::serialize_module(&module).unwrap();
+        for module in [module, verum_vbc::deserialize::deserialize_module(&wire).unwrap()] {
+            let probe = module.find_function_by_name("core.io.process.exit_code_probe").unwrap();
+            let mut vm = Interpreter::new(Arc::new(module));
+            for (input, expected) in [(0, 0), (37, 37), (0x12345678, expected_large)] {
+                let result = vm.execute_function_with_args(probe, &[verum_vbc::Value::from_i64(input)]).unwrap();
+                assert_eq!(result.try_as_i64(), Some(expected));
+            }
+        }
     }
 }
 

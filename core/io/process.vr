@@ -77,11 +77,19 @@ public type Stdio is
 
 /// Exit status of a child process.
 public type ExitStatus is {
-    /// Raw status value from waitpid.
+    /// POSIX wait status or Windows process exit code.
     raw: Int,
 };
 
 implement ExitStatus {
+    /// Encode a normal exit code in the same representation used by the OS.
+    public(in core) fn from_exit_code(code: Int) -> ExitStatus {
+        @cfg(any(target_os = "linux", target_os = "macos"))
+        { return ExitStatus { raw: (code & 255) << 8 }; }
+        @cfg(target_os = "windows")
+        { return ExitStatus { raw: (code as UInt32) as Int }; }
+    }
+
     /// Returns true iff the process exited normally with code 0.
     /// A child terminated by a signal — even SIGTERM — is *not* a success;
     /// callers that treat such a child as having exited 0 will mis-classify
@@ -140,7 +148,7 @@ implement ExitStatus {
         { return (self.raw >> 8) & 255; }
 
         @cfg(target_os = "windows")
-        { return self.raw & 0xFFFF; }
+        { return self.raw; }
     }
 }
 

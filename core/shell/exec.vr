@@ -366,10 +366,8 @@ fn needs_display_quoting(s: &Text) -> Bool {
 }
 
 fn synthesise_mock_result(resp: MockResponse, command: Text) -> ShellResult {
-    // POSIX waitpid encoding for exited process: code << 8
-    let raw_status = (resp.exit_code & 0xFF) << 8;
     ShellResult.new(
-        ExitStatus { raw: raw_status },
+        ExitStatus.from_exit_code(resp.exit_code),
         resp.stdout,
         resp.stderr,
         command,
@@ -384,7 +382,7 @@ fn synthesise_dry_run(command: Text) -> ShellResult {
     for b in command.clone().into_bytes().iter() { stdout.push(*b); }
     stdout.push('\n' as Byte);
     ShellResult.new(
-        ExitStatus { raw: 0 },
+        ExitStatus.from_exit_code(0),
         stdout,
         [],
         command,

@@ -182,7 +182,7 @@ implement<A, B> Pipeline<A, B> {
             // No shell stages: synthesise an empty result for transducer-only
             // pipelines (rare — usually used as `Pipeline.new().with_command(...).run()`).
             ShellResult.new(
-                ExitStatus { raw: 0 },
+                ExitStatus.from_exit_code(0),
                 [], [],
                 "<no command stage>".into(),
                 Duration.from_millis(0),
