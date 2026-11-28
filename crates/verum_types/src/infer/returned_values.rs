@@ -1325,7 +1325,8 @@ impl TypeChecker {
                         writes_through_borrow: false,
                     };
                     if !matches!(proof.result, Type::Unit | Type::Never)
-                        && !self.forwarding_scalar(&proof.result) { return None; }
+                        && !self.forwarding_scalar(&proof.result)
+                        && !self.write_value_has_structural_cleanup(&proof.result, span) { return None; }
                     if proof.parameters.iter().any(|ty| !self.return_value_has_trivial_cleanup(ty)) { return None; }
                     if structural.is_some() {
                         // This receipt is issued only by the structural operation
@@ -1347,11 +1348,15 @@ impl TypeChecker {
                     let facts = self.returned_body_types_with_calls(
                         &body, &proof.parameters, proof.receiver.as_ref(), Some(&proof.result), span, &proofs,
                     )?;
-                    if facts.nodes.iter().any(|ty| !self.return_value_has_trivial_cleanup(ty)) { return None; }
+                    if facts.nodes.iter().any(|ty| !self.return_value_has_trivial_cleanup(ty)
+                        && !self.write_value_has_structural_cleanup(ty, span)) { return None; }
                     for write in &facts.writes {
                         if !self.write_value_has_structural_cleanup(write, span) { return None; }
                     }
-                    proof.writes_through_borrow = facts.writes_through_borrow;
+                    // The caller may pass an interior reborrow to this method.
+                    // A direct field write in the callee then changes a referent
+                    // of the caller without replacing the caller's reference.
+                    proof.writes_through_borrow = facts.writes_through_borrow || !facts.writes.is_empty();
                     proofs.insert(span, proof);
                     active.remove(&span);
                 }
@@ -1392,9 +1397,8 @@ impl TypeChecker {
         Some(proof.result.clone())
     }
 
-    /// A sum of primitive carriers with no selected destructor has structural cleanup.
-    /// This is deliberately narrower than "contains no loan": an owned record
-    /// or an unknown lifecycle can run user code even when its result is Unit.
+    /// A closed sum or empty record can retire its components when every case
+    /// has a known cleanup operation and the nominal owner has no destructor.
     fn write_value_has_structural_cleanup(&mut self, ty: &Type, span: verum_ast::Span) -> bool {
         let mut pending = List::from_iter([self.unifier.apply(ty)]);
         // This is a proof-search budget; exhaustion retains the unknown-write
@@ -1420,10 +1424,13 @@ impl TypeChecker {
             match ty {
                 Type::Named { .. } | Type::Generic { .. } => {
                     let Some((name, _)) = self.conversion_nominal_head(&ty) else { return false; };
-                    let is_sum = self.source_type_registration.completed_declaration(&name)
-                        .is_some_and(|declaration| matches!(declaration.body, TypeDeclBody::Variant(_)));
-                    if !is_sum { return false; }
+                    let Some(declaration) = self.source_type_registration.completed_declaration(&name)
+                        else { return false; };
+                    let empty_record = declaration.resource_modifier.is_none()
+                        && matches!(&declaration.body, TypeDeclBody::Record(fields) if fields.is_empty());
+                    if !empty_record && !matches!(declaration.body, TypeDeclBody::Variant(_)) { return false; }
                     if !self.write_value_has_no_selected_drop(&ty, span) { return false; }
+                    if empty_record { continue; }
                     let Ok(Type::Variant(variants)) = self.expand_generic_to_variant(&ty) else { return false; };
                     pending.extend(variants.into_values());
                 }

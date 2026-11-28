@@ -94,6 +94,18 @@ fn writing_through_a_stored_exclusive_reference_retires_the_guard() {
 }
 
 #[test]
+fn forwarding_a_write_through_a_reference_field_retires_its_guard() {
+    let source = "type Cell is {public value:Int}; type Holder is {public cell:&mut Cell};
+        type Outcome<T> is Written(T) | Failed;
+        implement Cell {fn reset(&mut self)->Outcome<()> {self.value=0; Outcome.Written(())}}
+        implement Holder {fn reset(&mut self)->Outcome<()> {self.cell.reset()}}
+        fn test(holder:&mut Holder, x:Int) {
+            if x < holder.cell.value {let before = x;let _=holder.reset();let after = x;}
+        }";
+    assert_reads(source, &[("before = x;", true), ("after = x;", false)]);
+}
+
+#[test]
 fn changing_a_value_cannot_bypass_its_declared_refinement() {
     let (errors, _) = check("fn test() { let mut x: Int{it > 0} = 3; if x == 3 { x = -1; } }");
     assert!(

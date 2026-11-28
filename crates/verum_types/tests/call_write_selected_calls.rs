@@ -108,3 +108,54 @@ fn recursive_calls_do_not_create_an_unbounded_provenance_proof() {
     );
     assert!(found.iter().any(|e| e.contains("cannot establish the lifetime")), "{found:?}");
 }
+
+#[test]
+fn a_selected_writer_can_return_a_sum_with_structural_cleanup() {
+    let found = errors(
+        "type Failure is {}; type Outcome<T,E> is Written(T) | Failed(E);
+         type Writer is { target:&mut Cell };
+         implement Cell { fn set(&mut self,n:Int)->Outcome<(),Failure> {
+             self.value=n; Outcome.Written(())
+         } }
+         implement Writer { fn write(&mut self,n:Int)->Outcome<(),Failure> { self.target.set(n) } }",
+        "fn preserve(mut writer:Writer)->Writer {
+            let _=writer.write(1); let _=writer.write(2); writer
+         }",
+    );
+    assert!(found.is_empty(), "{found:?}");
+}
+
+#[test]
+fn a_sum_result_cannot_certify_an_unsafe_field_rebinding() {
+    let found = errors(
+        "type Failure is {}; type Outcome<T,E> is Written(T) | Failed(E);
+         type Writer is { target:&mut Cell };
+         implement Cell { fn set(&mut self,p:&Int)->Outcome<(),Failure> {
+             self.pointer=p; Outcome.Written(())
+         } }
+         implement Writer { fn write(&mut self,p:&Int)->Outcome<(),Failure> { self.target.set(p) } }",
+        "fn reject(mut writer:Writer)->Writer {
+            {let local=7; let _=writer.write(&local);} writer
+         }",
+    );
+    assert!(found.iter().any(|error| error.contains("does not live long enough")
+        || error.contains("cannot establish the lifetime")), "{found:?}");
+}
+
+#[test]
+fn a_selected_writer_result_rejects_custom_cleanup_on_an_empty_error_record() {
+    let found = errors(
+        "type Drop is protocol {fn drop(&mut self);};
+         type Failure is {}; implement Drop for Failure {fn drop(&mut self) {}}
+         type Outcome<T,E> is Written(T) | Failed(E);
+         type Writer is { target:&mut Cell };
+         implement Cell { fn set(&mut self,n:Int)->Outcome<(),Failure> {
+             self.value=n; Outcome.Written(())
+         } }
+         implement Writer { fn write(&mut self,n:Int)->Outcome<(),Failure> { self.target.set(n) } }",
+        "fn preserve(mut writer:Writer)->Writer {
+            let _=writer.write(1); let _=writer.write(2); writer
+         }",
+    );
+    assert!(found.iter().any(|error| error.contains("cannot establish the lifetime")), "{found:?}");
+}
