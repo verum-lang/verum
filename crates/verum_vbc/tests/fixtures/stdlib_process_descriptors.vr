@@ -1,0 +1,19 @@
+fn make_real_pipe() -> Int {
+    let mut fds: [Int32; 2] = [-1 as Int32, -1 as Int32];
+    if !make_pipe(&mut fds).is_ok() { return -1; }
+    (fds[0] as Int) * 65536 + fds[1] as Int
+}
+fn fixture_bytes() -> &[Byte] { b"xyzt" }
+fn close_port(fd: Int) -> Int { if close_descriptor(FileDesc.from_raw(fd)).is_ok() { 1 } else { 0 } }
+fn read_three(value: Result<List<Byte>, Text>) -> Int {
+    match value { Result.Ok(bytes) => if bytes.len() == 3 && bytes[0] == 120 as Byte && bytes[2] == 122 as Byte { 1 } else { -2 }, _ => -1 }
+}
+fn read_one(value: Result<List<Byte>, Text>) -> Int {
+    match value { Result.Ok(bytes) => if bytes.len() == 1 && bytes[0] == 116 as Byte { 1 } else { -2 }, _ => -1 }
+}
+fn read_eof(value: Result<List<Byte>, Text>) -> Int { match value { Result.Ok(bytes) => if bytes.len() == 0 { 1 } else { -1 }, _ => -1 } }
+fn read_error(value: Result<List<Byte>, Text>) -> Int { if value.is_err() { 1 } else { -1 } }
+fn write_error(value: Result<Int, Text>) -> Int { if value.is_err() { 1 } else { -1 } }
+fn wrote_four(value: Result<Int, Text>) -> Int { match value { Result.Ok(4) => 1, _ => -1 } }
+fn signal_ok(value: Result<(), Text>) -> Int { if value.is_ok() { 1 } else { -1 } }
+fn signal_error(value: Result<(), Text>) -> Int { if value.is_err() { 1 } else { -1 } }

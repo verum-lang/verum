@@ -74,12 +74,14 @@ mount core.sys.common.{OSError, FileDesc};
 mount core.sys.linux.syscall as platform_syscall;
 
 @cfg(target_os = "linux")
-mount core.sys.linux.syscall.{close as close_descriptor, F_SETFD, FD_CLOEXEC};
+mount core.sys.linux.syscall.{close as close_descriptor, read as read_descriptor, write as write_descriptor};
 
 @cfg(target_os = "macos")
 mount core.sys.darwin.libsystem as platform_syscall;
 @cfg(target_os = "macos")
-mount core.sys.darwin.libsystem.{safe_close as close_descriptor};
+mount core.sys.darwin.libsystem.{safe_close as close_descriptor, safe_read as read_descriptor, safe_write as write_descriptor};
+
+const PIPE_CHUNK_SIZE: Int = 4096;
 
 // =============================================================================
 // SpawnResult — what `native_spawn` returns
@@ -321,8 +323,16 @@ fn make_pipe(fds: &mut [Int32; 2]) -> Result<(), OSError> {
 
 @cfg(target_os = "macos")
 fn make_pipe(fds: &mut [Int32; 2]) -> Result<(), Text> {
-    let r = platform_syscall.pipe(&mut fds[0]);
-    if r != 0 { Result.Err("pipe failed".into()) } else { Result.Ok(()) }
+    let mut storage: [Byte; 8] = [0; 8];
+    let output = (&mut storage[..]).as_mut_ptr() as *mut Int32;
+    if unsafe { platform_syscall.pipe(output) } != 0 {
+        let code = platform_syscall.errno();
+        return Result.Err(f"pipe failed (errno {code})");
+    }
+    let address = output as Int;
+    fds[0] = @intrinsic("load_i32", address) as Int32;
+    fds[1] = @intrinsic("load_i32", address + 4) as Int32;
+    Result.Ok(())
 }
 
 @cfg(target_os = "linux")
@@ -344,14 +354,28 @@ fn do_fork() -> Result<Int, Text> {
 public fn native_kill(pid: Int, sig: Int) -> Result<(), Text> {
     @cfg(any(target_os = "linux", target_os = "macos"))
     {
+        if (pid as Int32) as Int != pid || (sig as Int32) as Int != sig {
+            return Result.Err("kill argument does not fit a POSIX C int");
+        }
+    }
+    @cfg(target_os = "linux")
+    {
         return match platform_syscall.kill(pid, sig) {
-            Result.Ok(_)  => Result.Ok(()),
-            Result.Err(_) => Result.Err("kill failed".into()),
+            Result.Ok(()) => Result.Ok(()),
+            Result.Err(error) => Result.Err(f"kill failed (errno {error.code})"),
         };
+    }
+    @cfg(target_os = "macos")
+    {
+        if unsafe { platform_syscall.kill(pid as Int32, sig as Int32) } == 0 {
+            return Result.Ok(());
+        }
+        let code = platform_syscall.errno();
+        return Result.Err(f"kill failed (errno {code})");
     }
     @cfg(target_os = "windows")
     {
-        return Result.Err("native_kill not implemented for Windows".into());
+        return Result.Err("native_kill not implemented for Windows");
     }
 }
 
@@ -359,28 +383,33 @@ public fn native_kill(pid: Int, sig: Int) -> Result<(), Text> {
 public fn native_fd_write_all(fd: Int, data: &[Byte]) -> Result<Int, Text> {
     @cfg(any(target_os = "linux", target_os = "macos"))
     {
-        let mut total: Int = 0;
-        let total_len = data.len() as Int;
-        while total < total_len {
-            let remaining: &[Byte] = &data[total as usize..];
-            let r = platform_syscall.write(FileDesc.from_raw(fd as Int32), remaining);
-            match r {
-                Result.Ok(n) => {
-                    if n == 0 { return Result.Err("write returned 0".into()); }
-                    total = total + n;
-                }
-                Result.Err(e) => {
-                    let code: Int = e.into();
-                    if code == 4 { continue; }  // EINTR
-                    return Result.Err(f"write failed: {code}");
+        if (fd as Int32) as Int != fd { return Result.Err("file descriptor does not fit a POSIX C int"); }
+        let mut buffer: [Byte; 4096] = [0; 4096];
+        let mut total = 0;
+        while total < data.len() {
+            let size: Int = (data.len() - total).min(PIPE_CHUNK_SIZE);
+            let mut offset = 0;
+            while offset < size {
+                buffer[offset] = data[total + offset];
+                offset += 1;
+            }
+            let mut written = 0;
+            while written < size {
+                match write_descriptor(FileDesc.from_raw(fd as Int32), &buffer[written..size]) {
+                    Result.Ok(0) => return Result.Err("write returned 0"),
+                    Result.Ok(count) => written += count,
+                    Result.Err(error) => if !error.interrupted() {
+                        return Result.Err(f"write failed (errno {error.code})");
+                    },
                 }
             }
+            total += written;
         }
-        Result.Ok(total)
+        return Result.Ok(total);
     }
     @cfg(target_os = "windows")
     {
-        return Result.Err("native_fd_write_all not implemented for Windows".into());
+        return Result.Err("native_fd_write_all not implemented for Windows");
     }
 }
 
@@ -388,20 +417,30 @@ public fn native_fd_write_all(fd: Int, data: &[Byte]) -> Result<Int, Text> {
 public fn native_fd_read_chunk(fd: Int, max: Int) -> Result<List<Byte>, Text> {
     @cfg(any(target_os = "linux", target_os = "macos"))
     {
-        let mut buf: List<Byte> = List.with_capacity(max as usize);
-        let mut i: Int = 0;
-        while i < max { buf.push(0); i = i + 1; }
-        let r = platform_syscall.read(FileDesc.from_raw(fd as Int32), &mut buf);
-        return match r {
-            Result.Ok(n)  => {
-                buf.truncate(n as usize);
-                Result.Ok(buf)
+        if max < 0 { return Result.Err("negative pipe read size"); }
+        if max == 0 { return Result.Ok([]); }
+        let size: Int = max.min(PIPE_CHUNK_SIZE);
+        if (fd as Int32) as Int != fd { return Result.Err("file descriptor does not fit a POSIX C int"); }
+        let mut buffer: [Byte; 4096] = [0; 4096];
+        loop {
+            match read_descriptor(FileDesc.from_raw(fd as Int32), &mut buffer[..size]) {
+                Result.Ok(count) => {
+                    let mut bytes: List<Byte> = List.with_capacity(count);
+                    let mut offset = 0;
+                    while offset < count {
+                        bytes.push(buffer[offset]);
+                        offset += 1;
+                    }
+                    return Result.Ok(bytes);
+                },
+                Result.Err(error) => if !error.interrupted() {
+                    return Result.Err(f"read failed (errno {error.code})");
+                },
             }
-            Result.Err(e) => Result.Err(f"read failed: {e}"),
-        };
+        }
     }
     @cfg(target_os = "windows")
     {
-        return Result.Err("native_fd_read_chunk not implemented for Windows".into());
+        return Result.Err("native_fd_read_chunk not implemented for Windows");
     }
 }

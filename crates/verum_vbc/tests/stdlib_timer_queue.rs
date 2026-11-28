@@ -1,55 +1,16 @@
 //! Execute the executor's timer queue with recorded wakes and owned waker releases.
 #![cfg(feature = "codegen")]
 
-use verum_ast::{
-    FileId, ItemKind, Module,
-    decl::{ImplItemKind, ImplKind, MountTreeKind},
-    pretty::format_type,
-};
+#[path = "support/selected_stdlib.rs"]
+mod selected_stdlib;
+
+use selected_stdlib::source_unit;
+use verum_ast::FileId;
 use verum_fast_parser::FastParser;
 use verum_vbc::{
     codegen::{CodegenConfig, ItemFailurePolicy, VbcCodegen},
     interpreter::Interpreter,
 };
-
-fn source_unit(path: &str, symbols: &str, index: usize) -> Module {
-    let source = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../core")
-            .join(path),
-    )
-    .unwrap();
-    let mut unit = FastParser::new()
-        .parse_module_str(&source, FileId::new(index as u32 + 1))
-        .unwrap();
-    let selected = |name: &str| symbols.split_whitespace().any(|symbol| symbol == name);
-    unit.items.retain_mut(|item| match &mut item.kind {
-        ItemKind::Module(decl) if decl.name.as_str() == "prelude" && decl.items.is_some() => {
-            decl.items.as_mut().unwrap().retain(|entry| matches!(entry.kind, ItemKind::Mount(_)));
-            true
-        }
-        ItemKind::Module(decl) => decl.items.is_none(),
-        ItemKind::Mount(decl) if path == "base/mod.vr" => {
-            matches!(&decl.tree.kind, MountTreeKind::Nested { trees, .. } if trees.iter().any(|tree|
-                matches!(&tree.kind, MountTreeKind::Path(path) if selected(path.last_segment_name()))
-            ))
-        }
-        ItemKind::Mount(_) => true,
-        ItemKind::Type(decl) => selected(decl.name.as_str()),
-        ItemKind::Protocol(decl) => selected(decl.name.as_str()),
-        ItemKind::Function(decl) => selected(decl.name.as_str()),
-        ItemKind::Impl(decl) => {
-            let owner = match &decl.kind {
-                ImplKind::Inherent(ty) => format_type(ty).replace(" ", "").to_string(),
-                ImplKind::Protocol { protocol, for_type, .. } => format!("{protocol}@{}", format_type(for_type).replace(" ", "")),
-            };
-            decl.items.retain(|item| matches!(&item.kind, ImplItemKind::Function(f) if selected(&format!("{owner}.{}", f.name))));
-            !decl.items.is_empty()
-        }
-        _ => false,
-    });
-    unit
-}
 
 const WAKER_PROBE: &str = r#"
 // Test waker records invocation and ownership release for each registration.
