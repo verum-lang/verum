@@ -269,9 +269,7 @@ public type ProtobufCursor is {
 
 implement ProtobufCursor {
     public fn new(buf: &[Byte]) -> ProtobufCursor {
-        let mut copy = List.with_capacity(buf.len());
-        copy.extend_from_slice(buf);
-        ProtobufCursor { buf: copy, pos: 0 }
+        ProtobufCursor { buf: List.from_slice(buf), pos: 0 }
     }
 
     public fn at_end(&self) -> Bool { self.pos >= self.buf.len() }

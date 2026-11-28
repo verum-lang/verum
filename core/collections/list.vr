@@ -195,10 +195,8 @@ implement<T> List<T> {
     public fn from_slice(slice: &[T]) -> List<T>
     where T: Clone
     {
-        let mut list = List.with_capacity(slice.len());
-        for item in slice.iter() {
-            list.push(item.clone());
-        }
+        let mut list: List<T> = List.new();
+        list.extend_from_slice(slice);
         list
     }
 

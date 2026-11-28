@@ -644,6 +644,17 @@ fn test_list_pop_front_singleton_empties() {
 // =============================================================================
 
 @test
+fn test_list_from_slice_owns_its_bytes() {
+    let mut source: List<Byte> = [17_u8, 73_u8];
+    let copy: List<Byte> = List.from_slice(source.as_slice());
+    source[1] = 0_u8;
+    assert_eq(copy.len(), 2);
+    assert_eq(copy[1], 73_u8);
+    let empty: List<Byte> = [];
+    assert(List.from_slice(empty.as_slice()).is_empty());
+}
+
+@test
 fn test_list_extend_from_slice_appends_in_order() {
     let mut xs: List<Int> = [1, 2];
     let src: List<Int> = [3, 4, 5];
