@@ -82,6 +82,9 @@ pub struct RegisterAllocator {
     /// Parameters whose declared by-value call boundary established an owner.
     pub(super) parameter_owners: verum_common::Map<Reg, (verum_common::value_use::BindingId, crate::types::TypeRef)>,
     pub(super) callable_bound_signatures: HashMap<crate::types::TypeParamId, crate::types::TypeRef>,
+    /// Live selections from tests of or-patterns in this function. The source
+    /// node distinguishes expanded patterns with overlapping source spans.
+    pub(super) or_pattern_choices: verum_common::Map<(verum_ast::Span, usize), Reg>,
     /// Outgoing handoffs match this body's completed parameter inventory.
     /// This private emission state is not an executable descriptor certificate.
     pub(super) emits_owned_parameter_calls: bool,
@@ -204,6 +207,7 @@ impl RegisterAllocator {
             source_returns: Default::default(),
             parameter_owners: Default::default(),
             callable_bound_signatures: HashMap::new(),
+            or_pattern_choices: Default::default(),
             emits_owned_parameter_calls: false,
         }
     }
@@ -615,6 +619,7 @@ impl RegisterAllocator {
             source_returns: self.source_returns.clone(),
             parameter_owners: self.parameter_owners.clone(),
             callable_bound_signatures: self.callable_bound_signatures.clone(),
+            or_pattern_choices: self.or_pattern_choices.clone(),
             emits_owned_parameter_calls: self.emits_owned_parameter_calls,
         }
     }
@@ -635,6 +640,7 @@ impl RegisterAllocator {
         self.source_returns = snapshot.source_returns.clone();
         self.parameter_owners.clone_from(&snapshot.parameter_owners);
         self.callable_bound_signatures.clone_from(&snapshot.callable_bound_signatures);
+        self.or_pattern_choices.clone_from(&snapshot.or_pattern_choices);
         self.emits_owned_parameter_calls = snapshot.emits_owned_parameter_calls;
     }
 
@@ -655,6 +661,7 @@ impl RegisterAllocator {
         self.source_returns = Default::default();
         self.parameter_owners.clear();
         self.callable_bound_signatures.clear();
+        self.or_pattern_choices.clear();
         self.emits_owned_parameter_calls = false;
     }
 
@@ -696,6 +703,9 @@ pub struct RegisterSnapshot {
     /// Parameters whose declared by-value call boundary established an owner.
     pub(super) parameter_owners: verum_common::Map<Reg, (verum_common::value_use::BindingId, crate::types::TypeRef)>,
     pub(super) callable_bound_signatures: HashMap<crate::types::TypeParamId, crate::types::TypeRef>,
+    /// Live selections from tests of or-patterns in this function. The source
+    /// node distinguishes expanded patterns with overlapping source spans.
+    pub(super) or_pattern_choices: verum_common::Map<(verum_ast::Span, usize), Reg>,
     /// Outgoing handoffs match this body's completed parameter inventory.
     /// This private emission state is not an executable descriptor certificate.
     pub(super) emits_owned_parameter_calls: bool,

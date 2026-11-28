@@ -51,6 +51,8 @@ use verum_ast::{
 mod selection;
 #[path = "method_types.rs"]
 mod method_types;
+#[path = "or_patterns.rs"]
+mod or_patterns;
 #[path = "index_projection.rs"]
 pub(super) mod index_projection;
 
@@ -19863,6 +19865,14 @@ impl VbcCodegen {
         tested
     }
 
+    /// A bare constructor tests its tag and introduces no local binding.
+    fn bare_pattern_variant_tag(&self, name: &str) -> Option<u32> {
+        if !name.chars().next().is_some_and(char::is_uppercase) {
+            return None;
+        }
+        self.ctx.lookup_function_in_scope(name).and_then(|info| info.variant_tag)
+    }
+
     pub(crate) fn compile_pattern_test(
         &mut self,
         pattern: &verum_ast::Pattern,
@@ -19878,7 +19888,7 @@ impl VbcCodegen {
             }
 
             PatternKind::Ident {
-                subpattern, name, ..
+                subpattern, name, by_ref, mutable
             } => {
                 if let verum_common::Maybe::Some(sub_pat) = subpattern {
                     // x @ <subpattern> — must test the subpattern (e.g. range check)
@@ -19888,35 +19898,9 @@ impl VbcCodegen {
                     // variant constructor (e.g., `None` when matching Maybe<T>).
                     // If so, this is a variant pattern and we must test the tag,
                     // not unconditionally match (which would shadow later arms).
-                    let ident_name = name.name.as_str();
-                    let is_variant = ident_name
-                        .chars()
-                        .next()
-                        .map(|c| c.is_uppercase())
-                        .unwrap_or(false)
-                        && self
-                            .ctx
-                            .lookup_function_in_scope(ident_name)
-                            .and_then(|info| info.variant_tag)
-                            .is_some();
-
-                    if is_variant {
-                        // Lookup tag — prefer scrutinee type when known
-                        let tag = self
-                            .ctx
-                            .lookup_function_in_scope(ident_name)
-                            .and_then(|info| info.variant_tag)
-                            .or_else(|| {
-                                if let Some(ref scrutinee_type) = self.ctx.match_scrutinee_type {
-                                    let base_type =
-                                        scrutinee_type.split('<').next().unwrap_or(scrutinee_type);
-                                    self.ctx
-                                        .find_variant_by_type_and_name(base_type, ident_name)
-                                } else {
-                                    None
-                                }
-                            })
-                            .unwrap_or(0);
+                    if !*by_ref && !*mutable
+                        && let Some(tag) = self.bare_pattern_variant_tag(name.as_str())
+                    {
                         self.ctx.emit(Instruction::IsVar {
                             dst: result,
                             value: scrutinee,
@@ -20284,32 +20268,7 @@ impl VbcCodegen {
             }
 
             PatternKind::Or(alternatives) => {
-                // Or pattern: match if ANY alternative matches
-                // result = alt1 || alt2 || ... || altN
-                self.ctx.emit(Instruction::LoadFalse { dst: result });
-
-                let end_label = self.ctx.new_label("or_end");
-
-                for alt in alternatives.iter() {
-                    let alt_result = self.ctx.alloc_temp();
-                    self.compile_pattern_test(alt, scrutinee, alt_result)?;
-
-                    // If this alternative matches, set result = true and jump to end
-                    let next_alt = self.ctx.new_label("or_next");
-                    self.ctx
-                        .emit_forward_jump(&next_alt, |offset| Instruction::JmpNot {
-                            cond: alt_result,
-                            offset,
-                        });
-                    self.ctx.emit(Instruction::LoadTrue { dst: result });
-                    self.ctx
-                        .emit_forward_jump(&end_label, |offset| Instruction::Jmp { offset });
-                    self.ctx.define_label(&next_alt);
-
-                    self.ctx.free_temp(alt_result);
-                }
-
-                self.ctx.define_label(&end_label);
+                self.test_or_pattern(pattern, alternatives, scrutinee, result)?;
             }
 
             PatternKind::Range {
@@ -21531,6 +21490,11 @@ impl VbcCodegen {
                 subpattern,
                 by_ref,
             } => {
+                if !*by_ref && !*mutable && subpattern.is_none()
+                    && self.bare_pattern_variant_tag(name.as_str()).is_some()
+                {
+                    return Ok(());
+                }
                 let var_reg = self.ctx.define_var(&name.name, *mutable);
                 if let Some(binding) = self.ctx.lookup_var_mut(&name.name) {
                     binding.pattern_alias = if *by_ref || subpattern.is_some() {
@@ -22152,13 +22116,7 @@ impl VbcCodegen {
             }
 
             PatternKind::Or(alternatives) => {
-                // Or pattern binding: bind from the first matching alternative
-                // Since Or pattern matches were already tested, we just need to bind
-                // from any alternative (they all should bind the same variables)
-                // For correctness, we try each until one succeeds in matching
-                if let Some(first) = alternatives.first() {
-                    self.compile_pattern_bind_mode(first, scrutinee, mode, declaration)?;
-                }
+                self.bind_or_pattern(pattern, alternatives, scrutinee, mode, declaration)?;
             }
 
             PatternKind::Range { .. } => {
@@ -42472,7 +42430,7 @@ impl VbcCodegen {
 
         // Step 1: Analyze free variables from all clauses and output expression
         // These need to be captured by the generator closure
-        let mut bound_vars = Vec::new();
+        let mut bound_vars = List::new();
 
         // Collect pattern-bound variables from all for clauses
         for clause in clauses.iter() {
@@ -43171,13 +43129,18 @@ impl VbcCodegen {
     }
 
     /// Collects variable names bound by a pattern.
-    fn collect_pattern_variables(&self, pattern: &verum_ast::Pattern, vars: &mut Vec<String>) {
+    fn collect_pattern_variables(&self, pattern: &verum_ast::Pattern, vars: &mut List<String>) {
         use verum_ast::PatternKind;
 
         match &pattern.kind {
             PatternKind::Ident {
-                name, subpattern, ..
+                name, subpattern, by_ref, mutable,
             } => {
+                if !*by_ref && !*mutable && subpattern.is_none()
+                    && self.bare_pattern_variant_tag(name.as_str()).is_some()
+                {
+                    return;
+                }
                 vars.push(name.name.to_string());
                 // Also collect from subpattern if present (e.g., x @ Some(y))
                 if let Some(sub) = subpattern {

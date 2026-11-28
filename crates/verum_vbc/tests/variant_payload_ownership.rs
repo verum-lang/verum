@@ -311,3 +311,73 @@ fn an_unrelated_nested_sum_cannot_supply_the_protocol_payload() {
         assert!(error.to_string().contains("variant"), "{error}");
     }
 }
+
+#[test]
+fn an_or_pattern_binds_only_the_selected_payload_path() {
+    run(r#"
+        type Inner is Empty | Number(Int);
+        type Choice is Short(Int) | Long(Int, Inner) | Flag(Bool);
+        fn pick(choice: &Choice) -> Int {
+            match choice {
+                Choice.Short(n) | Choice.Long(_, Inner.Number(n)) => *n,
+                Choice.Long(_, Inner.Empty) | Choice.Flag(true) => 8,
+                _ => 0,
+            }
+        }
+        fn probe() -> Int {
+            pick(&Choice.Short(17)) + pick(&Choice.Long(200, Inner.Number(48))) + pick(&Choice.Flag(true))
+        }
+    "#);
+}
+
+#[test]
+fn mutable_or_pattern_bindings_retain_the_selected_field() {
+    run(r#"
+        type Pair is Left(Int, Int) | Right(Int, Int);
+        fn set(pair: &mut Pair) {
+            match pair { Pair.Left(ref mut n, _) | Pair.Right(_, ref mut n) => *n = 41 }
+        }
+        fn probe() -> Int {
+            let mut pair = Pair.Right(32, 8);
+            set(&mut pair);
+            match pair { Pair.Right(first, second) => first + second, _ => 0 }
+        }
+    "#);
+}
+
+#[test]
+fn or_pattern_choices_reject_incompatible_binding_names_and_types() {
+    for (pattern, diagnostic) in [
+        ("Choice.Left(x) | Choice.Right(y)", "different names"),
+        ("Choice.Left(x) | Choice.Flag(x)", "incompatible or-pattern binding"),
+        ("Choice.Left(ref x) | Choice.Right(x)", "incompatible or-pattern binding"),
+    ] {
+        let source = format!("type Choice is Left(Int) | Right(Int) | Flag(Bool); fn probe(value: Choice) -> Int {{ match value {{ {pattern} => 73, _ => 0 }} }}");
+        for unit in [false, true] {
+            let error = compile(&source, unit).expect_err("incompatible bindings");
+            assert!(error.to_string().contains(diagnostic), "{error}");
+        }
+    }
+}
+
+#[test]
+fn an_or_pattern_tests_each_guard_once_and_keeps_leftmost_precedence() {
+    run(r#"
+        type Pair is Both(Int, Int);
+        fn count(step: Int) -> Int {
+            static mut CALLS: Int = 0;
+            CALLS += step;
+            CALLS
+        }
+        fn choose(pair: &Pair, first: Bool) -> Int {
+            match pair {
+                (Pair.Both(x, _) if count(1) > 0 && first) | Pair.Both(_, x) => *x,
+                _ => 0,
+            }
+        }
+        fn probe() -> Int {
+            let pair = Pair.Both(20, 51);
+            choose(&pair, true) + choose(&pair, false) + count(0)
+        }
+    "#);
+}
