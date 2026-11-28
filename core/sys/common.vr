@@ -254,6 +254,23 @@ implement FileDesc {
         self.0
     }
 
+    /// Create a separately closable socket descriptor for the same endpoint.
+    public(in core) fn duplicate_socket(&self) -> Result<FileDesc, OSError> {
+        @cfg(target_os = "linux") {
+            // F_DUPFD_CLOEXEC
+            let raw = core.sys.linux.syscall.fcntl(*self, 1030, 0)?;
+            return Result.Ok(FileDesc(raw));
+        }
+        @cfg(target_os = "macos") {
+            // F_DUPFD_CLOEXEC
+            let raw = core.sys.darwin.libsystem.safe_fcntl(*self, 67, 0)?;
+            return Result.Ok(FileDesc(raw));
+        }
+        @cfg(target_os = "windows") {
+            return Result.Err(OSError.new(core.sys.windows.winerror.WSAEOPNOTSUPP, "socket duplication is unsupported"));
+        }
+    }
+
     /// Whether the number is in the nonnegative descriptor range.
     public fn is_valid(&self) -> Bool {
         self.0 >= 0

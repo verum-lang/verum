@@ -70,17 +70,16 @@
     lifecycle: Lifecycle.Definition
 )
 module core.net.udp;
-mount io.*;
-mount super.addr.*;
+mount core.net.addr.{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 mount core.net.resolve.ToSocketAddrs;
-mount core.sys.common.OSError;
+mount core.sys.common.{FileDesc, OSError};
 
 // =============================================================================
 // V-LLSI Native Socket Imports
 // =============================================================================
 
 @cfg(target_os = "linux")
-mount sys.linux.syscall.{
+mount core.sys.linux.syscall.{
     // Socket operations
     socket, bind, connect, close,
     send, recv, sendto, recvfrom,
@@ -95,10 +94,6 @@ mount sys.linux.syscall.{
     set_multicast_ttl_v4, set_multicast_loop_v4,
     // Peek and non-blocking
     peek, recv_nonblock, send_nonblock,
-    // File operations
-    fcntl,
-    // Types
-    FileDesc,
     // Constants
     AF_INET, AF_INET6, SOCK_DGRAM, SOCK_CLOEXEC,
     SOL_SOCKET, SO_ERROR,
@@ -106,7 +101,7 @@ mount sys.linux.syscall.{
 };
 
 @cfg(target_os = "windows")
-mount sys.windows.winsock2.{
+mount core.sys.windows.winsock2.{
     // POSIX-compatible wrappers — renamed `winsock_*` to avoid libc
     // symbol collision (see #107). Aliased back here for shared code.
     winsock_socket as socket,
@@ -128,8 +123,6 @@ mount sys.windows.winsock2.{
     set_multicast_ttl_v4, set_multicast_loop_v4,
     // Peek and non-blocking
     peek, recv_nonblock, send_nonblock,
-    // Types
-    FileDesc,
     // Constants
     AF_INET, AF_INET6, SOCK_DGRAM, SOCK_CLOEXEC,
     SOL_SOCKET, SO_ERROR,
@@ -137,7 +130,7 @@ mount sys.windows.winsock2.{
 };
 
 @cfg(target_os = "macos")
-mount sys.darwin.libsystem.{
+mount core.sys.darwin.libsystem.{
     // Socket operations
     safe_socket as sys_socket,
     safe_bind as sys_bind,
@@ -170,49 +163,13 @@ mount sys.darwin.libsystem.{
     safe_peek,
     safe_recv_nonblock,
     safe_send_nonblock,
-    // File operations
-    safe_fcntl,
     // Constants
     AF_INET, AF_INET6, SOCK_DGRAM,
     SOL_SOCKET, SO_ERROR,
     MSG_PEEK, MSG_DONTWAIT,
 };
 
-@cfg(target_os = "macos")
-mount sys.common.{FileDesc};
-
-@cfg(target_os = "windows")
-mount sys.windows.winsock2.{
-    // Socket operations
-    socket, bind, connect, close,
-    send, recv, sendto, recvfrom,
-    // Socket options
-    setsockopt_int, getsockname,
-    set_nonblocking, set_reuseaddr, set_broadcast,
-    set_send_buffer_size, set_recv_buffer_size,
-    set_socket_timeout,
-    set_ip_tos, set_ip_recvtos, set_ipv6_tclass, set_ipv6_recvtclass,
-    // Multicast
-    join_multicast_v4, leave_multicast_v4,
-    set_multicast_ttl_v4, set_multicast_loop_v4,
-    // Peek and non-blocking
-    peek, recv_nonblock, send_nonblock,
-    // File operations
-    fcntl,
-    // Types
-    FileDesc,
-    // Constants
-    AF_INET, AF_INET6, SOCK_DGRAM, SOCK_CLOEXEC,
-    SOL_SOCKET, SO_ERROR,
-    MSG_PEEK, MSG_DONTWAIT,
-};
-
-@cfg(target_os = "windows")
-mount sys.common.{FileDesc};
-
-// Import I/O engine for async operations
-mount core.async.{Future, Poll, Context};
-mount sys.io_engine.{IOEngine, IOInterest};
+mount core.net.readiness.AsyncIoReady;
 mount core.io.{IoError, IoErrorKind};
 mount core.io.protocols.{io_error_kind_from_os_code};
 
@@ -260,7 +217,7 @@ mount core.io.protocols.{io_error_kind_from_os_code};
 /// - Use non-blocking I/O with event loop for connection multiplexing
 /// - Set SO_RCVBUF/SO_SNDBUF for optimal buffer sizes
 /// - Consider SO_REUSEPORT for multi-threaded receive scaling
-public type UdpSocket is {
+public type affine UdpSocket is {
     fd: FileDesc,
     local_addr: SocketAddr,
     /// Connected peer (if any). When set, send/recv can be used instead of send_to/recv_from.
@@ -279,18 +236,14 @@ implement UdpSocket {
     /// ```
     public fn bind<A: ToSocketAddrs>(addr: A) -> Result<UdpSocket, IoError> {
         let addrs = addr.to_socket_addrs()?;
-        let mut last_err = IoError.Other("No addresses resolved");
-
+        let mut attempt: Result<UdpSocket, IoError> = Result.Err(IoError.Other("No addresses resolved"));
         let mut i = 0;
         while i < addrs.len() {
-            match UdpSocket.bind_addr(&addrs[i]) {
-                Result.Ok(socket) => return Result.Ok(socket),
-                Result.Err(e) => last_err = e,
-            }
+            attempt = UdpSocket.bind_addr(&addrs[i]);
+            if attempt.is_ok() { break; }
             i = i + 1;
         }
-
-        Result.Err(last_err)
+        attempt
     }
 
     /// Internal: bind to a specific address.
@@ -782,25 +735,12 @@ implement UdpSocket {
         self.fd
     }
 
-    /// Clone the socket via dup().
-    ///
-
-    /// Both sockets share the same underlying file descriptor state.
+    /// Create an independently owned descriptor for the same socket.
+    /// Dropping either handle closes its own descriptor.
     public fn try_clone(&self) -> Result<UdpSocket, IoError> {
-        @cfg(any(target_os = "linux", target_os = "windows"))
-        const F_DUPFD_CLOEXEC: Int = 1030;
-
-        @cfg(target_os = "macos")
-        const F_DUPFD_CLOEXEC: Int = 67;
-
-        @cfg(any(target_os = "linux", target_os = "windows"))
-        let new_fd = fcntl(self.fd, F_DUPFD_CLOEXEC, 0).map_err(|e| IoError.from_os(e))?;
-
-        @cfg(target_os = "macos")
-        let new_fd = safe_fcntl(self.fd, F_DUPFD_CLOEXEC, 0).map_err(|e| IoError.from_os(e))?;
-
+        let fd = self.fd.duplicate_socket().map_err(|error: OSError| IoError.from_os(error))?;
         Result.Ok(UdpSocket {
-            fd: new_fd as FileDesc,
+            fd: fd,
             local_addr: self.local_addr,
             peer_addr: self.peer_addr,
         })
@@ -829,58 +769,9 @@ implement Debug for UdpSocket {
 }
 
 // =============================================================================
-// Async UDP Operations (using IOEngine)
+// Async UDP operations
 // =============================================================================
 
-/// Future that completes when a UDP socket is ready for I/O.
-type UdpIoReady is {
-    fd: FileDesc,
-    interest: IOInterest,
-    registered: Bool,
-};
-
-implement UdpIoReady {
-    fn readable(fd: FileDesc) -> UdpIoReady {
-        UdpIoReady { fd: fd, interest: IOInterest.Read, registered: false }
-    }
-
-    fn writable(fd: FileDesc) -> UdpIoReady {
-        UdpIoReady { fd: fd, interest: IOInterest.Write, registered: false }
-    }
-}
-
-implement Future for UdpIoReady {
-    type Output = ();
-
-    fn poll(&mut self, cx: &mut Context) -> Poll<()> {
-        let io_engine = IOEngine.current();
-
-        if !self.registered {
-            io_engine.register(self.fd, self.interest, cx.waker());
-            self.registered = true;
-            return Poll.Pending;
-        }
-
-        if io_engine.is_ready(self.fd, self.interest) {
-            io_engine.unregister(self.fd, self.interest);
-            Poll.Ready(())
-        } else {
-            io_engine.update_waker(self.fd, self.interest, cx.waker());
-            Poll.Pending
-        }
-    }
-}
-
-implement Drop for UdpIoReady {
-    fn drop(&mut self) {
-        if self.registered {
-            let io_engine = IOEngine.current();
-            io_engine.unregister(self.fd, self.interest);
-        }
-    }
-}
-
-// Async methods for UdpSocket
 implement UdpSocket {
     /// Receive a datagram asynchronously.
     ///
@@ -906,7 +797,7 @@ implement UdpSocket {
                     return Result.Ok((n, src_addr));
                 }
                 Result.Err(e) if io_error_kind_from_os_code(e.code) == IoErrorKind.WouldBlock => {
-                    UdpIoReady.readable(self.fd).await;
+                    AsyncIoReady.readable(self.fd).await;
                     continue;
                 }
                 Result.Err(e) => {
@@ -944,7 +835,7 @@ implement UdpSocket {
             match result {
                 Result.Ok(n) => return Result.Ok(n),
                 Result.Err(e) if io_error_kind_from_os_code(e.code) == IoErrorKind.WouldBlock => {
-                    UdpIoReady.writable(self.fd).await;
+                    AsyncIoReady.writable(self.fd).await;
                     continue;
                 }
                 Result.Err(e) => {
@@ -996,12 +887,12 @@ fn serialize_socket_addr(addr: &SocketAddr) -> List<Byte> {
             }
 
             // sin_port (big-endian)
-            let port = v4.port;
+            let port = v4.port();
             buf.push(((port >> 8) & 0xFF) as Byte);
             buf.push((port & 0xFF) as Byte);
 
             // sin_addr — field is `ip`, not `addr` (#75 resolution gap).
-            let (a, b, c, d) = v4.ip.octets();
+            let (a, b, c, d) = v4.ip().octets();
             buf.push(a);
             buf.push(b);
             buf.push(c);
@@ -1028,7 +919,7 @@ fn serialize_socket_addr(addr: &SocketAddr) -> List<Byte> {
             }
 
             // sin6_port (big-endian)
-            let port = v6.port;
+            let port = v6.port();
             buf.push(((port >> 8) & 0xFF) as Byte);
             buf.push((port & 0xFF) as Byte);
 
@@ -1037,7 +928,7 @@ fn serialize_socket_addr(addr: &SocketAddr) -> List<Byte> {
 
             // sin6_addr (16 bytes) — Ipv6Addr is 8 16-bit segments;
             // emit each as two big-endian bytes. Field is `ip`.
-            let (s0, s1, s2, s3, s4, s5, s6, s7) = v6.ip.segments();
+            let (s0, s1, s2, s3, s4, s5, s6, s7) = v6.ip().segments();
             buf.push(((s0 >> 8) & 0xFF) as Byte); buf.push((s0 & 0xFF) as Byte);
             buf.push(((s1 >> 8) & 0xFF) as Byte); buf.push((s1 & 0xFF) as Byte);
             buf.push(((s2 >> 8) & 0xFF) as Byte); buf.push((s2 & 0xFF) as Byte);
@@ -1048,7 +939,7 @@ fn serialize_socket_addr(addr: &SocketAddr) -> List<Byte> {
             buf.push(((s7 >> 8) & 0xFF) as Byte); buf.push((s7 & 0xFF) as Byte);
 
             // sin6_scope_id (4 bytes, little-endian)
-            let scope = v6.scope_id;
+            let scope = v6.scope_id();
             buf.push((scope & 0xFF) as Byte);
             buf.push(((scope >> 8) & 0xFF) as Byte);
             buf.push(((scope >> 16) & 0xFF) as Byte);

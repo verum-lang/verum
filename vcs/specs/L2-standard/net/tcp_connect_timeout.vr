@@ -8,13 +8,30 @@ mount core.net.addr.{Ipv4Addr, SocketAddr};
 mount core.net.resolve.ToSocketAddrs;
 mount core.net.tcp.{TcpListener, TcpStream};
 mount core.io.protocols.{Read, Write};
+@cfg(target_os = "windows")
+mount core.io.IoErrorKind;
+
+fn client_stream(address: SocketAddr) -> TcpStream {
+    let connected = TcpStream.connect_timeout(address, 2000).unwrap();
+    @cfg(target_os = "windows") {
+        match connected.try_clone() {
+            Result.Err(error) => assert(error.kind() is IoErrorKind.Unsupported),
+            Result.Ok(_) => panic("duplicate requires an independent socket handle"),
+        }
+        return connected;
+    }
+    @cfg(any(target_os = "macos", target_os = "linux")) {
+        let duplicate: TcpStream = connected.try_clone().unwrap();
+        return duplicate;
+    }
+}
 
 fn main() {
     let local = SocketAddr.new_v4(Ipv4Addr.localhost(), 0);
     assert(TcpStream.connect_timeout(local, 0) is Result.Err(_));
     let listener = TcpListener.bind(local).unwrap();
     let address = listener.local_addr().unwrap();
-    let mut client = TcpStream.connect_timeout(address, 2000).unwrap();
+    let mut client = client_stream(address);
     let (mut server, _) = listener.accept().unwrap();
     let message: [Byte; 3] = [0_u8, 255_u8, 65_u8];
     client.write_all(&message[..]).unwrap();

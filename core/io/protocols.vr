@@ -209,6 +209,7 @@ public fn io_error_kind_from_os_code(code: Int) -> IoErrorKind {
         22 => InvalidInput,        // EINVAL
         12 => OutOfMemory,         // ENOMEM
         10035 => WouldBlock,       // WSAEWOULDBLOCK from nonblocking sockets
+        10045 => Unsupported,      // WSAEOPNOTSUPP
         _ => Other,
     }
 }

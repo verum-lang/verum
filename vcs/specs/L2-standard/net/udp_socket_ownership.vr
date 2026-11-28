@@ -1,0 +1,35 @@
+// @test: run
+// @tier: 0
+// @level: L2
+// @tags: net, udp, ownership
+// @expected-exit: 0
+// @description: An independently duplicated socket exchanges a binary datagram after the original closes.
+mount core.io.{IoError, IoErrorKind};
+mount core.net.addr.{Ipv4Addr, SocketAddr};
+mount core.net.resolve.ToSocketAddrs;
+mount core.net.udp.UdpSocket;
+
+fn duplicate_endpoint() -> Result<UdpSocket, IoError> {
+    let original = UdpSocket.bind(SocketAddr.new_v4(Ipv4Addr.localhost(), 0))?;
+    original.try_clone()
+}
+
+async fn main() {
+    @cfg(target_os = "windows") {
+        match duplicate_endpoint() {
+            Result.Err(error) => assert(error.kind() is IoErrorKind.Unsupported),
+            Result.Ok(_) => panic("duplicate requires an independent socket handle"),
+        }
+        return;
+    }
+    let socket = duplicate_endpoint().unwrap();
+    let endpoint = socket.local_addr().unwrap();
+    let bytes: [Byte; 3] = [0_u8, 255_u8, 128_u8];
+    let sent: Result<Int, IoError> = socket.send_to_async(&bytes[..], endpoint).await;
+    assert(sent.unwrap() == 3);
+    let mut packet: [Byte; 3] = [0_u8; 3];
+    let received: Result<(Int, SocketAddr), IoError> = socket.recv_from_async(&mut packet[..]).await;
+    let (count, sender) = received.unwrap();
+    assert(count == 3 && sender.port() == endpoint.port());
+    assert(packet[0] == 0_u8 && packet[1] == 255_u8 && packet[2] == 128_u8);
+}

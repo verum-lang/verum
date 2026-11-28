@@ -408,11 +408,9 @@ public fn winsock_write(fd: FileDesc, buf: &[Byte]) -> Result<Int, OSError> {
     winsock_send(fd, buf, 0)
 }
 
-/// Stub for fcntl (not applicable on Windows, use ioctlsocket).
-/// Provided for API compatibility — returns Result.Ok(0).
+/// Winsock has no POSIX descriptor-control operation.
 public fn fcntl(fd: FileDesc, cmd: Int, arg: Int) -> Result<Int, OSError> {
-    // fcntl is not used directly on Windows; non-blocking is handled by ioctlsocket
-    Result.Ok(0)
+    Result.Err(OSError.new(core.sys.windows.winerror.WSAEOPNOTSUPP, "Winsock does not support fcntl"))
 }
 
 // =============================================================================
