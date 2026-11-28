@@ -22,6 +22,8 @@
 module core.shell.interactive;
 
 mount core.{Maybe, Result, List, Text};
+mount core.base.iterator.Iterator;
+mount core.collections.slice.*;
 mount core.base.protocols.{Display};
 mount core.io.stdio.{stdin, print, println, read_line};
 mount core.shell.result.{ShellError};
@@ -34,7 +36,7 @@ mount core.shell.result.{ShellError};
 public fn input(prompt: &Text) -> Text {
     print(prompt);
     match read_line() {
-        Result.Ok(s)  => strip_newline(s),
+        Result.Ok(s)  => s,
         Result.Err(_) => "",
     }
 }
@@ -42,9 +44,11 @@ public fn input(prompt: &Text) -> Text {
 /// Like `input`, but returns `Maybe.None` on EOF (Ctrl+D).
 public fn input_opt(prompt: &Text) -> Maybe<Text> {
     print(prompt);
-    match read_line() {
-        Result.Ok(s)  => Maybe.Some(strip_newline(s)),
-        Result.Err(_) => Maybe.None,
+    let mut stream = stdin();
+    let mut lines = stream.lines();
+    match lines.next() {
+        Maybe.Some(Result.Ok(line)) => Maybe.Some(line),
+        _ => Maybe.None,
     }
 }
 
@@ -53,16 +57,6 @@ public fn input_default(prompt: &Text, default: &Text) -> Text {
     let pr = f"{prompt} [{default}]: ";
     let s = input(&pr);
     if s.is_empty() { default.clone() } else { s }
-}
-
-fn strip_newline(s: Text) -> Text {
-    let mut end = s.len();
-    while end > 0 {
-        let last = s.byte_at(end - 1);
-        if last == ('\n' as Byte) || last == ('\r' as Byte) { end = end - 1; }
-        else { break; }
-    }
-    s.slice(0, end)
 }
 
 // =============================================================================
@@ -75,7 +69,7 @@ public fn password(prompt: &Text) -> Text {
     print(prompt);
     let restore = disable_echo();
     let line = match read_line() {
-        Result.Ok(s)  => strip_newline(s),
+        Result.Ok(s)  => s,
         Result.Err(_) => "",
     };
     restore_echo(restore);
@@ -189,16 +183,15 @@ public fn multi_select(prompt: &Text, options: &[Text]) -> List<Int> {
 // Required-input / validated helpers
 // =============================================================================
 
-/// Repeatedly prompt until input passes the validator. The validator is a
-/// pure function returning `Result.Ok(value)` on success or `Result.Err(message)` to
-/// re-prompt.
+/// Give each input line to the validator. An error message prompts another
+/// read. A successful validator may return the original line or a parsed value.
 public fn input_validated<T>(
     prompt: &Text,
-    validator: fn(&Text) -> Result<T, Text>,
+    validator: fn(Text) -> Result<T, Text>,
 ) -> T {
     loop {
         let raw = input(prompt);
-        match validator(&raw) {
+        match validator(raw) {
             Result.Ok(v) => return v,
             Result.Err(msg) => println(&f"× {msg}"),
         }
@@ -209,6 +202,6 @@ public fn input_validated<T>(
 public fn input_required(prompt: &Text) -> Text {
     input_validated(prompt, |s| {
         if s.is_empty() { Result.Err("input cannot be empty") }
-        else { Result.Ok(s.clone()) }
+        else { Result.Ok(s) }
     })
 }
