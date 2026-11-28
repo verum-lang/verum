@@ -808,11 +808,17 @@ impl<'a> Validator<'a> {
                 });
             }
             Instruction::SysExtended { sub_op, operands } => {
-                let Some(count) = crate::instruction::SysSubOpcode::from_byte(*sub_op)
-                    .and_then(|operation| operation.context_register_count()) else { return };
-                if self.module.header.version_minor < crate::format::CONTEXT_SLOT_VERSION {
+                use crate::instruction::SysSubOpcode;
+                let Some(operation) = SysSubOpcode::from_byte(*sub_op) else { return };
+                let Some(count) = operation.context_register_count() else { return };
+                let required = match operation {
+                    SysSubOpcode::ContextSlotGetPointer | SysSubOpcode::ContextSlotSetPointer =>
+                        crate::format::CONTEXT_POINTER_SLOT_VERSION,
+                    _ => crate::format::CONTEXT_SLOT_VERSION,
+                };
+                if self.module.header.version_minor < required {
                     self.errors.push(VbcError::InvalidInstructionEncoding {
-                        offset: instr_start, reason: "context slots require VBC minor 71 or newer".into(),
+                        offset: instr_start, reason: format!("context slots require VBC minor {required} or newer"),
                     });
                 }
                 let mut cursor = 0;

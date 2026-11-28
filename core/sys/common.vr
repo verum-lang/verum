@@ -1501,11 +1501,11 @@ implement PartialEq for SysContextError {
 implement Eq for SysContextError {}
 
 // Numeric slots and lexical providers share the current execution context.
-@intrinsic("ctx_slot_get")
-fn __ctx_slot_get_raw(slot: Int) -> Int;
+@intrinsic("ctx_slot_get_pointer")
+fn __ctx_slot_get_pointer(slot: Int) -> &unsafe Byte;
 
-@intrinsic("ctx_slot_set")
-fn __ctx_slot_set_raw(slot: Int, value: Int) -> Int;
+@intrinsic("ctx_slot_set_pointer")
+fn __ctx_slot_set_pointer(slot: Int, value: &unsafe Byte) -> Int;
 
 @intrinsic("ctx_slot_clear")
 fn __ctx_slot_clear_raw(slot: Int) -> Int;
@@ -1519,8 +1519,8 @@ fn __ctx_frame_pop_raw() -> Int;
 /// Return the visible pointer in the slot. Zero denotes an empty slot.
 @inline
 public fn ctx_get(slot: UInt8) -> Maybe<&unsafe Byte> {
-    let address = __ctx_slot_get_raw(slot as Int);
-    if address == 0 { Maybe.None } else { Maybe.Some(unsafe { address as &unsafe Byte }) }
+    let pointer = __ctx_slot_get_pointer(slot as Int);
+    if pointer.is_null() { Maybe.None } else { Maybe.Some(pointer) }
 }
 
 /// The caller owns the exclusive access required to modify the pointed-to value.
@@ -1530,7 +1530,7 @@ public fn ctx_get_mut(slot: UInt8) -> Maybe<&unsafe Byte> { ctx_get(slot) }
 /// The pointer must remain valid while the binding is visible.
 @inline
 public fn ctx_set(slot: UInt8, value: &unsafe Byte) {
-    let _ = __ctx_slot_set_raw(slot as Int, value as Int);
+    let _ = __ctx_slot_set_pointer(slot as Int, value);
 }
 
 @inline

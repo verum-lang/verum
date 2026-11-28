@@ -46,10 +46,13 @@ fn slot_key(slot: i64) -> Option<u32> {
 
 /// Slot read: topmost value for the slot, or 0 when empty / out of range.
 pub(in super::super) fn ctx_slot_get(stack: &ContextStack, slot: i64) -> i64 {
-    match slot_key(slot) {
-        Some(key) => stack.get(key).map(|value| value.as_integer_compatible()).unwrap_or(0),
-        None => 0,
-    }
+    ctx_slot_value(stack, slot).map_or(0, |value| value.as_integer_compatible())
+}
+
+/// Preserve the actual reference carrier. Its owner, generation and access
+/// rights remain authoritative when a borrower later uses the pointer.
+pub(in super::super) fn ctx_slot_value(stack: &ContextStack, slot: i64) -> Option<Value> {
+    slot_key(slot).and_then(|key| stack.get(key))
 }
 
 /// Slot overwrite: replace the topmost entry for the slot, else push a
@@ -65,7 +68,7 @@ pub(in super::super) fn ctx_slot_set(
 
 pub(in super::super) fn ctx_slot_write(stack: &mut ContextStack, slot: i64, value: Value, depth: usize) {
     if let Some(key) = slot_key(slot) {
-        if value.try_as_i64() == Some(0) {
+        if value.is_nil() || value.try_as_i64() == Some(0) {
             stack.clear_slot(key);
         } else {
             stack.set_slot(key, value, depth);

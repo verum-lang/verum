@@ -23,6 +23,14 @@ fn existing_named_handler_images_keep_native_scope_order() {
 }
 
 #[test]
+fn existing_numeric_slot_images_keep_their_native_calling_convention() {
+    let mut bytes = verum_vbc::serialize::serialize_module(&fixture::numeric_module()).unwrap();
+    bytes[6..8].copy_from_slice(&71u16.to_le_bytes());
+    let wire = verum_vbc::deserialize::deserialize_module_validated(&bytes).unwrap();
+    source_image::run_module(wire, |_| {});
+}
+
+#[test]
 fn elf_context_lookups_address_tls_without_a_libc_resolver() {
     use verum_codegen::llvm::{LoweringConfig, VbcToLlvmLowering};
     use verum_llvm::{

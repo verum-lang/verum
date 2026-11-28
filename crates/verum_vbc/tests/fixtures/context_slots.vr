@@ -14,7 +14,48 @@ fn write_slot(slot: UInt8, value: Int) {
     ctx_set(slot, unsafe { value as &unsafe Byte });
 }
 
+fn use_context_pointer() -> Int {
+    let mut reading = Reading { value: 17 };
+    let slot = 18 as UInt8;
+    ctx_set(slot, unsafe { &mut reading.value as &unsafe Byte });
+    if ctx_push_frame() is Result.Err(_) { return -1; }
+    match ctx_get(slot) {
+        Maybe.Some(pointer) => {
+            let place = unsafe { pointer as &mut Int };
+            *place = 41;
+        },
+        Maybe.None => return -2,
+    };
+    ctx_clear(slot);
+    if ctx_has(slot) { return -3; }
+    ctx_pop_frame();
+    let stored = match ctx_get(slot) {
+        Maybe.Some(pointer) => {
+            let place = unsafe { pointer as &unsafe Int };
+            unsafe { *place }
+        },
+        Maybe.None => 0,
+    };
+    ctx_clear(slot);
+    if reading.value == 41 { stored } else { 0 }
+}
+
+fn attempt_readonly_context_write() -> Int {
+    let reading = Reading { value: 17 };
+    let slot = 19 as UInt8;
+    ctx_set(slot, unsafe { &reading.value as &unsafe Byte });
+    match ctx_get(slot) {
+        Maybe.Some(pointer) => {
+            let place = unsafe { pointer as &mut Int };
+            *place = 23;
+            reading.value
+        },
+        Maybe.None => 0,
+    }
+}
+
 fn main() -> Int {
+    if use_context_pointer() != 41 { return 18; }
     let side = 17 as UInt8;
     let typed = 32 as UInt8;
     let last = 255 as UInt8;

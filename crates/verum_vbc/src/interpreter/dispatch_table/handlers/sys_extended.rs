@@ -361,14 +361,15 @@ fn sys_extended_body(
             Ok(DispatchResult::Continue)
         }
 
-        Some(SysSubOpcode::ContextSlotGet | SysSubOpcode::ContextSlotSet | SysSubOpcode::ContextSlotClear) => {
+        Some(operation @ (SysSubOpcode::ContextSlotGet | SysSubOpcode::ContextSlotSet | SysSubOpcode::ContextSlotClear
+            | SysSubOpcode::ContextSlotGetPointer | SysSubOpcode::ContextSlotSetPointer)) => {
             let dst = read_reg(state)?;
             let slot = read_reg(state)?;
             let slot = state.get_reg(slot).try_as_i64().ok_or(InterpreterError::TypeMismatch {
                 expected: "Int", got: "non-Int", operation: "context slot",
             })?;
-            let result = match SysSubOpcode::from_byte(sub_op_byte) {
-                Some(SysSubOpcode::ContextSlotSet) => {
+            let result = match operation {
+                SysSubOpcode::ContextSlotSet => {
                     let value = read_reg(state)?;
                     let value = state.get_reg(value).try_as_i64().ok_or(InterpreterError::TypeMismatch {
                         expected: "Int", got: "non-Int", operation: "context slot value",
@@ -383,15 +384,26 @@ fn sys_extended_body(
                     };
                     super::ctx_runtime::ctx_slot_write(&mut state.context_stack, slot, binding,
                         super::ctx_runtime::EXPLICIT_LIFETIME_DEPTH);
-                    0
+                    Value::from_i64(0)
                 }
-                Some(SysSubOpcode::ContextSlotClear) => {
+                SysSubOpcode::ContextSlotSetPointer => {
+                    let value = read_reg(state)?;
+                    let pointer = context_pointer(state.get_reg(value))?;
+                    super::ctx_runtime::ctx_slot_write(&mut state.context_stack, slot, pointer,
+                        super::ctx_runtime::EXPLICIT_LIFETIME_DEPTH);
+                    Value::from_i64(0)
+                }
+                SysSubOpcode::ContextSlotGetPointer => {
+                    let stored = super::ctx_runtime::ctx_slot_value(&state.context_stack, slot);
+                    context_pointer(stored.unwrap_or_else(|| Value::from_i64(0)))?
+                }
+                SysSubOpcode::ContextSlotClear => {
                     super::ctx_runtime::ctx_slot_clear(&mut state.context_stack, slot);
-                    0
+                    Value::from_i64(0)
                 }
-                _ => super::ctx_runtime::ctx_slot_get(&state.context_stack, slot),
+                _ => Value::from_i64(super::ctx_runtime::ctx_slot_get(&state.context_stack, slot)),
             };
-            state.set_reg(dst, Value::from_i64(result));
+            state.set_reg(dst, result);
             Ok(DispatchResult::Continue)
         }
         Some(SysSubOpcode::ContextFramePush | SysSubOpcode::ContextFramePop) => {
@@ -515,5 +527,18 @@ fn sys_extended_body(
             feature: "sys_extended sub-opcode",
             opcode: Some(Opcode::SysExtended),
         }),
+    }
+}
+
+/// A raw pointer may hold a machine address or a checked VM reference. Passing
+/// it through a context neither dereferences it nor grants additional rights.
+fn context_pointer(value: Value) -> InterpreterResult<Value> {
+    if value.is_int() || value.is_nil() || value.is_regular_ptr() || value.is_cbgr_ref() || value.is_cbgr_regref()
+    {
+        Ok(value)
+    } else {
+        Err(InterpreterError::TypeMismatch {
+            expected: "raw pointer", got: "non-pointer", operation: "context slot pointer",
+        })
     }
 }

@@ -19868,10 +19868,15 @@ impl VbcCodegen {
             func, &render_generic_param_map,
             &descriptor.type_params.iter().map(|p| p.id).collect::<verum_common::List<_>>(),
         ).or_else(|| self.can_infer_source_result(func).then_some(inferred_result).flatten());
+        let fixed_opcode = func_info.intrinsic_name.as_deref().and_then(crate::intrinsics::lookup_intrinsic)
+            .is_some_and(|info| info.intrinsic.opcode_signature().is_some());
         for ((param_name, is_mut), param) in params_with_mutability.iter().zip(func.params.iter()) {
             use verum_ast::FunctionParamKind;
             use crate::types::{CbgrTier, Mutability};
             let type_ref = match &param.kind {
+                FunctionParamKind::Regular { ty, .. } if fixed_opcode => {
+                    self.resolve_signature_type_ref(ty, &render_generic_param_map)?
+                }
                 FunctionParamKind::Regular { ty, .. } => {
                     let resolved = self.resolve_field_type_ref(ty, &render_generic_param_map)?;
                     // **Closure expected-return-type plumbing (#26 residual).**

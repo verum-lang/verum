@@ -13,7 +13,7 @@ pub fn module() -> verum_vbc::VbcModule {
         ("base/result.vr", "Result"),
         (
             "sys/common.vr",
-            "SysContextError CONTEXT_STACK_DEPTH ctx_get ctx_set ctx_clear ctx_has ctx_push_frame ctx_pop_frame __ctx_slot_get_raw __ctx_slot_set_raw __ctx_slot_clear_raw __ctx_frame_push_raw __ctx_frame_pop_raw",
+            "SysContextError CONTEXT_STACK_DEPTH ctx_get ctx_set ctx_clear ctx_has ctx_push_frame ctx_pop_frame __ctx_slot_get_pointer __ctx_slot_set_pointer __ctx_slot_clear_raw __ctx_frame_push_raw __ctx_frame_pop_raw",
         ),
     ];
     let mut units: verum_common::List<_> = selection
@@ -85,5 +85,25 @@ pub fn legacy_module() -> verum_vbc::VbcModule {
     function.instructions = Some(body);
     module.add_function(function);
     module.header.function_table_count = 1;
+    module
+}
+
+/// The register order and operation numbers are from the VBC 2.71 wire format.
+pub fn numeric_module() -> verum_vbc::VbcModule {
+    use verum_vbc::instruction::{Instruction, Reg};
+    let mut module = legacy_module();
+    module.header.version_minor = 71;
+    let body = vec![
+        Instruction::LoadI { dst: Reg(0), value: 18 },
+        Instruction::LoadI { dst: Reg(1), value: 73 },
+        Instruction::SysExtended { sub_op: 0x37, operands: vec![2, 0, 1] },
+        Instruction::SysExtended { sub_op: 0x36, operands: vec![2, 0] },
+        Instruction::Ret { value: Reg(2) },
+    ];
+    module.bytecode.clear();
+    verum_vbc::bytecode::encode_instructions(&body, &mut module.bytecode);
+    module.functions[0].register_count = 3;
+    module.functions[0].instructions = Some(body);
+    module.functions[0].bytecode_length = module.bytecode.len() as u32;
     module
 }

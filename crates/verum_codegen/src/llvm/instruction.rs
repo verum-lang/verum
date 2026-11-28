@@ -32807,8 +32807,8 @@ fn lower_sys_extended<'ctx>(
 
         Some(operation) if operation.context_register_count().is_some() => {
             let name = match operation {
-                SysSubOpcode::ContextSlotGet => "verum_ctx_slot_get",
-                SysSubOpcode::ContextSlotSet => "verum_ctx_slot_set",
+                SysSubOpcode::ContextSlotGet | SysSubOpcode::ContextSlotGetPointer => "verum_ctx_slot_get",
+                SysSubOpcode::ContextSlotSet | SysSubOpcode::ContextSlotSetPointer => "verum_ctx_slot_set",
                 SysSubOpcode::ContextSlotClear => "verum_ctx_slot_clear",
                 SysSubOpcode::ContextFramePush => "verum_ctx_frame_push",
                 SysSubOpcode::ContextFramePop => "verum_ctx_frame_pop",

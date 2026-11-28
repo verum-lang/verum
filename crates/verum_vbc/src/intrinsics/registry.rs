@@ -1388,12 +1388,13 @@ pub enum IntrinsicCallBound {
     Unknown,
 }
 
-/// Exact result types of system operations callable through VBC declarations.
+/// Exact argument and result types of system operations callable through VBC declarations.
 #[derive(Copy, Clone)]
-pub enum OpcodeResult {
+pub enum OpcodeType {
     Scalar(crate::types::TypeId),
     ByteSlice,
     ByteList,
+    RawBytePointer,
 }
 
 pub(crate) enum SignaturePart {
@@ -1402,7 +1403,7 @@ pub(crate) enum SignaturePart {
     Result,
 }
 
-impl OpcodeResult {
+impl OpcodeType {
     fn accepts(
         self, result: Option<&crate::types::TypeRef>,
         carrier: impl Fn(crate::types::TypeId) -> Option<verum_common::well_known_types::WellKnownType>,
@@ -1413,6 +1414,9 @@ impl OpcodeResult {
             (Self::ByteList, Some(TypeRef::Instantiated { base, args })) =>
                 (*base == TypeId::LIST || carrier(*base) == Some(verum_common::well_known_types::WellKnownType::List))
                     && args.as_slice() == [TypeRef::Concrete(TypeId::BYTE)],
+            (Self::RawBytePointer, Some(TypeRef::Reference {
+                inner, mutability: Mutability::Immutable, tier: CbgrTier::Tier2,
+            })) => **inner == TypeRef::Concrete(TypeId::BYTE),
             (Self::ByteSlice, Some(TypeRef::Reference {
                 inner, mutability: Mutability::Immutable, tier: CbgrTier::Tier0,
             })) => matches!(inner.as_ref(), TypeRef::Slice(element) if **element == TypeRef::Concrete(TypeId::BYTE)),
@@ -1425,28 +1429,30 @@ impl OpcodeResult {
             Self::Scalar(id) => id.well_known_name().expect("fixed scalar has a source name"),
             Self::ByteSlice => "&[Byte]",
             Self::ByteList => "List<Byte>",
+            Self::RawBytePointer => "&unsafe Byte",
         }
     }
 }
 
 impl Intrinsic {
     /// Fixed source ABI for operations that can also be invoked as values.
-    pub fn opcode_signature(&self) -> Option<(&'static [crate::types::TypeId], OpcodeResult)> {
+    pub fn opcode_signature(&self) -> Option<(&'static [OpcodeType], OpcodeType)> {
         use crate::instruction::SysSubOpcode;
         use crate::types::TypeId;
+        use OpcodeType::{ByteList, ByteSlice, RawBytePointer, Scalar};
+        const INT: OpcodeType = Scalar(TypeId::INT);
         match self.strategy {
             CodegenStrategy::SystemRegisters(SysSubOpcode::ContextSlotGet | SysSubOpcode::ContextSlotClear) =>
-                Some((&[TypeId::INT], OpcodeResult::Scalar(TypeId::INT))),
-            CodegenStrategy::SystemRegisters(SysSubOpcode::ContextSlotSet) =>
-                Some((&[TypeId::INT, TypeId::INT], OpcodeResult::Scalar(TypeId::INT))),
-            CodegenStrategy::SystemRegisters(SysSubOpcode::ContextFramePush | SysSubOpcode::ContextFramePop) =>
-                Some((&[], OpcodeResult::Scalar(TypeId::INT))),
-            CodegenStrategy::SystemRegisters(SysSubOpcode::ArgumentCount) => Some((&[], OpcodeResult::Scalar(TypeId::INT))),
-            CodegenStrategy::SystemRegisters(SysSubOpcode::ArgumentBytes) => Some((&[TypeId::INT], OpcodeResult::ByteSlice)),
-            CodegenStrategy::SystemRegisters(SysSubOpcode::EnvironmentBytes) => Some((&[], OpcodeResult::ByteList)),
-            CodegenStrategy::LinuxSignal(_) => Some((&[TypeId::INT], OpcodeResult::Scalar(TypeId::INT))),
-            CodegenStrategy::InlineSequence(InlineSequenceId::CharGeneralCategory) =>
-                Some((&[TypeId::CHAR], OpcodeResult::Scalar(TypeId::INT))),
+                Some((&[INT], INT)),
+            CodegenStrategy::SystemRegisters(SysSubOpcode::ContextSlotSet) => Some((&[INT, INT], INT)),
+            CodegenStrategy::SystemRegisters(SysSubOpcode::ContextSlotGetPointer) => Some((&[INT], RawBytePointer)),
+            CodegenStrategy::SystemRegisters(SysSubOpcode::ContextSlotSetPointer) => Some((&[INT, RawBytePointer], INT)),
+            CodegenStrategy::SystemRegisters(SysSubOpcode::ContextFramePush | SysSubOpcode::ContextFramePop
+                | SysSubOpcode::ArgumentCount) => Some((&[], INT)),
+            CodegenStrategy::SystemRegisters(SysSubOpcode::ArgumentBytes) => Some((&[INT], ByteSlice)),
+            CodegenStrategy::SystemRegisters(SysSubOpcode::EnvironmentBytes) => Some((&[], ByteList)),
+            CodegenStrategy::LinuxSignal(_) => Some((&[INT], INT)),
+            CodegenStrategy::InlineSequence(InlineSequenceId::CharGeneralCategory) => Some((&[Scalar(TypeId::CHAR)], INT)),
             _ => None,
         }
     }
@@ -1467,12 +1473,11 @@ impl Intrinsic {
         result: Option<&crate::types::TypeRef>,
         carrier: impl Fn(crate::types::TypeId) -> Option<verum_common::well_known_types::WellKnownType>,
     ) -> Option<(SignaturePart, verum_common::Text)> {
-        use crate::types::TypeRef;
         let (arguments, ret) = self.opcode_signature()?;
         let mut mismatch = None;
         for (index, expected) in arguments.iter().enumerate() {
             match parameters.next() {
-                Some(Some(TypeRef::Concrete(actual))) if actual == expected => {}
+                Some(actual) if expected.accepts(actual, &carrier) => {}
                 Some(_) => { mismatch = Some(SignaturePart::Parameter(index)); break; }
                 None => { mismatch = Some(SignaturePart::Arity); break; }
             }
@@ -1482,7 +1487,7 @@ impl Intrinsic {
             else if ret.accepts(result, carrier) { None }
             else { Some(SignaturePart::Result) }
         })?;
-        let args = arguments.iter().map(|ty| ty.well_known_name().unwrap()).collect::<verum_common::List<_>>().join(", ");
+        let args = arguments.iter().map(|ty| ty.name()).collect::<verum_common::List<_>>().join(", ");
         Some((part, format!("{} requires ({args}) -> {}", self.name, ret.name()).into()))
     }
 
@@ -3732,6 +3737,26 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         strategy: CodegenStrategy::SystemRegisters(crate::instruction::SysSubOpcode::ContextSlotSet),
         mlir_op: None,
         doc: "Set a numeric context slot",
+    },
+    Intrinsic {
+        name: "ctx_slot_get_pointer",
+        category: IntrinsicCategory::Context,
+        hints: &[],
+        param_count: 1,
+        return_count: 1,
+        strategy: CodegenStrategy::SystemRegisters(crate::instruction::SysSubOpcode::ContextSlotGetPointer),
+        mlir_op: None,
+        doc: "Read the visible context pointer with its original access rights",
+    },
+    Intrinsic {
+        name: "ctx_slot_set_pointer",
+        category: IntrinsicCategory::Context,
+        hints: &[],
+        param_count: 2,
+        return_count: 1,
+        strategy: CodegenStrategy::SystemRegisters(crate::instruction::SysSubOpcode::ContextSlotSetPointer),
+        mlir_op: None,
+        doc: "Bind a raw pointer for the lifetime of the current context frame",
     },
     Intrinsic {
         name: "ctx_slot_clear",

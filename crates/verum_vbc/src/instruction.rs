@@ -5314,7 +5314,11 @@ pub enum SysSubOpcode {
     ContextFramePush = 0x39,
     /// Restore the enclosing context frame, returning whether one was present.
     ContextFramePop = 0x3a,
-    // 0x3B-0x3F  RESERVED for execution environment operations.
+    /// Read a raw pointer with its original referent and borrowed capabilities.
+    ContextSlotGetPointer = 0x3b,
+    /// Store a raw pointer without converting its managed carrier to an integer.
+    ContextSlotSetPointer = 0x3c,
+    // 0x3D-0x3F  RESERVED for execution environment operations.
     // 0x40-0xFF  RESERVED.
 }
 
@@ -5344,6 +5348,8 @@ impl SysSubOpcode {
             0x38 => Some(Self::ContextSlotClear),
             0x39 => Some(Self::ContextFramePush),
             0x3a => Some(Self::ContextFramePop),
+            0x3b => Some(Self::ContextSlotGetPointer),
+            0x3c => Some(Self::ContextSlotSetPointer),
             _ => None,
         }
     }
@@ -5351,8 +5357,8 @@ impl SysSubOpcode {
     /// Register count including the destination of a context-store operation.
     pub fn context_register_count(self) -> Option<usize> {
         match self {
-            Self::ContextSlotGet | Self::ContextSlotClear => Some(2),
-            Self::ContextSlotSet => Some(3),
+            Self::ContextSlotGet | Self::ContextSlotClear | Self::ContextSlotGetPointer => Some(2),
+            Self::ContextSlotSet | Self::ContextSlotSetPointer => Some(3),
             Self::ContextFramePush | Self::ContextFramePop => Some(1),
             _ => None,
         }
@@ -17413,7 +17419,7 @@ mod tests {
         );
         assert_eq!(
             sweep(SysSubOpcode::from_byte, SysSubOpcode::to_byte),
-            22,
+            24,
             "SysSubOpcode variant count drift"
         );
         for (byte, operation) in [
@@ -17425,6 +17431,8 @@ mod tests {
             (0x38, SysSubOpcode::ContextSlotClear),
             (0x39, SysSubOpcode::ContextFramePush),
             (0x3a, SysSubOpcode::ContextFramePop),
+            (0x3b, SysSubOpcode::ContextSlotGetPointer),
+            (0x3c, SysSubOpcode::ContextSlotSetPointer),
         ] {
             assert_eq!(SysSubOpcode::from_byte(byte), Some(operation));
             assert_eq!(operation.to_byte(), byte);
