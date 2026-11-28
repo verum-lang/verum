@@ -148,7 +148,7 @@ impl VbcCodegen {
         if let Some(result) = &function.return_type {
             return self.semantic_formal_type_with_values(
                 result, scope, declared_ids, &Self::source_value_binders(function),
-            );
+            ).and_then(|ty| self.deferred_protocol_result(ty));
         }
         // A written empty block has one possible result. An omitted type on
         // a forward declaration or a body with a value still needs evidence.

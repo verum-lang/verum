@@ -113,6 +113,19 @@ struct Premises {
     unknown: Maybe<Text>,
 }
 
+impl Premises {
+    fn protocol_bounds(&self) -> Map<TypeRef, List<super::protocol_results::BoundProtocol>> {
+        let mut bounds: Map<_, List<_>> = Map::new();
+        for goal in &self.goals {
+            let application = if goal.arguments.is_empty() { TypeRef::Concrete(goal.protocol) }
+                else { TypeRef::instantiated(goal.protocol, goal.arguments.iter().cloned()) };
+            let associated = goal.associated.iter().map(|(name, ty)| (name.to_string(), ty.clone())).collect();
+            bounds.entry(goal.subject.clone()).or_default().push(super::protocol_results::BoundProtocol { application, associated });
+        }
+        bounds
+    }
+}
+
 pub(super) struct ProvenImplementation {
     pub bindings: TypeSubstitution,
     pub bounds: Map<TypeRef, List<super::protocol_results::BoundProtocol>>,
@@ -531,9 +544,26 @@ impl VbcCodegen {
                 // are functionally determined by a callable bound, e.g. the
                 // result T of F: fn(Input) -> T. Resolve the declaration's
                 // symbolic requirements before crossing into the caller space.
+                let mut concrete_callables = List::new();
                 if scope.values().any(|id| bindings.get(TypeParamId(*id)).is_none()) {
-                    let symbolic = cg.implementation_premises(declaration, scope)?;
+                    let mut symbolic = cg.implementation_premises(declaration, scope)?;
+                    let bounds = symbolic.protocol_bounds();
+                    for (subject, signature) in &mut symbolic.callables {
+                        if determined_subject(subject, &bindings).is_some_and(crate::mono::is_concrete_type) {
+                            *signature = cg.qualify_bound_projections(signature, &bounds)
+                                .ok_or_else(|| invalid("callable input has no declaring protocol", declaration.span))?;
+                        }
+                    }
                     infer_implementation_bindings(cg, &symbolic, assumptions, &mut bindings, declaration.span)?;
+                    for (index, (subject, signature)) in symbolic.callables.iter().enumerate() {
+                        if let Some(actual) = determined_subject(subject, &bindings).filter(|ty| crate::mono::is_concrete_type(ty))
+                            && super::constructor_types::fully_bound(signature, &bindings) {
+                            let signature = bindings.apply(signature).map_err(|err| invalid(err.to_string(), declaration.span))?;
+                            if let Some(resolved) = cg.body_declaration_type(&signature) {
+                                concrete_callables.push((index, actual.clone(), resolved));
+                            }
+                        }
+                    }
                 }
                 let mut substitution = SourceTypeSubstitution::default();
                 for (name, id) in scope.iter() {
@@ -567,6 +597,11 @@ impl VbcCodegen {
                     |cg| {
                         let mut premises =
                             cg.implementation_premises(declaration, &Default::default())?;
+                        for (index, actual, signature) in concrete_callables {
+                            let Some((subject, required)) = premises.callables.get_mut(index) else { return Ok(None) };
+                            if *subject != actual { return Ok(None); }
+                            *required = signature;
+                        }
                         for (name, required) in &goal.associated {
                             let value =
                                 declaration.items.iter().find_map(|item| match &item.kind {
@@ -638,13 +673,7 @@ impl VbcCodegen {
             Some(source.origin_module().into()), prepared.source_bindings, Some(prepared.receiver),
             |cg| cg.implementation_premises(&header.declaration, &prepared.scope),
         )?;
-        let mut bounds: Map<_, List<_>> = Map::new();
-        for goal in premises.goals {
-            let application = if goal.arguments.is_empty() { TypeRef::Concrete(goal.protocol) }
-                else { TypeRef::instantiated(goal.protocol, goal.arguments) };
-            let associated = goal.associated.into_iter().map(|(name, ty)| (name.to_string(), ty)).collect();
-            bounds.entry(goal.subject).or_default().push(super::protocol_results::BoundProtocol { application, associated });
-        }
+        let bounds = premises.protocol_bounds();
         Ok(Some(ProvenImplementation { bindings, bounds }))
     }
 
@@ -926,7 +955,10 @@ fn infer_implementation_bindings(
             let mut selected = None;
             for actual in actuals {
                 let mut candidate = bindings.clone();
-                if match_evidence(signature, actual, &mut candidate, span)? {
+                let matched = if crate::mono::is_concrete_type(actual) {
+                    cg.bind_callable_operand(signature, actual, &mut candidate)
+                } else { match_evidence(signature, actual, &mut candidate, span)? };
+                if matched {
                     retain_evidence(&mut selected, candidate, span)?;
                 }
             }

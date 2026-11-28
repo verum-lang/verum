@@ -8973,7 +8973,8 @@ impl VbcCodegen {
             .slots
             .into_iter()
             .enumerate()
-            .map(|(index, slot)| slot.ok_or_else(|| self.missing_call_witness(function, index)))
+            .map(|(index, slot)| slot.map(|ty| self.runtime_member_witness(ty))
+                .ok_or_else(|| self.missing_call_witness(function, index)))
             .collect::<CodegenResult<Vec<_>>>()?;
         // Specialization observes exactly the completed call, including explicit
         // arguments. A valid runtime prefix cannot specialize an unknown suffix.
@@ -13603,7 +13604,8 @@ impl VbcCodegen {
                 // type application is the sole authority for this call.
                 self.ctx.emit(Instruction::LoadUnit { dst: recv_reg });
                 if !member.method_arguments.is_empty() {
-                    self.ctx.emit(Instruction::SetCallWitness { type_args: member.method_arguments });
+                    let type_args = member.method_arguments.into_iter().map(|ty| self.runtime_member_witness(ty)).collect();
+                    self.ctx.emit(Instruction::SetCallWitness { type_args });
                 }
                 self.ctx.emit(Instruction::BindMethodReceiver { type_ref });
             } else {

@@ -61,31 +61,13 @@ impl VbcCodegen {
         let Some(application) = &scope.protocol else {
             return Ok(None);
         };
-        let Some(protocol) = application.protocol.and_then(|id| self.type_by_id(id)) else {
+        if application.protocol.and_then(|id| self.type_by_id(id)).is_none() {
             return Ok(None);
-        };
-        let args = protocol
-            .type_params
-            .iter()
-            .map(|param| {
-                let name = self.ctx.strings.get(param.name.0 as usize)?;
-                let value = application.substitution.get(name)?;
-                value.semantic.then(|| value.ty.clone())
-            })
-            .collect::<Maybe<List<_>>>()
-            .ok_or_else(|| {
-                CodegenError::with_span(
-                    CodegenErrorKind::InvalidSourceSignature(format!(
-                        "incomplete protocol application for Self.{method}"
-                    )),
-                    receiver.span,
-                )
-            })?;
-        let declared = if args.is_empty() {
-            TypeRef::Concrete(protocol.id)
-        } else {
-            TypeRef::instantiated(protocol.id, args)
-        };
+        }
+        let declared = self.declared_protocol_application(application).ok_or_else(||
+            CodegenError::with_span(CodegenErrorKind::InvalidSourceSignature(format!(
+                "incomplete protocol application for Self.{method}"
+            )), receiver.span))?;
         self.protocol_method(
             List::from_iter([declared.into()]),
             method,
@@ -144,11 +126,32 @@ impl VbcCodegen {
         declared_ids: &[crate::types::TypeParamId],
         output: &mut Map<TypeRef, List<BoundProtocol>>,
     ) {
+        let declaration = super::formal_parameters::DeclarationTypeScope {
+            owner: self.lexical_type_scope(), substitution: &self.current_source_substitution,
+            receiver: self.current_impl_receiver.as_ref(),
+        };
+        self.visit_declared_protocol_bounds(generics, where_clause, scope, declared_ids, &declaration,
+            |subject| self.protocol_bound_subject(subject), |subject, mut bound| {
+            for target in bound.associated.values_mut() {
+                let Some(known) = self.protocol_bound_subject(target) else { return; };
+                *target = known;
+            }
+            output.entry(subject.clone()).or_default().push(bound);
+        });
+    }
+
+    pub(super) fn visit_declared_protocol_bounds(
+        &self, generics: &[verum_ast::ty::GenericParam], where_clause: Option<&verum_ast::ty::WhereClause>,
+        scope: &std::collections::HashMap<String, u16>, declared_ids: &[crate::types::TypeParamId],
+        declaration: &super::formal_parameters::DeclarationTypeScope<'_>,
+        subject_in_scope: impl Fn(&TypeRef) -> Option<TypeRef>,
+        mut visit: impl FnMut(&TypeRef, BoundProtocol),
+    ) {
         use verum_ast::ty::{
             GenericParamKind, TypeBound, TypeBoundKind, TypeKind, WherePredicateKind,
         };
         let mut collect = |subject: TypeRef, bounds: &[TypeBound]| {
-            let Some(subject) = self.protocol_bound_subject(&subject) else { return; };
+            let Some(subject) = subject_in_scope(&subject) else { return; };
             for bound in bounds {
                 let path;
                 let ty = match &bound.kind {
@@ -159,19 +162,9 @@ impl VbcCodegen {
                     TypeBoundKind::GenericProtocol(ty) => ty,
                     _ => continue,
                 };
-                let declaration = super::formal_parameters::DeclarationTypeScope {
-                    owner: self.lexical_type_scope(), substitution: &self.current_source_substitution,
-                    receiver: self.current_impl_receiver.as_ref(),
-                };
-                let bound = self.declaration_protocol_bound(ty, &subject, scope, declared_ids, &declaration)
-                    .and_then(|mut bound| {
-                        for target in bound.associated.values_mut() {
-                            *target = self.protocol_bound_subject(target)?;
-                        }
-                        Some(bound)
-                    });
-                if let Some(bound) = bound { output.entry(subject.clone()).or_default().push(bound); }
-
+                if let Some(bound) = self.declaration_protocol_bound(ty, &subject, scope, declared_ids, declaration) {
+                    visit(&subject, bound);
+                }
             }
         };
         for param in generics {
@@ -185,7 +178,7 @@ impl VbcCodegen {
             .flat_map(|clause| &clause.predicates)
         {
             if let WherePredicateKind::Type { ty, bounds } = &predicate.kind
-                && let Some(subject) = self.semantic_formal_type(ty, scope, declared_ids)
+                && let Some(subject) = self.semantic_formal_type_in_declaration(ty, scope, declared_ids, &Default::default(), declaration)
             {
                 collect(subject, bounds);
             }

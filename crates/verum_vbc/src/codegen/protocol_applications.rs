@@ -22,6 +22,17 @@ pub(super) struct ProtocolApplication {
 }
 
 impl VbcCodegen {
+    pub(super) fn declared_protocol_application(&self, application: &ProtocolApplication) -> Option<TypeRef> {
+        let protocol = self.type_by_id(application.protocol?)?;
+        let arguments = protocol.type_params.iter().map(|parameter| {
+            let name = self.ctx.strings.get(parameter.name.0 as usize)?;
+            let value = application.substitution.get(name)?;
+            value.semantic.then(|| value.ty.clone())
+        }).collect::<Option<Vec<_>>>()?;
+        Some(if arguments.is_empty() { TypeRef::Concrete(protocol.id) }
+            else { TypeRef::instantiated(protocol.id, arguments) })
+    }
+
     pub(super) fn protocol_application_parts(ty: &Type) -> CodegenResult<(&Path, &[GenericArg])> {
         match &ty.kind {
             TypeKind::Path(path) => Ok((path, &[])),

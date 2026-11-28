@@ -218,6 +218,36 @@ pub(super) fn map_children(
 }
 
 impl VbcCodegen {
+    /// Resolve an unqualified projection in the binder's own list of bounds.
+    /// After substitution the caller's nominal type may implement unrelated
+    /// protocols that declare a member with the same name.
+    pub(super) fn qualify_bound_projections(
+        &self, ty: &TypeRef, bounds: &verum_common::Map<TypeRef, List<super::protocol_results::BoundProtocol>>,
+    ) -> Maybe<TypeRef> {
+        fn visit(cg: &VbcCodegen, ty: &TypeRef, bounds: &verum_common::Map<TypeRef, List<super::protocol_results::BoundProtocol>>,
+            depth: usize, remaining: &mut usize) -> CodegenResult<TypeRef> {
+            *remaining = remaining.checked_sub(1).ok_or_else(|| invalid("member owner exceeds component limit"))?;
+            if depth >= MAX_TYPE_REF_DEPTH { return Err(invalid("member owner exceeds depth limit")); }
+            let mut ty = map_children(ty, 0, &mut |part, binders| {
+                if binders == 0 { visit(cg, part, bounds, depth + 1, remaining) } else { Ok(part.clone()) }
+            })?;
+            if let TypeRef::AssociatedProjection { base, qualifier: owner @ None, assoc, args } = &mut ty
+                && args.is_empty() && let Some(requires) = bounds.get(base.as_ref()) {
+                let declaring = cg.bound_member_owner(requires.clone(), base, assoc)
+                    .ok_or_else(|| invalid("associated member has no unique owner in its declared bounds"))?;
+                let (id, args) = match declaring {
+                    TypeRef::Concrete(id) => (id, Vec::new()),
+                    TypeRef::Instantiated { base, args } => (base, args),
+                    _ => return Err(invalid("invalid associated member owner")),
+                };
+                *owner = Some(crate::types::ProtocolApplication { protocol: crate::types::ProtocolId(id.0), args });
+            }
+            Ok(ty)
+        }
+        let mut remaining = MAX_TYPE_REF_NODES;
+        visit(self, ty, bounds, 0, &mut remaining).ok()
+    }
+
     /// Normalize a selected method's bound before crossing into caller scope.
     /// The runtime method slot selects the retained implementation; neither a
     /// same-named method nor a same-numbered caller parameter is that witness.
@@ -281,6 +311,11 @@ impl VbcCodegen {
         }
         let equalities = DeclarationEqualities::with_members(self, definitions).ok()?;
         let result = equalities.normalize(self, ty).ok()?;
+        let mut bounds = verum_common::Map::new();
+        self.visit_declared_protocol_bounds(&implementation.generics, implementation.generic_where_clause.as_ref(),
+            &scope, &ids, &lexical, |subject| Some(subject.clone()),
+            |subject, bound| bounds.entry(subject.clone()).or_insert_with(List::new).push(bound));
+        let result = self.qualify_bound_projections(&result, &bounds)?;
         super::formal_parameters::resolved(&result, &function.type_param_ids, 0).then_some(result)
     }
 
@@ -323,6 +358,65 @@ impl VbcCodegen {
 
     pub(super) fn implementation_equalities(&self) -> CodegenResult<DeclarationEqualities> {
         DeclarationEqualities::with_members(self, self.current_impl_associated_equalities.clone())
+    }
+
+    pub(super) fn deferred_protocol_result(&self, ty: TypeRef) -> Maybe<TypeRef> {
+        if matches!(ty, TypeRef::Concrete(_) | TypeRef::Generic(_)) { return Some(ty); }
+        let Some(scope) = &self.current_deferred_impl else { return Some(ty) };
+        let Some(application) = &scope.protocol else { return Some(ty) };
+        let root = self.declared_protocol_application(application)?;
+        let mut bounds = verum_common::Map::new();
+        bounds.insert(scope.receiver.ty.clone(), List::from_iter([root.into()]));
+        self.qualify_bound_projections(&ty, &bounds)
+    }
+
+    /// A parent's associated assignment may live in a different conditional
+    /// implementation. Its own subject, arguments and premises must all match
+    /// before the child method's body can use that assignment.
+    pub(super) fn inherit_implementation_members(&mut self) {
+        let Some(scope) = self.current_deferred_impl.as_ref().filter(|scope| scope.receiver.semantic) else { return };
+        let Some(application) = scope.protocol.as_ref() else { return };
+        let subject = scope.receiver.ty.clone();
+        let Some(root) = self.declared_protocol_application(application) else { return };
+        let roots = List::from_iter([root.clone().into()]);
+        let Some(hierarchy) = self.protocol_hierarchy(roots.clone(), Some(&subject)) else { return };
+        let mut inherited = List::new();
+        for parent in &hierarchy {
+            let Some(protocol) = parent.application.base_type_id().and_then(|id| self.type_by_id(id)) else { continue };
+            if let Some(members) = crate::associated_types::declared_members(protocol) {
+                inherited.extend(members.filter(|(_, arity)| *arity == 0).map(|(name, _)| name.to_owned()));
+            }
+        }
+        inherited.sort_unstable();
+        inherited.dedup();
+        let mut remaining = MAX_TYPE_REF_NODES;
+        for member in inherited {
+            let projection = TypeRef::AssociatedProjection {
+                base: Box::new(subject.clone()), qualifier: None, assoc: member.clone(), args: Vec::new(),
+            };
+            let Some(declaring) = self.bound_member_owner(roots.clone(), &subject, &member) else { continue };
+            let (id, arguments) = match &declaring {
+                TypeRef::Concrete(id) => (*id, &[][..]),
+                TypeRef::Instantiated { base, args } => (*base, args.as_slice()),
+                _ => continue,
+            };
+            let known = self.current_type_equalities.members.iter()
+                .find(|(known, _)| *known == projection).map(|(_, value)| value.clone());
+            let value = match known {
+                Some(value) => value,
+                None if declaring != root => {
+                    let Some(value) = self.proven_protocol_member(&subject, id, arguments, &member, 0, &mut remaining)
+                        .filter(|value| *value != projection && self.declared_type_in_scope(value)) else { continue };
+                    self.current_type_equalities.members.push((projection, value.clone()));
+                    value
+                }
+                None => continue,
+            };
+            self.current_type_equalities.members.push((TypeRef::AssociatedProjection {
+                base: Box::new(subject.clone()), assoc: member, args: Vec::new(),
+                qualifier: Some(crate::types::ProtocolApplication { protocol: crate::types::ProtocolId(id.0), args: arguments.to_vec() }),
+            }, value));
+        }
     }
 
     pub(super) fn collect_declaration_equalities(

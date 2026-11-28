@@ -144,13 +144,15 @@ impl VbcCodegen {
         bindings: &mut TypeSubstitution,
     ) -> bool {
         if !self.declared_type_in_scope(actual) { return false; }
+        // Actuals already belong to this body even while some callee slots
+        // remain open. Retain their proven equations in partial substitutions.
+        let Some(actual) = self.body_declaration_type(actual) else { return false; };
         if fully_bound(pattern, bindings) {
             // Only a complete callee substitution moves this pattern into
             // the caller's scope. There its projections and body premises can
             // be normalized without interpreting a caller ID as a callee slot.
             let Some(expected) = bindings.apply(pattern).ok()
                 .and_then(|ty| self.body_declaration_type(&ty)) else { return false; };
-            let Some(actual) = self.body_declaration_type(actual) else { return false; };
             if !self.declared_type_in_scope(&expected) { return false; }
             let mut rigid = TypeSubstitution::empty();
             let Ok(ids) = self.current_callable_param_ids() else { return false; };
@@ -159,10 +161,14 @@ impl VbcCodegen {
             }
             // Reuse structural compatibility (including the two declared
             // array carriers), with every caller parameter fixed to itself.
+            if crate::mono::match_declared_types(&expected, &actual, &mut rigid) { return true; }
+            if self.current_protocol_bounds.is_empty() { return false; }
+            let Some(expected) = self.qualify_bound_projections(&expected, &self.current_protocol_bounds) else { return false };
+            let Some(actual) = self.qualify_bound_projections(&actual, &self.current_protocol_bounds) else { return false };
             return crate::mono::match_declared_types(&expected, &actual, &mut rigid);
         }
         let mut selected = bindings.clone();
-        if !crate::mono::match_declared_types(pattern, actual, &mut selected)
+        if !crate::mono::match_declared_types(pattern, &actual, &mut selected)
             || !fully_bound(pattern, &selected)
         { return false; }
         *bindings = selected;
@@ -839,7 +845,7 @@ impl VbcCodegen {
     /// A diverging callback supplies no result, so it satisfies a selected
     /// result type without changing that type's witness. This is covariance
     /// at the function boundary, not equality of Never with another type.
-    fn bind_callable_operand(&self, formal: &TypeRef, actual: &TypeRef,
+    pub(super) fn bind_callable_operand(&self, formal: &TypeRef, actual: &TypeRef,
         bindings: &mut TypeSubstitution) -> bool {
         if let (TypeRef::Function { is_async: expected_async, params: expected_params,
                 return_type: expected_result, contexts: expected_contexts },

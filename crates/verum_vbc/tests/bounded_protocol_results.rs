@@ -477,7 +477,7 @@ fn actual_iterator_product_preserves_projected_static_and_binary_results() {
         let product = module.functions.iter().find(|function|
             module.get_string(function.name).is_some_and(|name| name.ends_with("Sequence.product"))).unwrap();
         let result = product.semantic_return.as_ref().unwrap();
-        let TypeRef::AssociatedProjection { base: receiver, qualifier: None, assoc, args: projection_args } = result else {
+        let TypeRef::AssociatedProjection { base: receiver, qualifier: Some(declaration), assoc, args: projection_args } = result else {
             panic!("the retained source signature declares Self.Item: {result:?}")
         };
         assert_eq!(assoc, "Item");
@@ -488,6 +488,8 @@ fn actual_iterator_product_preserves_projected_static_and_binary_results() {
         assert!(matches!(item, TypeRef::Generic(_)), "{item:?}");
         let iterator = module.types.iter().find(|ty| module.get_string(ty.name) == Some("Iterator")
             && ty.origin_module.and_then(|owner| module.get_string(owner)) == Some("core.base.iterator")).unwrap();
+        assert_eq!(declaration.protocol.0, iterator.id.0);
+        assert!(declaration.args.is_empty());
         let implementation = module.get_type(*base).unwrap().protocols.iter()
             .find(|implementation| implementation.protocol.0 == iterator.id.0).unwrap();
         assert!(implementation.associated_types.iter().any(|(name, ty)|
@@ -844,6 +846,87 @@ fn actual_mapped_iterator_cmp_retains_its_implementation_only_item_parameter() {
         assert_tags(module.clone(), "MappedIter.cmp", &[0, 0, 0, 1, 1, 0, 1, 1, 1]);
         execute_source_and_wire(module, 43);
     }
+}
+
+#[test]
+fn actual_mapped_iterator_nth_back_uses_the_inherited_item_equation() {
+    use verum_ast::decl::{ImplItemKind, ImplKind};
+    let mut iterator = actual_iterator(&["nth", "advance_by"]);
+    let mut source = parse(include_str!("../../../core/base/iterator.vr"));
+    source.items.retain_mut(|item| match &mut item.kind {
+        ItemKind::Type(decl) if decl.name.as_str() == "DoubleEndedIterator" => {
+            let TypeDeclBody::Protocol(body) = &mut decl.body else { unreachable!() };
+            body.items.retain(|item| matches!(&item.kind, ProtocolItemKind::Function { decl, .. }
+                if matches!(decl.name.as_str(), "next_back" | "advance_back_by" | "nth_back")));
+            true
+        }
+        ItemKind::Type(decl) => matches!(decl.name.as_str(), "MappedIter" | "Range" | "RepeatWith" | "IntoIterator"),
+        ItemKind::Function(decl) => matches!(decl.name.as_str(), "range" | "repeat_with"),
+        ItemKind::Impl(decl) if matches!(&decl.kind, ImplKind::Protocol { protocol, for_type, .. }
+            if protocol.to_string() == "IntoIterator" && verum_ast::pretty::format_type(for_type) == "I") => true,
+        ItemKind::Impl(decl) if matches!(&decl.kind, ImplKind::Protocol { protocol, for_type, .. }
+            if matches!(protocol.to_string().as_str(), "Iterator" | "DoubleEndedIterator")
+            && matches!(verum_ast::pretty::format_type(for_type).as_str(), "MappedIter<I, F>" | "RepeatWith<T, F>" | "Range<Int>")) => {
+            decl.items.retain(|item| match &item.kind {
+                ImplItemKind::Type { name, .. } => name.as_str() == "Item",
+                ImplItemKind::Function(fun) => matches!(fun.name.as_str(), "next" | "next_back"),
+                _ => false,
+            });
+            true
+        }
+        _ => false,
+    });
+    iterator.items.extend(source.items);
+    iterator.items.extend(parse("mount core.base.maybe.Maybe; mount core.base.result.Result;").items);
+    iterator.items.extend(parse(r#"
+        public type Alternate is protocol { type Item; };
+        implement<I, F> Alternate for MappedIter<I, F> { type Item = UInt32; }
+    "#).items);
+    let mut maybe = parse(include_str!("../../../core/base/maybe.vr"));
+    maybe.items.retain_mut(|item| match &mut item.kind {
+        ItemKind::Module(decl) => decl.items.is_none(),
+        ItemKind::Type(decl) => decl.name.as_str() == "Maybe",
+        ItemKind::Impl(decl) if matches!(&decl.kind, ImplKind::Inherent(ty) if verum_ast::pretty::format_type(ty) == "Maybe<T>") => {
+            decl.items.retain(|item| matches!(&item.kind, ImplItemKind::Function(fun) if matches!(fun.name.as_str(), "map" | "is_none")));
+            !decl.items.is_empty()
+        }
+        _ => false,
+    });
+    let result = parse("module core.base.result; public type Result<T,E> is Ok(T) | Err(E);");
+    let consumer = r#"
+        module consumer;
+        mount core.base.iterator.{Iterator, DoubleEndedIterator, MappedIter, Alternate, repeat_with};
+        mount core.base.maybe.Maybe;
+        type Digits is { high: Int };
+        implement Alternate for Digits { type Item = UInt32; }
+        implement Iterator for Digits {
+            type Item = Int;
+            fn next(&mut self) -> Maybe<Int> { self.next_back() }
+        }
+        implement DoubleEndedIterator for Digits {
+            fn next_back(&mut self) -> Maybe<Int> {
+                if self.high == 0 { return Maybe.None; }
+                let value = self.high;
+                self.high -= 1;
+                Maybe.Some(value)
+            }
+        }
+        fn is_two(value: Int) -> Bool { value == 2 }
+        fn three() -> Int { 3 }
+        fn run() -> Int {
+            let mut mapped = MappedIter { iter: Digits { high: 3 }, f: is_two };
+            let first = match mapped.nth_back(1) { Maybe.Some(flag) => flag, _ => return 0 };
+            let last = match mapped.next_back() { Maybe.Some(flag) => flag, _ => return 0 };
+            if first && !last && mapped.next_back().is_none() {
+                let mut repeated = repeat_with(three);
+                match repeated.nth(4) { Maybe.Some(value) => 70 + value, _ => 0 }
+            } else { 0 }
+        }
+    "#;
+    execute_source_and_wire(compile(&[&maybe, &result, &iterator, &parse(consumer)]).unwrap(), 73);
+    let wrong = parse(&consumer.replace("is_two(value: Int)", "is_two(value: UInt32)"));
+    let mismatch = compile(&[&maybe, &result, &iterator, &wrong]).unwrap_err().to_string();
+    assert!(mismatch.contains("conflicting source argument evidence"), "{mismatch}");
 }
 
 #[test]

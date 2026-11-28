@@ -640,8 +640,11 @@ impl VbcCodegen {
     /// descriptor owns both the parameter roster and all candidate equations;
     /// incompatible same-named bindings cannot be selected by iteration order.
     pub(super) fn declared_associated_projection_target(&self, ty: &TypeRef) -> Option<TypeRef> {
-        let TypeRef::AssociatedProjection { base, qualifier: None, assoc, args } = ty else { return None; };
+        let TypeRef::AssociatedProjection { base, qualifier, assoc, args } = ty else { return None; };
         if !args.is_empty() { return None; }
+        if let Some(declaring) = qualifier {
+            return self.selected_protocol_implementation_member(base, TypeId(declaring.protocol.0), &declaring.args, assoc);
+        }
         let (id, arguments) = match base.as_ref() {
             TypeRef::Concrete(id) => (*id, &[][..]),
             TypeRef::Instantiated { base, args } => (*base, args.as_slice()),
