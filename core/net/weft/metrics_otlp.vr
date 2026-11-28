@@ -61,14 +61,14 @@
 //  string name = 1;
 //  string description = 2;
 //  string unit = 3;
-//  oneof data { Sum sum = 7; WeftHistogram histogram = 9; ... }
+//  oneof data { Sum sum = 7; Histogram histogram = 9; ... }
 //  }
 //
 
 // Sum.aggregation_temporality = AGGREGATION_TEMPORALITY_CUMULATIVE
 //  for monotonic counters (the variant `core.net.weft.metrics.WeftCounter`
 //  produces).
-// WeftHistogram with bucket bounds matches `metrics.WeftHistogram.bounds_ms`.
+// Histogram points record millisecond bounds and one count per interval.
 //
 
 // =============================================================================
@@ -82,6 +82,10 @@ module core.net.weft.metrics_otlp;
 
 mount core.collections.list.{List};
 mount core.collections.map.{Map};
+mount core.protobuf.wire.{
+    WireType, write_tag, write_varint, write_bytes, write_string as write_utf8,
+    write_fixed64, write_float64,
+};
 mount core.time.{Instant, Duration, SystemTime};
 mount core.async.task;
 mount core.async.timer;
@@ -244,10 +248,8 @@ implement OtlpExporter {
         }
     }
 
-    /// Snapshot the registry into an OTLP `ExportMetricsServiceRequest`
-    /// protobuf body. The encoder is a hand-rolled deterministic
-    /// serializer — no codegen dependency, no schema drift, byte-
-    /// for-byte stable across runs given identical inputs.
+    /// Encode registry measurements as an OTLP ExportMetricsServiceRequest.
+    /// Each point in a collection uses the same Unix timestamp.
     public fn encode_snapshot(&self) -> List<Byte> {
         let mut buf: List<Byte> = [];
         // Field 1, ResourceMetrics (LEN-delimited message).
@@ -292,11 +294,12 @@ implement OtlpExporter {
         );
         write_tag_len(&mut sm, 1, &scope);
         // Field 2: repeated Metric.
+        let time_unix_nano = SystemTime.now().duration_since_epoch().as_nanos() as UInt64;
         let counters = self.registry.counter_snapshot();
         let mut ci: Int = 0;
         while ci < counters.len() {
             let (name, value) = &counters[ci];
-            let m = encode_counter_metric(name, *value);
+            let m = encode_counter_metric(name, *value, time_unix_nano);
             write_tag_len(&mut sm, 2, &m);
             ci = ci + 1;
         }
@@ -304,7 +307,7 @@ implement OtlpExporter {
         let mut hi: Int = 0;
         while hi < histograms.len() {
             let (name, snap) = &histograms[hi];
-            let m = encode_histogram_metric(name, snap);
+            let m = encode_histogram_metric(name, snap, time_unix_nano);
             write_tag_len(&mut sm, 2, &m);
             hi = hi + 1;
         }
@@ -371,53 +374,21 @@ implement PartialEq for OtlpError {
 implement Eq for OtlpError {}
 
 // =============================================================================
-// Protobuf primitive helpers — minimal, deterministic encoder
+// Tagged fields used by the OTLP messages
 // =============================================================================
 
-/// Write a varint-encoded protobuf field tag (field_no << 3 | wire_type).
-fn write_varint(buf: &mut List<Byte>, mut value: UInt64) {
-    while value >= 0x80_u64 {
-        buf.push(((value & 0x7F_u64) | 0x80_u64) as Byte);
-        value = value >> 7_u64;
-    }
-    buf.push((value & 0x7F_u64) as Byte);
+fn write_tag_len(buf: &mut List<Byte>, field_no: UInt32, body: &List<Byte>) {
+    write_tag(buf, field_no, WireType.LengthDelim);
+    write_bytes(buf, body.as_slice());
 }
 
-/// Field tag: field_no << 3 | wire_type. wire types we use:
-///  0 = VARINT (counters, ints)
-///  1 = I64 (fixed 8-byte — not used here)
-///  2 = LEN (strings, sub-messages, packed repeated)
-fn write_tag(buf: &mut List<Byte>, field_no: Int, wire_type: Int) {
-    let tag: UInt64 = ((field_no as UInt64) << 3_u64) | (wire_type as UInt64);
-    write_varint(buf, tag);
+fn write_string_field(buf: &mut List<Byte>, field_no: UInt32, value: &Text) {
+    write_tag(buf, field_no, WireType.LengthDelim);
+    write_utf8(buf, value);
 }
 
-/// Write a LEN-delimited field — tag + varint length + body.
-fn write_tag_len(buf: &mut List<Byte>, field_no: Int, body: &List<Byte>) {
-    write_tag(buf, field_no, 2);
-    write_varint(buf, body.len() as UInt64);
-    let mut i: Int = 0;
-    while i < body.len() {
-        buf.push(body[i]);
-        i = i + 1;
-    }
-}
-
-/// Write a string field — same as LEN but takes a Text.
-fn write_string(buf: &mut List<Byte>, field_no: Int, value: &Text) {
-    let bytes = value.as_bytes();
-    write_tag(buf, field_no, 2);
-    write_varint(buf, bytes.len() as UInt64);
-    let mut i: Int = 0;
-    while i < bytes.len() {
-        buf.push(bytes[i]);
-        i = i + 1;
-    }
-}
-
-/// Write a varint scalar field (int64, uint64, ...).
-fn write_uint64(buf: &mut List<Byte>, field_no: Int, value: UInt64) {
-    write_tag(buf, field_no, 0);
+fn write_uint64(buf: &mut List<Byte>, field_no: UInt32, value: UInt64) {
+    write_tag(buf, field_no, WireType.Varint);
     write_varint(buf, value);
 }
 
@@ -427,30 +398,30 @@ fn write_uint64(buf: &mut List<Byte>, field_no: Int, value: UInt64) {
 
 fn encode_key_value(key: &Text, value: &Text) -> List<Byte> {
     let mut kv: List<Byte> = [];
-    write_string(&mut kv, 1, key);
+    write_string_field(&mut kv, 1, key);
     // Field 2: AnyValue. AnyValue.string_value is field 1 (LEN).
     let mut av: List<Byte> = [];
-    write_string(&mut av, 1, value);
+    write_string_field(&mut av, 1, value);
     write_tag_len(&mut kv, 2, &av);
     kv
 }
 
 fn encode_instrumentation_scope(name: &Text, version: &Text) -> List<Byte> {
     let mut s: List<Byte> = [];
-    write_string(&mut s, 1, name);     // name
-    write_string(&mut s, 2, version);  // version
+    write_string_field(&mut s, 1, name);     // name
+    write_string_field(&mut s, 2, version);  // version
     s
 }
 
-fn encode_counter_metric(name: &Text, value: Int) -> List<Byte> {
+fn encode_counter_metric(name: &Text, value: Int, time_unix_nano: UInt64) -> List<Byte> {
     let mut m: List<Byte> = [];
-    write_string(&mut m, 1, name);  // name
+    write_string_field(&mut m, 1, name);  // name
     // Field 7: Sum. Sum has fields:
     //  1: data_points (NumberDataPoint, repeated)
     //  2: aggregation_temporality = 2 (CUMULATIVE)
     //  3: is_monotonic = true
     let mut sum: List<Byte> = [];
-    let dp = encode_number_data_point(value);
+    let dp = encode_number_data_point(value, time_unix_nano);
     write_tag_len(&mut sum, 1, &dp);
     write_uint64(&mut sum, 2, 2_u64);  // CUMULATIVE
     write_uint64(&mut sum, 3, 1_u64);  // is_monotonic = true
@@ -458,91 +429,48 @@ fn encode_counter_metric(name: &Text, value: Int) -> List<Byte> {
     m
 }
 
-fn encode_number_data_point(value: Int) -> List<Byte> {
+fn encode_number_data_point(value: Int, time_unix_nano: UInt64) -> List<Byte> {
     let mut dp: List<Byte> = [];
-    // NumberDataPoint:
-    //  3: time_unix_nano
-    //  6: as_int (int64)
-    let now_ns = SystemTime.now().duration_since_epoch().as_nanos() as UInt64;
-    // fixed64 wire-type = 1 (8 bytes little-endian).
-    write_tag(&mut dp, 3, 1);
-    let mut k: Int = 0;
-    while k < 8 {
-        dp.push(((now_ns >> (k * 8)) & 0xFF_u64) as Byte);
-        k = k + 1;
-    }
-    // as_int = sint64 zigzag would be wire-type 0; but OTLP uses
-    // int64 here (varint with sign-extension on 10 bytes for negatives).
-    // Counters are non-negative so a plain varint of value-as-u64
-    // matches.
-    write_uint64(&mut dp, 6, value as UInt64);
+    write_tag(&mut dp, 3, WireType.Fixed64);
+    write_fixed64(&mut dp, time_unix_nano);
+    write_tag(&mut dp, 6, WireType.Fixed64);
+    write_fixed64(&mut dp, value as UInt64);
     dp
 }
 
-fn encode_histogram_metric(name: &Text, snap: &OtlpHistogramSnapshot) -> List<Byte> {
+fn encode_histogram_metric(name: &Text, snap: &OtlpHistogramSnapshot, time_unix_nano: UInt64) -> List<Byte> {
     let mut m: List<Byte> = [];
-    write_string(&mut m, 1, name);
-    // Field 9: WeftHistogram.
+    write_string_field(&mut m, 1, name);
+    write_string_field(&mut m, 3, &"ms");
+    // Field 9: Histogram.
     let mut hist: List<Byte> = [];
-    let dp = encode_histogram_data_point(snap);
+    let dp = encode_histogram_data_point(snap, time_unix_nano);
     write_tag_len(&mut hist, 1, &dp);
     write_uint64(&mut hist, 2, 2_u64);   // aggregation_temporality = CUMULATIVE
     write_tag_len(&mut m, 9, &hist);
     m
 }
 
-fn encode_histogram_data_point(snap: &OtlpHistogramSnapshot) -> List<Byte> {
+fn encode_histogram_data_point(snap: &OtlpHistogramSnapshot, time_unix_nano: UInt64) -> List<Byte> {
     let mut dp: List<Byte> = [];
-    // HistogramDataPoint:
-    //  3: time_unix_nano (fixed64)
-    //  4: count (uint64 fixed64? actually fixed64 per proto)
-    //  5: sum (double — fixed64)
-    //  6: bucket_counts (repeated uint64, packed)
-    //  7: explicit_bounds (repeated double, packed)
-    let now_ns = SystemTime.now().duration_since_epoch().as_nanos() as UInt64;
-    write_tag(&mut dp, 3, 1);
-    let mut k: Int = 0;
-    while k < 8 {
-        dp.push(((now_ns >> (k * 8)) & 0xFF_u64) as Byte);
-        k = k + 1;
+    write_tag(&mut dp, 3, WireType.Fixed64);
+    write_fixed64(&mut dp, time_unix_nano);
+    write_tag(&mut dp, 4, WireType.Fixed64);
+    write_fixed64(&mut dp, snap.total as UInt64);
+    write_tag(&mut dp, 5, WireType.Fixed64);
+    write_float64(&mut dp, snap.sum_ms as Float);
+
+    let mut counts: List<Byte> = [];
+    for count in snap.bucket_counts.iter() {
+        write_fixed64(&mut counts, *count as UInt64);
     }
-    // count as fixed64.
-    write_tag(&mut dp, 4, 1);
-    let cnt = snap.total as UInt64;
-    let mut ki: Int = 0;
-    while ki < 8 {
-        dp.push(((cnt >> (ki * 8)) & 0xFF_u64) as Byte);
-        ki = ki + 1;
+    write_tag_len(&mut dp, 6, &counts);
+
+    let mut bounds: List<Byte> = [];
+    for bound in snap.bounds_ms.iter() {
+        write_float64(&mut bounds, *bound as Float);
     }
-    // sum as double — emit big-endian-of-le-bits via cast through f64.
-    write_tag(&mut dp, 5, 1);
-    let sum_bits: UInt64 = (snap.sum_ms as Float).to_bits();
-    let mut kj: Int = 0;
-    while kj < 8 {
-        dp.push(((sum_bits >> (kj * 8)) & 0xFF_u64) as Byte);
-        kj = kj + 1;
-    }
-    // bucket_counts (packed repeated uint64).
-    let mut bc: List<Byte> = [];
-    let mut bi: Int = 0;
-    while bi < snap.bucket_counts.len() {
-        write_varint(&mut bc, snap.bucket_counts[bi] as UInt64);
-        bi = bi + 1;
-    }
-    write_tag_len(&mut dp, 6, &bc);
-    // explicit_bounds (packed repeated double).
-    let mut eb: List<Byte> = [];
-    let mut ei: Int = 0;
-    while ei < snap.bounds_ms.len() {
-        let bits: UInt64 = (snap.bounds_ms[ei] as Float).to_bits();
-        let mut kk: Int = 0;
-        while kk < 8 {
-            eb.push(((bits >> (kk * 8)) & 0xFF_u64) as Byte);
-            kk = kk + 1;
-        }
-        ei = ei + 1;
-    }
-    write_tag_len(&mut dp, 7, &eb);
+    write_tag_len(&mut dp, 7, &bounds);
     dp
 }
 

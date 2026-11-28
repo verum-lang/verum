@@ -1,0 +1,90 @@
+module core.net.weft.tests.metrics_wire;
+
+mount core.net.weft.metrics.{WeftCounter, WeftHistogram, WeftMetricsRegistry};
+mount core.net.weft.metrics_otlp.{OtlpExporter, OtlpExporterConfig};
+mount core.protobuf.wire.{ProtobufCursor, WireType, read_fixed64};
+
+fn messages(bytes: &List<Byte>, number: UInt32) -> List<List<Byte>> {
+    let mut fields: List<List<Byte>> = [];
+    let mut cursor = ProtobufCursor.new(bytes.as_slice());
+    while !cursor.at_end() {
+        let (field, wire) = cursor.read_tag().unwrap();
+        if field == number {
+            assert(wire is WireType.LengthDelim);
+            let (start, length) = cursor.read_length_delim_view().unwrap();
+            let payload: List<Byte> = List.from_slice(&bytes.as_slice()[start..start + length]);
+            fields.push(payload);
+        } else {
+            cursor.skip(wire).unwrap();
+        }
+    }
+    fields
+}
+
+fn fixed_field(bytes: &List<Byte>, number: UInt32) -> UInt64 {
+    let mut cursor = ProtobufCursor.new(bytes.as_slice());
+    while !cursor.at_end() {
+        let (field, wire) = cursor.read_tag().unwrap();
+        if field == number {
+            assert(wire is WireType.Fixed64);
+            return cursor.read_fixed64().unwrap();
+        }
+        cursor.skip(wire).unwrap();
+    }
+    panic("missing fixed64 field")
+}
+
+fn check_metric_points(counter: &List<Byte>, histogram: &List<Byte>) {
+    let sum = messages(counter, 7)[0];
+    let number_point = messages(&sum, 1)[0];
+    assert_eq(fixed_field(&number_point, 6), 257_u64);
+
+    let unit = messages(histogram, 3)[0];
+    assert_eq(Text.from_utf8(unit.as_slice()).unwrap(), "ms");
+    let distribution = messages(histogram, 9)[0];
+    let point = messages(&distribution, 1)[0];
+    let timestamp = fixed_field(&point, 3);
+    assert(timestamp > 0_u64);
+    assert_eq(timestamp, fixed_field(&number_point, 3));
+    assert_eq(fixed_field(&point, 4), 260_u64);
+    assert_eq(fixed_field(&point, 5), (11301.0).to_bits());
+
+    let counts = messages(&point, 6)[0];
+    let bounds = messages(&point, 7)[0];
+    let limits: List<Float> = [5.0, 15.0, 30.0, 60.0, 120.0, 250.0, 500.0, 1000.0, 2500.0, 5000.0, 10000.0];
+    assert_eq(counts.len(), 8 * (limits.len() + 1));
+    assert_eq(bounds.len(), 8 * limits.len());
+    let mut i: Int = 0;
+    while i <= limits.len() {
+        let count = read_fixed64(counts.as_slice(), i * 8).unwrap().0;
+        let expected = if i == 0 { 258_u64 } else if i == 1 || i == limits.len() { 1_u64 } else { 0_u64 };
+        assert_eq(count, expected);
+        if i < limits.len() {
+            assert_eq(read_fixed64(bounds.as_slice(), i * 8).unwrap().0, limits[i].to_bits());
+        }
+        i = i + 1;
+    }
+}
+
+@test
+fn registry_snapshot_uses_otlp_field_types_and_millisecond_buckets() {
+    let registry = Shared.new(WeftMetricsRegistry.new());
+    registry.counter(&"requests").add(257);
+    let histogram = registry.histogram(&"duration");
+    let mut i = 0;
+    while i < 258 {
+        histogram.observe_ms(5);
+        i = i + 1;
+    }
+    histogram.observe_ms(10);
+    histogram.observe_ms(10001);
+    let exporter = OtlpExporter.new(OtlpExporterConfig.new("http://collector/v1/metrics", "weft"), registry);
+    let request = exporter.encode_snapshot();
+    let resource = messages(&request, 1)[0];
+    let scope = messages(&resource, 2)[0];
+    let metrics = messages(&scope, 2);
+    assert_eq(metrics.len(), 2);
+    check_metric_points(&metrics[0], &metrics[1]);
+}
+
+fn main() { registry_snapshot_uses_otlp_field_types_and_millisecond_buckets(); }
