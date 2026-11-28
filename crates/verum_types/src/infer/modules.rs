@@ -18220,7 +18220,10 @@ impl TypeChecker {
                 None
             } else {
                 match &recv_ty {
-                    Type::Text => Some(verum_common::Text::from(WKT::Text.as_str())),
+                    // A builtin value has no TypeDecl, but its declared inherent
+                    // methods have the same priority over protocol defaults.
+                    Type::Int | Type::Float | Type::Bool | Type::Char | Type::Text =>
+                        self.get_type_name(recv_ty),
                     Type::Generic { name, .. } => Some(name.clone()),
                     Type::Named { path, .. } => Some(self.path_to_string(path)),
                     // A STRUCTURAL variant still has a nominal name, and

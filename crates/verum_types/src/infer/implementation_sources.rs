@@ -177,19 +177,26 @@ impl TypeChecker {
                 TypeKind::Slice(_) => "Slice".into(),
                 _ => continue,
             };
+            if !self.cfg_evaluator.should_include_item(item) {
+                continue;
+            }
             let members: Vec<_> = declaration.items.iter().filter(|member|
-                matches!(&member.kind, ImplItemKind::Function(f) if f.visibility == Visibility::Public && f.params.iter().any(|p| p.is_self()))
+                self.cfg_evaluator.should_include(&member.attributes)
+                    && matches!(&member.kind, ImplItemKind::Function(f) if f.visibility == Visibility::Public && f.params.iter().any(|p| p.is_self()))
             ).collect();
             if members.is_empty() {
                 continue;
             }
-            let header = verum_ast::source_signature::source_associated_implementation_items(
+            let mut implementation = verum_ast::source_signature::source_associated_implementation_items(
                 declaration,
                 &members,
             )
             .map_err(TypeError::Other)?;
+            // The validated header describes the imported domain. Live source
+            // also supplies each admitted member's executable declaration.
+            implementation.items = members.iter().map(|member| (**member).clone()).collect();
             self.with_implementation_owner(owner.as_str(), |checker| {
-                checker.register_impl_block(&header)
+                checker.register_impl_block(&implementation)
             })?;
             let methods = self.inherent_methods.read();
             for member in members {

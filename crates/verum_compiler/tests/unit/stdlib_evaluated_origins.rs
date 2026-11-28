@@ -189,3 +189,21 @@ fn formatter_writes_preserve_the_output_buffer_loan() {
     check_source_module(&mut phase.configured_checker(), "formatter_loan", &module, &registry)
         .unwrap_or_else(|errors| panic!("formatter read after write: {errors:#?}"));
 }
+
+#[test]
+fn sorting_text_keys_uses_the_source_comparison_contract() {
+    let session = crate::Session::new(crate::options::CompilerOptions::default());
+    let (registry, phase) = release_stdlib_graph(&session);
+    let source = r#"module sort_keys;
+        mount core.collections.list.List;
+        mount core.net.weft.metrics_otlp.OtlpHistogramSnapshot;
+        fn order_counters(mut entries: List<(Text, Int)>) {
+            entries.sort_by(|left, right| left.0.cmp(&right.0));
+        }
+        fn order_histograms(mut entries: List<(Text, OtlpHistogramSnapshot)>) {
+            entries.sort_by(|left, right| left.0.cmp(&right.0));
+        }"#;
+    let module = Parser::new(source).parse_module().unwrap();
+    check_source_module(&mut phase.configured_checker(), "sort_keys", &module, &registry)
+        .unwrap_or_else(|errors| panic!("{errors:#?}"));
+}

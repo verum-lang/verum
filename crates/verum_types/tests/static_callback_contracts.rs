@@ -30,6 +30,36 @@ fn imported_inherent_method_proves_the_domain_of_its_actual_receiver() {
 }
 
 #[test]
+fn a_glob_import_keeps_the_selected_slice_method_body_for_callback_checking() {
+    let consumer = "mount platform.*;
+        fn compare() -> fn(&[Int])->Int { |items| items.measure() }";
+    for (definition, accepted) in [("{ 73 }", true), ("{ later() }", false), (";", false)] {
+        let provider = format!("module platform;
+            async fn later()->Int {{ 73 }}
+            implement<T> [T] {{ public fn measure(&self)->Int {definition} }}");
+        let found = errors_with_provider(consumer, Some(&provider));
+        if accepted {
+            assert!(found.is_empty(), "{found:?}");
+        } else {
+            assert!(found.iter().any(|error| error.contains("excludes {Async}")), "{found:?}");
+        }
+    }
+    let configured = r#"module platform;
+        implement<T> [T] {
+            @cfg(target_os = "unused") public async fn measure(&self)->Int { 19 }
+            public fn measure(&self)->Int { 73 }
+        }"#;
+    let found = errors_with_provider(consumer, Some(configured));
+    assert!(found.is_empty(), "{found:?}");
+    let ambiguous = "module platform;
+        implement<T> [T] { public fn measure(&self)->Int { 73 } }
+        implement<T> [T] { public fn measure(&self)->Int { 19 } }";
+    let found = errors_with_provider(consumer, Some(ambiguous));
+    assert!(found.iter().any(|error| error.contains("AmbiguousName") && error.contains("measure")),
+        "{found:?}");
+}
+
+#[test]
 fn mutually_recursive_functions_can_be_used_as_synchronous_callbacks() {
     let source = "fn odd(n:Int)->Bool {if n<=0 {false} else {even(n-1)}}
         fn even(n:Int)->Bool {if n<=0 {true} else {odd(n-1)}}
@@ -59,6 +89,21 @@ fn receiver_selects_its_inherent_method_independently_of_protocol_registration_o
 }
 
 #[test]
+fn scalar_receivers_select_their_declared_inherent_method_before_a_protocol_default() {
+    let declarations = "type Measure is protocol { fn sample(self, other: Self) -> Bool { true } };
+        implement Measure for Int {}
+        implement Int { fn sample(self, other: Int) -> Int { if self < other {self} else {other} } }";
+    let accepted = errors(&format!("{declarations}
+        fn comparison() -> fn(Int,Int)->Int {{ |left,right| left.sample(right) }}
+        fn abstract_sample<T:Measure>(left:T,right:T)->Bool {{ left.sample(right) }}"));
+    assert!(accepted.is_empty(), "{accepted:?}");
+    let rejected = errors(&format!("{declarations}
+        fn wrong(left:Int,right:Int)->Bool {{ left.sample(right) }}"));
+    assert!(rejected.iter().any(|error| error.contains("Int") && error.contains("Bool")),
+        "the default replaced a concrete inherent method: {rejected:?}");
+}
+
+#[test]
 fn specialized_inherent_method_leaves_disjoint_protocol_dispatch_available() {
     let source = "type Gauge<T> is { item: T };
         type Sample is protocol { fn reading(&self) -> Bool; };
@@ -69,7 +114,8 @@ fn specialized_inherent_method_leaves_disjoint_protocol_dispatch_available() {
     let found = errors(source);
     assert!(found.is_empty(), "{found:?}");
     let absent = errors(&format!("{source} fn absent(g: &Gauge<Char>)->Int {{ g.reading() }}"));
-    assert!(absent.iter().any(|error| error.contains("a type implementing `reading` for `cog.Gauge<Char>`")), "{absent:?}");
+    assert!(absent.iter().any(|error| error.contains("MethodNotFound")
+        && error.contains("cog.Gauge<Char>") && error.contains("reading")), "{absent:?}");
 }
 
 fn errors_with_provider(source: &str, provider: Option<&str>) -> List<Text> {
