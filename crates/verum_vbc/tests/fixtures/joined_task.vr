@@ -1,0 +1,89 @@
+type affine CountingChild is { polls: Int };
+
+fn drop_count(increment: Int) -> Int {
+    static mut COUNT: Int = 0;
+    COUNT += increment;
+    COUNT
+}
+
+implement Drop for CountingChild {
+    fn drop(&mut self) { let _ = drop_count(1); }
+}
+
+implement Future for CountingChild {
+    type Output = Int;
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<Int> {
+        self.polls += 1;
+        if self.polls == 1 {
+            cx.waker().wake_by_ref();
+            Poll.Pending
+        } else {
+            Poll.Ready(73)
+        }
+    }
+}
+
+fn drive_join(cancel: Bool) -> Int {
+    let before = drop_count(0);
+    let child: Shared<Task<Int>> = Shared.new(Task.new(TaskId.new(), noop_waker()));
+    let mut handle: JoinHandle<Int> = JoinHandle.new(child.clone());
+    let mut driver: JoinedTask<CountingChild> = JoinedTask {
+        future: Maybe.Some(CountingChild { polls: 0 }),
+        task: child,
+    };
+    let waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+    if !(handle.poll(&mut cx) is Poll.Pending) { return -1; }
+    if !(driver.poll(&mut cx) is Poll.Pending) { return -2; }
+    if cancel { handle.cancel(); }
+    if handle.is_finished() || drop_count(0) != before { return -3; }
+    if !(driver.poll(&mut cx) is Poll.Ready(_)) { return -4; }
+    if !handle.is_finished() || drop_count(0) != before + 1 { return -5; }
+    match handle.poll(&mut cx) {
+        Poll.Ready(Result.Ok(value)) => value,
+        Poll.Ready(Result.Err(JoinError.Cancelled)) => 1,
+        _ => -6,
+    }
+}
+
+implement Send for CountingChild {}
+fn probe_scheduler_join() -> Int {
+    let before = drop_count(0);
+    let runtime = AsyncRuntime.new();
+    let mut handle = runtime.spawn(CountingChild { polls: 0 });
+    let waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+    if runtime.total_polls() != 0 || runtime.task_count() != 1 || drop_count(0) != before { return -1; }
+    if !handle.poll(&mut cx).is_pending() { return -2; }
+    if runtime.process_ready_tasks() != 0 || runtime.total_polls() != 1 { return -3; }
+    if handle.is_finished() || drop_count(0) != before { return -4; }
+    if runtime.process_ready_tasks() != 1 || runtime.total_polls() != 2 || runtime.task_count() != 0 { return -5; }
+    if drop_count(0) != before + 1 || !handle.is_finished() { return -6; }
+    match handle.poll(&mut cx) { Poll.Ready(Result.Ok(73)) => 1, _ => -7 }
+}
+
+type affine SuspendedChild is {};
+implement Send for SuspendedChild {}
+implement Drop for SuspendedChild {
+    fn drop(&mut self) { let _ = drop_count(1); }
+}
+implement Future for SuspendedChild {
+    type Output = Int;
+    fn poll(&mut self, _cx: &mut Context) -> Poll<Int> { Poll.Pending }
+}
+fn probe_scheduler_cancellation() -> Int {
+    let before = drop_count(0);
+    let runtime = AsyncRuntime.new();
+    let mut handle = runtime.spawn(SuspendedChild {});
+    let waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+    if runtime.process_ready_tasks() != 0 || runtime.total_polls() != 1 { return -11; }
+    if runtime.process_ready_tasks() != 0 || runtime.total_polls() != 1 || runtime.task_count() != 1 { return -12; }
+    handle.cancel();
+    handle.cancel();
+    if handle.is_finished() || !handle.poll(&mut cx).is_pending() || drop_count(0) != before { return -13; }
+    if runtime.process_ready_tasks() != 1 || runtime.total_polls() != 2 { return -14; }
+    if runtime.task_count() != 0 || drop_count(0) != before + 1 { return -15; }
+    match handle.poll(&mut cx) { Poll.Ready(Result.Err(JoinError.Cancelled)) => 1, _ => -16 }
+}

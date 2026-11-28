@@ -42,12 +42,14 @@
 )
 module core.async.executor;
 mount core.collections.list.List;
-mount core.base.memory.replace;
+mount core.collections.map.Map;
 mount core.intrinsics.atomic.{atomic_fence, MemoryOrder};
 mount super.poll.*;
 mount super.waker.*;
 mount super.future.*;
 mount super.task.*;
+mount core.base.memory.{Heap, Shared, Weak, drop, replace, swap};
+mount core.intrinsics.control.catch_unwind;
 mount super.diagnostics.{TaskInfo, TaskLifecycleState};
 mount core.intrinsics.atomic.{compiler_fence};
 mount core.intrinsics.platform.{spin_hint};
@@ -64,7 +66,7 @@ mount core.runtime.thread.{Thread, ThreadBuilder, ThreadJoinHandle, ThreadError}
 // =============================================================================
 
 // Cross-platform context system
-mount sys.common.{
+mount core.sys.common.{
     ctx_get, ctx_set, ctx_clear, ctx_has,
     ctx_push_frame, ctx_pop_frame,
     MAX_CONTEXT_SLOTS, SysContextError,
@@ -77,7 +79,7 @@ mount core.intrinsics.runtime.time.{monotonic_nanos, sleep_ns};
 // the LANGUAGE requires, and this is library API.
 mount core.sync.{Mutex, Condvar, AtomicInt, AtomicBool, MemoryOrdering, Send};
 
-mount sys.io_engine.{
+mount core.sys.io_engine.{
     IOEngine, CompletionOp, CompletionResult, EngineDuration,
     create_io_engine, DEFAULT_SQ_ENTRIES, WAKE_TOKEN,
     EngineIoError, POLLIN, POLLOUT,
@@ -328,6 +330,73 @@ implement Default for AsyncRuntimeConfig {
 // Task State
 // =============================================================================
 
+/// A scheduler entry owns the future until its last poll or shutdown. The
+/// join handle and the entry share exactly one completion cell.
+type JoinedTask<F: Future> is {
+    future: Maybe<F>,
+    task: Shared<Task<F.Output>>,
+};
+
+implement<F: Future> JoinedTask<F> {
+    fn release_future(&mut self) -> Bool {
+        let release: fn() -> () = || {
+            let empty: Maybe<F> = Maybe.None;
+            drop<Maybe<F>>(replace(&mut self.future, empty));
+        };
+        catch_unwind(release).is_ok()
+    }
+
+    fn abandon(&mut self) {
+        if self.future.is_some() {
+            let released = self.release_future();
+            self.task.get().fail(if released { JoinError.Cancelled } else { JoinError.Panicked });
+        }
+    }
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<()> {
+        if self.task.get().cancellation_requested() {
+            self.abandon();
+            return Poll.Ready(());
+        }
+
+        let polled = catch_unwind(|| match &mut self.future {
+            Maybe.Some(future) => future.poll(cx),
+            Maybe.None => panic("joined task polled after completion"),
+        });
+        match polled {
+            Result.Ok(Poll.Pending) => {
+                if self.task.get().cancellation_requested() {
+                    self.abandon();
+                    return Poll.Ready(());
+                }
+                Poll.Pending
+            },
+            Result.Err(_) => {
+                let _ = self.release_future();
+                self.task.get().fail(JoinError.Panicked);
+                Poll.Ready(())
+            },
+            Result.Ok(Poll.Ready(value)) => {
+                if !self.release_future() {
+                    let _ = catch_unwind(|| drop<F.Output>(value));
+                    self.task.get().fail(JoinError.Panicked);
+                } else if let Result.Err(rejected) = self.task.get().try_complete(value) {
+                    let released = catch_unwind(|| drop<F.Output>(rejected));
+                    self.task.get().fail(if released.is_ok() { JoinError.Cancelled } else { JoinError.Panicked });
+                }
+                Poll.Ready(())
+            },
+        }
+    }
+}
+
+// Each poll callback has exclusive access to the allocation produced by
+// Heap<T>.into_raw for its own instantiated state type.
+unsafe fn borrow_task_state<T>(data: &unsafe Byte) -> &mut T {
+    let pointer = data as &unsafe mut T;
+    unsafe { @intrinsic("heap_slot_mut", pointer) }
+}
+
 /// A completed driver retains the exact output of its last poll.
 type TaskState<F: Future> is { future: F, result: Maybe<F.Output> };
 
@@ -499,7 +568,7 @@ implement ChaseLevDeque {
         if b - t >= CHASE_LEV_CAPACITY - 1 {
             return Result.Err(task);
         }
-        let raw = Heap.into_raw(task) as Int;
+        let raw = task.into_raw() as Int;
         self.slots.index(b & CHASE_LEV_MASK).store(raw, MemoryOrdering.Relaxed);
         atomic_fence(MemoryOrder.Release);
         self.bottom.store(b + 1, MemoryOrdering.Relaxed);
@@ -693,6 +762,36 @@ implement WorkerSlot {
 /// before entering the poll loop.
 @thread_local
 static mut CURRENT_WORKER_ID: Int = 0;
+
+// Per-thread runtime identity distinguishes equal slot numbers in different
+// pools, including a worker that drives a nested runtime on the same thread.
+@thread_local
+static mut WORKER_RUNTIME: &unsafe Byte = 0 as &unsafe Byte;
+
+fn belongs_to_worker_pool(runtime: &AsyncRuntime) -> Bool {
+    let owner = unsafe { WORKER_RUNTIME };
+    owner == (runtime as &unsafe Byte)
+}
+
+// Restore the enclosing poll context across nested runtimes and unwinding.
+type RuntimeScope is { previous: Maybe<&unsafe Byte> };
+
+implement RuntimeScope {
+    fn enter(runtime: &AsyncRuntime) -> RuntimeScope {
+        let previous = ctx_get(SLOT_RUNTIME);
+        ctx_set(SLOT_RUNTIME, runtime as &unsafe Byte);
+        RuntimeScope { previous }
+    }
+}
+
+implement Drop for RuntimeScope {
+    fn drop(&mut self) {
+        match self.previous {
+            Maybe.Some(pointer) => ctx_set(SLOT_RUNTIME, pointer),
+            Maybe.None => ctx_clear(SLOT_RUNTIME),
+        }
+    }
+}
 
 /// Read the calling thread's worker id, or `Maybe.None` if not
 /// running inside a worker. Used by `spawn` to dispatch the
@@ -939,10 +1038,8 @@ public type AsyncRuntime is {
     running: AtomicBool,
     /// Shutdown flag
     shutdown: AtomicBool,
-    /// Task queue (pending tasks — awaiting wakeup or initial poll)
-    task_queue: Mutex<List<Heap<TaskEntry>>>,
-    /// Ready queue (woken tasks — ready to be polled)
-    ready_queue: Mutex<List<Heap<TaskEntry>>>,
+    /// Shared queues outlive any cloned waker only while the runtime owns them.
+    queues: Shared<TaskQueues>,
     /// Timer queue (pending timer-driven wakeups, earliest deadline last).
     ///
 
@@ -960,8 +1057,6 @@ public type AsyncRuntime is {
     /// brief_sleep loop; with this queue the loop parks for the
     /// exact remaining duration and wakes once.
     timer_queue: Mutex<TimerQueue>,
-    /// Next task ID
-    next_task_id: AtomicInt,
     /// Pending I/O completion results buffer
     io_results: [CompletionResult; 64],
     /// Number of valid I/O results
@@ -1018,6 +1113,70 @@ implement TimerQueue {
     }
 }
 
+// A parked entry has one owner. Wakes during a poll are remembered until
+// the entry is parked or completed. External wakers hold only a weak queue.
+type TaskQueues is {
+    admission: Mutex<()>,
+    parked: Mutex<List<Heap<TaskEntry>>>,
+    ready: Mutex<List<Heap<TaskEntry>>>,
+    // The bit exists only while its entry is live. Delayed wakes cannot
+    // retain completed tasks or arm a different future.
+    signals: Mutex<Map<Int, Bool>>,
+};
+
+implement TaskQueues {
+    fn new() -> TaskQueues {
+        TaskQueues {
+            admission: Mutex.new(()),
+            parked: Mutex.new(List.new()),
+            ready: Mutex.new(List.new()),
+            signals: Mutex.new(Map.new()),
+        }
+    }
+
+    fn register(&self, id: Int) {
+        let mut signals = self.signals.lock().unwrap_or_else(|p| p.into_inner());
+        if signals.insert(id, false).is_some() { panic("task id already registered"); }
+    }
+
+    fn retire(&self, id: Int) {
+        let mut signals = self.signals.lock().unwrap_or_else(|p| p.into_inner());
+        signals.remove(id);
+    }
+
+    fn wake(&self, id: Int) {
+        let mut parked = self.parked.lock().unwrap_or_else(|p| p.into_inner());
+        let mut signals = self.signals.lock().unwrap_or_else(|p| p.into_inner());
+        if !signals.contains_key(id) { return; }
+        for i in range(0, parked.len()) {
+            if parked.index(i).id.as_int() == id {
+                signals.insert(id, false);
+                let entry = parked.remove(i);
+                let mut ready = self.ready.lock().unwrap_or_else(|p| p.into_inner());
+                ready.push(entry);
+                return;
+            }
+        }
+        signals.insert(id, true);
+    }
+
+    fn park(&self, entry: Heap<TaskEntry>, closing: &AtomicBool) -> Result<(), Heap<TaskEntry>> {
+        let mut parked = self.parked.lock().unwrap_or_else(|p| p.into_inner());
+        if closing.load(MemoryOrdering.Acquire) { return Result.Err(entry); }
+        let wake = {
+            let mut signals = self.signals.lock().unwrap_or_else(|p| p.into_inner());
+            signals.insert(entry.id.as_int(), false).expect("parked task has no registration")
+        };
+        if wake {
+            let mut ready = self.ready.lock().unwrap_or_else(|p| p.into_inner());
+            ready.push(entry);
+        } else {
+            parked.push(entry);
+        }
+        Result.Ok(())
+    }
+}
+
 /// Internal task entry for executor scheduling.
 ///
 /// **Phase 3 (#279) SAFETY contract for `future_ptr`**:
@@ -1038,7 +1197,7 @@ implement TimerQueue {
 /// PUBLIC BECAUSE A PUBLIC SIGNATURE NAMES IT — `public fn pop_local`
 /// returns `Maybe<Heap<TaskEntry>>`.
 public type TaskEntry is {
-    id: Int,
+    id: TaskId,
     /// Boxed future (type-erased). See struct-level SAFETY contract.
     future_ptr: &unsafe Byte,
     /// Poll function pointer
@@ -1046,7 +1205,7 @@ public type TaskEntry is {
     /// Drop function pointer
     drop_fn: fn(&unsafe Byte),
     /// Waker for this task
-    waker: Maybe<Waker>,
+    waker: Waker,
     /// Is task completed
     completed: Bool,
 };
@@ -1064,10 +1223,8 @@ implement AsyncRuntime {
             task_count: AtomicInt.new(0),
             running: AtomicBool.new(false),
             shutdown: AtomicBool.new(false),
-            task_queue: Mutex.new(List.new()),
-            ready_queue: Mutex.new(List.new()),
+            queues: Shared.new(TaskQueues.new()),
             timer_queue: Mutex.new(TimerQueue.new()),
-            next_task_id: AtomicInt.new(1),
             // `CompletionResult.zeroed()`, not `@zero<...>()` — T1352.
             io_results: [CompletionResult.zeroed(); 64],
             io_result_count: 0,
@@ -1266,22 +1423,10 @@ implement AsyncRuntime {
         }
     }
 
-    /// Cheap predicate — true iff either queue has at least one
-    /// task. Acquires both locks briefly; never held across any
-    /// other lock.
+    /// Parked futures run again only after their registered waker fires.
     fn queues_nonempty(&self) -> Bool {
-        let r_empty = {
-            let r = self.ready_queue.lock().unwrap_or_else(|p| p.into_inner());
-            r.is_empty()
-        };
-        if !r_empty {
-            return true;
-        }
-        let p_empty = {
-            let p = self.task_queue.lock().unwrap_or_else(|p| p.into_inner());
-            p.is_empty()
-        };
-        !p_empty
+        let ready = self.queues.ready.lock().unwrap_or_else(|p| p.into_inner());
+        !ready.is_empty()
     }
 
     /// Decrement parked_count under a brief worker_pool lock.
@@ -1334,45 +1479,32 @@ implement AsyncRuntime {
     /// per-task body of `process_ready_tasks` so workers can
     /// drive both their local deque AND stolen tasks through
     /// the same waker / completion / re-park bookkeeping.
-    fn poll_one_task(&self, mut entry: Heap<TaskEntry>) {
+    fn poll_one_task(&self, mut entry: Heap<TaskEntry>) -> Bool {
         if entry.completed {
-            return;
+            return false;
         }
 
-        // Create or reuse waker for this task.
-        let waker = match &entry.waker {
-            Maybe.Some(w) => w.clone(),
-            Maybe.None => {
-                let w = create_runtime_waker(entry.id, self);
-                entry.waker = Maybe.Some(w.clone());
-                w
-            }
-        };
-        let mut cx = Context.from_waker(&waker);
-
+        let mut cx = Context.from_waker(&entry.waker);
         let poll_result = (entry.poll_fn)(entry.future_ptr, &mut cx);
         self.total_polls.fetch_add(1, MemoryOrdering.Relaxed);
 
         match poll_result {
             Poll.Ready(()) => {
                 entry.completed = true;
+                self.queues.retire(entry.id.as_int());
                 self.task_count.fetch_sub(1, MemoryOrdering.Relaxed);
                 self.total_completions.fetch_add(1, MemoryOrdering.Relaxed);
                 (entry.drop_fn)(entry.future_ptr);
+                true
             }
             Poll.Pending => {
-                // Re-enqueue to the global `task_queue` (the same
-                // path single-threaded `process_ready_tasks` uses
-                // for pending work). Stolen tasks DON'T return to
-                // the original owner — they live on the global
-                // queue until their waker fires, after which the
-                // wake path puts them in `ready_queue` for the
-                // next worker to pick up. Maintains the property
-                // that no task is duplicated across deques.
-                let mut queue = self.task_queue.lock().unwrap_or_else(|p| p.into_inner());
-                queue.push(entry);
-            }
+                if let Result.Err(abandoned) = self.queues.park(entry, &self.shutdown) {
+                    self.abandon_entry(abandoned);
+                }
+                false
+            },
         }
+
     }
 
     /// Get number of active tasks.
@@ -1441,7 +1573,7 @@ implement AsyncRuntime {
         // Walk ready queue — these tasks have been woken and are
         // queued for the next poll cycle (Running state).
         {
-            let ready = self.ready_queue.lock().unwrap_or_else(|p| p.into_inner());
+            let ready = self.queues.ready.lock().unwrap_or_else(|p| p.into_inner());
             let mut i: Int = 0;
             while i < ready.len() {
                 let entry = &ready[i];
@@ -1451,7 +1583,7 @@ implement AsyncRuntime {
                     TaskLifecycleState.Running
                 };
                 result.push(TaskInfo.new(
-                    TaskId { id: entry.id },
+                    entry.id,
                     state,
                     Text.new(),       // name: not tracked yet
                     0,                // poll_count: not tracked yet
@@ -1464,7 +1596,7 @@ implement AsyncRuntime {
         // Walk pending queue — these tasks are awaiting external
         // wakeup (Parked state) or have not yet been polled (Pending).
         {
-            let pending = self.task_queue.lock().unwrap_or_else(|p| p.into_inner());
+            let pending = self.queues.parked.lock().unwrap_or_else(|p| p.into_inner());
             let mut i: Int = 0;
             while i < pending.len() {
                 let entry = &pending[i];
@@ -1474,7 +1606,7 @@ implement AsyncRuntime {
                     TaskLifecycleState.Parked
                 };
                 result.push(TaskInfo.new(
-                    TaskId { id: entry.id },
+                    entry.id,
                     state,
                     Text.new(),
                     0,
@@ -1510,25 +1642,37 @@ implement AsyncRuntime {
     ///  while a worker is mid-`worker_pool.lock()` blocking
     ///  the join indefinitely.
     public fn shutdown(&self) {
-        self.shutdown.store(true, MemoryOrdering.Release);
+        {
+            let admission = self.queues.admission.lock().unwrap_or_else(|p| p.into_inner());
+            self.shutdown.store(true, MemoryOrdering.Release);
+        }
+
+        // A worker cannot join itself. It leaves the pool to the outside
+        // owner, whose shutdown/Drop will join and drain all raw deque slots.
+        if belongs_to_worker_pool(self) {
+            let guard = self.worker_pool.lock().unwrap_or_else(|p| p.into_inner());
+            if let Maybe.Some(pool) = guard.as_ref() { pool.notify_all(); }
+            return;
+        }
 
         // Hazard 3 + 6: extract the pool atomically, notify, then
         // RELEASE the lock before joining.
-        let pool_taken: Maybe<WorkerPool> = {
-            let mut g = self.worker_pool.lock().unwrap_or_else(|p| p.into_inner());
-            let extracted = g.take();
-            if let Maybe.Some(ref p) = extracted {
-                p.shutdown_flag.store(true, MemoryOrdering.Release);
-                p.notify_all();
-            }
-            extracted
-        };
-        // Lock released; safe to join lock-free.
+        let mut pool_taken: Maybe<WorkerPool> = Maybe.None;
+        {
+            let mut guard = self.worker_pool.lock().unwrap_or_else(|p| p.into_inner());
+            swap(&mut *guard, &mut pool_taken);
+        }
         if let Maybe.Some(pool) = pool_taken {
-            for h in pool.handles.into_iter() {
-                let _ = h.join();
+            pool.shutdown_flag.store(true, MemoryOrdering.Release);
+            pool.notify_all();
+            for handle in pool.handles.into_iter() { let _ = handle.join(); }
+            // All owners and thieves have exited. Every remaining deque slot
+            // must release the same typed allocation that spawn installed.
+            for slot in pool.slots.into_iter() {
+                while let Maybe.Some(entry) = slot.pop_local() { self.abandon_entry(entry); }
             }
         }
+        self.drain_all_tasks();
     }
 
     /// Spawn a future on the runtime.
@@ -1569,7 +1713,8 @@ implement AsyncRuntime {
     public fn spawn<F: Future + Send>(&self, future: F) -> JoinHandle<F.Output>
     where F.Output: Send
     {
-        // Check shutdown
+        // Publish the entry before shutdown may close admission and drain.
+        let admission = self.queues.admission.lock().unwrap_or_else(|p| p.into_inner());
         if self.shutdown.load(MemoryOrdering.Acquire) {
             panic("Cannot spawn: runtime is shutting down");
         }
@@ -1581,28 +1726,22 @@ implement AsyncRuntime {
             panic("Cannot spawn: task limit reached");
         }
 
-        // Create task with unique ID
-        let task = Shared.new(Task {
-            id: TaskId.new(),
-            state: AtomicInt.new(0),  // Pending
-            result: Mutex.new(Maybe.None),
-        });
-
-        let task_id = self.next_task_id.fetch_add(1, MemoryOrdering.Relaxed);
-
-        // Create task state wrapper
-        let state = Heap.new(TaskState.new(future));
-        let state_ptr = Heap.into_raw(state) as &unsafe Byte;
-
-        // Define poll function (type-erased)
-        let poll_fn: fn(&unsafe Byte, &mut Context) -> Poll<()> = |state_ptr: &unsafe Byte, cx: &mut Context| -> Poll<()> {
-            let state = unsafe { &mut *(state_ptr as &mut TaskState<F>) };
+        let id = TaskId.new();
+        let task_id = id.as_int();
+        let scheduler = create_runtime_waker(task_id, self);
+        let waker = scheduler.clone();
+        let task: Shared<Task<F.Output>> = Shared.new(Task.new(id, scheduler));
+        let state = Heap.new(JoinedTask { future: Maybe.Some(future), task: task.clone() });
+        let state_ptr = state.into_raw() as &unsafe Byte;
+        // The two callbacks consume the same instantiated state type. Only
+        // the owning scheduler entry can poll or destroy this allocation.
+        let poll_fn: fn(&unsafe Byte, &mut Context) -> Poll<()> = |ptr, cx| {
+            let state = unsafe { borrow_task_state<JoinedTask<F>>(ptr) };
             state.poll(cx)
         };
-
-        // Define drop function
-        let drop_fn = |state_ptr: &unsafe Byte| {
-            let _ = unsafe { Heap.from_raw(state_ptr as &unsafe mut TaskState<F>) };
+        let drop_fn = |ptr: &unsafe Byte| {
+            let mut state = unsafe { Heap.from_raw(ptr as &unsafe mut JoinedTask<F>) };
+            state.as_mut().abandon();
         };
 
         // Create task entry
@@ -1611,13 +1750,14 @@ implement AsyncRuntime {
         // For multi-threaded executors, context snapshot should be captured
         // at spawn time and restored when the task runs on a worker thread.
         let entry = Heap.new(TaskEntry {
-            id: task_id,
+            id,
             future_ptr: state_ptr,
             poll_fn: poll_fn,
             drop_fn: drop_fn,
-            waker: Maybe.None,
+            waker,
             completed: false,
         });
+        self.queues.register(task_id);
 
         // Phase 2 (#278) — affine dispatch:
         //   * Inside a worker → push to that worker's local deque
@@ -1637,7 +1777,7 @@ implement AsyncRuntime {
         // so each task is enqueued exactly once.
         let mut entry_slot: Maybe<Heap<TaskEntry>> = Maybe.Some(entry);
         match current_worker_id() {
-            Maybe.Some(wid) => {
+            Maybe.Some(wid) if belongs_to_worker_pool(self) => {
                 let guard = self.worker_pool.lock().unwrap_or_else(|p| p.into_inner());
                 if let Maybe.Some(ref pool) = *guard {
                     if let Maybe.Some(slot) = pool.slot(wid) {
@@ -1660,13 +1800,14 @@ implement AsyncRuntime {
                     }
                 }
             }
-            Maybe.None => {},
+            _ => {},
         };
         if let Maybe.Some(e) = entry_slot.take() {
             // Fall-through to the global injector path.
-            let mut queue = self.task_queue.lock().unwrap_or_else(|p| p.into_inner());
-            queue.push(e);
+            let mut ready = self.queues.ready.lock().unwrap_or_else(|p| p.into_inner());
+            ready.push(e);
         }
+        drop(admission);
         // Wake one parked worker — covers the lost-wakeup window
         // between a producer pushing and a worker about to park.
         // No-op when no pool is configured.
@@ -1677,7 +1818,7 @@ implement AsyncRuntime {
             }
         }
 
-        JoinHandle { task: task }
+        JoinHandle.new(task)
     }
 
     /// Block on a future until it completes.
@@ -1706,8 +1847,7 @@ implement AsyncRuntime {
             panic("AsyncRuntime already running - cannot nest block_on");
         }
 
-        // Set runtime context
-        ctx_set(SLOT_RUNTIME, self as &unsafe Byte);
+        let active = RuntimeScope.enter(self);
 
         // Phase 1B (#325): start the worker pool if the manifest
         // configured `async_worker_threads > 0`. The call is
@@ -1735,7 +1875,7 @@ implement AsyncRuntime {
         }
 
         // Create task state with result storage
-        let task_id = self.next_task_id.fetch_add(1, MemoryOrdering.Relaxed);
+        let task_id = TaskId.new().as_int();
         let mut state = TaskState.new(future);
 
         // Create waker for this task
@@ -1797,8 +1937,6 @@ implement AsyncRuntime {
             self.io_engine_ptr = 0;
         }
 
-        // Clear runtime context
-        ctx_clear(SLOT_RUNTIME);
         self.running.store(false, MemoryOrdering.Release);
 
         // Extract the result
@@ -1817,104 +1955,39 @@ implement AsyncRuntime {
     /// Returns the number of tasks that completed during this tick.
     fn process_ready_tasks(&self) -> Int {
         let budget = self.config.poll_budget;
-        let mut polled = 0;
-        let mut completed = 0;
         let mut tasks_to_poll: List<Heap<TaskEntry>> = List.new();
-
-        // Collect ready tasks (explicitly woken) -- these have priority
         {
-            let mut ready = self.ready_queue.lock().unwrap_or_else(|p| p.into_inner());
+            let mut ready = self.queues.ready.lock().unwrap_or_else(|p| p.into_inner());
             while !ready.is_empty() && tasks_to_poll.len() < budget {
-                if let Maybe.Some(task) = ready.pop() {
-                    tasks_to_poll.push(task);
-                }
+                if let Maybe.Some(task) = ready.pop() { tasks_to_poll.push(task); }
             }
         }
-
-        // Fill remaining budget with pending tasks (newly spawned, need initial poll)
-        {
-            let mut pending = self.task_queue.lock().unwrap_or_else(|p| p.into_inner());
-            while !pending.is_empty() && tasks_to_poll.len() < budget {
-                if let Maybe.Some(task) = pending.pop() {
-                    tasks_to_poll.push(task);
-                }
-            }
+        let mut completed = 0;
+        for entry in tasks_to_poll.into_iter() {
+            if self.poll_one_task(entry) { completed = completed + 1; }
         }
-
-        // Poll each task within budget
-        for mut entry in tasks_to_poll.into_iter() {
-            if entry.completed {
-                continue;
-            }
-
-            // Create or reuse waker for this task
-            let waker = match &entry.waker {
-                Maybe.Some(w) => w.clone(),
-                Maybe.None => {
-                    let w = create_runtime_waker(entry.id, self);
-                    entry.waker = Maybe.Some(w.clone());
-                    w
-                }
-            };
-            let mut cx = Context.from_waker(&waker);
-
-            // Poll the task -- this is where cooperative yielding happens.
-            // The task runs until it hits an .await point and returns Pending,
-            // or it completes and returns Ready.
-            let poll_result = (entry.poll_fn)(entry.future_ptr, &mut cx);
-            polled = polled + 1;
-
-            match poll_result {
-                Poll.Ready(()) => {
-                    entry.completed = true;
-                    completed = completed + 1;
-                    self.task_count.fetch_sub(1, MemoryOrdering.Relaxed);
-                    self.total_completions.fetch_add(1, MemoryOrdering.Relaxed);
-                    // Drop the task state (frees the heap-allocated future)
-                    (entry.drop_fn)(entry.future_ptr);
-                }
-                Poll.Pending => {
-                    // Task yielded -- return to pending queue.
-                    // It will be moved to the ready queue when its waker fires.
-                    let mut queue = self.task_queue.lock().unwrap_or_else(|p| p.into_inner());
-                    queue.push(entry);
-                }
-            }
-        }
-
-        // Update global poll counter
-        self.total_polls.fetch_add(polled, MemoryOrdering.Relaxed);
         completed
     }
 
-    /// Drain and drop all tasks from both queues.
-    ///
+    fn abandon_entry(&self, entry: Heap<TaskEntry>) {
+        self.queues.retire(entry.id.as_int());
+        (entry.drop_fn)(entry.future_ptr);
+        self.task_count.fetch_sub(1, MemoryOrdering.Relaxed);
+    }
 
-    /// Called during shutdown to clean up remaining tasks.
+    /// Remove both queues under the wake-path lock order. Future destructors
+    /// and join waiters can run arbitrary callbacks after both locks release.
     fn drain_all_tasks(&self) {
-        // Drain ready queue
+        let mut pending: List<Heap<TaskEntry>> = List.new();
+        let mut runnable: List<Heap<TaskEntry>> = List.new();
         {
-            let mut ready = self.ready_queue.lock().unwrap_or_else(|p| p.into_inner());
-            while !ready.is_empty() {
-                if let Maybe.Some(entry) = ready.pop() {
-                    if !entry.completed {
-                        (entry.drop_fn)(entry.future_ptr);
-                    }
-                }
-            }
+            let mut parked = self.queues.parked.lock().unwrap_or_else(|p| p.into_inner());
+            let mut ready = self.queues.ready.lock().unwrap_or_else(|p| p.into_inner());
+            swap(&mut *parked, &mut pending);
+            swap(&mut *ready, &mut runnable);
         }
-
-        // Drain pending queue
-        {
-            let mut pending = self.task_queue.lock().unwrap_or_else(|p| p.into_inner());
-            while !pending.is_empty() {
-                if let Maybe.Some(entry) = pending.pop() {
-                    if !entry.completed {
-                        (entry.drop_fn)(entry.future_ptr);
-                    }
-                }
-            }
-        }
+        for entry in pending.into_iter() { self.abandon_entry(entry); }
+        for entry in runnable.into_iter() { self.abandon_entry(entry); }
     }
 
     /// Run spawned tasks until no more tasks are ready.
@@ -1930,31 +2003,10 @@ implement AsyncRuntime {
 
     /// Returns the total number of tasks that completed.
     public fn run_until_idle(&self) -> Int {
+        let active = RuntimeScope.enter(self);
         let mut total_completed = 0;
-        loop {
-            let completed = self.process_ready_tasks();
-            total_completed = total_completed + completed;
-
-            // Check if there are any more ready tasks
-            let has_ready = {
-                let ready = self.ready_queue.lock().unwrap_or_else(|p| p.into_inner());
-                !ready.is_empty()
-            };
-            let has_pending = {
-                let pending = self.task_queue.lock().unwrap_or_else(|p| p.into_inner());
-                !pending.is_empty()
-            };
-
-            // If nothing is ready and nothing is pending, we're idle
-            if !has_ready && !has_pending {
-                break;
-            }
-
-            // If we have pending but no ready tasks, the tasks are waiting
-            // for external wakeup -- we're idle from the executor's perspective
-            if !has_ready && has_pending && completed == 0 {
-                break;
-            }
+        while self.queues_nonempty() {
+            total_completed = total_completed + self.process_ready_tasks();
         }
         total_completed
     }
@@ -2098,24 +2150,7 @@ implement AsyncRuntime {
 
     /// Wake a task by ID (called by waker).
     fn wake_task(&self, task_id: Int) {
-        let mut task_to_wake: Maybe<Heap<TaskEntry>> = Maybe.None;
-
-        // Find and remove task from pending queue
-        {
-            let mut queue = self.task_queue.lock().unwrap_or_else(|p| p.into_inner());
-            for i in range(0, queue.len()) {
-                if queue.get(i).map(|e| e.id == task_id).unwrap_or(false) {
-                    task_to_wake = Maybe.Some(queue.remove(i));
-                    break;
-                }
-            }
-        }
-
-        // Move to ready queue
-        if let Maybe.Some(task) = task_to_wake {
-            let mut ready = self.ready_queue.lock().unwrap_or_else(|p| p.into_inner());
-            ready.push(task);
-        }
+        self.queues.wake(task_id);
     }
 }
 
@@ -2252,8 +2287,6 @@ public type LocalExecutor is {
     ready: List<Heap<TaskEntry>>,
     /// Tasks waiting for wakeup
     pending: List<Heap<TaskEntry>>,
-    /// Next task ID
-    next_id: Int,
     /// Total polls performed
     polls: Int,
     /// Total tasks completed
@@ -2266,7 +2299,6 @@ implement LocalExecutor {
         LocalExecutor {
             ready: List.new(),
             pending: List.new(),
-            next_id: 1,
             polls: 0,
             completions: 0,
         }
@@ -2278,30 +2310,27 @@ implement LocalExecutor {
     /// The future does not need to be `Send` since it will only
     /// be polled on the current thread.
     public fn spawn_local<F: Future>(&mut self, future: F) {
-        let task_id = self.next_id;
-        self.next_id = self.next_id + 1;
-
-        // Create task state wrapper
+        let id = TaskId.new();
         let state = Heap.new(TaskState.new(future));
-        let state_ptr = Heap.into_raw(state) as &unsafe Byte;
+        let state_ptr = state.into_raw() as &unsafe Byte;
 
         // Define poll function (type-erased)
         let poll_fn: fn(&unsafe Byte, &mut Context) -> Poll<()> = |state_ptr: &unsafe Byte, cx: &mut Context| -> Poll<()> {
-            let state = unsafe { &mut *(state_ptr as &mut TaskState<F>) };
+            let state = unsafe { borrow_task_state<TaskState<F>>(state_ptr) };
             state.poll(cx)
         };
 
         // Define drop function
         let drop_fn = |state_ptr: &unsafe Byte| {
-            let _ = unsafe { Heap.from_raw(state_ptr as &unsafe mut TaskState<F>) };
+            drop(unsafe { Heap.from_raw(state_ptr as &unsafe mut TaskState<F>) });
         };
 
         let entry = Heap.new(TaskEntry {
-            id: task_id,
+            id,
             future_ptr: state_ptr,
             poll_fn: poll_fn,
             drop_fn: drop_fn,
-            waker: Maybe.None,
+            waker: noop_waker(),
             completed: false,
         });
 
@@ -2331,14 +2360,12 @@ implement LocalExecutor {
         // are moved to ready on spawn, so pending only has
         // tasks that returned Pending on a previous poll.
 
-        let noop = noop_waker();
-
         for mut entry in to_poll.into_iter() {
             if entry.completed {
                 continue;
             }
 
-            let mut cx = Context.from_waker(&noop);
+            let mut cx = Context.from_waker(&entry.waker);
             let poll_result = (entry.poll_fn)(entry.future_ptr, &mut cx);
             self.polls = self.polls + 1;
 
@@ -2507,6 +2534,7 @@ public type ExecutorTimeout<F: Future> is {
 //     from a peer's deque FRONT.
 fn worker_main(runtime_ptr: &unsafe Byte, worker_id: Int) {
     let runtime = unsafe { &*(runtime_ptr as &AsyncRuntime) };
+    let active = RuntimeScope.enter(runtime);
 
     // Phase 2 (#278): publish the worker id to the thread-local
     // cell. Encoded as `id + 1` because `0` is reserved for "not
@@ -2515,6 +2543,7 @@ fn worker_main(runtime_ptr: &unsafe Byte, worker_id: Int) {
     // local-vs-injector dispatch.
     unsafe {
         CURRENT_WORKER_ID = worker_id + 1;
+        WORKER_RUNTIME = runtime_ptr;
     }
 
     loop {
@@ -2595,6 +2624,7 @@ fn worker_main(runtime_ptr: &unsafe Byte, worker_id: Int) {
     // `CURRENT_WORKER_ID == 0` outside any worker.
     unsafe {
         CURRENT_WORKER_ID = 0;
+        WORKER_RUNTIME = 0 as &unsafe Byte;
     }
 }
 
@@ -2774,48 +2804,41 @@ public fn spawn_blocking<T: Send, F: fn() -> T + Send>(f: F) -> JoinHandle<T> {
 /// Waker data for runtime integration.
 type RuntimeWakerData is {
     task_id: Int,
-    runtime: &AsyncRuntime,
+    queues: Weak<TaskQueues>,
 };
 
-/// Create a waker that wakes a task on the given runtime.
 fn create_runtime_waker(task_id: Int, runtime: &AsyncRuntime) -> Waker {
-    let data = Heap.new(RuntimeWakerData {
-        task_id: task_id,
-        runtime: runtime,
-    });
-    let data_ptr = Heap.into_raw(data) as &unsafe Byte;
-
-    let raw = RawWaker.new(data_ptr, &RUNTIME_WAKER_VTABLE);
-    unsafe { Waker.from_raw(raw) }
+    let data = Heap.new(RuntimeWakerData { task_id, queues: runtime.queues.downgrade() });
+    let ptr = data.into_raw() as &unsafe Byte;
+    unsafe { Waker.from_raw(RawWaker.new(ptr, RUNTIME_WAKER_VTABLE)) }
 }
 
-/// Clone waker data.
+// The vtable retains the owning Heap until the consuming wake or drop.
+unsafe fn borrow_waker_data(data: &unsafe Byte) -> &RuntimeWakerData {
+    let pointer = data as &unsafe RuntimeWakerData;
+    unsafe { @intrinsic("heap_slot_ref", pointer) }
+}
+
 fn runtime_waker_clone(data: &unsafe Byte) -> RawWaker {
-    let waker_data = unsafe { &*(data as &RuntimeWakerData) };
-    let new_data = Heap.new(RuntimeWakerData {
-        task_id: waker_data.task_id,
-        runtime: waker_data.runtime,
-    });
-    let new_ptr = Heap.into_raw(new_data) as &unsafe Byte;
-    RawWaker.new(new_ptr, &RUNTIME_WAKER_VTABLE)
+    let wake = unsafe { borrow_waker_data(data) };
+    let copy = Heap.new(RuntimeWakerData { task_id: wake.task_id, queues: wake.queues.clone() });
+    RawWaker.new(copy.into_raw() as &unsafe Byte, RUNTIME_WAKER_VTABLE)
 }
 
-/// Wake task (consume waker).
 fn runtime_waker_wake(data: &unsafe Byte) {
-    let waker_data = unsafe { Heap.from_raw(data as &unsafe mut RuntimeWakerData) };
-    waker_data.runtime.wake_task(waker_data.task_id);
-    // waker_data is dropped here
+    let owner = unsafe { Heap.from_raw(data as &unsafe mut RuntimeWakerData) };
+    let wake = owner.as_ref();
+    if let Maybe.Some(queues) = wake.queues.upgrade() { queues.wake(wake.task_id); }
 }
 
-/// Wake task by reference (don't consume).
 fn runtime_waker_wake_by_ref(data: &unsafe Byte) {
-    let waker_data = unsafe { &*(data as &RuntimeWakerData) };
-    waker_data.runtime.wake_task(waker_data.task_id);
+    let wake = unsafe { borrow_waker_data(data) };
+    if let Maybe.Some(queues) = wake.queues.upgrade() { queues.wake(wake.task_id); }
 }
 
 /// Drop waker data.
 fn runtime_waker_drop(data: &unsafe Byte) {
-    let _ = unsafe { Heap.from_raw(data as &unsafe mut RuntimeWakerData) };
+    drop(unsafe { Heap.from_raw(data as &unsafe mut RuntimeWakerData) });
 }
 
 /// VTable for runtime wakers.

@@ -22,23 +22,27 @@ module core.async.task;
 mount super.poll.*;
 mount super.waker.*;
 mount super.future.*;
-mount core.base.memory.replace;
 // `spawn_blocking` routes through the dedicated blocking thread
 // pool (`core.runtime.pool.ThreadPool`) rather than the async
 // executor's worker pool — see the BlockingState/BlockingFuture
 // section below for the architectural rationale.
 mount core.runtime.pool.{ThreadPool};
+mount core.base.memory.{Heap, Shared, replace, swap};
+mount core.collections.list.List;
+mount super.executor.{AsyncRuntime, current_runtime};
 // Mounted rather than inherited: §4ter — the prelude carries only what
 // the LANGUAGE requires, and this is library API.
-mount core.sync.{Mutex, AtomicInt, AtomicBool, MemoryOrdering, Send};
+mount core.sync.{Mutex, MutexGuard, AtomicInt, MemoryOrdering, Send};
+mount core.sync.mutex.PoisonError;
 
 // =============================================================================
 // Task State
 // =============================================================================
 
 // Cancellation is a request until the scheduler has destroyed the future and
-// any result it produced concurrently.
+// any result it produced concurrently. The mutex also owns the join waiter.
 type TaskOutcome<T> is Pending | CancelRequested | Ready(Result<T, JoinError>) | Consumed(Bool);
+type TaskCompletion<T> is { outcome: TaskOutcome<T>, waiter: Maybe<Waker> };
 
 implement<T> TaskOutcome<T> {
     fn is_finished(&self) -> Bool {
@@ -113,9 +117,7 @@ implement TaskId {
     @inline
     public fn as_int(&self) -> Int { self.id }
 
-    // Create new task ID.
-    fn new() -> TaskId {
-        // Use atomic counter for unique IDs
+    public(in super) fn new() -> TaskId {
         static NEXT_ID: AtomicInt = AtomicInt.new(1);
         TaskId { id: NEXT_ID.fetch_add(1, MemoryOrdering.Relaxed) }
     }
@@ -150,42 +152,79 @@ implement Debug for TaskId {
 // A spawned asynchronous task.
 public type Task<T> is {
     id: TaskId,
-    state: AtomicInt,  // 0=pending, 1=running, 2=completed, 3=cancelled
-    result: Mutex<Maybe<T>>,
+    completion: Mutex<TaskCompletion<T>>,
+    scheduler: Waker,
 };
 
 implement<T> Task<T> {
-    // Get task ID.
-    @inline(always)
-    public fn id(&self) -> TaskId {
-        self.id
+    public(in super) fn new(id: TaskId, scheduler: Waker) -> Task<T> {
+        let completion: TaskCompletion<T> = TaskCompletion { outcome: TaskOutcome.Pending, waiter: Maybe.None };
+        Task { id, scheduler, completion: Mutex.new(completion) }
     }
 
-    // Check if task is finished.
-    @inline(always)
+    fn completion_guard(&self) -> MutexGuard<TaskCompletion<T>> {
+        self.completion.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    public fn id(&self) -> TaskId { self.id }
+
     public fn is_finished(&self) -> Bool {
-        let state = self.state.load(MemoryOrdering.Acquire);
-        state >= 2  // Completed || Cancelled
+        let state = self.completion_guard();
+        state.outcome.is_finished()
     }
 
-    // Check if task was cancelled.
-    @inline(always)
     public fn is_cancelled(&self) -> Bool {
-        self.state.load(MemoryOrdering.Acquire) == 3
+        let state = self.completion_guard();
+        state.outcome.was_cancelled()
     }
 
-    // Cancel the task.
     public fn cancel(&self) -> Bool {
-        // Can only cancel if pending || running
-        loop {
-            let state = self.state.load(MemoryOrdering.Acquire);
-            if state >= 2 {
-                return false;  // Already finished
-            }
-            if self.state.compare_exchange(state, 3, MemoryOrdering.AcqRel, MemoryOrdering.Relaxed).is_ok() {
-                return true;
-            }
+        {
+            let mut state: MutexGuard<TaskCompletion<T>> = self.completion_guard();
+            if !state.outcome.request_cancel() { return false; }
         }
+        self.scheduler.wake_by_ref();
+        true
+    }
+
+    public(in super) fn cancellation_requested(&self) -> Bool {
+        let state = self.completion_guard();
+        state.outcome is TaskOutcome.CancelRequested
+    }
+
+    // A refused success retains its payload for destruction outside the lock.
+    // Only its producer can subsequently acknowledge cancellation.
+    public(in super) fn try_complete(&self, value: T) -> Result<(), T> {
+        let waiter: Maybe<Waker> = {
+            let mut state: MutexGuard<TaskCompletion<T>> = self.completion_guard();
+            let published: Result<(), T> = state.outcome.publish(value);
+            if published is Result.Err(_) { return published; }
+            state.waiter.take()
+        };
+        if let Maybe.Some(waker) = &waiter { waker.wake_by_ref(); }
+        Result.Ok(())
+    }
+
+    public(in super) fn fail(&self, error: JoinError) {
+        let waiter: Maybe<Waker> = {
+            let mut state: MutexGuard<TaskCompletion<T>> = self.completion_guard();
+            state.outcome.fail(error);
+            state.waiter.take()
+        };
+        if let Maybe.Some(waker) = &waiter { waker.wake_by_ref(); }
+    }
+
+    fn poll_result(&self, cx: &mut Context) -> Poll<Result<T, JoinError>> {
+        let new_waiter = cx.waker().clone();
+        let previous = {
+            let mut state: MutexGuard<TaskCompletion<T>> = self.completion_guard();
+            if state.outcome.is_finished() {
+                return state.outcome.take_result();
+            }
+            state.waiter.replace(new_waiter)
+        };
+        drop(previous);
+        Poll.Pending
     }
 }
 
@@ -199,22 +238,24 @@ public type JoinHandle<T> is {
 };
 
 implement<T> JoinHandle<T> {
+    public(in super) fn new(task: Shared<Task<T>>) -> JoinHandle<T> { JoinHandle { task } }
+
     // Get task ID.
     @inline(always)
     public fn id(&self) -> TaskId {
-        self.task.id()
+        self.task.get().id()
     }
 
     // Check if task is finished.
     @inline(always)
     public fn is_finished(&self) -> Bool {
-        self.task.is_finished()
+        self.task.get().is_finished()
     }
 
     // Cancel the task.
     @inline(always)
     public fn cancel(&self) {
-        self.task.cancel();
+        self.task.get().cancel();
     }
 
     // Detach from task - let it run to completion without waiting.
@@ -227,20 +268,8 @@ implement<T> JoinHandle<T> {
 implement<T> Future for JoinHandle<T> {
     type Output = Result<T, JoinError>;
 
-    fn poll(&mut self, _cx: &mut Context) -> Poll<Result<T, JoinError>> {
-        if self.task.is_finished() {
-            if self.task.is_cancelled() {
-                Poll.Ready(Result.Err(JoinError.Cancelled))
-            } else {
-                let mut guard = self.task.result.lock().unwrap_or_else(|p| p.into_inner());
-                match guard.take() {
-                    Maybe.Some(res) => Poll.Ready(Result.Ok(res)),
-                    Maybe.None => Poll.Ready(Result.Err(JoinError.Panicked)),
-                }
-            }
-        } else {
-            Poll.Pending
-        }
+    fn poll(&mut self, cx: &mut Context) -> Poll<Result<T, JoinError>> {
+        self.task.get().poll_result(cx)
     }
 }
 
@@ -288,22 +317,16 @@ implement Eq for JoinError {}
 // Spawn Functions
 // =============================================================================
 
-// Thread-local task queue (simplified - real impl uses executor)
-static TASK_QUEUE: Mutex<List<Shared<Task<()>>>> = Mutex.new(List.new());
-
-// Spawn a future as a new task.
-// Returns a JoinHandle to await the result.
-public fn spawn<F: Future>(future: F) -> JoinHandle<F.Output>
+// Spawn on the runtime that owns the current poll. Recover the runtime before
+// consuming the future so invoking this function outside a runtime is explicit.
+public fn spawn<F: Future + Send>(future: F) -> JoinHandle<F.Output>
 where F.Output: Send
 {
-    // In a real implementation, this would submit to an executor
-    let task = Shared.new(Task {
-        id: TaskId.new(),
-        state: AtomicInt.new(0),  // Pending
-        result: Mutex.new(Maybe.None),
-    });
+    active_runtime().spawn(future)
+}
 
-    JoinHandle { task: task }
+fn active_runtime() -> &AsyncRuntime {
+    current_runtime().expect("spawning a task requires an active AsyncRuntime")
 }
 
 // =============================================================================
@@ -459,10 +482,10 @@ public fn spawn_blocking<F: fn() -> T + Send, T: Send>(f: F) -> JoinHandle<T> {
 
 // Spawn a future as a detached task (fire-and-forget).
 // The task runs to completion without waiting for the result.
-public fn spawn_detached<F: Future>(future: F)
+public fn spawn_detached<F: Future + Send>(future: F)
 where F.Output: Send
 {
-    let handle = spawn(future);
+    let handle = active_runtime().spawn(future);
     handle.detach();
 }
 
@@ -509,10 +532,10 @@ implement<T> JoinSet<T> {
     }
 
     // Spawn a task && add to set.
-    public fn spawn<F: Future<Output = T>>(&mut self, future: F)
+    public fn spawn<F: Future<Output = T> + Send>(&mut self, future: F)
     where T: Send
     {
-        self.handles.push(spawn(future));
+        self.handles.push(active_runtime().spawn(future));
     }
 
     // Number of tasks in set.
@@ -546,9 +569,8 @@ implement<T> Future for JoinSet<T> {
     // Poll until any task completes.
     fn poll(&mut self, cx: &mut Context) -> Poll<Result<T, JoinError>> {
         for i in range(0, self.handles.len()) {
-            if let Poll.Ready(res) = self.handles.get_mut(i)
-                .expect("JoinSet poll: i in range(0, handles.len()) — get_mut is_some")
-                .poll(cx) {
+            let outcome: Poll<Result<T, JoinError>> = self.handles[i].poll(cx);
+            if let Poll.Ready(res) = outcome {
                 self.handles.remove(i);
                 return Poll.Ready(res);
             }

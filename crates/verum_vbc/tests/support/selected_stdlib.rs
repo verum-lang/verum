@@ -38,6 +38,7 @@ pub fn source_unit(path: &str, symbols: &str, index: usize) -> Module {
         }
         ItemKind::Mount(_) => true,
         ItemKind::Const(decl) => selected(decl.name.as_str()) || selected("*const"),
+        ItemKind::Static(decl) => selected(decl.name.as_str()),
         ItemKind::ExternBlock(block) => {
             block.functions.retain(|function| selected(function.name.as_str()));
             !block.functions.is_empty()

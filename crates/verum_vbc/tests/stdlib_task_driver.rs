@@ -219,3 +219,29 @@ fn task_driver_preserves_the_pending_future_and_its_concrete_output() {
         assert!(elapsed >= 50_000, "50 microsecond poll backoff took {elapsed}ns");
     }
 }
+
+#[path = "fixtures/joined_task.rs"]
+mod joined_task;
+
+#[test]
+fn joined_task_retires_the_pending_future_before_publishing_its_result() {
+    let module = joined_task::module();
+    let bytes = verum_vbc::serialize::serialize_module(&module).unwrap();
+    let wire = verum_vbc::deserialize::deserialize_module_validated(&bytes).unwrap();
+    for module in [module, wire] {
+        let drive = module.find_function_by_name("core.async.executor.drive_join").unwrap();
+        let queued = ["probe_scheduler_join", "probe_scheduler_cancellation"].map(|name| {
+            module.find_function_by_name(&format!("core.async.executor.{name}")).unwrap()
+        });
+        let mut vm = Interpreter::try_new_validated(module.into()).unwrap();
+        vm.run_global_ctors().unwrap();
+        for entry in queued {
+            assert_eq!(vm.execute_function(entry).unwrap().try_as_i64(), Some(1));
+        }
+        for (cancel, expected) in [(false, 73), (true, 1)] {
+            let args = [verum_vbc::Value::from_bool(cancel)];
+            let result = vm.execute_function_with_args(drive, &args).unwrap();
+            assert_eq!(result.try_as_i64(), Some(expected), "cancel={cancel}");
+        }
+    }
+}
