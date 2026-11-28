@@ -290,3 +290,25 @@ fn an_unrelated_output_member_cannot_own_the_await_operator() {
         }
     "#);
 }
+
+#[test]
+fn constructing_a_future_recovers_only_the_outputs_proved_by_its_fields() {
+    let declarations = r#"
+        mount core.async.future.{Poll, Context};
+        type Pair<A, B, X:Future<Output=A>, Y:Future<Output=B>> is { first:X, second:Y };
+        implement<A,B,X:Future<Output=A>,Y:Future<Output=B>> Future for Pair<A,B,X,Y> {
+            type Output = (A,B);
+            fn poll(&mut self, _cx:&mut Context)->Poll<(A,B)> { Poll.Pending }
+        }
+    "#;
+    accepts(&format!("{declarations}
+        async fn collect<A,B,X:Future<Output=A>,Y:Future<Output=B>>(x:X,y:Y)->(A,B) {{
+            Pair {{first:x, second:y}}.await
+        }}
+    "));
+    refuses_type_mismatch(&format!("{declarations}
+        async fn swapped<A,B,X:Future<Output=A>,Y:Future<Output=B>>(x:X,y:Y)->(B,A) {{
+            Pair {{first:x, second:y}}.await
+        }}
+    "));
+}

@@ -187,6 +187,15 @@ impl TypeChecker {
         arguments: &[Type],
         span: Span,
     ) -> Result<()> {
+        if let Some(requirements) = self.nominal_application_requirements(key, arguments, span)? {
+            self.prove_application_requirements(requirements, span)?;
+        }
+        Ok(())
+    }
+
+    fn nominal_application_requirements(
+        &mut self, key: &Text, arguments: &[Type], span: Span,
+    ) -> Result<Option<NominalPremises>> {
         let Some(declaration) = self.source_type_registration.declaration(key)
             .filter(|decl| {
                 decl.has_application_bounds()
@@ -198,7 +207,7 @@ impl TypeChecker {
             })
             .cloned()
         else {
-            return Ok(());
+            return Ok(None);
         };
         let parameters = match self.ctx.lookup_type(&format!("__type_params_{key}")) {
             Some(Type::Record(parameters)) => parameters,
@@ -233,7 +242,52 @@ impl TypeChecker {
         self.pop_decl_param_frame();
         self.resolving_source_signature = previous_source;
         self.current_module_path = previous_owner;
-        self.prove_application_requirements(requirements?, span)
+        requirements.map(Some)
+    }
+
+    /// Field inference runs before selecting methods or projections on a new
+    /// record. Its declaration can determine further arguments from a known
+    /// field's associated type. The full domain is still checked at the end
+    /// of the expression, after contextual type information is available.
+    pub(super) fn finish_record_arguments(
+        &mut self, owner: &Text, arguments: List<Type>, span: Span,
+    ) -> Result<List<Type>> {
+        if arguments.is_empty() { return Ok(arguments); }
+        let resolved: List<_> = arguments.iter().map(|arg| self.unifier.apply(arg)).collect();
+        let Some(requirements) = self.nominal_application_requirements(owner, &resolved, span)? else {
+            return Ok(resolved);
+        };
+        if resolved.iter().all(|ty| !ty.has_value_inference()
+            && ty.free_vars().iter().all(|v| self.unifier.is_rigid(*v)))
+        {
+            self.prove_application_requirements(requirements, span)?;
+            return Ok(resolved);
+        }
+        let mut pending = requirements.protocols;
+        loop {
+            let before = pending.len();
+            let mut deferred = List::new();
+            for clause in pending {
+                let receiver = self.unifier.apply(&clause.ty);
+                if receiver.free_vars().iter().any(|v| !self.unifier.is_rigid(*v)) {
+                    deferred.push(clause);
+                    continue;
+                }
+                for bound in &clause.bounds {
+                    if bound.associated_types.values().any(|ty|
+                        self.unifier.apply(ty).free_vars().iter().any(|v| !self.unifier.is_rigid(*v)))
+                    {
+                        self.enforce_protocol_bound_evidence(&receiver, std::slice::from_ref(bound), span)?;
+                    }
+                }
+            }
+            if deferred.is_empty() || deferred.len() == before { break; }
+            pending = deferred;
+        }
+        let resolved: List<_> = resolved.iter().map(|arg| self.unifier.apply(arg)).collect();
+        let application = crate::context::NominalApplication { owner: owner.clone(), arguments: resolved.clone() };
+        self.retain_instance_domains(List::new(), List::from_single(application), span)?;
+        Ok(resolved)
     }
 
     pub(super) fn prove_protocol_application_requirements(

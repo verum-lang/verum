@@ -119,16 +119,18 @@ impl TypeChecker {
         Ok(())
     }
 
-    /// Keep value-domain obligations only after selecting a callable candidate.
-    pub(super) fn retain_call_value_domains(&mut self, parameters: List<Type>, span: Span) -> Result<()> {
-        if parameters.is_empty() { return Ok(()); }
+    /// Retain the domains of a selected value or nominal construction until contextual inference completes.
+    pub(super) fn retain_instance_domains(
+        &mut self, parameters: List<Type>, nominal_applications: List<crate::context::NominalApplication>, span: Span,
+    ) -> Result<()> {
+        if parameters.is_empty() && nominal_applications.is_empty() { return Ok(()); }
         if self.value_obligation_scope_depth == 0 {
-            return Err(TypeError::UniverseBinding { message: "value instantiation requires an inference obligation scope".into(), span });
+            return Err(TypeError::UniverseBinding { message: "domain checking requires an inference obligation scope".into(), span });
         }
         self.pending_value_obligations.push(PendingValueObligation {
             inference_variables: List::new(),
             value_parameters: parameters, type_bounds: Map::new(), protocol_bounds: Map::new(),
-            where_clauses: List::new(), type_equalities: List::new(), nominal_applications: List::new(), field_overwrites: List::new(), span,
+            where_clauses: List::new(), type_equalities: List::new(), nominal_applications, field_overwrites: List::new(), span,
         });
         Ok(())
     }

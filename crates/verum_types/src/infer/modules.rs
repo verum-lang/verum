@@ -18373,7 +18373,7 @@ impl TypeChecker {
                             ));
                             return Ok(None);
                         }
-                        self.retain_call_value_domains(instance.value_parameters, span)?;
+                        self.retain_instance_domains(instance.value_parameters, List::new(), span)?;
                         let explicit_vars = instance.explicit_method_vars;
                         Ok(Some(((ty, fresh_vars, impl_vc, explicit_vars), type_bounds, scheme.receiver_kind, instance.impl_self_type, instance.protocol_bounds, instance.where_clauses, instance.type_equalities, scheme)))
                     }).transpose()?.flatten()

@@ -100,7 +100,7 @@ impl TypeChecker {
         let instance = scheme
             .try_instantiate()
             .map_err(|message| TypeError::UniverseBinding { message, span })?;
-        self.retain_call_value_domains(instance.value_parameters, span)?;
+        self.retain_instance_domains(instance.value_parameters, List::new(), span)?;
         let Type::Tuple(parts) = instance.ty else {
             unreachable!("record instance tuple")
         };

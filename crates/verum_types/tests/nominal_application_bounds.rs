@@ -493,3 +493,9 @@ fn nested_refined_contracts_refuse_missing_or_foreign_evidence() {
     let found = nested_settings(REFINED_POLICY, &bad_source, NESTED_SETTINGS);
     assert!(found.iter().any(|error| error.contains("Undeclared")), "{found:#?}");
 }
+
+#[test]
+fn a_record_literal_must_prove_its_declared_domain_even_without_an_annotation() {
+    accepted(&format!("{DECL} fn good() {{ let _item = Requires {{ value: 1 }}; }}"));
+    refused(&format!("{DECL} fn bad() {{ let _item = Requires {{ value: true }}; }}"));
+}

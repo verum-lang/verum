@@ -2157,6 +2157,7 @@ impl TypeChecker {
                 // carrier. Rebuilding it from the literal's spelling would
                 // turn that identity back into an unrelated nominal type.
                 // Field and visibility checks above still govern construction.
+                let type_args = self.finish_record_arguments(&parameter_owner, type_args, expr.span)?;
                 let actual_struct_ty = if type_args.is_empty()
                     && declaration_ty.primitive_name().is_some()
                 {
@@ -10099,7 +10100,7 @@ impl TypeChecker {
                         } else {
                             Type::Named {
                                 path: Self::text_to_path(&parent_name),
-                                args: arguments.iter().map(|arg| self.unifier.apply(arg)).collect(),
+                                args: self.finish_record_arguments(&parent_name, arguments, expr.span)?,
                             }
                         };
                         return Ok(InferResult::new(result));
@@ -10329,10 +10330,7 @@ impl TypeChecker {
         // Apply unifier to get the final resolved types for type parameters
         let final_type = if !type_param_vars.is_empty() {
             // This is a generic type - resolve type parameters
-            let resolved_args: List<Type> = type_param_vars
-                .iter()
-                .map(|tv| self.unifier.apply(tv))
-                .collect();
+            let resolved_args = self.finish_record_arguments(&type_name, type_param_vars, expr.span)?;
             // Keep the owner selected during lookup. Reconstructing the
             // caller's alias spelling would give this instance a new name.
             let resolved_path = match &record_ty {
