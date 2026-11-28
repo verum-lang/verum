@@ -16,7 +16,7 @@ pub fn source_unit(path: &str, symbols: &str, index: usize) -> Module {
         .unwrap();
     let selected = |name: &str| symbols.split_whitespace().any(|symbol| symbol == name);
     unit.items.retain_mut(|item| match &mut item.kind {
-        ItemKind::Module(decl) if decl.name.as_str() == "prelude" && decl.items.is_some() => {
+        ItemKind::Module(decl) if path == "mod.vr" && decl.name.as_str() == "prelude" && decl.items.is_some() => {
             decl.items.as_mut().unwrap().retain(|entry| matches!(entry.kind, ItemKind::Mount(_)));
             true
         }

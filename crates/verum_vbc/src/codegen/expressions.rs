@@ -16572,7 +16572,31 @@ impl VbcCodegen {
                 None => eprintln!("[selfmut] key='{}' => NOT FOUND", effective_method_name),
             }
         }
-        let actual_receiver = if !receiver_is_borrowed
+        let field_borrow = if !receiver_is_borrowed
+            && !reference_receiver
+            && let Some((owner, field, false, _)) = field_writeback_target.as_ref()
+            && let Some(kind) = dynamic.as_ref().map(|member| member.receiver).or_else(|| {
+                let method = resolved_method.as_ref()?;
+                let signature = self.declared_callable_descriptors
+                    .get(&method.id)?.source_signature.as_ref()?;
+                Some(verum_ast::method_dispatch::ReceiverKind::from_declaration(signature))
+            })
+            && kind.meta().is_borrowed
+        {
+            // A returned guard can retain this borrow after the extracted receiver
+            // register is reused. Project the slot in its original owner once.
+            let reference = self.ctx.alloc_temp();
+            self.emit_field_reference(reference, *owner, *field);
+            if !kind.meta().allows_mutation {
+                self.emit_reference_attenuation(reference, crate::value::Capabilities::READ_ONLY);
+            }
+            Some(reference)
+        } else {
+            None
+        };
+        let actual_receiver = if let Some(reference) = field_borrow {
+            reference
+        } else if !receiver_is_borrowed
             && resolved_method.as_ref().is_some_and(|method| method.takes_self_mut_ref)
         {
             self.borrow_mutable_receiver(receiver, receiver_reg)?
@@ -16581,7 +16605,7 @@ impl VbcCodegen {
         };
         // Only this reborrow can replace the extracted field. A later owned
         // argument transfer may also allocate a register, without writing it.
-        let write_back_receiver = actual_receiver != receiver_reg;
+        let write_back_receiver = field_borrow.is_none() && actual_receiver != receiver_reg;
 
         // A by-value self parameter consumes the same declared owner as an
         // ordinary argument. Borrow adjustments preserve the caller's binding.
