@@ -94,17 +94,15 @@ implement TraceState {
     }
 
     /// Insert / update a key. New keys prepend per W3C §3.3.1.1.
-    /// Validates key + value length; returns unchanged state if either
-    /// is too long or if the list is full.
+    /// Reject empty keys and oversized fields. Retain the first 32 members.
     public fn with(&self, key: Text, value: Text) -> TraceState {
         if key.len() == 0 || key.len() > TRACESTATE_MAX_KEY_LEN { return self.clone(); }
         if value.len() > TRACESTATE_MAX_VALUE_LEN { return self.clone(); }
         let mut entries = List.with_capacity(self.entries.len() + 1);
         entries.push((key, value));
-        let key_ref = &entries[0].0;
         let mut i = 0;
         while i < self.entries.len() {
-            if !state_key_eq(&self.entries[i].0, key_ref)
+            if !state_key_eq(&self.entries[i].0, &key)
                 && entries.len() < TRACESTATE_MAX_MEMBERS
             {
                 entries.push((self.entries[i].0.clone(), self.entries[i].1.clone()));
@@ -115,24 +113,12 @@ implement TraceState {
     }
 
     public fn clone(&self) -> TraceState {
-        let mut entries = List.with_capacity(self.entries.len());
-        let mut i = 0;
-        while i < self.entries.len() {
-            entries.push((self.entries[i].0.clone(), self.entries[i].1.clone()));
-            i = i + 1;
-        }
-        TraceState { entries: entries }
+        TraceState { entries: self.entries }
     }
 
-    /// Owned snapshot of the ordered members.
+    /// Return an owned snapshot of the ordered members.
     public fn entries(&self) -> List<(Text, Text)> {
-        let mut out = List.with_capacity(self.entries.len());
-        let mut i = 0;
-        while i < self.entries.len() {
-            out.push((self.entries[i].0.clone(), self.entries[i].1.clone()));
-            i = i + 1;
-        }
-        out
+        self.entries
     }
 }
 

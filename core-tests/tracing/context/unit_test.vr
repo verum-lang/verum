@@ -6,7 +6,7 @@
 // =============================================================================
 
 mount core.tracing.context.{
-    TRACESTATE_MAX_MEMBERS, TRACESTATE_MAX_KEY_LEN, TRACESTATE_MAX_VALUE_LEN,
+    TraceState, TRACESTATE_MAX_MEMBERS, TRACESTATE_MAX_KEY_LEN, TRACESTATE_MAX_VALUE_LEN,
 };
 mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
@@ -57,6 +57,24 @@ fn test_tracestate_max_members_much_smaller_than_key_len() {
     // 32 members vs 256-char fields — design intent: a small population
     // of variably-sized members.
     assert(TRACESTATE_MAX_MEMBERS < TRACESTATE_MAX_KEY_LEN);
+}
+
+
+@test
+fn updating_a_tracestate_key_preserves_the_previous_state_and_precedes_other_entries() {
+    let previous = TraceState.empty().with("a", "one").with("b", "two");
+    let updated = previous.with("a", "three");
+    let unchanged = updated.with("", "invalid");
+    assert_eq(unchanged.get(&"a").unwrap(), "three");
+    assert_eq(previous.get(&"a").unwrap(), "one");
+    assert_eq(updated.len(), 2);
+    let mut entries = updated.entries();
+    assert_eq(entries[0].0, "a");
+    assert_eq(entries[0].1, "three");
+    assert_eq(entries[1].0, "b");
+    assert_eq(entries[1].1, "two");
+    entries.clear();
+    assert_eq(updated.len(), 2);
 }
 
 fn main() {}
