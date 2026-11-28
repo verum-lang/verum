@@ -379,7 +379,7 @@ fn encode_domain_name(name: &Text) -> Result<List<Byte>, DnsError> {
         return Result.Err(DnsError.InvalidName);
     }
 
-    let mut encoded = List.new();
+    let mut encoded: List<Byte> = List.new();
     let labels = name.split(".");
 
     for label in labels {
@@ -409,7 +409,7 @@ fn encode_domain_name(name: &Text) -> Result<List<Byte>, DnsError> {
 
 /// Returns (decoded_name, bytes_consumed).
 fn decode_domain_name(buf: &[Byte], start: Int) -> Result<(Text, Int), DnsError> {
-    let mut name_parts = List.new();
+    let mut name = Text.new();
     let mut pos = start;
     let mut bytes_consumed = 0;
     let mut followed_pointer = false;
@@ -491,12 +491,12 @@ fn decode_domain_name(buf: &[Byte], start: Int) -> Result<(Text, Int), DnsError>
         let label_start = pos + 1;
         let label_end = pos + 1 + len;
         let label = Text.from_utf8_lossy(&buf[label_start..label_end]);
-        name_parts.push(label);
+        if !name.is_empty() { name.push_str(&"."); }
+        name.push_str(&label);
 
         pos = label_end;
     }
 
-    let name = name_parts.join(".");
     if !followed_pointer {
         bytes_consumed = pos - start + 1;
     }
@@ -515,7 +515,7 @@ fn build_query(name: &Text, qtype: UInt16, id: UInt16) -> Result<List<Byte>, Dns
 
     // Question section.
     let encoded_name = encode_domain_name(name)?;
-    packet.extend(encoded_name);
+    packet.extend_from_slice(encoded_name.as_slice());
 
     // QTYPE (2 bytes).
     packet.push((qtype >> 8) as Byte);
@@ -538,7 +538,6 @@ type ParsedRecord is {
     rtype: UInt16,
     rclass: UInt16,
     ttl: UInt32,
-    rdata: List<Byte>,
     // For convenience - parsed IP/name for common types.
     parsed: Maybe<DnsRecord>,
 };
@@ -566,10 +565,10 @@ fn parse_resource_record(buf: &[Byte], offset: Int) -> Result<(ParsedRecord, Int
         return Result.Err(DnsError.InvalidResponse);
     }
 
-    let rdata = buf[pos..(pos + rdlength)].to_list();
+    let rdata = &buf[pos..(pos + rdlength)];
 
     // Parse common record types.
-    let parsed = match rtype {
+    let parsed: Maybe<DnsRecord> = match rtype {
         DNS_TYPE_A if rdlength == 4 => {
             let ip = Ipv4Addr.new(rdata[0], rdata[1], rdata[2], rdata[3]);
             Maybe.Some(DnsRecord.A(ip))
@@ -609,20 +608,17 @@ fn parse_resource_record(buf: &[Byte], offset: Int) -> Result<(ParsedRecord, Int
         }
         DNS_TYPE_TXT => {
             // TXT records: one or more <length><text> pairs.
-            let mut text_parts = List.new();
+            let mut text = Text.new();
             let mut txt_pos = 0;
             while txt_pos < rdlength {
                 let txt_len = rdata[txt_pos] as Int;
                 txt_pos = txt_pos + 1;
-                if txt_pos + txt_len <= rdlength {
-                    let part = Text.from_utf8_lossy(&rdata[txt_pos..(txt_pos + txt_len)]);
-                    text_parts.push(part);
-                    txt_pos = txt_pos + txt_len;
-                } else {
-                    break;
-                }
+                if txt_pos + txt_len > rdlength { return Result.Err(DnsError.InvalidResponse); }
+                let part = Text.from_utf8_lossy(&rdata[txt_pos..(txt_pos + txt_len)]);
+                text.push_str(&part);
+                txt_pos += txt_len;
             }
-            Maybe.Some(DnsRecord.TXT(text_parts.join("")))
+            Maybe.Some(DnsRecord.TXT(text))
         }
         DNS_TYPE_SRV if rdlength >= 6 => {
             let priority = ((rdata[0] as Int) << 8) | (rdata[1] as Int);
@@ -669,7 +665,6 @@ fn parse_resource_record(buf: &[Byte], offset: Int) -> Result<(ParsedRecord, Int
         rtype,
         rclass,
         ttl,
-        rdata,
         parsed,
     };
 
@@ -698,7 +693,7 @@ fn parse_response(buf: &[Byte], expected_id: UInt16) -> Result<List<DnsRecordEnt
     }
 
     let mut offset = DNS_HEADER_SIZE;
-    let mut records = List.new();
+    let mut records: List<DnsRecordEntry> = List.new();
 
     // Skip question section.
     for _ in 0..header.qdcount {
@@ -2044,6 +2039,27 @@ fn test_encode_domain_name() {
     assert_eq(encoded[0], 7);
     assert_eq(encoded[8], 3);
     assert_eq(encoded[12], 0);
+}
+
+@test
+fn test_txt_response_segments_and_bounds() {
+    let response: [Byte; 32] = [
+        18, 52, 129, 128, 0, 0, 0, 1, 0, 0, 0, 0,
+        0, 0, 16, 0, 1, 0, 0, 0, 61, 0, 9,
+        3, 97, 98, 99, 4, 100, 101, 102, 103,
+    ];
+    let records = parse_response(&response[..], 0x1234_u16).unwrap();
+    assert(records.len() == 1 && records[0].ttl == 61);
+    match &records[0].record {
+        DnsRecord.TXT(value) => assert(*value == "abcdefg"),
+        _ => panic("expected a TXT record"),
+    }
+    assert(parse_response(&response[..], 0x5678_u16) is Result.Err(DnsError.InvalidResponse));
+    let bad: [Byte; 25] = [
+        18, 52, 129, 128, 0, 0, 0, 1, 0, 0, 0, 0,
+        0, 0, 16, 0, 1, 0, 0, 0, 61, 0, 2, 4, 97,
+    ];
+    assert(parse_response(&bad[..], 0x1234_u16) is Result.Err(DnsError.InvalidResponse));
 }
 
 @test
