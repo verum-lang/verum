@@ -100,7 +100,8 @@ fn rejected_resize_and_heap_allocation_failure_preserve_the_owner() {
         let oom = verum_common::layout::MAX_ALLOCATION_SIZE / width + 1;
         assert_eq!(
             execute(&format!(
-                r#"fn probe()->Int {{
+                r#"mount core.intrinsics.memory.{{list_storage_resize, list_storage_read}};
+                fn probe()->Int {{
             let mut values:List<{ty}> = List<{ty}>.with_capacity(4);
             values.checked_push(37);
             let old_pointer=values.ptr as Int; let old_capacity=values.capacity();
@@ -110,7 +111,8 @@ fn rejected_resize_and_heap_allocation_failure_preserve_the_owner() {
             assert(!a, "below length succeeded"); assert(!b, "negative succeeded"); assert(!c, "OOM succeeded");
             assert(values.len()==1, "length changed"); assert(values.capacity()==old_capacity, "capacity changed");
             assert((values.ptr as Int)==old_pointer, "pointer changed");
-            unsafe {{list_storage_read(&values,0)}}
+            let preserved: {ty} = unsafe {{list_storage_read(&values,0)}};
+            preserved as Int
         }}"#
             )),
             37,

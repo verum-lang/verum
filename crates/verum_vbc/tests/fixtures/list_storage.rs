@@ -2,6 +2,7 @@
 use verum_ast::{
     ItemKind,
     decl::{ImplItemKind, ImplKind},
+    visitor::{Visitor, walk_expr},
 };
 use verum_fast_parser::FastParser;
 
@@ -13,11 +14,30 @@ pub const RETAIN_PROBES: &[&str] = &[
     "retaining_raw_handles_leaves_their_owner_live",
 ];
 use verum_vbc::codegen::{ItemFailurePolicy, VbcCodegen};
-fn is_list(ty: &verum_ast::Type) -> bool {
+fn named_type(ty: &verum_ast::Type, name: &str) -> bool {
     match &ty.kind {
-        verum_ast::ty::TypeKind::Path(p) => p.as_ident().is_some_and(|i| i.name == "List"),
-        verum_ast::ty::TypeKind::Generic { base, .. } => is_list(base),
+        verum_ast::ty::TypeKind::Path(p) => p.as_ident().is_some_and(|i| i.name == name),
+        verum_ast::ty::TypeKind::Generic { base, .. } => named_type(base, name),
         _ => false,
+    }
+}
+
+#[derive(Default)]
+struct ClientMethods {
+    clone: bool,
+    retain: bool,
+}
+
+impl Visitor for ClientMethods {
+    fn visit_expr(&mut self, expr: &verum_ast::Expr) {
+        if let verum_ast::ExprKind::MethodCall { method, .. } = &expr.kind {
+            match method.name.as_str() {
+                "clone" => self.clone = true,
+                "retain" | "retain_mut" => self.retain = true,
+                _ => {}
+            }
+        }
+        walk_expr(self, expr);
     }
 }
 
@@ -41,24 +61,20 @@ pub fn source_module(source: &str, rename_methods: bool) -> verum_vbc::VbcModule
             "mount core.collections.list.List; mount core.base.maybe.Maybe; mount core.base.result.Result; mount core.mem.allocator.AllocError;\n{source}"
         ))
     };
+    let mut client = ClientMethods::default();
+    for item in &ast.items {
+        client.visit_item(item);
+    }
     let mut core = parse(include_str!("../../../../core/collections/list.vr"));
     core.items.retain_mut(|item| match &mut item.kind {
         ItemKind::Module(decl) => decl.items.is_none(),
         ItemKind::Mount(_) => true,
-        ItemKind::Type(t) => t.name.name == "List",
+        ItemKind::Type(t) => t.name.name == "List" || (client.clone && t.name.name == "ListIter"),
         ItemKind::Function(f) => f.name.name == "list_max_len",
-        ItemKind::Impl(i) if matches!(&i.kind, ImplKind::Inherent(t) if is_list(t)) => {
-            // Nested calls from other list operations still select the original bodies.
-            let original_methods: verum_common::List<_> = i
-                .items
-                .iter()
-                .filter(|item| {
-                    matches!(&item.kind, ImplItemKind::Function(function)
-                        if matches!(function.name.name.as_str(), "pop" | "truncate" | "clear" | "swap"))
-                })
-                .cloned().collect();
+        ItemKind::Impl(i) if matches!(&i.kind, ImplKind::Inherent(t) if named_type(t, "List")) => {
+            let mut aliases = verum_common::List::new();
             i.items.retain_mut(|m| {
-                let ImplItemKind::Function(f) = &mut m.kind else {
+                let ImplItemKind::Function(f) = &m.kind else {
                     return false;
                 };
                 if [
@@ -77,10 +93,15 @@ pub fn source_module(source: &str, rename_methods: bool) -> verum_vbc::VbcModule
                 ]
                 .contains(&f.name.name.as_str())
                 {
-                    // Keep the actual source body while avoiding native method
-                    // intercepts: these tests exercise the source implementation.
                     if rename_methods {
-                        f.name.name = format!("checked_{}", f.name.name).into();
+                        // An alias exercises the same source body independently of
+                        // native method intercepts. Clients and other source methods
+                        // still resolve the ordinary declaration under its real name.
+                        let mut alias = m.clone();
+                        if let ImplItemKind::Function(copy) = &mut alias.kind {
+                            copy.name.name = format!("checked_{}", f.name.name).into();
+                        }
+                        aliases.push(alias);
                     }
                     true
                 } else {
@@ -96,21 +117,24 @@ pub fn source_module(source: &str, rename_methods: bool) -> verum_vbc::VbcModule
                         "grow",
                         "next_cap",
                         "reverse",
-                        "retain",
-                        "retain_mut",
                         "is_empty",
                         "as_slice",
                     ]
                     .contains(&f.name.name.as_str())
+                        || (client.retain && matches!(f.name.name.as_str(), "retain" | "retain_mut"))
+                        || (client.clone && f.name.name == "iter")
                 }
             });
-            if rename_methods {
-                i.items.extend(original_methods);
-            }
+            i.items.extend(aliases);
             true
         }
         ItemKind::Impl(decl) if matches!(&decl.kind, ImplKind::Protocol { protocol, for_type, .. }
-            if protocol.as_ident().is_some_and(|name| name.name == "Drop") && is_list(for_type)) => true,
+            if protocol.as_ident().is_some_and(|name| match name.name.as_str() {
+                "Drop" => named_type(for_type, "List"),
+                "Clone" => client.clone && named_type(for_type, "List"),
+                "Iterator" => client.clone && named_type(for_type, "ListIter"),
+                _ => false,
+            })) => true,
         _ => false,
     });
     let mut protocols = parse(include_str!("../../../../core/base/protocols.vr"));
@@ -119,7 +143,22 @@ pub fn source_module(source: &str, rename_methods: bool) -> verum_vbc::VbcModule
             || item
                 .kind
                 .type_or_protocol_name()
-                .is_some_and(|name| name.as_str() == "Drop")
+                .is_some_and(|name| name.as_str() == "Drop" || (client.clone && name.as_str() == "Clone"))
+    });
+    let mut iterator = parse(include_str!("../../../../core/base/iterator.vr"));
+    iterator.items.retain_mut(|item| {
+        if is_header(item) { return true; }
+        let ItemKind::Type(decl) = &mut item.kind else { return false; };
+        if !client.clone || decl.name.name != "Iterator" { return false; }
+        let verum_ast::decl::TypeDeclBody::Protocol(body) = &mut decl.body else { return false; };
+        body.items.retain(|item| match &item.kind {
+            verum_ast::decl::ProtocolItemKind::Type { name, .. } => name.name == "Item",
+            verum_ast::decl::ProtocolItemKind::Function { decl, .. } => {
+                matches!(decl.name.name.as_str(), "next" | "size_hint")
+            }
+            _ => false,
+        });
+        true
     });
     let mut memory = parse(include_str!("../../../../core/intrinsics/memory.vr"));
     memory.items.retain(|item| is_header(item) || matches!(&item.kind, ItemKind::Function(f) if ["slice_from_raw_parts", "list_storage_stride", "list_storage_read", "list_storage_write", "list_storage_move", "list_storage_resize"].contains(&f.name.name.as_str())));
@@ -127,6 +166,11 @@ pub fn source_module(source: &str, rename_methods: bool) -> verum_vbc::VbcModule
     primitives.items.retain_mut(|item| {
         if is_header(item) { return true; }
         let ItemKind::Impl(decl) = &mut item.kind else { return false; };
+        if client.clone && matches!(&decl.kind, ImplKind::Protocol { protocol, for_type, .. }
+            if protocol.as_ident().is_some_and(|name| name.name == "Clone")
+            && (matches!(for_type.kind, verum_ast::ty::TypeKind::Int) || named_type(for_type, "Byte"))) {
+            return true;
+        }
         if !matches!(&decl.kind, ImplKind::Inherent(ty) if matches!(&ty.kind,
             verum_ast::ty::TypeKind::Int)) {
             return false;
@@ -166,6 +210,7 @@ pub fn source_module(source: &str, rename_methods: bool) -> verum_vbc::VbcModule
         &root,
         &collections,
         &protocols,
+        &iterator,
         &result_owner,
         &maybe_owner,
         &allocation,
@@ -195,20 +240,20 @@ pub fn source_module(source: &str, rename_methods: bool) -> verum_vbc::VbcModule
 }
 
 pub fn compile(source: &str, rename_methods: bool) -> verum_vbc::VbcModule {
-    let vbc = source_module(source, rename_methods);
-    let mut graph = verum_vbc::mono::InstantiationGraph::new();
-    for function in &vbc.functions {
+    let mut vbc = source_module(source, rename_methods);
+    for function in &mut vbc.functions {
         let body = &vbc.bytecode[function.bytecode_offset as usize
             ..(function.bytecode_offset + function.bytecode_length) as usize];
-        verum_vbc::mono::discover_call_instantiations(
-            &vbc,
-            &verum_vbc::bytecode::decode_instructions(body).unwrap(),
-            function.func_id_base,
-            &mut graph,
-        )
-        .expect("source call discovery");
+        let mut instructions = verum_vbc::bytecode::decode_instructions(body).expect("source body");
+        verum_vbc::bytecode::jump_offsets_to_instr_indices(&mut instructions);
+        function.instructions = Some(instructions);
     }
-    verum_vbc::mono::monomorphize_minimal(vbc, &graph)
+    let graph = verum_vbc::mono::module_instantiations(&vbc).expect("source generic witnesses");
+    let mut module = verum_vbc::mono::monomorphize_minimal(vbc, &graph)
         .expect("source mono")
-        .module
+        .module;
+    module.resolve_external_bands();
+    module.synthesize_intrinsic_band_wrappers();
+    module.resolve_protocol_dispatch();
+    module
 }
