@@ -21,9 +21,8 @@ module core.database.sqlite.native.errors.message;
 
 mount base.{Bool, Text};
 mount core.database.sqlite.native.errors.code.{
-    ExtendedCode, PrimaryCode, PcOk,
-    primary_mnemonic, primary_is_success,
-    extended_is_success,
+    ExtendedCode, PrimaryCode, extended_of, extended_is_success,
+    primary_numeric, extended_numeric,
 };
 
 public type SqlErrorMessage is {
@@ -36,12 +35,7 @@ public type SqlErrorMessage is {
 }
 
 public fn ok_message() -> SqlErrorMessage {
-    SqlErrorMessage {
-        code: ExtendedCode { primary: PcOk, extension: 0 },
-        text: "".clone(),
-        offset: -1,
-        system_errno: 0,
-    }
+    new_message(extended_of(PrimaryCode.PcOk, 0), "")
 }
 
 public fn new_message(code: ExtendedCode, text: Text) -> SqlErrorMessage {
@@ -58,6 +52,26 @@ implement SqlErrorMessage {
     public fn is_success(&self) -> Bool {
         extended_is_success(&self.code)
     }
+}
+
+public fn sqlite3_errcode(m: &SqlErrorMessage) -> Int {
+    primary_numeric(m.code.primary_code())
+}
+
+public fn sqlite3_extended_errcode(m: &SqlErrorMessage) -> Int {
+    extended_numeric(&m.code)
+}
+
+public fn sqlite3_errmsg(m: &SqlErrorMessage) -> Text {
+    m.text.clone()
+}
+
+public fn sqlite3_error_offset(m: &SqlErrorMessage) -> Int {
+    m.offset
+}
+
+public fn sqlite3_system_errno(m: &SqlErrorMessage) -> Int {
+    m.system_errno
 }
 
 /// Fallback human-readable string for a primary code — mirrors

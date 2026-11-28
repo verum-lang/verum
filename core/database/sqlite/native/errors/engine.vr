@@ -19,34 +19,7 @@
 )
 module core.database.sqlite.native.errors.engine;
 
-mount base.{Text};
-mount core.database.sqlite.native.errors.code.{
-    PrimaryCode, primary_numeric, extended_numeric,
+public mount core.database.sqlite.native.errors.message.{
+    sqlite3_errcode, sqlite3_extended_errcode, sqlite3_errmsg,
+    sqlite3_error_offset, sqlite3_system_errno, errstr as sqlite3_errstr,
 };
-mount core.database.sqlite.native.errors.message.{
-    SqlErrorMessage, errstr,
-};
-
-public fn sqlite3_errcode(m: &SqlErrorMessage) -> Int {
-    primary_numeric(&m.code.primary)
-}
-
-public fn sqlite3_extended_errcode(m: &SqlErrorMessage) -> Int {
-    extended_numeric(&m.code)
-}
-
-public fn sqlite3_errmsg(m: &SqlErrorMessage) -> Text {
-    m.text.clone()
-}
-
-public fn sqlite3_error_offset(m: &SqlErrorMessage) -> Int {
-    m.offset
-}
-
-public fn sqlite3_system_errno(m: &SqlErrorMessage) -> Int {
-    m.system_errno
-}
-
-public fn sqlite3_errstr(p: &PrimaryCode) -> Text {
-    errstr(p)
-}

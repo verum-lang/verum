@@ -148,6 +148,12 @@ public fn extended_of(primary: PrimaryCode, extension: Int) -> ExtendedCode {
     ExtendedCode { primary: primary, extension: extension }
 }
 
+implement ExtendedCode {
+    public fn primary_code(&self) -> &PrimaryCode {
+        &self.primary
+    }
+}
+
 public fn extended_numeric(e: &ExtendedCode) -> Int {
     let p = primary_numeric(&e.primary);
     p | (e.extension * 256)
