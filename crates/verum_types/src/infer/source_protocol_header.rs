@@ -13,6 +13,15 @@ use verum_common::{List, Map, Text};
 pub(super) type DynObligations = List<(Span, verum_common::Set<Text>)>;
 
 #[derive(Debug)]
+pub(super) struct MemberProjection {
+    receiver: Type,
+    name: Text,
+    arguments: List<Type>,
+    assumptions: List<WhereClause>,
+    span: Span,
+}
+
+#[derive(Debug)]
 pub(crate) struct SourceProtocolHeader {
     pub identity: Text,
     pub parameters: std::sync::Arc<List<GenericParam>>,
@@ -21,9 +30,17 @@ pub(crate) struct SourceProtocolHeader {
     pub associated: Map<Text, AssociatedType>,
     pub supers: List<ProtocolBound>,
     pub(super) dyn_required: DynObligations,
+    pub(super) pending_members: Option<Vec<MemberProjection>>,
 }
 
 impl SourceProtocolHeader {
+    fn owns_self(&self, receiver: &Type) -> bool {
+        receiver.is_declared_self() || matches!(
+            (&self.constraints, receiver),
+            (ProtocolConstraints::Declared { self_type, .. }, Type::Var(variable)) if variable == self_type
+        )
+    }
+
     pub(super) fn self_bound(&self, span: Span) -> Option<ProtocolBound> {
         let args = self.owner.clone()?;
         let protocol = verum_ast::Path::new(
@@ -85,16 +102,6 @@ impl TypeChecker {
         items: &[ProtocolItem],
         declared_default_methods: &[Text],
     ) -> Result<(Map<Text, ProtocolMethod>, Map<Text, AssociatedType>, DynObligations)> {
-        let mut associated = Map::new();
-        for item in items {
-            if let ProtocolItemKind::Type { name, .. } = &item.kind {
-                let declaration =
-                    self.elaborate_associated_type(parameters, constraints, &item.kind)?;
-                if associated.insert(name.name.clone(), declaration).is_some() {
-                    return Err(invalid(item.span, "duplicate associated declaration"));
-                }
-            }
-        }
         let span = items.first().map(|item| item.span).unwrap_or_default();
         let owner = match constraints {
             ProtocolConstraints::Declared { parameters, .. } => Some(
@@ -111,13 +118,31 @@ impl TypeChecker {
             parameters: std::sync::Arc::new(parameters.iter().cloned().collect()),
             owner,
             constraints: constraints.clone(),
-            associated: associated.clone(),
+            associated: Map::new(),
             supers: supers.iter().cloned().collect(),
             dyn_required: List::new(),
+            pending_members: Some(Vec::new()),
         };
         let self_bound = header.self_bound(span);
         self.source_type_registration.headers.push(header);
         let result = (|| {
+            let mut associated = Map::new();
+            for item in items {
+                if let ProtocolItemKind::Type { name, .. } = &item.kind {
+                    let declaration = self.elaborate_associated_type(parameters, constraints, &item.kind)?;
+                    if associated.insert(name.name.clone(), declaration).is_some() {
+                        return Err(invalid(item.span, "duplicate associated declaration"));
+                    }
+                }
+            }
+            let header = self.source_type_registration.headers.last_mut().unwrap();
+            header.associated = associated;
+            // Siblings share a lexical telescope irrespective of source order.
+            // All uses must pass formation before any member is published.
+            for usage in header.pending_members.take().unwrap() {
+                self.validate_projection_with_header(self.source_type_registration.headers.last(),
+                    &usage.receiver, &usage.name, &usage.arguments, &usage.assumptions, usage.span)?;
+            }
             if let Some(bound) = self_bound {
                 let receiver = Type::Named {
                     path: verum_ast::Path::single(verum_ast::Ident::new("Self", span)),
@@ -158,17 +183,17 @@ impl TypeChecker {
                     }
                 }
             }
-            Ok((methods, associated))
+            Ok(methods)
         })();
         let header = self.source_type_registration.headers.pop()
             .expect("source protocol member scope remains active during elaboration");
-        result.map(|(methods, associated)| (methods, associated, header.dyn_required))
+        result.map(|methods| (methods, header.associated, header.dyn_required))
     }
 
     /// A projection is a type only after its receiver proves an exact declared
     /// member. The spelling `::Name` alone carries no such authority.
     pub(super) fn validate_source_projection(
-        &self,
+        &mut self,
         receiver: &Type,
         name: &Text,
         arguments: &[Type],
@@ -191,6 +216,16 @@ impl TypeChecker {
                 .iter()
                 .cloned(),
         );
+        if let Some(header) = self.source_type_registration.headers.last_mut()
+            && header.owns_self(receiver)
+            && let Some(pending) = &mut header.pending_members
+        {
+            pending.push(MemberProjection {
+                receiver: receiver.clone(), name: name.clone(),
+                arguments: arguments.to_vec().into(), assumptions, span,
+            });
+            return Ok(());
+        }
         self.validate_projection_with_header(
             self.source_type_registration.headers.last(),
             receiver,
@@ -211,9 +246,7 @@ impl TypeChecker {
         span: Span,
     ) -> Result<()> {
         let mut assumptions: List<_> = assumptions.iter().cloned().collect();
-        let symbolic_self = matches!(receiver, Type::Named { path, args }
-            if args.is_empty() && path.as_ident().is_some_and(|ident| ident.name.as_str() == "Self"));
-        if symbolic_self {
+        if receiver.is_declared_self() || header.is_some_and(|header| header.owns_self(receiver)) {
             let header = header.ok_or_else(|| {
                 invalid(
                     span,

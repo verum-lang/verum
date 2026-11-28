@@ -94,6 +94,50 @@ impl ProtocolChecker {
         Ok(owner)
     }
 
+    /// A bound on an associated type is guaranteed by its declaring protocol,
+    /// including when the receiver is rigid and its implementation is unknown.
+    pub(super) fn ordinary_projection_bounds(
+        &self, receiver: &Type, name: &str, environment: ConstraintEnvironment<'_>,
+    ) -> Result<List<ProtocolBound>, Text> {
+        let name = Text::from(name);
+        let Some(owner) = self.associated_projection_owner(receiver, &name, environment.protocols)? else {
+            return Ok(List::new());
+        };
+        let key = self.make_protocol_key(&owner.protocol);
+        let protocol = self.get_protocol(&key)
+            .ok_or_else(|| Text::from("associated projection owner is unavailable"))?;
+        let declaration = protocol.associated_types.get(&name)
+            .ok_or_else(|| Text::from("associated member is absent from its declaring protocol"))?;
+        if !matches!(declaration.kind, AssociatedTypeKind::Regular) || declaration.bounds.is_empty() {
+            return Ok(List::new());
+        }
+        protocol.constraints.application(receiver, &owner.args)?;
+        let (_, scope) = self.complete_associated_family_arguments_in(
+            declaration, receiver, &owner.args, &[], environment,
+        )?;
+        declaration.bounds.iter().map(|bound| {
+            bound.instantiate_family_result(declaration.binders.self_type, &scope, |member| {
+                let member = Text::from(member);
+                let declared = self.associated_declaration_application(
+                    &key, &owner.args, receiver, &member, &mut Vec::new(),
+                )?.ok_or_else(|| Text::from("associated result bound names an undeclared sibling"))?;
+                let selected = self.associated_projection_owner(receiver, &member, environment.protocols)?
+                    .ok_or_else(|| Text::from("associated result bound has no selected sibling"))?;
+                if self.make_protocol_key(&selected.protocol) != declared.owner
+                    || selected.args.len() != declared.arguments.len()
+                    || !selected.args.iter().zip(&declared.arguments)
+                        .all(|(actual, expected)| self.types_structurally_equal(actual, expected))
+                    || !matches!(declared.declaration.kind, AssociatedTypeKind::Regular)
+                {
+                    return Err("associated result bound requires its declaring sibling projection".into());
+                }
+                self.resolve_associated_family(receiver, &member, &[], environment.protocols)?
+                    .map(|family| family.result)
+                    .ok_or_else(|| Text::from("associated result bound lacks its sibling projection"))
+            })
+        }).collect()
+    }
+
     /// Reduce through exactly the selected owner application, retaining all
     /// implementation and family domain checks of ordinary family resolution.
     pub(crate) fn resolve_owned_associated_family(

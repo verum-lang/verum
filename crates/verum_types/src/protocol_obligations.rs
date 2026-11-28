@@ -215,8 +215,25 @@ impl<'a> Obligations<'a> {
         self.checker.types_structurally_equal(a, b)
     }
     fn assumption(&mut self, ty: &Type, expected: &ProtocolBound) -> Result<bool, Text> {
-        let mut pending: Vec<_> = self
-            .environment.protocols
+        // Eliminate only the projections on the goal's receiver path. Expanding
+        // every associated member would diverge for protocols like Stream.Next: Stream.
+        let mut path = Vec::new();
+        let mut projected = ty;
+        while let Some((receiver, member)) = projected.ordinary_projection() {
+            self.remaining = self.remaining.checked_sub(1)
+                .ok_or_else(|| Text::from("protocol projection budget exhausted"))?;
+            path.push((projected, receiver, member));
+            projected = receiver;
+        }
+        let mut assumptions = std::borrow::Cow::Borrowed(self.environment.protocols);
+        for (projection, receiver, member) in path.into_iter().rev() {
+            let environment = ConstraintEnvironment { protocols: &assumptions, ..self.environment };
+            let bounds = self.checker.ordinary_projection_bounds(receiver, member, environment)?;
+            if !bounds.is_empty() {
+                assumptions.to_mut().push(WhereClause { ty: projection.clone(), bounds });
+            }
+        }
+        let mut pending: Vec<_> = assumptions
             .iter()
             .flat_map(|clause| {
                 clause
@@ -241,7 +258,7 @@ impl<'a> Obligations<'a> {
                 let mut proved = true;
                 for name in expected.associated_types.keys() {
                     let equations = self.checker.associated_premise_equations(
-                        ty, expected, name, self.environment.protocols,
+                        ty, expected, name, &assumptions,
                     )?;
                     if equations.is_empty() || !equations.iter().all(|(a, b)| self.same(a, b)) {
                         proved = false;

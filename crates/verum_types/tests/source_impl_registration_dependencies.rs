@@ -72,6 +72,62 @@ fn provider_associated_result_implementation_is_discovered() {
 }
 
 #[test]
+fn a_forwarded_member_proves_exactly_its_declared_result_bounds() {
+    let provider = "public type Mark<T> is protocol {};
+        public type Factory<T> is protocol { type Rows: Mark<T>; };
+        public type View is protocol { type Rows: Mark<Int>; };
+        public type Wrapper<H> is { inner: H };
+        implement<H: Factory<Int>> View for Wrapper<H> { type Rows = H.Rows; }";
+    let consumer = "mount demo.lib.Wrapper;";
+    let valid = check(consumer, provider);
+    assert!(valid.is_empty(), "{valid:#?}");
+    for invalid in [
+        provider.replace("Factory<Int>>", "Factory<Bool>>"),
+        provider.replace("type Rows: Mark<T>;", "type Rows;"),
+        provider.replace("public type Wrapper<H>", "public type Wrapper<H, J>")
+            .replace("H: Factory<Int>> View for Wrapper<H>", "H: Factory<Int>, J> View for Wrapper<H, J>")
+            .replace("type Rows = H.Rows;", "type Rows = J.Rows;"),
+    ] {
+        let errors = check(consumer, &invalid);
+        assert!(!errors.is_empty(), "accepted unsupported projection in {invalid}");
+    }
+}
+
+#[test]
+fn a_forwarded_member_cannot_choose_between_two_declaring_protocols() {
+    let provider = "public type Mark is protocol {};
+        public type Left is protocol { type Rows: Mark; };
+        public type Right is protocol { type Rows; };
+        public type View is protocol { type Rows: Mark; };
+        public type Wrapper<H> is { inner: H };
+        implement<H: Left + Right> View for Wrapper<H> { type Rows = H.Rows; }";
+    let errors = check("mount demo.lib.Wrapper;", provider);
+    assert!(errors.iter().any(|e| e.contains("competing") || e.contains("ambiguous")), "{errors:#?}");
+}
+
+#[test]
+fn a_sibling_in_a_result_bound_uses_the_receivers_actual_equality() {
+    let provider = "public type Mark<T> is protocol {};
+        public type Factory is protocol { type Element; type Rows: Mark<Self.Element>; };
+        public type View is protocol { type Rows: Mark<Int>; };
+        public type Wrapper<H> is { inner: H };
+        implement<H: Factory<Element = Int>> View for Wrapper<H> { type Rows = H.Rows; }";
+    let consumer = "mount demo.lib.Wrapper;";
+    let valid = check(consumer, provider);
+    assert!(valid.is_empty(), "{valid:#?}");
+    let forward = provider.replace("type Element; type Rows: Mark<Self.Element>;",
+        "type Rows: Mark<Self.Element>; type Element;");
+    let reordered = check(consumer, &forward);
+    assert!(reordered.is_empty(), "{reordered:#?}");
+    let missing = check(consumer, &provider.replace("Mark<Self.Element>", "Mark<Self.Missing>"));
+    assert!(missing.iter().any(|error| error.contains("Missing")), "{missing:#?}");
+    for bound in ["Factory<Element = Bool>", "Factory"] {
+        let errors = check(consumer, &provider.replace("Factory<Element = Int>", bound));
+        assert!(errors.iter().any(|error| error.contains("Mark")), "{errors:#?}");
+    }
+}
+
+#[test]
 fn imported_implementation_proves_its_own_bounded_receiver() {
     const PROVIDER: &str = "public type Key is protocol {};
         public type Other<T> is {value:T}; implement<T> Key for Other<T> {}
