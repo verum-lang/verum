@@ -259,6 +259,16 @@ fn sync_extended_body(
             Ok(DispatchResult::Continue)
         }
 
+        Some(scope @ (SyncSubOpcode::ThreadFence | SyncSubOpcode::CompilerFence)) => {
+            let reg = read_reg(state)?;
+            let code = state.get_reg(reg).try_as_i64().ok_or(InterpreterError::TypeMismatch {
+                expected: "integer memory ordering", got: "non-integer", operation: "fence",
+            })?;
+            let order = crate::instruction::MemoryOrdering::from_scalar(code)
+                .ok_or_else(|| super::system::invalid_fence_order(code))?;
+            super::system::execute_fence(order, scope == SyncSubOpcode::CompilerFence);
+            Ok(DispatchResult::Continue)
+        }
         Some(SyncSubOpcode::AtomicRmw) => super::system::handle_atomic_rmw(state),
         _ => Err(InterpreterError::NotImplemented {
             feature: "sync_extended sub-opcode",

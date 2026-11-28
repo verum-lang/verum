@@ -158,11 +158,23 @@ public fn atomic_xor<T: Atomic + Integer>(ptr: &mut T, val: T, order: MemoryOrde
 // SECTION 6: Memory Fences
 // =============================================================================
 
-/// Memory fence
-public fn atomic_fence(order: MemoryOrder) { @intrinsic("fence", order) }
+/// Scalar ordering shared by the VBC and native synchronization instructions.
+@inline(always)
+fn fence_order(order: MemoryOrder) -> UInt8 {
+    match order {
+        MemoryOrder.Relaxed => ORDERING_RELAXED,
+        MemoryOrder.Acquire => ORDERING_ACQUIRE,
+        MemoryOrder.Release => ORDERING_RELEASE,
+        MemoryOrder.AcqRel => ORDERING_ACQ_REL,
+        MemoryOrder.SeqCst => ORDERING_SEQ_CST,
+    }
+}
+
+/// Order memory accesses across threads.
+public fn atomic_fence(order: MemoryOrder) { @intrinsic("atomic_fence", fence_order(order)) }
 
 /// Compiler fence (prevents reordering, no CPU fence)
-public fn compiler_fence(order: MemoryOrder) { @intrinsic("compiler_fence", order) }
+public fn compiler_fence(order: MemoryOrder) { @intrinsic("compiler_fence", fence_order(order)) }
 
 // =============================================================================
 // SECTION 7: VBC-Specific Size-Typed Atomic Operations

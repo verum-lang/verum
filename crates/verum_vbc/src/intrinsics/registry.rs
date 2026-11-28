@@ -1317,11 +1317,9 @@ pub enum InlineSequenceId {
     TlsHasSeq,
     /// `tls_clear` — clear a thread-local slot.
     TlsClearSeq,
-    /// memory_fence → AtomicFence with the SeqCst immediate; the
-    /// DirectOpcode route emitted the opcode WITHOUT its ordering byte
-    /// (truncated instruction → InvalidBytecode at the call site).
+    /// Cross-thread fence with an ordering operand.
     FenceSeq,
-    /// compiler_fence — ordering-only; runtime no-op on Tier 0.
+    /// Compiler fence with an ordering operand.
     CompilerFenceSeq,
     /// spin_hint / spin_loop_hint — CPU pause hint; Tier-0 no-op.
     SpinHintSeq,
@@ -1572,6 +1570,7 @@ impl Intrinsic {
             // Reads process state and constructs the result on the calling stack.
             | CodegenStrategy::InlineSequence(InlineSequenceId::EnvGetSeq)
             | CodegenStrategy::SystemRegisters(crate::instruction::SysSubOpcode::EnvironmentBytes)
+            | CodegenStrategy::InlineSequence(InlineSequenceId::FenceSeq | InlineSequenceId::CompilerFenceSeq)
             | CodegenStrategy::DirectOpcode(Opcode::Panic | Opcode::AtomicFence) => IntrinsicCallBound::Synchronous,
             _ => IntrinsicCallBound::Unknown,
         }
@@ -2951,17 +2950,17 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         param_count: 1, // ordering
         return_count: 0,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::FenceSeq),
-        mlir_op: Some("llvm.fence"),
+        mlir_op: Some("verum.atomic.fence"),
         doc: "Memory fence with specified ordering",
     },
     Intrinsic {
         name: "compiler_fence",
         category: IntrinsicCategory::Atomic,
-        hints: &[IntrinsicHint::Pure], // No runtime cost
-        param_count: 1,                // ordering (u8)
+        hints: &[IntrinsicHint::SyncBarrier],
+        param_count: 1,
         return_count: 0,
-        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::CompilerFenceSeq), // Compile-time only
-        mlir_op: Some("llvm.compiler.fence"),
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::CompilerFenceSeq),
+        mlir_op: Some("verum.atomic.fence"),
         doc: "Compiler fence (prevents reordering)",
     },
     // Atomic load intrinsics
@@ -3598,8 +3597,8 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[IntrinsicHint::SyncBarrier],
         param_count: 1, // ordering
         return_count: 0,
-        strategy: CodegenStrategy::DirectOpcode(Opcode::AtomicFence),
-        mlir_op: Some("llvm.intr.atomic.fence"),
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::FenceSeq),
+        mlir_op: Some("verum.atomic.fence"),
         doc: "Atomic memory fence",
     },
     // =========================================================================

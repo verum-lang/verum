@@ -38189,8 +38189,8 @@ impl VbcCodegen {
                         dst: dest,
                         ref_reg: args[0],
                     });
-                    // Insert memory fence to prevent reordering (SeqCst = 7)
-                    self.ctx.emit(Instruction::AtomicFence { ordering: 7 });
+                    // Keep volatile accesses ordered around the load.
+                    self.ctx.emit(Instruction::AtomicFence { ordering: crate::instruction::MemoryOrdering::SeqCst as u8 });
                 }
             }
 
@@ -38213,16 +38213,14 @@ impl VbcCodegen {
                         dst: dest,
                         ref_reg: args[0],
                     });
-                    // Acquire fence after load (Acquire = 4)
-                    self.ctx.emit(Instruction::AtomicFence { ordering: 4 });
+                    self.ctx.emit(Instruction::AtomicFence { ordering: crate::instruction::MemoryOrdering::Acquire as u8 });
                 }
             }
 
             InlineSequenceId::VolatileStoreRelease => {
                 // Volatile store with release semantics
                 if args.len() >= 2 {
-                    // Release fence before store (Release = 5)
-                    self.ctx.emit(Instruction::AtomicFence { ordering: 5 });
+                    self.ctx.emit(Instruction::AtomicFence { ordering: crate::instruction::MemoryOrdering::Release as u8 });
                     self.ctx.emit(Instruction::DerefMut {
                         ref_reg: args[0],
                         value: args[1],
@@ -40075,14 +40073,13 @@ impl VbcCodegen {
                 self.ctx.emit(Instruction::SyncExtended { sub_op, operands });
             }
 
-            InlineSequenceId::FenceSeq => {
-                // Conservative SeqCst regardless of the requested ordering —
-                // a stronger fence is always correct, and the ordering
-                // argument is a runtime value the fixed-immediate encoding
-                // cannot carry.  (The old DirectOpcode route emitted
-                // AtomicFence WITHOUT its ordering byte — truncated.)
-                self.ctx.emit(Instruction::AtomicFence { ordering: 5 });
-                self.ctx.emit(Instruction::LoadNil { dst: dest });
+            InlineSequenceId::FenceSeq | InlineSequenceId::CompilerFenceSeq => {
+                let [order] = args else { return Err(CodegenError::internal("fence requires one ordering")); };
+                for instruction in crate::intrinsics::expand::ordered_fence(
+                    seq_id == InlineSequenceId::CompilerFenceSeq, *order, dest,
+                ) {
+                    self.ctx.emit(instruction);
+                }
             }
             // WaitGroup family + tls_get_base — dst-first generic emission.
             InlineSequenceId::WgNewSeq
@@ -40137,11 +40134,6 @@ impl VbcCodegen {
                 // CPU pause hint — no Tier-0 effect; the old route
                 // (OpcodeWithMode(AtomicFence, 0xFF)) emitted a truncated
                 // AtomicFence missing its ordering byte.
-                self.ctx.emit(Instruction::LoadNil { dst: dest });
-            }
-            InlineSequenceId::CompilerFenceSeq => {
-                // Ordering-only: no Tier-0 runtime effect; AOT emits a
-                // singlethread fence at its arm.
                 self.ctx.emit(Instruction::LoadNil { dst: dest });
             }
 

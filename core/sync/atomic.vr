@@ -41,6 +41,7 @@ module core.sync.atomic;
 // Import typed atomic intrinsics from stdlib.intrinsics
 mount core.intrinsics.atomic.{
     compiler_fence, MemoryOrder,
+    ORDERING_RELAXED, ORDERING_ACQUIRE, ORDERING_RELEASE, ORDERING_ACQ_REL, ORDERING_SEQ_CST,
     // Typed atomic load intrinsics
     atomic_load_u8, atomic_load_u16, atomic_load_u32, atomic_load_u64,
     // Typed atomic store intrinsics
@@ -57,15 +58,6 @@ mount core.intrinsics.atomic.{
 };
 mount core.intrinsics.platform.{spin_hint};
 mount core.intrinsics.runtime.sync.{futex_wait as wait_on_word, futex_wake as wake_word};
-
-// Memory ordering constants for atomic operations.
-// These match the encoding used in VBC opcodes and LLVM.
-// Note: Defined locally because VBC codegen doesn't fully support constant imports yet.
-const ORDERING_RELAXED: UInt8 = 0;
-const ORDERING_ACQUIRE: UInt8 = 1;
-const ORDERING_RELEASE: UInt8 = 2;
-const ORDERING_ACQ_REL: UInt8 = 3;
-const ORDERING_SEQ_CST: UInt8 = 4;
 
 // =============================================================================
 // V-LLSI Native Futex Imports (cross-platform)
@@ -165,35 +157,10 @@ fn ordering_to_u8(order: MemoryOrdering) -> UInt8 {
     }
 }
 
-// Memory fence with specified ordering.
-//
-
-// Uses native CPU fence instructions:
-// - x86_64: mfence (SeqCst), lfence (Acquire), sfence (Release)
-// - ARM64: dmb ish variants
+/// Synchronize memory accesses using the target's implementation of the specified order.
 @inline(always)
 public fn fence(order: MemoryOrdering) {
-    match order {
-        Relaxed => {}  // No fence needed
-        Acquire => {
-            @cfg(target_arch = "x86_64")
-            @asm("lfence");
-            @cfg(target_arch = "aarch64")
-            @asm("dmb ishld");
-        }
-        Release => {
-            @cfg(target_arch = "x86_64")
-            @asm("sfence");
-            @cfg(target_arch = "aarch64")
-            @asm("dmb ishst");
-        }
-        AcqRel | SeqCst => {
-            @cfg(target_arch = "x86_64")
-            @asm("mfence");
-            @cfg(target_arch = "aarch64")
-            @asm("dmb ish");
-        }
-    }
+    @intrinsic("memory_fence", ordering_to_u8(order))
 }
 
 // =============================================================================

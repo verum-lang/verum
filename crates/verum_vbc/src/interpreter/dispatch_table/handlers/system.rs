@@ -542,10 +542,34 @@ pub(in super::super) fn handle_atomic_rmw(
 
 /// AtomicFence (0xE6)
 pub(in super::super) fn handle_atomic_fence(
-    _state: &mut InterpreterState,
+    state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
-    std::sync::atomic::fence(std::sync::atomic::Ordering::SeqCst);
+    let immediate = read_u8(state)?;
+    if immediate == 0xff {
+        std::hint::spin_loop();
+    } else {
+        let order = crate::instruction::MemoryOrdering::from_immediate(immediate)
+            .ok_or_else(|| invalid_fence_order(i64::from(immediate)))?;
+        execute_fence(order, false);
+    }
     Ok(DispatchResult::Continue)
+}
+
+pub(super) fn invalid_fence_order(value: i64) -> InterpreterError {
+    InterpreterError::Panic { message: format!("invalid memory fence ordering {value}") }
+}
+
+pub(super) fn execute_fence(order: crate::instruction::MemoryOrdering, compiler_only: bool) {
+    use crate::instruction::MemoryOrdering;
+    use std::sync::atomic::{Ordering, compiler_fence, fence};
+    let ordering = match order {
+        MemoryOrdering::Relaxed => return,
+        MemoryOrdering::Acquire => Ordering::Acquire,
+        MemoryOrdering::Release => Ordering::Release,
+        MemoryOrdering::AcqRel => Ordering::AcqRel,
+        MemoryOrdering::SeqCst => Ordering::SeqCst,
+    };
+    if compiler_only { compiler_fence(ordering); } else { fence(ordering); }
 }
 
 // ============================================================================

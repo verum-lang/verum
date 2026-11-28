@@ -28,22 +28,17 @@ fn regression_ordering_constant_values() {
 // Fences are observable only across threads; here we pin that they are wired
 // (callable without trapping / returning nil) at every ordering.
 @test
-@ignore("@intrinsic(\"fence\") and @intrinsic(\"compiler_fence\") have no registry entry: `is not implemented in this build (called from atomic_fence); it has no registry entry, so there is no value to return`. An honest refusal rather than a silent nil — measured 2026-09-12 at Tier 0 once the file was made to compile. Recorded as A143.")
 fn regression_fences_are_callable() {
-    // THE FENCES TAKE `MemoryOrder`, NOT THE `ORDERING_*` CONSTANTS.
-    // `core/intrinsics/atomic.vr` declares both — the `UInt8` constants
-    // (`:177`) for the raw ABI and the `MemoryOrder` sum (`:49`) for the
-    // typed surface — and the fences take the sum. Passing a constant
-    // is refused with `expected 'MemoryOrder', found 'UInt8'`: a COMPILE
-    // error that took all 3 tests in this file down. The constants are
-    // still pinned by their own test above, which is what they are for.
-    // Measured 2026-09-12.
+    atomic_fence(MemoryOrder.Relaxed);
     atomic_fence(MemoryOrder.Acquire);
     atomic_fence(MemoryOrder.Release);
+    atomic_fence(MemoryOrder.AcqRel);
     atomic_fence(MemoryOrder.SeqCst);
+    compiler_fence(MemoryOrder.Relaxed);
+    compiler_fence(MemoryOrder.Acquire);
+    compiler_fence(MemoryOrder.Release);
     compiler_fence(MemoryOrder.AcqRel);
     compiler_fence(MemoryOrder.SeqCst);
-    assert(true);
 }
 
 // CAS returns a `(observed_value, succeeded)` pair — pin the shape on both

@@ -24,6 +24,8 @@
 )
 module core.intrinsics.runtime.sync;
 
+mount core.intrinsics.atomic.ORDERING_SEQ_CST;
+
 // =============================================================================
 // SECTION 1: Futex Operations
 // =============================================================================
@@ -95,12 +97,12 @@ public fn spin_loop_hint();
 /// Full memory fence with specified ordering.
 @intrinsic("memory_fence")
 @inline(always)
-public fn memory_fence(order: Int = 5);
+public fn memory_fence(order: Int = ORDERING_SEQ_CST as Int);
 
 /// Compiler-only fence (prevents reordering, no hardware barrier).
 @intrinsic("compiler_fence")
 @inline(always)
-public fn compiler_fence(order: Int = 5);
+public fn compiler_fence(order: Int = ORDERING_SEQ_CST as Int);
 
 // =============================================================================
 // SECTION 4: WaitGroup primitives — migrated from `core/sync/waitgroup.vr`

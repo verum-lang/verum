@@ -5371,6 +5371,36 @@ pub enum MachSubOpcode {
     //              (port rights, IPC primitives, host_info, etc.).
 }
 
+/// Scalar ordering ABI used by Verum atomic instructions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+#[allow(missing_docs)]
+pub enum MemoryOrdering {
+    Relaxed = 0,
+    Acquire = 1,
+    Release = 2,
+    AcqRel = 3,
+    SeqCst = 4,
+}
+
+impl MemoryOrdering {
+    /// All encodable orders, in wire order. Dynamic operands are checked before narrowing.
+    pub const ALL: [Self; 5] = [Self::Relaxed, Self::Acquire, Self::Release, Self::AcqRel, Self::SeqCst];
+
+    /// Decode a scalar ABI operand. A negative or out-of-range order is invalid.
+    pub fn from_scalar(value: i64) -> Option<Self> {
+        usize::try_from(value).ok().and_then(|index| Self::ALL.get(index)).copied()
+    }
+
+    /// Older producers also emitted LLVM ordering bytes 5 and 7 as full fences.
+    pub fn from_immediate(value: u8) -> Option<Self> {
+        match value {
+            5 | 7 => Some(Self::SeqCst),
+            code => Self::from_scalar(i64::from(code)),
+        }
+    }
+}
+
 /// Cross-platform synchronization primitives — extracted from
 /// `SystemSubOpcode::Futex*` / `Spinlock*`.
 ///
@@ -5421,6 +5451,10 @@ pub enum SyncSubOpcode {
     /// width byte in the operand stream — see the atomic-rmw-family
     /// envelope contract).
     AtomicRmw = 0x40,
+    /// Cross-thread fence, ordering supplied by one scalar register.
+    ThreadFence = 0x41,
+    /// Same-thread compiler fence, using the same ordering contract.
+    CompilerFence = 0x42,
     // -- Thread-local slots (0x50-0x5F) — carried over from
     //    SystemSubOpcode::TlsSlot* (T0852).
     /// Read a TLS slot (dst, slot).
@@ -5458,6 +5492,8 @@ impl SyncSubOpcode {
             0x34 => Some(Self::WaitgroupTryWait),
             0x35 => Some(Self::WaitgroupDestroy),
             0x40 => Some(Self::AtomicRmw),
+            0x41 => Some(Self::ThreadFence),
+            0x42 => Some(Self::CompilerFence),
             0x50 => Some(Self::TlsSlotGet),
             0x51 => Some(Self::TlsSlotSet),
             0x52 => Some(Self::TlsSlotHas),

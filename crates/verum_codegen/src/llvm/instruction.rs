@@ -33405,6 +33405,10 @@ fn lower_sync_extended<'ctx>(
             Ok(())
         }
 
+        Some(scope @ (SyncSubOpcode::ThreadFence | SyncSubOpcode::CompilerFence)) => {
+            lower_register_fence(ctx, operands, scope == SyncSubOpcode::CompilerFence)
+        }
+
         Some(SyncSubOpcode::AtomicRmw) => {
             // Format: dst:reg, ptr:reg, val:reg, op:u8, size:u8
             //
@@ -36923,70 +36927,71 @@ fn lower_atomic_cas<'ctx>(
 ///
 /// Generates LLVM fence instruction with the specified ordering.
 /// Special case: ordering 0xFF means spin_hint (CPU pause/yield).
-fn lower_atomic_fence<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, ordering: u8) -> Result<()> {
-    if ordering == 0xFF {
-        // spin_hint: emit CPU pause/yield instruction via inline asm.
-        // On x86: PAUSE instruction (reduces power and avoids memory-order violations in spinloops)
-        // On ARM: YIELD instruction (hint to the processor that this is a spin-wait loop)
-        let module = ctx.get_module();
-        let void_type = ctx.types().context().void_type();
-        let fn_type = void_type.fn_type(&[], false);
-
-        // Use LLVM inline asm for the pause/yield hint.  Read the TARGET
-        // triple, never the codegen host's `#[cfg(target_arch)]` — host
-        // gates miscompile cross-builds.
-        let asm_str: &str = if target_is_x86_64(module) {
-            "pause"
-        } else if target_is_aarch64(module) {
-            "yield"
-        } else {
-            ""
-        };
-
-        if !asm_str.is_empty() {
-            // Build inline asm call: asm volatile("pause"/"yield")
-            // Use a helper function that wraps the inline asm
-            let spin_hint_fn_name = "__verum_spin_hint";
-            let spin_hint_fn = module.get_function(spin_hint_fn_name).unwrap_or_else(|| {
-                let f = module.add_function(spin_hint_fn_name, fn_type, None);
-                // Build the function body with inline asm
-                let entry = ctx.types().context().append_basic_block(f, "entry");
-                let saved_block = ctx.builder().get_insert_block();
-                ctx.builder().position_at_end(entry);
-                // Emit a no-op fence as a conservative fallback
-                // (inline asm would be ideal but inkwell's inline_asm API is limited)
-                let _ = ctx.builder().build_fence(
-                    AtomicOrdering::Monotonic,
-                    true, // single_thread = true (thread-local hint, not a real fence)
-                    "",   // fence is void — must be unnamed
-                );
-                let _ = ctx.builder().build_return(None);
-                if let Some(block) = saved_block {
-                    ctx.builder().position_at_end(block);
-                }
-                f
-            });
-            ctx.builder()
-                .build_call(spin_hint_fn, &[], "")
-                .map_err(|e| {
-                    LlvmLoweringError::internal(format!("Failed to call spin_hint: {}", e))
-                })?;
-        }
-        // If no asm available, spin_hint is a no-op (still correct, just less efficient)
-
+fn lower_atomic_fence<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, immediate: u8) -> Result<()> {
+    if immediate == 0xff {
+        // A spin hint is optional on targets without a pause/yield instruction.
+        let asm = if target_is_x86_64(ctx.get_module()) { "pause" }
+            else if target_is_aarch64(ctx.get_module()) { "yield" }
+            else { return Ok(()); };
+        let ty = ctx.types().void_type().fn_type(&[], false);
+        let hint = ctx.llvm_context().create_inline_asm(
+            ty, asm.into(), String::new(), true, false, None, false,
+        );
+        ctx.builder().build_indirect_call(ty, hint, &[], "").or_llvm_err()?;
         return Ok(());
     }
+    let order = verum_vbc::instruction::MemoryOrdering::from_immediate(immediate)
+        .ok_or_else(|| LlvmLoweringError::internal(format!("invalid immediate fence ordering {immediate}")))?;
+    emit_ordered_fence(ctx, order, false)
+}
 
-    let llvm_ordering = vbc_to_llvm_ordering(ordering);
+fn emit_ordered_fence(
+    ctx: &FunctionContext<'_, '_>,
+    order: verum_vbc::instruction::MemoryOrdering,
+    compiler_only: bool,
+) -> Result<()> {
+    if order != verum_vbc::instruction::MemoryOrdering::Relaxed {
+        ctx.builder().build_fence(vbc_to_llvm_ordering(order as u8), compiler_only, "").or_llvm_err()?;
+    }
+    Ok(())
+}
 
-    // Build fence instruction (is_single_thread = false for cross-thread
-    // synchronization).  Name MUST be empty: fence returns void and
-    // LLVM rejects named void-result instructions ("instructions
-    // returning void cannot have a name").
-    ctx.builder()
-        .build_fence(llvm_ordering, false, "")
-        .map_err(|e| LlvmLoweringError::internal(format!("Failed to build fence: {}", e)))?;
+/// LLVM requires an immediate ordering. Keep a constant order straight-line and
+/// dispatch a dynamic order to exactly one fence, preserving its synchronization scope.
+fn lower_register_fence<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    operands: &[u8],
+    compiler_only: bool,
+) -> Result<()> {
+    use verum_vbc::instruction::MemoryOrdering;
+    let mut cursor = 0;
+    let reg = verum_vbc::encoding::decode_reg(operands, &mut cursor)
+        .map_err(|e| LlvmLoweringError::internal(e.to_string()))?;
+    if cursor != operands.len() {
+        return Err(LlvmLoweringError::internal("trailing memory fence operands"));
+    }
+    let value = as_i64(ctx, ctx.get_register(reg.0)?, "fence_order")?;
+    if let Some(order) = value.get_sign_extended_constant().and_then(MemoryOrdering::from_scalar) {
+        return emit_ordered_fence(ctx, order, compiler_only);
+    }
 
+    let block = |name| ctx.llvm_context().append_basic_block(ctx.function(), name);
+    let done = block("fence_done");
+    let invalid = block("fence_invalid");
+    let orders = MemoryOrdering::ALL.map(|order| {
+        let target = if order == MemoryOrdering::Relaxed { done } else { block("fence") };
+        (ctx.types().i64_type().const_int(order as u64, false), target)
+    });
+    ctx.builder().build_switch(value, invalid, &orders).or_llvm_err()?;
+    for (order, (_, target)) in MemoryOrdering::ALL.into_iter().zip(orders).skip(1) {
+        ctx.builder().position_at_end(target);
+        emit_ordered_fence(ctx, order, compiler_only)?;
+        ctx.builder().build_unconditional_branch(done).or_llvm_err()?;
+    }
+    ctx.builder().position_at_end(invalid);
+    emit_runtime_abort(ctx, "invalid memory fence ordering", "fence_error")?;
+    ctx.builder().build_unreachable().or_llvm_err()?;
+    ctx.builder().position_at_end(done);
     Ok(())
 }
 

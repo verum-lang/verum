@@ -419,6 +419,15 @@ fn arith_extended(e: &mut Emitter, sub: ArithSubOpcode, dest: Reg, srcs: &[Reg])
     });
 }
 
+/// Encode the same register-sized ordering and unit result in source and archive wrappers.
+pub(crate) fn ordered_fence(compiler_only: bool, order: Reg, dest: Reg) -> [Instruction; 2] {
+    use crate::instruction::SyncSubOpcode;
+    let scope = if compiler_only { SyncSubOpcode::CompilerFence } else { SyncSubOpcode::ThreadFence };
+    let mut operands = Vec::new();
+    crate::encoding::encode_reg(order, &mut operands);
+    [Instruction::SyncExtended { sub_op: scope as u8, operands }, Instruction::LoadUnit { dst: dest }]
+}
+
 /// Mirror of the synthesizable arms of `emit_intrinsic_inline_sequence`.
 fn expand_sequence(
     e: &mut Emitter,
@@ -428,6 +437,12 @@ fn expand_sequence(
     byte_width: u8,
 ) -> bool {
     match seq {
+        InlineSequenceId::FenceSeq | InlineSequenceId::CompilerFenceSeq => {
+            let [order] = args else { return false };
+            for instruction in ordered_fence(seq == InlineSequenceId::CompilerFenceSeq, *order, dest) {
+                e.emit(instruction);
+            }
+        }
         InlineSequenceId::CharGeneralCategory => {
             let [scalar] = args else { return false };
             e.emit(crate::unicode_category::instruction(dest, *scalar));

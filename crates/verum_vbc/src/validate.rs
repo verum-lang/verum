@@ -774,6 +774,35 @@ impl<'a> Validator<'a> {
         let func_name = format!("fn#{}@0x{:x}", func.id.0, instr_start);
 
         match instr {
+            Instruction::AtomicFence { ordering }
+                if *ordering != 0xff && crate::instruction::MemoryOrdering::from_immediate(*ordering).is_none() =>
+            {
+                self.errors.push(VbcError::InvalidInstructionEncoding {
+                    offset: instr_start,
+                    reason: format!("invalid immediate fence ordering {ordering}"),
+                });
+            }
+            Instruction::SyncExtended { sub_op, operands }
+                if matches!(
+                    crate::instruction::SyncSubOpcode::from_byte(*sub_op),
+                    Some(crate::instruction::SyncSubOpcode::CompilerFence | crate::instruction::SyncSubOpcode::ThreadFence)
+                ) =>
+            {
+                let mut offset = 0;
+                if self.module.header.version_minor < crate::format::ORDERED_FENCE_VERSION {
+                    self.errors.push(VbcError::InvalidInstructionEncoding {
+                        offset: instr_start,
+                        reason: "ordered fence requires VBC minor 69 or newer".into(),
+                    });
+                }
+                match crate::encoding::decode_reg(operands, &mut offset) {
+                    Ok(reg) if offset == operands.len() => self.check_reg(reg, max_reg, &func_name),
+                    _ => self.errors.push(VbcError::InvalidInstructionEncoding {
+                        offset: instr_start,
+                        reason: "ordered fence requires exactly one register".into(),
+                    }),
+                }
+            }
             Instruction::MemExtended { sub_op, operands } => {
                 if *sub_op == crate::instruction::MemSubOpcode::ListStorageEmptyLike.to_byte() {
                     if self.module.header.version_minor < crate::format::LIST_STORAGE_EMPTY_LIKE_VERSION {

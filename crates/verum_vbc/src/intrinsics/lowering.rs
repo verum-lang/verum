@@ -152,30 +152,9 @@ pub struct MlirBlock {
     pub ops: Vec<MlirOp>,
 }
 
-/// Memory ordering for atomic operations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(missing_docs)]
-pub enum MemoryOrdering {
-    Relaxed,
-    Acquire,
-    Release,
-    AcqRel,
-    SeqCst,
-}
+pub use crate::instruction::MemoryOrdering;
 
 impl MemoryOrdering {
-    /// Convert from Verum ordering constant.
-    pub fn from_verum(ordering: u8) -> Self {
-        match ordering {
-            0 => MemoryOrdering::Relaxed,
-            1 => MemoryOrdering::Acquire,
-            2 => MemoryOrdering::Release,
-            3 => MemoryOrdering::AcqRel,
-            4 => MemoryOrdering::SeqCst,
-            _ => MemoryOrdering::SeqCst, // Default to strongest
-        }
-    }
-
     /// Convert to LLVM ordering attribute string.
     pub fn to_llvm_attr(&self) -> &'static str {
         match self {
@@ -618,7 +597,8 @@ impl IntrinsicLowering {
                         }
                     }
                 } else {
-                    let ordering = MemoryOrdering::from_verum(mode);
+                    let ordering = MemoryOrdering::from_immediate(mode)?;
+                    if ordering == MemoryOrdering::Relaxed { return None; }
                     self.emit(MlirOp {
                         name: "llvm.fence".to_string(),
                         attrs: vec![MlirAttr {
@@ -3649,11 +3629,23 @@ impl IntrinsicLowering {
                 operands: operands.to_vec(),
                 region: None,
             }),
+            InlineSequenceId::FenceSeq | InlineSequenceId::CompilerFenceSeq => self.emit(MlirOp {
+                name: "verum.atomic.fence".into(),
+                attrs: vec![MlirAttr {
+                    name: "syncscope".into(),
+                    value: MlirAttrValue::String(if seq_id == InlineSequenceId::CompilerFenceSeq {
+                        "singlethread".into()
+                    } else {
+                        "system".into()
+                    }),
+                }],
+                result_types: vec![],
+                operands: operands.to_vec(),
+                region: None,
+            }),
             InlineSequenceId::SpinUnlockSeq
             | InlineSequenceId::TlsSetSeq
             | InlineSequenceId::TlsClearSeq
-            | InlineSequenceId::FenceSeq
-            | InlineSequenceId::CompilerFenceSeq
             | InlineSequenceId::SpinHintSeq
             | InlineSequenceId::WgAddSeq
             | InlineSequenceId::WgDoneSeq
