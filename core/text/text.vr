@@ -606,7 +606,7 @@ implement Text {
         }
     }
 
-    /// Iterate over lines.
+    /// Iterate over lines separated by LF or CRLF. A lone CR belongs to the line.
     public fn lines(&self) -> Lines {
         Lines { text: self, pos: 0 }
     }
@@ -885,9 +885,14 @@ implement Text {
     /// input the two answer different questions, so this is not an
     /// alias for `find_char`.
     public fn find_byte(&self, byte: Byte) -> Maybe<Int> {
+        self.find_byte_from(byte, 0)
+    }
+
+    fn find_byte_from(&self, byte: Byte, start: Int) -> Maybe<Int> {
         let bytes = self.as_bytes();
-        let mut i: Int = 0;
-        while i < bytes.len() {
+        let len = bytes.len();
+        let mut i = start;
+        while i < len {
             if bytes[i] == byte {
                 return Maybe.Some(i);
             }
@@ -3980,30 +3985,21 @@ implement Iterator for Lines {
     type Item = Text;
 
     fn next(&mut self) -> Maybe<Text> {
-        let bytes = self.text.as_bytes();
-        if self.pos >= bytes.len() {
+        let start = self.pos;
+        let len = self.text.len();
+        if start >= len {
             return Maybe.None;
         }
 
-        let start = self.pos;
-        let mut end = start;
-
-        // Find end of line
-        while end < bytes.len() && bytes[end] != 10 {
-            end = end + 1;
-        }
-
-        // Skip \r if present (Windows line endings)
-        let line_end = if end > start && bytes[end - 1] == 13 {
-            end - 1
-        } else {
-            end
+        let (end, next) = match self.text.find_byte_from(10, start) {
+            Maybe.Some(lf) => {
+                let end = if lf > start && self.text.as_bytes()[lf - 1] == 13 { lf - 1 } else { lf };
+                (end, lf + 1)
+            },
+            Maybe.None => (len, len),
         };
-
-        // Move past newline
-        self.pos = if end < bytes.len() { end + 1 } else { end };
-
-        Maybe.Some(self.text.slice(start, line_end))
+        self.pos = next;
+        Maybe.Some(self.text.slice(start, end))
     }
 }
 

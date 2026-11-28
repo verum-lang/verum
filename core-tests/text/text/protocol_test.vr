@@ -164,6 +164,18 @@ fn iterator_lines_strips_trailing_newline() {
 }
 
 @test
+fn iterator_lines_recognizes_only_lf_and_crlf() {
+    let text: Text = "\nλ\r\n\r\r\n水\r";
+    let mut lines = text.lines();
+    assert_eq(lines.next().unwrap(), "");
+    assert_eq(lines.next().unwrap(), "λ");
+    assert_eq(lines.next().unwrap(), "\r");
+    assert_eq(lines.next().unwrap(), "水\r");
+    assert(lines.next().is_none());
+    assert(lines.next().is_none());
+}
+
+@test
 fn iterator_lines_empty_text_yields_nothing() {
     let s: Text = "";
     let mut it: Lines = s.lines();
