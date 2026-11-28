@@ -952,12 +952,11 @@ impl VbcCodegen {
         // a byte-suffixed repeat literal (`[0_u8; N]`) — the suffix alone is
         // enough to pack, so an unannotated byte scratch buffer no longer
         // falls through to a List backing (T0308 / T0608).
-        let byte_array_size = match self.detect_byte_array_type(ty)? {
-            Some(count) => Some(count),
-            None => match value {
-                Some(value) => self.detect_byte_array_from_repeat_value(value)?,
-                None => None,
-            },
+        let layout = self.declared_packed_array(ty)?;
+        let byte_array_size = match (layout, ty, value) {
+            (Some((count, 1, _)), _, _) => Some(count),
+            (None, None, Some(expr)) => self.detect_byte_array_from_repeat_value(expr)?,
+            _ => None,
         };
         if let (Some(count), Some(expr)) = (byte_array_size, value) {
             use verum_ast::{ArrayExpr, ExprKind};
@@ -993,7 +992,8 @@ impl VbcCodegen {
 
         // Check if this is a typed array type (non-byte) - if so, use specialized typed array allocation
         // This enables memory intrinsics like memcpy to work correctly with [UInt64; N] arrays
-        if let Some((count, elem_size, is_float)) = self.detect_typed_array_type(ty)?
+        if let Some((count, elem_size, is_float)) = layout
+            && elem_size > 1
             && let Some(expr) = value
             // ONLY a literal array. See the block comment below.
             && matches!(&expr.kind, verum_ast::ExprKind::Array(_))
@@ -1587,7 +1587,6 @@ impl VbcCodegen {
         Ok(None)
     }
 
-    /// Detects if type annotation is a byte array [Byte; N] and returns the size.
     /// Detect a byte-array from a repeat whose element is an explicit
     /// byte-suffixed integer literal (`[0_u8; N]` / `[0_i8; N]`). The
     /// `_u8`/`_i8` suffix is sufficient proof of byte-ness, so such a
@@ -1614,103 +1613,47 @@ impl VbcCodegen {
 
     fn checked_array_count(&self, expr: &verum_ast::Expr, element_size: usize) -> CodegenResult<Option<usize>> {
         let Some(value) = self.const_eval_i64(expr)? else { return Ok(None) };
-        let count = usize::try_from(value).ok().filter(|count| {
+        Self::checked_packed_count(value, element_size, expr.span).map(Some)
+    }
+
+    fn checked_packed_count(
+        value: impl TryInto<usize>, element_size: usize, span: verum_ast::Span,
+    ) -> CodegenResult<usize> {
+        value.try_into().ok().filter(|count: &usize| {
             count.checked_mul(element_size).is_some_and(|bytes| bytes <= isize::MAX as usize)
-        });
-        count.map(Some).ok_or_else(|| CodegenError::with_span(
+        }).ok_or_else(|| CodegenError::with_span(
             super::error::CodegenErrorKind::InvalidLiteral(
                 "array count must be nonnegative and its byte size must fit in Int".to_string(),
-            ),
-            expr.span,
+            ), span,
         ))
     }
 
-    pub(crate) fn detect_byte_array_type(&self, ty: Option<&verum_ast::Type>) -> CodegenResult<Option<usize>> {
-        use verum_ast::ty::{PathSegment, TypeKind};
-
-        let Some(ty) = ty else { return Ok(None) };
-        if let TypeKind::Array { element, size: Some(size) } = &ty.kind
-            && let TypeKind::Path(path) = &element.kind
-            && let Some(PathSegment::Name(ident)) = path.segments.last()
-            && matches!(ident.as_str(), "Byte" | "U8" | "u8")
-        {
-            return self.checked_array_count(size, 1);
-        }
-        Ok(None)
-    }
-
-    /// Detects if type annotation is a typed array [T; N] (non-byte).
-    /// Returns (count, element_size, is_float) if detected.
-    ///
-    /// `is_float` distinguishes `[Float; N]` / `[Float32; N]` from the
-    /// integer widths of the same byte size (`[Int; N]` / `[Int32; N]`).
-    /// The two share a stride but NOT a decode: a float element's raw bytes
-    /// are the IEEE-754 bit pattern (which, for a normal double, is exactly
-    /// its own NaN-boxed `Value`), so the read path must re-box through
-    /// `from_f64`, not `from_i64` (TYPED-ARRAY-FLOAT-1, #28). The flag is
-    /// threaded to `NewTypedArray` so the packed array is stamped with the
-    /// float-typed heap `TypeId` (F64 / F32) and every access decodes
-    /// coherently.
-    pub(crate) fn detect_typed_array_type(
+    /// Resolve the element exactly as field descriptors do. A local alias can
+    /// name either the element or the array; a user record has its own identity.
+    pub(super) fn declared_packed_array(
         &self,
         ty: Option<&verum_ast::Type>,
     ) -> CodegenResult<Option<(usize, usize, bool)>> {
-        use verum_ast::ty::{PathSegment, TypeKind};
-
+        use verum_ast::ty::TypeKind;
         let Some(ty) = ty else { return Ok(None) };
-        if let TypeKind::Array { element, size } = &ty.kind {
-            // Determine element size + float-ness from element type.
-            // The fast parser produces primitive TypeKind variants (Int, Float, Bool, Char)
-            // for built-in types, but TypeKind::Path for non-primitive types (Byte, UInt64, etc.).
-            let (elem_size, is_float): (Option<usize>, bool) = match &element.kind {
-                // Primitive TypeKind variants produced by the fast parser
-                TypeKind::Int => (Some(8), false),
-                TypeKind::Float => (Some(8), true),
-                TypeKind::Bool => (Some(1), false),
-                TypeKind::Char => (Some(4), false),
-
-                // Path-based type names (non-primitive types)
-                TypeKind::Path(path) => {
-                    if let Some(PathSegment::Name(ident)) = path.segments.last() {
-                        let name = ident.as_str();
-                        // Route through the canonical
-                        // `primitive_size_by_name` registry so every
-                        // primitive alias (canonical Verum + legacy
-                        // uppercase-short + Rust-style lowercase)
-                        // resolves to the right byte width. 1-byte
-                        // arrays (Byte / I8 / U8) take a different
-                        // codegen path via `detect_byte_array_type`,
-                        // so they return None here. Compound types
-                        // and unknown names also return None.
-                        let sz = verum_common::layout::primitive_size_by_name(name)
-                            .and_then(|sz| if sz == 1 { None } else { Some(sz as usize) });
-                        let is_f = matches!(
-                            name,
-                            "Float" | "Float32" | "Float64" | "F32" | "F64" | "f32" | "f64"
-                        );
-                        (sz, is_f)
-                    } else {
-                        (None, false)
-                    }
-                }
-
-                _ => (None, false),
-            };
-
-            if let Some(elem_size) = elem_size {
-                // Bool arrays are 1-byte and handled by detect_byte_array_type
-                if elem_size == 1 {
-                    return Ok(None);
-                }
-
-                // Extract count from size expression
-                if let Some(size_expr) = size {
-                    return Ok(self.checked_array_count(size_expr, elem_size)?
-                        .map(|count| (count, elem_size, is_float)));
-                }
-            }
+        if let TypeKind::Array { element, size: Some(size) } = &ty.kind {
+            let element = self.resolve_signature_type_ref(element, &self.ctx.current_generic_param_ids)?;
+            let Some((width, float)) = self.primitive_array_element_spec(&element) else { return Ok(None) };
+            return Ok(self.checked_array_count(size, width)?.map(|count| (count, width, float)));
         }
-        Ok(None)
+        let base = match &ty.kind {
+            TypeKind::Generic { base, .. } => &base.kind,
+            kind => kind,
+        };
+        let TypeKind::Path(path) = base else { return Ok(None) };
+        let is_alias = self.nominal_type_id(&path.to_string()).and_then(|id| self.type_by_id(id))
+            .is_some_and(|descriptor| descriptor.kind == crate::types::TypeKind::Alias);
+        if !is_alias { return Ok(None) }
+        let declaration = self.resolve_signature_type_ref(ty, &self.ctx.current_generic_param_ids)?;
+        let Some(expanded) = self.expand_declared_alias(declaration) else { return Ok(None) };
+        let Some((element, crate::types::ArrayExtent::Known(count))) = expanded.fixed_array_parts() else { return Ok(None) };
+        let Some((width, float)) = self.primitive_array_element_spec(element) else { return Ok(None) };
+        Ok(Some((Self::checked_packed_count(count, width, ty.span)?, width, float)))
     }
 
     /// Returns Some(value) for literal integers, None otherwise.

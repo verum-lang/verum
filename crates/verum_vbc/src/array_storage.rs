@@ -19,12 +19,25 @@ impl PackedElement {
     /// An inline scalar has no nested ownership and uses a supported VBC width.
     pub fn for_element(element: &TypeRef) -> Maybe<Self> {
         let TypeRef::Concrete(id) = element else { return None; };
-        if !(id.is_numeric() || *id == crate::TypeId::BOOL || *id == crate::TypeId::CHAR) {
+        if !id.is_numeric() {
             return None;
         }
         let width = verum_common::layout::primitive_size_by_name(id.well_known_name()?)?;
         matches!(width, 1 | 2 | 4 | 8).then_some(Self { width: width as usize, float: id.is_float() })
     }
+    /// Resolve the declared element for both source allocation and typed copies.
+    /// The fast path for builtins requires no descriptor or substitution.
+    pub(crate) fn for_declaration<'a>(
+        element: &TypeRef,
+        lookup: impl FnMut(crate::TypeId) -> Option<&'a crate::types::TypeDescriptor>,
+    ) -> Maybe<Self> {
+        if let TypeRef::Concrete(id) = element && id.is_builtin() {
+            return Self::for_element(element);
+        }
+        let expanded = element.clone().expand_aliases_while(lookup, |_| true)?;
+        Self::for_element(&expanded)
+    }
+
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

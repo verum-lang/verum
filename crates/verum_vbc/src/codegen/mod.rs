@@ -18962,11 +18962,7 @@ impl VbcCodegen {
                         _ => break,
                     }
                 }
-                let count = match self.detect_byte_array_type(Some(inner))? {
-                    Some(count) => Some(count),
-                    None => self.detect_typed_array_type(Some(inner))?.map(|(count, _, _)| count),
-                };
-                if let Some(n) = count {
+                if let Some((n, _, _)) = self.declared_packed_array(Some(inner))? {
                     self.ctx.set_fixed_array_count(&pname, n);
                 }
             }
@@ -19232,6 +19228,7 @@ impl VbcCodegen {
                 }
             }
         }
+        self.inherit_implementation_members();
         let parameter_types = self.source_semantic_parameters(
             func, &self.ctx.current_generic_param_ids, &receiver_generics, &declared_ids,
         );
@@ -22046,7 +22043,15 @@ impl VbcCodegen {
     /// Packed field allocation and access share the declared element geometry.
     /// A value parameter fixes the geometry even before its extent is specialized.
     fn field_array_spec(&self, type_name: &str, field_name: &str) -> Option<(usize, bool, crate::types::ArrayExtent)> {
-        let (element, extent) = self.field_array_type(type_name, field_name)?.fixed_array_parts()?;
+        let declaration = self.field_array_type(type_name, field_name)?;
+        let expanded;
+        let (element, extent) = match declaration.fixed_array_parts() {
+            Some(parts) => parts,
+            None => {
+                expanded = self.expand_declared_alias(declaration.clone())?;
+                expanded.fixed_array_parts()?
+            }
+        };
         let (size, is_float) = self.primitive_array_element_spec(element)?;
         Some((size, is_float, extent))
     }
@@ -22075,51 +22080,11 @@ impl VbcCodegen {
         Some(&fd.type_ref)
     }
 
-    /// `(elem_size, is_float)` for a PRIMITIVE array-element `TypeRef`, or
-    /// `None` for compound / nested / non-primitive elements.  Resolves the
-    /// element's canonical name through `type_ref_to_field_name` (so a
-    /// `Concrete(U8)` and a named-`Byte` alias both land on `"Byte"`), then
-    /// sizes it through the shared `primitive_size_by_name` registry.
-    fn primitive_array_element_spec(
-        &self,
-        element: &crate::types::TypeRef,
-    ) -> Option<(usize, bool)> {
-        use crate::types::{TypeId, TypeRef};
-        // THE NAME TABLE HAS HOLES AND THEY ARE NOT COSMETIC (T1463).
-        // `primitive_type_id_to_name` lists UNIT/BOOL/INT/FLOAT/TEXT/CHAR/
-        // U8/I32/U64 and nothing else, so a `Concrete(U32)` element falls
-        // through to `type_by_id`, which answers only where a descriptor for
-        // the builtin happens to be registered. Where it is not — a codegen
-        // built without the archive, which is the shape the stdlib bake and
-        // the unit tests use — the whole spec came back `None`, and every
-        // caller read that as "not a primitive array". `[UInt32; N]` is the
-        // AES / SHA-1 / BLAKE3 key-schedule shape, so the miss was aimed
-        // squarely at the crypto stack.
-        //
-        // Answer from the ID first for exactly the widths the name table
-        // omits: the same fact, one indirection earlier, and it cannot go
-        // missing. Ids the table already covers keep their existing path
-        // verbatim, so this adds answers and changes none.
-        if let TypeRef::Concrete(tid) = element {
-            let by_id = match *tid {
-                TypeId::U16 => Some((2usize, false)),
-                TypeId::U32 => Some((4, false)),
-                TypeId::I8 => Some((1, false)),
-                TypeId::I16 => Some((2, false)),
-                TypeId::F32 => Some((4, true)),
-                _ => None,
-            };
-            if by_id.is_some() {
-                return by_id;
-            }
-        }
-        let name = self.type_ref_to_field_name(element)?;
-        let sz = verum_common::layout::primitive_size_by_name(&name)? as usize;
-        let is_float = matches!(
-            name.as_str(),
-            "Float" | "Float32" | "Float64" | "F32" | "F64" | "f32" | "f64"
-        );
-        Some((sz, is_float))
+    /// Packed loads produce integer or floating-point values. A record, reference,
+    /// Bool or Char can have the same width without sharing either representation.
+    fn primitive_array_element_spec(&self, element: &TypeRef) -> Option<(usize, bool)> {
+        let packed = crate::array_storage::PackedElement::for_declaration(element, |id| self.type_by_id(id))?;
+        Some((packed.width, packed.float))
     }
 
     /// Substitute the literal `Self` token in a textual type name with

@@ -6,7 +6,7 @@
 //! only to this immutable query; no AST-address cache survives a scope change.
 use super::*;
 use crate::types::TypeRef;
-use verum_common::{List, Maybe, Set, Text};
+use verum_common::{List, Maybe, Text};
 
 pub(super) struct ExpressionTypes {
     /// The declared structural result, including callable parameter witnesses.
@@ -71,38 +71,10 @@ impl VbcCodegen {
     /// The selected declaration and substitution still use this one walker.
     pub(in crate::codegen) fn expand_declared_alias_while(
         &self,
-        mut witness: TypeRef,
-        mut transparent: impl FnMut(&crate::types::TypeDescriptor) -> bool,
+        witness: TypeRef,
+        transparent: impl FnMut(&crate::types::TypeDescriptor) -> bool,
     ) -> Maybe<TypeRef> {
-        let mut seen = Set::new();
-        let mut references = smallvec::SmallVec::<[(crate::types::CbgrTier, crate::types::Mutability); 2]>::new();
-        loop {
-            if let TypeRef::Reference { inner, tier, mutability } = witness {
-                references.push((tier, mutability));
-                witness = *inner;
-                continue;
-            }
-            let (base, args) = match &witness {
-                TypeRef::Concrete(id) => (*id, &[][..]),
-                TypeRef::Instantiated { base, args } => (*base, args.as_slice()),
-                _ => break,
-            };
-            let Some(descriptor) = self.type_by_id(base)
-                .filter(|ty| ty.kind == crate::types::TypeKind::Alias)
-            else {
-                break;
-            };
-            if !transparent(descriptor)
-                || !seen.insert(base) || args.len() != descriptor.type_params.len() {
-                return None;
-            }
-            witness = crate::mono::TypeSubstitution::new(&descriptor.type_params, args)
-                .apply(descriptor.alias_target.as_ref()?).ok()?;
-        }
-        for (tier, mutability) in references.into_iter().rev() {
-            witness = TypeRef::Reference { inner: Box::new(witness), tier, mutability };
-        }
-        Some(witness)
+        witness.expand_aliases_while(|id| self.type_by_id(id), transparent)
     }
 
     fn callable_result_name(&self, ty: &TypeRef) -> Maybe<Text> {

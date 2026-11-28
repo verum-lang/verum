@@ -117,3 +117,67 @@ fn packed_array_operands_keep_wide_registers_for_literals_and_repeats() {
     assert!(descriptor.register_count > 256);
     execute_image(module);
 }
+
+#[test]
+fn byte_array_geometry_survives_wrapping_the_record_and_returning_it() {
+    for element in ["UInt8", "Byte", "Octet"] {
+        let source = format!(r#"
+            type Octet is UInt8;
+            type Packet is {{ bytes: [{element}; 16] }};
+            type Outcome<T> is Present(T) | Missing;
+            fn make() -> Outcome<Packet> {{
+                let mut bytes: [{element}; 16] = [0; 16];
+                bytes[15] = 73;
+                Outcome.Present(Packet {{ bytes }})
+            }}
+            fn last(packet: &Packet) -> {element} {{ packet.bytes[15] }}
+            fn main() -> Int {{ match make() {{
+                Outcome.Present(p) => last(&p) as Int, Outcome.Missing => 0
+            }} }}
+        "#);
+        execute(&source);
+    }
+}
+
+#[test]
+fn a_fixed_array_alias_preserves_geometry_across_a_record_field() {
+    execute(r#"
+        type Bytes is [UInt8; 4];
+        type Packet is { bytes: Bytes };
+        fn last(packet: &Packet) -> UInt8 { packet.bytes[3] }
+        fn main() -> Int {
+            let mut bytes: Bytes = [0; 4];
+            bytes[3] = 73;
+            let packet = Packet { bytes };
+            last(&packet) as Int
+        }
+    "#);
+}
+
+#[test]
+fn boolean_and_character_array_fields_preserve_the_original_values() {
+    execute(r#"
+        type Flags is { ok: [Bool; 2], labels: [Char; 2] };
+        fn read(flags: &Flags) -> Int {
+            if flags.ok[1] && flags.labels[1] == 'x' { 73 } else { 0 }
+        }
+        fn main() -> Int {
+            let flags = Flags { ok: [false, true], labels: ['a', 'x'] };
+            read(&flags)
+        }
+    "#);
+}
+
+#[test]
+fn a_record_named_like_a_scalar_does_not_acquire_packed_storage() {
+    execute(r#"
+        type Byte is { value: Int };
+        type Packet is { rows: [app.Byte; 2] };
+        fn read(p: &Packet) -> Int { p.rows[1].value }
+        fn main() -> Int {
+            let rows: [app.Byte; 2] = [app.Byte {value: 1}, app.Byte {value: 73}];
+            let packet = Packet { rows };
+            read(&packet)
+        }
+    "#);
+}

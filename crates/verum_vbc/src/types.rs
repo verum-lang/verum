@@ -884,6 +884,45 @@ impl TypeRef {
         }
     }
 
+    /// Follow only selected alias declarations. Substitutions retain the caller's
+    /// parameters and reference capabilities. A cycle or incomplete alias refuses.
+    pub(crate) fn expand_aliases_while<'a>(
+        self,
+        mut lookup: impl FnMut(TypeId) -> Option<&'a TypeDescriptor>,
+        mut transparent: impl FnMut(&TypeDescriptor) -> bool,
+    ) -> Option<Self> {
+        let mut witness = self;
+        let mut seen = verum_common::Set::new();
+        let mut references = smallvec::SmallVec::<[(CbgrTier, Mutability); 2]>::new();
+        loop {
+            if let TypeRef::Reference { inner, tier, mutability } = witness {
+                references.push((tier, mutability));
+                witness = *inner;
+                continue;
+            }
+            let (base, args) = match &witness {
+                TypeRef::Concrete(id) => (*id, &[][..]),
+                TypeRef::Instantiated { base, args } => (*base, args.as_slice()),
+                _ => break,
+            };
+            let Some(descriptor) = lookup(base)
+                .filter(|ty| ty.kind == TypeKind::Alias)
+            else {
+                break;
+            };
+            if !transparent(descriptor)
+                || !seen.insert(base) || args.len() != descriptor.type_params.len() {
+                return None;
+            }
+            witness = crate::mono::TypeSubstitution::new(&descriptor.type_params, args)
+                .apply(descriptor.alias_target.as_ref()?).ok()?;
+        }
+        for (tier, mutability) in references.into_iter().rev() {
+            witness = TypeRef::Reference { inner: Box::new(witness), tier, mutability };
+        }
+        Some(witness)
+    }
+
     pub(crate) fn fixed_array_parts(&self) -> Option<(&Self, ArrayExtent)> {
         match self {
             Self::Array { element, length } => Some((element, ArrayExtent::Known(*length))),

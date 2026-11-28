@@ -26067,7 +26067,20 @@ impl VbcCodegen {
                 self.ctx.expected_value_span = field.value.as_ref().map(|expr| Self::normalized_place(expr).span);
 
                 let copy_start = self.ctx.instructions.len();
-                let value_reg = if let Some(ref v) = field.value {
+                // A wide packed local becomes an independent boxed field buffer.
+                // Field shorthand and an explicit place use the same conversion.
+                let local_name = match &field.value {
+                    Some(expr) => Self::expr_ident_name(expr),
+                    None => Some(field.name.name.to_string()),
+                };
+                let unpack = local_name.as_ref().and_then(|name| {
+                    self.packed_local_field_unpack_spec(&type_name, &field.name.name, name)
+                        .map(|spec| (name, spec))
+                });
+                let value_reg = if let Some((name, (width, float, count, signed))) = unpack {
+                    let source = self.ctx.get_var_reg(name)?;
+                    self.emit_unpack_packed_into_list(source, width, float, count, signed)?
+                } else if let Some(ref v) = field.value {
                     if matches!(v.kind, ExprKind::Closure { .. } | ExprKind::Paren(_))
                         && let Some(hint) = self.field_type_name(&type_name, &field.name.name)
                         .map(verum_common::Text::from)
@@ -26084,34 +26097,10 @@ impl VbcCodegen {
                         self.try_compile_packed_array_field_value(&type_name, &field.name.name, v)?
                     {
                         reg
-                    } else if let Some((esz, isf, len, signed_bits)) = Self::expr_ident_name(v)
-                        .and_then(|n| {
-                            self.packed_local_field_unpack_spec(&type_name, &field.name.name, &n)
-                        })
-                    {
-                        // PACKED-FIELD-ONE-REPRESENTATION-1 (T1463): a TRACKED
-                        // packed local stored into a non-byte primitive-array
-                        // field is the one producer that disagrees with every
-                        // other; unpack it so the field's representation is
-                        // single-valued and `GetE` never meets a bare buffer.
-                        let src = self
-                            .compile_expr(v)?
-                            .or_internal("field value has no value")?;
-                        let list = self.emit_unpack_packed_into_list(src, esz, isf, len, signed_bits)?;
-                        self.ctx.free_temp(src);
-                        list
                     } else {
                         self.compile_expr(v)?
                             .or_internal("field value has no value")?
                     }
-                } else if let Some((esz, isf, len, signed_bits)) = self.packed_local_field_unpack_spec(
-                    &type_name,
-                    &field.name.name,
-                    &field.name.name,
-                ) {
-                    // Field shorthand `K { w }` — same producer as `K { w: w }`.
-                    let src = self.ctx.get_var_reg(&field.name.name)?;
-                    self.emit_unpack_packed_into_list(src, esz, isf, len, signed_bits)?
                 } else {
                     self.ctx.get_var_reg(&field.name.name)?
                 };
@@ -26122,49 +26111,6 @@ impl VbcCodegen {
                 };
                 self.pop_field_type_context(saved_field_type);
 
-                // Field-write strategy:
-                //
-                //   * Raw pointers (FFI / alloc results): pass-through — see
-                //     the comment at the original RawPtr branch below; Clone
-                //     mis-allocates because the data isn't an ObjectHeader.
-                //   * Primitives + heap-allocated records: pass-through.
-                //     Verum records live in heap-allocated NaN-boxed objects;
-                //     copying the pointer into the field is the correct
-                //     value-semantics shape because each record has its own
-                //     allocation and the field-write doesn't share mutable
-                //     interior state with the source binding.  The previous
-                //     Clone-before-SetF step was a no-op for primitives but
-                //     produced **Unit-corruption for records whose AST
-                //     declares no `Clone` impl** (Waker / RawWaker /
-                //     RawWakerVTable — every async-runtime carrier).  In
-                //     those cases the Clone handler's `record_allocation`
-                //     succeeded but the cloned register's NaN-boxed value
-                //     read back as Unit on the next field-read, surfacing
-                //     downstream as `NullPointerAt opcode 0x62` at the
-                //     `.raw.vtable.<slot>` chain in Waker methods.
-                //
-                // Pre-fix call chain:
-                //   `noop_waker()` → `Waker.from_raw(raw)` → `Waker { raw: raw }`
-                //   → Clone(r0=raw) → cloned_reg holds Unit → SetF writes Unit
-                //   → reading `self.raw` on the result returns Unit → next
-                //   field access on Unit null-derefs.
-                //
-                // Removing the synthetic Clone closes the chain at the
-                // source. Aliasing concerns: if a future record literal
-                // syntactically reuses a binding across multiple fields
-                // (`Mat3 { r0: z, r1: z, r2: z }`), the heap-record
-                // semantics still hold because each Mat3 field is a fresh
-                // Value slot in the parent record; the SOURCE binding is
-                // unaffected, and downstream mutation of the resulting
-                // record's fields does not feed back to `z`.  Aliasing
-                // would only become a hazard if records had interior
-                // mutability through field-reference, which Verum doesn't
-                // expose at the record-literal layer.
-                // REFINE-FIELD-DYNAMIC-BYPASS-1: refined fields get a
-                // runtime Assert on the incoming value before the write —
-                // the SMT E500 gate only rejects LITERAL violations; a
-                // dynamic value (NaN through a fn return) reached the
-                // field unchecked (T1-F parity for fields).
                 let field_idx = applied_owner.base_type_id().and_then(|id| self.type_by_id(id))
                     .and_then(|declaration| declaration.fields.iter().position(|declared|
                         self.ctx.strings.get(declared.name.0 as usize).map(|name| name.as_str())
@@ -26174,26 +26120,8 @@ impl VbcCodegen {
                         "record construction selected an undeclared field".into()), field.name.span))?;
                 self.emit_field_refinement_assert(value_reg, &applied_owner, field_idx)?;
 
-                // A FIELD INITIALIZED FROM A PLACE TAKES A COPY (T0832).
-                //
-                // The paragraph above used to argue that `Mat3 { r0: z,
-                // r1: z, r2: z }` was safe because "each field is a
-                // fresh Value slot in the parent record". The slot is
-                // fresh; what it holds is not. All three slots held one
-                // pointer, so `m.r0.c0 = 7` wrote through all three rows
-                // AND through `z` — measured, `pair.b.v + zero.v` came
-                // back 14 where the language says 0.
-                //
-                // The Clone was removed here for a real reason: it made
-                // `Waker { raw: raw }` read back as Unit, because the
-                // old opcode deep-copied whatever the register held,
-                // including raw FFI buffers whose bytes are not an
-                // `ObjectHeader`. That reason is now handled where it
-                // belongs — `value_copy` returns untracked pointers as
-                // themselves — so the copy is safe to make again.
-                //
-                // Only PLACES copy: a field initialized from a literal,
-                // a call or a nested literal already owns its value.
+                // A source place copies or transfers according to its declaration.
+                // A newly unpacked buffer already owns its numeric elements.
                 let transfer = match &field.value {
                     Some(expr) => self.consumes_named_place(expr, value_reg),
                     None => self.consumes_named_binding(field.name.name.as_str(), value_reg),
@@ -26202,7 +26130,7 @@ impl VbcCodegen {
                     Some(expr) => self.generic_named_place(expr, value_reg),
                     None => self.generic_named_binding(field.name.name.as_str(), value_reg),
                 };
-                let is_place = !transfer && generic.is_none() && match &field.value {
+                let is_place = unpack.is_none() && !transfer && generic.is_none() && match &field.value {
                     Some(expr) => self.binds_a_copy_of_a_place(expr, value_reg, copy_type.as_ref())?,
                     // Shorthand (`Point { x, y }`) names its source
                     // without an expression node.
@@ -26240,7 +26168,7 @@ impl VbcCodegen {
                 if stored != value_reg {
                     self.ctx.free_temp(stored);
                 }
-                if field.value.is_some() {
+                if field.value.is_some() || unpack.is_some() {
                     self.ctx.free_temp(value_reg);
                 }
             }

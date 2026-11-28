@@ -192,7 +192,7 @@ impl Builder<'_> {
                 return Ok(CopyNode::Array {
                     element: self.intern((**element).clone())?,
                     length: *length,
-                    packed: crate::array_storage::PackedElement::for_element(element),
+                    packed: crate::array_storage::PackedElement::for_declaration(element, |id| self.module.get_type(id)),
                 });
             }
             _ => return Err("typed copy requires a resolved value declaration".into()),
