@@ -1376,8 +1376,8 @@ fn typed_drop_fields<'a>(state: &InterpreterState, value: Value, plan: &'a crate
             state.heap.validate_callable(&state.module, value, signature)?;
             return Ok(None);
         }
-        DropPlan::ListStorage { .. } => return Err(InterpreterError::Panic {
-            message: "built-in List destruction requires its live owned storage".into(),
+        DropPlan::SequenceStorage { .. } => return Err(InterpreterError::Panic {
+            message: "sequence destruction requires its live element storage".into(),
         }),
         DropPlan::Glue { owner, .. } => (*owner, None, None),
         DropPlan::Record { owner, fields, .. } => (*owner, Some(fields.as_slice()), None),
