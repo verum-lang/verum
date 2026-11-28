@@ -343,6 +343,7 @@ impl<'a> Obligations<'a> {
             .map(|index| index.candidates(ty, self.checker.requires_unfiltered_type_candidates(ty)))
             .unwrap_or_default();
         let mut covering = false;
+        let mut first_unsatisfied = None;
         for index in candidates {
             let implementation = &self.checker.impls[index];
             let overlap = match self.checker.match_implementation_candidate_in_environment(
@@ -371,35 +372,35 @@ impl<'a> Obligations<'a> {
                 .checker
                 .match_implementation_candidate_in_environment(implementation, ty, Some(&bound.args), true, &self.environment)
             {
-                let mut proved = self
+                let mut evidence = self
                     .checker
-                    .check_implementation_callable_bounds_in_environment(implementation, &substitution, &self.environment)
-                    .is_ok();
+                    .check_implementation_callable_bounds_in_environment(implementation, &substitution, &self.environment);
                 for clause in &implementation.where_clauses {
+                    if evidence.is_err() { break; }
                     let clause_ty = clause.ty.try_apply_subst(&substitution)?;
                     for required in &clause.bounds {
                         let required = required.try_apply_subst(&substitution)?;
-                        if self.check(&clause_ty, &required).is_err() {
-                            proved = false;
-                            break;
-                        }
-                    }
-                    if !proved {
-                        break;
+                        evidence = self.check(&clause_ty, &required);
+                        if evidence.is_err() { break; }
                     }
                 }
-                if proved {
-                    covering = true;
+                match evidence {
+                    Ok(()) => covering = true,
+                    Err(cause) => { first_unsatisfied.get_or_insert(cause); }
                 }
             }
         }
         if !covering {
-            return Err(format!(
+            let mut message = format!(
                 "no implementation proves {}: {} under its declared assumptions",
                 ty.to_text(),
                 bound.protocol
-            )
-            .into());
+            );
+            if let Some(cause) = first_unsatisfied {
+                message.push_str(" because ");
+                message.push_str(&cause);
+            }
+            return Err(message.into());
         }
         let protocol = self
             .checker

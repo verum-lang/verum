@@ -56,6 +56,21 @@ const DECL: &str =
     "type P is protocol {}; implement P for Int {} type Requires<T:P> is { value:T };";
 
 #[test]
+fn array_protocol_evidence_preserves_the_element_and_declared_extent() {
+    let family = "type Element is protocol {}; implement Element for Int {}
+        implement<T:Element, const N:Int> P for [T; N] {}";
+    accepted(&format!("{DECL} {family} type Passed is {{ a:Requires<[Int; 0]>, b:Requires<[Int; 4]> }};"));
+    refused(&format!("{DECL} {family} type Bad is {{ a:Requires<[Bool; 4]> }};"));
+    refused(&format!("{DECL} {family} type Bad is {{ a:Requires<[Int]> }};"));
+    let fixed = "implement P for [Int; 2] {} implement P for [Int; 4] {}";
+    accepted(&format!("{DECL} {fixed} type Passed is {{ a:Requires<[Int; 4]> }};"));
+    refused(&format!("{DECL} {fixed} type Bad is {{ a:Requires<[Int; 3]> }};"));
+    refused(&format!("{DECL} {family} implement P for [Int; 2] {{}}"));
+    let missing = errors(&format!("{DECL} {family} type Bad is {{ a:Requires<[Bool; 4]> }};"), None);
+    assert!(missing.iter().any(|error| error.contains("[Bool; 4]") && error.contains("Bool: cog::Element")), "{missing:?}");
+}
+
+#[test]
 fn structural_implementation_receivers_use_their_own_premises() {
     let head = "type PairWith<R> is protocol { type Output; };";
     for receiver in ["&Requires<T>", "&mut Requires<T>", "(&Requires<T>, T)"] {

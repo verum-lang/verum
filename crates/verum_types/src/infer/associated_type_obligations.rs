@@ -420,7 +420,9 @@ impl TypeChecker {
                 .check_universal_bounds_in(proof_receiver, std::slice::from_ref(&bound), environment).is_ok() {
                 continue;
             }
-            self.load_protocol_owner_candidates(&name, &subject)?;
+            // A matched header's prerequisites can be declared in the same
+            // unpublished source as the outer goal, including after its use.
+            self.load_scoped_bound_implementations(&subject, &bound)?;
             let registry = self.protocol_checker.read();
             let environment = self.source_type_registration.proof_environment(assumptions, callables);
             let requirements = registry.source_bound_requirements(&subject, proof_receiver, &bound, environment)

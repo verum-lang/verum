@@ -20,12 +20,16 @@ pub(super) struct ImportedStructuralMethod {
 pub(super) enum StructuralProtocolHead {
     Tuple(usize),
     Reference(verum_ast::expr::ReferenceKind, bool),
+    Array,
+    Slice,
 }
 
 impl StructuralProtocolHead {
     pub(super) fn of(receiver: &Type) -> Option<Self> {
         match receiver {
             Type::Tuple(parts) => Some(Self::Tuple(parts.len())),
+            Type::Array { .. } => Some(Self::Array),
+            Type::Slice { .. } => Some(Self::Slice),
             _ => receiver.reference_parts().map(|(_, mutable, tier)| Self::Reference(tier, mutable)),
         }
     }
@@ -34,11 +38,17 @@ impl StructuralProtocolHead {
         use verum_ast::{TypeKind, expr::ReferenceKind};
         match &target.kind {
             TypeKind::Tuple(parts) => Some(Self::Tuple(parts.len())),
+            TypeKind::Array { .. } => Some(Self::Array),
+            TypeKind::Slice(_) => Some(Self::Slice),
             TypeKind::Reference { mutable, .. } => Some(Self::Reference(ReferenceKind::Managed, *mutable)),
             TypeKind::CheckedReference { mutable, .. } => Some(Self::Reference(ReferenceKind::Checked, *mutable)),
             TypeKind::UnsafeReference { mutable, .. } => Some(Self::Reference(ReferenceKind::Unsafe, *mutable)),
             _ => None,
         }
+    }
+
+    pub(super) fn matches_source(self, target: &verum_ast::Type) -> bool {
+        Self::of_source(target) == Some(self)
     }
 }
 
@@ -139,7 +149,7 @@ impl TypeChecker {
                     continue;
                 }
                 if !checker.is_blanket_impl_for_type(for_type, &declaration.generics)
-                    && !structural.is_some_and(|head| Some(head) == StructuralProtocolHead::of_source(for_type)) {
+                    && !structural.is_some_and(|head| head.matches_source(for_type)) {
                     continue;
                 }
                 let selected = checker.resolve_protocol_reference(path)?;

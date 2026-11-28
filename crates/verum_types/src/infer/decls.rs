@@ -4428,6 +4428,29 @@ impl TypeChecker {
         receiver
     }
 
+    /// Name used only to attach methods. Applicability is always checked
+    /// against the complete receiver, including its binders and array extent.
+    fn implementation_method_owner(&self, resolved: &Type, source: &verum_ast::Type) -> Option<Text> {
+        let target = Self::implementation_attachment_type(resolved);
+        match target {
+            Type::Named { path, .. } => Some(self.path_to_string(path)),
+            Type::Generic { name, .. } => Some(name.clone()),
+            Type::Array { .. } | Type::Slice { .. } => self.get_exact_type_name(target),
+            _ => target.primitive_name().filter(|_| !matches!(target, Type::Unknown)).map(Text::from),
+        }.or_else(|| {
+            use verum_ast::ty::TypeKind;
+            let syntax = match &source.kind {
+                TypeKind::Generic { base, .. } => &base.kind,
+                other => other,
+            };
+            if let TypeKind::Path(path) = syntax {
+                path.as_ident().map(|id| id.name.clone())
+            } else {
+                None
+            }
+        })
+    }
+
     fn validate_impl_owner(
         &self,
         implementation: &crate::protocol::ProtocolImpl,
@@ -4898,42 +4921,9 @@ impl TypeChecker {
                 // protocol implementations, including sums and transparent aliases.
                 let self_type = self.ast_to_type_for_protocol_impl(for_type)?;
                 let previous_self_type = self.current_self_type.clone();
-                let attachment = Self::implementation_attachment_type(&self_type);
                 self.set_current_self_type(Maybe::Some(self_type.clone()));
 
-                // Get the type name for registering qualified method names
-                let type_name = match attachment {
-                    Type::Named { path, .. } => Some(self.path_to_string(path)),
-                    Type::Generic { name, .. } => Some(name.clone()),
-                    _ => None,
-                }
-                .or_else(|| match &for_type.kind {
-                    verum_ast::ty::TypeKind::Path(path) => {
-                        path.as_ident().map(|id| id.name.clone())
-                    }
-                    verum_ast::ty::TypeKind::Generic { base, .. } => {
-                        // For generic types like List<T>, extract the base type name
-                        match &base.kind {
-                            verum_ast::ty::TypeKind::Path(path) => {
-                                path.as_ident().map(|id| id.name.clone())
-                            }
-                            _ => None,
-                        }
-                    }
-                    // CRITICAL: Handle primitive types for inherent impls
-                    // e.g., `implement Int { fn max_value() -> Int { ... } }`
-                    verum_ast::ty::TypeKind::Int => Some(WKT::Int.as_str().into()),
-                    verum_ast::ty::TypeKind::Float => Some(WKT::Float.as_str().into()),
-                    verum_ast::ty::TypeKind::Bool => Some(WKT::Bool.as_str().into()),
-                    verum_ast::ty::TypeKind::Char => Some(WKT::Char.as_str().into()),
-                    verum_ast::ty::TypeKind::Text => Some(WKT::Text.as_str().into()),
-                    verum_ast::ty::TypeKind::Unit => Some("Unit".into()),
-                    // CRITICAL: Handle slice and array types for inherent impls
-                    // e.g., `implement<T> [T] { fn len(&self) -> Int { ... } }`
-                    verum_ast::ty::TypeKind::Slice(_) => Some("Slice".into()),
-                    verum_ast::ty::TypeKind::Array { .. } => Some("Array".into()),
-                    _ => None,
-                });
+                let type_name = self.implementation_method_owner(&self_type, for_type);
 
                 // Register all method signatures
                 if let Some(type_name_str) = type_name {
@@ -5338,32 +5328,7 @@ impl TypeChecker {
                     &verum_ast::Path { span: protocol.span, ..Self::text_to_path(&protocol_identity) },
                     protocol_args, Some(&resolved_self_type),
                 )?;
-                let type_name_opt = match Self::implementation_attachment_type(&resolved_self_type) {
-                    Type::Named { path, .. } => Some(self.path_to_string(path)),
-                    Type::Generic { name, .. } => Some(name.clone()),
-                    ty => ty.primitive_name()
-                        .filter(|_| !matches!(ty, Type::Unknown)).map(Text::from),
-                }
-                .or_else(|| match &for_type.kind {
-                    verum_ast::ty::TypeKind::Path(path) => {
-                        path.as_ident().map(|id| id.name.clone())
-                    }
-                    verum_ast::ty::TypeKind::Generic { base, .. } => match &base.kind {
-                        verum_ast::ty::TypeKind::Path(path) => {
-                            path.as_ident().map(|id| id.name.clone())
-                        }
-                        _ => None,
-                    },
-                    // CRITICAL: Handle primitive types for protocol implementations
-                    // e.g., `implement Hash for Int { ... }`
-                    verum_ast::ty::TypeKind::Int => Some(WKT::Int.as_str().into()),
-                    verum_ast::ty::TypeKind::Float => Some(WKT::Float.as_str().into()),
-                    verum_ast::ty::TypeKind::Bool => Some(WKT::Bool.as_str().into()),
-                    verum_ast::ty::TypeKind::Char => Some(WKT::Char.as_str().into()),
-                    verum_ast::ty::TypeKind::Text => Some(WKT::Text.as_str().into()),
-                    verum_ast::ty::TypeKind::Unit => Some("Unit".into()),
-                    _ => None,
-                });
+                let type_name_opt = self.implementation_method_owner(&resolved_self_type, for_type);
 
                 // Extract protocol name for debug logging
                 let protocol_name = protocol

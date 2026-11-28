@@ -8601,31 +8601,10 @@ impl TypeChecker {
         for_type: &verum_ast::ty::Type,
         generics: &[verum_ast::ty::GenericParam],
     ) -> bool {
-        use verum_ast::ty::TypeKind;
-
-        // Collect all type parameter names from the impl's generics
-        let type_param_names: std::collections::HashSet<&str> = generics
-            .iter()
-            .filter_map(|g| {
-                if let verum_ast::ty::GenericParamKind::Type { name, .. } = &g.kind {
-                    Some(name.name.as_str())
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        // Check if the for_type is a single type parameter
-        match &for_type.kind {
-            TypeKind::Path(path) => {
-                if let Some(ident) = path.as_ident() {
-                    type_param_names.contains(ident.name.as_str())
-                } else {
-                    false
-                }
-            }
-            _ => false,
-        }
+        let verum_ast::ty::TypeKind::Path(path) = &for_type.kind else { return false; };
+        let Some(ident) = path.as_ident() else { return false; };
+        generics.iter().any(|parameter| matches!(&parameter.kind,
+            verum_ast::ty::GenericParamKind::Type { name, .. } if name.name == ident.name))
     }
 
     /// Register implementation evidence without importing the receiver's entire
@@ -13991,7 +13970,7 @@ impl TypeChecker {
     /// This is used for methods that should be called on reference types themselves.
     /// Returns type names for Reference, CheckedReference, UnsafeReference, Slice, Array,
     /// and also Generic/Named types (like Heap<T>) without unwrapping.
-    fn get_exact_type_name(&self, ty: &Type) -> Option<Text> {
+    pub(super) fn get_exact_type_name(&self, ty: &Type) -> Option<Text> {
         match ty {
             // Reference types have their own methods like as_checked, as_unsafe
             Type::Reference { .. } => Some(verum_common::Text::from("Reference")),

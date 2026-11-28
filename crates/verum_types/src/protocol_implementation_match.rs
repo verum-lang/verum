@@ -497,6 +497,9 @@ impl HeadComparison<'_> {
         if let Some(compatible) = ProtocolChecker::compare_reference_applications(a, b,
             |left, right| !self.compare(left, right, observe))
         { return !compatible; }
+        if let Some(overlap) = ProtocolChecker::sequence_heads_overlap(a, b,
+            |left, right| !self.compare(left, right, observe))
+        { return !overlap; }
         match (a, b) {
             (Type::Named { path: a, args: aa }, Type::Named { path: b, args: ba }) => {
                 !checker.paths_equal(a, b)

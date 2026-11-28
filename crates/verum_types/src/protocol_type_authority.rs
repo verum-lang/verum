@@ -22,6 +22,8 @@ enum HeadIdentity {
     Nominal,
     Reference,
     Refinement,
+    Array,
+    Slice,
 }
 
 fn nominal_key(ty: &Type) -> Option<(Cow<'_, Text>, usize)> {
@@ -56,6 +58,22 @@ fn scalar_identity(name: &str) -> Text {
 }
 
 impl ProtocolChecker {
+    /// Compare the part of a sequence head that can exclude overlap. Only two
+    /// known, different extents are disjoint; a value binder remains open.
+    pub(super) fn sequence_heads_overlap(
+        left: &Type, right: &Type, elements_overlap: impl FnOnce(&Type, &Type) -> bool,
+    ) -> Option<bool> {
+        match (left, right) {
+            (Type::Array { element: a, size: an }, Type::Array { element: b, size: bn }) => {
+                let known = an.as_ref().and_then(crate::ty::ArrayLength::known)
+                    .zip(bn.as_ref().and_then(crate::ty::ArrayLength::known));
+                Some(!known.is_some_and(|(a, b)| a != b) && elements_overlap(a, b))
+            }
+            (Type::Slice { element: a }, Type::Slice { element: b }) => Some(elements_overlap(a, b)),
+            _ => None,
+        }
+    }
+
     /// Called only by the checker that actually declares language builtins.
     /// Canonical scalar identity is shared language authority, not a protocol
     /// spelling heuristic. Ordinary source declarations never call this API.
@@ -126,8 +144,11 @@ impl ProtocolChecker {
         if ty.reference_parts().is_some() {
             return Some(HeadIdentity::Reference);
         }
-        if matches!(ty, Type::Refined { .. }) {
-            return Some(HeadIdentity::Refinement);
+        match ty {
+            Type::Refined { .. } => return Some(HeadIdentity::Refinement),
+            Type::Array { .. } => return Some(HeadIdentity::Array),
+            Type::Slice { .. } => return Some(HeadIdentity::Slice),
+            _ => {}
         }
         if !matches!(ty, Type::Unknown)
             && let Some(name) = ty.primitive_name()
@@ -199,7 +220,7 @@ impl ProtocolChecker {
     pub(crate) fn builtin_source_receiver_name(&self, ty: &Type) -> Option<Text> {
         match self.head_identity(ty)? {
             HeadIdentity::Builtin(identity) => Some(identity),
-            HeadIdentity::Nominal | HeadIdentity::Reference | HeadIdentity::Refinement => None,
+            _ => None,
         }
     }
 
@@ -228,18 +249,10 @@ impl ProtocolChecker {
             (Some(HeadIdentity::Builtin(left)), Some(HeadIdentity::Builtin(right))) => {
                 left != right
             }
-            (Some(HeadIdentity::Nominal), Some(HeadIdentity::Builtin(_)))
-            | (Some(HeadIdentity::Builtin(_)), Some(HeadIdentity::Nominal)) => true,
-            // Borrowing and dereferencing convert values at use sites. An
-            // implementation is selected for its declared receiver itself.
-            (Some(HeadIdentity::Reference), Some(HeadIdentity::Builtin(_) | HeadIdentity::Nominal))
-            | (Some(HeadIdentity::Builtin(_) | HeadIdentity::Nominal), Some(HeadIdentity::Reference)) => true,
-            // Refinement erasure is a value conversion, not receiver identity.
-            // A closed carrier cannot instantiate into a refinement (or vice
-            // versa). Unknown heads and variables still supply no disjointness
-            // evidence, and two refined heads still need their full predicates.
-            (Some(HeadIdentity::Refinement), Some(HeadIdentity::Builtin(_) | HeadIdentity::Nominal | HeadIdentity::Reference))
-            | (Some(HeadIdentity::Builtin(_) | HeadIdentity::Nominal | HeadIdentity::Reference), Some(HeadIdentity::Refinement)) => true,
+            // Use-site conversions (borrowing, refinement erasure, array
+            // slicing) do not identify distinct receiver constructors. Two
+            // instances of one constructor still need their arguments checked.
+            (Some(a), Some(b)) => std::mem::discriminant(&a) != std::mem::discriminant(&b),
             _ => false,
         }
     }

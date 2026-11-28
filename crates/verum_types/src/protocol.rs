@@ -11823,6 +11823,9 @@ impl ProtocolChecker {
         if let Some(overlap) = Self::compare_reference_applications(ty1, ty2,
             |left, right| self.types_could_unify(left, right))
         { return overlap; }
+        if let Some(overlap) = Self::sequence_heads_overlap(ty1, ty2,
+            |left, right| self.types_could_unify(left, right))
+        { return overlap; }
         match (ty1, ty2) {
             (
                 Type::Meta {
@@ -11860,11 +11863,6 @@ impl ProtocolChecker {
                         .iter()
                         .zip(e2.iter())
                         .all(|(t1, t2)| self.types_could_unify(t1, t2))
-            }
-
-            // Arrays: elements could unify
-            (Type::Array { element: e1, .. }, Type::Array { element: e2, .. }) => {
-                self.types_could_unify(e1, e2)
             }
 
             // Functions: check parameter and return types

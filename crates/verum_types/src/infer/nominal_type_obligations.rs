@@ -375,7 +375,11 @@ impl TypeChecker {
                     .bound_follows_from_assumptions(&requirement.ty, &bound, &assumptions)
                     .map_err(|error| refusal(span, error))?
                 {
-                    self.load_nominal_bound_source(&source.ty, source_bound)?;
+                    // Normalization can erase the declaration which owns an
+                    // implementation. Retain that source alongside the normalized goal.
+                    if source.ty != requirement.ty || source_bound != &bound {
+                        self.load_scoped_bound_implementations(&source.ty, source_bound)?;
+                    }
                     remaining.push(bound);
                 }
             }
@@ -390,12 +394,13 @@ impl TypeChecker {
         Ok(())
     }
 
-    fn load_nominal_bound_source(
+    pub(super) fn load_scoped_bound_implementations(
         &mut self,
         subject: &Type,
         bound: &crate::protocol::ProtocolBound,
     ) -> Result<()> {
         let subject_name = self.get_type_name(subject);
+        let structural = super::implementation_sources::StructuralProtocolHead::of(subject);
         let protocol = self.path_to_string(&bound.protocol);
         let protocol_owner = protocol
             .rsplit_once('.')
@@ -430,9 +435,8 @@ impl TypeChecker {
             let equalities = std::mem::take(&mut self.source_type_registration.type_equalities);
             let previous_owner = std::mem::replace(&mut self.current_module_path, owner.clone());
             let result: Result<()> = (|| {
-                // Blanket candidates have no nominal receiver owner. Their
-                // actual source telescope, not a guessed concrete receiver,
-                // determines whether they apply to this proof obligation.
+                // Blanket and structural implementations have no nominal
+                // receiver owner. Their source telescopes determine applicability.
                 for item in &module.items {
                     if !self.cfg_evaluator.should_include(&item.attributes) {
                         continue;
@@ -443,7 +447,8 @@ impl TypeChecker {
                             for_type,
                             ..
                         } = &implementation.kind
-                        && self.is_blanket_impl_for_type(for_type, &implementation.generics)
+                        && (structural.is_some_and(|head| head.matches_source(for_type))
+                            || self.is_blanket_impl_for_type(for_type, &implementation.generics))
                     {
                         let selected = self.resolve_protocol_reference(path)?;
                         if self.path_to_string(&selected) == protocol {
