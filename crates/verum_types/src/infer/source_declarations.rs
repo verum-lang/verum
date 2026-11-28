@@ -990,11 +990,16 @@ impl TypeChecker {
         span: Span,
     ) -> Result<Option<crate::protocol::FutureResolution>> {
         use verum_common::well_known_types::WellKnownProtocol;
-        if let Some(resolution) = self.protocol_checker.read().resolve_future_protocol(receiver) {
-            return Ok(Some(resolution));
+        if let Type::Future { output } = receiver {
+            return Ok(Some(crate::protocol::FutureResolution { output: output.as_ref().clone() }));
         }
+        let Some(owner) = self.source_operator_name(WellKnownProtocol::Future) else { return Ok(None) };
         self.load_source_operator_implementation(receiver, WellKnownProtocol::Future, span)?;
-        Ok(self.protocol_checker.read().resolve_future_protocol(receiver))
+        let (protocols, callables) = self.method_dispatch_premises(span)?;
+        self.protocol_checker.read().future_output_in(
+            receiver, &Self::text_to_path(&owner),
+            crate::protocol::ConstraintEnvironment::new(&protocols, &callables),
+        ).map_err(|msg| TypeError::OtherWithCodeSpanned { code: "E405".into(), msg, span })
     }
 
     /// Retain private methods for checking their owner's implementation, but

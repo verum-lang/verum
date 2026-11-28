@@ -148,14 +148,26 @@ impl ProtocolChecker {
         arguments: &[Type],
         assumptions: &[WhereClause],
     ) -> Result<Option<FamilyApplication>, Text> {
+        self.resolve_owned_associated_family_in(
+            receiver, owner, name, arguments,
+            ConstraintEnvironment::new(assumptions, &Default::default()),
+        )
+    }
+
+    pub(crate) fn resolve_owned_associated_family_in(
+        &self, receiver: &Type, owner: &ProtocolBound, name: &Text,
+        arguments: &[Type], environment: ConstraintEnvironment<'_>,
+    ) -> Result<Option<FamilyApplication>, Text> {
         let key = self.make_protocol_key(&owner.protocol);
         let Some(declaration) = self.associated_declaration_application(
             &key, &owner.args, receiver, name, &mut Vec::new(),
         )? else { return Err("selected protocol does not declare this associated member".into()); };
+        if let Some(application) = self.assumed_family(
+            receiver, name, arguments, environment.protocols, None, Some(&declaration),
+        )? { return Ok(Some(application)); }
         self.resolve_family_implementations(
             self.impls_by_protocol.get_key_value(&key),
-            receiver, name, arguments, ConstraintEnvironment::new(assumptions, &Default::default()),
-            Some((&owner.args, &declaration)), None,
+            receiver, name, arguments, environment, Some((&owner.args, &declaration)), None,
         )
     }
 
@@ -343,6 +355,19 @@ impl ProtocolChecker {
         &self, receiver: &Type, name: &Text, arguments: &[Type],
         assumptions: &[WhereClause], header: Option<AssociatedDeclarationHeader<'_>>,
     ) -> Result<Option<FamilyApplication>, Text> {
+        if let Some(application) = self.assumed_family(receiver, name, arguments, assumptions, header, None)? {
+            return Ok(Some(application));
+        }
+        self.resolve_family_implementations(
+            &self.impls_by_protocol, receiver, name, arguments,
+            ConstraintEnvironment::new(assumptions, &Default::default()), None, header,
+        )
+    }
+
+    fn assumed_family(
+        &self, receiver: &Type, name: &Text, arguments: &[Type], assumptions: &[WhereClause],
+        header: Option<AssociatedDeclarationHeader<'_>>, owner: Option<&DeclarationApplication>,
+    ) -> Result<Option<FamilyApplication>, Text> {
         let mut symbolic: Option<(Text, List<Type>, FamilyApplication, bool)> = None;
         for assumption in assumptions {
             if !self.types_structurally_equal(&assumption.ty, receiver) {
@@ -364,6 +389,12 @@ impl ProtocolChecker {
                 else {
                     continue;
                 };
+                if owner.is_some_and(|owner| owner.owner != selected.owner
+                    || owner.arguments.len() != selected.arguments.len()
+                    || !owner.arguments.iter().zip(&selected.arguments).all(|(left, right)| self.types_structurally_equal(left, right)))
+                {
+                    continue;
+                }
                 let (completed, _) = self.complete_associated_family_arguments(
                     &selected.declaration,
                     receiver,
@@ -408,13 +439,7 @@ impl ProtocolChecker {
                 }
             }
         }
-        if let Some((_, _, application, _)) = symbolic {
-            return Ok(Some(application));
-        }
-        self.resolve_family_implementations(
-            &self.impls_by_protocol, receiver, name, arguments,
-            ConstraintEnvironment::new(assumptions, &Default::default()), None, header,
-        )
+        Ok(symbolic.map(|(_, _, application, _)| application))
     }
 
     /// A known owner narrows the index search. Every remaining candidate must

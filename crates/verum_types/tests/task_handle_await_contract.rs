@@ -262,3 +262,31 @@ fn imported_spawn_signature_preserves_its_future_output_projection() {
     "#,
     );
 }
+
+#[test]
+fn await_uses_the_selected_future_output_under_caller_premises() {
+    let declarations = r#"
+        mount core.async.future.{Poll, Context};
+        type Envelope<T, F: Future<Output=T>> is { public inner: F };
+        implement<T, F: Future<Output=T>> Future for Envelope<T, F> {
+            type Output = T;
+            fn poll(&mut self, cx: &mut Context) -> Poll<T> { self.inner.poll(cx) }
+        }
+    "#;
+    accepts(&format!("{declarations}
+        async fn project<T,F:Future<Output=T>>(item:Envelope<T,F>)->T {{item.await}}
+        async fn direct<T,F:Future<Output=T>>(item:F)->T {{item.await}}
+    "));
+    refuses_type_mismatch("async fn wrong<F:Future<Output=Int>>(item:F)->Text {item.await}");
+    refuses_type_mismatch("async fn invented<T>(item:T)->Int {item.await}");
+}
+
+#[test]
+fn an_unrelated_output_member_cannot_own_the_await_operator() {
+    accepts(r#"
+        type Decoy is protocol { type Output; };
+        async fn project<F: Future<Output=Int> + Decoy<Output=Text>>(item:F)->Int {
+            item.await
+        }
+    "#);
+}

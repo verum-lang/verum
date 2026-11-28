@@ -9671,67 +9671,37 @@ impl ProtocolChecker {
     /// * `Some(FutureResolution)` with the Output type
     /// * `None` if the type doesn't implement Future
     pub fn resolve_future_protocol(&self, ty: &Type) -> Option<FutureResolution> {
-        // Handle type variables
-        if let Type::Var(_) = ty {
-            return Some(FutureResolution {
-                output: Type::Var(TypeVar::fresh()),
-            });
-        }
+        self.future_output_in(
+            ty, &self.operator_protocol_path(WellKnownProtocol::Future),
+            ConstraintEnvironment::new(&[], &Default::default()),
+        ).ok().flatten()
+    }
 
-        // Handle Type::Future directly (primitive type representation)
+    pub(crate) fn future_output_in(
+        &self, ty: &Type, protocol: &Path, environment: ConstraintEnvironment<'_>,
+    ) -> Result<Option<FutureResolution>, Text> {
         if let Type::Future { output } = ty {
-            return Some(FutureResolution {
-                output: *output.clone(),
-            });
+            return Ok(Some(FutureResolution { output: output.as_ref().clone() }));
         }
-
-        // Handle Future<T> represented as Generic or Named type
-        // After unification, async function return types may be represented as
-        // Generic { name: "Future", args: [T] } or Named { path: ..Future.., args: [T] }
-        // rather than the built-in Type::Future variant.
-        match ty {
-            Type::Generic { name, args } if name.as_str() == "Future" && args.len() == 1 => {
-                return Some(FutureResolution {
-                    output: args[0].clone(),
-                });
-            }
-            Type::Named { path, args } if args.len() == 1 => {
-                if let Some(ident) = path.as_ident() {
-                    if ident.as_str() == "Future" {
-                        return Some(FutureResolution {
-                            output: args[0].clone(),
-                        });
-                    }
-                }
-            }
-            _ => {}
+        if !self.has_protocol(&self.make_protocol_key(protocol)) { return Ok(None); }
+        let owner = ProtocolBound::simple(protocol.clone());
+        // An abstract operand cannot gain an output by matching one future
+        // instantiation of its type variable. A universal blanket or a caller
+        // premise can establish membership independently of such a choice.
+        if matches!(ty, Type::Var(_))
+            && self.check_universal_bounds_in(ty, std::slice::from_ref(&owner), environment).is_err()
+        {
+            return Ok(None);
         }
-
-        // Handle bare Future (no type args) - the inner type was lost during inference.
-        // Treat as Future<_> and return a fresh type variable.
-        match ty {
-            Type::Generic { name, args } if name.as_str() == "Future" && args.is_empty() => {
-                return Some(FutureResolution {
-                    output: Type::Var(TypeVar::fresh()),
-                });
-            }
-            Type::Named { path, args } if args.is_empty() => {
-                if let Some(ident) = path.as_ident() {
-                    if ident.as_str() == "Future" {
-                        return Some(FutureResolution {
-                            output: Type::Var(TypeVar::fresh()),
-                        });
-                    }
-                }
-            }
-            _ => {}
+        let member = Text::from("Output");
+        if matches!(ty, Type::DynProtocol { .. })
+            && self.bound_follows_from_assumptions(ty, &owner, environment.protocols)?
+        {
+            return self.resolve_dynamic_associated_family(ty, protocol, Some(&[]), &member)
+                .map(|output| Some(FutureResolution { output }));
         }
-
-        // Output belongs to the selected Future implementation, even when
-        // another protocol on the same receiver also declares an Output.
-        let protocol = self.operator_protocol_path(WellKnownProtocol::Future);
-        let output = self.resolve_associated_type(ty, &protocol, &"Output".into()).ok()?;
-        Some(FutureResolution { output: self.normalize_projection_type(&output) })
+        Ok(self.resolve_owned_associated_family_in(ty, &owner, &member, &[], environment)?
+            .map(|family| FutureResolution { output: family.result }))
     }
 
     pub(crate) fn operator_protocol_source_name(role: WellKnownProtocol) -> Option<Text> {
