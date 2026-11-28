@@ -1817,6 +1817,10 @@ impl VbcModule {
         &self, receiver: &TypeRef, method: StringId, argc: u8,
         application: Option<&TypeRef>, method_arguments: &[TypeRef],
     ) -> Result<Option<(FunctionId, Vec<TypeRef>)>, String> {
+        if let TypeRef::Dynamic(object) = receiver {
+            self.object_member_application(object, method, application)?;
+            return Ok(None);
+        }
         if let Some(selected) = self.bound_protocol_method(receiver, method, argc, application, method_arguments)? {
             return Ok(Some(selected));
         }

@@ -15047,6 +15047,39 @@ fn lower_call_method<'ctx>(
     {
         return refuse_unresolved_witness(ctx, dst);
     }
+    let object_dispatch =
+        if let Some((TypeRef::Dynamic(object), application)) = &receiver_declaration {
+            let candidates = vbc_mod
+                .object_method_candidates(
+                    object,
+                    StringId(method_id),
+                    args.count,
+                    application.as_ref(),
+                    call_witness.as_deref().unwrap_or_default(),
+                )
+                .map_err(LlvmLoweringError::unsupported)?;
+            let mut entries = Vec::new();
+            for (owner, body, parameters) in candidates {
+                let target = vbc_mod
+                    .specialized_function_id(body, &parameters)
+                    .and_then(|id| vbc_mod.get_function(id))
+                    .ok_or_else(|| {
+                        LlvmLoweringError::unsupported(
+                            "missing specialized dynamic protocol implementation",
+                        )
+                    })?;
+                let name = vbc_mod
+                    .get_string(target.name)
+                    .or_internal("dynamic implementation has no name")?;
+                entries.push((owner.0, name.to_owned()));
+            }
+            if entries.is_empty() {
+                return refuse_unresolved_witness(ctx, dst);
+            }
+            Some(entries)
+        } else {
+            None
+        };
     let selection = if let Some((declaration, protocol)) = receiver_declaration {
         vbc_mod.try_applied_bound_method(&declaration, StringId(method_id), args.count, protocol.as_ref(),
             call_witness.as_deref().unwrap_or_default())
@@ -15175,7 +15208,7 @@ fn lower_call_method<'ctx>(
     // keeps the receiver's LIST header, so lower_get_element's runtime
     // type-id branch takes the Value-stride list path, and Len reads
     // the same offset (List len@32 == Pack len@32) either way.
-    if bare_method_early == "as_slice" || bare_method_early == "as_mut_slice" {
+    if object_dispatch.is_none() && matches!(bare_method_early, "as_slice" | "as_mut_slice") {
         let recv_val = ctx.get_register(receiver.0)?;
         ctx.set_register(dst.0, recv_val);
         if ctx.is_list_register(receiver.0) {
@@ -15221,7 +15254,8 @@ fn lower_call_method<'ctx>(
                 let method_suffix = format!(".{}", method_name);
                 let mut via_protocols = 0usize;
                 let mut via_name_probe = 0usize;
-                for type_desc in &vbc.types {
+                if let Some(entries) = &object_dispatch { dispatch_entries.extend(entries.iter().cloned()); }
+                for type_desc in vbc.types.iter().filter(|_| object_dispatch.is_none()) {
                     let before = seen_dyn_tids.contains(&type_desc.id.0);
                     for proto_impl in &type_desc.protocols {
                         for &fn_id in &proto_impl.methods {
@@ -15327,8 +15361,12 @@ fn lower_call_method<'ctx>(
                     let ptr_type = ctx.types().ptr_type();
                     let receiver_val = ctx.get_register(receiver.0)?;
 
-                    // Read type_id from object header (first i64 at ptr)
-                    let recv_i64 = as_i64(ctx, receiver_val, "recv_i64")?;
+                    let header_owner = if object_dispatch.is_some() {
+                        ctx.reference_value_view(receiver.0, receiver_val)?
+                    } else {
+                        receiver_val
+                    };
+                    let recv_i64 = as_i64(ctx, header_owner, "recv_i64")?;
                     // RTS-SCALAR-GUARD (task #22 leg 1b) — same
                     // pointer-plausibility gate as the runtime-type-
                     // switch fallback: a scalar receiver must take the
@@ -15370,11 +15408,14 @@ fn lower_call_method<'ctx>(
                         .builder()
                         .build_int_to_ptr(recv_i64, ptr_type, "recv_ptr")
                         .or_llvm_err()?;
-                    let type_id_val = ctx
-                        .builder()
-                        .build_load(i64_type, recv_ptr, "type_id")
-                        .or_llvm_err()?
-                        .into_int_value();
+                    let type_id_val = if object_dispatch.is_some() {
+                        let owner = ctx.builder()
+                            .build_load(ctx.types().context().i32_type(), recv_ptr, "object_type_id")
+                            .or_llvm_err()?.into_int_value();
+                        ctx.builder().build_int_z_extend(owner, i64_type, "object_type_id_word").or_llvm_err()?
+                    } else {
+                        ctx.builder().build_load(i64_type, recv_ptr, "type_id").or_llvm_err()?.into_int_value()
+                    };
 
                     // Build arguments: (receiver, args...)
                     // All values coerced to i64 for uniform C runtime ABI.
@@ -15418,7 +15459,9 @@ fn lower_call_method<'ctx>(
                             .get_module()
                             .get_function(fname)
                             .map(|f| f.count_params() as usize);
-                        let callable = pc.map_or(false, |pc| pc <= arg_vals.len());
+                        let callable = pc.is_some_and(|pc| if object_dispatch.is_some() {
+                            pc == arg_vals.len()
+                        } else { pc <= arg_vals.len() });
                         if !callable {
                             if std::env::var_os("VERUM_TRACE_DYN").is_some() {
                                 eprintln!(
@@ -15436,6 +15479,11 @@ fn lower_call_method<'ctx>(
                         case_blocks.push((bb, fname.clone()));
                     }
 
+                    if object_dispatch.is_some() {
+                        ctx.record_reference_site(super::native_call::ReferenceSiteKind::ObjectMethodArms {
+                            receiver: receiver.0, count: dispatch_entries.len(),
+                        });
+                    }
                     ctx.builder()
                         .build_switch(type_id_val, default_bb, &cases)
                         .or_llvm_err()?;
@@ -15449,34 +15497,18 @@ fn lower_call_method<'ctx>(
                     // corrupted `list[i].clone()` in `Deque.from_list` (→ crash) and
                     // every generic `T: Clone` over a primitive (returned 0). Other
                     // protocol methods keep the 0 default.
-                    ctx.builder().position_at_end(default_bb);
-                    ctx.builder()
-                        .build_unconditional_branch(merge_bb)
-                        .or_llvm_err()?;
-
-                    let default_val: BasicValueEnum<'ctx> = if method_name == "clone" {
-                        type_id_val.into()
-                    } else {
-                        i64_type.const_zero().into()
-                    };
                     let mut incoming: Vec<(BasicValueEnum<'ctx>, _)> = Vec::new();
-                    incoming.push((default_val, default_bb));
-
-                    // RTS-SCALAR-GUARD: an implausible-pointer receiver IS
-                    // the primitive/Copy case the default arm describes —
-                    // for `clone` its identity clone is the raw value
-                    // itself (no deref happened on this path), otherwise
-                    // the zero contract applies.
-                    ctx.builder().position_at_end(dyn_guard_default_bb);
-                    ctx.builder()
-                        .build_unconditional_branch(merge_bb)
-                        .or_llvm_err()?;
-                    let guard_val: BasicValueEnum<'ctx> = if method_name == "clone" {
-                        recv_i64.into()
-                    } else {
-                        i64_type.const_zero().into()
-                    };
-                    incoming.push((guard_val, dyn_guard_default_bb));
+                    for (block, identity) in [(default_bb, type_id_val), (dyn_guard_default_bb, recv_i64)] {
+                        ctx.builder().position_at_end(block);
+                        if object_dispatch.is_some() {
+                            emit_runtime_abort(ctx, "dynamic receiver has no selected protocol implementation", "object_method")?;
+                            ctx.builder().build_unreachable().or_llvm_err()?;
+                        } else {
+                            let value = if method_name == "clone" { identity } else { i64_type.const_zero() };
+                            ctx.builder().build_unconditional_branch(merge_bb).or_llvm_err()?;
+                            incoming.push((value.into(), block));
+                        }
+                    }
 
                     for (bb, fname) in &case_blocks {
                         ctx.builder().position_at_end(*bb);
@@ -15580,6 +15612,21 @@ fn lower_call_method<'ctx>(
                             .builder()
                             .build_call(target_fn, &call_args, "dyn_call")
                             .or_llvm_err()?;
+                        if object_dispatch.is_some() {
+                            use super::native_call::{ArgumentView, NativeArgument, ResultView};
+                            use verum_llvm::values::AsValueRef;
+                            let registers = std::iter::once(receiver.0)
+                                .chain((0..args.count).map(|i| args.start.0 + u16::from(i)));
+                            let arguments = registers.zip(arg_vals.iter()).zip(call_args.iter())
+                                .map(|((reg, original), actual)| NativeArgument {
+                                    view: if original.as_value_ref() == actual.as_value_ref() {
+                                        ArgumentView::Register(reg)
+                                    } else { ArgumentView::Adjusted(reg) },
+                                    value: *actual,
+                                }).collect();
+                            let receipt = ctx.record_native_call(dst.0, result, arguments);
+                            ctx.finish_native_call(receipt, None, ResultView::Opaque);
+                        }
 
                         let ret_val = result
                             .try_as_basic_value()

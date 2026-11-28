@@ -176,3 +176,11 @@ fn native_bound_calls_select_the_receivers_applied_protocol() {
         |_| {},
     );
 }
+
+#[cfg(target_os = "macos")]
+#[test]
+fn native_generic_calls_keep_dynamic_protocol_applications_and_mutable_storage() {
+    source_image::run_module(checked_wire(include_str!(
+        "../../verum_vbc/tests/fixtures/dynamic_receivers_applied_method.vr"
+    )), |_| {});
+}

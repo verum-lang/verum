@@ -508,13 +508,6 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
         let mut parameter_uses = List::from_elem(0_u8, fd.params.len());
         let mut call_inputs: Map<usize, Map<usize, bool>> = Map::new();
         let mut may_write = false;
-        let calls: Map<_, _> = self
-            .calls
-            .get(&fd.id.0)
-            .into_iter()
-            .flatten()
-            .map(|(id, call)| (call.instruction, (*id, call.clone())))
-            .collect();
         let sites: Map<usize, List<ReferenceSiteKind>> = self
             .sites
             .get(&fd.id.0)
@@ -524,6 +517,16 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                 map.entry(site.instruction).or_default().push(site.kind);
                 map
             });
+        let mut calls = Map::new();
+        let mut object_calls: Map<usize, List<_>> = Map::new();
+        for (id, call) in self.calls.get(&fd.id.0).into_iter().flatten() {
+            if sites.get(&call.instruction).is_some_and(|markers|
+                markers.iter().any(|marker| matches!(marker, ReferenceSiteKind::ObjectMethodArms { .. }))) {
+                object_calls.entry(call.instruction).or_default().push((*id, call.clone()));
+            } else {
+                calls.insert(call.instruction, (*id, call.clone()));
+            }
+        }
         while let Some((pc, mut state)) = pending.pop_first() {
             self.work += 1;
             if !state.bounded()
@@ -573,7 +576,9 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                 | I::LoadSmallI { dst, .. }
                 | I::New { dst, .. }
                 | I::NewG { dst, .. } => write = Some((*dst, R::Value)),
-                I::TypeResource { dst, .. } => write = Some((*dst, R::Value)),
+                I::TypeResource { dst, .. } | I::TypeIdentity { dst, .. } => {
+                    write = Some((*dst, R::Value));
+                }
                 I::Not { dst, src } | I::CvtToI { dst, src }
                 | I::UnaryI { dst, src, .. } | I::UnaryF { dst, src, .. } => {
                     use_input(*src, 8, &state);
@@ -857,6 +862,50 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                 I::TailCall { .. }
                 | I::Switch { .. }
                 | I::CtxProvide { .. } => return BodyFacts::unknown(instructions.len()),
+                I::CallM { dst, receiver, args, .. } if sites.get(&pc).is_some_and(|markers|
+                    markers.iter().any(|site| matches!(site, ReferenceSiteKind::ObjectMethodArms { .. }))) => {
+                    let arms = object_calls.get(&pc).map_or(&[][..], |calls| calls.as_slice());
+                    let complete = !arms.is_empty() && sites[&pc].contains(
+                        &ReferenceSiteKind::ObjectMethodArms { receiver: receiver.0, count: arms.len() }
+                    );
+                    let registers: List<_> = std::iter::once(*receiver)
+                        .chain((0..args.count).map(|i| Reg(args.start.0 + u16::from(i)))).collect();
+                    let mut demands = List::from_elem(if complete { 0 } else { 8 }, registers.len());
+                    demands[0] |= 1; // The switch consumes the concrete object header.
+                    let mut writes = !complete;
+                    for (target, receipt) in arms {
+                        if receipt.arguments.len() != registers.len() {
+                            demands.fill(8);
+                            writes = true;
+                            break;
+                        }
+                        let body = self.body(FunctionId(*target));
+                        writes |= body.may_write;
+                        for (index, reg) in registers.iter().enumerate() {
+                            let identity = matches!(receipt.arguments[index].view,
+                                ArgumentView::Register(source) if source == reg.0);
+                            demands[index] |= if identity {
+                                body.parameter_uses.get(index).copied().unwrap_or(8)
+                            } else { 8 };
+                        }
+                    }
+                    let mut header_slot = None;
+                    for (index, (&reg, &demand)) in registers.iter().zip(&demands).enumerate() {
+                        use_input(reg, demand, &state);
+                        let value = state.value(reg);
+                        if demand == 1 && (value.permits_object_view()
+                            || (!writes && matches!(value, R::SharedLocalSlot | R::ReadOnlyFieldSlot))) {
+                            call_inputs.entry(pc).or_default().insert(index, matches!(value, R::IndexedSlot));
+                            if index == 0 { header_slot = Some(matches!(value, R::IndexedSlot)); }
+                        }
+                    }
+                    if let Some(indexed) = header_slot { value_inputs.entry(pc).or_default().insert(receiver.0, indexed); }
+                    if writes {
+                        may_write = true;
+                        state.invalidate_storage();
+                    }
+                    write = Some((*dst, R::Unknown));
+                }
                 I::Call { dst, .. } | I::CallG { dst, .. } | I::CallM { dst, .. } => {
                     let result = if let Some((id, receipt)) = calls.get(&pc) {
                         let callee = self.body(FunctionId(*id));

@@ -77,6 +77,8 @@ pub(crate) struct NativeCallReceipt<'ctx> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ReferenceSiteKind {
     ValueInput(u16),
+    /// Every implementation arm in a source-witnessed object switch emits a native call.
+    ObjectMethodArms { receiver: u16, count: usize },
     SlotOutput(u16),
     PassthroughOutput {
         register: u16,
