@@ -360,10 +360,10 @@ fn a_foreign_mount_selects_its_declared_link_symbol_in_either_order() {
 #[test]
 fn an_imported_record_keeps_its_namespace_through_a_public_facade() {
     let sources = [
-        "module graph.entities; public type Node is { value: Int }",
+        "module graph.entities; public type Node is { public value: Int }",
         "module graph.other; public type Token is End | Node(Int);",
         "module graph.surface; public mount graph.entities.{Node as Item};",
-        "module graph.client; mount graph.surface.{Item}; public fn read(item: Item)->Int { item.value }",
+        "module graph.client; mount graph.surface.{Item}; public fn read(item: Item)->Int { item.value } public fn probe()->Int { read(Item { value: 73 }) }",
     ].map(|s| Parser::new(s).parse_module().unwrap());
     for order in [[0, 1, 2, 3], [3, 2, 1, 0]] {
         let files = order.map(|i| &sources[i]);
@@ -393,6 +393,9 @@ fn an_imported_record_keeps_its_namespace_through_a_public_facade() {
             declared.origin_module.and_then(|id| wire.get_string(id)),
             Some("graph.entities")
         );
+        let run = wire.find_function_by_name("graph.client.probe").unwrap();
+        let mut vm = verum_vbc::interpreter::Interpreter::try_new_validated(wire.into()).unwrap();
+        assert_eq!(vm.execute_function(run).unwrap().try_as_i64(), Some(73));
     }
 }
 

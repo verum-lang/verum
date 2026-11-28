@@ -1379,6 +1379,15 @@ pub struct TypeDescriptor {
 }
 
 impl TypeDescriptor {
+    /// Named records use field construction. Only a declaration that introduces
+    /// a value constructor can publish that name into another module's value scope.
+    pub fn exports_value_constructor(&self) -> bool {
+        matches!(self.kind, TypeKind::Record | TypeKind::Unit)
+            && (self.is_transparent_wrapper || self.source_declaration.as_ref().is_some_and(|source|
+                matches!(source.body, verum_ast::TypeDeclBody::Tuple(_)
+                    | verum_ast::TypeDeclBody::Newtype(_) | verum_ast::TypeDeclBody::Unit)))
+    }
+
     /// Completion may revisit an imported implementation. Only an identical
     /// row represents the same evidence after local ID remapping.
     #[cfg(feature = "codegen")]

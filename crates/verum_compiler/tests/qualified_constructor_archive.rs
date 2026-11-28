@@ -266,12 +266,15 @@ fn archive_constructor_selection_preserves_payload_loan_rules() {
     for eager in [false, true] {
         for source in [
             "mount core.provider.Choice; fn wrap(callback:fn()->Int)->Choice<fn()->Int> {let value=Choice.Hold(callback);value}",
+            "mount core.provider.Choice; fn invoke(callback:fn()->Int)->Choice<fn()->Int>; fn forward(callback:fn()->Int)->Choice<fn()->Int> {let value=invoke(callback);value}",
+            "mount core.provider.Choice; type Cell is {public pointer:&Int}; fn read(cell:&mut Cell, callback:fn()->Int)->&Int {let value=Choice.Hold(callback);cell.pointer}",
         ] {
             let found = archive_errors(&mut archive_checker(&archive, eager), source);
             assert!(found.is_empty(), "eager={eager}, {source}: {found:?}");
         }
         for (source, expected) in [
-            ("mount core.provider.Choice; fn invoke(callback:fn()->Int)->Choice<fn()->Int>; fn invalid(callback:fn()->Int)->Choice<fn()->Int> {let value=invoke(callback);value}", "cannot establish the lifetime"),
+            ("mount core.provider.Choice; type Cell is {public pointer:&Int}; fn invoke(callback:fn()->Int)->Choice<fn()->Int>; fn invalid(cell:&mut Cell, callback:fn()->Int)->&Int {let value=invoke(callback);cell.pointer}", "cannot establish the lifetime"),
+            ("mount core.provider.Choice; fn invoke(callback:fn()->Int)->Choice<fn()->Int>; fn invalid()->Choice<fn()->Int> {let local=73;let loan=&local;let read:fn()->Int=|| *loan;invoke(read)}", "DanglingReference"),
             ("mount core.provider.Choice; fn invalid()->Choice<&Int> {let local=73;let value=Choice.Hold(&local);value}", "DanglingReference"),
         ] {
             let found = archive_errors(&mut archive_checker(&archive, eager), source);

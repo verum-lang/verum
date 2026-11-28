@@ -881,10 +881,7 @@ fn register_nominal_constructors<'a>(
 ) -> usize {
     let mut count = 0;
     for ty in &module.types {
-        if !ty.is_transparent_wrapper && !ty.source_declaration.as_ref().is_some_and(|source| matches!(
-            source.body, verum_ast::TypeDeclBody::Tuple(_) | verum_ast::TypeDeclBody::Newtype(_) | verum_ast::TypeDeclBody::Unit
-        )) { continue; }
-        if !matches!(ty.kind, verum_vbc::types::TypeKind::Record | verum_vbc::types::TypeKind::Unit) { continue; }
+        if !ty.exports_value_constructor() { continue; }
         let Some(name) = lookup(ty.name) else { continue; };
         let owner = ty.origin_module.and_then(lookup).unwrap_or(module_name);
         if !include(name, owner) { continue; }

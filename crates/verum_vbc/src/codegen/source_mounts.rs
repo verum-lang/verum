@@ -1038,7 +1038,12 @@ impl VbcCodegen {
             let nominal = self.source_export_candidates_in(path, Some(scope), Some(DeclarationNamespace::Type));
             if nominal.inaccessible { return Err(format!("type mount `{path}` is inaccessible from `{consumer}`")); }
             if let Some(key) = nominal.nominal() {
-                return Ok(self.ctx.lookup_function(key).map(|info| SourceValueSelection {
+                let Some(ty) = self.type_name_to_id.get(key).and_then(|id| self.type_by_id(*id)) else {
+                    return Ok(None);
+                };
+                if !ty.exports_value_constructor() { return Ok(None); }
+                return Ok(self.ctx.lookup_qualified_function(key).filter(|info|
+                    info.nominal_constructor_type() == Some(ty.id)).map(|info| SourceValueSelection {
                     key: key.clone(), function: info, kind: SourceValueKind::NominalConstructor,
                 }));
             }
