@@ -730,8 +730,11 @@ implement<T> [T] {
     /// Reverse slice in place.
     public fn reverse(&mut self) {
         let len = self.len();
-        for i in range(0, len / 2) {
-            self.swap(i, len - 1 - i);
+        let half = len / 2;
+        let mut left: Int = 0;
+        while left < half {
+            self.swap(left, len - 1 - left);
+            left += 1;
         }
     }
 
