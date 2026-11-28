@@ -119,6 +119,10 @@ pub trait IdRemap {
 /// archive merge in lockstep.
 pub fn rewrite_instruction_ids(instr: &mut Instruction, remap: &dyn IdRemap) {
     match instr {
+        Instruction::BindProtocolReceiver { receiver, application } => {
+            rewrite_type_ref_ids(receiver, remap);
+            rewrite_type_ref_ids(application, remap);
+        }
         Instruction::BindMethodReceiver { type_ref }
         | Instruction::RetainCopy { type_ref, .. }
         | Instruction::CloneTyped { type_ref, .. }

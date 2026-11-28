@@ -98,6 +98,13 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             }
         }
 
+        Instruction::BindProtocolReceiver { receiver, application } => {
+            output.push(Opcode::Extended.to_byte());
+            output.push(ExtendedSubOpcode::BindProtocolReceiver.to_byte());
+            encode_type_ref(receiver, output);
+            encode_type_ref(application, output);
+        }
+
         Instruction::BindMethodReceiver { type_ref } => {
             output.push(Opcode::Extended.to_byte());
             output.push(ExtendedSubOpcode::BindMethodReceiver.to_byte());
@@ -5419,6 +5426,10 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                 }),
                 Some(ExtendedSubOpcode::TargetHasFeature) => Ok(Instruction::TargetHasFeature {
                     dst: decode_reg(data, offset)?, feature: decode_reg(data, offset)?,
+                }),
+                Some(ExtendedSubOpcode::BindProtocolReceiver) => Ok(Instruction::BindProtocolReceiver {
+                    receiver: decode_type_ref(data, offset)?,
+                    application: decode_type_ref(data, offset)?,
                 }),
                 Some(ExtendedSubOpcode::BindMethodReceiver) => Ok(Instruction::BindMethodReceiver {
                     type_ref: decode_type_ref(data, offset)?,

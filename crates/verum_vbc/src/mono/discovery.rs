@@ -177,6 +177,10 @@ pub(super) fn discover_with_limit(
         let operands = match instr {
             Instruction::CallG { type_args, .. } | Instruction::SetCallWitness { type_args } => type_args.as_slice(),
             Instruction::NewClosure { lexical_types, .. } => lexical_types.as_slice(),
+            Instruction::BindProtocolReceiver { receiver, application } => {
+                super::substitution::validate_witness_shape(application).map_err(super::SpecializationError::from)?;
+                std::slice::from_ref(receiver)
+            }
             Instruction::BindMethodReceiver { type_ref } | Instruction::DropTyped { type_ref, .. } =>
                 std::slice::from_ref(type_ref),
             _ => continue,
@@ -217,6 +221,10 @@ pub(super) fn bound_method_call(
     };
     let method = crate::types::StringId(*method_id);
     match witness {
+        Instruction::BindProtocolReceiver { receiver, application } if concrete(receiver) && concrete(application) => {
+            Ok(module.try_applied_bound_method(receiver, method, args.count, Some(application), &[])?
+                .filter(|(_, args)| !args.is_empty()))
+        }
         Instruction::BindMethodReceiver { type_ref } if concrete(type_ref) => {
             let method_arguments = match previous {
                 Some(Instruction::SetCallWitness { type_args }) => type_args.as_slice(),

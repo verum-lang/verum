@@ -9837,6 +9837,8 @@ pub enum ExtendedSubOpcode {    /// Reserved no-op — forward-compat anchor. Al
     DropTyped = 0x09,
     /// Carry a caller-scoped receiver declaration to the immediately following instance call.
     BindMethodReceiver = 0x0a,
+    /// Caller-scoped receiver and applied protocol of the immediately following method call.
+    BindProtocolReceiver = 0x15,
     /// Target atomic support: destination and declaration-owned TypeRef.
     TargetHasAtomic = 0x0b,
     /// Target CPU feature: destination and Text operand registers.
@@ -10113,6 +10115,7 @@ impl ExtendedSubOpcode {
             0x08 => Some(Self::NewClosureWitnessed),
             0x09 => Some(Self::DropTyped),
             0x0a => Some(Self::BindMethodReceiver),
+            0x15 => Some(Self::BindProtocolReceiver),
             0x0b => Some(Self::TargetHasAtomic),
             0x0c => Some(Self::TargetHasFeature),
             0x0d => Some(Self::TypeIdentity),
@@ -10211,6 +10214,7 @@ impl ExtendedSubOpcode {
             Self::NewClosureWitnessed => "EXT_NEW_CLOSURE_WITNESSED",
             Self::DropTyped => "EXT_DROP_TYPED",
             Self::BindMethodReceiver => "EXT_BIND_METHOD_RECEIVER",
+            Self::BindProtocolReceiver => "EXT_BIND_PROTOCOL_RECEIVER",
             Self::TargetHasAtomic => "EXT_TARGET_HAS_ATOMIC",
             Self::TargetHasFeature => "EXT_TARGET_HAS_FEATURE",
             Self::TypeIdentity => "EXT_TYPE_IDENTITY",
@@ -12064,6 +12068,8 @@ pub enum Instruction {    // ===================================================
         /// Exact type of the value receiver in the caller’s generic scope.
         type_ref: TypeRef,
     },
+    /// Select an instance member through this complete caller-declared protocol application.
+    BindProtocolReceiver { receiver: TypeRef, application: TypeRef },
     /// Stage positional generic arguments for the next call.
     SetCallWitness {
         /// Positional type arguments (TypeParamId order of the callee).

@@ -1751,6 +1751,13 @@ impl Default for VariantDescriptor {
     }
 }
 
+/// A protocol implementation head in the binder scope of its source definition.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImplementationApplication {
+    pub scope: [u8; 32],
+    pub arguments: Vec<TypeRef>,
+}
+
 /// Protocol implementation for a type.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProtocolImpl {
@@ -1781,6 +1788,10 @@ pub struct ProtocolImpl {
     /// pair wholesale under `PRECOMPILE_SCHEMA_VERSION` v11.
     #[serde(default)]
     pub associated_types: Vec<(StringId, TypeRef)>,
+    /// Protocol arguments in the implementation’s own binder scope. Older
+    /// descriptors have no argument evidence for a parameterized protocol.
+    #[serde(default)]
+    pub application: Option<ImplementationApplication>,
     /// Protocol type arguments as SOURCE-RENDERED text
     /// (`implement<T, E: Default> FromResidual<Maybe<Never>> for
     /// Result<T, E>` → `["Maybe<Never>"]`), one string per generic
@@ -2839,6 +2850,7 @@ mod tests {
             protocol: ProtocolId(100),
             methods: vec![1, 2, 3],
             associated_types: Vec::new(),
+            application: None,
             protocol_args_text: Vec::new(),
                     type_param_fn_bounds: Vec::new(),
         });
@@ -2999,6 +3011,7 @@ mod tests {
             protocol: ProtocolId(50),
             methods: vec![100, 101, 102],
             associated_types: Vec::new(),
+            application: None,
             protocol_args_text: Vec::new(),
                     type_param_fn_bounds: Vec::new(),
         };
@@ -3013,6 +3026,7 @@ mod tests {
             protocol: ProtocolId(1),
             methods: vec![],
             associated_types: Vec::new(),
+            application: None,
             protocol_args_text: Vec::new(),
                     type_param_fn_bounds: Vec::new(),
         };
@@ -3309,6 +3323,7 @@ mod tests {
             protocol: ProtocolId(50),
             methods: vec![1, 2, 3],
             associated_types: Vec::new(),
+            application: None,
             protocol_args_text: Vec::new(),
                     type_param_fn_bounds: Vec::new(),
         };

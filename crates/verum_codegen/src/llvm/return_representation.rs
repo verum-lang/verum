@@ -1123,7 +1123,7 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                     state.invalidate_storage();
                 }
                 I::ChkRef { ref_reg } => use_input(*ref_reg, 8, &state),
-                I::Nop | I::SetCallWitness { .. } | I::BindMethodReceiver { .. } => {}
+                I::Nop | I::SetCallWitness { .. } | I::BindMethodReceiver { .. } | I::BindProtocolReceiver { .. } => {}
                 I::FfiExtended { sub_op, operands }
                     if *sub_op == verum_vbc::instruction::SystemSubOpcode::StructFieldAddr as u8 =>
                 {

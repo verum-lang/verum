@@ -261,6 +261,18 @@ impl<'a> Validator<'a> {
             }
         }
 
+        // The implementation owns these binders independently of the nominal
+        // receiver. Its argument count belongs to the declared protocol.
+        for row in &desc.protocols {
+            let Some(application) = &row.application else { continue };
+            if row.source_implementation.is_none() || self.module.get_type(TypeId(row.protocol.0))
+                .is_none_or(|protocol| protocol.kind != crate::types::TypeKind::Protocol
+                    || application.arguments.is_empty() || protocol.type_params.len() != application.arguments.len())
+            {
+                self.errors.push(VbcError::Deserialization("applied implementation lacks its declared protocol arguments".into()));
+            }
+            for argument in &application.arguments { self.validate_type_ref(argument, 0); }
+        }
         // Validate size/alignment
         if desc.alignment > 0 && !desc.alignment.is_power_of_two() {
             self.errors.push(VbcError::InvalidHeader {
@@ -677,8 +689,21 @@ impl<'a> Validator<'a> {
                 self.errors.push(VbcError::InvalidInstructionEncoding { offset: instr_start,
                     reason: "static protocol call requires its declared receiver".into() });
             }
-            if let Instruction::BindMethodReceiver { type_ref } = &instr {
-                self.validate_type_ref(type_ref, 0);
+            if let Instruction::BindMethodReceiver { type_ref } | Instruction::BindProtocolReceiver { receiver: type_ref, .. } = &instr {
+                if let Instruction::BindProtocolReceiver { application, .. } = &instr {
+                    self.validate_call_witnesses(std::slice::from_ref(type_ref), func);
+                    self.validate_call_witnesses(std::slice::from_ref(application), func);
+                    if self.module.header.version_minor < crate::format::PROTOCOL_IMPLEMENTATION_ARGUMENT_VERSION
+                        || !matches!(application, TypeRef::Instantiated { base, args }
+                            if self.module.get_type(*base).is_some_and(|ty| ty.kind == crate::types::TypeKind::Protocol
+                                && !args.is_empty() && ty.type_params.len() == args.len()))
+                    {
+                        self.errors.push(VbcError::InvalidInstructionEncoding { offset: instr_start,
+                            reason: "applied receiver requires a complete declared protocol".into() });
+                    }
+                } else {
+                    self.validate_type_ref(type_ref, 0);
+                }
                 if offset >= func_end || self.module.bytecode.get(offset) != Some(&crate::instruction::Opcode::CallM.to_byte()) {
                     self.errors.push(VbcError::InvalidInstructionEncoding {
                         offset: instr_start,

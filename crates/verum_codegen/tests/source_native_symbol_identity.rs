@@ -157,3 +157,14 @@ fn selected_source_calls_execute_in_the_native_application() {
 fn native_static_calls_bind_the_selected_implementations_receiver() {
     source_image::run(include_str!("../../verum_vbc/tests/fixtures/static_receiver_application.vr"));
 }
+
+#[cfg(target_os = "macos")]
+#[test]
+fn native_bound_calls_select_the_receivers_applied_protocol() {
+    source_image::run_module(
+        checked_wire(include_str!(
+            "../../verum_vbc/tests/fixtures/applied_receiver_witness.vr"
+        )),
+        |_| {},
+    );
+}

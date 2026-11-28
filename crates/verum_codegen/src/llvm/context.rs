@@ -431,7 +431,7 @@ pub struct FunctionContext<'a, 'ctx> {
     /// #48 phase-2 staged generic-call witness (see set_pending_call_witness).
     pub pending_call_witness: Option<Vec<verum_vbc::types::TypeRef>>,
     /// Caller-scoped receiver of the immediately following instance call.
-    pub pending_method_receiver: Option<verum_vbc::types::TypeRef>,
+    pub pending_method_receiver: Option<(verum_vbc::types::TypeRef, Option<verum_vbc::types::TypeRef>)>,
 
     /// Registers that hold Heap<T> allocations requiring deallocation on return.
     /// Drop protocol: these registers are freed via verum_dealloc before Ret/RetV.

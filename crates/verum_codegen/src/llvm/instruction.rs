@@ -2542,8 +2542,12 @@ fn lower_instruction_impl<'ctx>(
             Ok(())
         }
 
+        Instruction::BindProtocolReceiver { receiver, application } => {
+            ctx.pending_method_receiver = Some((receiver.clone(), Some(application.clone())));
+            Ok(())
+        }
         Instruction::BindMethodReceiver { type_ref } => {
-            ctx.pending_method_receiver = Some(type_ref.clone());
+            ctx.pending_method_receiver = Some((type_ref.clone(), None));
             Ok(())
         }
         Instruction::SetCallWitness { type_args } => {
@@ -15037,13 +15041,14 @@ fn lower_call_method<'ctx>(
     // 3. Search functions by name suffix ".{method_name}"
 
     let mut method_id = method_id;
-    if receiver_declaration.as_ref().is_some_and(TypeRef::is_generic)
+    if receiver_declaration.as_ref().is_some_and(|(receiver, application)| receiver.is_generic()
+        || application.as_ref().is_some_and(TypeRef::is_generic))
         || call_witness.as_ref().is_some_and(|arguments| arguments.iter().any(TypeRef::is_generic))
     {
         return refuse_unresolved_witness(ctx, dst);
     }
-    let selection = if let Some(declaration) = receiver_declaration {
-        vbc_mod.try_bound_method_with_arguments(&declaration, StringId(method_id), args.count,
+    let selection = if let Some((declaration, protocol)) = receiver_declaration {
+        vbc_mod.try_applied_bound_method(&declaration, StringId(method_id), args.count, protocol.as_ref(),
             call_witness.as_deref().unwrap_or_default())
     } else if let Some(witness) = &call_witness {
         vbc_mod.witnessed_source_method(StringId(method_id), args.count, witness)
@@ -30272,7 +30277,7 @@ fn lower_extended<'ctx>(
             }
             lower_exception_disposition(ctx, dst)
         }
-        Some(ExtendedSubOpcode::BindMethodReceiver) => Err(LlvmLoweringError::unsupported(
+        Some(ExtendedSubOpcode::BindMethodReceiver | ExtendedSubOpcode::BindProtocolReceiver) => Err(LlvmLoweringError::unsupported(
             "BindMethodReceiver requires the canonical decoded instruction",
         )),
         Some(ExtendedSubOpcode::CloneTyped) => Err(LlvmLoweringError::unsupported("CloneTyped requires the canonical decoded instruction")),

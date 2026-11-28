@@ -247,6 +247,8 @@ impl VbcCodegen {
                 protocol: ProtocolId(protocol.0),
                 methods: vec![u32::MAX; members.len()],
                 associated_types,
+                application: self.retained_implementation_application(application,
+                    self.current_impl_definition.map(|trigger| blanket_definition(trigger, blanket.definition))),
                 protocol_args_text,
                 type_param_fn_bounds,
             },
@@ -323,21 +325,25 @@ impl VbcCodegen {
         &self,
         method: &super::DeferredDefaultMethod,
     ) -> Option<crate::module::SourceDefinitionIdentity> {
-        let mut definition = method.implementation.declaration.definition?;
-        if let Some(blanket) = method.blanket_row {
-            let qualify = |original: [u8; 32], blanket: [u8; 32]| {
-                let mut hash =
-                    blake3::Hasher::new_derive_key("Verum materialized blanket definition v1");
-                hash.update(&original);
-                hash.update(&blanket);
-                *hash.finalize().as_bytes()
-            };
-            definition.digest = qualify(definition.digest, blanket.definition.digest);
-            definition.implementation_scope = definition
-                .implementation_scope
-                .zip(blanket.definition.implementation_scope)
-                .map(|(trigger, source)| qualify(trigger, source));
-        }
-        Some(definition)
+        let trigger = method.implementation.declaration.definition?;
+        Some(method.blanket_row.map_or(trigger, |row| blanket_definition(trigger, row.definition)))
     }
+}
+
+fn blanket_definition(
+    mut definition: crate::module::SourceDefinitionIdentity, blanket: crate::module::SourceDefinitionIdentity,
+) -> crate::module::SourceDefinitionIdentity {
+    let qualify = |original: [u8; 32], blanket: [u8; 32]| {
+        let mut hash =
+            blake3::Hasher::new_derive_key("Verum materialized blanket definition v1");
+        hash.update(&original);
+        hash.update(&blanket);
+        *hash.finalize().as_bytes()
+    };
+    definition.digest = qualify(definition.digest, blanket.digest);
+    definition.implementation_scope = definition
+        .implementation_scope
+        .zip(blanket.implementation_scope)
+        .map(|(trigger, source)| qualify(trigger, source));
+    definition
 }

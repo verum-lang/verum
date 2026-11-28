@@ -1538,8 +1538,10 @@ impl VbcModule {
             function.params.len() == usize::from(argc) + usize::from(takes_self)
         });
         let Some((id, function)) = declarations.next() else { return Ok(None) };
-        if declarations.next().is_some() {
-            return Err(format!("call witness for `{name}` has competing source method declarations"));
+        if let Some((_, other)) = declarations.next() {
+            let instance = |f: &FunctionDescriptor| f.params.first().and_then(|p| self.get_string(p.name)) == Some("self");
+            let kind = if instance(function) && instance(other) { "instance" } else { "source method" };
+            return Err(format!("call witness for `{name}` has competing {kind} declarations"));
         }
         if function.type_params.is_empty() {
             return Ok(None);
@@ -1550,9 +1552,12 @@ impl VbcModule {
     /// Resolve a qualified protocol selector against the caller's actual type
     /// argument. Interpreted and specialized calls use the same declaration slot.
     pub(crate) fn bound_protocol_method(
-        &self, receiver: &TypeRef, method: StringId, argc: u8, method_arguments: &[TypeRef],
+        &self, receiver: &TypeRef, method: StringId, argc: u8,
+        applied: Option<&TypeRef>, method_arguments: &[TypeRef],
     ) -> Result<Option<(FunctionId, Vec<TypeRef>)>, String> {
-        if let Some(selected) = self.bound_static_protocol_method(receiver, method, argc, method_arguments)? {
+        if applied.is_none()
+            && let Some(selected) = self.bound_static_protocol_method(receiver, method, argc, method_arguments)?
+        {
             return Ok(Some(selected));
         }
         // A source protocol owns its member even if another protocol on the
@@ -1566,33 +1571,66 @@ impl VbcModule {
                     && self.get_string(declaration.name) == Some(*qualifier)))
         {
             let missing = || format!("no implementation of declared protocol member `{qualifier}.{member}` for {receiver:?}");
-            let resolve = |head| -> Result<Option<FunctionId>, String> {
-                let Some((protocol, _)) = self.protocol_member_owner(head, Some(qualifier), member, false)?
+            let resolve = |head| -> Result<Option<(FunctionId, Vec<TypeRef>)>, String> {
+                let Some((protocol, parameterized)) = self.protocol_member_owner(head, Some(qualifier), member, false)?
                 else { return Ok(None) };
+                if let Some(TypeRef::Instantiated { base, args }) = applied
+                    && method_arguments.is_empty() && parameterized && base.0 == protocol.0
+                    && self.get_type(*base).is_some_and(|ty| ty.type_params.len() == args.len())
+                {
+                    return self.select_implementation_member(head, protocol, member, |row, target| {
+                        let application = row.application.as_ref()?;
+                        if row.source_implementation.is_none() || target.parent_type != Some(head)
+                            || !target.has_source_body || application.arguments.len() != args.len()
+                            || target.source_definition?.implementation_scope != Some(application.scope)
+                            || target.params.len() != usize::from(argc) + 1
+                            || target.params.first().and_then(|p| self.get_string(p.name)) != Some("self")
+                            || target.source_signature.as_ref().is_none_or(|source| source.name.as_str() != member)
+                        { return None; }
+                        let mut binding = crate::mono::TypeSubstitution::empty();
+                        let pattern = target.source_receiver.as_ref()?;
+                        if !crate::mono::unify_declared_types(pattern, receiver, &mut binding)
+                            || !application.arguments.iter().zip(args)
+                                .all(|(pattern, actual)| crate::mono::unify_declared_types(pattern, actual, &mut binding))
+                        { return None; }
+                        let arguments = target.type_params.iter().map(|p| binding.get(p.id).cloned())
+                            .collect::<Option<Vec<_>>>()?;
+                        Some((target.id, arguments))
+                    });
+                }
+                // Legacy bytecode may have only a receiver. Once this implementation
+                // declares an applied head, a qualified caller must select it.
+                let requires_application = parameterized && self.get_type(head).is_some_and(|ty|
+                    ty.protocols.iter().any(|row| row.protocol == protocol && row.application.is_some()));
+                if applied.is_some() || !method_arguments.is_empty() || requires_application {
+                    return Err(format!("missing or mismatched application for {qualifier}.{member}"));
+                }
                 self.implementation_member(head, Some(receiver), protocol, member, None)
+                    .map(|id| id.and_then(|id| self.bind_instance_receiver(id, receiver, argc)))
             };
             let target = if let Some(kind) = receiver.structural_receiver_kind() {
                 let mut selected = None;
                 for &head in self.types.lookup_index().structural.get(&kind).into_iter().flatten() {
-                    if let Some(id) = resolve(head)? {
-                        let function = self.get_function(id).ok_or_else(missing)?;
+                    if let Some(candidate) = resolve(head)? {
+                        let function = self.get_function(candidate.0).ok_or_else(missing)?;
                         if function.parent_type != Some(head)
                             || function.source_receiver.as_ref().and_then(TypeRef::structural_receiver_kind) != Some(kind)
                         {
                             return Err(format!("structural protocol member `{qualifier}.{member}` lacks its declared receiver"));
                         }
-                        if selected.is_some_and(|previous| previous != id) {
+                        if selected.as_ref().is_some_and(|previous| previous != &candidate) {
                             return Err(format!("multiple structural implementations of `{qualifier}.{member}` apply to {receiver:?}"));
                         }
-                        selected = Some(id);
+                        selected = Some(candidate);
                     }
                 }
                 selected
             } else {
                 resolve(receiver.base_type_id().ok_or_else(missing)?)?
-            }.ok_or_else(missing)?;
-            return self.bind_instance_receiver(target, receiver, argc).map(Some).ok_or_else(missing);
+            };
+            return target.map(Some).ok_or_else(missing);
         }
+        if applied.is_some() { return Err("applied receiver requires a qualified protocol member".into()); }
         Ok(None)
     }
 
@@ -1608,7 +1646,15 @@ impl VbcModule {
     pub fn try_bound_method_with_arguments(
         &self, receiver: &TypeRef, method: StringId, argc: u8, method_arguments: &[TypeRef],
     ) -> Result<Option<(FunctionId, Vec<TypeRef>)>, String> {
-        if let Some(selected) = self.bound_protocol_method(receiver, method, argc, method_arguments)? {
+        self.try_applied_bound_method(receiver, method, argc, None, method_arguments)
+    }
+
+    /// Resolve the same typed method prefix during interpretation and native specialization.
+    pub fn try_applied_bound_method(
+        &self, receiver: &TypeRef, method: StringId, argc: u8,
+        application: Option<&TypeRef>, method_arguments: &[TypeRef],
+    ) -> Result<Option<(FunctionId, Vec<TypeRef>)>, String> {
+        if let Some(selected) = self.bound_protocol_method(receiver, method, argc, application, method_arguments)? {
             return Ok(Some(selected));
         }
         let specialized = self.receiver_specialization(receiver, method, argc)?;
@@ -1755,6 +1801,25 @@ impl VbcModule {
         &self, receiver: TypeId, application: Option<&TypeRef>, protocol: ProtocolId,
         method: &str, operand: Option<TypeId>,
     ) -> Result<Option<FunctionId>, String> {
+        self.select_implementation_member(receiver, protocol, method, |_, target| {
+            if let Some(actual) = application
+                && let Some(declared) = &target.source_receiver
+                && !crate::mono::match_declared_types(declared, actual, &mut crate::mono::TypeSubstitution::empty())
+            { return None; }
+            if let Some(actual) = operand
+                && let Some(formal) = target.semantic_parameter_types()
+                    .and_then(|parameters| parameters.get(1)).and_then(Option::as_ref)
+                && formal.base_type_id().is_some_and(|expected| expected != actual)
+            { return None; }
+            Some(target.id)
+        })
+    }
+
+    /// Select one body and its evidence from the declaring protocol's exact vtable slot.
+    fn select_implementation_member<T: PartialEq>(
+        &self, receiver: TypeId, protocol: ProtocolId, method: &str,
+        candidate: impl Fn(&crate::types::ProtocolImpl, &FunctionDescriptor) -> Option<T>,
+    ) -> Result<Option<T>, String> {
         let Some(owner) = self.get_type(receiver) else { return Ok(None) };
         let Some(declaration) = self.get_type(crate::types::TypeId(protocol.0)) else { return Ok(None) };
         let mut slots = declaration.variants.iter().filter(|member| self.get_string(member.name) == Some(method));
@@ -1767,19 +1832,11 @@ impl VbcModule {
             let id = FunctionId(raw);
             let target = self.get_function(id).filter(|f| f.id == id && f.has_definition())
                 .ok_or_else(|| format!("protocol member `{method}` has no local definition in slot {raw}"))?;
-            if let Some(actual) = application
-                && let Some(declared) = &target.source_receiver
-                && !crate::mono::match_declared_types(declared, actual, &mut crate::mono::TypeSubstitution::empty())
-            { continue; }
-            if let Some(actual) = operand
-                && let Some(formal) = target.semantic_parameter_types()
-                    .and_then(|parameters| parameters.get(1)).and_then(Option::as_ref)
-                && formal.base_type_id().is_some_and(|expected| expected != actual)
-            { continue; }
-            if selected.is_some_and(|other| other != id) {
+            let Some(value) = candidate(implementation, target) else { continue };
+            if selected.as_ref().is_some_and(|other| other != &value) {
                 return Err(format!("multiple implementations of `{method}` apply to {receiver:?}"));
             }
-            selected = Some(id);
+            selected = Some(value);
         }
         Ok(selected)
     }

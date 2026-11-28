@@ -1,0 +1,19 @@
+type Read<X> is protocol { fn read(&self, x: X) -> Int; };
+type Reader is { value: Int };
+implement<X> Read<X> for Reader {
+    fn read(&self, x: X) -> Int { if X.id == Int.id { self.value } else { 0 } }
+}
+type Mark<X> is protocol { fn mark(&self) -> Int; };
+implement Mark<Int> for Reader { fn mark(&self) -> Int { 3 } }
+implement Mark<Bool> for Reader { fn mark(&self) -> Int { 7 } }
+
+fn read_through<X, R: Read<X>>(r: &R, x: X) -> Int { r.read(x) }
+fn relay<R: Read<X>, X>(r: &R, x: X) -> Int { read_through(r, x) }
+fn mark_through<X, R: Mark<X>>(r: &R, value: X) -> Int { r.mark() }
+fn probe() -> Int {
+    let reader = Reader { value: 81 };
+    if relay(&reader, 42) != 81 || relay(&reader, false) != 0 { return -1; }
+    mark_through(&reader, false) * 10 + mark_through(&reader, 9)
+}
+
+fn main() -> Int { probe() }

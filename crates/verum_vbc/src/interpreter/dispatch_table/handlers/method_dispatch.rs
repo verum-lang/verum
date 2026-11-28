@@ -551,12 +551,13 @@ fn enter_declared_numeric_method(
 pub(in super::super) fn handle_call_method(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
-    handle_bound_method(state, None)
+    handle_bound_method(state, None, None)
 }
 
 pub(super) fn handle_bound_method(
     state: &mut InterpreterState,
     declared_receiver: Option<crate::types::TypeRef>,
+    declared_protocol: Option<crate::types::TypeRef>,
 ) -> InterpreterResult<DispatchResult> {
     // Where this INSTRUCTION begins — one byte back, because the
     // dispatch loop has already consumed the opcode byte. The Deref
@@ -574,10 +575,10 @@ pub(super) fn handle_bound_method(
     let args = read_reg_range(state)?;
     if state.method_profile.is_some() {
         return state.profile_method_dispatch(instruction_pc, StringId(method_id), |state| {
-            execute_method_call(state, declared_receiver, instruction_pc, dst, receiver_reg, method_id, args)
+            execute_method_call(state, declared_receiver, declared_protocol, instruction_pc, dst, receiver_reg, method_id, args)
         });
     }
-    execute_method_call(state, declared_receiver, instruction_pc, dst, receiver_reg, method_id, args)
+    execute_method_call(state, declared_receiver, declared_protocol, instruction_pc, dst, receiver_reg, method_id, args)
 }
 
 /// Pass an existing place through, or borrow the actual caller slot holding
@@ -645,6 +646,7 @@ fn enter_resolved_method(
 fn execute_method_call(
     state: &mut InterpreterState,
     declared_receiver: Option<crate::types::TypeRef>,
+    declared_protocol: Option<crate::types::TypeRef>,
     instruction_pc: u32,
     dst: Reg,
     receiver_reg: Reg,
@@ -672,7 +674,7 @@ fn execute_method_call(
     let mut call_witness_sidecar: Option<Box<[crate::types::TypeRef]>> =
         state.pending_call_witness.take();
     if let Some(application) = &declared_receiver
-        && let Some((target, arguments)) = state.module.bound_protocol_method(application, StringId(method_id), args.count,
+        && let Some((target, arguments)) = state.module.bound_protocol_method(application, StringId(method_id), args.count, declared_protocol.as_ref(),
             call_witness_sidecar.as_deref().unwrap_or_default())
             .map_err(|message| InterpreterError::InvalidBytecode { pc: instruction_pc as usize, message })?
     {

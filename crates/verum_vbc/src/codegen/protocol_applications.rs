@@ -23,14 +23,30 @@ pub(super) struct ProtocolApplication {
 
 impl VbcCodegen {
     pub(super) fn declared_protocol_application(&self, application: &ProtocolApplication) -> Option<TypeRef> {
-        let protocol = self.type_by_id(application.protocol?)?;
-        let arguments = protocol.type_params.iter().map(|parameter| {
-            let name = self.ctx.strings.get(parameter.name.0 as usize)?;
+        let protocol = application.protocol?;
+        let source = self.protocol_registry.get(&application.key).filter(|source|
+            crate::module::qualify_module_name(&source.source_module, &source.name) == application.key);
+        // Source headers are available across the whole unit before individual
+        // vtable descriptors are populated. Only the declaring roster orders these arguments.
+        let argument = |name: &str| {
             let value = application.substitution.get(name)?;
             value.semantic.then(|| value.ty.clone())
-        }).collect::<Option<Vec<_>>>()?;
-        Some(if arguments.is_empty() { TypeRef::Concrete(protocol.id) }
-            else { TypeRef::instantiated(protocol.id, arguments) })
+        };
+        let arguments = if let Some(source) = source {
+            source.generics.iter().filter_map(parameter_name).map(argument).collect::<Option<Vec<_>>>()?
+        } else {
+            self.type_by_id(protocol)?.type_params.iter().map(|parameter|
+                argument(self.ctx.strings.get(parameter.name.0 as usize)?)).collect::<Option<Vec<_>>>()?
+        };
+        Some(if arguments.is_empty() { TypeRef::Concrete(protocol) }
+            else { TypeRef::instantiated(protocol, arguments) })
+    }
+
+    pub(super) fn retained_implementation_application(
+        &self, application: &ProtocolApplication, definition: Option<crate::module::SourceDefinitionIdentity>,
+    ) -> Option<crate::types::ImplementationApplication> {
+        let TypeRef::Instantiated { args, .. } = self.declared_protocol_application(application)? else { return None; };
+        Some(crate::types::ImplementationApplication { scope: definition?.implementation_scope?, arguments: args })
     }
 
     pub(super) fn protocol_application_parts(ty: &Type) -> CodegenResult<(&Path, &[GenericArg])> {

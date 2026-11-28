@@ -32,6 +32,7 @@ fn carrier(owner: &str, name: &str, id: TypeId) -> VbcModule {
             protocol: ProtocolId(protocol.0),
             methods: vec![],
             associated_types: vec![],
+            application: None,
             protocol_args_text: vec![carried_arg],
             type_param_fn_bounds: vec![],
         }]

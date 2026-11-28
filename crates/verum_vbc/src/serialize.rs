@@ -423,6 +423,12 @@ impl Serializer {
                 encode_varint(bytes.len() as u64, &mut self.output);
                 self.output.extend_from_slice(&bytes);
             }
+            self.output.push(u8::from(proto_impl.application.is_some()));
+            if let Some(head) = &proto_impl.application {
+                self.output.extend_from_slice(&head.scope);
+                encode_varint(head.arguments.len() as u64, &mut self.output);
+                for argument in &head.arguments { self.serialize_type_ref(argument)?; }
+            }
         }
 
         // Alias target (TypeKind::Alias only — encoded for every

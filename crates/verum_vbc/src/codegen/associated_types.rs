@@ -241,7 +241,7 @@ impl VbcCodegen {
                 let declared = self.semantic_formal_type_in_declaration(
                     &argument, &parameters, &ids, &Default::default(), &lexical,
                 )?;
-                declared_arguments.push(bindings.apply(&declared).ok()?);
+                declared_arguments.push(declared);
             }
             // The source may omit protocol arguments supplied by its declared
             // defaults. Complete that same telescope with the actual receiver
@@ -249,7 +249,11 @@ impl VbcCodegen {
             let declared_arguments = self.complete_nominal_arguments(
                 protocol, declared_arguments.into(), implementation.span, &[], Some(actual),
             ).ok()?;
-            if declared_arguments != protocol_arguments { continue; }
+            if declared_arguments.len() != protocol_arguments.len()
+                || !declared_arguments.iter().zip(protocol_arguments).all(|(pattern, expected)|
+                    match_declared_types(pattern, expected, &mut bindings)
+                        && bindings.apply(pattern).ok().as_ref() == Some(expected))
+            { continue; }
             conditional |= implementation.generic_where_clause.as_ref().is_some_and(|clause| !clause.predicates.is_empty())
                 || implementation.meta_where_clause.as_ref().is_some_and(|clause| !clause.predicates.is_empty());
             if implementation.specialize_attr.is_some() || (!conditional && ids.iter().any(|id| bindings.get(*id).is_none()))

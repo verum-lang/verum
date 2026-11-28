@@ -659,6 +659,10 @@ impl<'a> BytecodeSpecializer<'a> {
                     _ => {}
                 }
             }
+            I::BindProtocolReceiver { receiver, application } => {
+                *receiver = self.instantiate_witness(receiver)?;
+                *application = self.instantiate_witness(application)?;
+            }
             I::BindMethodReceiver { type_ref }
             | I::RetainCopy { type_ref, .. }
             | I::CloneTyped { type_ref, .. }

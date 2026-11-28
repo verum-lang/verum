@@ -170,7 +170,9 @@ pub const VERSION_MAJOR: u16 = 2;
 /// VBC 2.69 carries the actual ordering and scope of a dynamic fence.
 /// VBC 2.70 distinguishes an indexed writable place from a legacy element view.
 /// VBC 2.71 adds register-addressed context slots and inherited context frames.
-pub const VERSION_MINOR: u16 = 71;
+/// VBC 2.73 retains the type arguments of applied protocol implementations.
+pub const VERSION_MINOR: u16 = 73;
+pub const PROTOCOL_IMPLEMENTATION_ARGUMENT_VERSION: u16 = 73;
 pub const CONTEXT_SLOT_VERSION: u16 = 71;
 pub const MUTABLE_ELEMENT_PROJECTION_VERSION: u16 = 70;
 /// First wire version with register-ordered thread and compiler fences.

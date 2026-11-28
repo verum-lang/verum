@@ -200,3 +200,177 @@ fn a_local_generic_function_and_its_enclosing_method_each_use_their_own_slots() 
     let mut vm = Interpreter::new(Arc::new(module));
     assert_eq!(vm.execute_function(entry).unwrap().as_i64(), 73);
 }
+
+
+#[test]
+fn applied_protocols_bind_the_selected_implementations_own_arguments() {
+    let source = concat!(
+        "module application;\n",
+        include_str!("fixtures/applied_receiver_witness.vr")
+    );
+    let ast = Parser::new(source).parse_module().unwrap();
+    let module = VbcCodegen::new().compile_module(&ast).unwrap();
+    let wire = verum_vbc::serialize::serialize_module(&module).unwrap();
+    let restored = verum_vbc::deserialize::deserialize_module_validated(&wire).unwrap();
+    for module in [module, restored] {
+        use verum_vbc::types::{TypeId, TypeRef};
+        let named = |name| {
+            module
+                .types
+                .iter()
+                .find(|t| module.get_string(t.name) == Some(name))
+                .unwrap()
+                .id
+        };
+        let owner = named("Reader");
+        let mark = named("Mark");
+        let read = named("Read");
+        let receiver = TypeRef::Concrete(owner);
+        let selector = module.strings.lookup("dyn:application.Mark.mark").unwrap();
+        let application =
+            |protocol, value| TypeRef::instantiated(protocol, [TypeRef::Concrete(value)]);
+        let integer = application(mark, TypeId::INT);
+        let boolean = application(mark, TypeId::BOOL);
+        let select = |image: &verum_vbc::module::VbcModule, witness: &[TypeRef]| {
+            image.try_applied_bound_method(&receiver, selector, 0, witness.first(), &[])
+        };
+        let integer_body = select(&module, std::slice::from_ref(&integer))
+            .unwrap()
+            .unwrap()
+            .0;
+        let boolean_body = select(&module, std::slice::from_ref(&boolean))
+            .unwrap()
+            .unwrap()
+            .0;
+        assert_ne!(integer_body, boolean_body);
+        assert!(select(&module, &[]).is_err());
+        assert!(select(&module, &[application(read, TypeId::INT)]).is_err());
+        assert!(select(&module, &[application(mark, TypeId::TEXT)]).is_err());
+
+        let relay = module
+            .get_function(
+                module
+                    .find_function_by_name("application.read_through")
+                    .unwrap(),
+            )
+            .unwrap();
+        let start = relay.bytecode_offset as usize;
+        let instructions = verum_vbc::bytecode::decode_instructions(
+            &module.bytecode[start..start + relay.bytecode_length as usize],
+        )
+        .unwrap();
+        let paired = instructions
+            .windows(2)
+            .find_map(|pair| match pair {
+                [
+                    verum_vbc::Instruction::BindProtocolReceiver {
+                        application: TypeRef::Instantiated { base, .. },
+                        ..
+                    },
+                    call @ verum_vbc::Instruction::CallM { .. },
+                ] if *base == read => Some(call.clone()),
+                _ => None,
+            })
+            .expect("receiver and protocol application share one prefix for the selected call");
+        let mut graph = verum_vbc::mono::InstantiationGraph::new();
+        let read_application = application(read, TypeId::INT);
+        let read_selector = module.strings.lookup("dyn:application.Read.read").unwrap();
+        let (read_body, read_arguments) = module
+            .try_applied_bound_method(&receiver, read_selector, 1, Some(&read_application), &[])
+            .unwrap()
+            .unwrap();
+        let prefix = verum_vbc::Instruction::BindProtocolReceiver {
+            receiver: receiver.clone(),
+            application: read_application,
+        };
+        verum_vbc::mono::discover_call_instantiations(&module, &[prefix, paired], 0, &mut graph)
+            .unwrap();
+        assert!(graph.contains(read_body, &read_arguments));
+
+        let mut forged = module.clone();
+        let row = forged
+            .types
+            .iter_mut()
+            .find(|ty| ty.id == owner)
+            .unwrap()
+            .protocols
+            .iter_mut()
+            .find(|row| row.methods.first() == Some(&integer_body.0))
+            .unwrap();
+        row.methods[0] = boolean_body.0;
+        assert!(select(&forged, std::slice::from_ref(&integer)).is_err());
+
+        let mut ambiguous = module.clone();
+        let row = ambiguous
+            .types
+            .iter_mut()
+            .find(|ty| ty.id == owner)
+            .unwrap()
+            .protocols
+            .iter_mut()
+            .find(|row| row.methods.first() == Some(&boolean_body.0))
+            .unwrap();
+        row.application.as_mut().unwrap().arguments = vec![TypeRef::Concrete(TypeId::INT)];
+        assert!(
+            select(&ambiguous, std::slice::from_ref(&integer))
+                .unwrap_err()
+                .contains("multiple implementations")
+        );
+        let entry = module.find_function_by_name("application.probe").unwrap();
+        let mut vm = Interpreter::try_new_validated(Arc::new(module)).unwrap();
+        assert_eq!(vm.execute_function(entry).unwrap().try_as_i64(), Some(73));
+    }
+}
+
+#[test]
+fn applied_implementation_collection_precedes_its_foreign_protocol_descriptor() {
+    use verum_vbc::codegen::{CodegenConfig, ItemFailurePolicy};
+    let reader = Parser::new(
+        r#"
+        module app.reader;
+        mount app.protocol.Read;
+        public type Reader is {};
+        implement<X> Read<X> for Reader {
+            fn value(&self) -> Int { if X.id == Bool.id { 73 } else { 0 } }
+        }
+    "#,
+    )
+    .parse_module()
+    .unwrap();
+    let protocol = Parser::new(
+        r#"
+        module app.protocol;
+        public type Read<X> is protocol { fn value(&self) -> Int; };
+    "#,
+    )
+    .parse_module()
+    .unwrap();
+    let client = Parser::new(
+        r#"
+        module app.client;
+        mount app.protocol.Read;
+        mount app.reader.Reader;
+        fn relay<X, R: Read<X>>(r: &R, x: X) -> Int { r.value() }
+        fn probe() -> Int { let r = Reader {}; relay(&r, true) }
+    "#,
+    )
+    .parse_module()
+    .unwrap();
+    for files in [[&reader, &client, &protocol], [&protocol, &client, &reader]] {
+        let mut cg = VbcCodegen::with_config(CodegenConfig::new("app"));
+        cg.collect_unit_declarations(&files).unwrap();
+        cg.resolve_pending_imports();
+        cg.compile_unit_items(&files, ItemFailurePolicy::Strict)
+            .unwrap();
+        let original = cg.finalize_module_from_state().unwrap();
+        let wire = verum_vbc::serialize::serialize_module(&original).unwrap();
+        for image in [
+            original,
+            verum_vbc::deserialize::deserialize_module_validated(&wire).unwrap(),
+        ] {
+            let probe = image.find_function_by_name("app.client.probe").unwrap();
+            let mut vm = Interpreter::try_new_validated(Arc::new(image)).unwrap();
+            assert_eq!(vm.execute_function(probe).unwrap().try_as_i64(), Some(73));
+        }
+    }
+}

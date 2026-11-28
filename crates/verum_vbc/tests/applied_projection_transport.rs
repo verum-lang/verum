@@ -104,7 +104,7 @@ fn load_projection(binding: Option<TypeRef>, args: Vec<TypeRef>) -> verum_vbc::m
     if let Some(body) = binding {
         let assoc = module.intern_string("Item");
         carrier.protocols.push(ProtocolImpl { source_implementation: Some(member_implementation("Text")), protocol: ProtocolId(3100), methods: vec![],
-            associated_types: vec![(assoc, body)], protocol_args_text: vec![], type_param_fn_bounds: vec![] });
+            associated_types: vec![(assoc, body)], application: None, protocol_args_text: vec![], type_param_fn_bounds: vec![] });
     }
     module.types.push(carrier);
     let name = module.intern_string("Source");
@@ -377,6 +377,7 @@ fn nested_associated_witness_cycles_fail_before_loading_a_type_head() {
     owner.protocols.push(verum_vbc::types::ProtocolImpl {
         source_implementation: Some(member_implementation("(Carrier.Item, Carrier.Item)")), protocol: ProtocolId(3100), methods: vec![],
         associated_types: vec![(member, TypeRef::Tuple(vec![projection.clone(), projection.clone()]))],
+        application: None,
         protocol_args_text: vec![], type_param_fn_bounds: vec![],
     });
     let bytes = verum_vbc::serialize::serialize_module(&module).unwrap();

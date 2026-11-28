@@ -401,6 +401,7 @@ fn record_projection_cannot_escape_into_descriptor_headers_or_impls() {
                 protocol: ProtocolId(1002),
                 methods: vec![],
                 associated_types: vec![(StringId::EMPTY, ty)],
+                application: None,
                 protocol_args_text: vec![],
                 type_param_fn_bounds: vec![],
             }),

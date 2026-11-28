@@ -58,7 +58,8 @@ pub(super) fn finish_protocol_slots(
             let matches = row.source_implementation.as_ref()
                 .and_then(|source| definitions.get(&(row.protocol, source)));
             !matches.is_some_and(|candidates| candidates.iter().any(|definition| {
-                row.protocol_args_text == definition.protocol_args_text
+                row.application == definition.application
+                    && row.protocol_args_text == definition.protocol_args_text
                     && row.associated_types == definition.associated_types
                     && row.type_param_fn_bounds == definition.type_param_fn_bounds
                     && row.methods.len() == definition.methods.len()
@@ -318,6 +319,7 @@ mod tests {
             source_implementation: Some(source(owner)),
             methods: methods.to_vec(),
             associated_types: vec![(StringId(9), TypeRef::Concrete(item))],
+            application: None,
             protocol_args_text: vec![],
             type_param_fn_bounds: vec![],
         };

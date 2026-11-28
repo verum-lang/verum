@@ -783,6 +783,9 @@ impl VbcLinker {
             crate::source_declaration_integrity::validate_impl_function_bounds(proto_impl, &self.out.strings)
                 .map_err(|_| LinkError::InvalidImplementationBound)?;
             proto_impl.protocol = remap.map_protocol(proto_impl.protocol)?;
+            if let Some(head) = &mut proto_impl.application {
+                for argument in &mut head.arguments { *argument = self.remap_type_ref(argument, remap)?; }
+            }
             for (_, binding) in &mut proto_impl.associated_types {
                 *binding = self.remap_type_ref(binding, remap)?;
             }

@@ -3502,7 +3502,7 @@ impl VbcCodegen {
         implementation: &verum_ast::decl::ImplDecl,
         instance: Option<&ConcreteImplType>,
         implemented_methods: &std::collections::HashSet<String>,
-    ) -> CodegenResult<ImplReceiverWitness> {
+    ) -> CodegenResult<(ImplReceiverWitness, Option<crate::types::ImplementationApplication>)> {
         let (type_generics, const_generics, ordered_generics) = self.resolve_impl_generics(implementation);
         u16::try_from(ordered_generics.len()).map_err(|_| CodegenError::with_span(
             CodegenErrorKind::InvalidSourceSignature("implementation binder roster exceeds VBC index space".into()), implementation.span))?;
@@ -3527,6 +3527,7 @@ impl VbcCodegen {
             declaration.owner.clone(), self.current_source_substitution.clone(), Some(receiver.clone()),
             |cg| cg.resolve_protocol_application(protocol, protocol_args, &scope, &declared_ids, &implementation.generics, &receiver),
         )?;
+        let head = self.retained_implementation_application(&application, declaration.definition);
         let root_application = application.key.clone();
         let root_protocol = application.protocol;
         let mut protocols_to_check = vec![application];
@@ -3752,7 +3753,7 @@ impl VbcCodegen {
                 }
             }
         }
-        Ok(receiver)
+        Ok((receiver, head))
     }
 
     fn deferred_default_method(
@@ -10077,7 +10078,7 @@ impl VbcCodegen {
                     if let Some(pn) = protocol_name {
                         // Generate default methods from protocol
                         let instance = self.record_concrete_impl_bindings(impl_decl, &selected_items);
-                        let receiver = self.generate_default_protocol_methods(
+                        let (receiver, application) = self.generate_default_protocol_methods(
                             ty_name, impl_decl, instance.as_ref(), &declared_methods.keys().cloned().collect(),
                         )?;
 
@@ -10261,6 +10262,7 @@ impl VbcCodegen {
                                 protocol: crate::types::ProtocolId(proto_type_id.0),
                                 methods: method_fn_ids,
                                 associated_types: assoc_bindings,
+                                application,
                                 protocol_args_text,
                                 type_param_fn_bounds: fn_bound_ids,
                             };
@@ -16092,6 +16094,7 @@ impl VbcCodegen {
                                 // bindings — assoc types live on the
                                 // concrete `implement P for T` records.
                                 associated_types: Vec::new(),
+                                application: None,
                                 protocol_args_text: Vec::new(),
                                 // No impl-level fn bounds carried on this path (T0997).
                                 type_param_fn_bounds: Vec::new(),
@@ -25161,6 +25164,7 @@ impl VbcCodegen {
                     // the protocol-id remap).
                     associated_types: pi.associated_types.iter()
                         .map(|(name, ty)| (intern(self, *name), ty.clone())).collect(),
+                    application: pi.application.clone(),
                     // Source-rendered arg text must be re-interned into
                     // the importing module's string table.
                     protocol_args_text: pi
@@ -25673,7 +25677,19 @@ impl VbcCodegen {
                 {
                     continue;
                 }
-                copy_remapped_data_type_carriers(source, &mut self.types[index], &type_id_remap);
+                let target = &mut self.types[index];
+                copy_remapped_data_type_carriers(source, target, &type_id_remap);
+                if source.protocols.iter().any(|row| row.application.is_some()) {
+                    let applications: HashMap<_, _> = source.protocols.iter().filter_map(|row| {
+                        let head = row.application.as_ref()?;
+                        Some((head.scope, &head.arguments))
+                    }).collect();
+                    for head in target.protocols.iter_mut().filter_map(|row| row.application.as_mut()) {
+                        if let Some(arguments) = applications.get(&head.scope) {
+                            head.arguments = arguments.iter().map(|ty| remap_type_ref_archive(ty, &type_id_remap)).collect();
+                        }
+                    }
+                }
                 self.archive_data_sources.insert(local, priority);
             }
         }

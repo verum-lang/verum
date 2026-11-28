@@ -850,7 +850,8 @@ impl<'a> Deserializer<'a> {
  // A u32 protocol ID, a method-count varint, and the count varints added
  // by each compatible format version, even for empty collections.
  let minimum_bytes = 5 + usize::from(minor >= 4)
-     + usize::from(minor >= 7) + usize::from(minor >= 14);
+     + usize::from(minor >= 7) + usize::from(minor >= 14)
+     + usize::from(minor >= 40) + usize::from(minor >= crate::format::PROTOCOL_IMPLEMENTATION_ARGUMENT_VERSION);
  let maximum = self.data.len().saturating_sub(self.offset) / minimum_bytes;
  if count > maximum as u64 {
  return Err(VbcError::TableTooLarge {
@@ -1030,7 +1031,26 @@ impl<'a> Deserializer<'a> {
          _ => return Err(VbcError::Deserialization("invalid source implementation presence tag".into())),
      }
  } else { None };
+ let application = if self.header.as_ref().is_some_and(|header| header.version_minor >= crate::format::PROTOCOL_IMPLEMENTATION_ARGUMENT_VERSION) {
+     match decode_u8(self.data, &mut self.offset)? {
+         0 => None,
+         1 => {
+             let mut scope = [0; 32];
+             scope.copy_from_slice(self.data.get(self.offset..self.offset + 32).ok_or_else(|| VbcError::eof(self.offset, 32))?);
+             self.offset += 32;
+             let count = decode_varint(self.data, &mut self.offset)?;
+             if count == 0 || count > MAX_TYPE_REF_INSTANTIATION_ARGS as u64 {
+                 return Err(VbcError::Deserialization("invalid applied protocol type argument count".into()));
+             }
+             let mut arguments = Vec::with_capacity(count as usize);
+             for _ in 0..count { arguments.push(self.parse_type_ref()?); }
+             Some(crate::types::ImplementationApplication { scope, arguments })
+         }
+         _ => return Err(VbcError::Deserialization("invalid protocol application presence tag".into())),
+     }
+ } else { None };
  protocols.push(ProtocolImpl {
+ application,
  source_implementation,
  protocol,
  methods,
@@ -2461,6 +2481,7 @@ mod tests {
  protocol: ProtocolId(i),
  methods: vec![i, i + 1],
  associated_types: vec![(name, TypeRef::Concrete(TypeId::INT))],
+ application: None,
  protocol_args_text: vec![name],
  type_param_fn_bounds: vec![(name, bound)],
  });
@@ -2474,7 +2495,7 @@ mod tests {
 
  #[test]
  fn test_protocol_counts_are_bounded_by_versioned_wire_payload() {
- for (minor, width) in [(0, 5), (3, 5), (4, 6), (6, 6), (7, 7), (13, 7), (14, 8), (VERSION_MINOR, 8)] {
+ for (minor, width) in [(0, 5), (3, 5), (4, 6), (6, 6), (7, 7), (13, 7), (14, 8), (40, 9), (72, 9), (VERSION_MINOR, 10)] {
  for count in [0, 1, 256, 285] {
  let mut bytes = Vec::new();
  encode_varint(count, &mut bytes);

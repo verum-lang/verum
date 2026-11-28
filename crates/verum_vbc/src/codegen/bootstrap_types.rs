@@ -127,6 +127,9 @@ fn descriptor_ids(ty: &TypeDescriptor) -> Vec<TypeId> {
     }
     for implementation in &ty.protocols {
         ids.push(TypeId(implementation.protocol.0));
+        if let Some(head) = &implementation.application {
+            for argument in &head.arguments { type_ids(argument, &mut ids); }
+        }
         for (_, target) in &implementation.associated_types {
             type_ids(target, &mut ids);
         }
@@ -652,6 +655,9 @@ impl VbcCodegen {
                 implementation.protocol.0 = *remap
                     .get(&implementation.protocol.0)
                     .unwrap_or(&implementation.protocol.0);
+                if let Some(head) = &mut implementation.application {
+                    for argument in &mut head.arguments { *argument = tr(argument); }
+                }
                 for (_, target) in &mut implementation.associated_types {
                     *target = tr(target);
                 }

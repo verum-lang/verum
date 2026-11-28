@@ -3,7 +3,7 @@ module core.net.weft.tests.tracing;
 mount core.net.http.{Headers, Method, Response, StatusCode};
 mount core.net.weft.error.WeftError;
 mount core.net.weft.handler.{Handler, WeftRequest};
-mount core.net.weft.service.Layer;
+mount core.net.weft.service.{Layer, ServiceBuilder};
 mount core.net.weft.tracing.{TraceContext, TracingHandler, TracingLayer};
 
 const TRACE_PREFIX: Text = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7";
@@ -37,7 +37,9 @@ async fn tracing_layer_propagates_the_header_and_preserves_failures() {
     headers.set(&"traceparent", &f"{TRACE_PREFIX}-0f");
     let layer = TracingLayer.named("trace-test");
     let applied: &dyn Layer<TraceEndpoint, Wrapped = TracingHandler<TraceEndpoint>> = &layer;
-    let endpoint: TracingHandler<TraceEndpoint> = applied.wrap(TraceEndpoint { fail: false });
+    let builder = ServiceBuilder.new(TraceEndpoint { fail: false });
+    let wrapped: ServiceBuilder<TracingHandler<TraceEndpoint>> = builder.layer(layer);
+    let endpoint = wrapped.build();
     let success = WeftRequest.new(Method.Get, "/ok", Maybe.None, headers, []);
     let response: Response = match endpoint.handle(success).await {
         Result.Ok(reply) => reply,

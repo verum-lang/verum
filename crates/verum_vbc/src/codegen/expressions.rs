@@ -16916,7 +16916,14 @@ impl VbcCodegen {
             } else if type_args.is_empty()
                 && let Some(type_ref) = self.bound_receiver_declaration(receiver)
             {
-                self.ctx.emit(Instruction::BindMethodReceiver { type_ref });
+                if let Some(member) = &dynamic
+                    && matches!(member.application, crate::types::TypeRef::Instantiated { .. })
+                {
+                    let application = self.runtime_member_witness(member.application.clone());
+                    self.ctx.emit(Instruction::BindProtocolReceiver { receiver: type_ref, application });
+                } else {
+                    self.ctx.emit(Instruction::BindMethodReceiver { type_ref });
+                }
             }
             self.ctx.emit(Instruction::CallM {
                 dst: result,
