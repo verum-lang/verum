@@ -1,13 +1,13 @@
 //! Actual List source methods use their runtime storage encoding, not T.size.
 use std::cell::{Cell, RefCell};
 use verum_codegen::llvm::{LoweringConfig, VbcToLlvmLowering};
-use verum_common::{Heap, List, Set, Text};
+use verum_common::{Heap, List, Map, Set, Text};
 use verum_llvm::{
     OptimizationLevel,
     context::Context,
     memory_buffer::MemoryBuffer,
     targets::{InitializationConfig, Target},
-    values::{AnyValue, CallSiteValue},
+    values::{AnyValue, AsValueRef, CallSiteValue},
 };
 
 thread_local! {
@@ -86,10 +86,15 @@ fn with_methods(
     let mut todo = List::new();
     todo.push(pop);
     todo.extend(vbc.functions.iter().filter_map(|function| lower.get_function_by_id(function.id.0)));
+    let functions: Map<_, _> = lower
+        .module()
+        .get_functions()
+        .map(|function| (function.as_value_ref(), function))
+        .collect();
     let mut seen = Set::<Text>::new();
     let mut ir = Text::new();
-    // Follow actual direct calls so the JIT includes the real allocation,
-    // reallocation and deallocation code, only replacing OS allocation edges.
+    // A function value can be stored in a closure as well as called directly.
+    // Retain both kinds of native dependency when replacing the OS boundaries.
     while let Some(function) = todo.pop() {
         let name = Text::from(function.get_name().to_str().unwrap());
         if !seen.insert(name.clone()) {
@@ -103,9 +108,13 @@ fn with_methods(
         ir.push('\n');
         for block in function.get_basic_blocks() {
             for instruction in block.get_instructions() {
-                if let Ok(call) = CallSiteValue::try_from(instruction) {
-                    if let Some(callee) = call.get_called_fn_value() {
-                        todo.push(callee);
+                for value in instruction
+                    .get_operands()
+                    .flatten()
+                    .filter_map(|operand| operand.value())
+                {
+                    if let Some(target) = functions.get(&value.as_value_ref()) {
+                        todo.push(*target);
                     }
                 }
             }
@@ -158,6 +167,31 @@ fn value_slot_constructor_uses_cbgr_storage() {
             let size =
                 *(data.sub(verum_common::layout::ALLOCATION_HEADER_SIZE as usize) as *const u32);
             assert_eq!(size, 40 * verum_common::layout::VALUE_SLOT_SIZE as u32);
+        },
+    );
+}
+
+#[test]
+fn an_address_taken_callback_reads_a_list_value() {
+    with_source(
+        r#"
+        fn increase(value: Int) -> Int { value + 7 }
+        fn probe() -> Int {
+            let mut values: List<Int> = List.new();
+            values.push(66);
+            let value = values[0];
+            let callback: fn(Int) -> Int = increase;
+            callback(value)
+        }
+        "#,
+        |_, jit| {
+            // SAFETY: the source declares the no-argument integer entry.
+            let returned = unsafe {
+                jit.get_function::<unsafe extern "C" fn() -> i64>("probe")
+                    .unwrap()
+                    .call()
+            };
+            assert_eq!(returned, 73);
         },
     );
 }
