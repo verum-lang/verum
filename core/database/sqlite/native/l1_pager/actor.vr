@@ -47,7 +47,7 @@ mount core.database.sqlite.native.l1_pager.pager.{
     pager_read, pager_write, pager_commit,
 };
 mount core.database.sqlite.native.l1_pager.page_cache.{
-    CachedFrame, PageCache, page_cache_new,
+    PageCache, page_cache_new,
 };
 
 // -----------------------------------------------------------------------------
@@ -135,49 +135,22 @@ public fn pager_apply(actor: &mut PagerActor, req: PagerRequest) -> PagerReply {
             // Fast path: cache hit.
             let cached = actor.cache.get(page);
             match cached {
-                Maybe.Some(f) => {
-                    let frame = PageFrame {
-                        page_no: f.page_no,
-                        data: f.data.clone(),
-                        dirty: f.dirty,
-                    };
-                    return ReadOk(frame, tok);
-                },
+                Maybe.Some(f) => return ReadOk(f.into_page(), tok),
                 Maybe.None => {},
             }
             // Slow path: pull from the pager.
             match pager_read(&mut actor.pager, page) {
                 Result.Ok(frame) => {
-                    let cached_new = CachedFrame {
-                        page_no: frame.page_no,
-                        data: frame.data.clone(),
-                        dirty: false,
-                        generation: actor.cache.current_generation(),
-                        pin_count: 0,
-                        last_access: 0,
-                    };
-                    actor.cache.put(cached_new);
+                    actor.cache.store_page(&frame, frame.is_dirty());
                     ReadOk(frame, tok)
                 }
                 Result.Err(e) => Failed(e, tok),
             }
         }
         Write(frame, tok) => {
-            // Buffer in cache as dirty.
-            let cached_new = CachedFrame {
-                page_no: frame.page_no,
-                data: frame.data.clone(),
-                dirty: true,
-                generation: actor.cache.current_generation(),
-                pin_count: 0,
-                last_access: 0,
-            };
-            actor.cache.put(cached_new);
-            // Passthrough to the pager (the :memory: backend writes
-            // immediately; the WAL backend buffers — abstraction is the
-            // pager's responsibility, not ours).
             match pager_write(&mut actor.pager, &frame) {
                 Result.Ok(_) => {
+                    actor.cache.store_page(&frame, true);
                     actor.pending_writes = actor.pending_writes + 1;
                     WriteOk(tok)
                 }

@@ -152,6 +152,14 @@ public type WalFrameRead is {
     payload: List<Byte>,
 };
 
+implement WalFrameRead {
+    public(in core.database.sqlite.native.l1_pager) fn page_number(&self) -> Int {
+        self.header.page_number() as Int
+    }
+
+    public(in core.database.sqlite.native.l1_pager) fn into_payload(self) -> List<Byte> { self.payload }
+}
+
 /// Read frame `frame_no` from the WAL file.  Returns header +
 /// payload bytes.  Caller is responsible for validating salts
 /// against the writer's current state (recovery already does

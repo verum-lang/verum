@@ -1,0 +1,118 @@
+module core.database.sqlite.native.l1_pager.tests.page_cache;
+mount core.base.maybe.Maybe;
+mount core.base.result.Result;
+mount core.collections.List;
+mount core.database.sqlite.native.l1_pager.pager.{PageFrame, Pager, pager_open_memory_with_size, pager_read, pager_write, pager_flush, pager_commit};
+mount core.database.sqlite.native.l0_vfs.memdb_vfs.open_memory_rwc;
+mount core.database.sqlite.native.l1_pager.page_cache.page_cache_new;
+mount core.database.sqlite.native.l0_vfs.vfs_protocol.sync_default;
+mount core.database.sqlite.native.l1_pager.wal_writer.{WalBackend, wal_writer_create};
+mount core.database.sqlite.native.l1_pager.wal_pager.{
+    CheckpointMode, wal_pager_new, wal_pager_write, wal_pager_read, wal_pager_commit, wal_pager_checkpoint,
+};
+mount core.database.sqlite.native.l1_pager.actor.{PagerActor, PagerRequest, PagerReply, actor_new, pager_apply};
+fn memory_pager() -> Pager {
+    match pager_open_memory_with_size(512) { Result.Ok(p) => p, Result.Err(_) => panic("open failed") }
+}
+fn byte_page(number: Int, byte: Byte) -> PageFrame {
+    PageFrame.new(number, List.from_elem(byte, 512))
+}
+fn check_read(pager: &mut Pager, page: Int, value: Byte, dirty: Bool) {
+    let loaded = match pager_read(pager, page) { Result.Ok(frame) => frame, Result.Err(_) => panic("read failed") };
+    assert_eq(loaded.page_number(), page);
+    assert_eq(loaded.bytes().len(), 512);
+    assert_eq(loaded.bytes()[0], value);
+    assert_eq(loaded.bytes()[511], value);
+    assert_eq(loaded.is_dirty(), dirty);
+}
+@test
+fn dirty_pages_survive_pressure_and_reload_from_storage() {
+    let mut p = memory_pager();
+    p.set_cache_size(1);
+    check_read(&mut p, 1, 0 as Byte, false);
+    check_read(&mut p, 1, 0 as Byte, false);
+    let old = pager_read(&mut p, 1).unwrap();
+    assert(pager_write(&mut p, &byte_page(1, 9 as Byte)).is_ok());
+    assert(pager_write(&mut p, &byte_page(1, 17 as Byte)).is_ok());
+    assert_eq(p.dirty_count_view(), 1);
+    assert_eq(old.bytes()[511], 0 as Byte);
+    assert(pager_write(&mut p, &byte_page(2, 27 as Byte)).is_ok());
+    assert_eq(p.dirty_count_view(), 2);
+    check_read(&mut p, 1, 17 as Byte, true);
+    check_read(&mut p, 2, 27 as Byte, true);
+    assert(pager_flush(&mut p).is_ok());
+    assert_eq(p.dirty_count_view(), 0);
+    assert(pager_commit(&mut p).is_ok());
+    check_read(&mut p, 1, 17 as Byte, false);
+    check_read(&mut p, 2, 27 as Byte, false);
+    assert_eq(p.stored_pages().unwrap(), 2);
+}
+@test
+fn rejected_actor_write_cannot_shadow_an_accepted_page() {
+    let mut pager = memory_pager();
+    assert(pager_write(&mut pager, &byte_page(3, 63 as Byte)).is_ok());
+    pager.set_read_only(true);
+    let mut actor = actor_new(pager, 1);
+    match pager_apply(&mut actor, PagerRequest.Write(byte_page(3, 87 as Byte), 31)) {
+        PagerReply.Failed(_, 31) => {}
+        _ => panic("read-only actor accepted a write"),
+    }
+    match pager_apply(&mut actor, PagerRequest.Read(3, 34)) {
+        PagerReply.ReadOk(frame, 34) => assert_eq(frame.bytes()[0], 63 as Byte),
+        _ => panic("pending page lost after rejection"),
+    }
+}
+
+@test
+fn flushing_the_wal_commits_every_buffered_page_and_backfills_the_database() {
+    let file = match open_memory_rwc(&"pages-wal") {
+        Result.Ok(f) => f, Result.Err(_) => panic("WAL backend"),
+    };
+    let writer = match wal_writer_create(WalBackend.WbMem(file), 512, 1_u32, 2_u32) {
+        Result.Ok(w) => w, Result.Err(_) => panic("WAL writer"),
+    };
+    let mut base = memory_pager();
+    assert(pager_write(&mut base, &byte_page(7, 70 as Byte)).is_ok());
+    assert(pager_commit(&mut base).is_ok());
+    let mut pager = wal_pager_new(base, writer);
+    assert(wal_pager_write(&mut pager, &byte_page(5, 50 as Byte)).is_ok());
+    assert(wal_pager_write(&mut pager, &byte_page(2, 20 as Byte)).is_ok());
+    assert(wal_pager_write(&mut pager, &byte_page(2, 24 as Byte)).is_ok());
+    assert(wal_pager_write(&mut pager, &byte_page(0, 90 as Byte)).is_err());
+    let pending = wal_pager_read(&mut pager, 2).unwrap();
+    assert_eq(pending.bytes()[0], 24 as Byte);
+    assert(pending.is_dirty());
+    assert_eq(wal_pager_commit(&mut pager, sync_default()).unwrap(), 2);
+    assert_eq(pager.pending_write_count(), 0);
+    let committed = wal_pager_read(&mut pager, 5).unwrap();
+    assert_eq(committed.bytes()[0], 50 as Byte);
+    assert(!committed.is_dirty());
+    assert(wal_pager_checkpoint(&mut pager, CheckpointMode.Full, 3_u32, 4_u32).is_ok());
+    assert_eq(pager.n_backfill(), 2);
+    assert(wal_pager_checkpoint(&mut pager, CheckpointMode.Truncate, 3_u32, 4_u32).is_ok());
+    assert_eq(pager.mx_frame(), 0);
+    let restored = wal_pager_read(&mut pager, 2).unwrap();
+    assert_eq(restored.bytes()[511], 24 as Byte);
+    let untouched = wal_pager_read(&mut pager, 7).unwrap();
+    assert_eq(untouched.bytes()[511], 70 as Byte);
+}
+
+@test
+fn pins_survive_replacement_until_the_matching_release() {
+    let mut cache = page_cache_new(1);
+    cache.store_page(&byte_page(1, 7 as Byte), false);
+    assert(cache.pin(1));
+    cache.store_page(&byte_page(1, 9 as Byte), false);
+    assert_eq(cache.pin_count_of(1), 1);
+    cache.bump_generation();
+    match cache.get(1) { Maybe.None => {} _ => panic("unexpected cache hit"), }
+    assert(!cache.evict_one());
+    cache.store_page(&byte_page(1, 21 as Byte), false);
+    match cache.get(1) {
+        Maybe.Some(frame) => assert_eq(frame.bytes()[11], 21 as Byte),
+        Maybe.None => panic("missing current page"),
+    }
+    assert(cache.unpin(1));
+    assert(cache.evict_one());
+    match cache.get(1) { Maybe.None => {} _ => panic("unexpected cache hit"), }
+}

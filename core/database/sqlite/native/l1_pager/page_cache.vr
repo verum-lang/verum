@@ -22,18 +22,13 @@ module core.database.sqlite.native.l1_pager.page_cache;
 //  sweeping but without the O(N) iteration.
 //
 
-//  2. **LRU eviction**. Frames are evicted in least-recently-used
-//  order, but only if `pin_count == 0`. A pinned frame cannot be
-//  evicted (would break pager correctness if its bytes are about
-//  to be written to WAL).
+//  2. **LRU eviction**. A dirty frame in the current generation stays
+//  resident until its write succeeds. Pins protect every generation.
 //
-
-//  3. **Cap by count, not bytes**. The pager calls `configure(max)`
-//  with a count derived from `PRAGMA cache_size`; the cache
-//  enforces it. Byte accounting adds no safety and costs on the
-//  hot path.
+//  3. **Cap by count**. A burst of dirty or pinned pages can exceed
+//  the configured limit. Flushing frees clean pages for eviction.
 //
-
+//
 //  4. **Pluggable arena**. The current body uses a plain `Map` backing
 //  store. The production CBGR-arena version (§8.2) drops in
 //  behind the same API once `core.mem.arena.bump_generation` is
@@ -52,6 +47,7 @@ module core.database.sqlite.native.l1_pager.page_cache;
 
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.l1_pager.pager.PageFrame;
 
 // -----------------------------------------------------------------------------
 // Frame model
@@ -68,6 +64,14 @@ public type CachedFrame is {
     pin_count: Int,
     last_access: Int,      // monotone tick for LRU eviction
 };
+
+implement CachedFrame {
+    public(in core.database.sqlite.native.l1_pager) fn into_page(self) -> PageFrame {
+        PageFrame.from_storage(self.page_no, self.data, self.dirty)
+    }
+
+    public(in core.database.sqlite.native.l1_pager) fn bytes(&self) -> &[Byte] { self.data.as_slice() }
+}
 
 // -----------------------------------------------------------------------------
 // Cache
@@ -142,78 +146,53 @@ implement PageCache {
     /// the backing store. `Some`-return increments the hit counter.
     ///
 
-    /// HOT PATH. `Map.get` returns `V` by value (a copy), so the
-    /// owned `existing` we read here can be moved into the
-    /// re-insert without an explicit `.data.clone()` — saves one
-    /// page-sized List<Byte> copy per cache hit (4KB-32KB / hit).
     public fn get(&mut self, page_no: Int) -> Maybe<CachedFrame> {
-        if !self.frames.contains_key(page_no) {
-            self.misses = self.misses + 1;
-            return Maybe.None;
-        }
-        let existing = self.frames.get(page_no);
-        if existing.generation != self.current_gen {
-            // Stale. Evict and report miss — caller will re-load.
+        let current = match self.frames.get_mut(&page_no) {
+            Maybe.Some(frame) if frame.generation == self.current_gen => {
+                frame.last_access = self.next_tick;
+                true
+            }
+            Maybe.Some(frame) if frame.pin_count == 0 => false,
+            _ => { self.misses = self.misses + 1; return Maybe.None; }
+        };
+        if !current {
             let _ = self.frames.remove(page_no);
             self.remove_page_no(page_no);
             self.misses = self.misses + 1;
             return Maybe.None;
         }
-        // Refresh access-tick. `existing` is already an owned copy
-        // so we move its `data` into the new frame instead of
-        // cloning — the old map slot will be overwritten by insert.
-        let tick = self.next_tick;
         self.next_tick = self.next_tick + 1;
-        let updated = CachedFrame {
-            page_no: existing.page_no,
-            data: existing.data,
-            dirty: existing.dirty,
-            generation: existing.generation,
-            pin_count: existing.pin_count,
-            last_access: tick,
-        };
-        let _ = self.frames.insert(page_no, updated);
         self.hits = self.hits + 1;
-        // `Map.get` ALREADY returns `Maybe<CachedFrame>` — wrapping it in
-        // `Maybe.Some(...)` produced `Maybe<Maybe<CachedFrame>>`, and the
-        // caller's `match … { Maybe.Some(cached) => … cached.dirty … }`
-        // then bound `cached` to the INNER Maybe and did a record field
-        // access on it. That is T0401's panic, verbatim:
-        //   field access out of bounds: field index 2 … type='Maybe'
-        //   — descriptor declares NO fields (kind Sum, 2 variant(s))
-        // The double wrap type-checks because `implement<T> Deref for
-        // Maybe<T>` (core/base/maybe.vr) lets a `Maybe<CachedFrame>` coerce
-        // where a `CachedFrame` is expected — the same deliberate impl that
-        // makes `existing.generation` above legal.
         self.frames.get(page_no)
     }
 
-    /// Insert / replace a frame at `page_no`. Tags with current
-    /// generation and a fresh access-tick. If the cache is full, an
-    /// unpinned LRU entry is evicted first.
+    /// Store one page image at the current generation.
+    public(in core.database.sqlite.native.l1_pager) fn store_page(&mut self, page: &PageFrame, dirty: Bool) {
+        self.put(CachedFrame {
+            page_no: page.page_number(), data: page.copy_bytes(), dirty,
+            generation: self.current_gen, pin_count: 0, last_access: self.next_tick,
+        });
+    }
+
+    /// Install fresh data while keeping outstanding pins on this page number.
+    /// A full cache evicts its least recently used clean, unpinned entry.
     public fn put(&mut self, frame: CachedFrame) {
-        // Replace directly if the page is already present (doesn't count
-        // against the cap).
-        if self.frames.contains_key(frame.page_no) {
-            let mut f = frame;
-            f.generation = self.current_gen;
-            f.last_access = self.next_tick;
-            self.next_tick = self.next_tick + 1;
-            let _ = self.frames.insert(f.page_no, f);
-            return;
-        }
-
-        // Evict if we're at capacity.
-        if self.frames.len() >= self.max_frames {
-            self.evict_one();
-        }
-
-        let mut f = frame;
-        f.generation = self.current_gen;
-        f.last_access = self.next_tick;
+        let pn = frame.page_no;
+        let mut fresh = frame;
+        fresh.generation = self.current_gen;
+        fresh.last_access = self.next_tick;
         self.next_tick = self.next_tick + 1;
-        let pn = f.page_no;
-        let _ = self.frames.insert(pn, f);
+        match self.frames.get_mut(&pn) {
+            Maybe.Some(existing) => {
+                fresh.pin_count = existing.pin_count;
+                *existing = fresh;
+                return;
+            }
+            Maybe.None => {}
+        }
+        if self.frames.len() >= self.max_frames { self.evict_one(); }
+        fresh.pin_count = 0;
+        let _ = self.frames.insert(pn, fresh);
         self.page_nos.push(pn);
 
         let n = self.frames.len();
@@ -224,72 +203,52 @@ implement PageCache {
     // Pinning
     // =========================================================================
 
-    /// Pin a frame so LRU eviction skips it. Returns false if not
-    /// present. HOT PATH — moves `existing.data` rather than
-    /// cloning (the old map slot is overwritten by insert).
+    /// Pin a resident frame until its matching unpin.
     public fn pin(&mut self, page_no: Int) -> Bool {
-        if !self.frames.contains_key(page_no) { return false; }
-        let existing = self.frames.get(page_no);
-        let updated = CachedFrame {
-            page_no: existing.page_no,
-            data: existing.data,
-            dirty: existing.dirty,
-            generation: existing.generation,
-            pin_count: existing.pin_count + 1,
-            last_access: existing.last_access,
-        };
-        let _ = self.frames.insert(page_no, updated);
-        true
+        match self.frames.get_mut(&page_no) {
+            Maybe.Some(f) if f.generation == self.current_gen => { f.pin_count = f.pin_count + 1; true }
+            _ => false,
+        }
     }
 
-    /// Release one pin reference. Returns false if not present or
-    /// already at zero (caller bug).
     public fn unpin(&mut self, page_no: Int) -> Bool {
-        if !self.frames.contains_key(page_no) { return false; }
-        let existing = self.frames.get(page_no);
-        if existing.pin_count <= 0 { return false; }
-        let updated = CachedFrame {
-            page_no: existing.page_no,
-            data: existing.data,
-            dirty: existing.dirty,
-            generation: existing.generation,
-            pin_count: existing.pin_count - 1,
-            last_access: existing.last_access,
-        };
-        let _ = self.frames.insert(page_no, updated);
-        true
+        match self.frames.get_mut(&page_no) {
+            Maybe.Some(f) if f.pin_count > 0 => { f.pin_count = f.pin_count - 1; true }
+            _ => false,
+        }
     }
 
     /// Mark a present frame as dirty (pager writes flip this before
     /// checkpoint).
     public fn mark_dirty(&mut self, page_no: Int) -> Bool {
-        if !self.frames.contains_key(page_no) { return false; }
-        let existing = self.frames.get(page_no);
-        let updated = CachedFrame {
-            page_no: existing.page_no,
-            data: existing.data,
-            dirty: true,
-            generation: existing.generation,
-            pin_count: existing.pin_count,
-            last_access: existing.last_access,
-        };
-        let _ = self.frames.insert(page_no, updated);
-        true
+        self.set_dirty(page_no, true)
+    }
+
+    public(in core.database.sqlite.native.l1_pager) fn mark_clean(&mut self, page_no: Int) -> Bool {
+        self.set_dirty(page_no, false)
+    }
+
+    fn set_dirty(&mut self, page_no: Int, dirty: Bool) -> Bool {
+        match self.frames.get_mut(&page_no) {
+            Maybe.Some(f) if f.generation == self.current_gen => { f.dirty = dirty; true }
+            _ => false,
+        }
     }
 
     /// Probe the dirty flag without bumping the LRU tick. Used by
     /// the checkpointer to filter clean pages out of its writeback
     /// loop. O(1).
     public fn is_dirty(&self, page_no: Int) -> Bool {
-        if !self.frames.contains_key(page_no) { return false; }
-        self.frames.get(page_no).dirty
+        match self.frames.get(page_no) {
+            Maybe.Some(f) => f.dirty && f.generation == self.current_gen,
+            Maybe.None => false,
+        }
     }
 
     /// Probe the pin count without bumping the LRU tick. Used by
     /// tests + assertion paths. O(1).
     public fn pin_count_of(&self, page_no: Int) -> Int {
-        if !self.frames.contains_key(page_no) { return 0; }
-        self.frames.get(page_no).pin_count
+        match self.frames.get(page_no) { Maybe.Some(f) => f.pin_count, Maybe.None => 0 }
     }
 
     // =========================================================================
@@ -306,7 +265,7 @@ implement PageCache {
         }
     }
 
-    /// Evict the LRU unpinned frame. Returns true on success.
+    /// Evict an unpinned clean or invalidated frame. Returns true on success.
     /// Used by `configure` and `put`; tests may call it directly.
     public fn evict_one(&mut self) -> Bool {
         // Scan resident pages via the parallel `page_nos` index for
@@ -316,8 +275,11 @@ implement PageCache {
         let mut i: Int = 0;
         while i < self.page_nos.len() {
             let k = self.page_nos[i];
-            let f = self.frames.get(k);
-            if f.pin_count == 0 && f.last_access < victim_access {
+            let f = match self.frames.get(k) {
+                Maybe.Some(frame) => frame,
+                Maybe.None => { i = i + 1; continue; }
+            };
+            if f.pin_count == 0 && (!f.dirty || f.generation != self.current_gen) && f.last_access < victim_access {
                 victim = k;
                 victim_access = f.last_access;
             }
@@ -399,7 +361,10 @@ implement PageCache {
         let mut i: Int = 0;
         while i < self.page_nos.len() {
             let k = self.page_nos[i];
-            let f = self.frames.get(k);
+            let f = match self.frames.get(k) {
+                Maybe.Some(frame) => frame,
+                Maybe.None => { i = i + 1; continue; }
+            };
             if f.dirty && f.generation == self.current_gen {
                 out.push(k);
             }
@@ -416,7 +381,10 @@ implement PageCache {
         let mut i: Int = 0;
         while i < self.page_nos.len() {
             let k = self.page_nos[i];
-            let f = self.frames.get(k);
+            let f = match self.frames.get(k) {
+                Maybe.Some(frame) => frame,
+                Maybe.None => { i = i + 1; continue; }
+            };
             total = total + f.data.len();
             i = i + 1;
         }

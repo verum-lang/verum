@@ -54,12 +54,8 @@ module core.database.sqlite.native.l0_vfs.locking;
 // F_SETLK on Darwin, LockFileEx on Windows).
 // =============================================================================
 
-mount sys.common;
-mount sys.common.{FileDesc, OSError, FcntlLockKind, try_lock_region, unlock_region};
+mount core.sys.common.{FileDesc, OSError, FcntlLockKind, try_lock_region, unlock_region};
 mount base.{Result, Ok, Err, Text, Maybe};
-// Reached through ambient visibility rather than a request
-// until now (T0780 census).
-mount core.sys.common.{MapFlags, MemProt, OSError, SysContextError};
 mount core.database.sqlite.native.l0_vfs.vfs_protocol.{
     LockKind, VfsError, VfsErrorKind,
 };
@@ -89,6 +85,12 @@ public type SqliteLockManager is {
     // same process pick non-colliding bytes.
     shared_byte: Int,
 };
+
+implement SqliteLockManager {
+    public(in core.database.sqlite.native.l0_vfs) fn holds_shared_only(&self) -> Bool {
+        self.state == LockKind.Shared
+    }
+}
 
 /// Build a fresh manager on `fd`. Starts in `Unlocked` — caller must
 /// drive acquires explicitly.

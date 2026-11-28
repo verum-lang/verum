@@ -75,7 +75,7 @@ mount core.database.sqlite.native.l1_pager.journal.wal.{
 mount core.database.sqlite.native.l0_vfs.vfs_protocol.VfsProtocol;
 mount core.database.sqlite.native.l1_pager.wal_reader.recover_from_header;
 mount core.database.sqlite.native.l1_pager.wal_index.{
-    WalIndex, wal_index_new,
+    WalIndex, wal_index_new, READMARK_NOT_USED,
 };
 
 // -----------------------------------------------------------------------------
@@ -295,6 +295,32 @@ implement WalWriter {
         self.commit_checksum = checksum.clone();
         self.running = checksum;
         self.write_cursor = file_header_size() + pages.len() * (frame_header_size() + self.page_size());
+    }
+
+    public(in core.database.sqlite.native.l1_pager) fn checkpoint_limit(&self) -> Int {
+        let mark = self.index.min_active_reader_mark();
+        let committed = self.index.mx_frame();
+        if mark < committed { mark } else { committed }
+    }
+
+    public(in core.database.sqlite.native.l1_pager) fn can_restart(&self) -> Bool {
+        self.index.min_active_reader_mark() == READMARK_NOT_USED
+    }
+
+    public(in core.database.sqlite.native.l1_pager) fn size_on_disk(&self) -> Result<Int, PagerError> {
+        let size = match &self.backend {
+            WbFile(file) => file.file_size(),
+            WbMem(file) => file.size(),
+        };
+        match size {
+            Result.Ok(n) => Result.Ok(n),
+            Result.Err(e) => Result.Err(io_error("could not read WAL size", e)),
+        }
+    }
+
+    public(in core.database.sqlite.native.l1_pager) fn finish_backfill(&mut self, through: Int) {
+        let _ = self.index.advance_backfill(through);
+        self.state.advance_backfill(self.index.n_backfill());
     }
 
     /// Borrow the state for read access (no mutation).  Used by

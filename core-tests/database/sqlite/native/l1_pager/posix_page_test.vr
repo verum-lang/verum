@@ -1,0 +1,89 @@
+module core.database.sqlite.native.l1_pager.tests.posix_page;
+
+mount core.base.env.temp_dir;
+mount core.base.result.Result;
+mount core.collections.List;
+mount core.id.nanoid.generate_len;
+mount core.io.fs.{read, remove_file, write};
+mount core.io.path.Path;
+mount core.database.sqlite.native.l0_vfs.posix_vfs.PosixVfs;
+mount core.database.sqlite.native.l0_vfs.vfs_protocol.{VfsErrorKind, VfsProtocol, flags_ro, flags_rwc};
+mount core.database.sqlite.native.l1_pager.pager.{PageFrame, pager_open_file, pager_write, pager_read, pager_commit, pager_close};
+
+fn write_and_reopen(name: &Text) -> Bool {
+    let mut writer = match pager_open_file(name, 8192, flags_rwc()) {
+        Result.Ok(p) => p, Result.Err(_) => return false,
+    };
+    let mut input: List<Byte> = List.from_elem(0 as Byte, 8192);
+    let mut i = 0;
+    while i < input.len() { input[i] = (i % 251) as Byte; i = i + 1; }
+    let page = PageFrame.new(2, input);
+    if pager_write(&mut writer, &page).is_err() || pager_commit(&mut writer).is_err() { return false; }
+    if pager_close(&mut writer).is_err() { return false; }
+    let mut reader = match pager_open_file(name, 8192, flags_ro()) {
+        Result.Ok(p) => p, Result.Err(_) => return false,
+    };
+    let restored = match pager_read(&mut reader, 2) {
+        Result.Ok(frame) => frame, Result.Err(_) => return false,
+    };
+    if pager_write(&mut reader, &page).is_ok() { return false; }
+    let data = restored.bytes();
+    i = 0;
+    while i < data.len() {
+        if data[i] != (i % 251) as Byte { return false; }
+        i = i + 1;
+    }
+    data.len() == 8192 && pager_close(&mut reader).is_ok()
+}
+
+@test
+fn posix_pages_use_packed_bytes_across_buffer_windows() {
+    let suffix = generate_len(12);
+    let name = f"{temp_dir()}/verum-sqlite-page-{suffix}";
+    let path = Path.new(&name);
+    let reopened = write_and_reopen(&name);
+    let on_disk = read(&path);
+    let removed = remove_file(&path).is_ok();
+    assert(reopened && removed);
+    let bytes = match on_disk { Result.Ok(data) => data, Result.Err(_) => panic("could not read pager file") };
+    assert_eq(bytes.len(), 16384);
+    let mut i = 0;
+    while i < 8192 {
+        assert_eq(bytes[i], 0 as Byte);
+        assert_eq(bytes[8192 + i], (i % 251) as Byte);
+        i = i + 1;
+    }
+}
+
+@test
+fn posix_paths_reject_embedded_nul_and_overflow() {
+    let vfs = PosixVfs {};
+    match vfs.open(&"sqlite\0suffix", flags_ro()) {
+        Result.Err(e) => assert(e.kind is VfsErrorKind.InvalidArgument),
+        Result.Ok(_) => panic("opened a prefix of the requested path"),
+    }
+    let long_path = "a".repeat(4096);
+    match vfs.open(&long_path, flags_ro()) {
+        Result.Err(e) => assert(e.kind is VfsErrorKind.InvalidArgument),
+        Result.Ok(_) => panic("opened a truncated path"),
+    }
+}
+
+@test
+fn closing_a_temporary_pager_releases_its_file_and_partial_pages_fail() {
+    let suffix = generate_len(12);
+    let name = f"{temp_dir()}/verum-sqlite-close-{suffix}";
+    let path = Path.new(&name);
+    let seed: [Byte; 17] = [10 as Byte; 17];
+    assert(write(&path, &seed[..]).is_ok());
+    let mut flags = flags_rwc();
+    flags.delete_on_close = true;
+    let mut pager = match pager_open_file(&name, 512, flags) {
+        Result.Ok(p) => p, Result.Err(_) => panic("failed to open partial database"),
+    };
+    let rejected = pager_read(&mut pager, 1).is_err();
+    let closed = pager_close(&mut pager).is_ok() && pager_close(&mut pager).is_ok();
+    let removed = read(&path).is_err();
+    if !removed { let _ = remove_file(&path); }
+    assert(rejected && closed && removed);
+}

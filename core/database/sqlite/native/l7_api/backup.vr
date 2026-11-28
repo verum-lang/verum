@@ -56,7 +56,7 @@ module core.database.sqlite.native.l7_api.backup;
 mount collections.List;
 mount base.{Result, Ok, Err, Text};
 mount core.database.sqlite.native.l1_pager.pager.{
-    Pager, PageFrame, pager_read, pager_write,
+    Pager, pager_read, pager_write,
 };
 mount core.database.sqlite.native.l0_vfs.memdb_vfs.{ memdb_size };
 mount core.database.sqlite.native.l1_pager.pager.{
@@ -240,12 +240,7 @@ public fn backup_step(
         };
         // Destination expects the same page_size; we already rejected
         // mismatched sizes in backup_init_into.
-        let dst_frame = PageFrame {
-            page_no: frame.page_no,
-            data: frame.data.clone(),
-            dirty: false,
-        };
-        match pager_write(session.dst.pager_mut(), &dst_frame) {
+        match pager_write(session.dst.pager_mut(), &frame) {
             Result.Ok(_) => {}
             Result.Err(_) => {
                 return BoFailed {
