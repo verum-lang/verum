@@ -1,4 +1,4 @@
-use super::{StructuralUse, Type, TypeChecker};
+use super::{Type, TypeChecker};
 use verum_fast_parser::Parser;
 
 #[test]
@@ -33,7 +33,7 @@ fn structural_copy_checks_every_logical_payload_of_the_exact_collection() {
             path: TypeChecker::text_to_path(&format!("tree.{name}").into()),
             args: Default::default(),
         };
-        let result = checker.check_resource_layout(&ty, StructuralUse::Clone);
+        let result = checker.check_structural_clone(&ty, verum_ast::Span::default());
         assert_eq!(result.is_ok(), allowed, "{name}: {result:?}");
     }
 }
