@@ -97,6 +97,8 @@ pub struct RegisterInfo {
     lookup_observer: Option<Shared<AtomicUsize>>,
     /// Exact source declaration identity, local to this function body.
     pub binding_id: verum_common::value_use::BindingId,
+    /// Owns a condition temporary or a field extracted after its last guard.
+    pub(super) conditional_owner: bool,
     /// The allocated register.
     pub reg: Reg,
 
@@ -242,6 +244,7 @@ impl RegisterAllocator {
                     pending_list_element: None,
                     scope_level: 0,
                     kind: RegisterKind::Parameter,
+                    conditional_owner: false,
                     is_cell: false,
                     pattern_alias: None,
                 },
@@ -298,6 +301,7 @@ impl RegisterAllocator {
                 pending_list_element: None,
                 scope_level,
                 kind: RegisterKind::Local,
+                conditional_owner: false,
                 is_cell: false,
                 pattern_alias: None,
             },
@@ -494,6 +498,18 @@ impl RegisterAllocator {
             std::cmp::Reverse((info.scope_level, info.binding_id.0))
         });
         bindings
+    }
+
+    /// Inspect only condition owners. Looking up other bindings here would
+    /// change the observation interval of an enclosing guard.
+    pub(super) fn conditional_owners_above(&self, level: usize) -> verum_common::List<RegisterInfo> {
+        let mut owners: verum_common::List<_> = self.variables.iter()
+            .chain(self.scope_stack.iter().flat_map(|scope| scope.shadowed_vars.iter().map(|(name, binding, _)| (name, binding))))
+            .filter(|(_, binding)| binding.conditional_owner && binding.scope_level > level)
+            .map(|(_, binding)| binding.clone()).collect();
+        owners.sort_by_key(|binding| std::cmp::Reverse((binding.scope_level, binding.binding_id.0)));
+        owners.dedup_by_key(|binding| binding.binding_id);
+        owners
     }
 
     /// Returns the current scope level.

@@ -51,6 +51,8 @@ use verum_ast::{
 mod selection;
 #[path = "method_types.rs"]
 mod method_types;
+#[path = "conditional_patterns.rs"]
+mod conditional_patterns;
 #[path = "or_patterns.rs"]
 mod or_patterns;
 #[path = "index_projection.rs"]
@@ -18371,125 +18373,25 @@ impl VbcCodegen {
         let else_label = self.ctx.new_label("else");
         let end_label = self.ctx.new_label("if_end");
 
-        // Helper to check if a condition has bindings (Let or Is with binding pattern)
-        let condition_has_bindings = |c: &ConditionKind| -> bool {
-            match c {
-                ConditionKind::Let { .. } => true,
-                ConditionKind::Expr(expr) => {
-                    // Check if expr is an Is pattern with bindings
-                    if let ExprKind::Is {
-                        pattern,
-                        negated: false,
-                        ..
-                    } = &expr.kind
-                    {
-                        Self::pattern_has_bindings(pattern)
-                    } else {
-                        false
-                    }
-                }
-            }
-        };
-
-        // Track whether we have any bindings (need scope management)
-        let has_bindings = condition.conditions.iter().any(condition_has_bindings);
-
-        // Enter scope for all bindings in the chain
-        // All bindings persist through subsequent conditions and then branch
-        if has_bindings {
-            self.ctx.enter_scope();
-        }
-
-        // Track scrutinee registers for cleanup on else path
-        let mut scrutinee_regs: Vec<Reg> = Vec::new();
-
-        // Compile ALL conditions in the chain with AND semantics
-        // Each condition either:
-        // - Evaluates to false → jump to else
-        // - Pattern doesn't match → jump to else
-        // - Success → continue to next condition or then branch
-        for condition_kind in condition.conditions.iter() {
-            match condition_kind {
-                ConditionKind::Expr(expr) => {
-                    // Check if this is an Is expression with pattern bindings
-                    if let ExprKind::Is {
-                        expr: scrutinee_expr,
-                        pattern,
-                        negated: false,
-                    } = &expr.kind
-                        && Self::pattern_has_bindings(pattern)
-                    {
-                        // Handle like a Let binding: evaluate, test, bind
-                        let scrutinee = self.compile_expr(scrutinee_expr)?.ok_or_else(|| {
-                            CodegenError::internal("is pattern scrutinee has no value")
-                        })?;
-
-                        // Track for cleanup on else path
-                        scrutinee_regs.push(scrutinee);
-
-                        let bind_prev = self
-                            .enter_scrutinee_type_for_bind(scrutinee_expr, std::iter::once(pattern));
-                        let match_reg = self.ctx.alloc_temp();
-                        self.compile_pattern_test(pattern, scrutinee, match_reg)?;
-
-                        // Jump to else if pattern doesn't match
-                        self.ctx
-                            .emit_forward_jump(&else_label, |offset| Instruction::JmpNot {
-                                cond: match_reg,
-                                offset,
-                            });
-                        self.ctx.free_temp(match_reg);
-
-                        // Bind pattern variables - available for subsequent conditions and then branch
-                        self.compile_pattern_bind_from_expr(pattern, scrutinee, scrutinee_expr)?;
-                        self.exit_scrutinee_type_for_bind(bind_prev);
-                        continue;
-                    }
-
-                    // Regular boolean expression condition
-                    let cond_reg = self
-                        .compile_expr(expr)?
-                        .or_internal("if condition has no value")?;
-
-                    // Jump to else if condition is false
-                    self.ctx
-                        .emit_forward_jump(&else_label, |offset| Instruction::JmpNot {
-                            cond: cond_reg,
-                            offset,
-                        });
-                    self.ctx.free_temp(cond_reg);
-                }
-                ConditionKind::Let { pattern, value } => {
-                    // Let pattern condition: evaluate, test match, bind on success
-
-                    // Evaluate the expression
-                    let scrutinee = self
-                        .compile_expr(value)?
-                        .or_internal("if-let expr has no value")?;
-
-                    // Track for cleanup on else path
-                    scrutinee_regs.push(scrutinee);
-
-                    let bind_prev =
-                        self.enter_scrutinee_type_for_bind(value, std::iter::once(pattern));
-                    let match_reg = self.ctx.alloc_temp();
-                    self.compile_pattern_test(pattern, scrutinee, match_reg)?;
-
-                    // Jump to else if pattern doesn't match
-                    self.ctx
-                        .emit_forward_jump(&else_label, |offset| Instruction::JmpNot {
-                            cond: match_reg,
-                            offset,
-                        });
-                    self.ctx.free_temp(match_reg);
-
-                    // Bind pattern variables - they're available for subsequent conditions
-                    // and the then branch
-                    self.compile_pattern_bind_from_expr(pattern, scrutinee, value)?;
-                    self.exit_scrutinee_type_for_bind(bind_prev);
-                }
+        let outer_level = self.ctx.registers.scope_level();
+        let has_bindings = condition.conditions.iter().any(|term| Self::conditional_pattern(term).is_some());
+        if has_bindings { self.ctx.enter_scope(); }
+        let mut subjects = List::new();
+        let mut last_owner: Option<usize> = None;
+        for term in &condition.conditions {
+            let failure = last_owner.and_then(|index| subjects.get(index))
+                .map_or(else_label.as_str(), |s: &conditional_patterns::ConditionalSubject| s.failure_label(&else_label));
+            if let Some((pattern, value)) = Self::conditional_pattern(term) {
+                let subject = self.bind_conditional_subject(pattern, value, failure)?;
+                if subject.failure.is_some() { last_owner = Some(subjects.len()); }
+                subjects.push(subject);
+            } else if let ConditionKind::Expr(expr) = term {
+                let cond = self.compile_expr(expr)?.or_internal("if condition has no value")?;
+                self.ctx.emit_forward_jump(failure, |offset| Instruction::JmpNot { cond, offset });
+                self.ctx.free_temp(cond);
             }
         }
+        for subject in &subjects { self.acquire_conditional_fields(subject); }
 
         // All conditions passed - compile then branch
         let then_result = self.with_forwarded_result(span, then_branch.span, |cg|
@@ -18503,27 +18405,20 @@ impl VbcCodegen {
             self.ctx.emit(Instruction::LoadUnit { dst: result });
         }
 
-        // Exit scope and run defers if we had bindings
         if has_bindings {
-            let (_, defers) = self.ctx.exit_scope(false);
-            for defer_instrs in defers {
-                for instr in defer_instrs {
-                    self.ctx.emit(instr);
-                }
+            for instruction in self.ctx.exit_edge_defers(self.ctx.registers.scope_level(), false) {
+                self.ctx.emit(instruction);
             }
+            self.retire_conditional_owners(outer_level);
         }
+        self.ctx.emit_forward_jump(&end_label, |offset| Instruction::Jmp { offset });
 
-        // Jump over else branch
-        self.ctx
-            .emit_forward_jump(&end_label, |offset| Instruction::Jmp { offset });
-
-        // Else label - cleanup and compile else branch
+        // Failure at a later condition falls through the earlier owners in
+        // reverse evaluation order. The else branch sees all of them retired.
+        for subject in subjects.iter().rev() { self.retire_failed_condition(subject); }
         self.ctx.define_label(&else_label);
-
-        // Free scrutinee registers on else path
-        for reg in scrutinee_regs {
-            self.ctx.free_temp(reg);
-        }
+        for subject in &subjects { self.release_condition_register(subject); }
+        if has_bindings { self.ctx.exit_scope(false); }
 
         // Compile else branch
         if let Some(else_expr) = else_branch {
@@ -18622,6 +18517,8 @@ impl VbcCodegen {
             self.ctx.free_temp(val_reg);
         }
 
+        self.retire_conditional_owners(loop_ctx.scope_level);
+
         // Jump to loop end
         self.ctx
             .emit_forward_jump(&loop_ctx.break_label, |offset| Instruction::Jmp { offset });
@@ -18636,6 +18533,8 @@ impl VbcCodegen {
             .find_loop(label)
             .ok_or_else(|| CodegenError::new(CodegenErrorKind::ContinueOutsideLoop))?
             .clone();
+
+        self.retire_conditional_owners(loop_ctx.scope_level);
 
         // Jump to loop start
         self.ctx
@@ -18843,48 +18742,24 @@ impl VbcCodegen {
         // Loop start
         self.ctx.define_label(&loop_ctx.continue_label);
 
-        // Compile the scrutinee expression
-        let scrutinee = self
-            .compile_expr(scrutinee_expr)?
-            .or_internal("while-let scrutinee has no value")?;
-
-        let bind_prev =
-            self.enter_scrutinee_type_for_bind(scrutinee_expr, std::iter::once(pattern));
-        let match_reg = self.ctx.alloc_temp();
-        self.compile_pattern_test(pattern, scrutinee, match_reg)?;
-
-        // Exit loop if pattern doesn't match
-        self.ctx
-            .emit_forward_jump(&loop_ctx.break_label, |offset| Instruction::JmpNot {
-                cond: match_reg,
-                offset,
-            });
-        self.ctx.free_temp(match_reg);
-
-        // Pattern matched - enter scope and bind variables
         self.ctx.enter_scope();
-        self.compile_pattern_bind_from_expr(pattern, scrutinee, scrutinee_expr)?;
-        self.exit_scrutinee_type_for_bind(bind_prev);
-
-        // Compile body
+        let subject = self.bind_conditional_subject(pattern, scrutinee_expr, &loop_ctx.break_label)?;
+        self.acquire_conditional_fields(&subject);
         self.compile_block_with_demand(body, ResultDemand::Discarded)?;
-
-        // Exit scope (handle defers)
-        let (_, defers) = self.ctx.exit_scope(false);
-        for defer_instrs in defers {
-            for instr in defer_instrs {
-                self.ctx.emit(instr);
-            }
+        for instruction in self.ctx.exit_edge_defers(self.ctx.registers.scope_level(), false) {
+            self.ctx.emit(instruction);
         }
-
-        // Free scrutinee after body
-        self.ctx.free_temp(scrutinee);
+        self.retire_conditional_owners(loop_ctx.scope_level);
 
         // Jump back to start
         self.ctx
             .emit_backward_jump(&loop_ctx.continue_label, |offset| Instruction::Jmp {
                 offset,
             })?;
+
+        self.retire_failed_condition(&subject);
+        self.release_condition_register(&subject);
+        self.ctx.exit_scope(false);
 
         // Loop end
         self.ctx.define_label(&loop_ctx.break_label);

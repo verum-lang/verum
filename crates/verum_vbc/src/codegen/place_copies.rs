@@ -411,21 +411,22 @@ impl VbcCodegen {
     /// unknown writes still end the proof instead of guessing a prior producer.
     pub(super) fn copy_result_producer(&self, mut reg: Reg, start: usize, end: usize) -> Maybe<(usize, &Instruction)> {
         let instructions = self.ctx.instructions.get(start..end)?;
-        // Entry at the first evaluated instruction still executes the producer.
-        // A jump into the expression or past its last instruction can bypass it.
-        if start == end || self.ctx.has_label_in_instruction_range(start + 1, end) { return None; }
         for (offset, instruction) in instructions.iter().enumerate().rev().take(128) {
             match instruction {
                 Instruction::Mov { dst, src } if *dst == reg => reg = *src,
                 Instruction::ChkRef { ref_reg } if *ref_reg == reg => {},
                 Instruction::DropTyped { src, .. } | Instruction::DropRef { src }
                     if *src != reg => {},
-                _ if instruction.intrinsic_result_type().is_some_and(|(dst, _)| dst == reg) =>
-                    return Some((start + offset, instruction)),
-                Instruction::Call { dst, .. } | Instruction::CallG { dst, .. }
-                    | Instruction::Deref { dst, .. }
-                    | Instruction::MakeVariantTyped { dst, .. }
-                    if *dst == reg => return Some((start + offset, instruction)),
+                producer if producer.intrinsic_result_type().is_some_and(|(dst, _)| dst == reg)
+                    || matches!(producer, Instruction::Call { dst, .. } | Instruction::CallG { dst, .. }
+                        | Instruction::Deref { dst, .. } | Instruction::MakeVariantTyped { dst, .. } if *dst == reg) =>
+                {
+                    let index = start + offset;
+                    // Branches computing arguments can join at or before the
+                    // producer. Only an entry after it can bypass this result.
+                    return (!self.ctx.has_label_in_instruction_range(index + 1, end))
+                        .then_some((index, producer));
+                }
                 _ => return None,
             }
         }

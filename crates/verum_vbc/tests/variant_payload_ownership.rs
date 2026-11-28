@@ -381,3 +381,106 @@ fn an_or_pattern_tests_each_guard_once_and_keeps_leftmost_precedence() {
         }
     "#);
 }
+
+#[test]
+fn conditional_sums_retire_selected_and_rejected_owners_once() {
+    run(r#"
+        mount core.base.protocols.Drop;
+        type affine Ticket is { value: Int };
+        type Choice is Accepted(Ticket) | Rejected(Ticket);
+        fn count(delta: Int) -> Int {
+            static mut TOTAL: Int = 0;
+            TOTAL += delta;
+            TOTAL
+        }
+        implement Drop for Ticket {
+            fn drop(&mut self) { let _ = count(self.value); }
+        }
+        fn choice(value: Int, accept: Bool) -> Choice {
+            if accept { Choice.Accepted(Ticket { value }) } else { Choice.Rejected(Ticket { value }) }
+        }
+        fn consume(value: Ticket) {}
+        fn early() -> Int {
+            if let Choice.Accepted(value) = choice(2, true) { return 7; }
+            0
+        }
+        fn probe() -> Int {
+            if let Choice.Accepted(value) = choice(1, true) {
+                consume(value);
+                if count(0) != 1 { return -1; }
+            }
+            if early() != 7 || count(0) != 3 { return -2; }
+            if let Choice.Accepted(a) = choice(4, true) && let Choice.Accepted(b) = choice(8, false) {
+                return -3;
+            } else if count(0) != 15 { return -4; }
+            if false && let Choice.Accepted(unused) = choice(64, true) { return -5; }
+            let mut round = 0;
+            while let Choice.Accepted(next) = choice(16, true) {
+                round += 1;
+                if round == 1 { continue; }
+                break;
+            }
+            if count(0) != 47 { return -6; }
+            while let Choice.Accepted(unused) = choice(26, false) { return -7; }
+            count(0)
+        }
+    "#);
+}
+
+#[test]
+fn a_condition_cannot_transfer_a_field_of_an_existing_subject() {
+    let source = r#"
+        type affine Ticket is { value: Int };
+        type Choice is Accepted(Ticket) | Rejected;
+        fn consume(value: Ticket) {}
+        fn reject(subject: Choice) {
+            if let Choice.Accepted(value) = subject { consume(value); }
+        }
+    "#;
+    for unit in [false, true] {
+        let error = compile(source, unit).expect_err("the named sum still owns its field");
+        assert!(error.to_string().contains("still owned by the scrutinee"), "{error}");
+    }
+}
+
+#[test]
+fn a_condition_transfers_a_producer_owned_generic_field() {
+    run(r#"
+        mount core.base.protocols.Drop;
+        type affine Ticket is { number: Int };
+        type Slot<T> is Empty | Filled(T);
+        fn count(delta: Int) -> Int {
+            static mut DROPS: Int = 0;
+            DROPS += delta;
+            DROPS
+        }
+        implement Drop for Ticket { fn drop(&mut self) { let _ = count(self.number); } }
+        fn wrap<T>(item: T) -> Slot<T> { Slot.Filled(item) }
+        fn consume<T>(item: T) {}
+        fn pass<T>(item: T) {
+            if let Slot.Filled(received) = wrap(item) { consume(received); }
+        }
+        fn probe() -> Int { pass<Ticket>(Ticket { number: 73 }); count(0) }
+    "#);
+}
+
+#[test]
+fn a_condition_preserves_a_field_observed_by_its_guard_or_subject_destructor() {
+    let prefix = r#"
+        mount core.base.protocols.Drop;
+        type affine Ticket is { number: Int };
+        type Slot is Filled(Ticket) | Empty;
+        fn wrap() -> Slot { Slot.Filled(Ticket { number: 73 }) }
+        fn accept(value: &Ticket) -> Bool { value.number == 73 }
+        fn consume(value: Ticket) {}
+    "#;
+    for code in [
+        "fn bad() { if let Slot.Filled(item) = wrap() && accept(&item) { consume(item); } }",
+        "implement Drop for Slot { fn drop(&mut self) {} } fn bad() { if let Slot.Filled(item) = wrap() { consume(item); } }",
+    ] {
+        for unit in [false, true] {
+            let error = compile(&format!("{prefix}{code}"), unit).expect_err("the shell retains its field");
+            assert!(error.to_string().contains("still owned by the scrutinee"), "{error}");
+        }
+    }
+}
