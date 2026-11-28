@@ -429,15 +429,21 @@ impl VbcCodegen {
         &self, owner: crate::types::TypeRef, field: &str,
     ) -> Option<crate::types::TypeRef> {
         let projection = self.field_projection(owner, field, false)?;
-        let descriptor = self.type_by_id(projection.owner.base_type_id()?)?;
-        let arguments = match &projection.owner {
+        self.declared_field_at(&projection.owner, projection.ordinal as usize)
+    }
+
+    pub(in crate::codegen) fn declared_field_at(
+        &self, owner: &crate::types::TypeRef, ordinal: usize,
+    ) -> Option<crate::types::TypeRef> {
+        let descriptor = self.type_by_id(owner.base_type_id()?)?;
+        let arguments = match owner {
             crate::types::TypeRef::Instantiated { args, .. } => args.as_slice(),
             _ => &[],
         };
         if descriptor.type_params.len() != arguments.len() {
             return None;
         }
-        let member = descriptor.fields.get(projection.ordinal as usize)?.declaration_type.as_ref()?;
+        let member = descriptor.fields.get(ordinal)?.declaration_type.as_ref()?;
         let ids: verum_common::List<_> = descriptor.type_params.iter().map(|parameter| parameter.id).collect();
         if !crate::codegen::formal_parameters::resolved(member, &ids, 0) {
             return None;

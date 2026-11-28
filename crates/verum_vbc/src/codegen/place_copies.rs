@@ -292,6 +292,16 @@ impl VbcCodegen {
                     match owner {
                         TypeRef::Reference { inner, .. } => owner = *inner,
                         TypeRef::Tuple(parts) => return parts.get(*index as usize).cloned(),
+                        TypeRef::Concrete(_) | TypeRef::Instantiated { .. } => {
+                            let descriptor = self.type_by_id(owner.base_type_id()?)?;
+                            let positional = descriptor.is_transparent_wrapper
+                                || descriptor.source_declaration.as_ref().is_some_and(|decl| matches!(
+                                    decl.body,
+                                    verum_ast::decl::TypeDeclBody::Tuple(_) | verum_ast::decl::TypeDeclBody::SigmaTuple(_)
+                                ));
+                            if !positional { return None; }
+                            return self.declared_field_at(&owner, *index as usize);
+                        }
                         _ => return None,
                     }
                 }

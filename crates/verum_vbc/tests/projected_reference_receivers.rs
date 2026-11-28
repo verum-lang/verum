@@ -106,3 +106,53 @@ fn a_stored_reference_preserves_its_access_capability() {
         }
     }
 }
+
+#[test]
+fn positional_method_calls_execute_the_selected_payload_implementation() {
+    let source = r#"
+        module app;
+        type Sink is { state: Int };
+        type Hash is protocol { fn hash(&self, sink: &mut Sink); };
+        type Token is { value: Int };
+        implement Hash for Text {
+            fn hash(&self, sink: &mut Sink) {
+                if *self == "stop" { panic("visited text"); }
+                sink.state = if *self == "first" { 71 } else { 13 };
+            }
+        }
+        implement Hash for Token { fn hash(&self, sink: &mut Sink) { sink.state = self.value; } }
+        type Key is (Text);
+        implement Hash for Key { fn hash(&self, sink: &mut Sink) { self.0.hash(sink); } }
+        type Wrap<T> is (T);
+        type Row is (Text, Token);
+        fn main() -> Int {
+            let mut sink = Sink { state: 0 };
+            let a = Key("first"); a.hash(&mut sink);
+            let first = sink.state;
+            let b = Row("second", Token { value: 29 }); b.0.hash(&mut sink);
+            let second = sink.state; b.1.hash(&mut sink);
+            let third = sink.state; let last: Wrap<Token> = Wrap(Token { value: 37 }); last.0.hash(&mut sink);
+            first * 1000000 + second * 10000 + third * 100 + sink.state
+        }
+        fn fail() {
+            let mut sink = Sink { state: 0 };
+            let a = Key("stop"); a.hash(&mut sink);
+        }
+    "#;
+    for unit_entry in [false, true] {
+        let module = compile(source, unit_entry).unwrap();
+        let wire = verum_vbc::serialize::serialize_module(&module).unwrap();
+        let module = verum_vbc::deserialize::deserialize_module(&wire).unwrap();
+        verum_vbc::validate::validate_module(&module).unwrap();
+        let main = module.find_function_by_name("app.main").unwrap();
+        let fail = module.find_function_by_name("app.fail").unwrap();
+        let mut vm = Interpreter::new(module.into());
+        assert_eq!(
+            vm.execute_function(main).unwrap().try_as_i64(),
+            Some(71132937)
+        );
+        assert!(
+            matches!(vm.execute_function(fail), Err(verum_vbc::interpreter::InterpreterError::Panic { message }) if message == "visited text")
+        );
+    }
+}
