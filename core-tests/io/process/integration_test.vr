@@ -2,7 +2,7 @@
 // core-tests/io/process/integration_test.vr
 // =============================================================================
 
-mount core.io.process.{Stdio, ExitStatus, Command};
+mount core.io.process.{Stdio, ExitStatus, Command, run};
 mount core.collections.list.List;
 
 // =============================================================================
@@ -58,6 +58,19 @@ fn integration_exit_status_classifier() {
     assert_eq(classify(&ExitStatus { raw: 0 }), Text.from("success"));
     assert_eq(classify(&ExitStatus { raw: 0x0100 }), Text.from("exited-nonzero"));
     assert_eq(classify(&ExitStatus { raw: 9 }), Text.from("signaled"));
+}
+
+@cfg(any(target_os = "macos", target_os = "linux"))
+@test
+fn integration_run_preserves_arguments_and_captured_output() {
+    let args: List<Text> = ["-c", "printf az; printf z >&2; exit 37"];
+    let output = run("/bin/sh", args).unwrap();
+    assert_eq(output.status.code(), 37);
+    assert_eq(output.stdout_bytes.len(), 2);
+    assert_eq(output.stdout_bytes[0], 97 as Byte);
+    assert_eq(output.stdout_bytes[1], 122 as Byte);
+    assert_eq(output.stderr_bytes.len(), 1);
+    assert_eq(output.stderr_bytes[0], 122 as Byte);
 }
 
 fn main() {}

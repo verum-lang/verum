@@ -391,7 +391,7 @@ implement Child {
         @cfg(target_os = "windows")
         {
             let r = __process_kill_raw_impl(self.pid, sig);
-            return if r == 0 { Result.Ok(()) } else { Result.Err("TerminateProcess failed".into()) };
+            return if r == 0 { Result.Ok(()) } else { Result.Err("TerminateProcess failed") };
         }
     }
 
@@ -535,8 +535,8 @@ fn spawn_child_with_output(cmd: &Command) -> Result<Output, Text> {
     // original stdio config.
     let r = native_spawn(&cmd.program, &cmd.args, false, true, true)?;
 
-    let stdout_bytes = if r.stdout_fd >= 0 { read_all_from_fd(r.stdout_fd) } else { [] };
-    let stderr_bytes = if r.stderr_fd >= 0 { read_all_from_fd(r.stderr_fd) } else { [] };
+    let stdout_bytes: List<Byte> = if r.stdout_fd >= 0 { read_all_from_fd(r.stdout_fd) } else { [] };
+    let stderr_bytes: List<Byte> = if r.stderr_fd >= 0 { read_all_from_fd(r.stderr_fd) } else { [] };
     if r.stdout_fd >= 0 { close_fd(r.stdout_fd); }
     if r.stderr_fd >= 0 { close_fd(r.stderr_fd); }
 
@@ -547,7 +547,7 @@ fn spawn_child_with_output(cmd: &Command) -> Result<Output, Text> {
 /// Consume at most one chunk so that a busy stdout cannot starve stderr
 /// or delay cancellation. Only close the fd after an observed EOF.
 fn read_child_pipe(port: &mut Maybe<Int>, max: Int) -> Result<Maybe<List<Byte>>, Text> {
-    if max <= 0 { return Result.Err("pipe read size must be positive".into()); }
+    if max <= 0 { return Result.Err("pipe read size must be positive"); }
     let fd = match *port { Maybe.Some(fd) => fd, Maybe.None => return Result.Ok(Maybe.None) };
     let chunk = read_ready_chunk(fd, max)?;
     if let Maybe.Some(bytes) = &chunk {
@@ -594,7 +594,7 @@ fn try_wait_for_child(pid: Int) -> Result<Maybe<ExitStatus>, Text> {
     match core.sys.darwin.libsystem.try_waitpid(pid as Int32) {
         Result.Ok(Maybe.Some(raw)) => Result.Ok(Maybe.Some(ExitStatus { raw: raw as Int })),
         Result.Ok(Maybe.None) => Result.Ok(Maybe.None),
-        Result.Err(_) => Result.Err("waitpid failed".into()),
+        Result.Err(_) => Result.Err("waitpid failed"),
     }
 }
 
@@ -631,7 +631,7 @@ fn wait_for_child(pid: Int) -> Result<ExitStatus, Text> {
     let mut status: Int32 = 0;
     match core.sys.linux.syscall.wait4(pid, &mut status, 0) {
         Result.Ok(_)  => Result.Ok(ExitStatus { raw: status as Int }),
-        Result.Err(_) => Result.Err("wait4 failed".into()),
+        Result.Err(_) => Result.Err("wait4 failed"),
     }
 }
 
@@ -643,7 +643,7 @@ fn wait_for_child(pid: Int) -> Result<ExitStatus, Text> {
     // as whatever the call left in place (T0806).
     match core.sys.darwin.libsystem.safe_waitpid(pid as Int32, 0 as Int32) {
         Result.Ok(status) => Result.Ok(ExitStatus { raw: status as Int }),
-        Result.Err(_)     => Result.Err("waitpid failed".into()),
+        Result.Err(_)     => Result.Err("waitpid failed"),
     }
 }
 
@@ -968,6 +968,6 @@ fn quote_arg(arg: &Text) -> Text {
 /// Example: `let out = run("ls", ["-la", "/tmp"])?;`
 public fn run(program: Text, args: List<Text>) -> Result<Output, Text> {
     let mut cmd = Command.new(program);
-    cmd.args(&args);
+    cmd.args(args.as_slice());
     cmd.output()
 }

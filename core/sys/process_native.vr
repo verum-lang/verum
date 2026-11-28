@@ -88,10 +88,10 @@ const PIPE_CHUNK_SIZE: Int = 4096;
 // =============================================================================
 
 public type SpawnResult is {
-    pid:       Int,
-    stdin_fd:  Int,   // -1 if not piped
-    stdout_fd: Int,   // -1 if not piped
-    stderr_fd: Int,   // -1 if not piped
+    public(in core) pid:       Int,
+    public(in core) stdin_fd:  Int,   // -1 if not piped
+    public(in core) stdout_fd: Int,   // -1 if not piped
+    public(in core) stderr_fd: Int,   // -1 if not piped
 }
 
 // =============================================================================
