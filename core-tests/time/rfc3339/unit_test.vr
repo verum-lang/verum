@@ -341,4 +341,15 @@ fn test_format_with_negative_offset() {
     assert_eq(s, "1969-12-31T19:00:00-05:00");
 }
 
+@test
+fn test_parsed_value_equality_includes_the_retained_offset_and_fraction() {
+    let utc = Rfc3339Time { unix_seconds: 1, nanos: 2, offset_minutes: 0 };
+    let same = Rfc3339Time { unix_seconds: 1, nanos: 2, offset_minutes: 0 };
+    let shifted = Rfc3339Time { unix_seconds: 1, nanos: 2, offset_minutes: 60 };
+    let later = Rfc3339Time { unix_seconds: 1, nanos: 3, offset_minutes: 0 };
+    assert(utc.eq(&same));
+    assert(!utc.eq(&shifted));
+    assert(!utc.eq(&later));
+}
+
 fn main() {}

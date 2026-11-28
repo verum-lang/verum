@@ -65,6 +65,8 @@ mount core.time.system_time.SystemTime;
 // Parsed value
 // =============================================================================
 
+/// Equality includes the UTC offset retained by `format_rfc3339` as well as the instant.
+@derive(Eq)
 public type Rfc3339Time is {
     /// Seconds since 1970-01-01T00:00:00Z (UTC).
     public unix_seconds: Int,
