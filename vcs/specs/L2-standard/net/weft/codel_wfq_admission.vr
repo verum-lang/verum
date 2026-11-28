@@ -63,10 +63,10 @@ fn wfq_unknown_tenant_falls_back_to_default() {
     let layer = WfqLayer.with_quantum_us(1_000);
     layer.register_tenant(f"_default", 1);
     let stranger = f"never-registered";
-    // Default class: weight 1, quantum 1000, cost 1000 → admit on
-    // first arrival; second arrival has deficit 0 again — depends on
-    // accrual timing. Just verify the call shape compiles.
-    let _ = layer.admit(&stranger, 1_000);
+    let other = f"another-stranger";
+    assert(!layer.admit(&stranger, 2_000));
+    assert(layer.admit(&other, 2_000));
+    assert(!layer.admit(&stranger, 2_000));
 }
 
 fn wfq_no_policy_admits_freely() {
@@ -79,11 +79,32 @@ fn wfq_no_policy_admits_freely() {
 fn wfq_re_register_preserves_weight_change() {
     let layer = WfqLayer.with_quantum_us(1_000);
     layer.register_tenant(f"acme", 1);
-    layer.register_tenant(f"acme", 5);    // weight bump
     let acme = f"acme";
-    // Higher weight → larger credits per admit → more likely to pass
-    // a high-cost request. Just a smoke-call here.
-    let _ = layer.admit(&acme, 4_000);
+    assert(!layer.admit(&acme, 2_000));
+    layer.register_tenant(f"acme", 5);
+    assert(layer.admit(&acme, 6_000));
+    assert(!layer.admit(&acme, 6_000));
+}
+
+fn wfq_keeps_independent_tenant_balances() {
+    let layer = WfqLayer.with_quantum_us(10);
+    layer.register_tenant(f"alpha", 1);
+    layer.register_tenant(f"beta", 2);
+    let alpha = f"alpha";
+    let beta = f"beta";
+    assert(!layer.admit(&alpha, 20));
+    assert(layer.admit(&beta, 20));
+    assert(!layer.admit(&alpha, 0));
+    assert(!layer.admit(&alpha, -1));
+    assert(!layer.admit(&alpha, 21));
+    assert(layer.admit(&alpha, 30));
+}
+
+fn wfq_saturates_large_weights() {
+    let layer = WfqLayer.with_quantum_us(4_000_000_000);
+    let tenant = f"large";
+    layer.register_tenant(f"large", 4_000_000_000);
+    assert(layer.admit(&tenant, 9_223_372_036_854_775_807));
 }
 
 @main
@@ -98,6 +119,8 @@ public fn main() -> Int {
     wfq_unknown_tenant_falls_back_to_default();
     wfq_no_policy_admits_freely();
     wfq_re_register_preserves_weight_change();
+    wfq_keeps_independent_tenant_balances();
+    wfq_saturates_large_weights();
     print("CoDel + WFQ admission control surface verified");
     0
 }
