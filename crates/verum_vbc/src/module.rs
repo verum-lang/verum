@@ -1549,6 +1549,203 @@ impl VbcModule {
         Ok(crate::mono::canonical_type_args(function, witness).map(|args| (id, args)))
     }
 
+    /// Identify the protocol application advertised by an existential receiver.
+    /// The object's hidden allocation selects a body only after this check.
+    pub fn object_member_application(
+        &self,
+        object: &crate::types::DynamicProtocolType,
+        selector: StringId,
+        explicit: Option<&TypeRef>,
+    ) -> Result<TypeRef, String> {
+        let (qualifier, member) = self
+            .get_string(selector)
+            .and_then(|name| name.strip_prefix("dyn:"))
+            .and_then(|name| name.rsplit_once('.'))
+            .ok_or_else(|| "a dynamic object requires a qualified protocol member".to_owned())?;
+        let mut pending: Vec<_> = object.bounds.iter().cloned().collect();
+        let mut visited = verum_common::Set::new();
+        let mut selected = None;
+        while let Some(bound) = pending.pop() {
+            if !visited.insert(bound.clone()) {
+                continue;
+            }
+            let protocol = self
+                .get_type(TypeId(bound.protocol.0))
+                .filter(|descriptor| {
+                    descriptor.kind == crate::types::TypeKind::Protocol
+                        && descriptor.type_params.len() == bound.args.len()
+                })
+                .ok_or_else(|| {
+                    "dynamic object bound lacks a complete protocol declaration".to_owned()
+                })?;
+            let name = self
+                .get_string(protocol.name)
+                .ok_or_else(|| "unnamed dynamic protocol".to_owned())?;
+            let owner =
+                declaration_origin(&self.name, protocol.origin_module, |id| self.get_string(id))
+                    .map_err(|error| error.to_string())?;
+            if (qualifier == qualify_module_name(owner, name)
+                || (!qualifier.contains('.') && qualifier == name))
+                && protocol
+                    .variants
+                    .iter()
+                    .any(|variant| self.get_string(variant.name) == Some(member))
+            {
+                let application = if bound.args.is_empty() {
+                    TypeRef::Concrete(protocol.id)
+                } else {
+                    TypeRef::instantiated(protocol.id, bound.args)
+                };
+                if explicit.is_some_and(|expected| expected != &application) {
+                    continue;
+                }
+                if selected.as_ref().is_some_and(|prior| prior != &application) {
+                    return Err(format!(
+                        "multiple dynamic bounds declare `{qualifier}.{member}`"
+                    ));
+                }
+                selected = Some(application);
+            }
+            // An erased superprotocol ID proves only a zero-argument application.
+            for parent in &protocol.protocols {
+                if self.get_type(TypeId(parent.protocol.0)).is_some_and(|ty| {
+                    ty.kind == crate::types::TypeKind::Protocol && ty.type_params.is_empty()
+                }) {
+                    pending.push(crate::types::ProtocolApplication {
+                        protocol: parent.protocol,
+                        args: Vec::new(),
+                    });
+                }
+            }
+        }
+        selected.ok_or_else(|| {
+            format!("dynamic object does not declare the applied member `{qualifier}.{member}`")
+        })
+    }
+
+    fn bound_protocol_candidate(
+        &self,
+        head: TypeId,
+        receiver: &TypeRef,
+        qualifier: &str,
+        member: &str,
+        argc: u8,
+        applied: Option<&TypeRef>,
+        method_arguments: &[TypeRef],
+    ) -> Result<Option<(FunctionId, Vec<TypeRef>)>, String> {
+        let Some((protocol, parameterized)) =
+            self.protocol_member_owner(head, Some(qualifier), member, false)?
+        else {
+            return Ok(None);
+        };
+        if let Some(TypeRef::Instantiated { base, args }) = applied
+            && method_arguments.is_empty()
+            && parameterized
+            && base.0 == protocol.0
+            && self
+                .get_type(*base)
+                .is_some_and(|ty| ty.type_params.len() == args.len())
+        {
+            return self.select_implementation_member(head, protocol, member, |row, target| {
+                let application = row.application.as_ref()?;
+                if row.source_implementation.is_none()
+                    || target.parent_type != Some(head)
+                    || !target.has_source_body
+                    || application.arguments.len() != args.len()
+                    || target.source_definition?.implementation_scope != Some(application.scope)
+                    || target.params.len() != usize::from(argc) + 1
+                    || target.params.first().and_then(|p| self.get_string(p.name)) != Some("self")
+                    || target
+                        .source_signature
+                        .as_ref()
+                        .is_none_or(|source| source.name.as_str() != member)
+                {
+                    return None;
+                }
+                let mut binding = crate::mono::TypeSubstitution::empty();
+                let pattern = target.source_receiver.as_ref()?;
+                if !crate::mono::unify_declared_types(pattern, receiver, &mut binding)
+                    || !application
+                        .arguments
+                        .iter()
+                        .zip(args)
+                        .all(|(pattern, actual)| {
+                            crate::mono::unify_declared_types(pattern, actual, &mut binding)
+                        })
+                {
+                    return None;
+                }
+                let arguments = target
+                    .type_params
+                    .iter()
+                    .map(|p| binding.get(p.id).cloned())
+                    .collect::<Option<Vec<_>>>()?;
+                Some((target.id, arguments))
+            });
+        }
+        // Legacy bytecode may have only a receiver. Once this implementation
+        // declares an applied head, a qualified caller must select it.
+        let requires_application = parameterized
+            && self.get_type(head).is_some_and(|ty| {
+                ty.protocols
+                    .iter()
+                    .any(|row| row.protocol == protocol && row.application.is_some())
+            });
+        if applied.is_some() || !method_arguments.is_empty() || requires_application {
+            return Err(format!(
+                "missing or mismatched application for {qualifier}.{member}"
+            ));
+        }
+        self.implementation_member(head, Some(receiver), protocol, member, None)
+            .map(|id| id.and_then(|id| self.bind_instance_receiver(id, receiver, argc)))
+    }
+
+    /// All proved concrete object dispatch arms, including each implementation's own arguments.
+    pub fn object_method_candidates(
+        &self,
+        object: &crate::types::DynamicProtocolType,
+        selector: StringId,
+        argc: u8,
+        explicit: Option<&TypeRef>,
+        method_arguments: &[TypeRef],
+    ) -> Result<Vec<(TypeId, FunctionId, Vec<TypeRef>)>, String> {
+        let application = self.object_member_application(object, selector, explicit)?;
+        let protocol = application
+            .base_type_id()
+            .ok_or_else(|| "object member has no protocol".to_owned())?;
+        let (qualifier, member) = self
+            .get_string(selector)
+            .and_then(|s| s.strip_prefix("dyn:"))
+            .and_then(|s| s.rsplit_once('.'))
+            .ok_or_else(|| "missing object selector".to_owned())?;
+        let applied = matches!(application, TypeRef::Instantiated { .. }).then_some(&application);
+        let mut candidates = Vec::new();
+        let mut seen = verum_common::Set::new();
+        for owner in &self.types {
+            if !seen.insert(owner.id)
+                || owner.kind == crate::types::TypeKind::Protocol
+                || !owner
+                    .protocols
+                    .iter()
+                    .any(|row| row.protocol.0 == protocol.0)
+            {
+                continue;
+            }
+            if let Some((body, arguments)) = self.bound_protocol_candidate(
+                owner.id,
+                &TypeRef::Concrete(owner.id),
+                qualifier,
+                member,
+                argc,
+                applied,
+                method_arguments,
+            )? {
+                candidates.push((owner.id, body, arguments));
+            }
+        }
+        Ok(candidates)
+    }
+
     /// Resolve a qualified protocol selector against the caller's actual type
     /// argument. Interpreted and specialized calls use the same declaration slot.
     pub(crate) fn bound_protocol_method(
@@ -1571,43 +1768,9 @@ impl VbcModule {
                     && self.get_string(declaration.name) == Some(*qualifier)))
         {
             let missing = || format!("no implementation of declared protocol member `{qualifier}.{member}` for {receiver:?}");
-            let resolve = |head| -> Result<Option<(FunctionId, Vec<TypeRef>)>, String> {
-                let Some((protocol, parameterized)) = self.protocol_member_owner(head, Some(qualifier), member, false)?
-                else { return Ok(None) };
-                if let Some(TypeRef::Instantiated { base, args }) = applied
-                    && method_arguments.is_empty() && parameterized && base.0 == protocol.0
-                    && self.get_type(*base).is_some_and(|ty| ty.type_params.len() == args.len())
-                {
-                    return self.select_implementation_member(head, protocol, member, |row, target| {
-                        let application = row.application.as_ref()?;
-                        if row.source_implementation.is_none() || target.parent_type != Some(head)
-                            || !target.has_source_body || application.arguments.len() != args.len()
-                            || target.source_definition?.implementation_scope != Some(application.scope)
-                            || target.params.len() != usize::from(argc) + 1
-                            || target.params.first().and_then(|p| self.get_string(p.name)) != Some("self")
-                            || target.source_signature.as_ref().is_none_or(|source| source.name.as_str() != member)
-                        { return None; }
-                        let mut binding = crate::mono::TypeSubstitution::empty();
-                        let pattern = target.source_receiver.as_ref()?;
-                        if !crate::mono::unify_declared_types(pattern, receiver, &mut binding)
-                            || !application.arguments.iter().zip(args)
-                                .all(|(pattern, actual)| crate::mono::unify_declared_types(pattern, actual, &mut binding))
-                        { return None; }
-                        let arguments = target.type_params.iter().map(|p| binding.get(p.id).cloned())
-                            .collect::<Option<Vec<_>>>()?;
-                        Some((target.id, arguments))
-                    });
-                }
-                // Legacy bytecode may have only a receiver. Once this implementation
-                // declares an applied head, a qualified caller must select it.
-                let requires_application = parameterized && self.get_type(head).is_some_and(|ty|
-                    ty.protocols.iter().any(|row| row.protocol == protocol && row.application.is_some()));
-                if applied.is_some() || !method_arguments.is_empty() || requires_application {
-                    return Err(format!("missing or mismatched application for {qualifier}.{member}"));
-                }
-                self.implementation_member(head, Some(receiver), protocol, member, None)
-                    .map(|id| id.and_then(|id| self.bind_instance_receiver(id, receiver, argc)))
-            };
+            let resolve = |head| self.bound_protocol_candidate(
+                head, receiver, qualifier, member, argc, applied, method_arguments,
+            );
             let target = if let Some(kind) = receiver.structural_receiver_kind() {
                 let mut selected = None;
                 for &head in self.types.lookup_index().structural.get(&kind).into_iter().flatten() {

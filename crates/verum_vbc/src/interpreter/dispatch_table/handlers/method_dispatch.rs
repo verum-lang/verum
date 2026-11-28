@@ -673,6 +673,23 @@ fn execute_method_call(
     // unrelated later calls by construction.
     let mut call_witness_sidecar: Option<Box<[crate::types::TypeRef]>> =
         state.pending_call_witness.take();
+    let (declared_receiver, declared_protocol) =
+        if let Some(crate::types::TypeRef::Dynamic(object)) = &declared_receiver {
+            let invalid = |message| InterpreterError::InvalidBytecode { pc: instruction_pc as usize, message };
+            let protocol = state.module.object_member_application(object, StringId(method_id), declared_protocol.as_ref())
+                .map_err(invalid)?;
+            let place = resolve_receiver_place(state, receiver)?;
+            let actual = if place.value.is_regular_ptr() && state.heap.contains(place.value.as_ptr()) {
+                super::object_dispatch::runtime_type_for_dispatch(&place.value, state).map(|(id, _)| TypeId(id))
+            } else {
+                let id = super::calls::get_builtin_type_id(place.value);
+                (id != TypeId::PTR).then_some(id)
+            }.ok_or_else(|| invalid("dynamic receiver has no concrete storage declaration".into()))?;
+            let applied = matches!(protocol, crate::types::TypeRef::Instantiated { .. }).then_some(protocol);
+            (Some(crate::types::TypeRef::Concrete(actual)), applied)
+        } else {
+            (declared_receiver, declared_protocol)
+        };
     if let Some(application) = &declared_receiver
         && let Some((target, arguments)) = state.module.bound_protocol_method(application, StringId(method_id), args.count, declared_protocol.as_ref(),
             call_witness_sidecar.as_deref().unwrap_or_default())

@@ -1,0 +1,42 @@
+type Mark<X> is protocol {
+    fn apply(&mut self, value: Int) -> Int;
+    fn current(&self) -> Int;
+};
+type Other is protocol { fn apply(&mut self, value: Int) -> Int; };
+type Counter is { value: Int };
+type Meter is { value: Int };
+implement Mark<Int> for Counter {
+    fn apply(&mut self, value: Int) -> Int { self.value += value; self.value }
+    fn current(&self) -> Int { self.value }
+}
+implement Mark<Bool> for Counter {
+    fn apply(&mut self, value: Int) -> Int { self.value += value * 10; self.value }
+    fn current(&self) -> Int { self.value }
+}
+implement Other for Counter {
+    fn apply(&mut self, value: Int) -> Int { self.value = 1; self.value }
+}
+implement<X> Mark<X> for Meter {
+    fn apply(&mut self, value: Int) -> Int {
+        if X.id == Bool.id { self.value += 3 * value; } else { self.value += value; }
+        self.value
+    }
+    fn current(&self) -> Int { self.value }
+}
+fn relay<X, R: Mark<X>>(counter: &mut R, tag: X, amount: Int) -> Int { counter.apply(amount) }
+fn inspect<X, R: Mark<X>>(counter: &R, tag: X) -> Int { counter.current() }
+fn shared(counter: &dyn Mark<Int>) -> Int { inspect(counter, 0) }
+fn other<C: Other>(counter: &mut C) -> Int { counter.apply(99) }
+fn integer(counter: &mut dyn Mark<Int>) -> Int { relay(counter, 0, 2) }
+fn boolean(counter: &mut dyn Mark<Bool>) -> Int { relay(counter, false, 3) }
+fn main() -> Int {
+    let mut counter = Counter { value: 41 };
+    if integer(&mut counter) != 43 { return 0; }
+    if boolean(&mut counter) != 73 { return 0; }
+    let mut meter = Meter { value: 10 };
+    if integer(&mut meter) != 12 { return 0; }
+    if boolean(&mut meter) != 21 { return 0; }
+    if shared(&counter) != 73 { return 0; }
+    if shared(&meter) != 21 { return 0; }
+    counter.value
+}

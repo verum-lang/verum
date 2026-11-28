@@ -374,3 +374,64 @@ fn applied_implementation_collection_precedes_its_foreign_protocol_descriptor() 
         }
     }
 }
+
+#[test]
+fn a_dynamic_witness_selects_the_actual_objects_exact_protocol_application() {
+    use verum_vbc::types::{DynamicProtocolType, ProtocolApplication, ProtocolId, TypeId, TypeRef};
+    let source = concat!(
+        "module application;\n",
+        include_str!("fixtures/dynamic_receivers_applied_method.vr")
+    );
+    let ast = Parser::new(source).parse_module().unwrap();
+    let original = VbcCodegen::new().compile_module(&ast).unwrap();
+    let serialized = verum_vbc::serialize::serialize_module(&original).unwrap();
+    let wire = verum_vbc::deserialize::deserialize_module_validated(&serialized).unwrap();
+    for module in [original, wire] {
+        let protocol = module
+            .types
+            .iter()
+            .find(|ty| module.get_string(ty.name) == Some("Mark"))
+            .unwrap()
+            .id;
+        let object = DynamicProtocolType {
+            bounds: [ProtocolApplication {
+                protocol: ProtocolId(protocol.0),
+                args: vec![TypeRef::Concrete(TypeId::INT)],
+            }]
+            .into_iter()
+            .collect(),
+            bindings: Default::default(),
+        };
+        let selected = module.strings.lookup("dyn:application.Mark.apply").unwrap();
+        let sibling = module
+            .strings
+            .lookup("dyn:application.Other.apply")
+            .unwrap();
+        assert!(
+            module
+                .object_member_application(&object, sibling, None)
+                .is_err()
+        );
+        let wrong = TypeRef::instantiated(protocol, [TypeRef::Concrete(TypeId::BOOL)]);
+        assert!(
+            module
+                .object_method_candidates(&object, selected, 1, Some(&wrong), &[])
+                .is_err()
+        );
+        let entries = module
+            .object_method_candidates(&object, selected, 1, None, &[])
+            .unwrap();
+        assert_eq!(entries.len(), 2);
+        assert!(entries.iter().any(|(_, _, arguments)| arguments.is_empty()));
+        assert!(entries
+            .iter()
+            .any(|(_, _, arguments)| arguments.as_slice() == [TypeRef::Concrete(TypeId::INT)]));
+        let entry = module.find_function_by_name("application.main").unwrap();
+        let erased = module.find_function_by_name("application.integer").unwrap();
+        let mut vm = Interpreter::try_new_validated(Arc::new(module)).unwrap();
+        assert_eq!(vm.execute_function(entry).unwrap().try_as_i64(), Some(73));
+        let missing = vm.execute_function_with_args(erased, &[verum_vbc::value::Value::from_i64(9)])
+            .expect_err("the actual primitive owner has no Mark<Int> implementation");
+        assert!(matches!(missing, verum_vbc::interpreter::InterpreterError::InvalidBytecode { .. }), "{missing:?}");
+    }
+}

@@ -212,33 +212,50 @@ pub(super) fn bound_method_call(
     previous: Option<&Instruction>,
     witness: &Instruction,
     call: Option<&Instruction>,
-) -> Result<Option<(FunctionId, Vec<TypeRef>)>, String> {
+) -> Result<Vec<(FunctionId, Vec<TypeRef>)>, String> {
     let Some(Instruction::CallM {
         method_id, args, ..
     }) = call
     else {
-        return Ok(None);
+        return Ok(Vec::new());
     };
     let method = crate::types::StringId(*method_id);
-    match witness {
-        Instruction::BindProtocolReceiver { receiver, application } if concrete(receiver) && concrete(application) => {
-            Ok(module.try_applied_bound_method(receiver, method, args.count, Some(application), &[])?
-                .filter(|(_, args)| !args.is_empty()))
-        }
+    let (receiver, application, method_arguments) = match witness {
+        Instruction::BindProtocolReceiver {
+            receiver,
+            application,
+        } if concrete(receiver) && concrete(application) => (receiver, Some(application), &[][..]),
         Instruction::BindMethodReceiver { type_ref } if concrete(type_ref) => {
-            let method_arguments = match previous {
+            let arguments = match previous {
                 Some(Instruction::SetCallWitness { type_args }) => type_args.as_slice(),
                 _ => &[],
             };
-            if !method_arguments.iter().all(concrete) { return Ok(None); }
-            Ok(module.try_bound_method_with_arguments(type_ref, method, args.count, method_arguments)?
-                .filter(|(_, args)| !args.is_empty()))
+            if !arguments.iter().all(concrete) {
+                return Ok(Vec::new());
+            }
+            (type_ref, None, arguments)
         }
         Instruction::SetCallWitness { type_args } => {
-            module.witnessed_source_method(method, args.count, type_args)
+            return Ok(module
+                .witnessed_source_method(method, args.count, type_args)?
+                .into_iter()
+                .collect());
         }
-        _ => Ok(None),
+        _ => return Ok(Vec::new()),
+    };
+    if let TypeRef::Dynamic(object) = receiver {
+        return Ok(module
+            .object_method_candidates(object, method, args.count, application, method_arguments)?
+            .into_iter()
+            .filter(|(_, _, parameters)| !parameters.is_empty())
+            .map(|(_, id, arguments)| (id, arguments))
+            .collect());
     }
+    Ok(module
+        .try_applied_bound_method(receiver, method, args.count, application, method_arguments)?
+        .filter(|(_, args)| !args.is_empty())
+        .into_iter()
+        .collect())
 }
 
 /// Destruction can call generic user glue even though it has no CallG operand.
