@@ -36,13 +36,12 @@ collision with `core.base.error.Error` and the conceptual `Nil` /
 `Maybe.None`. Document this naming choice in the audit so future
 renames preserve the trailing-underscore convention.
 
-### §3.2 Display + Eq for RespValue not present
+### §3.2 Display for RespValue
 
-Only RespError has Display/Debug (already uses qualified arms per
-the source). RespValue has @derive(Eq, Clone, Debug) but lacks
-Display — `f"{value}"` won't compile. Add Display rendering to
-the RESP3 wire format (canonical text representation for
-debugging).
+RespValue derives PartialEq, Clone and Debug. A Double containing NaN
+compares unequal to itself, including inside arrays and maps.
+RespError implements Display. Adding Display for RespValue would allow
+`f"{value}"` to render the RESP3 representation for debugging.
 
 **Effort:** medium (~2h) — recursive structure across 16 variants.
 

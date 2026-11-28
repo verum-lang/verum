@@ -2993,7 +2993,7 @@ implement<T: PartialEq> PartialEq for List<T> {
         while i < n {
             match (self.get(i), other.get(i)) {
                 (Maybe.Some(a), Maybe.Some(b)) => {
-                    if !(a == b) {
+                    if !a.eq(b) {
                         return false;
                     }
                 }
@@ -3016,7 +3016,7 @@ implement<T: PartialEq> PartialEq for List<T> {
         while i < n {
             match (self.get(i), other.get(i)) {
                 (Maybe.Some(a), Maybe.Some(b)) => {
-                    if !(a == b) {
+                    if !a.eq(b) {
                         return true;
                     }
                 }

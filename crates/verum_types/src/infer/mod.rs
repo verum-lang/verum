@@ -24,6 +24,7 @@ mod protocol_methods;
 mod protocol_default_bodies;
 mod function_body_scope;
 mod source_impl_signatures;
+mod recursive_derived_equality;
 mod source_type_registration;
 mod nominal_type_obligations;
 mod source_protocol_header;

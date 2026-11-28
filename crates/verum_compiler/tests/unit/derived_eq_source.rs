@@ -8,6 +8,135 @@ public type Eq is protocol extends PartialEq {};
 "#;
 
 #[test]
+fn recursive_derived_equality_requires_uniform_owned_descent() {
+    let session = crate::Session::new(crate::CompilerOptions::default());
+    let (registry, phase) = release_stdlib_graph(&session);
+    let imports = "mount core.base.protocols.{PartialEq,Eq}; mount core.collections.list.List;";
+    for (name, body, expected) in [
+        (
+            "children",
+            "@derive(PartialEq) type Tree is Leaf(Float) | Branch(List<Tree>) | Pairs(List<(Tree,Tree)>);",
+            None,
+        ),
+        (
+            "wrapped",
+            "type Children<T> is { values:List<T> };
+            implement<T:PartialEq> PartialEq for Children<T> {
+                fn eq(&self, other:&Self)->Bool { self.values.eq(&other.values) } }
+            @derive(PartialEq) type Tree is Leaf(Float) | Nodes(Children<Tree>);",
+            None,
+        ),
+        (
+            "total",
+            "@derive(Eq) type Tree is Leaf(Int) | Branch(List<Tree>) | Pairs(List<(Tree,Tree)>);
+            fn need_total<T:Eq>(v:&T)->Bool {true}
+            fn total_tree(v:&Tree)->Bool {need_total(v)}",
+            None,
+        ),
+        (
+            "specialized",
+            "type Children<T> is { values:List<T> };
+            implement PartialEq for Children<Tree> where type Tree:PartialEq {
+                fn eq(&self, other:&Self)->Bool { true } }
+            @derive(PartialEq) type Tree is Leaf(Float) | Nodes(Children<Tree>);",
+            Some("PartialEq"),
+        ),
+        (
+            "circular",
+            "type Tree is Leaf(Float) | Nodes(List<Tree>);
+            implement PartialEq for Tree where type Tree:PartialEq {
+                fn eq(&self, other:&Self)->Bool { true } }",
+            Some("PartialEq"),
+        ),
+        (
+            "function",
+            "type Sink<T> is { values:List<T>, accepts:fn(T)->Bool };
+            implement<T:PartialEq> PartialEq for Sink<T> {
+                fn eq(&self, other:&Self)->Bool { true } }
+            @derive(PartialEq) type Tree is Leaf(Float) | Nodes(Sink<Tree>);",
+            Some("PartialEq"),
+        ),
+        (
+            "unmet",
+            "type Missing is {value:Int}; type Children<T> is {values:List<T>};
+            implement<T:PartialEq> PartialEq for Children<T> where type Missing:PartialEq {
+                fn eq(&self, other:&Self)->Bool { true } }
+            @derive(PartialEq) type Tree is Leaf(Float) | Nodes(Children<Tree>);",
+            Some("PartialEq"),
+        ),
+        (
+            "partial_leaf",
+            "@derive(Eq) type Tree is Leaf(Float) | Children(List<Tree>);",
+            Some("Eq"),
+        ),
+        (
+            "missing_leaf",
+            "type Missing is { value:Int };
+            @derive(PartialEq) type Tree is Leaf(Missing) | Children(List<Tree>);",
+            Some("PartialEq"),
+        ),
+    ] {
+        let owner = format!("recursive_{name}");
+        let required = expected.unwrap_or("PartialEq");
+        let source = format!(
+            "module {owner}; {imports} {body}
+            fn compare<T:{required}>(a:&T,b:&T)->Bool {{a.eq(b)}}
+            fn use_tree(a:&Tree,b:&Tree)->Bool {{compare(a,b)}}"
+        );
+        let file = session
+            .load_source_string(&source, format!("{owner}.vr").into())
+            .unwrap();
+        let ast = verum_fast_parser::FastParser::new()
+            .parse_module_str(&source, file)
+            .unwrap();
+        let selected =
+            prepare_source_roster(&[(&owner, &owner, &ast)], &TargetConfig::host(), true).unwrap();
+        let module = &selected[0].2;
+        register_sources(&registry, [(owner.as_str(), owner.as_str(), module)]).unwrap();
+        let result =
+            check_source_module(&mut phase.configured_checker(), &owner, module, &registry);
+        if let Some(bound) = expected {
+            let errors = result.expect_err(&owner);
+            assert!(
+                errors.iter().any(|error| error.code() == Some("E405")
+                    && error
+                        .message()
+                        .contains(format!("core::base::protocols::{bound}").as_str())),
+                "{owner}: {errors:?}"
+            );
+        } else {
+            result.unwrap_or_else(|errors| panic!("{owner}: {errors:?}"));
+        }
+    }
+    for (relation, accepted) in [("PartialEq", true), ("Eq", false)] {
+        let source = format!(
+            "module redis_client; mount core.redis.protocol.RespValue;
+            mount core.base.protocols.{relation};
+            fn require<T:{relation}>(v:&T)->Bool {{true}}
+            fn use_reply(v:&RespValue)->Bool {{require(v)}}"
+        );
+        let module = Parser::new(&source).parse_module().unwrap();
+        let result = check_source_module(
+            &mut phase.configured_checker(),
+            "redis_client",
+            &module,
+            &registry,
+        );
+        if accepted {
+            result.unwrap_or_else(|errors| panic!("Redis {relation}: {errors:?}"));
+        } else {
+            let errors = result.expect_err("a RESP double can carry NaN");
+            assert!(
+                errors.iter().any(|error| error.code() == Some("E405")
+                    && error.message().contains("RespValue")
+                    && error.message().contains("core::base::protocols::Eq")),
+                "{errors:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn structural_eq_checks_and_executes_the_declared_components() {
     let source = format!(
         r#"{PROTOCOLS}

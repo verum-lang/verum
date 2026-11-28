@@ -73,7 +73,7 @@ impl TypeChecker {
                 | verum_ast::decl::ImplKind::Inherent(for_type) => for_type,
             };
             let receiver = self.ast_to_type_for_protocol_impl(receiver)?;
-            self.set_current_self_type(Some(receiver));
+            self.set_current_self_type(Some(receiver.clone()));
             let mut clauses = List::new();
             let mut callable_bounds = Map::new();
             for parameter in &source.generics {
@@ -93,6 +93,9 @@ impl TypeChecker {
                             "implementation predicate has no checked condition carrier"));
                     };
                     let subject = self.ast_to_type(ty)?;
+                    if self.proves_derived_equality_component(source, &receiver, ty, &subject, bounds)? {
+                        continue;
+                    }
                     self.append_source_impl_conditions(&subject, bounds, owner, &mut clauses, &mut callable_bounds)?;
                 }
             }

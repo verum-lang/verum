@@ -1,0 +1,20 @@
+// @test: run
+// @tier: 0
+// @level: L2
+// @tags: redis, collections, partial-eq
+// @expected-exit: 0
+// @description: RESP aggregates compare their payloads, including non-reflexive doubles.
+mount core.base.protocols.PartialEq;
+mount core.redis.protocol.RespValue;
+
+fn reply(value: Float) -> RespValue {
+    RespValue.MapValue([(RespValue.Integer(1), RespValue.Array([RespValue.Double(value)]))])
+}
+
+fn main() {
+    let left = reply(2.5);
+    assert(left.eq(&reply(2.5)));
+    assert(!left.eq(&reply(3.5)));
+    let nan = reply(0.0 / 0.0);
+    assert(!nan.eq(&nan));
+}

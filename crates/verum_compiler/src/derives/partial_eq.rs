@@ -77,7 +77,8 @@ fn comparison_carrier(mut ty: &Type) -> &Type {
 
 // Importers consult both declarations before the source owner is checked.
 // Require equality of the stored types, including wrappers that can implement
-// equality independently of their type arguments.
+// equality independently of their type arguments. Preserve the field's source
+// location so the checker can verify a recursive predicate against its owner.
 fn component_conditions(ctx: &DeriveContext, protocol: &str) -> Option<WhereClause> {
     let info = &ctx.type_info;
     let mut predicates = ctx

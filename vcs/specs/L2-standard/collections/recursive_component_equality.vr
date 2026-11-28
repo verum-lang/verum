@@ -1,0 +1,32 @@
+// @test: run
+// @tier: 0
+// @level: L2
+// @tags: collections, protocols, equality
+// @expected-exit: 0
+// @description: Recursive comparisons use each stored element's declared relation.
+mount core.base.protocols.PartialEq;
+mount core.collections.list.List;
+
+type Label is { key: Int };
+
+implement PartialEq for Label {
+    fn eq(&self, other: &Self) -> Bool { self.key % 10 == other.key % 10 }
+}
+
+@derive(PartialEq)
+type Tree is Leaf(Float) | Tag(Label) | Branch(List<Tree>) | Pairs(List<(Tree, Tree)>);
+
+fn labeled(key: Int) -> Tree {
+    Tree.Pairs([(Tree.Leaf(0.0), Tree.Branch([Tree.Tag(Label { key: key })]))])
+}
+
+fn main() {
+    let first = labeled(2);
+    assert(first.eq(&labeled(12)));
+    assert(!first.eq(&labeled(13)));
+    let tags: List<Label> = [Label { key: 2 }];
+    let same: List<Label> = [Label { key: 12 }];
+    let other: List<Label> = [Label { key: 13 }];
+    assert(!tags.ne(&same));
+    assert(tags.ne(&other));
+}

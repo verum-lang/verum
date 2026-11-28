@@ -60,7 +60,7 @@ mount collections.{List, Map};
 // RESP value
 // =============================================================================
 
-@derive(Eq, Clone, Debug)
+@derive(PartialEq, Clone, Debug)
 public type RespValue is
     | SimpleString(Text)
     | Error_(Text)
