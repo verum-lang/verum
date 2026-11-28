@@ -237,6 +237,14 @@ fn storage_survives_receiver_argument_and_return() {
 }
 
 #[test]
+fn list_clone_runs_the_declared_element_clone_once_per_element() {
+    with_methods(list_storage::CLONE_ELEMENTS, false, |_, jit| unsafe {
+        let probe = jit.get_function::<unsafe extern "C" fn() -> i64>("probe").unwrap();
+        assert_eq!(probe.call(), 2);
+    });
+}
+
+#[test]
 fn cloned_list_keeps_storage_and_allocator_provenance() {
     with_source(
         r#"

@@ -466,9 +466,14 @@ fn expand_sequence(
                 operands: extended_operands(dest, args),
             });
         }
-        InlineSequenceId::ListStorageStride => {
+        InlineSequenceId::ListStorageStride | InlineSequenceId::ListStorageEmptyLike => {
+            let operation = if matches!(seq, InlineSequenceId::ListStorageEmptyLike) {
+                crate::instruction::MemSubOpcode::ListStorageEmptyLike
+            } else {
+                crate::instruction::MemSubOpcode::ListStorageStride
+            };
             e.emit(Instruction::MemExtended {
-                sub_op: crate::instruction::MemSubOpcode::ListStorageStride.to_byte(),
+                sub_op: operation.to_byte(),
                 operands: extended_operands(dest, args),
             });
         }

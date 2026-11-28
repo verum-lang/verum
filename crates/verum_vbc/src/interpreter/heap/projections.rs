@@ -515,6 +515,30 @@ impl Heap {
             .transpose()
     }
 
+    /// A typed dereference reads the whole VM value from a slot, or decodes
+    /// the declared scalar from a packed element of the same physical width.
+    pub(crate) fn read_projected_scalar_reference(
+        &self,
+        reference: Value,
+        kind: crate::module::CType,
+        width: u8,
+    ) -> InterpreterResult<Option<Value>> {
+        let Some(id) = reference.projection_id() else {
+            return Ok(None);
+        };
+        let target = self.projection_target(id)?;
+        if target.shape == ProjectionShape::Element(ProjectionEncoding::Byte) {
+            if width != 1 {
+                return Err(invalid("scalar width exceeds packed element storage"));
+            }
+            let byte = self.read_projection(target)?.as_i64() as u8;
+            return crate::ffi::read_native_scalar(kind, &[byte])
+                .map(Some)
+                .ok_or_else(|| invalid("invalid packed scalar type"));
+        }
+        self.read_projection(target).map(Some)
+    }
+
     pub(crate) fn write_projected_scalar(
         &self,
         target: Value,

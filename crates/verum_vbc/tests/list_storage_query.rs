@@ -104,3 +104,48 @@ fn unsupported_memory_wire_tag_is_refused() {
     let failure = execute(decoded).unwrap_err().to_string();
     assert!(failure.contains("mem_extended sub-opcode"), "{failure}");
 }
+
+#[test]
+fn clone_storage_requires_its_wire_version_and_two_registers() {
+    use verum_vbc::{
+        Instruction, Reg,
+        bytecode::encode_instruction,
+        encoding::encode_reg,
+        instruction::MemSubOpcode,
+        module::{FunctionDescriptor, FunctionId},
+        validate::validate_module,
+    };
+    let storage = |registers: &[Reg], minor| {
+        let mut module = VbcModule::new("clone_storage".into());
+        let mut function = FunctionDescriptor::new(module.intern_string("clone"));
+        function.id = FunctionId(0);
+        function.register_count = 302;
+        let mut operands = Vec::new();
+        for &reg in registers {
+            encode_reg(reg, &mut operands);
+        }
+        let operation = Instruction::MemExtended {
+            sub_op: MemSubOpcode::ListStorageEmptyLike.to_byte(),
+            operands,
+        };
+        encode_instruction(&operation, &mut module.bytecode);
+        encode_instruction(&Instruction::RetV, &mut module.bytecode);
+        function.bytecode_length = module.bytecode.len() as u32;
+        module.functions.push(function);
+        module.header.function_table_count = 1;
+        module.header.version_minor = minor;
+        module
+    };
+    let minor = verum_vbc::format::LIST_STORAGE_EMPTY_LIKE_VERSION;
+    let registers = [Reg(300), Reg(301)];
+    validate_module(&storage(&registers, minor)).unwrap();
+    assert!(validate_module(&storage(&registers, minor - 1)).is_err());
+    for invalid in [
+        &[Reg(0)][..],
+        &[Reg(0), Reg(1), Reg(2)],
+        &[Reg(302), Reg(0)],
+        &[Reg(0), Reg(302)],
+    ] {
+        assert!(validate_module(&storage(invalid, minor)).is_err(), "{invalid:?}");
+    }
+}

@@ -304,7 +304,12 @@ allocation, with the latter reporting OS allocation failure before changing
 the owner. It copies initialized bytes before releasing the old block.
 
 The internal native allocator takes an explicit canonical encoding (512 or
-527). Ordinary value-slot construction and cloning reuse it. Source `get`,
+527). Ordinary value-slot construction and cloning reuse it. VBC 2.67 adds
+`list_storage_empty_like` for the source implementation of `List.clone`.
+The operation validates the source length, capacity and complete backing
+extent, then allocates an empty destination with the same encoding and room
+for the source's initialized elements. The source method borrows each element
+by index and calls its declared `Clone` implementation once. Source `get`,
 `set`, `push`, `pop`, `insert`, `remove`, `swap` and `swap_remove` use the
 checked owner-based value operations. The legacy native ListPop opcode
 branches before any empty-buffer read and reads nonempty elements using the
@@ -317,12 +322,12 @@ hiding their behavior. These are public parser/codegen tests, not a full CLI
 checker or AOT acceptance. They include reserve, growth, insertion/removal,
 clear/truncate, shrink and regrowth for Byte/Int and record slots; allocation-failure controls
 check preservation of the old owner. Native tests retain the compiler-owned
-checked allocator and exit bodies, substituting only OS allocation/exit
+checked allocator and exit bodies, substituting only OS allocation, release and exit
 edges. Packed native owners are created by the actual internal allocator,
 not by constructing a header in the test.
 
 This is an internal allocation/value-access boundary. The public native
-packed constructor remains disconnected: borrowed `get_unchecked`, indexing,
+packed constructor remains disconnected: borrowed `get_unchecked`,
 raw-pointer methods, iterators and slices still require an explicit storage
 reference contract. Their original address and width cannot be reconstructed
 from a preloaded word or from `&T` alone. Whole native List acceptance remains

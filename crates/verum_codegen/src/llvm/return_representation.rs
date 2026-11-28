@@ -877,6 +877,7 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                 I::MemExtended { sub_op, operands } if matches!(
                     Mem::from_byte(*sub_op),
                     Some(Mem::ListStorageStride
+                        | Mem::ListStorageEmptyLike
                         | Mem::ListStorageRead
                         | Mem::ListStorageWrite
                         | Mem::ListStorageMove
@@ -889,7 +890,7 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                         return BodyFacts::unknown(instructions.len());
                     };
                     use_input(owner, 1, &state);
-                    if operation != Some(Mem::ListStorageStride) {
+                    if !matches!(operation, Some(Mem::ListStorageStride | Mem::ListStorageEmptyLike)) {
                         let Ok(index) = operand() else { return BodyFacts::unknown(instructions.len()); };
                         use_input(index, 8, &state);
                     }
@@ -902,7 +903,7 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                         use_input(count, 8, &state);
                     }
                     if position != operands.len() { return BodyFacts::unknown(instructions.len()); }
-                    let observes = matches!(operation, Some(Mem::ListStorageStride | Mem::ListStorageRead));
+                    let observes = matches!(operation, Some(Mem::ListStorageStride | Mem::ListStorageEmptyLike | Mem::ListStorageRead));
                     if !observes {
                         may_write = true;
                         state.invalidate_storage();

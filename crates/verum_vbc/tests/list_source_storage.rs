@@ -345,6 +345,36 @@ fn ordinary_reordering_rejects_malformed_owners_before_access() {
 }
 
 #[test]
+fn list_clone_runs_the_declared_element_clone_once_per_element() {
+    assert_eq!(execute_with_method_names(list_storage::CLONE_ELEMENTS, false), 2);
+}
+
+#[test]
+fn list_clone_validates_empty_owners_and_preserves_storage_width() {
+    for (ty, width) in [("Byte", 1), ("Int", 8)] {
+        let source = format!(r#"fn probe() -> Int {{
+            let mut values: List<{ty}> = List<{ty}>.new();
+            values.push(7 as {ty});
+            values.push(255 as {ty});
+            let copy = values.clone();
+            assert(copy.len() == 2 && copy.capacity() == 2);
+            assert(copy[0] as Int == 7 && copy[1] as Int == 255);
+            @intrinsic("list_storage_stride", copy)
+        }}"#);
+        assert_eq!(execute_with_method_names(&source, false), width);
+        let damaged = format!(r#"fn probe() -> Int {{
+            let mut values: List<{ty}> = List<{ty}>.new();
+            values.shrink_to_fit();
+            values.cap = 1;
+            let copy = values.clone();
+            copy.len()
+        }}"#);
+        let error = try_execute_with_method_names(&damaged, false).unwrap_err().to_string();
+        assert!(error.contains("backing has no live allocation extent"), "{error}");
+    }
+}
+
+#[test]
 fn retained_owners_survive_serialization_with_their_declared_cleanup() {
     let module = list_storage::compile(list_storage::RETAIN_OWNERSHIP, false);
     let bytes = verum_vbc::serialize::serialize_module(&module).expect("serialize list operations");

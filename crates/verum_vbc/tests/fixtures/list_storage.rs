@@ -13,6 +13,26 @@ pub const RETAIN_PROBES: &[&str] = &[
     "retaining_borrowed_elements_leaves_their_owner_live",
     "retaining_raw_handles_leaves_their_owner_live",
 ];
+pub const CLONE_ELEMENTS: &str = r#"
+    mount core.base.protocols.Clone;
+    static mut CLONES: Int = 0;
+    type Ticket is { id: Int };
+    implement Clone for Ticket {
+        fn clone(&self) -> Ticket {
+            unsafe { CLONES = CLONES + 1; }
+            Ticket { id: self.id + 10 }
+        }
+    }
+    fn probe() -> Int {
+        let mut source: List<Ticket> = List<Ticket>.new();
+        source.push(Ticket { id: 1 });
+        source.push(Ticket { id: 7 });
+        let copy = source.clone();
+        assert(source[0].id == 1 && source[1].id == 7);
+        assert(copy[0].id == 11 && copy[1].id == 17);
+        unsafe { CLONES }
+    }
+"#;
 use verum_vbc::codegen::{ItemFailurePolicy, VbcCodegen};
 fn named_type(ty: &verum_ast::Type, name: &str) -> bool {
     match &ty.kind {
@@ -69,7 +89,7 @@ pub fn source_module(source: &str, rename_methods: bool) -> verum_vbc::VbcModule
     core.items.retain_mut(|item| match &mut item.kind {
         ItemKind::Module(decl) => decl.items.is_none(),
         ItemKind::Mount(_) => true,
-        ItemKind::Type(t) => t.name.name == "List" || (client.clone && t.name.name == "ListIter"),
+        ItemKind::Type(t) => t.name.name == "List",
         ItemKind::Function(f) => f.name.name == "list_max_len",
         ItemKind::Impl(i) if matches!(&i.kind, ImplKind::Inherent(t) if named_type(t, "List")) => {
             let mut aliases = verum_common::List::new();
@@ -122,7 +142,6 @@ pub fn source_module(source: &str, rename_methods: bool) -> verum_vbc::VbcModule
                     ]
                     .contains(&f.name.name.as_str())
                         || (client.retain && matches!(f.name.name.as_str(), "retain" | "retain_mut"))
-                        || (client.clone && f.name.name == "iter")
                 }
             });
             i.items.extend(aliases);
@@ -132,7 +151,6 @@ pub fn source_module(source: &str, rename_methods: bool) -> verum_vbc::VbcModule
             if protocol.as_ident().is_some_and(|name| match name.name.as_str() {
                 "Drop" => named_type(for_type, "List"),
                 "Clone" => client.clone && named_type(for_type, "List"),
-                "Iterator" => client.clone && named_type(for_type, "ListIter"),
                 _ => false,
             })) => true,
         _ => false,
@@ -144,21 +162,6 @@ pub fn source_module(source: &str, rename_methods: bool) -> verum_vbc::VbcModule
                 .kind
                 .type_or_protocol_name()
                 .is_some_and(|name| name.as_str() == "Drop" || (client.clone && name.as_str() == "Clone"))
-    });
-    let mut iterator = parse(include_str!("../../../../core/base/iterator.vr"));
-    iterator.items.retain_mut(|item| {
-        if is_header(item) { return true; }
-        let ItemKind::Type(decl) = &mut item.kind else { return false; };
-        if !client.clone || decl.name.name != "Iterator" { return false; }
-        let verum_ast::decl::TypeDeclBody::Protocol(body) = &mut decl.body else { return false; };
-        body.items.retain(|item| match &item.kind {
-            verum_ast::decl::ProtocolItemKind::Type { name, .. } => name.name == "Item",
-            verum_ast::decl::ProtocolItemKind::Function { decl, .. } => {
-                matches!(decl.name.name.as_str(), "next" | "size_hint")
-            }
-            _ => false,
-        });
-        true
     });
     let mut memory = parse(include_str!("../../../../core/intrinsics/memory.vr"));
     memory.items.retain(|item| is_header(item) || matches!(&item.kind, ItemKind::Function(f) if ["slice_from_raw_parts", "list_storage_stride", "list_storage_read", "list_storage_write", "list_storage_move", "list_storage_resize"].contains(&f.name.name.as_str())));
@@ -210,7 +213,6 @@ pub fn source_module(source: &str, rename_methods: bool) -> verum_vbc::VbcModule
         &root,
         &collections,
         &protocols,
-        &iterator,
         &result_owner,
         &maybe_owner,
         &allocation,

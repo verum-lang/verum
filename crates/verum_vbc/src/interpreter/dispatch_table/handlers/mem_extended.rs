@@ -162,6 +162,7 @@ fn mem_extended_body(
         0x08..=0x0A => super::list_storage::access(state, sub_op),
         0x0C..=0x0F | 0x50..=0x51 => super::deque_storage::access(state, sub_op),
         0x0B => super::list_storage::resize(state),
+        0x52 => super::list_storage::empty_like(state),
         0x28 => super::cbgr::handle_deref(state),
         0x26 | 0x27 | 0x29 | 0x2A => {
             let dst = read_reg(state)?;
@@ -1290,6 +1291,10 @@ unsafe {
                 message: "invalid scalar reference type".into(),
             })?;
             let reference = state.get_reg(src);
+            if let Some(value) = state.heap.read_projected_scalar_reference(reference, kind, width)? {
+                state.set_reg(dst, value);
+                return Ok(DispatchResult::Continue);
+            }
             if let Some(value) = scalar_register_slot(state, reference)? {
                 state.set_reg(dst, value);
                 return Ok(DispatchResult::Continue);
@@ -1314,8 +1319,7 @@ unsafe {
             if address.is_null() { return Err(InterpreterError::NullPointer); }
             // Managed projected fields are complete VM values, including their tags.
             // A foreign pointer names native storage and has no register/slot identity.
-            let managed_slot = reference.is_projected_slot()
-                || (reference.is_fat_ref() && reference.as_fat_ref().len() == 1 && reference.as_fat_ref().reserved == 0)
+            let managed_slot = (reference.is_fat_ref() && reference.as_fat_ref().len() == 1 && reference.as_fat_ref().reserved == 0)
                 || (state.cbgr_mutable_ptrs.contains(&(address as usize))
                     && super::cbgr::bridge_extent_room(state, address as usize).is_none());
             let value = if managed_slot {

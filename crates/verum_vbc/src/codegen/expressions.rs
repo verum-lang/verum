@@ -39764,13 +39764,18 @@ impl VbcCodegen {
                     operands,
                 });
             }
-            InlineSequenceId::ListStorageStride => {
+            InlineSequenceId::ListStorageStride | InlineSequenceId::ListStorageEmptyLike => {
+                let operation = if matches!(seq_id, InlineSequenceId::ListStorageEmptyLike) {
+                    crate::instruction::MemSubOpcode::ListStorageEmptyLike
+                } else {
+                    crate::instruction::MemSubOpcode::ListStorageStride
+                };
                 // The existing bytecode operand API owns a Vec buffer.
                 let mut operands = Vec::new();
                 Self::write_reg(&mut operands, dest.0);
                 for &arg in args { Self::write_reg(&mut operands, arg.0); }
                 self.ctx.emit(Instruction::MemExtended {
-                    sub_op: crate::instruction::MemSubOpcode::ListStorageStride.to_byte(),
+                    sub_op: operation.to_byte(),
                     operands,
                 });
             }

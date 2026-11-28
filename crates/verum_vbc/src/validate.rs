@@ -775,7 +775,30 @@ impl<'a> Validator<'a> {
 
         match instr {
             Instruction::MemExtended { sub_op, operands } => {
-                if let Some(layout) = crate::encoding::PackedArrayLayout::for_subopcode(*sub_op) {
+                if *sub_op == crate::instruction::MemSubOpcode::ListStorageEmptyLike.to_byte() {
+                    if self.module.header.version_minor < crate::format::LIST_STORAGE_EMPTY_LIKE_VERSION {
+                        self.errors.push(VbcError::InvalidInstructionEncoding {
+                            offset: instr_start,
+                            reason: "ListStorageEmptyLike requires VBC minor 67 or newer".into(),
+                        });
+                    }
+                    let mut offset = 0;
+                    for _ in 0..2 {
+                        match crate::encoding::decode_reg(operands, &mut offset) {
+                            Ok(reg) => self.check_reg(reg, max_reg, &func_name),
+                            Err(error) => {
+                                self.errors.push(error);
+                                return;
+                            }
+                        }
+                    }
+                    if offset != operands.len() {
+                        self.errors.push(VbcError::InvalidInstructionEncoding {
+                            offset: instr_start,
+                            reason: "trailing ListStorageEmptyLike operands".into(),
+                        });
+                    }
+                } else if let Some(layout) = crate::encoding::PackedArrayLayout::for_subopcode(*sub_op) {
                     match layout.decode(operands, &mut 0) {
                         Ok(array) => {
                             for reg in array.regs {

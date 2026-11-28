@@ -5026,6 +5026,8 @@ pub enum MemSubOpcode {
     DequeStorageSlice = 0x50,
     /// Project a contiguous writable span (dst, owner, physical start, length).
     DequeStorageSliceMut = 0x51,
+    /// Make an empty List from a validated owner's encoding and initialized length (dst, owner).
+    ListStorageEmptyLike = 0x52,
     // -- Pointer arithmetic + deref leaves (0x10-0x1F), carried over
     //    from SystemSubOpcode 0x60-0x6C (T0852).
     /// Unsigned raw-pointer load (dst, addr, size-imm).
@@ -5152,6 +5154,7 @@ impl MemSubOpcode {
             0x0F => Some(Self::DequeStorageRefMut),
             0x50 => Some(Self::DequeStorageSlice),
             0x51 => Some(Self::DequeStorageSliceMut),
+            0x52 => Some(Self::ListStorageEmptyLike),
             0x10 => Some(Self::DerefRaw),
             0x11 => Some(Self::DerefMutRaw),
             0x12 => Some(Self::DerefRawPtr),
@@ -17363,13 +17366,14 @@ mod tests {
             MemSubOpcode::from_byte(0x0B),
             Some(MemSubOpcode::ListStorageResize)
         );
+        assert_eq!(MemSubOpcode::from_byte(0x52), Some(MemSubOpcode::ListStorageEmptyLike));
         assert_eq!(
             MemSubOpcode::from_byte(0x1F),
             Some(MemSubOpcode::DerefScalarRef)
         );
         assert_eq!(
             sweep(MemSubOpcode::from_byte, MemSubOpcode::to_byte),
-            49, // Includes owned Heap slots and wide reference loads.
+            50, // Includes allocation from a source List storage encoding.
             "MemSubOpcode variant count drift"
         );
     }

@@ -3,7 +3,7 @@ use super::super::{
     error::{BuildExt, CallSiteExt, OptionExt, Result},
     slice_cell::CellEnv,
 };
-use super::{LIST_CAP_OFFSET, LIST_PTR_OFFSET, RuntimeLowering};
+use super::{LIST_CAP_OFFSET, LIST_LEN_OFFSET, LIST_PTR_OFFSET, RuntimeLowering};
 use verum_llvm::{
     AddressSpace, IntPredicate,
     context::Context,
@@ -249,6 +249,11 @@ pub(super) fn define<'ctx>(context: &'ctx Context, module: &Module<'ctx>) -> Res
     let valid_cap = builder
         .build_int_compare(IntPredicate::ULE, capacity, limit, "valid_capacity")
         .or_llvm_err()?;
+    let len_ptr = runtime.list_field_address(&builder, list, LIST_LEN_OFFSET, "length_ptr")?;
+    let length = builder.build_load(i64_ty, len_ptr, "length").or_llvm_err()?.into_int_value();
+    let valid_len = builder.build_int_compare(IntPredicate::ULE, length, capacity, "valid_length")
+        .or_llvm_err()?;
+    let valid_owner = builder.build_and(valid_cap, valid_len, "valid_owner").or_llvm_err()?;
     let valid_index = builder
         .build_int_compare(IntPredicate::ULE, index, capacity, "valid_index")
         .or_llvm_err()?;
@@ -259,7 +264,7 @@ pub(super) fn define<'ctx>(context: &'ctx Context, module: &Module<'ctx>) -> Res
         .build_int_compare(IntPredicate::ULE, count, remaining, "valid_count")
         .or_llvm_err()?;
     let valid = builder
-        .build_and(valid_cap, valid_index, "valid_owner_index")
+        .build_and(valid_owner, valid_index, "valid_owner_index")
         .or_llvm_err()?;
     let valid = builder
         .build_and(valid, valid_count, "valid_range")

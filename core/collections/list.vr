@@ -2954,9 +2954,12 @@ implement<T> Drop for List<T> {
 
 implement<T: Clone> Clone for List<T> {
     fn clone(&self) -> List<T> {
-        let mut new_list = List.with_capacity(self.len);
-        for item in self.iter() {
+        let mut new_list: List<T> = @intrinsic("list_storage_empty_like", self);
+        let mut index = 0;
+        while index < self.len {
+            let item = &self[index];
             new_list.push(item.clone());
+            index = index + 1;
         }
         new_list
     }

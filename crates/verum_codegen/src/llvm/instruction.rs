@@ -27516,6 +27516,44 @@ fn lower_mem_extended<'ctx>(
             ctx.set_register(dst, result);
             Ok(())
         }
+        op if op == MemSubOpcode::ListStorageEmptyLike.to_byte() => {
+            let dst = read_reg_varlen(operands, &mut pos)?;
+            let list = read_reg_varlen(operands, &mut pos)?;
+            let value = ctx.get_register(list)?;
+            let value = ctx.reference_value_view(list, value)?;
+            let owner = as_ptr(ctx, value, "clone_storage_source")?;
+            let module = ctx.get_module();
+            let address = module
+                .get_function("verum_list_storage_address")
+                .or_missing_fn("verum_list_storage_address")?;
+            let allocate = module
+                .get_function("verum_list_allocate_storage")
+                .or_missing_fn("verum_list_allocate_storage")?;
+            let word = ctx.types().i64_type();
+            let zero = word.const_zero();
+            let builder = ctx.builder();
+            builder
+                .build_call(address, &[owner.into(), zero.into(), zero.into()], "valid_clone_owner")
+                .or_llvm_err()?;
+            let length_slot = RuntimeLowering::new(ctx.llvm_context()).list_field_address(
+                builder, owner, super::runtime::LIST_LEN_OFFSET, "clone_source_length",
+            )?;
+            let length = builder
+                .build_load(word, length_slot, "source_length")
+                .or_llvm_err()?
+                .into_int_value();
+            let encoding = builder
+                .build_load(ctx.llvm_context().i32_type(), owner, "clone_source_encoding")
+                .or_llvm_err()?
+                .into_int_value();
+            let result = builder
+                .build_call(allocate, &[length.into(), encoding.into()], "clone_destination")
+                .or_llvm_err()?
+                .basic_value_or("List allocator returned void")?;
+            ctx.set_register(dst, result);
+            ctx.mark_list_register(dst);
+            Ok(())
+        }
         0x0B => {
             let dst = read_reg_varlen(operands, &mut pos)?;
             let list = read_reg_varlen(operands, &mut pos)?;

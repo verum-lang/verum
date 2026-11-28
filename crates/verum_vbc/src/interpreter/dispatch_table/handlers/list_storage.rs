@@ -17,6 +17,7 @@ fn invalid(message: impl Into<verum_common::Text>) -> InterpreterError {
 
 struct Storage {
     data: *mut u8,
+    encoding: crate::TypeId,
     width: usize,
     capacity: usize,
     owner: usize,
@@ -59,6 +60,7 @@ impl Storage {
         if capacity == 0 && data.is_null() {
             return Ok(Self {
                 data,
+                encoding: header.type_id,
                 width,
                 capacity,
                 owner: owner as usize,
@@ -80,6 +82,7 @@ impl Storage {
         }
         Ok(Self {
             data: backing.data,
+            encoding: header.type_id,
             width,
             capacity,
             owner: owner as usize,
@@ -442,6 +445,45 @@ pub(super) fn access(
         }
         _ => return Err(invalid("unsupported List storage operation")),
     }
+    Ok(DispatchResult::Continue)
+}
+
+/// Allocate the clone destination after checking the complete source owner.
+pub(super) fn empty_like(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+    let dst = read_reg(state)?;
+    let src = read_reg(state)?;
+    let storage = Storage::resolve(state, state.get_reg(src))?;
+    let capacity = storage.len;
+    let owner = state.heap.alloc(storage.encoding, 3 * std::mem::size_of::<Value>())?;
+    state.record_allocation();
+    let backing = if capacity == 0 {
+        Value::from_ptr(std::ptr::null_mut::<()>())
+    } else {
+        let allocation = if storage.width == 1 {
+            state.heap.alloc(storage.encoding, capacity)
+        } else {
+            state.heap.alloc_array(crate::TypeId::UNIT, capacity)
+        };
+        match allocation {
+            Ok(backing) => {
+                state.record_allocation();
+                Value::from_ptr(backing.as_ptr().cast::<u8>())
+            }
+            Err(error) => {
+                // SAFETY: the unexposed wrapper is this instruction's only allocation.
+                unsafe { state.heap.free(owner) };
+                return Err(error);
+            }
+        }
+    };
+    // SAFETY: this fresh wrapper contains exactly the three declared List fields.
+    unsafe {
+        let fields = owner.as_ptr().cast::<u8>().add(heap::OBJECT_HEADER_SIZE).cast::<Value>();
+        fields.write(Value::from_i64(0));
+        fields.add(1).write(Value::from_i64(capacity as i64));
+        fields.add(2).write(backing);
+    }
+    state.set_reg(dst, Value::from_ptr(owner.as_ptr().cast::<u8>()));
     Ok(DispatchResult::Continue)
 }
 

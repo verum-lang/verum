@@ -1245,6 +1245,8 @@ pub enum InlineSequenceId {
     HeapSlotBorrow { mutable: bool },
     /// Query the physical element width of an existing List carrier.
     ListStorageStride,
+    /// Allocate an empty List with the source owner's physical element encoding.
+    ListStorageEmptyLike,
     /// Read an initialized element using its owner's physical encoding.
     ListStorageRead,
     /// Write an element using its owner's physical encoding.
@@ -2716,6 +2718,16 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::HeapSlotBorrow { mutable: true }),
         mlir_op: None,
         doc: "Mutably borrow the declared payload from its live Heap allocation",
+    },
+    Intrinsic {
+        name: "list_storage_empty_like",
+        category: IntrinsicCategory::Memory,
+        hints: &[IntrinsicHint::Alloc, IntrinsicHint::MayTrap, IntrinsicHint::Generic, IntrinsicHint::Inline],
+        param_count: 1,
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::ListStorageEmptyLike),
+        mlir_op: None,
+        doc: "Allocate an empty List with the validated source's encoding and room for its initialized elements",
     },
     Intrinsic {
         name: "list_storage_stride",
