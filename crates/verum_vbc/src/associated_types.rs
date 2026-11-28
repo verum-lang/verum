@@ -18,6 +18,18 @@ impl DeclarationLookup for VbcModule {
     fn spelling(&self, id: StringId) -> Option<&str> { self.get_string(id) }
 }
 
+pub(crate) fn declared_members(protocol: &TypeDescriptor) -> Option<impl Iterator<Item = (&str, usize)>> {
+    let source = protocol.source_declaration.as_ref()?;
+    let body = match &source.body {
+        verum_ast::TypeDeclBody::Protocol(body) | verum_ast::TypeDeclBody::Coinductive(body) => body,
+        _ => return None,
+    };
+    Some(body.items.iter().filter_map(|item| match &item.kind {
+        verum_ast::decl::ProtocolItemKind::Type { name, type_params, .. } => Some((name.as_str(), type_params.len())),
+        _ => None,
+    }))
+}
+
 /// A reference has its own complete storage representation. Operations that
 /// inspect a semantic signature, including calls to user code, need its target.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -67,19 +79,11 @@ fn projection_in(
     for row in &owner.protocols {
         if qualifier.is_some_and(|application| application.protocol != row.protocol) { continue; }
         let Some(protocol) = declarations.descriptor(TypeId(row.protocol.0)) else { return Ok(None); };
-        let Some(source) = &protocol.source_declaration else { return Ok(None); };
-        let declaration = match &source.body {
-            verum_ast::TypeDeclBody::Protocol(body) | verum_ast::TypeDeclBody::Coinductive(body) => body,
-            _ => return Ok(None),
-        };
-        let member = declaration.items.iter().find_map(|item| match &item.kind {
-            verum_ast::decl::ProtocolItemKind::Type { name, type_params, .. } if name.name.as_str() == assoc => Some(type_params),
-            _ => None,
-        });
-        let Some(parameters) = member else { continue; };
+        let Some(mut members) = declared_members(protocol) else { return Ok(None); };
+        let Some((_, arity)) = members.find(|(name, _)| *name == assoc) else { continue; };
         // An erased equation is still a declaration of this member. It cannot
         // make a competing protocol the unique owner of an unqualified name.
-        if !protocol.type_params.is_empty() || !parameters.is_empty()
+        if !protocol.type_params.is_empty() || arity != 0
             || !row.source_implementation.as_ref().is_some_and(|source| source.has_unconditional_member(assoc))
         { return Ok(None); }
         if let Some(previous) = selected {

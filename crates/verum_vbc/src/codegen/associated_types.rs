@@ -70,10 +70,13 @@ impl ConcreteImplType {
     }
 }
 
-struct ConditionalEquation {
-    source: verum_ast::source_implementation::AssociatedImplementationSource,
-    target: TypeRef,
-    bindings: TypeSubstitution,
+enum MemberEquation {
+    Known(TypeRef),
+    Conditional {
+        source: verum_ast::source_implementation::AssociatedImplementationSource,
+        target: TypeRef,
+        carried: Option<TypeRef>,
+    },
 }
 
 impl VbcCodegen {
@@ -112,16 +115,22 @@ impl VbcCodegen {
         self.proven_protocol_member(actual, protocol, &[], member, 0, &mut remaining)
     }
 
-    fn proven_protocol_member(
+    pub(super) fn proven_protocol_member(
         &mut self, actual: &TypeRef, protocol: TypeId, args: &[TypeRef], member: &str,
         depth: usize, remaining: &mut usize,
     ) -> Option<TypeRef> {
         *remaining = remaining.checked_sub(1)?;
         if depth >= crate::types::MAX_TYPE_REF_DEPTH { return None; }
-        let (value, condition) = self.implementation_member_candidate(actual, protocol, args, member)?;
-        let Some(condition) = condition else { return Some(value); };
-        let bounds = self.proven_member_bounds(&condition.source, actual, protocol, args).ok()??;
-        self.instantiate_member_equation(&condition.target, &condition.bindings, &bounds, depth + 1, remaining)
+        match self.implementation_member_candidate(actual, protocol, args, member)? {
+            MemberEquation::Known(value) => Some(value),
+            MemberEquation::Conditional { source, target, carried } => {
+                let proof = self.proven_member_bounds(&source, actual, protocol, args).ok()??;
+                if let Some(carried) = carried && carried != proof.bindings.apply(&target).ok()? {
+                    return None;
+                }
+                self.instantiate_member_equation(&target, &proof.bindings, &proof.bounds, depth + 1, remaining)
+            }
+        }
     }
 
     fn instantiate_member_equation(
@@ -162,13 +171,15 @@ impl VbcCodegen {
     pub(super) fn selected_protocol_implementation_member(
         &self, actual: &TypeRef, protocol: TypeId, protocol_arguments: &[TypeRef], member: &str,
     ) -> Option<TypeRef> {
-        let (value, condition) = self.implementation_member_candidate(actual, protocol, protocol_arguments, member)?;
-        condition.is_none().then_some(value)
+        match self.implementation_member_candidate(actual, protocol, protocol_arguments, member)? {
+            MemberEquation::Known(value) => Some(value),
+            MemberEquation::Conditional { .. } => None,
+        }
     }
 
     fn implementation_member_candidate(
         &self, actual: &TypeRef, protocol: TypeId, protocol_arguments: &[TypeRef], member: &str,
-    ) -> Option<(TypeRef, Option<ConditionalEquation>)> {
+    ) -> Option<MemberEquation> {
         use super::{formal_parameters::DeclarationTypeScope, source_substitution::SourceTypeSubstitution};
         use crate::{mono::match_declared_types, types::TypeParamId};
         use verum_ast::{decl::{ImplItemKind, ImplKind}, ty::GenericParamKind};
@@ -196,22 +207,22 @@ impl VbcCodegen {
             if self.nominal_type_id_in_scope(&Self::format_type_path(path), source.origin_module())
                     != Some(TypeId(row.protocol.0))
             { return None; }
-            let mut parameters = Map::new();
-            let mut ids = List::new();
+            let mut names = Vec::new();
             let mut conditional = false;
             for parameter in &implementation.generics {
                 match &parameter.kind {
                     GenericParamKind::Type { name, bounds, .. } => {
-                        let id = u16::try_from(ids.len()).ok()?;
-                        if parameters.insert(name.name.to_string(), id).is_some() { return None; }
-                        ids.push(TypeParamId(id));
+                        if names.len() >= usize::from(u16::MAX) { return None; }
+                        names.push(name.name.to_string());
                         conditional |= !bounds.is_empty();
                     }
                     GenericParamKind::Lifetime { .. } => {}
                     _ => return None,
                 }
             }
-            let parameters = parameters.into();
+            let parameters = self.impl_generic_scope_for_owner(Some(id), &names);
+            if parameters.len() != names.len() { return None; }
+            let ids: List<_> = parameters.values().copied().map(TypeParamId).collect();
             let lexical = DeclarationTypeScope {
                 owner: source.origin_module(), substitution: &empty, receiver: None,
             };
@@ -241,7 +252,7 @@ impl VbcCodegen {
             if declared_arguments != protocol_arguments { continue; }
             conditional |= implementation.generic_where_clause.as_ref().is_some_and(|clause| !clause.predicates.is_empty())
                 || implementation.meta_where_clause.as_ref().is_some_and(|clause| !clause.predicates.is_empty());
-            if implementation.specialize_attr.is_some() || ids.iter().any(|id| bindings.get(*id).is_none())
+            if implementation.specialize_attr.is_some() || (!conditional && ids.iter().any(|id| bindings.get(*id).is_none()))
             { return None; }
             let mut assignments = implementation.items.iter().filter_map(|item| match &item.kind {
                 ImplItemKind::Type { name, ty, type_params } if name.name.as_str() == member =>
@@ -254,19 +265,23 @@ impl VbcCodegen {
             let body = self.semantic_formal_type_in_declaration(
                 body, &parameters, &ids, &Default::default(), &lexical,
             )?;
-            let result = bindings.apply(&body).ok()?;
-            if !self.declared_type_in_scope(&result) { return None; }
             // A retained unconditional row must agree with its source. It is
             // never a replacement for a missing or contradictory source head.
-            for (name, carried) in &row.associated_types {
-                if self.ctx.strings.get(name.0 as usize).is_some_and(|name| name == member)
-                    && TypeSubstitution::new(&owner.type_params, arguments).apply(carried).ok()? != result
-                { return None; }
-            }
-            let condition = conditional.then(|| ConditionalEquation {
-                source: source.clone(), target: body, bindings,
+            let mut carried = row.associated_types.iter().filter(|(name, _)|
+                self.ctx.strings.get(name.0 as usize).is_some_and(|name| name == member));
+            let carried = match carried.next() {
+                Some((_, witness)) if carried.next().is_none() =>
+                    Some(TypeSubstitution::new(&owner.type_params, arguments).apply(witness).ok()?),
+                Some(_) => return None,
+                None => None,
+            };
+            selected = Some(if conditional {
+                MemberEquation::Conditional { source: source.clone(), target: body, carried }
+            } else {
+                let value = bindings.apply(&body).ok()?;
+                if !self.declared_type_in_scope(&value) || carried.is_some_and(|other| other != value) { return None; }
+                MemberEquation::Known(value)
             });
-            selected = Some((result, condition));
         }
         selected
     }

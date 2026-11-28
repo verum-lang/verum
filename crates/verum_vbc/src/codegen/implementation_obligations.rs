@@ -159,6 +159,11 @@ struct Premises {
     unknown: Maybe<Text>,
 }
 
+pub(super) struct ProvenImplementation {
+    pub bindings: TypeSubstitution,
+    pub bounds: Map<TypeRef, List<super::protocol_results::BoundProtocol>>,
+}
+
 impl VbcCodegen {
     /// Collected across the whole source unit before any method is selected.
     pub(super) fn record_implementation_header(
@@ -518,7 +523,7 @@ impl VbcCodegen {
         prepared: &mut Maybe<PreparedImplementation>,
         goal: &Goal,
         assumptions: &Premises,
-    ) -> CodegenResult<Maybe<Premises>> {
+    ) -> CodegenResult<Maybe<(Premises, TypeSubstitution)>> {
         self.with_protocol_source_scope(
             Some(header.source.origin_module().into()),
             Default::default(),
@@ -574,12 +579,12 @@ impl VbcCodegen {
                 // symbolic requirements before crossing into the caller space.
                 if scope.values().any(|id| bindings.get(TypeParamId(*id)).is_none()) {
                     let symbolic = cg.implementation_premises(declaration, scope)?;
-                    infer_implementation_bindings(&symbolic, assumptions, &mut bindings, declaration.span)?;
+                    infer_implementation_bindings(cg, &symbolic, assumptions, &mut bindings, declaration.span)?;
                 }
                 let mut substitution = SourceTypeSubstitution::default();
                 for (name, id) in scope.iter() {
                     let Some(actual) = bindings.get(TypeParamId(*id)) else {
-                        return Ok(Some(Premises {
+                        return Ok(Some((Premises {
                             unknown: Some(format!(
                                 "implementation has an undetermined parameter '{name}' in '{}' for '{}'",
                                 header.source.origin_module(),
@@ -587,7 +592,7 @@ impl VbcCodegen {
                                     .unwrap_or_else(|| format!("{:?}", receiver.ty)),
                             ).into()),
                             ..Default::default()
-                        }));
+                        }, bindings)));
                     };
                     let witness = ImplReceiverWitness { ty: actual.clone(), semantic: true };
                     if let Some((_, domain)) = source_bindings.get_value(name) {
@@ -632,7 +637,7 @@ impl VbcCodegen {
                                 }
                             }
                         }
-                        Ok(Some(premises))
+                        Ok(Some((premises, bindings)))
                     },
                 )
             },
@@ -644,7 +649,7 @@ impl VbcCodegen {
     pub(super) fn proven_member_bounds(
         &mut self, source: &AssociatedImplementationSource, subject: &TypeRef, protocol: TypeId,
         arguments: &[TypeRef],
-    ) -> CodegenResult<Maybe<Map<TypeRef, List<super::protocol_results::BoundProtocol>>>> {
+    ) -> CodegenResult<Maybe<ProvenImplementation>> {
         let declaration = source.declaration().map_err(|reason| invalid(reason, Span::default()))?;
         let span = declaration.span;
         let header = ImplementationHeader { source: source.clone(), declaration: Arc::new(declaration) };
@@ -666,7 +671,7 @@ impl VbcCodegen {
         assumptions.callables.extend(self.ctx.registers.callable_bound_signatures.iter()
             .map(|(id, signature)| (TypeRef::Generic(*id), signature.clone())));
         let mut prepared = None;
-        let Some(required) = self.implementation_alternative(&header, &mut prepared, &goal, &assumptions)? else {
+        let Some((required, bindings)) = self.implementation_alternative(&header, &mut prepared, &goal, &assumptions)? else {
             return Ok(None);
         };
         if required.impossible || required.unknown.is_some()
@@ -686,7 +691,7 @@ impl VbcCodegen {
             let associated = goal.associated.into_iter().map(|(name, ty)| (name.to_string(), ty)).collect();
             bounds.entry(goal.subject).or_default().push(super::protocol_results::BoundProtocol { application, associated });
         }
-        Ok(Some(bounds))
+        Ok(Some(ProvenImplementation { bindings, bounds }))
     }
 
     pub(super) fn blanket_requirements_hold(
@@ -810,7 +815,7 @@ impl VbcCodegen {
                 if matches!(protocol_heads, ProtocolHeadFilter::Declared(heads) if !heads.contains(&goal.protocol)) {
                     continue;
                 }
-                let Some(premises) = self.implementation_alternative(header, implementation, &goal, assumptions)? else {
+                let Some((premises, _)) = self.implementation_alternative(header, implementation, &goal, assumptions)? else {
                     continue;
                 };
                 if premises.impossible {
@@ -939,6 +944,7 @@ fn retain_evidence(
 /// its associated outputs once its subject and every argument are known. Each
 /// pass either binds a new implementation parameter or reaches a fixed point.
 fn infer_implementation_bindings(
+    cg: &VbcCodegen,
     requirements: &Premises,
     assumptions: &Premises,
     bindings: &mut TypeSubstitution,
@@ -963,6 +969,24 @@ fn infer_implementation_bindings(
             if goal.associated.is_empty() { continue; }
             let Some(subject) = determined_subject(&goal.subject, bindings) else { continue };
             let mut selected = None;
+            // A nominal subject can supply the same evidence as a caller
+            // premise. Only a fully selected, unconditional source equation
+            // may introduce a binder here. The instantiated premises are
+            // still discharged by the obligation graph.
+            if goal.arguments.iter().all(|ty| super::constructor_types::fully_bound(ty, bindings)) {
+                let args: List<_> = goal.arguments.iter().map(|ty| bindings.apply(ty))
+                    .collect::<Result<_, _>>().map_err(|error| invalid(error.to_string(), span))?;
+                let mut candidate = bindings.clone();
+                let mut complete = true;
+                for (member, pattern) in &goal.associated {
+                    let Some(actual) = cg.selected_protocol_implementation_member(subject, goal.protocol, &args, member) else {
+                        complete = false;
+                        break;
+                    };
+                    if !match_evidence(pattern, &actual, &mut candidate, span)? { complete = false; break; }
+                }
+                if complete { selected = Some(candidate); }
+            }
             for fact in &assumptions.goals {
                 if fact.protocol != goal.protocol || fact.subject != *subject
                     || fact.arguments.len() != goal.arguments.len() { continue; }

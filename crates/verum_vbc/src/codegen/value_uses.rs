@@ -585,7 +585,8 @@ impl super::VbcCodegen {
             }
             // Generic parameters carry the selected caller's exact witness.
             // A cleared slot is Unit and typed cleanup is idempotent for it.
-            self.ctx.emit(Instruction::DropTyped { src: binding.reg, type_ref: ty });
+            let type_ref = self.runtime_member_witness(ty);
+            self.ctx.emit(Instruction::DropTyped { src: binding.reg, type_ref });
         }
     }
 
@@ -630,7 +631,8 @@ impl super::VbcCodegen {
             // Drop glue: a sum's active payload and generic owned fields cannot
             // be recovered from the erased record layout. References retire
             // only their binding slot and leave the referent live.
-            self.ctx.emit(Instruction::DropTyped { src, type_ref: ty.clone() });
+            let type_ref = self.runtime_member_witness(ty.clone());
+            self.ctx.emit(Instruction::DropTyped { src, type_ref });
         } else {
             self.ctx.emit(Instruction::DropRef { src });
         }

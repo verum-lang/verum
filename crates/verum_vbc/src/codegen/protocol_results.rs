@@ -1,6 +1,6 @@
 //! Method declarations selected through protocol objects and constrained type parameters.
 use super::{CodegenError, CodegenErrorKind, CodegenResult, VbcCodegen};
-use crate::types::TypeRef;
+use crate::types::{TypeId, TypeRef};
 use verum_ast::{Expr, ExprKind};
 use verum_common::{List, Map, Maybe};
 
@@ -278,12 +278,8 @@ impl VbcCodegen {
         let hierarchy = self.protocol_hierarchy(bounds, Some(subject))?;
         let mut member_owner = None;
         for bound in &hierarchy {
-            let source = self.type_by_id(bound.application.base_type_id()?)?.source_declaration.as_ref()?;
-            let verum_ast::TypeDeclBody::Protocol(body) = &source.body else { return None; };
-            if body.items.iter().any(|item| matches!(&item.kind,
-                verum_ast::decl::ProtocolItemKind::Type { name, type_params, .. }
-                    if name.name.as_str() == member && type_params.is_empty()))
-            {
+            let owner = self.type_by_id(bound.application.base_type_id()?)?;
+            if crate::associated_types::declared_members(owner)?.any(|entry| entry == (member, 0)) {
                 if member_owner.as_ref().is_some_and(|prior| prior != &bound.application) { return None; }
                 member_owner = Some(bound.application.clone());
             }
@@ -291,11 +287,27 @@ impl VbcCodegen {
         member_owner
     }
 
-    /// Carry the declaring protocol into a frame operation whose result
-    /// depends on the caller's substitution for a bound type parameter.
-    pub(super) fn runtime_member_witness(&self, ty: TypeRef) -> TypeRef {
+    /// Infer an unqualified nominal member's owner only when its declaration
+    /// is unique and its application requires no missing protocol arguments.
+    fn nominal_member_owner(&self, subject: &TypeRef, member: &str) -> Maybe<crate::types::ProtocolApplication> {
+        let mut selected = None;
+        for row in &self.type_by_id(subject.base_type_id()?)?.protocols {
+            let owner = self.type_by_id(TypeId(row.protocol.0))?;
+            let Some((_, arity)) = crate::associated_types::declared_members(owner)?.find(|(name, _)| *name == member)
+                else { continue; };
+            if arity != 0 || !owner.type_params.is_empty() || selected.is_some_and(|prior| prior != row.protocol) {
+                return None;
+            }
+            selected = Some(row.protocol);
+        }
+        selected.map(|protocol| crate::types::ProtocolApplication { protocol, args: Vec::new() })
+    }
+
+    /// Discharge concrete projections before serializing a frame operation.
+    /// Open projections keep their exact declaring application for substitution.
+    pub(super) fn runtime_member_witness(&mut self, ty: TypeRef) -> TypeRef {
         fn qualify(
-            cg: &VbcCodegen, ty: &TypeRef, depth: usize, remaining: &mut usize,
+            cg: &mut VbcCodegen, ty: &TypeRef, depth: usize, remaining: &mut usize,
         ) -> CodegenResult<TypeRef> {
             if depth >= crate::types::MAX_TYPE_REF_DEPTH || *remaining == 0 {
                 return Err(CodegenError::internal("runtime member witness exceeds its type budget"));
@@ -304,18 +316,28 @@ impl VbcCodegen {
             let mut ty = super::type_equalities::map_children(ty, 0, &mut |part, binders| {
                 if binders == 0 { qualify(cg, part, depth + 1, remaining) } else { Ok(part.clone()) }
             })?;
-            if let TypeRef::AssociatedProjection { base, qualifier, assoc, args } = &mut ty
-                && qualifier.is_none() && args.is_empty()
-                && let Some(bounds) = cg.current_protocol_bounds.get(base.as_ref())
-                && let Some(TypeRef::Concrete(protocol)) = cg.bound_member_owner(bounds.clone(), base, assoc)
-            {
-                *qualifier = Some(crate::types::ProtocolApplication {
-                    protocol: crate::types::ProtocolId(protocol.0), args: vec![],
-                });
+            if let TypeRef::AssociatedProjection { base, qualifier, assoc, args } = &mut ty && args.is_empty() {
+                if qualifier.is_none() {
+                    *qualifier = match cg.current_protocol_bounds.get(base.as_ref()) {
+                        Some(bounds) => cg.bound_member_owner(bounds.clone(), base, assoc).and_then(|application| {
+                            let (owner, args) = match application {
+                                TypeRef::Concrete(owner) => (owner, Vec::new()),
+                                TypeRef::Instantiated { base, args } => (base, args),
+                                _ => return None,
+                            };
+                            Some(crate::types::ProtocolApplication { protocol: crate::types::ProtocolId(owner.0), args })
+                        }),
+                        None => cg.nominal_member_owner(base, assoc),
+                    };
+                }
+                if let Some(application) = qualifier && crate::mono::is_concrete_type(base)
+                    && let Some(value) = cg.proven_protocol_member(base, TypeId(application.protocol.0),
+                        &application.args, assoc, depth + 1, remaining)
+                { return Ok(value); }
             }
             Ok(ty)
         }
-        if self.current_protocol_bounds.is_empty() || matches!(ty, TypeRef::Generic(_) | TypeRef::Concrete(_)) {
+        if matches!(ty, TypeRef::Generic(_) | TypeRef::Concrete(_)) || crate::mono::is_concrete_type(&ty) {
             return ty;
         }
         let mut remaining = crate::types::MAX_TYPE_REF_NODES;

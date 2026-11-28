@@ -1024,7 +1024,7 @@ fn actual_chain_iterator_max_completes_its_associated_implementation_parameter()
         });
         module
     });
-    let consumer = parse(r#"
+    let source = r#"
         module consumer;
         mount core.base.iterator.{Iterator, ChainIter};
         mount core.base.maybe.Maybe;
@@ -1043,8 +1043,36 @@ fn actual_chain_iterator_max_completes_its_associated_implementation_parameter()
             };
             match values.max() { Maybe.Some(value) => value, Maybe.None => 0 }
         }
-    "#);
-    execute_source_and_wire(compile(&[&ordering, &maybe, &protocols, &iterator, &consumer]).unwrap(), 7);
+    "#;
+    let consumer = parse(source);
+    let module = compile(&[&ordering, &maybe, &protocols, &iterator, &consumer]).unwrap();
+    let run = module.get_function(module.find_function_by_name("consumer.run").unwrap()).unwrap();
+    let start = run.bytecode_offset as usize;
+    let body = decode_instructions(&module.bytecode[start..start + run.bytecode_length as usize]).unwrap();
+    use verum_vbc::types::{TypeId, TypeRef};
+    assert!(body.iter().any(|operation| matches!(operation,
+        Instruction::DropTyped { type_ref: TypeRef::Instantiated { base, args }, .. }
+        if module.get_type(*base).and_then(|ty| module.get_string(ty.name)) == Some("Maybe")
+            && args.as_slice() == [TypeRef::Concrete(TypeId::INT)])),
+        "the result must retire Maybe<Int> under the proved Item = Int equation");
+    execute_source_and_wire(module, 7);
+
+    for (item, value) in [("Int", "7"), ("Bool", "true")] {
+        let declaration = format!("type Other is {{ remaining: Bool }}; implement Iterator for Other {{
+            type Item = {item}; fn next(&mut self) -> Maybe<{item}> {{
+                if self.remaining {{ self.remaining = false; Maybe.Some({value}) }} else {{ Maybe.None }}
+            }}
+        }} fn run()");
+        let mixed = parse(&source.replace("fn run()", &declaration)
+            .replace("second: Sequence { value: 7, remaining: true }", "second: Other { remaining: true }"));
+        let result = compile(&[&ordering, &maybe, &protocols, &iterator, &mixed]);
+        if item == "Int" {
+            execute_source_and_wire(result.unwrap(), 7);
+        } else {
+            let error = result.err().expect("the two independently selected Iterator.Item declarations must agree");
+            assert!(matches!(error.kind, verum_vbc::codegen::CodegenErrorKind::TypeInference(_)), "{error}");
+        }
+    }
 }
 
 #[test]

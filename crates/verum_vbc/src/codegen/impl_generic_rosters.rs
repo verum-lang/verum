@@ -499,8 +499,12 @@ impl VbcCodegen {
         implementation: &ImplKind,
         generics: &[String],
     ) -> std::collections::HashMap<String, u16> {
-        let parent_names = self
-            .implementation_nominal_id(implementation)
+        self.impl_generic_scope_for_owner(self.implementation_nominal_id(implementation), generics)
+    }
+
+    pub(super) fn impl_generic_scope_for_owner(&self, owner: Option<TypeId>, generics: &[String])
+        -> std::collections::HashMap<String, u16> {
+        let parent_names = owner
             .and_then(|id| self.declaration_generic_roster(id))
             .map(|roster| {
                 roster
