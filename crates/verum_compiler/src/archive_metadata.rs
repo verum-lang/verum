@@ -48,11 +48,12 @@ use verum_vbc::archive::VbcArchive;
 use verum_vbc::module::VbcModule;
 use verum_vbc::types::{TypeKind, TypeRef, VariantKind};
 
-fn structural_method_owner(kind: TypeKind) -> Option<&'static str> {
-    match kind {
-        TypeKind::Slice => Some("Slice"),
-        TypeKind::Array => Some("Array"),
-        _ => None,
+fn is_structural_method_owner(ty: &verum_vbc::types::TypeDescriptor, name: &str) -> bool {
+    match ty.structural_method_kind() {
+        Some(TypeKind::Slice) => name == "Slice",
+        Some(TypeKind::Array) => name == "Array",
+        Some(TypeKind::Tuple) => verum_ast::source_implementation::product_method_arity(name).is_some(),
+        _ => false,
     }
 }
 
@@ -341,7 +342,7 @@ pub fn archive_to_core_metadata(archive: &VbcArchive) -> Result<CoreMetadata, Te
             if ty.source_inherent_implementations.is_empty() { continue; }
             let name = module.strings.get(ty.name).ok_or_else(|| Text::from("inherent implementation target has no name"))?;
             let owner = ty.origin_module.and_then(|id| module.strings.get(id)).unwrap_or(&entry.name);
-            let key: Text = if ty.canonical_scalar_type_id(name).is_some() || structural_method_owner(ty.kind) == Some(name) { name.into() }
+            let key: Text = if ty.canonical_scalar_type_id(name).is_some() || is_structural_method_owner(ty, name) { name.into() }
                 else { verum_vbc::module::qualify_module_name(owner, name).into() };
             let target = meta.inherent_implementations.entry(key).or_default();
             for source in &ty.source_inherent_implementations {
@@ -704,7 +705,7 @@ fn register_module_metadata(
     let declaration_names: verum_common::Map<u32, Text> = module.types.iter()
         .filter_map(|ty| {
             let name = module.get_string(ty.name)?;
-            let declared = if ty.canonical_scalar_type_id(name).is_some() || structural_method_owner(ty.kind) == Some(name) {
+            let declared = if ty.canonical_scalar_type_id(name).is_some() || is_structural_method_owner(ty, name) {
                 Text::from(name)
             } else {
                 let owner = ty.origin_module.and_then(|id| module.get_string(id)).unwrap_or(module_name);
@@ -1203,7 +1204,7 @@ fn register_module_metadata(
         // A built-in scalar can carry protocol implementations from many files.
         // Those files own the implementations, never the scalar declaration.
         let builtin = ty.canonical_scalar_type_id(type_name.as_str()).is_some()
-            || structural_method_owner(ty.kind) == Some(type_name.as_str());
+            || is_structural_method_owner(ty, type_name.as_str());
         let descriptor = TypeDescriptor {
             source_declaration: ty.source_declaration.clone(),
             is_public: matches!(
@@ -1508,7 +1509,7 @@ fn register_module_metadata(
             if scalar_receiver.is_some() {
                 scalar_method_owners.insert(parent.clone());
                 parent.clone()
-            } else if receiver.is_some_and(|ty| structural_method_owner(ty.kind) == Some(parent.as_str())) {
+            } else if receiver.is_some_and(|ty| is_structural_method_owner(ty, parent.as_str())) {
                 parent.clone()
             } else {
                 let owner = receiver.and_then(|ty| ty.origin_module)

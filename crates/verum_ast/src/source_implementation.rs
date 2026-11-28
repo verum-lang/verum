@@ -7,6 +7,30 @@ use verum_common::{List, Map, Text};
 
 const MAX_BYTES: usize = 1024 * 1024;
 
+/// A structural product has no nominal declaration. Its method catalogue
+/// groups headers by arity; the header still selects the complete receiver.
+pub fn product_method_catalogue(arity: usize) -> Text {
+    let mut name = Text::from("(");
+    for index in 0..arity {
+        if index > 0 { name.push_str(", "); }
+        name.push('_');
+    }
+    if arity == 1 { name.push(','); }
+    name.push(')');
+    name
+}
+
+pub fn product_method_arity(name: &str) -> Option<usize> {
+    let parts = name.strip_prefix('(')?.strip_suffix(')')?;
+    if parts == "_," { return Some(1); }
+    let mut arity = 0;
+    for part in parts.split(", ") {
+        if part != "_" { return None; }
+        arity += 1;
+    }
+    (arity >= 2).then_some(arity)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub struct AssociatedImplementationSource {
     /// The empty path is the explicitly selected anonymous source root. This

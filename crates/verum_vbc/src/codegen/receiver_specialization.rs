@@ -32,7 +32,7 @@ impl VbcCodegen {
         let Some(kind) = actual.structural_receiver_kind() else { return Ok(None) };
         let mut selected: Option<(crate::module::FunctionId, String)> = None;
         let mut declared = false;
-        for catalogue in self.types.iter().filter(|catalogue| catalogue.kind == kind) {
+        for catalogue in self.types.iter().filter(|catalogue| catalogue.structural_method_kind() == Some(kind)) {
             let Some(owner) = self.type_declaration_identity(catalogue) else {
                 continue;
             };

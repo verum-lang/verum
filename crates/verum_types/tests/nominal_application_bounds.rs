@@ -56,6 +56,15 @@ const DECL: &str =
     "type P is protocol {}; implement P for Int {} type Requires<T:P> is { value:T };";
 
 #[test]
+fn local_generic_product_implementations_keep_their_structural_receiver() {
+    let source = "type Width is protocol { fn width(&self)->Int; };
+        implement<B,A> Width for (A,B) { fn width(&self)->Int { 2 } }
+        fn read<T:Width>(x:&T)->Int { x.width() }";
+    accepted(&format!("{source} fn probe(p:(Byte,Int))->Int {{ read(&p) }}"));
+    refused(&format!("{source} fn probe(p:(Int,Int,Int))->Int {{ read(&p) }}"));
+}
+
+#[test]
 fn concrete_call_reports_the_unsatisfied_leaf_of_a_conditional_implementation() {
     let declarations = "type Ready is protocol {};
         type Leaf is protocol {}; implement Leaf for Int {}

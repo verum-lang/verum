@@ -881,6 +881,7 @@ impl TypeRef {
     pub(crate) fn structural_receiver_kind(&self) -> Option<TypeKind> {
         match self {
             Self::Slice(_) => Some(TypeKind::Slice),
+            Self::Tuple(items) if !items.is_empty() => Some(TypeKind::Tuple),
             array => array.fixed_array_parts().map(|_| TypeKind::Array),
         }
     }
@@ -1456,6 +1457,16 @@ pub struct TypeDescriptor {
 }
 
 impl TypeDescriptor {
+    /// An anonymous method catalogue is distinct from a named type whose
+    /// underlying layout happens to be a product.
+    pub fn structural_method_kind(&self) -> Option<TypeKind> {
+        match self.kind {
+            kind @ (TypeKind::Array | TypeKind::Slice | TypeKind::Tuple)
+                if self.source_declaration.is_none() => Some(kind),
+            _ => None,
+        }
+    }
+
     /// Named records use field construction. Only a declaration that introduces
     /// a value constructor can publish that name into another module's value scope.
     pub fn exports_value_constructor(&self) -> bool {

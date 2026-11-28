@@ -430,6 +430,7 @@ fn structural_methods_retain_their_own_catalogue_and_receiver_shape() {
     for (name, target, other) in [
         ("Slice", "[Int]", "[Int; 4]"),
         ("Array", "[Int; 4]", "[Int]"),
+        ("(_, _)", "(Int,Int)", "(Int,Int,Int)"),
     ] {
         let source = format!(
             "module {OWNER}; implement {target} {{ public fn archived_marker(&self)->Bool {{ true }} }}"
@@ -486,6 +487,29 @@ fn structural_methods_retain_their_own_catalogue_and_receiver_shape() {
             )
             .unwrap();
         assert!(publish(&wrong).is_err(), "{other} was admitted on {name}");
+    }
+}
+
+#[test]
+fn archived_product_protocols_preserve_their_component_domain_and_nominal_neighbors() {
+    let source = format!("module {OWNER};
+        public type Width is protocol {{ fn width(&self)->Int; }};
+        public type Tuple is (Int, Int);
+        implement<B> Width for (Byte,B) {{ fn width(&self)->Int {{ 1 }} }}
+        implement<B> Width for (Int,B) {{ fn width(&self)->Int {{ 2 }} }}");
+    let metadata = publish(&source_module(&source)).expect("publish both product headers");
+    for eager in [false, true] {
+        let consumer = "mount core.family_archive.{Width,Tuple};
+            fn width<T:Width>(p:&T)->Int { p.width() }";
+        let good = format!("{consumer} fn probe(a:(Byte,Bool),b:(Int,Float))->Int {{ width(&a)+width(&b) }}");
+        let errors = consumer_errors(&metadata, &good, eager);
+        assert!(errors.is_empty(), "eager={eager}: {errors:?}");
+        for ty in ["(Bool,Int)", "(Int,Int,Int)", "Tuple"] {
+            let bad = format!("{consumer} fn probe(p:{ty})->Int {{ width(&p) }}");
+            let errors = consumer_errors(&metadata, &bad, eager);
+            assert!(errors.iter().any(|error| error.contains("E405") && error.contains("Width")),
+                "eager={eager}, {ty}: {errors:?}");
+        }
     }
 }
 

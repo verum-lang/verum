@@ -13912,6 +13912,8 @@ impl TypeChecker {
             Type::Named { path, .. } => Some(self.path_to_string(path)),
             Type::Generic { name, .. } => Some(name.clone()),
             Type::Record(_) => None, // Anonymous records don't have names
+            Type::Tuple(items) if !items.is_empty() =>
+                Some(verum_ast::source_implementation::product_method_catalogue(items.len())),
             Type::Variant(_) => {
                 // Look up the variant type in our mapping to find its declared name
                 // Uses ProtocolChecker as the authoritative source, with local fallback

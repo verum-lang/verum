@@ -14,6 +14,12 @@ fn parse(source: &str) -> Module {
 }
 
 #[test]
+fn structural_products_dispatch_with_their_component_binders_and_nominal_neighbors() {
+    let source = parse(concat!("module consumer;\n", include_str!("fixtures/structural_product_dispatch.vr")));
+    execute_source_and_wire(compile(&[&source]).unwrap(), 73);
+}
+
+#[test]
 fn static_protocol_calls_bind_the_implementation_receiver_in_its_own_order() {
     let source = parse(concat!("module consumer;\n", include_str!("fixtures/static_receiver_application.vr")));
     let mut module = compile(&[&source]).unwrap();

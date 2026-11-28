@@ -82,10 +82,14 @@ impl TypeChecker {
 
     pub(super) fn metadata_implementation_target(descriptor: &TypeDescriptor) -> Type {
         // Only the global opaque catalogue represents a structural receiver.
-        // Its element and extent are bound by the implementation header.
+        // Its element, extent and product components are bound by the header.
         if descriptor.module_path.is_empty() && descriptor.origin_module_path.is_none()
+            && descriptor.source_declaration.is_none()
             && matches!(descriptor.kind, crate::core_metadata::TypeDescriptorKind::Opaque)
         {
+            if let Some(arity) = verum_ast::source_implementation::product_method_arity(&descriptor.name) {
+                return Type::Tuple(std::iter::repeat_n(Type::Unknown, arity).collect());
+            }
             match descriptor.name.as_str() {
                 "Slice" => return Type::Slice { element: Box::new(Type::Unknown) },
                 "Array" => return Type::Array { element: Box::new(Type::Unknown), size: None },

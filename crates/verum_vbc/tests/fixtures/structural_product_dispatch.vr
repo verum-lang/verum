@@ -1,0 +1,22 @@
+type Width is protocol { fn width(&self)->Int; };
+type Tuple is (Int,Int);
+
+implement<B,A> Width for (A,B) {
+    fn width(&self)->Int { (A.size as Int) * 100 + (B.size as Int) }
+}
+implement<A,B,C> Width for (A,B,C) { fn width(&self)->Int { 17 } }
+implement Width for Tuple { fn width(&self)->Int { 3 } }
+
+type First is protocol { fn first(&self)->Int; };
+implement<T> First for (Byte,T) { fn first(&self)->Int { 11 } }
+implement<T> First for (Int,T) { fn first(&self)->Int { 22 } }
+
+fn width<T:Width>(value:&T)->Int { value.width() }
+fn first<T:First>(value:&T)->Int { value.first() }
+fn run()->Int {
+    let pair:(Byte,Int) = (1_u8,2);
+    let named = Tuple(1,2);
+    if width(&pair) == 108 && width(&(1,2,3)) == 17 && width(&named) == 3
+        && first(&pair) == 11 && first(&(1,2)) == 22 { 73 } else { 0 }
+}
+fn main()->Int { run() }

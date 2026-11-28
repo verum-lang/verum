@@ -85,7 +85,7 @@ impl VbcCodegen {
                     // Structural receivers have no nominal application. The
                     // catalogue only identifies the method family; the retained
                     // implementation owns the element/extent binder roles.
-                    let kind = self.type_by_id(parent).map(|catalogue| catalogue.kind);
+                    let kind = self.type_by_id(parent).and_then(|catalogue| catalogue.structural_method_kind());
                     if kind != Some(receiver_kind) {
                         return Err(CodegenError::new(CodegenErrorKind::InvalidSourceSignature(
                             "structural receiver conflicts with its declaring method catalogue".into())));

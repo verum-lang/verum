@@ -175,8 +175,8 @@ impl TypeLookupIndex {
     fn insert(&mut self, position: usize, descriptor: &TypeDescriptor) {
         if let std::collections::hash_map::Entry::Vacant(entry) = self.by_id.entry(descriptor.id) {
             entry.insert(position);
-            if matches!(descriptor.kind, TypeKind::Array | TypeKind::Slice) {
-                self.structural.entry(descriptor.kind).or_default().push(descriptor.id);
+            if let Some(kind) = descriptor.structural_method_kind() {
+                self.structural.entry(kind).or_default().push(descriptor.id);
             }
         }
     }

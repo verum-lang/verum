@@ -4435,6 +4435,8 @@ impl TypeChecker {
         match target {
             Type::Named { path, .. } => Some(self.path_to_string(path)),
             Type::Generic { name, .. } => Some(name.clone()),
+            Type::Tuple(items) if matches!(source.kind, verum_ast::TypeKind::Tuple(_)) =>
+                Some(verum_ast::source_implementation::product_method_catalogue(items.len())),
             Type::Array { .. } | Type::Slice { .. } => self.get_exact_type_name(target),
             _ => target.primitive_name().filter(|_| !matches!(target, Type::Unknown)).map(Text::from),
         }.or_else(|| {
@@ -4466,6 +4468,11 @@ impl TypeChecker {
 
     fn validate_impl_target(&self, actual: &Type, expected: &Type, span: Span) -> Result<()> {
         let attachment = Self::implementation_attachment_type(actual);
+        if let (Type::Tuple(actual), Type::Tuple(expected)) = (attachment, expected)
+            && actual.len() == expected.len()
+        {
+            return Ok(());
+        }
         if matches!((attachment, expected),
             (Type::Slice { .. }, Type::Slice { .. }) | (Type::Array { .. }, Type::Array { .. }))
         {

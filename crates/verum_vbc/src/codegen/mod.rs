@@ -13171,6 +13171,7 @@ impl VbcCodegen {
         let kind = match &target_ty.kind {
             verum_ast::ty::TypeKind::Slice(_) => crate::types::TypeKind::Slice,
             verum_ast::ty::TypeKind::Array { .. } => crate::types::TypeKind::Array,
+            verum_ast::ty::TypeKind::Tuple(items) if !items.is_empty() => crate::types::TypeKind::Tuple,
             _ => return,
         };
         let type_id = match self.type_name_to_id.get(type_name).copied() {
@@ -13225,7 +13226,9 @@ impl VbcCodegen {
             // Container types
             TypeKind::Slice(_) => Some("Slice".to_string()),
             TypeKind::Array { .. } => Some("Array".to_string()),
-            TypeKind::Tuple(_) => Some("Tuple".to_string()),
+            TypeKind::Tuple(items) if !items.is_empty() =>
+                Some(verum_ast::source_implementation::product_method_catalogue(items.len()).to_string()),
+            TypeKind::Tuple(_) => Some("Unit".to_string()),
             // Reference types - extract the inner type name
             TypeKind::Reference { inner, .. } => self.extract_impl_type_name_from_type(inner),
             TypeKind::CheckedReference { inner, .. } => {
@@ -19756,7 +19759,7 @@ impl VbcCodegen {
                 Some(receiver) => match receiver.ty.structural_receiver_kind() {
                     Some(kind) => self.declared_callable_descriptors.get(&func_info.id)
                         .and_then(|declaration| declaration.parent_type)
-                        .filter(|parent| self.type_by_id(*parent).is_some_and(|catalogue| catalogue.kind == kind)),
+                        .filter(|parent| self.type_by_id(*parent).and_then(|catalogue| catalogue.structural_method_kind()) == Some(kind)),
                     None => receiver.ty.base_type_id(),
                 },
                 None => self.type_name_to_id.get(type_name.as_str()).copied()
