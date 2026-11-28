@@ -994,10 +994,15 @@ impl TypeChecker {
             return Ok(Some(crate::protocol::FutureResolution { output: output.as_ref().clone() }));
         }
         let Some(owner) = self.source_operator_name(WellKnownProtocol::Future) else { return Ok(None) };
-        self.load_source_operator_implementation(receiver, WellKnownProtocol::Future, span)?;
+        let bound = crate::protocol::ProtocolBound::simple(Self::text_to_path(&owner));
         let (protocols, callables) = self.method_dispatch_premises(span)?;
+        if super::implementation_sources::StructuralProtocolHead::of(receiver).is_some() {
+            self.load_scoped_bound_implementations(receiver, &bound)?;
+        } else {
+            self.load_source_bound_implementations(receiver, &bound, &protocols, &callables, span)?;
+        }
         self.protocol_checker.read().future_output_in(
-            receiver, &Self::text_to_path(&owner),
+            receiver, &bound.protocol,
             crate::protocol::ConstraintEnvironment::new(&protocols, &callables),
         ).map_err(|msg| TypeError::OtherWithCodeSpanned { code: "E405".into(), msg, span })
     }

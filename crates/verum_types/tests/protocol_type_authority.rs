@@ -382,3 +382,15 @@ fn nominal_tuple_heads_are_distinct_from_scalar_implementations() {
         }
     }
 }
+
+#[test]
+fn nominal_structural_and_transparent_heads_preserve_their_protocol_domains() {
+    let declaration = "type Row is { key:Int };";
+    for structural in ["(Int,Int)", "fn(Int)->Int"] {
+        accept(&heads(declaration, "Row", Some((structural, "Bool")), "Row"));
+        accept(&heads(declaration, structural, Some(("Row", "Bool")), structural));
+        reject(&heads(declaration, "Row", Some((structural, "Bool")), structural));
+    }
+    let alias = "type Identity<T> is T; type Row is { key:Int };";
+    reject(&heads(alias, "Identity<(Int,Int)>", Some(("(Int,Int)", "Bool")), "(Int,Int)"));
+}

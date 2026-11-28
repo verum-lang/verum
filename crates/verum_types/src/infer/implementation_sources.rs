@@ -19,6 +19,7 @@ pub(super) struct ImportedStructuralMethod {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) enum StructuralProtocolHead {
     Tuple(usize),
+    Function(usize),
     Reference(verum_ast::expr::ReferenceKind, bool),
     Array,
     Slice,
@@ -28,6 +29,7 @@ impl StructuralProtocolHead {
     pub(super) fn of(receiver: &Type) -> Option<Self> {
         match receiver {
             Type::Tuple(parts) => Some(Self::Tuple(parts.len())),
+            Type::Function { params, .. } => Some(Self::Function(params.len())),
             Type::Array { .. } => Some(Self::Array),
             Type::Slice { .. } => Some(Self::Slice),
             _ => receiver.reference_parts().map(|(_, mutable, tier)| Self::Reference(tier, mutable)),
@@ -38,6 +40,7 @@ impl StructuralProtocolHead {
         use verum_ast::{TypeKind, expr::ReferenceKind};
         match &target.kind {
             TypeKind::Tuple(parts) => Some(Self::Tuple(parts.len())),
+            TypeKind::Function { params, .. } => Some(Self::Function(params.len())),
             TypeKind::Array { .. } => Some(Self::Array),
             TypeKind::Slice(_) => Some(Self::Slice),
             TypeKind::Reference { mutable, .. } => Some(Self::Reference(ReferenceKind::Managed, *mutable)),

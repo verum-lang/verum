@@ -22,6 +22,8 @@ enum HeadIdentity {
     Nominal,
     Reference,
     Refinement,
+    Tuple,
+    Function,
     Array,
     Slice,
 }
@@ -146,6 +148,11 @@ impl ProtocolChecker {
         }
         match ty {
             Type::Refined { .. } => return Some(HeadIdentity::Refinement),
+            // The empty tuple may denote Unit. A nonempty product or a
+            // function signature has its own constructor, even with rigid
+            // variables in its components.
+            Type::Tuple(elements) if !elements.is_empty() => return Some(HeadIdentity::Tuple),
+            Type::Function { .. } => return Some(HeadIdentity::Function),
             Type::Array { .. } => return Some(HeadIdentity::Array),
             Type::Slice { .. } => return Some(HeadIdentity::Slice),
             _ => {}

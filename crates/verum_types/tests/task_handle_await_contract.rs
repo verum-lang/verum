@@ -312,3 +312,20 @@ fn constructing_a_future_recovers_only_the_outputs_proved_by_its_fields() {
         }}
     "));
 }
+
+#[test]
+fn structural_await_distinguishes_a_nominal_future_from_a_tuple_implementation() {
+    accepts(r#"
+        async fn plain<A,B>(pair:(A,B))->(A,B) { pair.await }
+        async fn callable<F>(f:fn(F)->Int)->fn(F)->Int { f.await }
+    "#);
+    let implemented = r#"
+        mount core.async.future.{Poll, Context};
+        implement Future for (Int,Int) {
+            type Output = Bool;
+            fn poll(&mut self, _cx:&mut Context)->Poll<Bool> { Poll.Ready(true) }
+        }
+    "#;
+    accepts(&format!("{implemented} async fn actual(pair:(Int,Int))->Bool {{ pair.await }}"));
+    refuses_type_mismatch(&format!("{implemented} async fn wrong(pair:(Int,Int))->(Int,Int) {{ pair.await }}"));
+}
