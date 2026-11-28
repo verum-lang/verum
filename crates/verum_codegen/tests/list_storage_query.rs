@@ -17,7 +17,7 @@ use verum_llvm::{
 use verum_vbc::codegen::{ItemFailurePolicy, VbcCodegen};
 
 thread_local! {
-    static STORAGE: RefCell<List<Heap<[u64]>>> = RefCell::new(List::new());
+    static STORAGE: RefCell<List<(u64, Heap<[u64]>)>> = RefCell::new(List::new());
     static FAIL_ALLOCATION: Cell<bool> = const { Cell::new(false) };
 }
 extern "C" fn allocate(size: u64) -> *mut u64 {
@@ -27,17 +27,25 @@ extern "C" fn allocate(size: u64) -> *mut u64 {
     STORAGE.with(|s| {
         let mut allocation = List::from_elem(0, size.div_ceil(8) as usize).into_boxed_slice();
         let ptr = allocation.as_mut_ptr();
-        s.borrow_mut().push(allocation);
+        s.borrow_mut().push((size, allocation));
         ptr
     })
 }
-extern "C" fn release(_pointer: u64, _size: u64) {}
+extern "C" fn release(pointer: *mut u64, size: u64) {
+    STORAGE.with(|storage| {
+        let mut storage = storage.borrow_mut();
+        let index = storage.iter().position(|(_, entry)| entry.as_ptr() == pointer)
+            .expect("native release must belong to this test allocator");
+        let (allocated, _) = storage.swap_remove(index);
+        assert_eq!(size, allocated, "released allocation extent");
+    });
+}
 extern "C" fn abort(_code: i32) {
     std::process::abort();
 }
 const BOUNDARIES: &[(&str, &str)] = &[
     ("verum_os_alloc", "declare ptr @verum_os_alloc(i64)\n"),
-    ("verum_dealloc", "declare void @verum_dealloc(ptr, i64)\n"),
+    ("verum_os_free", "declare void @verum_os_free(ptr, i64)\n"),
     ("verum_os_exit", "declare void @verum_os_exit(i32)\n"),
 ];
 fn is_list(ty: &verum_ast::Type) -> bool {
@@ -284,7 +292,7 @@ fn with_source(
         .expect("JIT");
     for (name, addr) in [
         ("verum_os_alloc", allocate as *const () as usize),
-        ("verum_dealloc", release as *const () as usize),
+        ("verum_os_free", release as *const () as usize),
         ("verum_os_exit", abort as *const () as usize),
     ] {
         if let Some(f) = executable.get_function(name) {
