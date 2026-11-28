@@ -245,6 +245,13 @@ impl VbcCodegen {
                 TypeRef::Array { element, length } => Some(TypeRef::Array {
                     element: Box::new(resolve(cg, element, active, depth + 1)?), length: *length
                 }),
+                open @ TypeRef::Instantiated { base: TypeId::ARRAY, .. } => {
+                    let (element, crate::types::ArrayExtent::Parameter(count)) = open.fixed_array_parts()? else { return None; };
+                    Some(TypeRef::Instantiated {
+                        base: TypeId::ARRAY,
+                        args: vec![resolve(cg, element, active, depth + 1)?, TypeRef::Generic(count)].into(),
+                    })
+                }
                 _ => None,
             }
         }
@@ -342,13 +349,38 @@ impl VbcCodegen {
         Some(scope)
     }
 
+    /// Interpret a value domain in the callee's declaration order. Caller
+    /// slots can have the same numeric IDs and must never capture later binders.
+    fn instantiated_value_domain<'a, 'w>(
+        parameter: &'a DeclaredGenericParameter,
+        roster: &[DeclaredGenericParameter],
+        lookup: impl Fn(TypeParamId) -> Option<&'w TypeRef>,
+    ) -> CodegenResult<Cow<'a, TypeRef>> {
+        let carrier = parameter.value_carrier.as_ref().ok_or_else(|| CodegenError::new(
+            CodegenErrorKind::TypeInference(format!("value parameter `{}` has no declared runtime carrier", parameter.name)),
+        ))?;
+        if !carrier.is_generic() {
+            return Ok(Cow::Borrowed(carrier));
+        }
+        let mut substitution = crate::mono::TypeSubstitution::empty();
+        for prior in roster.iter().take_while(|prior| prior.witness_slot != parameter.witness_slot) {
+            if let Some(id) = prior.witness_slot && let Some(value) = lookup(id) {
+                substitution.bind(id, value.clone());
+            }
+        }
+        substitution.apply(carrier).map(Cow::Owned).map_err(|err| CodegenError::new(
+            CodegenErrorKind::TypeInference(format!("cannot specialize the domain of `{}`: {err}", parameter.name)),
+        ))
+    }
+
     /// Both executable CallG and declaration inference consume this conversion.
-    pub(super) fn callable_argument_witness(
+    pub(super) fn callable_argument_witness<'w>(
         &self,
         function: &FunctionInfo,
         index: usize,
         argument: &GenericArg,
         expected: Option<&TypeRef>,
+        prior: impl Fn(TypeParamId) -> Option<&'w TypeRef>,
     ) -> CodegenResult<Option<TypeRef>> {
         let invalid =
             |message: &str| CodegenError::new(CodegenErrorKind::TypeInference(message.into()));
@@ -387,9 +419,12 @@ impl VbcCodegen {
         }
         if parameter.value_parameter().is_some() {
             let unsupported = || invalid("selected value parameter has no supported runtime scalar carrier");
-            let carrier = parameter.value_carrier.as_ref().ok_or_else(unsupported)?;
+            let carrier = Self::instantiated_value_domain(parameter, &roster, prior)?;
+            let carrier = carrier.as_ref();
             if *carrier != TypeRef::Concrete(TypeId::INT) {
-                if crate::const_sequence::sequence_domain(carrier).is_none() { return Err(unsupported()); }
+                if crate::const_sequence::sequence_domain(carrier).is_none() && carrier.fixed_array_parts().is_none() {
+                    return Err(unsupported());
+                }
                 if !crate::const_sequence::ConstSequence::supported_domain(carrier) {
                     return Err(invalid("unsupported element domain in constant sequence"));
                 }
@@ -479,7 +514,8 @@ impl VbcCodegen {
                         parameter.name, parameter.witness_slot, parameter.value_carrier, bindings),
                 ))
             };
-            let carrier = parameter.value_carrier.as_ref().ok_or_else(invalid)?;
+            let carrier = Self::instantiated_value_domain(parameter, roster, |id| bindings.get(&id.0))?;
+            let carrier = carrier.as_ref();
             let scalar = *carrier == TypeRef::Concrete(TypeId::INT);
             if !scalar && !crate::const_sequence::ConstSequence::supported_domain(carrier) { return Err(invalid()); }
             let slot = parameter.witness_slot.ok_or_else(invalid)?;

@@ -60,8 +60,12 @@ impl ConstSequence {
 
     pub(crate) fn supported_domain(mut domain: &TypeRef) -> bool {
         for _ in 0..MAX_SEQUENCE_DEPTH {
-            let Some((element, _)) = sequence_domain(domain) else {
-                return false;
+            let element = match domain {
+                TypeRef::Slice(element) => element.as_ref(),
+                array => match array.fixed_array_parts() {
+                    Some((element, _)) => element,
+                    None => return false,
+                },
             };
             if *element == TypeRef::Concrete(TypeId::INT) {
                 return true;

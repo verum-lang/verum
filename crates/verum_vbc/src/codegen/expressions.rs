@@ -9102,7 +9102,7 @@ impl VbcCodegen {
         }
         for (index, (arg, id)) in explicit.iter().zip(&info.explicit_type_param_ids).enumerate() {
             let Some(id) = id else {
-                if self.callable_argument_witness(&info, index, arg, None)?.is_some() {
+                if self.callable_argument_witness(&info, index, arg, None, |id| bindings.get(&id.0))?.is_some() {
                     return Err(CodegenError::new(CodegenErrorKind::TypeInference("generic argument has no declared slot".into())));
                 }
                 continue;
@@ -9110,7 +9110,7 @@ impl VbcCodegen {
             let expected_slot = expected_bindings
                 .get(&u32::from(id.0))
                 .or_else(|| bindings.get(&id.0));
-            let value = self.callable_argument_witness(&info, index, arg, expected_slot)?
+            let value = self.callable_argument_witness(&info, index, arg, expected_slot, |id| bindings.get(&id.0))?
                 .ok_or_else(|| CodegenError::new(CodegenErrorKind::TypeInference("runtime generic slot received erased argument".into())))?;
             bindings.insert(id.0, value);
         }

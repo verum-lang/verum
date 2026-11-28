@@ -209,3 +209,16 @@ fn named_concrete_lengths_and_element_aliases_are_checked_from_source() {
     let source = "const N: Int = 2; const M: Int = 3; type Element is Byte; fn size<T>()->Int {T.size} fn probe()->Int {size<[Element; N + M]>()}";
     assert!(errors(source).is_empty(), "{:?}", errors(source));
 }
+
+#[test]
+fn dependent_const_sequence_arguments_use_the_preceding_declared_count() {
+    let declaration = "fn get<const N:Int, const Values:[Int;N]>()->Int { Values[0] }";
+    for (n, values) in [(1, "[7]"), (3, "[7,8,9]")] {
+        let result = errors(&format!("{declaration} fn probe()->Int {{ get<{n},{values}>() }}"));
+        assert!(result.is_empty(), "{result:?}");
+    }
+    for values in ["[7]", "[7,8,9]", "[true,false]"] {
+        let result = errors(&format!("{declaration} fn probe()->Int {{ get<2,{values}>() }}"));
+        assert!(!result.is_empty(), "{values} was admitted");
+    }
+}

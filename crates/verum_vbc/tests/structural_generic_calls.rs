@@ -372,3 +372,21 @@ fn unsized_slice_witness_is_preserved_without_inventing_a_size() {
         "unsized slices have no standalone layout"
     );
 }
+
+#[test]
+fn dependent_const_sequence_lengths_follow_the_selected_call_slots() {
+    let source = "fn get<const N:Int, const Values:[Int; N]>()->Int { Values[0] }
+        fn pass<const K:Int, const Data:[Int; K]>()->Int { get<K,Data>() }
+        fn probe()->Int { pass<2,[9,3]>() + get<1,[64]>() }";
+    let module = compile(source);
+    let archive = verum_vbc::serialize::serialize_module(&module).unwrap();
+    let decoded = verum_vbc::deserialize::deserialize_module(&archive).unwrap();
+    for module in [module, decoded] {
+        let entry = module.find_function_by_name("probe").unwrap();
+        let mut vm = Interpreter::try_new_validated(Arc::new(module)).unwrap();
+        assert_eq!(vm.execute_function(entry).unwrap().as_i64(), 73);
+    }
+    let bad = source.replace("pass<2,[9,3]>", "pass<3,[9,3]>");
+    let ast = Parser::new(&bad).parse_module().unwrap();
+    assert!(VbcCodegen::new().compile_module(&ast).is_err());
+}

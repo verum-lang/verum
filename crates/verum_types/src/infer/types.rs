@@ -2886,8 +2886,12 @@ fn substitute_refinement_binder(
                 combined = combined.compose(&inferred)
                     .map_err(|message| TypeError::UniverseBinding { message, span })?;
             } else if let Some(crate::context::GenericBinder::Value(expected)) = slot {
-                let provided = self.explicit_value_argument(argument, expected, span)?;
-                let inferred = self.unifier.unify(expected, &provided, span)?;
+                // Each value domain can mention any preceding binder. Instantiate
+                // those identities before validating the concrete argument.
+                let expected = expected.try_apply_subst(&combined)
+                    .map_err(|message| TypeError::UniverseBinding { message, span })?;
+                let provided = self.explicit_value_argument(argument, &expected, span)?;
+                let inferred = self.unifier.unify(&expected, &provided, span)?;
                 use crate::ty::SubstitutionExt;
                 combined = combined.compose(&inferred)
                     .map_err(|message| TypeError::UniverseBinding { message, span })?;

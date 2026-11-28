@@ -262,26 +262,31 @@ impl TypeChecker {
             let pending = std::mem::take(&mut self.pending_value_obligations);
             for obligation in pending {
                 for parameter in &obligation.value_parameters {
-                    let argument = self.unifier.apply(parameter);
-                    let Type::Meta { ty: expected_sort, .. } = parameter else {
+                    let argument = self.unifier.try_apply(parameter, obligation.span)?;
+                    // Instantiate the domain, keeping the declaration's own
+                    // predicate. Substituting the entire binder here would
+                    // let the supplied argument certify its own obligation.
+                    let mut required = parameter.clone();
+                    let Type::Meta { ty: expected_sort, .. } = &mut required else {
                         return Err(TypeError::UniverseBinding { message: "invalid value parameter roster".into(), span: obligation.span });
                     };
+                    **expected_sort = self.unifier.try_apply(expected_sort, obligation.span)?;
                     let Type::Meta { ty: actual_sort, value, .. } = &argument else {
                         return Err(TypeError::UniverseBinding { message: "a value parameter was instantiated with a type".into(), span: obligation.span });
                     };
+                    let same_carrier = self.types_equivalent(expected_sort.base(), actual_sort.base());
                     if matches!(value, crate::ty::ValueTerm::Inference(_))
-                        || !self.types_equivalent(expected_sort.base(), actual_sort.base())
-                        || !self.meta_argument_satisfies_domain(parameter, &argument) {
+                        || !same_carrier || !self.meta_argument_satisfies_domain(&required, &argument) {
                         let reason = if matches!(value, crate::ty::ValueTerm::Inference(_)) {
                             "the value remains unresolved"
-                        } else if !self.types_equivalent(expected_sort.base(), actual_sort.base()) {
+                        } else if !same_carrier {
                             "the carrier types differ"
                         } else {
                             "the value does not establish the required domain"
                         };
                         return Err(TypeError::OtherWithCodeSpanned {
                             code: "E405".into(),
-                            msg: format!("call value argument does not establish its declared scalar domain: expected {parameter}, found {argument}; {reason}").into(),
+                            msg: format!("call value argument does not establish its declared domain: expected {required}, found {argument}; {reason}").into(),
                             span: obligation.span,
                         });
                     }

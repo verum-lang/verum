@@ -897,7 +897,7 @@ impl VbcCodegen {
                 .is_some_and(|ty| Self::explicit_type_contains_hole(&ty)) {
                 continue;
             }
-            let Some(actual) = self.callable_argument_witness(function, index, argument, expected)? else { continue; };
+            let Some(actual) = self.callable_argument_witness(function, index, argument, expected, |id| bindings.get(id))? else { continue; };
             let id = slot.ok_or_else(|| invalid("generic argument has no declared slot"))?;
             if !self.bind_source_declaration(&TypeRef::Generic(id), &actual, bindings) {
                 return Err(invalid("explicit generic argument conflicts with its declared witness"));
