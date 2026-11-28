@@ -50,6 +50,7 @@ mount core.net.http.{Response};
 mount core.net.weft.service.{Layer};
 mount core.net.weft.handler.{WeftRequest, Handler};
 mount core.net.weft.error.{WeftError};
+mount core.base.protocols.From;
 
 // =============================================================================
 // Vegas state
@@ -109,7 +110,8 @@ implement AdaptiveConcurrencyLayer {
     }
 }
 
-implement<H: Handler> Layer<H> for AdaptiveConcurrencyLayer {
+implement<H: Handler> Layer<H> for AdaptiveConcurrencyLayer
+where H.Error: From<WeftError> {
     type Wrapped = AdaptiveConcurrencyHandler<H>;
     fn wrap(&self, inner: H) -> AdaptiveConcurrencyHandler<H> {
         AdaptiveConcurrencyHandler {
@@ -124,8 +126,11 @@ public type AdaptiveConcurrencyHandler<H> is {
     state: Shared<VegasState>,
 };
 
-implement<H: Handler> Handler for AdaptiveConcurrencyHandler<H> {
-    async fn handle(&self, req: WeftRequest) -> Result<Response, WeftError> {
+implement<H: Handler> Handler for AdaptiveConcurrencyHandler<H>
+where H.Error: From<WeftError> {
+    type Error = H.Error;
+
+    async fn handle(&self, req: WeftRequest) -> Result<Response, H.Error> {
         let s = &*self.state;
 
         // Admission — compare in-flight against current limit.
@@ -133,12 +138,12 @@ implement<H: Handler> Handler for AdaptiveConcurrencyHandler<H> {
         let in_flight = s.inflight.fetch_add(1, MemoryOrdering.AcqRel);
         if in_flight >= limit {
             s.inflight.fetch_sub(1, MemoryOrdering.AcqRel);
-            return Result.Err(WeftError.Overloaded);
+            return Result.Err(H.Error.from(WeftError.Overloaded));
         }
 
         let start = Instant.now();
         let result = self.inner.handle(req).await;
-        let elapsed_us = Instant.now().duration_since(start).as_micros();
+        let elapsed_us = start.elapsed().as_micros();
 
         s.inflight.fetch_sub(1, MemoryOrdering.AcqRel);
 
