@@ -1,18 +1,7 @@
 use verum_ast::Span;
 use verum_types::{TypeError, source_files::SourceFileRegistry};
 
-#[test]
-fn an_escaping_protocol_result_points_to_the_call_inside_a_nested_record() {
-    let source = "
-        type Pair<T> is { first:T, second:T };
-        type Envelope<T> is { pair:Pair<T>, serial:Int };
-        type Sequence is protocol {
-            fn duplicate(&self) -> Self;
-            fn pair(self) -> Envelope<Self> {
-                Envelope {pair:Pair {first:self.duplicate(), second:self}, serial:10}
-            }
-        };
-    ";
+fn check(source: &str, inspect: impl FnOnce(&[&TypeError])) {
     let module = verum_fast_parser::FastParser::new()
         .parse_module_str(source, verum_ast::FileId::new(1)).unwrap();
     let mut checker = verum_types::TypeChecker::with_minimal_context();
@@ -25,11 +14,47 @@ fn an_escaping_protocol_result_points_to_the_call_inside_a_nested_record() {
         }
     }
     errors.extend(checker.take_deferred_errors());
-    let error = errors.iter().chain(checker.diagnostic_sources())
-        .find(|error| error.to_string().contains("does not live long enough"))
-        .unwrap_or_else(|| panic!("{errors:?}"));
-    let span = error.span();
-    assert_eq!(&source[span.start as usize..span.end as usize], "self.duplicate()");
+    let errors: Vec<_> = errors.iter().chain(checker.diagnostic_sources()).collect();
+    inspect(&errors);
+}
+
+#[test]
+fn an_escaping_protocol_result_points_to_the_call_inside_a_nested_record() {
+    let source = "
+        type Pair<T> is { first:T, second:T };
+        type Envelope<T> is { pair:Pair<T>, serial:Int };
+        type Sequence is protocol {
+            fn duplicate(&self) -> Self;
+            fn pair(self) -> Envelope<Self> {
+                Envelope {pair:Pair {first:self.duplicate(), second:self}, serial:10}
+            }
+        };
+    ";
+    check(source, |errors| {
+        let error = errors.iter()
+            .find(|error| error.to_string().contains("does not live long enough"))
+            .unwrap_or_else(|| panic!("{errors:?}"));
+        let span = error.span();
+        assert_eq!(&source[span.start as usize..span.end as usize], "self.duplicate()");
+    });
+}
+
+#[test]
+fn an_opaque_write_reports_the_read_of_the_borrowed_field_and_its_cause() {
+    let declarations = "type Payload is { ptr:&Int, count:Int }; fn replace(target:&mut Payload);";
+    let scalar = format!("{declarations} fn read(mut p:Payload)->Int {{ replace(&mut p); p.count }}");
+    check(&scalar, |errors| assert!(errors.is_empty(), "{errors:?}"));
+    let source = format!("{declarations} fn read(mut p:Payload)->&Int {{ replace(&mut p); p.ptr }}");
+    check(&source, |errors| {
+        let hits: Vec<_> = errors.iter().filter_map(|error| match error {
+            TypeError::UnverifiedPayloadLoan { place, read_span, write_span } => Some((
+                place.as_str(), &source[read_span.start as usize..read_span.end as usize],
+                &source[write_span.start as usize..write_span.end as usize],
+            )),
+            _ => None,
+        }).collect();
+        assert_eq!(hits, [("p.ptr", "p.ptr", "&mut p")], "{errors:?}");
+    });
 }
 
 #[test]
@@ -70,6 +95,11 @@ fn ownership_errors_keep_the_use_and_the_related_location() {
             },
             "E312",
             "value goes out of scope here",
+        ),
+        (
+            UnverifiedPayloadLoan { place: "db.row".into(), read_span: action, write_span: origin },
+            "E312",
+            "this write could replace the stored reference",
         ),
         (
             MoveWhileBorrowed {

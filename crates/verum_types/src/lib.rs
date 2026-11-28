@@ -1347,6 +1347,14 @@ pub enum TypeError {
         drop_span: Option<verum_ast::Span>,
     },
 
+    /// A read of a loan-bearing value after a write of unknown provenance.
+    #[error("cannot establish the lifetime of references stored in `{place}` after a possible write")]
+    UnverifiedPayloadLoan {
+        place: Text,
+        read_span: verum_ast::Span,
+        write_span: verum_ast::Span,
+    },
+
     /// &checked reference may escape through function call
     ///
     /// Example:
@@ -2149,6 +2157,7 @@ impl TypeError {
             } => *new_borrow_span,
             FieldBorrowConflict { new_span, .. } => *new_span,
             DanglingReference { ref_span, .. } => *ref_span,
+            UnverifiedPayloadLoan { read_span, .. } => *read_span,
             CheckedRefEscape { span, .. } => *span,
             MoveWhileBorrowed { move_span, .. } => *move_span,
             AssignWhileBorrowed { assign_span, .. } => *assign_span,
@@ -3697,6 +3706,17 @@ impl TypeError {
                 }
                 if let Some(drop) = drop_span.and_then(related_span) {
                     builder = builder.secondary_span(drop, "value goes out of scope here");
+                }
+                builder.build()
+            }
+
+            UnverifiedPayloadLoan { read_span, write_span, .. } => {
+                let mut builder = DiagnosticBuilder::error().code("E312").message(self.to_string());
+                if let Some(read) = convert_span(*read_span) {
+                    builder = builder.span(read);
+                }
+                if read_span != write_span && let Some(write) = related_span(*write_span) {
+                    builder = builder.secondary_span(write, "this write could replace the stored reference");
                 }
                 builder.build()
             }

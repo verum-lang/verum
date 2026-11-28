@@ -1013,12 +1013,12 @@ fn indexed_values_keep_local_loans_and_require_known_storage() {
     for (caller, expected) in [
         ("fn leak()->&Int { let local=3; let mut slots=[]; slots.push(&local); slots[0] }", "local"),
         ("fn read(mut slots:List<&Int>, change:fn(&mut List<&Int>))->&Int {
-            change(&mut slots); slots[0] }", "after this mutable call"),
+            change(&mut slots); slots[0] }", "references stored in `slots` after a possible write"),
         ("fn choose(items:&mut List<&Int>)->Int;
-          fn read(mut slots:List<&Int>)->&Int { slots[choose(&mut slots)] }", "after this mutable call"),
+          fn read(mut slots:List<&Int>)->&Int { slots[choose(&mut slots)] }", "references stored in `slots` after a possible write"),
         ("mount foreign.List as OtherList;
           fn transfer<T>(source:&OtherList<T>, mut out:List<T>)->List<T> {
-            out.push(source[0]); out }", "after this mutable call"),
+            out.push(source[0]); out }", "after a possible write"),
     ] {
         let found = registered_errors([("core.collections.list", list.clone()), ("foreign", list.clone()),
             ("consumer", format!("mount core.collections.list.List; {caller}").into())]);

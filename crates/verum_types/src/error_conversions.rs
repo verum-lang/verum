@@ -515,6 +515,10 @@ impl From<TypeError> for VerumError {
                 ).into(),
             },
 
+            e @ TypeError::UnverifiedPayloadLoan { .. } => VerumError::Other {
+                message: format!("E312: {e}").into(),
+            },
+
             TypeError::CheckedRefEscape { var, .. } => VerumError::Other {
                 message: format!(
                     "E310: `&checked` reference to `{}` may escape through function call",
