@@ -314,6 +314,63 @@ fn execute_source_and_wire(module: VbcModule, expected: i64) {
 }
 
 #[test]
+fn range_syntax_and_iterator_declaration_share_the_runtime_owner() {
+    use verum_ast::decl::{ImplItemKind, ImplKind};
+    use verum_vbc::types::TypeId;
+
+    let mut iterator = actual_iterator(&[]);
+    let mut source = parse(include_str!("../../../core/base/iterator.vr"));
+    source.items.retain_mut(|item| match &mut item.kind {
+        ItemKind::Type(decl) => matches!(decl.name.as_str(), "Range" | "IntoIterator"),
+        ItemKind::Function(decl) => decl.name.as_str() == "range",
+        ItemKind::Impl(decl) if matches!(&decl.kind, ImplKind::Protocol { protocol, for_type, .. }
+            if matches!(protocol.to_string().as_str(), "Iterator" | "IntoIterator")
+                && verum_ast::pretty::format_type(for_type) == "Range<Int>") => {
+            decl.items.retain(|item| match &item.kind {
+                ImplItemKind::Type { .. } => true,
+                ImplItemKind::Function(fun) => matches!(fun.name.as_str(), "next" | "into_iter"),
+                _ => false,
+            });
+            true
+        }
+        _ => false,
+    });
+    iterator.items.extend(source.items);
+    iterator.items.extend(parse("mount core.base.maybe.Maybe;").items);
+    let mut maybe = parse(include_str!("../../../core/base/maybe.vr"));
+    maybe.items.retain(|item| match &item.kind {
+        ItemKind::Module(decl) => decl.items.is_none(),
+        ItemKind::Type(decl) => decl.name.as_str() == "Maybe",
+        _ => false,
+    });
+    let foreign = parse(r#"
+        module foreign;
+        public type Range is { marker: Int };
+        public fn make() -> Range { Range { marker: 30 } }
+        public fn marker() -> Int { make().marker }
+    "#);
+    let consumer = parse(r#"
+        module consumer;
+        mount core.base.iterator.{Range, Iterator, IntoIterator, range};
+        mount foreign.marker;
+        fn sum(span: Range<Int>) -> Int {
+            let mut total = 0;
+            for n in span { total += n; }
+            total
+        }
+        fn run() -> Int { marker() + sum(2..2) + sum(1..4) + sum(1..=4) + sum(range(8, 11)) }
+    "#);
+    for (first, second) in [(&foreign, &iterator), (&iterator, &foreign)] {
+        let module = compile(&[&maybe, first, second, &consumer]).unwrap();
+        let returned = |name| module.get_function(module.find_function_by_name(name).unwrap())
+            .unwrap().semantic_return.as_ref().unwrap().base_type_id().unwrap();
+        assert_eq!(returned("core.base.iterator.range"), TypeId::RANGE);
+        assert_ne!(returned("foreign.make"), TypeId::RANGE);
+        execute_source_and_wire(module, 73);
+    }
+}
+
+#[test]
 fn a_protocol_call_passes_its_declared_shared_receiver_to_a_scalar_body() {
     let source = parse(concat!("module consumer;\n", include_str!("fixtures/bound_borrowed_byte.vr")));
     execute_source_and_wire(compile(&[&source]).unwrap(), 73);

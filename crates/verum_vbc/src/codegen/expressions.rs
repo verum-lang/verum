@@ -31245,11 +31245,10 @@ impl VbcCodegen {
     ) -> CodegenResult<Option<Reg>> {
         let result = self.ctx.alloc_temp();
 
-        // Create a range struct (3 fields at fixed indices: start=0, end=1, inclusive=2)
-        // Use TypeId::RANGE (517) so the iterator recognizes this as a range
+        // Range syntax constructs the canonical core.base.iterator.Range record.
         self.ctx.emit(Instruction::New {
             dst: result,
-            type_id: 517, // TypeId::RANGE
+            type_id: crate::types::TypeId::RANGE.0,
             field_count: 3,
         });
 

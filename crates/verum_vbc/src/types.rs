@@ -50,6 +50,7 @@ impl TypeId {
         match declaration {
             WellKnownType::Text => return Some(Self::TEXT),
             WellKnownType::Deque => return Some(Self::DEQUE),
+            WellKnownType::Range => return Some(Self::RANGE),
             _ => {}
         }
         Self::SMART_POINTER_TYPE_IDS.iter().find_map(|(spelling, id)| {
