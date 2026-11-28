@@ -1616,7 +1616,7 @@ impl VbcCodegen {
         Self::checked_packed_count(value, element_size, expr.span).map(Some)
     }
 
-    fn checked_packed_count(
+    pub(super) fn checked_packed_count(
         value: impl TryInto<usize>, element_size: usize, span: verum_ast::Span,
     ) -> CodegenResult<usize> {
         value.try_into().ok().filter(|count: &usize| {
@@ -1628,6 +1628,29 @@ impl VbcCodegen {
         ))
     }
 
+    /// Parameter length belongs to its semantic declaration, even for unpacked
+    /// elements. It conveys no local allocation or element addressing mode.
+    pub(super) fn fixed_parameter_extent(&self, declaration: &crate::types::TypeRef) -> Option<u64> {
+        use crate::types::{ArrayExtent, TypeKind, TypeRef};
+        fn referent(mut ty: &TypeRef) -> &TypeRef {
+            while let TypeRef::Reference { inner, .. } = ty { ty = inner; }
+            ty
+        }
+
+        let ty = referent(declaration);
+        let resolved;
+        let ty = if ty.base_type_id().and_then(|id| self.type_by_id(id))
+            .is_some_and(|descriptor| descriptor.kind == TypeKind::Alias)
+        {
+            resolved = self.expand_declared_alias(ty.clone())?;
+            referent(&resolved)
+        } else { ty };
+        match ty.fixed_array_parts()? {
+            (_, ArrayExtent::Known(count)) => Some(count),
+            (_, ArrayExtent::Parameter(_)) => None,
+        }
+    }
+
     /// Resolve the element exactly as field descriptors do. A local alias can
     /// name either the element or the array; a user record has its own identity.
     pub(super) fn declared_packed_array(
@@ -1637,6 +1660,7 @@ impl VbcCodegen {
         use verum_ast::ty::TypeKind;
         let Some(ty) = ty else { return Ok(None) };
         if let TypeKind::Array { element, size: Some(size) } = &ty.kind {
+            if verum_ast::checked_const::is_inferred_array_extent(size) { return Ok(None) }
             let element = self.resolve_signature_type_ref(element, &self.ctx.current_generic_param_ids)?;
             let Some((width, float)) = self.primitive_array_element_spec(&element) else { return Ok(None) };
             return Ok(self.checked_array_count(size, width)?.map(|count| (count, width, float)));

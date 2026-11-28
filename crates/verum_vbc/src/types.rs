@@ -923,6 +923,17 @@ impl TypeRef {
         Some(witness)
     }
 
+    /// `[T; _]` retains T and obtains the initialized length from its storage.
+    pub(crate) fn runtime_array_element(&self) -> Option<&Self> {
+        match self {
+            Self::Instantiated { base: TypeId::ARRAY, args } => match args.as_slice() {
+                [element] => Some(element),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
     pub(crate) fn fixed_array_parts(&self) -> Option<(&Self, ArrayExtent)> {
         match self {
             Self::Array { element, length } => Some((element, ArrayExtent::Known(*length))),

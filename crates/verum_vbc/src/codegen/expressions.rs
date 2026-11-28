@@ -8490,7 +8490,7 @@ impl VbcCodegen {
         if matches!(value.kind, ExprKind::Array(verum_ast::ArrayExpr::List(_)))
             && let Some(target) = expected.and_then(|ty| self.expand_declared_alias(ty.clone()))
             && matches!(target, crate::types::TypeRef::Instantiated { .. } | crate::types::TypeRef::Concrete(_))
-            && self.nominal_array_element(&target).is_none()
+            && self.array_literal_element(&target).is_none()
         {
             return Err(CodegenError::with_span(CodegenErrorKind::InvalidSourceSignature(
                 "selected parameter has no declared array construction".into()), argument.span));
@@ -22855,7 +22855,7 @@ impl VbcCodegen {
                 self.ctx.emit(Instruction::NewList { dst: result , capacity_hint: cap_hint });
 
                 let target = self.ctx.expected_value_type.clone().and_then(|ty| self.expand_declared_alias(ty));
-                let element = target.as_ref().and_then(|ty| self.nominal_array_element(ty));
+                let element = target.as_ref().and_then(|ty| self.array_literal_element(ty));
                 for elem in elements.iter() {
                     let start = self.ctx.instructions.len();
                     let elem_reg = self

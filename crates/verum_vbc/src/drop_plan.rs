@@ -183,6 +183,29 @@ fn build_inner(
         return Err("typed destruction exceeds the finite declaration plan boundary".into());
     }
     *budget -= 1;
+    // A runtime extent still carries its exact element declaration. The storage
+    // supplies the initialized prefix; only a fixed extent asserts its length.
+    let array = match ty {
+        TypeRef::Array { element, length } => Some((element.as_ref(), Some(*length))),
+        TypeRef::Instantiated { base: TypeId::ARRAY, .. } => Some((
+            ty.runtime_array_element().ok_or("runtime-extent array destruction requires one declared element witness")?,
+            None,
+        )),
+        _ => None,
+    };
+    if let Some((element_type, fixed_length)) = array {
+        active.push(ty.clone());
+        let cleanup = build_inner(module, element_type, active, budget);
+        active.pop();
+        return Ok(match cleanup? {
+            DropPlan::Ignore => DropPlan::Ignore,
+            plan => DropPlan::SequenceStorage {
+                fixed_length,
+                element_type: element_type.clone(),
+                element: Heap::new(plan),
+            },
+        });
+    }
     let (owner, args) = match ty {
         TypeRef::Reference { .. } => return Ok(DropPlan::Ignore),
         TypeRef::Function { .. } => return Ok(DropPlan::Callable { signature: ty.clone() }),
@@ -204,19 +227,6 @@ fn build_inner(
                 owner: TypeId::TUPLE,
                 owner_args: List::new(),
                 fields,
-            });
-        }
-        TypeRef::Array { element, length } => {
-            active.push(ty.clone());
-            let cleanup = build_inner(module, element, active, budget);
-            active.pop();
-            return Ok(match cleanup? {
-                DropPlan::Ignore => DropPlan::Ignore,
-                plan => DropPlan::SequenceStorage {
-                    fixed_length: Some(*length),
-                    element_type: element.as_ref().clone(),
-                    element: Heap::new(plan),
-                },
             });
         }
         _ => {

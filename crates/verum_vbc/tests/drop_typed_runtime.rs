@@ -632,6 +632,18 @@ fn owned_fixed_array_runs_each_element_destructor_once() {
 
 
 #[test]
+fn runtime_extent_retires_the_initialized_elements_once() {
+    run(r#"
+        fn retire<T>(values: [T; _]) -> Int { values.len() }
+        fn probe() -> Int {
+            let mut a = 0; let mut b = 0;
+            let n = retire<Guard>([Guard { drops:&mut a, marker:1 }, Guard { drops:&mut b, marker:2 }]);
+            100*n + 10*a + b
+        }
+    "#, 211);
+}
+
+#[test]
 fn owned_array_rejects_a_wrong_extent_before_detaching_its_elements() {
     let source = r#"
         type Item is { n: Int };

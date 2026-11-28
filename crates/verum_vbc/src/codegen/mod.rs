@@ -18916,58 +18916,6 @@ impl VbcCodegen {
             func_info.return_type.clone(),
         );
 
-        // T1269 — A FIXED-SIZE ARRAY PARAMETER CARRIES ITS COUNT IN ITS
-        // OWN DECLARATION, and it is the only place the count survives.
-        //
-        // `fn f(buf: &[Byte; 12]) -> Int { buf.len() }` answered 12 at
-        // tier 0 and **0** at tier 1, in the same binary in which the
-        // slice-typed twin `fn f(buf: &[Byte]) -> Int` answered 12. The
-        // VBC of the two bodies is byte-identical (`Len { arr: Reg(0),
-        // type_hint: 0 }`), so the divergence is downstream: an
-        // `Array`-typed parameter is marked as a LIST register and the
-        // AOT then reads `LIST_LEN_OFFSET` out of a slice FatRef.
-        //
-        // Answering here removes the question instead of arbitrating it:
-        // N is in the TYPE, so `buf.len()` folds to a constant at BOTH
-        // tiers and no register mark is consulted.
-        //
-        // ONLY THE COUNT IS RECORDED, deliberately — not
-        // `mark_byte_array_var` / `mark_typed_array_var`. Those marks
-        // steer element ADDRESSING (`ByteArrayElementAddr`, i8 stride),
-        // which is right for a locally allocated packed array and wrong
-        // for a parameter that arrives as a FatRef. The count feeds
-        // `.len()`, `is_empty()`, `len(x)` and `static_array_count`,
-        // none of which touch addressing.
-        //
-        // A CONST-GENERIC bound (`buf: &mut [Byte; N]`) is not a literal
-        // and gets nothing here; that leg is the AOT's to answer.
-        {
-            use verum_ast::ty::TypeKind;
-            for param in &func.params {
-                let verum_ast::FunctionParamKind::Regular { pattern, ty, .. } = &param.kind else {
-                    continue;
-                };
-                let Some((pname, _)) = self.extract_pattern_name_and_mutable(pattern) else {
-                    continue;
-                };
-                // Peel the reference spellings — the descriptor erases
-                // `&`, and so does the count: `[T; N]` and `&[T; N]`
-                // have the same N.
-                let mut inner = ty;
-                loop {
-                    match &inner.kind {
-                        TypeKind::Reference { inner: i, .. }
-                        | TypeKind::CheckedReference { inner: i, .. }
-                        | TypeKind::UnsafeReference { inner: i, .. } => inner = i,
-                        _ => break,
-                    }
-                }
-                if let Some((n, _, _)) = self.declared_packed_array(Some(inner))? {
-                    self.ctx.set_fixed_array_count(&pname, n);
-                }
-            }
-        }
-
         // Set current function's return type name for variant disambiguation.
         // When a variant name collides (e.g., "Lt" in both user's "Ordering" and
         // stdlib's "GeneralCategory"), this allows preferring the correct parent type.
@@ -19235,8 +19183,11 @@ impl VbcCodegen {
         // annotation can also describe a source body, including an empty one.
         let owns_parameters = func.body.is_some() && !func_info.is_generator;
         for (index, (param, ty)) in func.params.iter().zip(parameter_types).enumerate() {
-            let binding = self.extract_param_name_and_mutable(param)
-                .and_then(|(name, _)| self.ctx.lookup_var(&name).map(|binding| binding.reg));
+            let name = &params_with_mutability[index].0;
+            let binding = self.ctx.lookup_var(name).map(|binding| binding.reg);
+            if let Some(count) = ty.as_ref().and_then(|declaration| self.fixed_parameter_extent(declaration)) {
+                self.ctx.set_fixed_array_count(name, Self::checked_packed_count(count, 1, param.span)?);
+            }
             if owns_parameters && let Some(reg) = binding {
                 let written = match &param.kind {
                     verum_ast::FunctionParamKind::Regular { ty, .. } => Some(ty),

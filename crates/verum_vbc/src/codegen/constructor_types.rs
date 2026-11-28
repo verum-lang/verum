@@ -459,7 +459,7 @@ impl VbcCodegen {
             && let Some(target) = self.expand_declared_alias(owner.clone())
             && matches!(target, TypeRef::Instantiated { .. } | TypeRef::Concrete(_))
         {
-            let element = self.nominal_array_element(&target)?;
+            let element = self.array_literal_element(&target)?;
             return items.iter().all(|item|
                 self.source_expression_declaration(item, Some(element), depth + 1).as_ref() == Some(element)
             ).then(|| owner.clone());

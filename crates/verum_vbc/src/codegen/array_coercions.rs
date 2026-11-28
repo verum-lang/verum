@@ -13,6 +13,10 @@ impl VbcCodegen {
         args.get(index)
     }
 
+    pub(super) fn array_literal_element<'a>(&self, target: &'a TypeRef) -> Option<&'a TypeRef> {
+        target.runtime_array_element().or_else(|| self.nominal_array_element(target))
+    }
+
     /// Only the callable's structural contract selects conversion. Expression
     /// hints belong to initializers/arguments/fields and are not return targets.
     pub(super) fn materialize_list_return(&mut self, source: Reg) -> CodegenResult<Reg> {

@@ -181,3 +181,19 @@ fn a_record_named_like_a_scalar_does_not_acquire_packed_storage() {
         }
     "#);
 }
+
+#[test]
+fn generic_element_and_runtime_extent_are_independent() {
+    execute(r#"
+        type Table<K, V> is { key: K, value: V };
+        implement<K, V> Table<K, V> {
+            fn size(pairs: [(K, V); _]) -> Int { pairs.len() }
+        }
+        type Triples<T> is [(T, T); 3];
+        fn fixed<T>(pairs: &Triples<T>) -> Int { pairs.len() }
+        fn main() -> Int {
+            let triples: [(Int, Int); 3] = [(1, 2), (3, 4), (5, 6)];
+            10 * Table<Int, Int>.size([(0, 0), (1, 1), (2, 2), (3, 3), (4, 4), (5, 5), (6, 6)]) + fixed<Int>(&triples)
+        }
+    "#);
+}
