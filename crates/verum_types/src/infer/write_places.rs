@@ -12,6 +12,7 @@ pub(super) struct EvaluatedOperand {
     ty: Type,
     origins: List<RecordReceiver>,
     known_owned_payload: bool,
+    raw_address: Option<Box<[RecordReceiver]>>,
 }
 
 fn unparen(mut expr: &Expr) -> &Expr {
@@ -218,7 +219,12 @@ impl TypeChecker {
             }
         }
         let known_owned_payload = self.carries_stored_loan(ty) && self.complete_slot_value_origins(expr);
-        let observed = EvaluatedOperand { ty: ty.clone(), origins, known_owned_payload };
+        let raw_address = match ty {
+            Type::Pointer { mutable: true, inner } | Type::VolatilePointer { mutable: true, inner } =>
+                self.raw_store_destinations(expr, inner).map(List::into_boxed_slice),
+            _ => None,
+        };
+        let observed = EvaluatedOperand { ty: ty.clone(), origins, known_owned_payload, raw_address };
         for scope in &mut self.place_operands {
             if let Some(slot) = scope.get_mut(&key) {
                 *slot = Some(observed.clone());
@@ -592,5 +598,11 @@ impl TypeChecker {
         self.place_operands.iter().rev()
             .find_map(|scope| scope.get(&key)?.as_ref())
             .is_some_and(|operand| operand.known_owned_payload)
+    }
+
+    pub(super) fn observed_raw_address(&self, expr: &Expr) -> Option<List<RecordReceiver>> {
+        let key = std::ptr::from_ref(unparen(expr)).addr();
+        self.place_operands.iter().rev().find_map(|scope| scope.get(&key)?.as_ref())?
+            .raw_address.as_deref().map(List::from)
     }
 }

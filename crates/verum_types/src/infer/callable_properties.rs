@@ -62,10 +62,9 @@ pub(super) fn forwarded_parameter_index(function: &FunctionDecl, mut value: &Exp
 }
 
 pub(super) fn owned_slot_body_result(declaration: &FunctionDecl) -> Option<Type> {
-    direct_intrinsic_body(declaration)?
-        .0
-        .owned_slot_write_carrier()
-        .map(|_| Type::Unit)
+    let (operation, _) = direct_intrinsic_body(declaration)?;
+    (operation.owned_slot_write_carrier().is_some() || operation.is_raw_pointer_store())
+        .then_some(Type::Unit)
 }
 
 pub(super) fn intrinsic_requirement(name: &str) -> Option<PropertyRequirement> {

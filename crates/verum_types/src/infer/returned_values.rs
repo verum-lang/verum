@@ -1502,6 +1502,10 @@ impl TypeChecker {
                 | Type::Reference { .. }
                 | Type::CheckedReference { .. }
                 | Type::UnsafeReference { .. }
+                // Retiring a raw address runs no cleanup on its pointee.
+                // Writes through it still require a proof of the selected body.
+                | Type::Pointer { .. }
+                | Type::VolatilePointer { .. }
         )
     }
 }

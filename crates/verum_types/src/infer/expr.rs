@@ -7889,7 +7889,9 @@ impl TypeChecker {
                 }
             }
         }
-        let known_writes = if let Some(origins) = self.imported_slot_read_origins(expr.span, args, &params, &resolved_return) {
+        let known_writes = if self.check_declared_raw_store(expr.span, args, &params, &resolved_return)? {
+            true
+        } else if let Some(origins) = self.imported_slot_read_origins(expr.span, args, &params, &resolved_return) {
             self.record_owned_value_origins(expr.span, Some(origins), true);
             true
         } else if let Some(known) = self.observe_value_exchange(expr.span, args, &params, &resolved_return)? {
@@ -11770,6 +11772,9 @@ impl TypeChecker {
             }
             if let Some((carrier, take)) = operation.intrinsic.owned_slot_read_carrier() {
                 return self.check_slot_read(operation.intrinsic, carrier, take, args, expr);
+            }
+            if operation.intrinsic.is_raw_pointer_store() {
+                return self.check_raw_store_intrinsic(operation.intrinsic, args, expr);
             }
             match operation.intrinsic.strategy {
                 CodegenStrategy::InlineSequence(

@@ -13,7 +13,11 @@ fn diagnostics(declaration: &str, caller: &str) -> List<Text> {
     let mut checker = TypeChecker::with_minimal_context();
     checker.register_primitives();
     checker.set_current_module_path("probe");
-    let mut errors = checker.prepare_module_declarations(&module);
+    check_module(&mut checker, &module)
+}
+
+fn check_module(checker: &mut TypeChecker, module: &verum_ast::Module) -> List<Text> {
+    let mut errors = checker.prepare_module_declarations(module);
     for item in &module.items {
         if let Err(error) = checker.check_item(item) {
             errors.push(error);
@@ -25,6 +29,27 @@ fn diagnostics(declaration: &str, caller: &str) -> List<Text> {
         .chain(checker.diagnostic_sources())
         .map(|error| error.to_string().into())
         .collect()
+}
+
+fn imported_diagnostics<const N: usize>(sources: [(&str, Text); N]) -> List<Text> {
+    use verum_modules::{ModuleInfo, ModulePath, ModuleRegistry, extract_exports_from_module};
+    let mut registry = ModuleRegistry::new();
+    for (owner, source) in sources {
+        let id = registry.allocate_id();
+        let file = FileId::new(id.as_u32());
+        let module = FastParser::new().parse_module_str(&source, file).unwrap();
+        let path = ModulePath::from_str(owner);
+        let exports = extract_exports_from_module(&module, id, &path).unwrap();
+        let mut info = ModuleInfo::new(id, path, module, file, source);
+        info.exports = exports;
+        registry.register(info);
+    }
+    let module = registry.get_by_path("consumer").unwrap();
+    let mut checker = TypeChecker::with_minimal_context();
+    checker.register_primitives();
+    checker.set_current_module_path("consumer");
+    checker.set_module_registry_direct(registry);
+    check_module(&mut checker, &module.ast)
 }
 
 #[test]
@@ -201,6 +226,144 @@ fn a_borrowed_receiver_can_return_its_own_type_with_different_provenance() {
 }
 
 #[test]
+fn typed_raw_stores_retain_the_value_in_the_addressed_record_field() {
+    for operation in ["ptr_write", "ptr_write_volatile", "intrinsic_ptr_write"] {
+        let declarations = format!(r#"type Pair is {{ public left:&Int, public right:&Int }};
+            fn exchange<T>(slot:&mut T, value:T)->T {{ @intrinsic("replace",slot,value) }}
+            unsafe fn store<T>(value:T, destination:*mut T) {{ @intrinsic("{operation}",destination,value) }}"#);
+        for field in ["left", "right"] {
+            for store in [
+                format!(r#"@intrinsic("{operation}",(&mut pair.{field}) as *mut &Int,&short)"#),
+                format!("store(&short,(&mut pair.{field}) as *mut &Int)"),
+                format!("let raw=(&mut pair.{field}) as *mut &Int; let alias=raw; store(&short,alias)"),
+            ] {
+                let source = format!("fn caller(from:&Int,incoming:&Int)->&Int {{
+                    let short=5; let mut pair=Pair{{left:from,right:from}};
+                    unsafe {{ {store}; }}; exchange(&mut pair.left,incoming)
+                }}");
+                let errors = diagnostics(&declarations, &source);
+                if field == "left" {
+                    assert!(errors.iter().any(|error| error.contains("short") && error.contains("does not live long enough")),
+                        "{store}: {errors:?}");
+                } else {
+                    assert!(errors.is_empty(), "{store}: {errors:?}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_raw_pointer_argument_cannot_hide_writes_by_an_opaque_callee() {
+    let declarations = r#"type Pair is { public left:&Int, public right:&Int };
+        fn exchange<T>(slot:&mut T, value:T)->T { @intrinsic("replace",slot,value) }
+        fn selected(slot:*mut &Int, value:&Int) {}"#;
+    let errors = diagnostics(declarations, "fn caller(selected:fn(*mut &Int,&Int),from:&Int,incoming:&Int)->&Int {
+        let short=5; let mut pair=Pair{left:from,right:from};
+        unsafe { selected((&mut pair.left) as *mut &Int,&short); };
+        exchange(&mut pair.left,incoming)
+    }");
+    assert!(errors.iter().any(|error| error.contains("does not live long enough")
+        || error.contains("cannot establish the lifetime")), "{errors:?}");
+    let bad = diagnostics("", r#"fn caller(raw:*mut &Int) { let short=5;
+        unsafe { @intrinsic("ptr_write",raw,&short); }; }"#);
+    assert!(bad.iter().any(|error| error.contains("cannot establish the original carrier")
+        || error.contains("does not live long enough")), "{bad:?}");
+    let bad = diagnostics("", r#"fn caller(raw:*const Int) { unsafe { @intrinsic("ptr_write",raw,2); }; }"#);
+    assert!(bad.iter().any(|error| error.contains("requires a writable pointer")), "{bad:?}");
+}
+
+#[test]
+fn an_imported_raw_store_exposes_its_unit_result_and_addressed_slot() {
+    let provider = r#"public unsafe fn put<T>(value:T, address:*mut T) {
+        @intrinsic("ptr_write",address,value)
+    }"#;
+    for field in ["left", "right"] {
+        let consumer = format!(r#"mount owner.{{put as write}};
+            type Pair is {{public left:&Int,public right:&Int}};
+            fn exchange<T>(slot:&mut T,value:T)->T {{ @intrinsic("replace",slot,value) }}
+            fn read(from:&Int,incoming:&Int)->&Int {{
+                let short=5; let mut pair=Pair{{left:from,right:from}};
+                unsafe {{write(&short,(&mut pair.{field}) as *mut &Int);}};
+                exchange(&mut pair.left,incoming)
+            }}"#);
+        let errors = imported_diagnostics([("owner", provider.into()), ("consumer", consumer.into())]);
+        if field == "left" {
+            assert!(errors.iter().any(|error| error.contains("short")
+                && error.contains("does not live long enough")), "{errors:?}");
+        } else {
+            assert!(errors.is_empty(), "{errors:?}");
+        }
+    }
+    let wrong = imported_diagnostics([
+        ("owner", provider.into()),
+        ("consumer", "mount owner.put; fn wrong(address:*mut Int)->Int {unsafe {put(2,address)}}".into()),
+    ]);
+    assert!(wrong.iter().any(|error| error.contains("Unit") && error.contains("Int")), "{wrong:?}");
+}
+
+#[test]
+fn writing_a_reference_slot_discards_its_previous_exact_identity() {
+    for (operation, escapes) in [
+        (r#"@intrinsic("ptr_write",address,&short)"#, true),
+        (r#"@intrinsic("ptr_write",address,from)"#, false),
+        ("*address=&short", true),
+        ("*address=from", false),
+        ("callback(address,&short)", true),
+    ] {
+        let caller = format!("fn caller(from:&Int, callback:fn(*mut &Int,&Int))->&Int {{
+            let short=5; let mut slot=from;
+            unsafe {{ let address=(&mut slot) as *mut &Int; {operation}; }};
+            let result=slot; result
+        }}");
+        let errors = diagnostics("", &caller);
+        if escapes {
+            assert!(errors.iter().any(|error| error.contains("does not live long enough")
+                || error.contains("cannot establish the lifetime")), "{operation}: {errors:?}");
+        } else {
+            assert!(errors.is_empty(), "{operation}: {errors:?}");
+        }
+    }
+}
+
+#[test]
+fn retiring_a_raw_pointer_in_a_closed_callee_preserves_the_pointee() {
+    for permission in ["*mut", "*volatile mut"] {
+        let declarations = format!(r#"
+            type Pair is {{ public left:&Int, public right:&Int }};
+            fn exchange<T>(slot:&mut T, value:T)->T {{ @intrinsic("replace",slot,value) }}
+            fn ptr_write(slot:{permission} &Int, value:&Int) {{}}
+            fn forward(slot:{permission} &Int, value:&Int) {{ ptr_write(slot,value); }}
+        "#);
+        for selected in ["ptr_write", "forward"] {
+            let caller = format!("fn caller(from:&Int,incoming:&Int)->&Int {{
+                let short=5; let mut pair=Pair{{left:from,right:from}};
+                unsafe {{ {selected}((&mut pair.left) as {permission} &Int,&short); }};
+                exchange(&mut pair.left,incoming)
+            }}");
+            let errors = diagnostics(&declarations, &caller);
+            assert!(errors.is_empty(), "{permission} {selected}: {errors:?}");
+        }
+    }
+}
+
+#[test]
+fn retiring_a_raw_pointer_does_not_discharge_a_sibling_parameters_destructor() {
+    let declarations = "type Drop is protocol {fn drop(&mut self);};
+        type affine DeferredWrite is {target:&mut Payload,source:&Int};
+        implement Drop for DeferredWrite {fn drop(&mut self) {self.target.ptr=self.source;}}
+        fn finish(address:*mut Int, pending:DeferredWrite) {}";
+    assert!(diagnostics(declarations, "").is_empty());
+    let errors = diagnostics(declarations, "fn caller(input:&Int)->Payload {
+        let mut cell=0; let mut container=Payload{ptr:input,marker:2};
+        {let local=3; finish((&mut cell) as *mut Int,DeferredWrite{target:&mut container,source:&local});}
+        Payload{ptr:container.ptr,marker:container.marker}
+    }");
+    assert!(errors.iter().any(|error| error.contains("does not live long enough")
+        || error.contains("cannot establish the lifetime")), "{errors:?}");
+}
+
+#[test]
 fn branch_results_keep_only_the_loans_in_the_returned_payload() {
     for (source, escapes) in [("input", false), ("&local", true)] {
         let caller = format!("fn receive(input:&Int,choose:Bool)->Payload {{
@@ -370,41 +533,13 @@ fn conditional_replacement_does_not_erase_the_unwritten_branch() {
 
 #[test]
 fn renamed_imports_keep_the_selected_owners_return_rule() {
-    use verum_modules::{ModuleInfo, ModulePath, ModuleRegistry, extract_exports_from_module};
     for (payload, accepted) in [("source.ptr", true), ("key", false)] {
         for call in ["choose", "service.selected"] {
-            let mut registry = ModuleRegistry::new();
-            for (owner, source) in [
-            ("owner", format!("public type Payload is {{public ptr:&Int,public marker:Int}}; public fn selected(source:&Payload,key:&Int)->Payload {{Payload{{ptr:{payload},marker:source.marker}}}}")),
-            ("decoy", "public type Payload is {public ptr:&Int,public marker:Int}; public fn selected(source:&Payload,key:&Int)->Payload {Payload{ptr:key,marker:source.marker}}".into()),
-            ("consumer", format!("mount decoy.*; mount owner.{{self as service,Payload as Carrier,selected as choose}}; fn receive(input:&Int)->Carrier {{let container=Carrier{{ptr:input,marker:2}}; let key=3; {call}(&container,&key)}}")),
-        ] {
-            let id = registry.allocate_id();
-            let file = FileId::new(id.as_u32());
-            let module = FastParser::new().parse_module_str(&source, file).unwrap();
-            let path = ModulePath::from_str(owner);
-            let exports = extract_exports_from_module(&module, id, &path).unwrap();
-            let mut info = ModuleInfo::new(id, path, module, file, source.into());
-            info.exports = exports;
-            registry.register(info);
-        }
-            let module = registry.get_by_path("consumer").unwrap();
-            let mut checker = TypeChecker::with_minimal_context();
-            checker.register_primitives();
-            checker.set_current_module_path("consumer");
-            checker.set_module_registry_direct(registry);
-            let mut errors = checker.prepare_module_declarations(&module.ast);
-            for item in &module.ast.items {
-                if let Err(error) = checker.check_item(item) {
-                    errors.push(error);
-                }
-            }
-            errors.extend(checker.take_deferred_errors());
-            let errors: List<Text> = errors
-                .iter()
-                .chain(checker.diagnostic_sources())
-                .map(|error| error.to_string().into())
-                .collect();
+            let errors = imported_diagnostics([
+                ("owner", format!("public type Payload is {{public ptr:&Int,public marker:Int}}; public fn selected(source:&Payload,key:&Int)->Payload {{Payload{{ptr:{payload},marker:source.marker}}}}").into()),
+                ("decoy", "public type Payload is {public ptr:&Int,public marker:Int}; public fn selected(source:&Payload,key:&Int)->Payload {Payload{ptr:key,marker:source.marker}}".into()),
+                ("consumer", format!("mount decoy.*; mount owner.{{self as service,Payload as Carrier,selected as choose}}; fn receive(input:&Int)->Carrier {{let container=Carrier{{ptr:input,marker:2}}; let key=3; {call}(&container,&key)}}").into()),
+            ]);
             if accepted {
                 assert!(errors.is_empty(), "{errors:?}");
             } else {

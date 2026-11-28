@@ -1293,6 +1293,9 @@ impl Default for UniverseContext {
 pub(crate) enum ReferenceOrigin {
     Parameter,
     Exact(crate::ty::RecordReceiver),
+    /// An immutable raw pointer still designates these observed managed places.
+    /// Its value does not itself carry a managed loan.
+    RawAddress(Box<[crate::ty::RecordReceiver]>),
     Candidates(Box<[crate::ty::RecordReceiver]>),
     /// All activation-local loans held by an owned value are accounted for.
     OwnedPayload(Box<[crate::ty::RecordReceiver]>),
@@ -1323,6 +1326,14 @@ struct RecordPlace {
 }
 
 impl RecordPlace {
+    /// A store into a reference slot can replace the reference itself.
+    /// Its previous referent remains a candidate on paths that skip the store.
+    fn may_replace_reference(&mut self) {
+        if let Some(ReferenceOrigin::Exact(origin)) = &self.reference {
+            self.reference = Some(ReferenceOrigin::Candidates(Box::new([origin.clone()])));
+        }
+    }
+
     fn identity(&mut self) -> Option<u64> {
         use std::sync::atomic::{AtomicU64, Ordering};
         static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -1693,6 +1704,13 @@ impl TypeEnv {
         self.record_places.entry(name.into()).or_default().reference = Some(source);
     }
 
+    pub(crate) fn raw_address_origins(&mut self, name: &str) -> Option<List<crate::ty::RecordReceiver>> {
+        let ReferenceOrigin::RawAddress(targets) = self.local_record_place(name)?.reference.as_ref()? else {
+            return None;
+        };
+        Some(List::from(targets.as_ref()))
+    }
+
     pub(crate) fn set_binding_loan_region(&mut self, name: &str, region: usize) {
         self.record_places.entry(name.into()).or_default().loan_region = Some(region);
     }
@@ -1811,7 +1829,7 @@ impl TypeEnv {
         if reference {
             match place.reference.as_ref()? {
                 ReferenceOrigin::Exact(source) => return Some(source.clone()),
-                ReferenceOrigin::Candidates(_) | ReferenceOrigin::OwnedPayload(_)
+                ReferenceOrigin::RawAddress(_) | ReferenceOrigin::Candidates(_) | ReferenceOrigin::OwnedPayload(_)
                 | ReferenceOrigin::OwnedRecord { .. } => return None,
                 ReferenceOrigin::Parameter => {}
             }
@@ -1883,6 +1901,9 @@ impl TypeEnv {
                 .values_mut()
                 .find(|place| place.id == Some(destination.binding))
             {
+                if destination.fields.is_empty() {
+                    place.may_replace_reference();
+                }
                 if let Some(ReferenceOrigin::OwnedRecord { origins, fields }) = &mut place.reference
                     && let Some(field) = destination.fields.first().and_then(|field| fields.get_mut(field))
                 {
@@ -1946,6 +1967,9 @@ impl TypeEnv {
             if let Some(place) = scope.record_places.values_mut()
                 .find(|place| place.id == Some(destination.binding))
             {
+                if destination.fields.is_empty() {
+                    place.may_replace_reference();
+                }
                 place.unverified_write = Some(span);
                 return;
             }
@@ -1963,6 +1987,21 @@ impl TypeEnv {
         while scope.parent.is_some() {
             for place in scope.record_places.values_mut() {
                 if matches!(place.reference, Some(ReferenceOrigin::Parameter)) {
+                    place.unverified_write = Some(span);
+                }
+            }
+            scope = scope.parent.as_deref_mut().expect("lexical parent");
+        }
+    }
+
+    /// An explicitly passed opaque raw address may also point into a local.
+    pub(crate) fn invalidate_unknown_raw_write(&mut self, span: Span) {
+        let mut scope = self;
+        while scope.parent.is_some() {
+            for place in scope.record_places.values_mut() {
+                if matches!(place.reference, Some(ReferenceOrigin::Parameter | ReferenceOrigin::Exact(_)
+                    | ReferenceOrigin::Candidates(_) | ReferenceOrigin::OwnedPayload(_) | ReferenceOrigin::OwnedRecord { .. })) {
+                    place.may_replace_reference();
                     place.unverified_write = Some(span);
                 }
             }
@@ -2018,7 +2057,7 @@ impl TypeEnv {
                         .unwrap_or_else(|| origins.clone()),
                     Some(ReferenceOrigin::Parameter) if collection_element => List::new(),
                     Some(ReferenceOrigin::Parameter) => List::from_iter([source.clone()]),
-                    None => List::new(),
+                    Some(ReferenceOrigin::RawAddress(_)) | None => List::new(),
                 };
                 for origin in &place.inserted_origins {
                     if !origins.contains(origin) { origins.push(origin.clone()); }

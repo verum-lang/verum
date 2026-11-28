@@ -1474,6 +1474,13 @@ impl Intrinsic {
         })
     }
 
+    /// Writes the second operand through the writable pointer in the first.
+    pub fn is_raw_pointer_store(&self) -> bool {
+        matches!(self.strategy,
+            CodegenStrategy::InlineSequence(InlineSequenceId::PtrWriteRaw | InlineSequenceId::PtrWriteVolatile)
+            | CodegenStrategy::DirectOpcode(Opcode::DerefMut))
+    }
+
     /// Source operand installed as a complete owned value by a memory operation.
     /// A raw store or exchange takes the destination followed by its new value.
     pub(crate) fn stored_value_operand(&self) -> Option<usize> {
@@ -1481,10 +1488,9 @@ impl Intrinsic {
             CodegenStrategy::InlineSequence(InlineSequenceId::Forget) => Some(0),
             CodegenStrategy::InlineSequence(
                 InlineSequenceId::Replace
-                | InlineSequenceId::HeapSlotInit
-                | InlineSequenceId::PtrWriteRaw
-                | InlineSequenceId::PtrWriteVolatile,
-            ) | CodegenStrategy::DirectOpcode(Opcode::DerefMut) => Some(1),
+                | InlineSequenceId::HeapSlotInit,
+            ) => Some(1),
+            _ if self.is_raw_pointer_store() => Some(1),
             _ if self.owned_slot_write_carrier().is_some() => Some(2),
             _ => None,
         }

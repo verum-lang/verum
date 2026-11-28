@@ -98,7 +98,22 @@ impl TypeChecker {
         }
         let (holder, _) = self.borrow_place(destination)?;
         let ty = self.place_reference_head(&self.ctx.env.lookup(&holder)?.ty, destination.span).ok()?;
-        if matches!(ty, Type::Pointer { .. } | Type::VolatilePointer { .. }) { return None; }
+        if matches!(ty, Type::Pointer { .. } | Type::VolatilePointer { .. }) {
+            let mut targets = self.ctx.env.raw_address_origins(&holder)?;
+            let place = unparen(destination);
+            let (deref, field) = match &place.kind {
+                ExprKind::Field { expr, field } => (unparen(expr), Some(&field.name)),
+                _ => (place, None),
+            };
+            let ExprKind::Unary { op: UnOp::Deref, expr } = &deref.kind else { return None };
+            if !matches!(&unparen(expr).kind, ExprKind::Path(path) if path.as_ident()?.name == holder) {
+                return None;
+            }
+            if let Some(field) = field {
+                for target in &mut targets { target.fields.push(field.clone()); }
+            }
+            return Some(targets);
+        }
         if self.reference_mode(&ty, destination.span).ok()?.is_some() {
             let targets = self.ctx.env.reference_candidates(&holder);
             return (!targets.is_empty()).then_some(targets);
@@ -112,21 +127,122 @@ impl TypeChecker {
         incoming: &[RecordReceiver],
         complete: bool,
     ) -> crate::Result<()> {
-        let Some(targets) = self.projected_store_destinations(destination) else {
+        let targets = self.projected_store_destinations(destination);
+        self.retain_addressed_store(targets, incoming, complete, destination.span)
+    }
+
+    fn retain_addressed_store(
+        &mut self, targets: Option<List<RecordReceiver>>, incoming: &[RecordReceiver],
+        complete: bool, span: verum_ast::Span,
+    ) -> crate::Result<()> {
+        let Some(targets) = targets else {
+            self.refinement_evidence.invalidate_write(&[]);
             if complete && incoming.is_empty() { return Ok(()); }
-            return Err(crate::TypeError::UnknownRecordOrigin { span: destination.span });
+            return Err(crate::TypeError::UnknownRecordOrigin { span });
         };
+        self.refinement_evidence.invalidate_write(&targets);
         for target in targets {
-            self.check_input_storage_retention(incoming, &target, destination.span)?;
+            self.check_input_storage_retention(incoming, &target, span)?;
             let region = self.ctx.env.storage_loan_region(target.binding)
-                .ok_or(crate::TypeError::UnknownRecordOrigin { span: destination.span })?;
-            self.retain_origins_in_region(incoming, region, destination.span)?;
+                .ok_or(crate::TypeError::UnknownRecordOrigin { span })?;
+            self.retain_origins_in_region(incoming, region, span)?;
             self.ctx.env.insert_owned_slot_origins(&target, incoming);
             if !complete {
-                self.ctx.env.invalidate_payload_origins(&target, destination.span);
+                self.ctx.env.invalidate_payload_origins(&target, span);
             }
         }
         Ok(())
+    }
+
+    pub(super) fn writable_raw_element(&self, ty: &Type, span: verum_ast::Span) -> Option<Type> {
+        match self.place_reference_head(ty, span).ok()? {
+            Type::Pointer { mutable: true, inner } | Type::VolatilePointer { mutable: true, inner } => Some(*inner),
+            _ => None,
+        }
+    }
+
+    /// Only a type-preserving cast from an exclusive reference or an immutable
+    /// pointer already derived from it identifies the original managed slot.
+    pub(super) fn raw_store_destinations(&mut self, address: &Expr, element: &Type) -> Option<List<RecordReceiver>> {
+        if element.contains_type(|ty| matches!(ty, Type::Unknown | Type::Placeholder { .. })) { return None; }
+        let mut address = unparen(address);
+        while let ExprKind::Cast { expr, .. } = &address.kind {
+            let source = unparen(expr);
+            let source_ty = self.type_registry.lookup_expr(expr.span)
+                .or_else(|| self.type_registry.lookup_expr(source.span))?;
+            let head = self.place_reference_head(source_ty, source.span).ok()?;
+            match head {
+                Type::Pointer { mutable: true, inner } | Type::VolatilePointer { mutable: true, inner }
+                    if self.types_equivalent(&inner, element) => { address = source; }
+                Type::Reference { mutable: true, inner } | Type::CheckedReference { mutable: true, inner }
+                    if self.types_equivalent(&inner, element) => {
+                    let target = if let ExprKind::Unary { op: UnOp::RefMut | UnOp::RefCheckedMut, expr } = &source.kind {
+                        match &unparen(expr).kind {
+                            ExprKind::Path(path) => self.ctx.env.record_source(path.as_ident()?.as_str(), false)?,
+                            ExprKind::Field { expr: owner, field } => {
+                                let (mut place, _) = self.call_input_place(owner)?;
+                                place.fields.push(field.name.clone());
+                                place
+                            }
+                            _ => return None,
+                        }
+                    } else { self.reference_result_origin(source)? };
+                    return Some(List::from_iter([target]));
+                }
+                _ => return None,
+            }
+        }
+        let ExprKind::Path(path) = &address.kind else { return None };
+        self.ctx.env.raw_address_origins(path.as_ident()?.as_str())
+    }
+
+    fn retain_raw_store(&mut self, address: &Expr, value: &Expr, element: &Type, span: verum_ast::Span) -> crate::Result<()> {
+        let targets = self.observed_raw_address(address);
+        if !self.carries_stored_loan(element) {
+            if !self.refinement_evidence.is_empty() {
+                self.refinement_evidence.invalidate_write(targets.as_deref().unwrap_or(&[]));
+            }
+            return Ok(());
+        }
+        let incoming = self.observed_operand_origins(value);
+        let complete = incoming.is_some() && self.observed_known_owned_payload(value);
+        self.retain_addressed_store(targets, incoming.as_deref().unwrap_or(&[]), complete, span)
+    }
+
+    pub(super) fn check_raw_store_intrinsic(
+        &mut self, operation: &'static verum_vbc::intrinsics::registry::Intrinsic,
+        args: &[Expr], expression: &Expr,
+    ) -> crate::Result<Type> {
+        let span = expression.span;
+        let [_, address, value] = args else {
+            return Err(crate::TypeError::wrong_arg_count(operation.name.into(), 2, args.len().saturating_sub(1), span));
+        };
+        self.require_slot_access(operation.name, span)?;
+        self.with_call_place_types(expression, &args[1..], |checker| {
+            let pointer = checker.synth_expr(address)?.ty;
+            let element = checker.writable_raw_element(&pointer, address.span)
+                .ok_or_else(|| crate::TypeError::OtherWithCodeSpanned {
+                    code: "E0444".into(), msg: format!("{} requires a writable pointer", operation.name).into(), span: address.span,
+                })?;
+            checker.check_expr(value, &element)?;
+            let parameters = [pointer, element];
+            checker.check_call_loans(&args[1..], Some(&parameters), None)?;
+            checker.consume_affine_call_args(&args[1..], &parameters)?;
+            checker.retain_raw_store(address, value, &parameters[1], span)?;
+            Ok(Type::Unit)
+        })
+    }
+
+    pub(super) fn check_declared_raw_store(&mut self, span: verum_ast::Span, args: &[Expr], params: &[Type], result: &Type) -> crate::Result<bool> {
+        if *result != Type::Unit || params.len() != 2 || args.len() != 2 { return Ok(false); }
+        let Some((op, order)) = self.direct_slot_operation(span, 2) else { return Ok(false) };
+        let [pointer, payload] = order.as_slice() else { return Ok(false) };
+        if !op.is_raw_pointer_store() || args.iter().any(|arg| self.deref_adjustments.contains_key(&arg.span))
+        { return Ok(false); }
+        let Some(element) = self.writable_raw_element(&params[*pointer], span) else { return Ok(false) };
+        if !self.types_equivalent(&element, &params[*payload]) { return Ok(false); }
+        self.retain_raw_store(&args[*pointer], &args[*payload], &element, span)?;
+        Ok(true)
     }
 
     pub(super) fn retain_iteration_origin(&mut self, origin: &RecordReceiver, span: verum_ast::Span) -> crate::Result<()> {
@@ -1474,7 +1590,7 @@ impl TypeChecker {
         } else {
             Err(crate::TypeError::OtherWithCodeSpanned {
                 code: "E0444".into(),
-                msg: format!("{operation} requires unsafe access to collection storage").into(),
+                msg: format!("{operation} requires unsafe access to storage").into(),
                 span,
             })
         }
@@ -1832,6 +1948,7 @@ impl TypeChecker {
         let mut sources = List::new();
         let mut destinations = List::new();
         let mut unknown_write = None;
+        let mut unknown_raw_write = None;
         for (argument, receiver_mode, declared, is_callee) in receiver.into_iter()
             .map(|(value, mode, ty)| (value, Some(mode), ty, false))
             .chain(callable.into_iter().map(|value| (value, None, None, true)))
@@ -1848,6 +1965,25 @@ impl TypeChecker {
             };
             let selected = declared.unwrap_or(actual);
             let head = self.place_reference_head(selected, argument.span)?;
+            if let Type::Pointer { mutable: true, inner: element }
+                | Type::VolatilePointer { mutable: true, inner: element } = &head
+            {
+                let targets = self.observed_raw_address(argument);
+                if !self.refinement_evidence.is_empty() {
+                    self.refinement_evidence.invalidate_write(targets.as_deref().unwrap_or(&[]));
+                }
+                let carries = self.carries_stored_loan(element);
+                if let Some(targets) = targets {
+                    let retains_shared = carries && self.may_retain_shared_loan(element);
+                    for target in targets {
+                        if !sources.contains(&(target.clone(), true)) { sources.push((target.clone(), true)); }
+                        if carries { destinations.push((target, argument.span, retains_shared)); }
+                    }
+                } else if carries {
+                    unknown_raw_write = Some(argument.span);
+                }
+                continue;
+            }
             let (mode, payload) = match &head {
                 Type::Reference { mutable, inner }
                 | Type::CheckedReference { mutable, inner }
@@ -1925,6 +2061,14 @@ impl TypeChecker {
         }
         if let Some(span) = unknown_write {
             self.ctx.env.invalidate_unknown_referent_write(span);
+        }
+        if let Some(span) = unknown_raw_write {
+            for (origin, _) in &sources {
+                if let Some(var) = self.ctx.env.dropping_loan_storage(origin.binding, true, self.closure_return_depth) {
+                    return Err(crate::TypeError::DanglingReference { var, ref_span: span, drop_span: None });
+                }
+            }
+            self.ctx.env.invalidate_unknown_raw_write(span);
         }
         for (destination, span, retains_shared) in destinations {
             self.ctx.env.invalidate_payload_origins(&destination, span);
