@@ -173,7 +173,7 @@ fn pow2(n: Int) -> Int {
     r
 }
 
-implement<H: Handler> Layer<H> for RetryLayer {
+implement<H: Handler<Error = WeftError>> Layer<H> for RetryLayer {
     type Wrapped = RetryHandler<H>;
     fn wrap(&self, inner: H) -> RetryHandler<H> {
         RetryHandler {
@@ -206,7 +206,7 @@ public type RetryHandler<H> is {
     layer: RetryLayer,
 };
 
-implement<H: Handler> Handler for RetryHandler<H> {
+implement<H: Handler<Error = WeftError>> Handler for RetryHandler<H> {
     async fn handle(&self, req: WeftRequest) -> Result<Response, WeftError> {
         // Default — only safe/idempotent methods retry. The
         // `with_idempotency_key_retry` builder opts non-idempotent

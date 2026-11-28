@@ -113,7 +113,7 @@ implement CircuitBreakerLayer {
     }
 }
 
-implement<H: Handler> Layer<H> for CircuitBreakerLayer {
+implement<H: Handler<Error = WeftError>> Layer<H> for CircuitBreakerLayer {
     type Wrapped = CircuitBreakerHandler<H>;
     fn wrap(&self, inner: H) -> CircuitBreakerHandler<H> {
         CircuitBreakerHandler {
@@ -128,7 +128,7 @@ public type CircuitBreakerHandler<H> is {
     state: Shared<BreakerState>,
 };
 
-implement<H: Handler> Handler for CircuitBreakerHandler<H> {
+implement<H: Handler<Error = WeftError>> Handler for CircuitBreakerHandler<H> {
     async fn handle(&self, req: WeftRequest) -> Result<Response, WeftError> {
         let s = &*self.state;
         let now = SystemTime.now().duration_since_epoch().as_millis();
@@ -152,7 +152,7 @@ implement<H: Handler> Handler for CircuitBreakerHandler<H> {
     }
 }
 
-implement<H: Handler> CircuitBreakerHandler<H> {
+implement<H: Handler<Error = WeftError>> CircuitBreakerHandler<H> {
     async fn dispatch(&self, req: WeftRequest, s: &BreakerState)
         -> Result<Response, WeftError>
     {
@@ -183,7 +183,7 @@ fn classify_as_failure(result: &Result<Response, WeftError>) -> Bool {
     match result {
         Result.Err(e) => e.category().is_retryable(),
         Result.Ok(r)  => {
-            let code = r.status.code();
+            let code = r.status_code().code();
             code == 502 || code == 503 || code == 504
         }
     }
