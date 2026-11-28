@@ -85,13 +85,20 @@ pub fn decode_metadata(bytes: &[u8]) -> Result<CoreMetadata, verum_common::Text>
 }
 
 fn validate_metadata_descriptors(metadata: &CoreMetadata) -> Result<(), Text> {
+    // Methods and associated types consume their implementation's binders.
+    // Diagnose a missing owner before inspecting any of its members.
+    if let Some(implementation) = metadata.implementations.iter()
+        .find(|implementation| implementation.source_implementation.is_none())
+    {
+        return Err(format!(
+            "implementation lacks its declaration-owned source telescope for {} on {}; rebuild the metadata archive",
+            implementation.protocol, implementation.target_type,
+        ).into());
+    }
     callable::validate_archive_callables(metadata)?;
     validate_source_callable_owners(metadata)?;
     validate_archive_array_extents(metadata)?;
     NominalSourceOwners::default().admit(metadata)?;
-    if metadata.implementations.iter().any(|implementation| implementation.source_implementation.is_none()) {
-        return Err("implementation lacks its declaration-owned source telescope; rebuild the metadata archive".into());
-    }
     for descriptor in metadata.functions.values() {
         if let Some(signature) = &descriptor.source_signature {
             verum_ast::source_signature::validate_source_signature(signature, descriptor.parent_type.is_some())?;

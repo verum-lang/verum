@@ -94,13 +94,16 @@ fn consumer_errors(metadata: &CoreMetadata, source: &str, eager: bool) -> Vec<St
     ));
     let metadata = Arc::new(metadata.clone());
     let mut checker = if eager {
-        TypeChecker::new_with_core_eager(metadata)
+        TypeChecker::with_minimal_context()
     } else {
-        TypeChecker::new_with_core(metadata)
+        TypeChecker::new_with_core(metadata.clone())
     };
     checker.register_primitives();
     checker.set_current_module_path("consumer");
     checker.set_module_registry_direct(registry);
+    if eager {
+        checker.load_core_eager(metadata);
+    }
     diagnostics(&mut checker, source)
 }
 
