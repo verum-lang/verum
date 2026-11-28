@@ -56,6 +56,48 @@ const DECL: &str =
     "type P is protocol {}; implement P for Int {} type Requires<T:P> is { value:T };";
 
 #[test]
+fn concrete_call_reports_the_unsatisfied_leaf_of_a_conditional_implementation() {
+    let declarations = "type Ready is protocol {};
+        type Leaf is protocol {}; implement Leaf for Int {}
+        type Layer<T> is { value:T }; implement<T:Leaf> Ready for Layer<T> {}
+        type Outer<T> is { value:T }; implement<T:Ready> Ready for Outer<T> {}
+        fn consume<T:Ready>(x:&T)->Int { 1 }";
+    accepted(&format!("{declarations} fn probe(x:&Outer<Layer<Int>>)->Int {{ consume(x) }}"));
+    for owner in [None, Some("demo")] {
+        let source = format!(
+            "{declarations} fn probe(x:&Outer<Layer<Bool>>)->Int {{ consume(x) }}"
+        );
+        let errors = errors(&source, owner);
+        assert!(
+            errors.iter().any(|error| ["Outer", "Layer", "Ready", "Bool", "Leaf"]
+                .iter().all(|component| error.contains(component))),
+            "{owner:?}: {errors:#?}"
+        );
+    }
+}
+
+#[test]
+fn concrete_negative_calls_distinguish_a_witness_from_an_undecided_condition() {
+    let declarations = "type Route is protocol {}; type Guard is protocol {};
+        implement Guard for Int {}
+        type Conditional<T> is { value:T }; implement<T:Guard> Route for Conditional<T> {}
+        fn exclude<T:!Route>(x:&T)->Bool { true }";
+    accepted(&format!("{declarations} fn probe(x:&Bool)->Bool {{ exclude(x) }}"));
+    for (subject, expected) in [
+        ("Conditional<Int>", "must NOT implement"),
+        ("Conditional<Bool>", "cannot establish negative call requirement"),
+    ] {
+        let source = format!("{declarations} fn probe(x:&{subject})->Bool {{ exclude(x) }}");
+        let errors = errors(&source, Some("demo"));
+        assert!(
+            errors.iter().any(|error| error.contains("E405")
+                && error.contains("Route") && error.contains(expected)),
+            "{subject}: {errors:#?}"
+        );
+    }
+}
+
+#[test]
 fn array_protocol_evidence_preserves_the_element_and_declared_extent() {
     let family = "type Element is protocol {}; implement Element for Int {}
         implement<T:Element, const N:Int> P for [T; N] {}";

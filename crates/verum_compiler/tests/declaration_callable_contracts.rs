@@ -250,7 +250,7 @@ fn nominal_callback_protocols_need_implementation_evidence() {
     assert!(
         !refused.is_empty()
             && refused.iter().all(|error| error.contains("Fn")
-                && (error.contains("BoundNotSatisfied") || error.contains("does not implement"))),
+                && error.contains("no implementation proves")),
         "{refused:?}"
     );
 }

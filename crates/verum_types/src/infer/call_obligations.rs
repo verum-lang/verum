@@ -539,75 +539,53 @@ impl TypeChecker {
                 }
                 continue;
             }
-            if !matches!(unresolved_core, Type::Var(_)) {
-                // LAZY-LOAD FIRST, THEN JUDGE. The verdict used to be
-                // thrown away into `tracing::debug!` with the note
-                // «some stdlib impls may not yet be loaded depending on
-                // compilation order. The runtime will catch actual
-                // violations». Both halves were wrong: for a statically
-                // typed language the runtime must not be the arbiter of
-                // a compile-time bound, and the load-order worry has a
-                // real fix — ensure the receiver's impls are loaded and
-                // re-ask. Silencing it made EVERY generic bound
-                // decorative: `fn f<T: Ord>(…)` accepted a type with no
-                // `Ord` and no `cmp` at all, and `T: Semiring` accepted
-                // a plain record (measured on 2026-08-07).
-                let first = self
-                    .protocol_checker
-                    .read()
-                    .check_bounds(&resolved_ty, bounds);
-                // Retry AFTER ensuring the receiver's and the
-                // protocols' impls are loaded: the lazy stdlib loader
-                // is receiver-driven, so a bound can look unsatisfied
-                // purely because nothing had asked for that type yet.
-                // (This load-order worry is why the verdict used to be
-                // discarded entirely — the fix is to remove the
-                // uncertainty, not the check.)
-                let satisfied = if first.is_err() || bounds.iter().any(|bound| bound.is_negative) {
-                    if let Some(name) = self.get_type_name(&resolved_ty) {
-                        self.ensure_stdlib_type_loaded_transitive(&name);
-                    }
-                    for bound in bounds {
-                        let protocol = self.path_to_string(&bound.protocol);
-                        self.ensure_stdlib_type_loaded_transitive(&protocol);
-                        self.load_source_bound_implementations(
-                            &resolved_ty, bound, &[], &Map::new(), span,
-                        )?;
-                        self.load_protocol_owner_candidates(&protocol, &resolved_ty)?;
-                    }
-                    self.protocol_checker.read().check_bounds(&resolved_ty, bounds)
-                } else {
-                    first
-                };
-                if let Err(e) = satisfied {
-                    let (proto, is_negative) = match &e {
-                        crate::protocol::ProtocolError::BoundNotSatisfied { protocol, .. } => {
-                            (Text::from(format!("{}", protocol)), false)
+            if matches!(unresolved_core, Type::Var(_)) {
+                continue;
+            }
+            // A positive closed goal may already have a witness. A negative
+            // one needs all source candidates before it can establish absence.
+            if !bounds.iter().any(|bound| bound.is_negative)
+                && self.protocol_checker.read().check_bounds(&resolved_ty, bounds).is_ok()
+            {
+                continue;
+            }
+            if let Some(name) = self.get_type_name(&resolved_ty) {
+                self.ensure_stdlib_type_loaded_transitive(&name);
+            }
+            let callables = Map::new();
+            self.load_protocol_bound_sources(&resolved_ty, bounds, &[], &callables, span)?;
+            for bound in bounds {
+                let requirement = std::slice::from_ref(bound);
+                let protocol = &bound.protocol;
+                let checked = self.protocol_checker.read().check_bounds(&resolved_ty, requirement);
+                if let Err(error) = checked {
+                    use crate::protocol::ProtocolError;
+                    let message = match error {
+                        ProtocolError::NegativeBoundViolated { protocol, .. } =>
+                            format!("type `{resolved_ty}` must NOT implement `{protocol}` here, but it does"),
+                        ProtocolError::BoundNotSatisfied { protocol, .. } if bound.is_negative =>
+                            format!("cannot establish negative call requirement `{resolved_ty}: !{protocol}`"),
+                        ProtocolError::BoundNotSatisfied { protocol, .. } => {
+                            // The closed solver decides applicability (including
+                            // concrete negation). Report the missing nested premise
+                            // when the declaration proof can identify it.
+                            let expanded = self.staged_proof_receiver(&resolved_ty, span)?;
+                            let environment = self.source_type_registration.proof_environment(&[], &callables);
+                            let proof = self.protocol_checker.read().check_universal_bounds_in(
+                                expanded.as_ref().unwrap_or(&resolved_ty), requirement, environment,
+                            );
+                            let mut message = format!("cannot establish call requirement `{resolved_ty}: {protocol}`");
+                            if let Err(reason) = proof {
+                                message.push_str(": ");
+                                message.push_str(&reason);
+                            }
+                            message
                         }
-                        crate::protocol::ProtocolError::NegativeBoundViolated {
-                            protocol, ..
-                        } => (Text::from(format!("{}", protocol)), true),
-                        _ => (Text::from(""), false),
+                        error => format!("cannot establish call requirement `{resolved_ty}: {protocol}`: {error}"),
                     };
-                    if !proto.as_str().is_empty() {
-                        let msg = if is_negative {
-                            format!(
-                                "type `{}` must NOT implement `{}` here, but it does",
-                                resolved_ty, proto
-                            )
-                        } else {
-                            format!(
-                                "type `{}` does not implement `{}`, required by this \
-                                 call's bound",
-                                resolved_ty, proto
-                            )
-                        };
-                        self.push_diagnostic_for(TypeError::OtherWithCodeSpanned {
-                            code: Text::from("E405"),
-                            msg: Text::from(msg),
-                            span: span,
-                        });
-                    }
+                    self.push_diagnostic_for(TypeError::OtherWithCodeSpanned {
+                        code: "E405".into(), msg: message.into(), span,
+                    });
                 }
             }
         }

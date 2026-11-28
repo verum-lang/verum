@@ -397,6 +397,25 @@ impl TypeChecker {
         callables: &Map<TypeVar, Type>,
         span: Span,
     ) -> Result<()> {
+        self.load_protocol_bound_sources(ty, bounds, assumptions, callables, span)?;
+        let expanded = self.staged_proof_receiver(ty, span)?;
+        let environment = self.source_type_registration.proof_environment(assumptions, callables);
+        self.protocol_checker
+            .read()
+            .check_universal_bounds_in(expanded.as_ref().unwrap_or(ty), bounds, environment)
+            .map_err(|error| refusal(span, error))
+    }
+
+    /// Load every declaration on the selected implementation's prerequisite
+    /// path before a closed call or a universal obligation asks for a verdict.
+    pub(super) fn load_protocol_bound_sources(
+        &mut self,
+        ty: &Type,
+        bounds: &[ProtocolBound],
+        assumptions: &[WhereClause],
+        callables: &Map<TypeVar, Type>,
+        span: Span,
+    ) -> Result<()> {
         let mut pending: Vec<_> = bounds.iter().map(|bound| (ty.clone(), bound.clone())).collect();
         let mut seen: Vec<(Type, ProtocolBound)> = Vec::new();
         while let Some((subject, bound)) = pending.pop() {
@@ -422,6 +441,7 @@ impl TypeChecker {
             }
             // A matched header's prerequisites can be declared in the same
             // unpublished source as the outer goal, including after its use.
+            self.load_protocol_owner_candidates(&name, &subject)?;
             self.load_scoped_bound_implementations(&subject, &bound)?;
             let registry = self.protocol_checker.read();
             let environment = self.source_type_registration.proof_environment(assumptions, callables);
@@ -433,12 +453,7 @@ impl TypeChecker {
                 }
             }
         }
-        let expanded = self.staged_proof_receiver(ty, span)?;
-        let environment = self.source_type_registration.proof_environment(assumptions, callables);
-        self.protocol_checker
-            .read()
-            .check_universal_bounds_in(expanded.as_ref().unwrap_or(ty), bounds, environment)
-            .map_err(|error| refusal(span, error))
+        Ok(())
     }
 }
 
