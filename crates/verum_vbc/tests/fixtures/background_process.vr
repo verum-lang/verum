@@ -1,0 +1,68 @@
+module core.shell.exec;
+mount core.async.waker.noop_waker;
+mount core.intrinsics.runtime.time.sleep_ns;
+fn probe_deferred_shell() -> Int {
+    let signal = JobCancellation.new();
+    let mut job = background_process("sleep 0.05; printf xy; printf z >&2; exit 37", signal, Duration.from_millis(20));
+    if job.active.is_some() || job.request.is_none() { return -1; }
+    let waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+    if !job.poll(&mut cx).is_pending() { return -2; }
+    for i in range(0, 1000) {
+        sleep_ns(1000000);
+        match job.poll(&mut cx) {
+            Poll.Ready(Result.Ok(result)) => {
+                let bytes = result.bytes();
+                return if result.code() == 37 && bytes.len() == 2 && bytes[0] == 120 as Byte && bytes[1] == 121 as Byte && result.stderr().as_bytes().len() == 1 && result.stderr().as_bytes()[0] == 122 as Byte { 1 } else { -3 };
+            },
+            Poll.Ready(Result.Err(_)) => return -4,
+            Poll.Pending => {},
+        }
+    }
+    -5
+}
+fn probe_cancel_before_poll() -> Int {
+    let signal = JobCancellation.new();
+    let mut job = background_process("exit 99", signal.clone(), Duration.from_millis(1));
+    if job.active.is_some() || job.request.is_none() { return -1; }
+    signal.cancel();
+    let waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+    match job.poll(&mut cx) {
+        Poll.Ready(Result.Err(ShellError.Cancelled { .. })) => 1,
+        _ => -2,
+    }
+}
+
+fn probe_cancel_running_child() -> Int {
+    let signal = JobCancellation.new();
+    let mut job = background_process("exec /bin/sleep 30", signal.clone(), Duration.from_millis(5));
+    let waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+    if !job.poll(&mut cx).is_pending() { return -1; }
+    let pid = match &job.active {
+        Maybe.Some(process) => process.child.id(),
+        Maybe.None => return -2,
+    };
+    signal.cancel();
+    for i in range(0, 1000) {
+        match job.poll(&mut cx) {
+            Poll.Ready(Result.Err(ShellError.Cancelled { .. })) => {
+                return match core.sys.darwin.libsystem.try_waitpid(pid as Int32) {
+                    Result.Err(error) => if error.code == core.sys.darwin.errno.ECHILD { 1 } else { -3 },
+                    _ => -4,
+                };
+            },
+            Poll.Ready(_) => return -5,
+            Poll.Pending => sleep_ns(1000000),
+        }
+    }
+    -6
+}
+
+fn main() -> Int {
+    if probe_deferred_shell() != 1 { return 1; }
+    if probe_cancel_before_poll() != 1 { return 2; }
+    if probe_cancel_running_child() != 1 { return 3; }
+    73
+}

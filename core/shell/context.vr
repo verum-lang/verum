@@ -183,11 +183,11 @@ public type MockResponse is {
     /// `*` matches any command (catch-all).
     pattern: Text,
     /// Stdout bytes to return.
-    stdout: List<Byte>,
+    public(in super) stdout: List<Byte>,
     /// Stderr bytes.
-    stderr: List<Byte>,
+    public(in super) stderr: List<Byte>,
     /// Exit code (will be encoded as POSIX waitpid status: code << 8).
-    exit_code: Int,
+    public(in super) exit_code: Int,
 }
 
 implement MockResponse {
@@ -215,7 +215,7 @@ public type MockLayer is {
     recorded:        List<Text>,
     /// If `true` and no pattern matches, raise `Result.Err(SpawnFailed)` instead of
     /// silently falling through to a real shell. Default: true (safer).
-    strict_no_match: Bool,
+    public(in super) strict_no_match: Bool,
 }
 
 implement MockLayer {
@@ -285,13 +285,13 @@ public type ShellContext is {
     /// Path to the shell program. Maybe.None = autodetect from $SHELL / COMSPEC.
     shell_program: Maybe<Text>,
     /// Capability gate.
-    permissions: PermissionSet,
+    public(in super) permissions: PermissionSet,
     /// Mock layer — if Some, real spawns are intercepted.
-    mock: Maybe<MockLayer>,
+    public(in super) mock: Maybe<MockLayer>,
     /// Diagnostics: log every dispatched command.
-    verbose: Bool,
+    public(in super) verbose: Bool,
     /// Diagnostics: print but don't actually spawn.
-    dry_run: Bool,
+    public(in super) dry_run: Bool,
 }
 
 implement ShellContext {

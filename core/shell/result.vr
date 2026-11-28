@@ -42,6 +42,7 @@ mount core.text.text.{Text as TextOps};
 // path that the user-mode module-resolver doesn't always trace).
 public mount core.io.process.{ExitStatus};
 mount core.time.duration.{Duration};
+mount core.base.protocols.Send;
 
 // =============================================================================
 // ShellResult — standard outcome of a command
@@ -60,6 +61,9 @@ public type ShellResult is {
     /// Wall-clock duration from spawn() to wait() return.
     duration:     Duration,
 }
+
+// Output consists of owned byte buffers and text, an integer exit status and duration.
+implement Send for ShellResult {}
 
 implement ShellResult {
     /// Construct a result from (status, stdout, stderr) and the dispatched
@@ -228,6 +232,9 @@ public type ShellError is
     | ParseError        { public command: Text, public format: Text, public cause: Text }
     | Cancelled         { public command: Text, public reason: Text };
 
+// Every variant owns its diagnostic text and scalar status or duration.
+implement Send for ShellError {}
+
 implement ShellError {
     /// Re-fetch the command field regardless of variant.
     public fn command(&self) -> &Text {
@@ -289,17 +296,17 @@ implement Clone for ShellError {
     fn clone(&self) -> ShellError {
         match self {
             NonZeroExit      { command, status, stderr } =>
-                NonZeroExit { command: command.clone(), status: *status, stderr: stderr.clone() },
+                ShellError.NonZeroExit { command: command.clone(), status: *status, stderr: stderr.clone() },
             SpawnFailed      { command, reason } =>
-                SpawnFailed { command: command.clone(), reason: reason.clone() },
+                ShellError.SpawnFailed { command: command.clone(), reason: reason.clone() },
             Timeout          { command, after_ms } =>
-                Timeout { command: command.clone(), after_ms: *after_ms },
+                ShellError.Timeout { command: command.clone(), after_ms: *after_ms },
             PermissionDenied { command, kind } =>
-                PermissionDenied { command: command.clone(), kind: kind.clone() },
+                ShellError.PermissionDenied { command: command.clone(), kind: kind.clone() },
             ParseError       { command, format, cause } =>
-                ParseError { command: command.clone(), format: format.clone(), cause: cause.clone() },
+                ShellError.ParseError { command: command.clone(), format: format.clone(), cause: cause.clone() },
             Cancelled        { command, reason } =>
-                Cancelled { command: command.clone(), reason: reason.clone() },
+                ShellError.Cancelled { command: command.clone(), reason: reason.clone() },
         }
     }
 }

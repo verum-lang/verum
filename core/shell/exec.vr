@@ -46,7 +46,12 @@ module core.shell.exec;
 
 mount core.{Maybe, Result, List, Text};
 mount core.base.protocols.{Display, Debug, Clone};
-mount core.io.process.{Command, ExitStatus, Stdio};
+mount core.io.process.{Child, Command, ExitStatus, Stdio};
+mount core.async.future.Future;
+mount core.async.poll.Poll;
+mount core.async.waker.{Context, Waker};
+mount core.base.memory.{Shared, drop, replace};
+mount core.sync.{AtomicBool, MemoryOrdering, Send};
 mount core.time.duration.{Duration};
 mount core.time.instant.{Instant};
 mount core.async.cancellation.{CancellationToken};
@@ -69,55 +74,8 @@ public async fn run(program: &Text, args: List<Text>)
     -> Result<ShellResult, ShellError>
 
 {
-    let ctx = ShellContext.default();
-
-    // Permission gate first — fast-fail before allocations
-    ctx.permissions.check_run(program)?;
-
-    let display_cmd = render_argv(program, &args);
-
-    // Diagnostics: log dispatched command if requested
-    if ctx.verbose {
-        log_dispatched(&display_cmd);
-    }
-    if ctx.dry_run {
-        return Result.Ok(synthesise_dry_run(display_cmd));
-    }
-
-    // Mock interception
-    if let Maybe.Some(mut mock) = ctx.mock.clone() {
-        match mock.dispatch(&display_cmd) {
-            Maybe.Some(resp) => return Result.Ok(synthesise_mock_result(resp, display_cmd)),
-            Maybe.None => if ctx.mock.as_ref().unwrap().strict_no_match {
-                return Result.Err(ShellError.SpawnFailed {
-                    command: display_cmd,
-                    reason:  "no mock response matched and strict_no_match=true".into(),
-                });
-            }
-        }
-    }
-
-    // Real spawn
-    let start = Instant.now();
-    let mut cmd = Command.new(program.clone());
-    cmd.args(&args);
-    ctx.configure_command(&mut cmd);
-    cmd.stdout(Stdio.Piped);
-    cmd.stderr(Stdio.Piped);
-
-    match cmd.output() {
-        Result.Ok(out) => Result.Ok(ShellResult.new(
-            out.status,
-            out.stdout_bytes,
-            out.stderr_bytes,
-            display_cmd,
-            start.elapsed(),
-        )),
-        Result.Err(reason) => Result.Err(ShellError.SpawnFailed {
-            command: display_cmd,
-            reason:  reason,
-        }),
-    }
+    let request = ProcessRequest.Program(program.clone(), args, true);
+    ProcessFuture.new(request, JobCancellation.new(), Duration.zero()).await
 }
 
 // =============================================================================
@@ -144,190 +102,288 @@ public async fn sh_check(cmd_text: &Text)
     -> Result<ShellResult, ShellError>
 
 {
-    let ctx = ShellContext.default();
+    let request = ProcessRequest.Script(cmd_text.clone());
+    ProcessFuture.new(request, JobCancellation.new(), Duration.zero()).await
+}
 
-    // Resolve shell program — also subjects it to the run-permission gate
-    let shell_prog = ctx.resolve_shell();
-    ctx.permissions.check_run(&shell_prog)?;
+/// Executes an argv command with cancellable, bounded reads from both child pipes.
+public async fn run_with_cancel(
+    program: &Text, args: List<Text>, token: &CancellationToken, grace: Duration,
+) -> Result<ShellResult, ShellError> {
+    let request = ProcessRequest.Program(program.clone(), args, false);
+    ProcessFuture.new(request, token.clone(), grace).await
+}
 
-    let flag = ctx.shell_command_flag();
-    let display_cmd = cmd_text.clone();
+/// Executes a cancellable command through the configured shell.
+public async fn sh_with_cancel(
+    cmd_text: &Text, token: &CancellationToken, grace: Duration,
+) -> Result<ShellResult, ShellError> {
+    let request = ProcessRequest.CancellableScript(cmd_text.clone());
+    ProcessFuture.new(request, token.clone(), grace).await
+}
 
-    if ctx.verbose {
-        log_dispatched(&display_cmd);
-    }
-    if ctx.dry_run {
-        return Result.Ok(synthesise_dry_run(display_cmd));
-    }
+type ProcessRequest is Program(Text, List<Text>, Bool) | Script(Text) | CancellableScript(Text);
+type ProcessStep is Progress | Waiting | Exited(ExitStatus) | Failed(ShellError);
 
-    if let Maybe.Some(mut mock) = ctx.mock.clone() {
-        match mock.dispatch(&display_cmd) {
-            Maybe.Some(resp) => return Result.Ok(synthesise_mock_result(resp, display_cmd)),
-            Maybe.None => if ctx.mock.as_ref().unwrap().strict_no_match {
-                return Result.Err(ShellError.SpawnFailed {
-                    command: display_cmd,
-                    reason:  "no mock response matched and strict_no_match=true".into(),
-                });
-            }
+type ProcessCancellation is protocol {
+    fn cancellation_message(&self) -> Maybe<Text>;
+};
+
+implement ProcessCancellation for CancellationToken {
+    fn cancellation_message(&self) -> Maybe<Text> {
+        match self.reason() {
+            Maybe.Some(reason) => Maybe.Some(reason.message()),
+            Maybe.None => Maybe.None,
         }
-    }
-
-    let start = Instant.now();
-    let mut cmd = Command.new(shell_prog);
-    cmd.arg(flag);
-    cmd.arg(cmd_text.clone());
-    ctx.configure_command(&mut cmd);
-    cmd.stdout(Stdio.Piped);
-    cmd.stderr(Stdio.Piped);
-
-    match cmd.output() {
-        Result.Ok(out) => Result.Ok(ShellResult.new(
-            out.status,
-            out.stdout_bytes,
-            out.stderr_bytes,
-            display_cmd,
-            start.elapsed(),
-        )),
-        Result.Err(reason) => Result.Err(ShellError.SpawnFailed {
-            command: display_cmd,
-            reason:  reason,
-        }),
     }
 }
 
-// =============================================================================
-// run_with_cancel / sh_with_cancel — same as above but cancellable
-// =============================================================================
+// Job handles can request cancellation from another thread. Only this flag
+// crosses that boundary. The polling task owns the child and both output pipes.
+public(in super) type JobCancellation is { requested: Shared<AtomicBool> };
+implement Send for JobCancellation {}
 
-/// Executes a command with a `CancellationToken` watching alongside. On
-/// cancel, the child is sent SIGTERM, given `grace` to exit, then SIGKILL.
-/// Returns `Result.Err(Cancelled)` carrying the reason from the token.
-///
-
-/// `grace` defaults to 5 seconds when `Duration.from_millis(0)` is passed.
-public async fn run_with_cancel(
-    program: &Text,
-    args: List<Text>,
-    token: &CancellationToken,
-    grace: Duration,
-) -> Result<ShellResult, ShellError>
-
-{
-    let ctx = ShellContext.default();
-    ctx.permissions.check_run(program)?;
-
-    let display_cmd = render_argv(program, &args);
-    if ctx.dry_run { return Result.Ok(synthesise_dry_run(display_cmd)); }
-
-    if let Maybe.Some(mut mock) = ctx.mock.clone() {
-        match mock.dispatch(&display_cmd) {
-            Maybe.Some(resp) => return Result.Ok(synthesise_mock_result(resp, display_cmd)),
-            Maybe.None => if ctx.mock.as_ref().unwrap().strict_no_match {
-                return Result.Err(ShellError.SpawnFailed {
-                    command: display_cmd,
-                    reason:  "no mock response matched".into(),
-                });
-            }
-        }
+implement JobCancellation {
+    public(in super) fn new() -> JobCancellation {
+        JobCancellation { requested: Shared.new(AtomicBool.new(false)) }
     }
 
-    if let Maybe.Some(reason) = token.reason() {
-        return Result.Err(ShellError.Cancelled { command: display_cmd, reason: reason.message() });
+    public(in super) fn clone(&self) -> JobCancellation {
+        JobCancellation { requested: self.requested.clone() }
     }
 
-    let start = Instant.now();
-    let mut cmd = Command.new(program.clone());
-    cmd.args(&args);
-    ctx.configure_command(&mut cmd);
-    cmd.stdout(Stdio.Piped);
-    cmd.stderr(Stdio.Piped);
+    public(in super) fn cancel(&self) {
+        self.requested.store(true, MemoryOrdering.Release);
+    }
+}
 
-    let mut child = match cmd.spawn() {
-        Result.Ok(c) => c,
-        Result.Err(reason) => return Result.Err(ShellError.SpawnFailed {
-            command: display_cmd,
-            reason,
-        }),
-    };
+implement ProcessCancellation for JobCancellation {
+    fn cancellation_message(&self) -> Maybe<Text> {
+        if self.requested.load(MemoryOrdering.Acquire) { Maybe.Some("cancelled") } else { Maybe.None }
+    }
+}
 
-    let effective_grace = if grace.as_millis() == 0 { Duration.from_millis(5000) } else { grace };
-    let mut stdout: List<Byte> = [];
-    let mut stderr: List<Byte> = [];
-    let mut status: Maybe<ExitStatus> = Maybe.None;
-    let mut cancellation: Maybe<Text> = Maybe.None;
-    let mut terminate_at: Maybe<Instant> = Maybe.None;
-    loop {
-        // Only this task reaps the child. Once reaped, its numeric PID may
-        // belong to another process and must never be signalled again.
-        if status.is_none() {
-            match child.try_wait() {
-                Result.Ok(state) => { status = state; },
-                Result.Err(reason) => {
-                    child.close_output();
+type affine RunningProcess is {
+    child: Child,
+    command: Text,
+    start: Instant,
+    stdout: List<Byte>,
+    stderr: List<Byte>,
+    status: Maybe<ExitStatus>,
+    owns_pid: Bool,
+    cancellation: Maybe<Text>,
+    terminate_at: Maybe<Instant>,
+};
+
+implement RunningProcess {
+    fn start(
+        request: ProcessRequest, cancellation: Maybe<Text>, active: &mut Maybe<RunningProcess>,
+    ) -> Result<Maybe<ShellResult>, ShellError> {
+        let ctx = ShellContext.default();
+        let (program, args, display_cmd, verbose_dispatch): (Text, List<Text>, Text, Bool) = match request {
+            ProcessRequest.Program(program, args, verbose) => {
+                let label = render_argv(&program, &args);
+                (program, args, label, verbose)
+            },
+            ProcessRequest.Script(text) => {
+                let args: List<Text> = [ctx.shell_command_flag(), text.clone()];
+                (ctx.resolve_shell(), args, text, true)
+            },
+            ProcessRequest.CancellableScript(text) => {
+                let program = ctx.resolve_shell();
+                let args: List<Text> = [ctx.shell_command_flag(), text];
+                let label = render_argv(&program, &args);
+                (program, args, label, false)
+            },
+        };
+        ctx.permissions.check_run(&program)?;
+        if verbose_dispatch && ctx.verbose { log_dispatched(&display_cmd); }
+        if ctx.dry_run { return Result.Ok(Maybe.Some(synthesise_dry_run(display_cmd))); }
+        if let Maybe.Some(mut mock) = ctx.mock.clone() {
+            match mock.dispatch(&display_cmd) {
+                Maybe.Some(response) => {
+                    return Result.Ok(Maybe.Some(synthesise_mock_result(response, display_cmd)));
+                },
+                Maybe.None => if ctx.mock.as_ref().unwrap().strict_no_match {
+                    let reason = if verbose_dispatch {
+                        "no mock response matched and strict_no_match=true"
+                    } else { "no mock response matched" };
                     return Result.Err(ShellError.SpawnFailed { command: display_cmd, reason });
                 },
             }
         }
-        if cancellation.is_none() && token.is_cancelled() {
-            if let Maybe.Some(reason) = token.reason() {
-                cancellation = Maybe.Some(reason.message());
-                if status.is_none() {
-                    let _ = child.terminate();
-                    terminate_at = Maybe.Some(Instant.now());
+        if let Maybe.Some(reason) = cancellation {
+            return Result.Err(ShellError.Cancelled { command: display_cmd, reason });
+        }
+
+        let start = Instant.now();
+        let mut command = Command.new(program);
+        command.args(args.as_slice());
+        ctx.configure_command(&mut command);
+        command.stdout(Stdio.Piped);
+        command.stderr(Stdio.Piped);
+        match command.spawn() {
+            Result.Err(reason) => Result.Err(ShellError.SpawnFailed { command: display_cmd, reason }),
+            Result.Ok(child) => {
+                *active = Maybe.Some(RunningProcess {
+                    child, command: display_cmd, start, stdout: [], stderr: [],
+                    status: Maybe.None, owns_pid: true, cancellation: Maybe.None, terminate_at: Maybe.None,
+                });
+                Result.Ok(Maybe.None)
+            },
+        }
+    }
+
+    fn stop(&mut self) {
+        self.child.close_output();
+        if self.owns_pid {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+            self.owns_pid = false;
+        }
+    }
+
+    fn step(&mut self, cancellation: Maybe<Text>, grace: Duration) -> ProcessStep {
+        if self.owns_pid {
+            match self.child.try_wait() {
+                Result.Ok(Maybe.Some(status)) => {
+                    self.owns_pid = false;
+                    self.status = Maybe.Some(status);
+                },
+                Result.Ok(Maybe.None) => {},
+                Result.Err(reason) => {
+                    // The OS can no longer confirm ownership of this PID.
+                    self.owns_pid = false;
+                    return ProcessStep.Failed(ShellError.SpawnFailed { command: self.command.clone(), reason });
+                },
+            }
+        }
+        if self.cancellation.is_none() {
+            if let Maybe.Some(reason) = cancellation {
+                self.cancellation = Maybe.Some(reason);
+                if self.owns_pid {
+                    let _ = self.child.terminate();
+                    self.terminate_at = Maybe.Some(Instant.now());
                 }
             }
         }
-        if let Maybe.Some(sent) = &terminate_at {
-            if status.is_none() && sent.elapsed().as_millis() >= effective_grace.as_millis() {
-                let _ = child.kill();
-                terminate_at = Maybe.None;
-            }
+        let grace_expired = match &self.terminate_at {
+            Maybe.Some(sent) => sent.elapsed().as_millis() >= grace.as_millis(),
+            Maybe.None => false,
+        };
+        if self.owns_pid && grace_expired {
+            let _ = self.child.kill();
+            self.terminate_at = Maybe.None;
         }
-        if status.is_some() && cancellation.is_some() {
-            child.close_output();
-            return Result.Err(ShellError.Cancelled { command: display_cmd, reason: cancellation.unwrap() });
+        if !self.owns_pid {
+            let empty: Maybe<Text> = Maybe.None;
+            if let Maybe.Some(reason) = replace(&mut self.cancellation, empty) {
+                return ProcessStep.Failed(ShellError.Cancelled { command: self.command.clone(), reason });
+            }
         }
 
-        // Service both pipes fairly, even during the TERM grace period. A
-        // child filling stderr while its stdout stays open must make progress.
         let mut progress = false;
-        let mut failure: Maybe<Text> = Maybe.None;
-        match child.read_stdout_ready(65536) {
-            Result.Ok(Maybe.Some(bytes)) => { for b in bytes { stdout.push(b); } progress = true; },
-            Result.Err(reason) => { failure = Maybe.Some(reason); },
+        match self.child.read_stdout_ready(65536) {
+            Result.Ok(Maybe.Some(bytes)) => { for b in bytes { self.stdout.push(b); } progress = true; },
+            Result.Err(reason) => return ProcessStep.Failed(ShellError.SpawnFailed { command: self.command.clone(), reason }),
             _ => {},
         }
-        match child.read_stderr_ready(65536) {
-            Result.Ok(Maybe.Some(bytes)) => { for b in bytes { stderr.push(b); } progress = true; },
-            Result.Err(reason) => { failure = Maybe.Some(reason); },
+        match self.child.read_stderr_ready(65536) {
+            Result.Ok(Maybe.Some(bytes)) => { for b in bytes { self.stderr.push(b); } progress = true; },
+            Result.Err(reason) => return ProcessStep.Failed(ShellError.SpawnFailed { command: self.command.clone(), reason }),
             _ => {},
         }
-        if let Maybe.Some(reason) = failure {
-            child.close_output();
-            if status.is_none() { let _ = child.kill(); let _ = child.wait(); }
-            return Result.Err(ShellError.SpawnFailed { command: display_cmd, reason });
+        if self.child.output_is_closed() {
+            let empty: Maybe<ExitStatus> = Maybe.None;
+            if let Maybe.Some(status) = replace(&mut self.status, empty) { return ProcessStep.Exited(status); }
         }
-        if child.output_is_closed() {
-            if let Maybe.Some(exit) = status {
-                return Result.Ok(ShellResult.new(exit, stdout, stderr, display_cmd, start.elapsed()));
-            }
-        }
-        if progress { core.async.task.yield_now().await; } else { core.async.timer.sleep_ms(1).await; }
+        if progress { ProcessStep.Progress } else { ProcessStep.Waiting }
+    }
+
+    fn finish(&mut self, status: ExitStatus) -> ShellResult {
+        let stdout: List<Byte> = [];
+        let stderr: List<Byte> = [];
+        ShellResult.new(status, replace(&mut self.stdout, stdout), replace(&mut self.stderr, stderr),
+            self.command.clone(), self.start.elapsed())
     }
 }
 
-/// Cancellable variant of `sh_check` — the most common production form.
-public async fn sh_with_cancel(
-    cmd_text: &Text,
-    token: &CancellationToken,
-    grace: Duration,
-) -> Result<ShellResult, ShellError>
+implement Drop for RunningProcess {
+    fn drop(&mut self) { self.stop(); }
+}
 
-{
-    let ctx = ShellContext.default();
-    let shell_prog = ctx.resolve_shell();
-    let flag = ctx.shell_command_flag();
-    run_with_cancel(&shell_prog, [flag, cmd_text.clone()], token, grace).await
+public(in super) type ProcessFuture<C> is {
+    request: Maybe<ProcessRequest>, active: Maybe<RunningProcess>, cancel: C, grace: Duration,
+};
+
+// A live process transfers its sole OS handle, the owned descriptors and buffers
+// with the future. Its source of cancellation must independently support transfer.
+implement<C: Send> Send for ProcessFuture<C> {}
+
+implement<C> ProcessFuture<C> {
+    fn new(request: ProcessRequest, cancel: C, grace: Duration) -> ProcessFuture<C> {
+        let grace = if grace.as_millis() == 0 { Duration.from_millis(5000) } else { grace };
+        ProcessFuture { request: Maybe.Some(request), active: Maybe.None, cancel, grace }
+    }
+}
+
+implement<C: ProcessCancellation> Future for ProcessFuture<C> {
+    type Output = Result<ShellResult, ShellError>;
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<Result<ShellResult, ShellError>> {
+        let empty: Maybe<ProcessRequest> = Maybe.None;
+        if let Maybe.Some(request) = replace(&mut self.request, empty) {
+            match RunningProcess.start(request, self.cancel.cancellation_message(), &mut self.active) {
+                Result.Ok(Maybe.None) => {},
+                Result.Ok(Maybe.Some(result)) => return Poll.Ready(Result.Ok(result)),
+                Result.Err(error) => return Poll.Ready(Result.Err(error)),
+            }
+        }
+        let cancellation = self.cancel.cancellation_message();
+        let step = match &mut self.active {
+            Maybe.Some(process) => process.step(cancellation, self.grace),
+            Maybe.None => panic("shell process polled after completion"),
+        };
+        match step {
+            ProcessStep.Progress => { cx.waker().wake_by_ref(); Poll.Pending },
+            ProcessStep.Waiting => {
+                schedule_pipe_retry(cx.waker().clone());
+                Poll.Pending
+            },
+            ProcessStep.Exited(status) => {
+                let result = match &mut self.active {
+                    Maybe.Some(process) => process.finish(status),
+                    Maybe.None => unreachable(),
+                };
+                let empty: Maybe<RunningProcess> = Maybe.None;
+                drop(replace(&mut self.active, empty));
+                Poll.Ready(Result.Ok(result))
+            },
+            ProcessStep.Failed(error) => {
+                let empty: Maybe<RunningProcess> = Maybe.None;
+                drop(replace(&mut self.active, empty));
+                Poll.Ready(Result.Err(error))
+            },
+        }
+    }
+}
+
+fn schedule_pipe_retry(waker: Waker) {
+    let runtime = match core.async.executor.current_runtime() {
+        Maybe.Some(runtime) => runtime,
+        Maybe.None => { waker.wake(); return; },
+    };
+    let deadline = Instant.now() + Duration.from_millis(1);
+    runtime.register_timer(deadline.as_nanos() as UInt64, waker);
+}
+
+public(in super) fn background_process(command: Text, cancel: JobCancellation, grace: Duration)
+    -> ProcessFuture<JobCancellation> {
+    ProcessFuture.new(ProcessRequest.CancellableScript(command), cancel, grace)
+}
+
+public(in super) fn checked_process(command: Text) -> ProcessFuture<JobCancellation> {
+    ProcessFuture.new(ProcessRequest.Script(command), JobCancellation.new(), Duration.zero())
 }
 
 // =============================================================================
@@ -376,11 +432,10 @@ fn synthesise_mock_result(resp: MockResponse, command: Text) -> ShellResult {
 }
 
 fn synthesise_dry_run(command: Text) -> ShellResult {
-    let mut stdout: List<Byte> = [];
-    let prefix: Text = "[dry-run] ".into();
-    for b in prefix.into_bytes().iter() { stdout.push(*b); }
-    for b in command.clone().into_bytes().iter() { stdout.push(*b); }
-    stdout.push('\n' as Byte);
+    let mut message: Text = "[dry-run] ";
+    message.push_str(&command);
+    message.push('\n');
+    let stdout = message.into_bytes();
     ShellResult.new(
         ExitStatus.from_exit_code(0),
         stdout,
@@ -392,5 +447,6 @@ fn synthesise_dry_run(command: Text) -> ShellResult {
 
 fn log_dispatched(cmd: &Text) {
     // Diagnostics output goes to stderr to leave stdout clean for piping.
-    eprint(f"$ {cmd}\n");
+    let message: Text = f"$ {cmd}\n";
+    eprint(&message);
 }

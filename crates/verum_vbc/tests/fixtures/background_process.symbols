@@ -1,0 +1,49 @@
+mod.vr
+base/result.vr Result Result<T,E>.unwrap Result<T,E>.map_err Result<T,E>.unwrap_or_else Result<T,E>.is_ok
+base/maybe.vr Maybe Maybe<T>.take Maybe<T>.replace Maybe<T>.is_none Maybe<T>.is_some Maybe<T>.unwrap Clone@Maybe<T>.clone Maybe<T>.as_ref Maybe<T>.unwrap_or Maybe<T>.or_else
+text/text.vr Iterator@Chars.next utf8_decode_char_len Text.as_bytes Text.trim_end_matches_char Text Text.new Text.as_ptr Text.char_count Text.push Text.push_str Text.push_byte Text.reserve Text.grow Text.from_utf8_unchecked Text.slice Text.chars Chars Chars.next utf8_char_len is_utf8_char_boundary Text.with_capacity Text.clone Clone@Text.clone utf8_valid_prefix_len Text.from_utf8 Utf8Error Text.from_utf8_lossy utf8_sequence Text.try_with_capacity Text.len Text.from Text.capacity Text.is_empty Text.into_bytes Text.char_indices CharIndices Text.contains kmp_failure_table kmp_find From<&Text>@Text.from From@Text.from Text.from_char
+intrinsics/runtime/text.vr int_to_text text_as_bytes text_adopt_owned char_encode_utf8 text_byte_len text_copy text_capacity utf8_decode_char
+base/protocols.vr float_to_string Clone int_to_string PartialEq Eq Hash Hasher Hash#hash Hasher#finish Deref Drop Send Sync Formatter FormatSpec FormatError TextAlignment Sign Display Debug Formatter.new Formatter.write_str Formatter.write_padded FormatSpec.new DerefMut From Into From@T.from Into<U>@T.into From<T>@T.from Into@T.into
+base/iterator.vr range Range Iterator Iterator#next IntoIterator IntoIterator#into_iter Iterator@Range<Int>.next
+base/memory.vr replace Heap Heap<T>.new Heap<T>.as_ref alloc is_null Shared Shared<T>.new Clone@Shared<T>.clone Deref@Shared<T>.deref Drop@Shared<T>.drop SharedInner try_alloc drop
+intrinsics/memory.vr list_storage_stride null_ptr ptr_offset ptr_is_null ptr_write list_storage_write slice_from_raw_parts list_storage_read list_storage_move list_storage_resize drop_in_place forget slice_from_raw_parts_mut ptr_read
+intrinsics/runtime/mem_raw.vr memset_addr memcpy_addr __load_byte __store_byte load_byte store_byte
+mem/allocator.vr AllocError AllocError.message cbgr_alloc cbgr_dealloc
+intrinsics/conversion.vr f64_to_bits f64_from_bits
+collections/list.vr List<T>.grow List<T>.next_cap List<T>.resize_buffer list_max_len List List<T>.new List<T>.push List<T>.len List<T>.as_slice List<T>.with_capacity List<T>.is_empty List<T>.retain Clone@List<T>.clone List<T>.retain_mut List<T>.swap List<T>.truncate List<T>.pop List<T>.clear List<T>.free_buffer Drop@List<T>.drop List<T>.iter ListIter Iterator@ListIter<T>.next IntoIterator@ListIter<T>.into_iter List<T>.insert List<T>.remove IntoList IntoIterator@List<T>.into_iter Iterator@IntoList<T>.next
+base/primitives.vr Int.checked_mul Clone@Byte.clone Int.unsigned_abs Char.encode_utf8 Display@Int8.fmt Debug@Int8.fmt_debug Display@Int16.fmt Debug@Int16.fmt_debug Display@Int32.fmt Debug@Int32.fmt_debug Display@Int128.fmt Debug@Int128.fmt_debug Display@UInt16.fmt Debug@UInt16.fmt_debug Display@UInt32.fmt Debug@UInt32.fmt_debug Display@UInt64.fmt Debug@UInt64.fmt_debug Display@UInt128.fmt Debug@UInt128.fmt_debug Float.is_nan Float.is_infinite Float64.is_nan Float64.is_infinite Int.checked_add Int.MAX Int.min
+io/process.vr ExitStatus ExitStatus.is_exited ExitStatus.success ExitStatus.code Child Command Stdio ExitStatus.from_exit_code Command.new Command.arg Command.args Command.env Command.current_dir Command.stdout Command.stderr Command.spawn Child.try_wait Child.read_stdout_ready Child.read_stderr_ready Child.output_is_closed Child.close_output Child.kill Child.terminate Child.wait Child.signal spawn_child try_wait_for_child read_child_pipe read_ready_chunk close_fd wait_for_child Child.id
+time/duration.vr Duration Duration.zero Duration.from_millis Duration.as_millis Duration.millis NANOS_PER_MILLI Duration.from_nanos Duration.nanos
+shell/result.vr ShellResult ShellResult.new ShellResult.bytes ShellResult.code ShellResult.success ShellResult.stdout ShellResult.stderr ShellError
+shell/exec.vr Drop@RunningProcess.drop JobCancellation JobCancellation.new JobCancellation.clone JobCancellation.cancel ProcessCancellation ProcessCancellation#cancellation_message ProcessCancellation@JobCancellation.cancellation_message ProcessFuture ProcessFuture<C>.new Future@ProcessFuture<C>.poll Drop@ProcessFuture<C>.drop RunningProcess RunningProcess.start RunningProcess.stop RunningProcess.step RunningProcess.finish ProcessStep ProcessRequest background_process render_argv log_dispatched needs_display_quoting synthesise_mock_result synthesise_dry_run schedule_pipe_retry
+shell/context.vr ShellContext ShellContext.default ShellContext.configure_command ShellContext.resolve_shell ShellContext.shell_command_flag PermissionSet PermissionSet.unrestricted PermissionSet.check_run basename_of MockLayer MockLayer.dispatch MockResponse Clone@MockResponse.clone Clone@MockLayer.clone
+shell/escape.vr ShellFlavour default_flavour
+async/future.vr Future Future#poll
+async/poll.vr Poll Poll<T>.is_pending Poll<T>.is_ready
+async/waker.vr RawWakerVTable RawWakerVTable.new RawWaker RawWaker.new Waker Waker.wake_by_ref Clone@Waker.clone Drop@Waker.drop Context Context.from_waker Context.waker noop_clone noop_wake noop_wake_by_ref noop_drop noop_vtable noop_waker Waker.wake
+async/executor.vr current_runtime AsyncRuntime AsyncRuntime.register_timer TimerEntry SLOT_RUNTIME AsyncRuntimeConfig TaskQueues WorkerPool WorkerSlot ChaseLevDeque TaskEntry TimerQueue TimerQueue.new TimerQueue.register TimerQueue.next_deadline TimerQueue.pop_due
+sync/atomic.vr AtomicBool AtomicBool.new AtomicBool.load AtomicBool.store MemoryOrdering AtomicInt FutexLock AtomicU32 ordering_to_u8 FutexLock.lock FutexLock.try_lock AtomicInt.compare_exchange FUTEX_UNLOCKED FUTEX_LOCKED FutexLock.lock_slow AtomicInt.load AtomicInt.swap FUTEX_LOCKED_CONTENDED
+time/instant.vr Instant Instant.now Instant.elapsed Instant.as_nanos Instant.duration_since
+intrinsics/runtime/time.vr sleep_ns monotonic_nanos
+sys/process_native.vr read_pipe_bytes PipePair child_close SpawnResult native_spawn native_kill native_fd_read_chunk native_wait make_pipe close_pipe build_argv_blob ArgvBlob do_fork child_setup_stdio child_execve child_exit duplicate_child_fd PIPE_CHUNK_SIZE
+sync/mod.vr AtomicBool MemoryOrdering Send Mutex
+time/mod.vr Duration Instant
+base/mod.vr Maybe Result Text Into From
+sync/mutex.vr Mutex Mutex<T>.lock MutexGuard PoisonError PoisonError<T>.into_inner Deref@MutexGuard<T>.deref DerefMut@MutexGuard<T>.deref_mut MutexGuard<T>.data MutexGuard<T>.data_mut PoisonError<T>.new
+async/timer.vr Sleep
+sys/io_engine.vr CompletionResult
+runtime/thread.vr ThreadJoinHandle
+sync/condvar.vr Condvar
+collections/map.vr Map Slot
+async/task.vr TaskId Task TaskCompletion TaskOutcome JoinError
+sys/darwin/thread.vr Thread DarwinThread futex_wait __ulock_wait __ulock_wake
+sys/darwin/libsystem.vr PthreadT try_waitpid waitpid_raw safe_waitpid safe_close waitpid close errno __error errno_to_message execve_raw fork pipe dup2 execve _exit kill safe_read safe_write read write poll poll_descriptors PthreadMutex
+text/case_fold.vr equal_ascii_nocase fold_byte_ascii
+intrinsics/arithmetic.vr checked_mul checked_add
+intrinsics/atomic.vr atomic_fence MemoryOrder fence_order ORDERING_SEQ_CST atomic_fetch_sub_u32 ORDERING_RELEASE ORDERING_ACQUIRE ORDERING_RELAXED ORDERING_ACQ_REL atomic_fetch_add_u32 atomic_load_u32 atomic_load_u8 atomic_store_u8 atomic_cas_u64 atomic_load_u64
+sys/common.vr MAX_CONTEXT_SLOTS poll_readable_now OSError ctx_get FileDesc FileDesc.from_raw OSError.new FileDesc.STDERR PollDescriptor probe_descriptor OSError.interrupted OSError.kind OSErrorKind OSError.from_code __ctx_slot_get_raw
+base/env.vr shell var_opt var VarError get_env_impl
+intrinsics/runtime/cbgr.vr cbgr_deallocate
+sys/darwin/errno.vr errno_name *const
+io/stdio.vr eprint
+sys/error.vr OSErrorKind native_error_kind native_error_message
