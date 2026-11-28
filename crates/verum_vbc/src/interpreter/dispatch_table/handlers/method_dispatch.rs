@@ -1723,31 +1723,8 @@ fn execute_method_call(
     // typically generic-parameter dispatch) keeps the historic
     // behaviour for back-compatibility with code that doesn't have
     // type information at codegen time.
-    // Methods whose user-side stdlib bodies depend on a `let X =
-    // *self` / `match *self { ... }` pattern that the interpreter
-    // does NOT deep-copy from the dereferenced slot — `X` (or the
-    // pattern bindings) end up aliased with `*self`, so the
-    // subsequent `*self = None` mutation clobbers the captured
-    // value.  For these methods the intrinsic dispatch path is
-    // *structurally correct* (it allocates a fresh variant before
-    // mutating self), so we route through it unconditionally and
-    // skip the user-side body, even when a qualified function
-    // exists.
-    //
-    // Until the codegen-level fix lands for `let X = *ref` deep-copy
-    // semantics, this short-circuit list is the canonical workaround
-    // surface — add a method here ONLY when its stdlib body has the
-    // shape `let old = *self; *self = X; old` (or equivalent
-    // pattern-binding alias) AND the intrinsic dispatcher
-    // correctly clones before mutating.  See
-    // `dispatch_variant_method`'s `"take"` arm for the deep-clone
-    // contract.
-    const INTRINSIC_PREFERRED_VARIANT_METHODS: &[&str] = &["take"];
-    let force_intrinsic_variant_dispatch =
-        INTRINSIC_PREFERRED_VARIANT_METHODS.contains(&bare_method_name.as_str());
     let prefer_user_compiled = method_name != bare_method_name
-        && state.module.find_function_by_name(&method_name).is_some()
-        && !force_intrinsic_variant_dispatch;
+        && state.module.find_function_by_name(&method_name).is_some();
     // A1, static-call leg: for `TypeName.method(..)` the codegen emits
     // `LOAD_K String("TypeName")` + `CALL_M "method"`, so `method_name`
     // here is the BARE name and the type lives only in the receiver
@@ -10343,73 +10320,6 @@ pub(super) fn dispatch_variant_method(
         // effectively a reference to the heap variant, so they are no-ops
         // that return the receiver.
         "as_ref" | "as_mut" => Ok(Some(receiver)),
-        // take: clone the variant payload into a FRESH allocation,
-        // then clear the original to None-shape (tag=0, fc=0), and
-        // return the clone. Mirrors Option::take() semantics.
-        //
-        // CRITICAL: the historical implementation returned `receiver`
-        // directly and mutated the underlying heap variant in-place to
-        // (tag=0, fc=0). Because `receiver` is a NaN-boxed pointer to
-        // the same heap object, the returned value aliased the
-        // mutated original — `let taken = m.take()` then observed
-        // `taken == None` even though m was `Some(v)` pre-call.
-        //
-        // The aliasing path also broke every stdlib chain that depends
-        // on `Maybe.take` to extract-and-clear (StreamOnce.poll_next,
-        // StreamRepeatN.poll_next via take, StreamUnfold.state.take,
-        // many `Option`-shaped state-machines).
-        //
-        // Fix: allocate a fresh variant with the original (tag,
-        // field_count) and copy each payload Value before any
-        // mutation; THEN clear the original; THEN return the clone.
-        // The clone is a structurally-independent heap object, so
-        // subsequent reads through the new value see the pre-take
-        // state, and reads through self see None.
-        "take" => {
-            if field_count == 0 {
-                // Nothing to extract — receiver already is the
-                // unit/None shape.  Return as-is (semantically still
-                // "no value", structurally indistinguishable from a
-                // freshly-allocated None of the same parent type).
-                return Ok(Some(receiver));
-            }
-            // Read parent type-id from the heap header so the cloned
-            // variant carries the same descriptor lineage (Display /
-            // Debug / variant-name lookup all key off type_id).
-            let parent_type_id = header.type_id;
-            // Read all payload Values BEFORE any mutation.  SAFETY:
-            // synthetic-id guard at function entry; field_count is
-            // the variant's true payload count from the header pair.
-            let payloads: Vec<Value> = (0..field_count)
-                .map(|i| unsafe { heap::variant_payload(base_ptr, i) })
-                .collect();
-            // Allocate clone with same (tag, field_count, payload[]).
-            let clone_obj = state.heap.alloc_variant(parent_type_id, tag, field_count_u32)?;
-            // Copy payloads into the fresh allocation.
-            unsafe {
-                let clone_base = clone_obj.as_ptr() as *mut u8;
-                for (i, payload) in payloads.into_iter().enumerate() {
-                    std::ptr::write(
-                        heap::variant_payload_ptr_mut(clone_base, i),
-                        payload,
-                    );
-                }
-            }
-            state.record_allocation();
-            let clone_val = Value::from_ptr(clone_obj.as_ptr() as *mut u8);
-            // Now mutate the ORIGINAL variant in place to None-shape.
-            // SAFETY: same as the pre-fix path; we just deferred the
-            // write until after the clone allocation succeeded so
-            // failure mid-clone leaves the original unchanged.
-            unsafe {
-                heap::write_variant_data_header(
-                    (base_ptr as *mut u8).add(heap::OBJECT_HEADER_SIZE),
-                    0,
-                    0,
-                );
-            }
-            Ok(Some(clone_val))
-        }
         // ok: Result<T, E>.ok() -> Maybe<T> — for Ok(v) returns Some(v),
         // for Err(_) returns None. Returning the receiver as-is works
         // because the variant representation is identical.

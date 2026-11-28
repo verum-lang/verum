@@ -547,7 +547,9 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                     }
                 } else if demand == 1 && state.registers.get(&reg.0).is_some_and(|value| {
                     value.permits_object_view()
-                        || (matches!(value, R::ReadOnlyFieldSlot | R::SharedLocalSlot) && matches!(instruction, I::GetF { .. }))
+                        || (matches!(value, R::ReadOnlyFieldSlot | R::SharedLocalSlot)
+                            && matches!(instruction, I::GetF { .. } | I::IsVar { .. }
+                                | I::GetVariantData { .. } | I::GetVariantDataRef { .. } | I::AsVar { .. }))
                 }) {
                     value_inputs.entry(pc).or_default().insert(reg.0);
                 }
@@ -674,7 +676,11 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                         if sites.get(&pc).is_some_and(|sites| {
                             sites.contains(&ReferenceSiteKind::SlotOutput(dst.0))
                         }) {
-                            R::ObjectFieldSlot
+                            if matches!(state.raw(*variant), R::ReadOnlyFieldSlot | R::SharedLocalSlot) {
+                                R::ReadOnlyFieldSlot
+                            } else {
+                                R::ObjectFieldSlot
+                            }
                         } else {
                             R::Unknown
                         },
