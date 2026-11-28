@@ -154,6 +154,20 @@ fn an_owned_pattern_still_consumes_its_subject_once() {
 }
 
 #[test]
+fn an_affine_element_moved_out_of_a_tuple_cannot_be_used_twice() {
+    let source = format!(r#"{TYPES}
+        fn take(token: Token) -> Int {{ token.value }}
+        fn invalid(pair: (Token, Int)) -> Int {{
+            let (token, _) = pair;
+            let value = take(token);
+            value + take(token)
+        }}
+    "#);
+    let found = errors(&source);
+    assert!(found.iter().any(|error| error.contains("moved") || error.contains("consum")), "{found:?}");
+}
+
+#[test]
 fn distinct_mutable_payloads_keep_their_field_identity() {
     let source = "type Pair is Both(Int,Int); fn update(pair:&mut Pair)->Int {match pair {&Pair.Both(ref mut first,ref mut second)=>{*first=36;*second=37;*first+*second}}}";
     let found = errors(source);

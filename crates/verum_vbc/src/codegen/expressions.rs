@@ -19113,7 +19113,7 @@ impl VbcCodegen {
 
         self.ctx.enter_scope();
         if let Some(item) = item {
-            self.bind_loop_element(pattern, elem_reg, &item, None)?;
+            self.bind_typed_pattern(pattern, elem_reg, &item, None)?;
         } else {
             self.compile_pattern_bind(pattern, elem_reg)?;
         }
@@ -19148,9 +19148,9 @@ impl VbcCodegen {
         Ok(Some(result))
     }
 
-    /// A protocol's Item includes its reference mode. Keep the source owner as
-    /// the pattern's pointee while recording the borrow once for ownership.
-    fn bind_loop_element(
+    /// Destructuring a reference projects its fields without taking ownership.
+    /// A collection can also lend an element whose declared type is a value.
+    pub(super) fn bind_typed_pattern(
         &mut self, pattern: &verum_ast::Pattern, reg: Reg, item: &crate::types::TypeRef,
         implicit_borrow: Option<crate::types::Mutability>,
     ) -> CodegenResult<()> {
@@ -19275,7 +19275,7 @@ impl VbcCodegen {
         };
         self.ctx.enter_scope();
         if let Some(item) = &item_type {
-            self.bind_loop_element(pattern, elem_reg, item, borrow)?;
+            self.bind_typed_pattern(pattern, elem_reg, item, borrow)?;
         } else {
             self.compile_pattern_bind(pattern, elem_reg)?;
         }

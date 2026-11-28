@@ -509,6 +509,31 @@ fn a_generic_replacement_uses_the_actual_copy_or_transfer_discipline() {
 }
 
 #[test]
+fn destructuring_borrowed_products_preserves_nested_owners_and_place_identity() {
+    run(r#"
+        fn read(pair: &((Ticket, Int), Int)) -> Int {
+            let ((ticket, first), last) = pair;
+            ticket.counter.value + *first + *last
+        }
+        fn change(pair: &mut ((Ticket, Int), Int)) {
+            let ((_, first), last) = pair;
+            *first = *first + 1;
+            *last = *last + 2;
+        }
+        fn probe() -> Int {
+            let mut count = Count { value: 0 };
+            {
+                let mut pair = ((Ticket { counter: &mut count }, 30), 40);
+                if read(&pair) != 70 { return 1; }
+                change(&mut pair);
+                if read(&pair) != 73 || count.value != 0 { return 2; }
+            }
+            if count.value == 1 { 73 } else { 3 }
+        }
+    "#);
+}
+
+#[test]
 fn a_tuple_takes_a_named_affine_element_once() {
     run(r#"
         fn probe() -> Int {

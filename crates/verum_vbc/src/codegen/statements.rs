@@ -1528,9 +1528,10 @@ impl VbcCodegen {
                 }
                 _ => reg,
             }};
-            self.compile_pattern_bind(pattern, bound)?;
             if let Some(declaration) = &tuple_declaration {
-                self.bind_pattern_declaration(pattern, declaration, None);
+                self.bind_typed_pattern(pattern, bound, declaration, None)?;
+            } else {
+                self.compile_pattern_bind(pattern, bound)?;
             }
             if transfer {
                 self.ctx.clear_transferred_source(reg);
