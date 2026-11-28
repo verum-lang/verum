@@ -557,6 +557,23 @@ implement<T> Deref for Outer<T> {
 }
 
 #[test]
+fn a_transparent_projection_reborrows_with_its_receivers_permissions() {
+    check(r#"
+        type Key is (Int);
+        fn replace(key:&mut Key) { let value = &mut key.0; *value = 17; }
+        fn read(value:&Int)->Int { *value }
+        fn inspect(key:&Key)->Int { read(&key.0) }
+        fn probe()->Int { let mut key=Key(13); replace(&mut key); inspect(&key) }
+    "#, Some(17));
+
+    let ast = Parser::new("type Key is (Int); fn bad(key:&Key)->&mut Int { &mut key.0 }")
+        .parse_module().unwrap();
+    let error = canonical_deref::compile(CodegenConfig::new("user_receiver"), &ast)
+        .err().expect("a shared wrapper cannot lend its field mutably");
+    assert!(error.to_string().contains("readonly place"), "{error}");
+}
+
+#[test]
 fn nested_mutable_projections_preserve_the_terminal_place() {
     for receiver in ["g", "(*g)", "(**g)"] {
         let body = format!(r#"{MUTATING_TARGET}

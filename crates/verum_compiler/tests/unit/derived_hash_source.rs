@@ -147,6 +147,25 @@ fn structural_hash_executes_the_canonical_text_body() {
         implement Hash for Text { fn hash(&self, hasher:&mut Hasher) {
             hasher.state = hasher.state * 100 + (if *self == "alpha" { 71 } else { 13 });
         } }
+        implement Hash for UInt64 { fn hash(&self, hasher:&mut Hasher) {
+            hasher.state = *self as Int;
+        } }
+        @derive(Hash) type Number is (USize);
+        type OffsetNumber is (USize);
+        implement Hash for OffsetNumber { fn hash(&self, hasher:&mut Hasher) {
+            hasher.state = self.0 as Int + 100;
+        } }
+        fn digest<T:Hash>(key:&T) -> Int {
+            let mut sink = Hasher {state:0}; key.hash(&mut sink); sink.state
+        }
+        fn digest_field(key:&Number) -> Int { digest(&key.0) }
+        fn number_probe() -> Int {
+            let mut sink = Hasher {state:0};
+            let key = Number(13);
+            key.hash(&mut sink);
+            if sink.state == 13 && digest(&key) == 13 && digest(&Number(17)) == 17
+                && digest_field(&key) == 13 && digest(&OffsetNumber(13)) == 113 { 1 } else { 0 }
+        }
         @derive(Hash) public type Wrap<T> is (T);
         @derive(Hash) public type Pair is { left: Wrap<Text>, right: Text };
         @derive(Hash) type Role is Empty | Single(Text) | Named {value:Text};
@@ -181,6 +200,9 @@ fn structural_hash_executes_the_canonical_text_body() {
         let sum = module
             .find_function_by_name("core.base.protocols.sum_probe")
             .unwrap();
+        let numbers = module
+            .find_function_by_name("core.base.protocols.number_probe")
+            .unwrap();
         let mut vm = Interpreter::new(module);
         assert_eq!(
             vm.execute_function_with_args(entry, &[]).unwrap().as_i64(),
@@ -190,6 +212,7 @@ fn structural_hash_executes_the_canonical_text_body() {
             vm.execute_function_with_args(sum, &[]).unwrap().as_i64(),
             113 + 271
         );
+        assert_eq!(vm.execute_function_with_args(numbers, &[]).unwrap().as_i64(), 1);
     }
 }
 

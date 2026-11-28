@@ -5015,6 +5015,26 @@ impl VbcCodegen {
         self.ctx.fixed_array_count(&ident.name)
     }
 
+    fn reborrow_managed_place(
+        &mut self, operand: &Expr, mutable: bool, access: crate::types::Mutability,
+    ) -> CodegenResult<Option<Reg>> {
+        if mutable && access != crate::types::Mutability::Mutable {
+            return Err(CodegenError::with_span(
+                CodegenErrorKind::TypeInference("a readonly place cannot be reborrowed mutably".into()),
+                operand.span,
+            ));
+        }
+        let source = self.compile_expr(operand)?.or_internal("managed reborrow has no reference")?;
+        let reference = self.ctx.alloc_temp();
+        if mutable {
+            self.ctx.emit(Instruction::Mov { dst: reference, src: source });
+        } else {
+            self.emit_reference_attenuation(reference, source, crate::value::Capabilities::READ_ONLY);
+        }
+        self.ctx.free_temp(source);
+        Ok(Some(reference))
+    }
+
     fn compile_unary(&mut self, op: UnOp, inner: &Expr) -> CodegenResult<Option<Reg>> {
         if matches!(op, UnOp::RefMut | UnOp::RefCheckedMut | UnOp::RefUnsafeMut)
             && let ExprKind::Index { expr: base, index } = &Self::normalized_place(inner).kind {
@@ -5028,6 +5048,13 @@ impl VbcCodegen {
             && self.extract_expr_type_name(base)
                 .and_then(|name| self.transparent_inner_type_name(&name)).is_some()
         {
+            // A borrowed wrapper already identifies its payload's storage.
+            // Borrowing the receiver slot here introduces a second reference.
+            if let Some(crate::types::TypeRef::Reference { tier: CbgrTier::Tier0, mutability, .. }) =
+                self.projection_operand_declaration(base)
+            {
+                return self.reborrow_managed_place(base, op == UnOp::RefMut, mutability);
+            }
             return self.compile_unary(op, base);
         }
         if std::env::var("VERUM_TRACE_UNARY_REF").is_ok()
@@ -5171,20 +5198,7 @@ impl VbcCodegen {
                     tier: CbgrTier::Tier0, mutability, ..
                 }) = self.declared_expression_result(ptr_expr, None, 0, 0)
             {
-                if op == UnOp::RefMut && mutability != crate::types::Mutability::Mutable {
-                    return Err(CodegenError::with_span(
-                        CodegenErrorKind::TypeInference("a readonly place cannot be reborrowed mutably".into()),
-                        inner.span,
-                    ));
-                }
-                let source = self.compile_expr(ptr_expr)?.or_internal("managed reborrow has no reference")?;
-                let reference = self.ctx.alloc_temp();
-                self.ctx.emit(Instruction::Mov { dst: reference, src: source });
-                if op == UnOp::Ref {
-                    self.emit_reference_attenuation(reference, reference, crate::value::Capabilities::READ_ONLY);
-                }
-                self.ctx.free_temp(source);
-                return Ok(Some(reference));
+                return self.reborrow_managed_place(ptr_expr, op == UnOp::RefMut, mutability);
             }
             // Reborrow the place returned by a declared dereference. Loading
             // its value first would create a reference to a temporary copy.
@@ -13276,44 +13290,58 @@ impl VbcCodegen {
             .and_then(|ty| self.scoped_callable_type_name(&ty, Some(&self.ctx.current_generic_param_ids)));
         let receiver_declaration = field_declaration.map(String::from)
             .or_else(|| self.extract_expr_type_name(receiver));
-        // A mutable method on a projected place borrows its storage directly.
-        if (matches!(&array_receiver.kind, ExprKind::Field { .. })
+        let transparent = receiver_declaration.as_deref()
+            .is_some_and(|owner| self.transparent_inner_type_name(owner).is_some());
+        let projected_place = matches!(&array_receiver.kind, ExprKind::Field { .. })
             || matches!(&array_receiver.kind, ExprKind::Index { expr: base, index }
             if !matches!(index.kind, ExprKind::Range { .. })
                 && self.packed_index_element_size(base).is_none())
             || matches!(&array_receiver.kind, ExprKind::TupleIndex { expr: base, index: 0 }
                 if self.extract_expr_type_name(base)
-                    .and_then(|name| self.transparent_inner_type_name(&name)).is_some()))
+                    .and_then(|name| self.transparent_inner_type_name(&name)).is_some());
+        // A static call to a transparent wrapper passes the same borrowed
+        // receiver as a call through the protocol. Its payload may be a scalar.
+        if !receiver_is_borrowed && (projected_place || transparent)
             && let Some(receiver_type) = receiver_declaration.as_deref()
             && let Some(key) = self.registered_receiver_method(receiver_type, method.name.as_str())
-            && self.ctx.lookup_qualified_function(&key).is_some_and(|info| info.takes_self_mut_ref)
+            && let Some(selected) = self.ctx.lookup_qualified_function(&key)
+            && ((projected_place && selected.takes_self_mut_ref)
+                || (transparent && self.declared_callable_descriptors.get(&selected.id)
+                    .and_then(|method| method.source_signature.as_ref())
+                    .and_then(|signature| signature.params.first())
+                    .is_some_and(|param| matches!(param.kind, verum_ast::FunctionParamKind::SelfRef))))
         {
-            let (borrowed, target) = if matches!(
-                self.projection_operand_declaration(array_receiver),
-                Some(crate::types::TypeRef::Reference { .. })
-            ) {
+            let mutable = selected.takes_self_mut_ref;
+            let access = if mutable { crate::types::Mutability::Mutable } else { crate::types::Mutability::Immutable };
+            let declaration = self.projection_operand_declaration(array_receiver);
+            let (borrowed, target) = if let Some(crate::types::TypeRef::Reference { mutability, tier, .. }) = &declaration {
                 // A stored reference already identifies the receiver storage.
                 // Borrowing its field slot would introduce an extra reference
                 // layer while dispatch still expects the original pointee.
-                if !self.mutable_projection_place(array_receiver, 0) {
+                if mutable && !self.mutable_projection_place(array_receiver, 0) {
                     return Err(CodegenError::with_span(CodegenErrorKind::TypeInference(
                         "method receiver has no declared mutable projection".into(),
                     ), receiver.span));
                 }
-                let value = self.compile_expr(array_receiver)?
-                    .or_internal("projected method receiver has no reference")?;
+                let value = if !mutable && *tier == CbgrTier::Tier0 {
+                    self.reborrow_managed_place(array_receiver, false, *mutability)?
+                } else {
+                    self.compile_expr(array_receiver)?
+                }.or_internal("projected method receiver has no reference")?;
                 (value, receiver_type.to_owned())
             } else {
-                let value = self.compile_unary(UnOp::RefMut, array_receiver)?
+                let op = if mutable { UnOp::RefMut } else { UnOp::Ref };
+                let value = self.compile_unary(op, array_receiver)?
                     .or_internal("projected method receiver has no borrow")?;
-                (value, format!("&mut {}", Self::method_receiver_type_name(receiver_type)))
+                (value, format!("&{}{}", if mutable { "mut " } else { "" }, Self::method_receiver_type_name(receiver_type)))
             };
-            return self.compile_method_on_adjusted_value(
-                borrowed, &target, self.projection_operand_declaration(array_receiver).map(|ty| {
-                    if matches!(ty, crate::types::TypeRef::Reference { .. }) { ty }
-                    else { crate::types::TypeRef::reference(ty, crate::types::Mutability::Mutable, crate::types::CbgrTier::Tier0) }
-                }), receiver.span, method, args, resolved_target, type_args, true,
-            );
+            let borrowed_type = declaration.map(|ty| match ty {
+                crate::types::TypeRef::Reference { inner, tier, .. } =>
+                    crate::types::TypeRef::Reference { inner, tier, mutability: access },
+                value => crate::types::TypeRef::reference(value, access, CbgrTier::Tier0),
+            });
+            return self.compile_method_on_adjusted_value(borrowed, &target, borrowed_type,
+                receiver.span, method, args, resolved_target, type_args, true);
         }
         if let Some(receiver_type) = receiver_declaration.as_deref() {
             let depth = self.method_receiver_deref_count(receiver_type, method.name.as_str());
@@ -24908,8 +24936,9 @@ impl VbcCodegen {
             && let Some(type_name) = self.infer_expr_type_name(base)
             && self.transparent_inner_type_name(&type_name).is_some()
         {
-            let base_is_ref = Self::expr_ident_name(base)
-                .is_some_and(|n| self.ctx.reference_bound_vars.contains(&n));
+            let base_is_ref = matches!(self.projection_operand_declaration(base),
+                Some(crate::types::TypeRef::Reference { tier: CbgrTier::Tier0, .. }))
+                || Self::expr_ident_name(base).is_some_and(|n| self.ctx.reference_bound_vars.contains(&n));
             let base_reg = self
                 .compile_expr(base)?
                 .or_internal("tuple base has no value")?;

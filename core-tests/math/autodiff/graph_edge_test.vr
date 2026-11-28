@@ -44,6 +44,9 @@ fn graph_identifiers_are_structural_map_keys() {
     let mut node_hash = DefaultHasher.new();
     NodeId(7).hash(&mut node_hash);
     assert_eq(node_hash.finish(), hash_key(&(7 as USize)));
+    assert_eq(hash_key(&AutodiffTensorId(13)), hash_key(&(13 as USize)));
+    assert_eq(hash_key(&AutodiffTensorId(17)), hash_key(&(17 as USize)));
+    assert_eq(hash_key(&NodeId(7)), hash_key(&(7 as USize)));
 
     let mut sizes: Map<AutodiffTensorId, USize> = Map.new();
     assert_eq(sizes.insert(AutodiffTensorId(13), 96), Maybe.None);
