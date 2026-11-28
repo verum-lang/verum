@@ -188,3 +188,111 @@ fn typed_float_conversion_rejects_foreign_values_and_unknown_rounding_modes() {
         ));
     }
 }
+
+#[test]
+fn projected_payload_respects_owner_lifetime_field_bounds_and_shared_access() {
+    use verum_vbc::interpreter::InterpreterError;
+    use verum_vbc::types::TypeId;
+    let mut module = VbcModule::new("variant_places".into());
+    let payload = |variant, field| Instruction::GetVariantDataRef {
+        dst: Reg(2),
+        variant,
+        field,
+    };
+    for (name, body) in [
+        (
+            "borrow",
+            vec![payload(Reg(0), 0), Instruction::Ret { value: Reg(2) }],
+        ),
+        (
+            "shared",
+            vec![
+                Instruction::Ref {
+                    dst: Reg(3),
+                    src: Reg(0),
+                },
+                payload(Reg(3), 0),
+                Instruction::Ret { value: Reg(2) },
+            ],
+        ),
+        (
+            "out_of_bounds",
+            vec![payload(Reg(0), 1), Instruction::Ret { value: Reg(2) }],
+        ),
+        (
+            "read",
+            vec![
+                Instruction::Deref {
+                    dst: Reg(2),
+                    ref_reg: Reg(0),
+                },
+                Instruction::Ret { value: Reg(2) },
+            ],
+        ),
+        (
+            "write",
+            vec![
+                Instruction::DerefMut {
+                    ref_reg: Reg(0),
+                    value: Reg(1),
+                },
+                Instruction::RetV,
+            ],
+        ),
+    ] {
+        let mut function = FunctionDescriptor::new(module.intern_string(name));
+        function.id = FunctionId(module.functions.len() as u32);
+        function.register_count = 4;
+        function.bytecode_offset = module.bytecode.len() as u32;
+        verum_vbc::bytecode::encode_instructions(&body, &mut module.bytecode);
+        function.bytecode_length = module.bytecode.len() as u32 - function.bytecode_offset;
+        module.add_function(function);
+    }
+    module.header.function_table_count = module.functions.len() as u32;
+    let wire = verum_vbc::serialize::serialize_module(&module).unwrap();
+    for module in [
+        module,
+        verum_vbc::deserialize::deserialize_module_validated(&wire).unwrap(),
+    ] {
+        let mut vm = Interpreter::try_new_validated(module.into()).unwrap();
+        let call = |vm: &mut Interpreter, name: &str, args: &[Value]| {
+            let function = vm.state.module.find_function_by_name(name).unwrap();
+            vm.execute_function_with_args(function, args)
+        };
+        let owner = vm.state.heap.alloc_variant(TypeId(100), 0, 1).unwrap();
+        let source = Value::from_ptr(owner.as_ptr());
+        let mutable = call(&mut vm, "borrow", &[source]).unwrap();
+        let shared = call(&mut vm, "shared", &[source]).unwrap();
+        call(&mut vm, "write", &[mutable, Value::from_i64(73)]).unwrap();
+        assert!(matches!(
+            call(&mut vm, "write", &[shared, Value::from_i64(9)]),
+            Err(InterpreterError::CapabilityDenied { .. })
+        ));
+        assert_eq!(
+            call(&mut vm, "read", &[shared]).unwrap(),
+            Value::from_i64(73)
+        );
+        assert!(matches!(
+            call(&mut vm, "out_of_bounds", &[source]),
+            Err(InterpreterError::IndexOutOfBounds {
+                index: 1,
+                length: 1
+            })
+        ));
+        let record = vm.state.heap.alloc(TypeId(100), 16).unwrap();
+        assert!(matches!(
+            call(&mut vm, "borrow", &[Value::from_ptr(record.as_ptr())]),
+            Err(InterpreterError::InvalidOperand { .. })
+        ));
+        // SAFETY: the owner belongs to this VM. Subsequent accesses go through checked tickets.
+        unsafe { vm.state.heap.free(owner) };
+        assert!(matches!(
+            call(&mut vm, "read", &[shared]),
+            Err(InterpreterError::CbgrViolation { .. })
+        ));
+        assert!(matches!(
+            call(&mut vm, "write", &[mutable, Value::from_i64(1)]),
+            Err(InterpreterError::CbgrViolation { .. })
+        ));
+    }
+}

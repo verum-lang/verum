@@ -379,44 +379,65 @@ pub(in super::super) fn handle_get_variant_data(
     Ok(DispatchResult::Continue)
 }
 
-/// GetVariantDataRef (0x8B) - Get pointer to variant data field.
-///
-/// Unlike GetVariantData which copies the field value, this returns a pointer
-/// to the field location within the variant. Used for `ref` and `ref mut`
-/// pattern bindings to enable mutation through references.
-///
-/// Encoding: opcode + dst:reg + variant:reg + field:varint
-/// Effect: Sets `dst` to a pointer to the field at `field` offset in the variant's payload.
+/// Borrow a variant payload slot with the lifetime and access rights of its owner.
 pub(in super::super) fn handle_get_variant_data_ref(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
+    use super::cbgr_helpers::resolve_receiver_place;
+    use crate::interpreter::{CbgrViolationKind, InterpreterError};
+    use crate::value::Capabilities;
+    use verum_common::layout::{VARIANT_PAYLOAD_OFFSET, VARIANT_TAG_OFFSET};
+
     let dst = read_reg(state)?;
-    let variant_reg = read_reg(state)?;
-    let field = read_varint(state)? as usize;
-
-    let variant = variant_value(state, state.get_reg(variant_reg))?;
-
-    if variant.is_regular_ptr() && !variant.is_nil() {
-        let base_ptr = variant.as_ptr::<u8>();
-        if !base_ptr.is_null() {
-            // Payload starts at OBJECT_HEADER_SIZE + 8 (after tag + padding)
-            // Field offset is measured in Value-sized units
-            let payload_offset = heap::OBJECT_HEADER_SIZE + 8;
-            let field_offset = payload_offset + field * std::mem::size_of::<Value>();
-            // Return pointer to the field (not the field value)
-            let field_ptr = unsafe { base_ptr.add(field_offset) };
-            let field_ptr_addr = field_ptr as usize;
-            // Track this as a mutable pointer so Deref knows to read the Value from memory
-            // (instead of doing identity deref like for regular heap objects)
-            state.cbgr_mutable_ptrs.insert(field_ptr_addr);
-            state.set_reg(dst, Value::from_ptr(field_ptr));
-        } else {
-            state.set_reg(dst, Value::nil());
-        }
-    } else {
-        state.set_reg(dst, Value::nil());
+    let owner = read_reg(state)?;
+    let field = read_varint(state)?;
+    let place = resolve_receiver_place(state, state.get_reg(owner))?.into_record(state)?;
+    let variant = peel_heap_cell(state, place.value);
+    if !variant.is_regular_ptr() || variant.is_nil() {
+        return Err(InterpreterError::InvalidOperand {
+            message: "variant payload reference requires a live variant".into(),
+        });
     }
-
+    let pointer = variant.as_ptr::<heap::ObjectHeader>();
+    if !state.heap.contains(pointer) {
+        return Err(InterpreterError::CbgrViolation {
+            kind: CbgrViolationKind::UseAfterFree,
+            ptr: pointer as usize,
+        });
+    }
+    let prefix = (VARIANT_PAYLOAD_OFFSET - VARIANT_TAG_OFFSET) as usize;
+    // SAFETY: exact membership proves a live header. No allocation or callback
+    // occurs before the payload extent and representation are checked.
+    let header = unsafe { &*pointer };
+    if !header.flags.contains(heap::ObjectFlags::VARIANT) || (header.size as usize) < prefix {
+        return Err(InterpreterError::InvalidOperand {
+            message: "variant payload reference requires a variant representation".into(),
+        });
+    }
+    // SAFETY: the variant flag and extent establish the tag/count prefix.
+    let (_, count) = unsafe { heap::variant_header_pair(pointer.cast()) };
+    let width = std::mem::size_of::<Value>();
+    let data_size = header.size as usize - prefix;
+    if data_size / width != count as usize || data_size % width != 0 {
+        return Err(InterpreterError::InvalidOperand {
+            message: "variant field count disagrees with its allocation".into(),
+        });
+    }
+    if field >= u64::from(count) {
+        return Err(InterpreterError::IndexOutOfBounds {
+            index: i64::try_from(field).unwrap_or(i64::MAX),
+            length: count as usize,
+        });
+    }
+    let access = place
+        .capabilities
+        .intersect(&Capabilities(Capabilities::READ | Capabilities::WRITE));
+    let reference = state.heap.project_object_field(
+        pointer as usize,
+        prefix + field as usize * width,
+        access,
+    )?;
+    state.set_reg(dst, reference);
     Ok(DispatchResult::Continue)
 }
 
