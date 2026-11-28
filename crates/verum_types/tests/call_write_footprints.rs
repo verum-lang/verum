@@ -990,3 +990,38 @@ fn structural_cleanup_budget_exhaustion_keeps_the_unknown_write_rule() {
         else { assert!(found.iter().any(|e| e.contains("cannot establish the lifetime")), "{found:?}"); }
     }
 }
+
+#[test]
+fn a_list_value_subscript_transfers_the_loans_in_its_selected_element() {
+    let list = list_with_push();
+    for caller in [
+        "fn gather<T>(source:&List<T>, perm:&List<Int>, mut out:List<T>)->List<T> {
+            out.push(source[perm[0]]); out }",
+        "fn gather<T>(source:List<T>, mut out:List<T>)->List<T> {
+            let element=source[0]; out.push(element); out }",
+        "fn forward(input:&Int)->&Int { let mut slots=[]; slots.push(input); slots[0] }",
+    ] {
+        let found = registered_errors([("core.collections.list", list.clone()),
+            ("consumer", format!("mount core.collections.list.List; {caller}").into())]);
+        assert!(found.is_empty(), "{caller}: {found:?}");
+    }
+}
+
+#[test]
+fn indexed_values_keep_local_loans_and_require_known_storage() {
+    let list = list_with_push();
+    for (caller, expected) in [
+        ("fn leak()->&Int { let local=3; let mut slots=[]; slots.push(&local); slots[0] }", "local"),
+        ("fn read(mut slots:List<&Int>, change:fn(&mut List<&Int>))->&Int {
+            change(&mut slots); slots[0] }", "after this mutable call"),
+        ("fn choose(items:&mut List<&Int>)->Int;
+          fn read(mut slots:List<&Int>)->&Int { slots[choose(&mut slots)] }", "after this mutable call"),
+        ("mount foreign.List as OtherList;
+          fn transfer<T>(source:&OtherList<T>, mut out:List<T>)->List<T> {
+            out.push(source[0]); out }", "after this mutable call"),
+    ] {
+        let found = registered_errors([("core.collections.list", list.clone()), ("foreign", list.clone()),
+            ("consumer", format!("mount core.collections.list.List; {caller}").into())]);
+        assert!(found.iter().any(|error| error.contains(expected)), "{caller}: {found:?}");
+    }
+}

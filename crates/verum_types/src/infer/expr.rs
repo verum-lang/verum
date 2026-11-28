@@ -111,6 +111,13 @@ pub(super) enum PlaceUse {
     Operand,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum IndexUse {
+    Value,
+    Borrow,
+    ExplicitRangeBorrow,
+}
+
 /// A resolved callable and the premises attached to its fresh parameters.
 struct PreparedCall {
     callable: Type,
@@ -155,7 +162,8 @@ impl TypeChecker {
         }
         let result = match &field.kind {
             ExprKind::Field { .. } => self.infer_expr_field(field)?,
-            ExprKind::Index { .. } => self.infer_expr_index(field)?,
+            ExprKind::Index { .. } => self.infer_index_projection(field,
+                if usage == PlaceUse::Borrow { IndexUse::Borrow } else { IndexUse::Value })?,
             ExprKind::TupleIndex { .. } => self.infer_expr_tuple_index(field, usage)?,
             ExprKind::Unary { op: UnOp::Deref, .. } if usage != PlaceUse::Value => {
                 // Addressing a dereference chain must not recurse through a new
@@ -239,7 +247,7 @@ impl TypeChecker {
         let mut place = expr;
         while let ExprKind::Paren(inner) = &place.kind { place = inner; }
         if matches!(&place.kind, ExprKind::Index { index, .. } if matches!(index.kind, ExprKind::Range { .. })) {
-            return self.with_place_types(expr, |checker| checker.infer_index_projection(place, true));
+            return self.with_place_types(expr, |checker| checker.infer_index_projection(place, IndexUse::ExplicitRangeBorrow));
         }
         self.synth_borrowed_operand(expr)
     }
@@ -4567,7 +4575,7 @@ impl TypeChecker {
                 // Index access
                 // Supports Array, Slice, List<T>, Text (returns Char), Map<K,V> (returns V)
                 // Also supports any type implementing the Index protocol or having an `index` method
-                Index { .. } => self.infer_expr_index(current_expr),
+                Index { .. } => self.infer_index_projection(current_expr, IndexUse::Value),
 
                 // Pipeline operator: x |> f (desugars to f(x))
                 // Syntax grammar: recursive-descent parseable (LL(k), k<=3), reserved keywords only let/fn/is, unified "type X is" definitions — Pipeline operator
@@ -9316,8 +9324,10 @@ impl TypeChecker {
         }
     }
 
-    fn infer_expr_index(&mut self, expr: &Expr) -> Result<InferResult> {
-        self.infer_index_projection(expr, false)
+    fn declared_list_element(&self, ty: &Type) -> Option<Type> {
+        let (name, args) = self.conversion_nominal_head(ty)?;
+        let [element] = args else { return None };
+        (self.declared_runtime_storage_carrier(&name) == Some(WKT::List)).then(|| element.clone())
     }
 
     fn contiguous_range_element(&self, ty: &Type, span: Span) -> Result<Option<Type>> {
@@ -9330,13 +9340,7 @@ impl TypeChecker {
                 owner = self.place_reference_head(referent, span)?;
                 continue;
             }
-            if let Some((name, args)) = self.conversion_nominal_head(&owner)
-                && self.declared_runtime_storage_carrier(&name) == Some(WKT::List)
-                && let [element] = args
-            {
-                return Ok(Some(element.clone()));
-            }
-            return Ok(None);
+            return Ok(self.declared_list_element(&owner));
         }
         Err(TypeError::InvalidIndex {
             message: "range receiver exceeds the reference resolution boundary".into(),
@@ -9344,7 +9348,7 @@ impl TypeChecker {
         })
     }
 
-    fn infer_index_projection(&mut self, expr: &Expr, addressed: bool) -> Result<InferResult> {
+    fn infer_index_projection(&mut self, expr: &Expr, usage: IndexUse) -> Result<InferResult> {
         use ExprKind::*;
         let ExprKind::Index { expr: arr, index } = &expr.kind else { unreachable!() };
         // =====================================================================
@@ -9377,6 +9381,17 @@ impl TypeChecker {
         let arr_result = self.synth_expr_for_field_access(arr)?;
         let resolved_main = self.unifier.apply(&arr_result.ty);
         self.load_source_index_methods(&resolved_main)?;
+        // VBC chooses GetE for the declared List before consulting user Index
+        // or Deref methods. Capture that receiver before evaluating the key.
+        let list_element = if !matches!(index.kind, Range { .. }) {
+            let owner = self.place_reference_head(&resolved_main, arr.span)?;
+            match owner.reference_parts() {
+                Some((referent, _, _)) => self.declared_list_element(&self.place_reference_head(referent, arr.span)?),
+                None => self.declared_list_element(&owner),
+            }
+        } else { None };
+        let slot = list_element.as_ref().filter(|element| usage == IndexUse::Value && self.carries_stored_loan(element))
+            .and_then(|element| self.index_slot_snapshot(arr, element));
 
         // Synthesize index type to determine if this is indexing or slicing
         let index_result = self.synth_expr(index)?;
@@ -9495,7 +9510,7 @@ impl TypeChecker {
                 };
                 self.unifier.unify(&args[0], &Type::int(), index.span)?;
                 let slice = Type::slice(element);
-                if addressed { return Ok(InferResult::new(slice)); }
+                if usage == IndexUse::ExplicitRangeBorrow { return Ok(InferResult::new(slice)); }
                 self.track_reference_borrow(expr, false, expr.span)?;
                 return Ok(InferResult::new(Type::reference(false, slice)));
             }
@@ -9507,6 +9522,13 @@ impl TypeChecker {
             })?;
             self.unifier.unify(&index_ty, &contract.key, index.span)?;
             return Ok(InferResult::new(contract.output));
+        }
+        if let Some(element) = list_element {
+            self.unifier.unify(&index_ty, &Type::Int, index.span)?;
+            if usage == IndexUse::Value && self.carries_stored_loan(&element) {
+                self.observe_indexed_slot(expr.span, arr, &element, slot)?;
+            }
+            return Ok(InferResult::new(element));
         }
         let expected_index_type = index_contract.map(|contract| contract.key).unwrap_or_else(Type::int);
         self.unifier.unify(&index_ty, &expected_index_type, index.span)?;

@@ -985,7 +985,8 @@ impl TypeChecker {
         let value = unparen(value);
         match &value.kind {
             ExprKind::Call { .. } | ExprKind::MethodCall { .. } | ExprKind::MetaFunction { .. } | ExprKind::Closure { .. }
-            | ExprKind::Tuple(_) | ExprKind::Array(_) | ExprKind::Record { .. } | ExprKind::Try(_) | ExprKind::TryBlock(_)
+            | ExprKind::Index { .. } | ExprKind::Tuple(_) | ExprKind::Array(_) | ExprKind::Record { .. }
+            | ExprKind::Try(_) | ExprKind::TryBlock(_)
             | ExprKind::TryRecover { .. } | ExprKind::TryRecoverFinally { .. } =>
                 self.evaluated_value_origins.get(&value.span)?.origins.as_ref(),
             _ => None,
@@ -1622,6 +1623,42 @@ impl TypeChecker {
         }
     }
 
+    fn slot_backing_place(&mut self, owner: &Expr) -> Option<RecordReceiver> {
+        self.reference_result_origin(owner).or_else(|| self.call_input_place(owner).map(|place| place.0))
+    }
+
+    pub(super) fn index_slot_snapshot(
+        &mut self, owner: &Expr, element: &Type,
+    ) -> Option<(RecordReceiver, List<RecordReceiver>)> {
+        let backing = self.slot_backing_place(owner)?;
+        let origins = self.stored_slot_origins(&backing, element)?;
+        Some((backing, origins))
+    }
+
+    pub(super) fn observe_indexed_slot(
+        &mut self, span: verum_ast::Span, owner: &Expr, element: &Type,
+        snapshot: Option<(RecordReceiver, List<RecordReceiver>)>,
+    ) -> crate::Result<()> {
+        let Some((backing, mut origins)) = snapshot else {
+            self.record_owned_value_origins(span, None, false);
+            return Ok(());
+        };
+        // The key may call arbitrary code. A replacement binding cannot stand
+        // for the receiver that was evaluated first. Include loans that a
+        // checked write installed in its backing storage while evaluating it.
+        if self.slot_backing_place(owner).as_ref() != Some(&backing) {
+            return Err(crate::TypeError::UnknownRecordOrigin { span });
+        }
+        let after = self.stored_slot_origins(&backing, element);
+        if let Some(after) = &after {
+            for origin in after {
+                if !origins.contains(origin) { origins.push(origin.clone()); }
+            }
+        }
+        self.record_owned_value_origins(span, Some(origins), after.is_some());
+        Ok(())
+    }
+
     /// Read a stored value, independently of how long the reference to its
     /// backing owner lives. An unknown prior mutation keeps the observed
     /// contents unproved. Taking a slot also invalidates structural facts.
@@ -1631,23 +1668,25 @@ impl TypeChecker {
         element: &Type,
         take: bool,
     ) -> Option<List<RecordReceiver>> {
-        let backing = self
-            .reference_result_origin(owner)
-            .or_else(|| self.call_input_place(owner).map(|place| place.0))?;
+        let backing = self.slot_backing_place(owner)?;
         if take {
             self.refinement_evidence
                 .invalidate_write(std::slice::from_ref(&backing));
         }
+        self.stored_slot_origins(&backing, element)
+    }
+
+    fn stored_slot_origins(&mut self, backing: &RecordReceiver, element: &Type) -> Option<List<RecordReceiver>> {
         if !self.carries_stored_loan(element) {
             return Some(List::new());
         }
-        if !self.check_payload_origin_observation(&backing)
+        if !self.check_payload_origin_observation(backing)
             || !backing.fields.is_empty()
             || !self.ctx.env.storage_has_payload_origins(backing.binding)
         {
             return None;
         }
-        self.ctx.env.collection_element_origins(&backing)
+        self.ctx.env.collection_element_origins(backing)
     }
 
     pub(super) fn imported_slot_read_origins(
