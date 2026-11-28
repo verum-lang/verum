@@ -1,6 +1,6 @@
 use verum_ast::{
     FileId, ItemKind, Module,
-    decl::{ImplItemKind, ImplKind, MountTreeKind},
+    decl::{ImplItemKind, ImplKind, MountTreeKind, ProtocolItem, ProtocolItemKind, TypeDeclBody},
     pretty::format_type,
 };
 use verum_fast_parser::FastParser;
@@ -15,6 +15,16 @@ pub fn source_unit(path: &str, symbols: &str, index: usize) -> Module {
         .parse_module_str(&source, FileId::new(index as u32 + 1))
         .unwrap();
     let selected = |name: &str| symbols.split_whitespace().any(|symbol| symbol == name);
+    let keep_requirement = |owner: &str, item: &ProtocolItem| {
+        let prefix = format!("{owner}#");
+        if !symbols.split_whitespace().any(|symbol| symbol.starts_with(&prefix)) {
+            return true;
+        }
+        match &item.kind {
+            ProtocolItemKind::Function { decl, .. } => selected(&format!("{prefix}{}", decl.name)),
+            _ => true,
+        }
+    };
     unit.items.retain_mut(|item| match &mut item.kind {
         ItemKind::Module(decl) if path == "mod.vr" && decl.name.as_str() == "prelude" && decl.items.is_some() => {
             decl.items.as_mut().unwrap().retain(|entry| matches!(entry.kind, ItemKind::Mount(_)));
@@ -32,8 +42,16 @@ pub fn source_unit(path: &str, symbols: &str, index: usize) -> Module {
             block.functions.retain(|function| selected(function.name.as_str()));
             !block.functions.is_empty()
         }
-        ItemKind::Type(decl) => selected(decl.name.as_str()),
-        ItemKind::Protocol(decl) => selected(decl.name.as_str()),
+        ItemKind::Type(decl) => {
+            if let TypeDeclBody::Protocol(body) = &mut decl.body {
+                body.items.retain(|item| keep_requirement(decl.name.as_str(), item));
+            }
+            selected(decl.name.as_str())
+        }
+        ItemKind::Protocol(decl) => {
+            decl.items.retain(|item| keep_requirement(decl.name.as_str(), item));
+            selected(decl.name.as_str())
+        }
         ItemKind::Function(decl) => selected(decl.name.as_str()),
         ItemKind::Impl(decl) => {
             let owner = match &decl.kind {

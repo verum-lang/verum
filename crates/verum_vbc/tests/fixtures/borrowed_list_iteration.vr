@@ -4,7 +4,7 @@ fn byte_positions(bytes: &List<Byte>) -> Int {
     total
 }
 
-fn main() -> Int {
+fn shared_positions() -> Int {
     let empty: List<Byte> = [];
     let bytes: List<Byte> = [240 as Byte, 241 as Byte];
     if byte_positions(&empty) != 0 || byte_positions(&bytes) != 481 { return 2; }
@@ -17,4 +17,85 @@ fn main() -> Int {
         },
         Maybe.None => 5,
     }
+}
+fn independent_positions() -> Int {
+    let mut values: List<Int> = [12, 34, 56];
+    {
+        let mut positions = values.iter_mut();
+        match positions.next() {
+            Maybe.Some(first) => {
+                match positions.next_back() {
+                    Maybe.Some(last) => {
+                        *last = 99;
+                        *first = 42;
+                    },
+                    Maybe.None => return -1,
+                }
+            },
+            Maybe.None => return -2,
+        }
+        if positions.len() != 1 { return -3; }
+    }
+    if values[0] == 42 && values[1] == 34 && values[2] == 99 { 1 } else { -4 }
+}
+
+fn assign_byte(place: &mut Byte, value: Byte) {
+    *place = value;
+}
+
+fn change_bytes(values: &mut List<Byte>, stride: Int) -> Int {
+    if @intrinsic("list_storage_stride", values) != stride { return -1; }
+    {
+        let mut positions = values.iter_mut();
+        match positions.next() {
+            Maybe.Some(first) => match positions.next_back() {
+                Maybe.Some(last) => {
+                    assign_byte(first, 151 as Byte);
+                    let previous = core.base.memory.replace(last, 152 as Byte);
+                    if previous != 45 as Byte { return -2; }
+                    core.base.memory.swap(first, last);
+                },
+                Maybe.None => return -3,
+            },
+            Maybe.None => return -4,
+        }
+    }
+    if values[0] == 152 as Byte && values[1] == 46 as Byte && values[2] == 151 as Byte { 1 } else { -5 }
+}
+
+type Entry is { number: Int };
+
+fn at_middle(values: &mut List<Entry>) -> &mut Entry { &mut values[1] }
+fn forward(entry: &mut Entry) -> &mut Entry { entry }
+fn replace_entry(entry: &mut Entry) -> Int {
+    let previous = core.base.memory.replace(entry, Entry { number: 151 });
+    previous.number
+}
+
+fn record_positions() -> Bool {
+    let mut values: List<Entry> = [Entry { number: 42 }, Entry { number: 73 }];
+    let current = forward(at_middle(&mut values));
+    let prior = current.number;
+    let changed = replace_entry(current);
+    prior == 73 && changed == 73 && values[0].number == 42 && values[1].number == 151
+}
+
+fn main() -> Int {
+    let shared = shared_positions();
+    if shared != 73 { return 10 + shared; }
+    let positions = independent_positions();
+    if positions != 1 { return 20 - positions; }
+    let mut wide: List<Byte> = [44 as Byte, 46 as Byte, 45 as Byte];
+    let mut packed = List<Byte>.with_capacity(3);
+    packed.push(44 as Byte);
+    packed.push(46 as Byte);
+    packed.push(45 as Byte);
+    let slot = change_bytes(&mut wide, 8);
+    if slot != 1 { return 30 - slot; }
+    let byte = change_bytes(&mut packed, 1);
+    if byte != 1 { return 40 - byte; }
+    if !record_positions() { return 51; }
+    let mut local = 5 as Byte;
+    assign_byte(&mut local, 151 as Byte);
+    if local == 151 as Byte { 73 } else { 4 }
 }

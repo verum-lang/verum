@@ -6477,7 +6477,7 @@ pub(super) fn dispatch_primitive_method(
         // typically every wrapper or nested collection.
         let is_array_shaped = header.type_id.is_array_dispatchable();
 
-        if is_list && method == "iter"
+        if is_list && matches!(method, "iter" | "iter_mut")
             && let Some(declaration) = state.module.find_method_by_receiver_type(TypeId::LIST, method)
                 .and_then(|id| state.module.get_function(id))
             && declaration.has_source_body && declaration.has_definition()

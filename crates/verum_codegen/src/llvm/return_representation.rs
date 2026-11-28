@@ -21,6 +21,8 @@ pub(super) enum Representation {
     Slot,
     /// The selected native producer computed the address of a boxed field.
     ObjectFieldSlot,
+    /// A writable element reference carrying its physical width.
+    IndexedSlot,
     /// The same address after attenuating its access to read-only.
     ReadOnlyFieldSlot,
     /// A mutable local address issued by the selected native RefLocal producer.
@@ -49,7 +51,7 @@ impl Nodes {
 }
 impl R {
     fn permits_object_view(&self) -> bool {
-        matches!(self, Self::Slot | Self::ObjectFieldSlot | Self::MutableLocalSlot)
+        matches!(self, Self::Slot | Self::IndexedSlot | Self::ObjectFieldSlot | Self::MutableLocalSlot)
     }
     fn copy_bounded(&self, budget: &mut Nodes, depth: usize) -> Option<Self> {
         budget.take(depth)?;
@@ -182,7 +184,7 @@ impl R {
                 return a.copy_bounded(budget, depth + 1);
             }
             if a.permits_object_view() && b.permits_object_view() {
-                return Some(R::Slot);
+                return Some(if matches!(a, R::IndexedSlot) || matches!(b, R::IndexedSlot) { R::IndexedSlot } else { R::Slot });
             }
             if let (R::Sum(owner, xs), R::Sum(other, ys)) = (a, b) {
                 if owner != other {
@@ -225,9 +227,9 @@ impl R {
 #[derive(Clone, Debug)]
 pub(super) struct BodyFacts {
     pub result: Representation,
-    pub value_inputs: Map<usize, Set<u16>>,
+    pub value_inputs: Map<usize, Map<u16, bool>>,
     pub parameter_uses: List<u8>,
-    pub call_inputs: Map<usize, Set<usize>>,
+    pub call_inputs: Map<usize, Map<usize, bool>>,
     pub may_write: bool,
 }
 impl BodyFacts {
@@ -484,7 +486,8 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
         let mut branch_targets = Set::new();
         for (pc, op) in instructions.iter().enumerate() {
             match op {
-                I::Jmp { offset } | I::JmpIf { offset, .. } | I::JmpNot { offset, .. } => {
+                I::Jmp { offset } | I::JmpIf { offset, .. } | I::JmpNot { offset, .. }
+                | I::TryBegin { handler_offset: offset } => {
                     let target = pc as i64 + i64::from(*offset);
                     if target < 0 || target as usize >= instructions.len() {
                         return BodyFacts::unknown(instructions.len());
@@ -501,9 +504,9 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
         let mut pending = OrderedMap::new();
         pending.insert(0, initial);
         let mut returns: Option<R> = None;
-        let mut value_inputs: Map<usize, Set<u16>> = Map::new();
+        let mut value_inputs: Map<usize, Map<u16, bool>> = Map::new();
         let mut parameter_uses = List::from_elem(0_u8, fd.params.len());
-        let mut call_inputs: Map<usize, Set<usize>> = Map::new();
+        let mut call_inputs: Map<usize, Map<usize, bool>> = Map::new();
         let mut may_write = false;
         let calls: Map<_, _> = self
             .calls
@@ -551,7 +554,8 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                             && matches!(instruction, I::GetF { .. } | I::IsVar { .. }
                                 | I::GetVariantData { .. } | I::GetVariantDataRef { .. } | I::AsVar { .. }))
                 }) {
-                    value_inputs.entry(pc).or_default().insert(reg.0);
+                    let indexed = matches!(state.registers.get(&reg.0), Some(R::IndexedSlot));
+                    value_inputs.entry(pc).or_default().insert(reg.0, indexed);
                 }
             };
             match instruction {
@@ -570,7 +574,8 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                 | I::New { dst, .. }
                 | I::NewG { dst, .. } => write = Some((*dst, R::Value)),
                 I::TypeResource { dst, .. } => write = Some((*dst, R::Value)),
-                I::Not { dst, src } | I::CvtToI { dst, src } => {
+                I::Not { dst, src } | I::CvtToI { dst, src }
+                | I::UnaryI { dst, src, .. } | I::UnaryF { dst, src, .. } => {
                     use_input(*src, 8, &state);
                     write = Some((*dst, R::Value));
                 }
@@ -581,12 +586,14 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                 I::CbgrExtended { sub_op, operands }
                     if *sub_op == verum_vbc::instruction::CbgrSubOpcode::RefListElement.to_byte() =>
                 {
-                    let Ok(([dst, container, index], _)) =
+                    let Ok(([dst, container, index], access)) =
                         verum_vbc::encoding::decode_element_projection(operands, &mut 0)
                     else { return BodyFacts::unknown(instructions.len()); };
                     use_input(container, 1, &state);
                     use_input(index, 8, &state);
-                    write = Some((dst, R::Unknown));
+                    let indexed = access == verum_vbc::encoding::ElementProjectionAccess::Mutable
+                        && sites.get(&pc).is_some_and(|markers| markers.contains(&ReferenceSiteKind::SlotOutput(dst.0)));
+                    write = Some((dst, if indexed { R::IndexedSlot } else { R::Unknown }));
                 }
                 I::CbgrExtended { sub_op, operands }
                     if *sub_op == verum_vbc::instruction::CbgrSubOpcode::RefSlice.to_byte() =>
@@ -824,10 +831,25 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                     next = false;
                 }
                 I::Panic { .. } | I::Unreachable => next = false,
-                I::TryBegin { .. }
-                | I::Throw { .. }
-                | I::RethrowException
-                | I::TailCall { .. }
+                I::TryBegin { handler_offset } => {
+                    // Recovery can run after any call in the protected body. No
+                    // register or heap facts at entry prove the state at catch.
+                    edges.push(((pc as i64 + i64::from(*handler_offset)) as usize, State::default()));
+                    for uses in &mut parameter_uses { *uses |= 8; }
+                }
+                I::TryEnd => {}
+                I::GetException { dst } => write = Some((*dst, R::Unknown)),
+                I::DiscardException { dst } => {
+                    may_write = true;
+                    state.invalidate_storage();
+                    write = Some((*dst, R::Value));
+                }
+                I::Throw { error } => {
+                    use_input(*error, 4, &state);
+                    next = false;
+                }
+                I::RethrowException => next = false,
+                I::TailCall { .. }
                 | I::JmpCmp { .. }
                 | I::Switch { .. }
                 | I::CtxProvide { .. } => return BodyFacts::unknown(instructions.len()),
@@ -864,7 +886,7 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                                     ) && state.cells.get(&reg) == Some(&false));
                                 use_input(Reg(reg), if identity { demand } else { 8 }, &state);
                                 if demand == 1 && value.permits_object_view() {
-                                    call_inputs.entry(pc).or_default().insert(index);
+                                    call_inputs.entry(pc).or_default().insert(index, matches!(value, R::IndexedSlot));
                                     value = R::Unknown; // contents are not another proved cell
                                 }
                                 value
@@ -896,9 +918,20 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                 I::GetE { dst, arr, idx } => {
                     // The selected indexed access reads only the container and index.
                     // Its element may itself be a reference with an unknown carrier.
-                    use_input(*arr, 8, &state);
+                    let container = sites.get(&pc).is_some_and(|markers|
+                        markers.contains(&ReferenceSiteKind::ValueInput(arr.0)));
+                    use_input(*arr, if container { 1 } else { 8 }, &state);
                     use_input(*idx, 8, &state);
                     write = Some((*dst, R::Unknown));
+                }
+                I::SetE { arr, idx, value } => {
+                    let container = sites.get(&pc).is_some_and(|markers|
+                        markers.contains(&ReferenceSiteKind::ValueInput(arr.0)));
+                    use_input(*arr, if container { 1 } else { 8 }, &state);
+                    use_input(*idx, 8, &state);
+                    use_input(*value, 4, &state);
+                    may_write = true;
+                    state.invalidate_storage();
                 }
                 I::Ref { dst, src } | I::RefMut { dst, src } => {
                     use_input(*src, 8, &state);
@@ -973,6 +1006,18 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                     may_write = true;
                     state.invalidate_storage();
                 }
+                I::MemExtended { sub_op, operands } if *sub_op == Mem::Swap.to_byte() => {
+                    let mut cursor = 0;
+                    let mut operand = || verum_vbc::encoding::decode_reg(operands, &mut cursor);
+                    let (Ok(left), Ok(right)) = (operand(), operand()) else {
+                        return BodyFacts::unknown(instructions.len());
+                    };
+                    if cursor != operands.len() { return BodyFacts::unknown(instructions.len()); }
+                    use_input(left, 2, &state);
+                    use_input(right, 2, &state);
+                    may_write = true;
+                    state.invalidate_storage();
+                }
                 I::MemExtended { sub_op, operands } if *sub_op == Mem::DerefValue as u8 => {
                     let mut cursor = 0;
                     let mut operand = || verum_vbc::encoding::decode_reg(operands, &mut cursor);
@@ -985,7 +1030,9 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                     use_input(source, 2, &state);
                     let slot = sites.get(&pc).is_some_and(|sites|
                         sites.contains(&ReferenceSiteKind::SlotOutput(dst.0)));
-                    write = Some((dst, if slot { R::Slot } else { R::Unknown }));
+                    write = Some((dst, if !slot { R::Unknown }
+                        else if matches!(state.raw(source), R::IndexedSlot) { R::IndexedSlot }
+                        else { R::Slot }));
                 }
                 I::MemExtended { sub_op, operands } if matches!(
                     Mem::from_byte(*sub_op),
@@ -1122,7 +1169,7 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                     // same instruction. A word's carrier and argument origins
                     // survive, but a previous allocation's tag cannot prove it.
                     incoming.registers.retain(|_, value| {
-                        matches!(value, R::Value | R::Slot | R::ObjectFieldSlot | R::ReadOnlyFieldSlot | R::MutableLocalSlot | R::SharedLocalSlot | R::Parameter(..))
+                        matches!(value, R::Value | R::Slot | R::IndexedSlot | R::ObjectFieldSlot | R::ReadOnlyFieldSlot | R::MutableLocalSlot | R::SharedLocalSlot | R::Parameter(..))
                     });
                     incoming.guards.clear();
                     incoming.objects.clear();
@@ -1178,7 +1225,7 @@ pub(super) fn apply<'ctx>(
     }
     let sites = authority.resolve_reference_sites(&calls);
     let mut analysis = Analysis::new(vbc, &calls, &sites);
-    let mut plans: List<(InstructionValue<'ctx>, Option<u32>, BasicValueEnum<'ctx>)> = List::new();
+    let mut plans: List<(InstructionValue<'ctx>, Option<u32>, BasicValueEnum<'ctx>, bool)> = List::new();
     let mut ids: List<_> = sites.keys().copied().collect();
     ids.sort_unstable();
     for id in ids {
@@ -1188,20 +1235,16 @@ pub(super) fn apply<'ctx>(
             let ReferenceSiteKind::ValueInput(register) = site.kind else {
                 continue;
             };
-            if !facts
-                .value_inputs
-                .get(&site.instruction)
-                .is_some_and(|regs| regs.contains(&register))
-            {
+            let Some(&indexed) = facts.value_inputs.get(&site.instruction).and_then(|regs| regs.get(&register)) else {
                 continue;
-            }
+            };
             let Some(anchor) = site.anchor else {
                 continue;
             };
             let Some(value) = anchor.get_operand(0).and_then(|operand| operand.value()) else {
                 continue;
             };
-            plans.push((anchor, None, value));
+            plans.push((anchor, None, value, indexed));
         }
         for (_, call) in calls.get(&id).into_iter().flatten() {
             let Some(arguments) = facts.call_inputs.get(&call.instruction) else {
@@ -1210,7 +1253,7 @@ pub(super) fn apply<'ctx>(
             // This is the actual emitted argument list, after static receiver
             // omission and ABI adaptation, not a reconstructed VBC arg range.
             let instruction = unsafe { InstructionValue::new(call.call.as_value_ref()) };
-            for &index in arguments {
+            for (&index, &indexed) in arguments {
                 let Some(argument) = call.arguments.get(index) else {
                     continue;
                 };
@@ -1219,17 +1262,17 @@ pub(super) fn apply<'ctx>(
                     .and_then(|operand| operand.value());
                 if let Some(value) = value {
                     if value.as_value_ref() == argument.value.as_value_ref() {
-                        plans.push((instruction, Some(index as u32), value));
+                        plans.push((instruction, Some(index as u32), value, indexed));
                     }
                 }
             }
         }
     }
     let builder = context.create_builder();
-    for (instruction, operand, value) in plans {
+    for (instruction, operand, value, indexed) in plans {
+        builder.position_before(&instruction);
         let pointer = match value {
             BasicValueEnum::IntValue(bits) if bits.get_type().get_bit_width() == 64 => {
-                builder.position_before(&instruction);
                 builder
                     .build_int_to_ptr(
                         bits,
@@ -1238,15 +1281,15 @@ pub(super) fn apply<'ctx>(
                     )
                     .or_llvm_err()?
             }
-            BasicValueEnum::PointerValue(pointer) => {
-                builder.position_before(&instruction);
-                pointer
-            }
+            BasicValueEnum::PointerValue(pointer) => pointer,
             _ => continue,
         };
-        let loaded = builder
-            .build_load(context.i64_type(), pointer, "reference_value_load")
-            .or_llvm_err()?;
+        let loaded = if indexed {
+            let bits = builder.build_ptr_to_int(pointer, context.i64_type(), "indexed_reference").or_llvm_err()?;
+            super::element_reference::load(context, module, &builder, bits, "reference_value_load")?.into()
+        } else {
+            builder.build_load(context.i64_type(), pointer, "reference_value_load").or_llvm_err()?
+        };
         if let Some(index) = operand {
             let adapted = if value.is_pointer_value() {
                 builder

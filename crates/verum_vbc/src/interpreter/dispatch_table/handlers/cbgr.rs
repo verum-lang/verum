@@ -2319,6 +2319,15 @@ fn cbgr_extended_body(
             let ([dst, list_reg, index_reg], access) =
                 super::bytecode_io::read_operand(state, crate::encoding::decode_element_projection)?;
             let mut receiver = super::cbgr_helpers::resolve_receiver_place(state, state.get_reg(list_reg))?;
+            if access == crate::encoding::ElementProjectionAccess::Mutable {
+                let required = Capabilities::READ | Capabilities::WRITE | Capabilities::EXCLUSIVE;
+                if receiver.capabilities.0 & required != required {
+                    return Err(InterpreterError::CapabilityDenied {
+                        required: u64::from(required),
+                        actual: u64::from(receiver.capabilities.0),
+                    });
+                }
+            }
             receiver.capabilities = access.restrict(receiver.capabilities);
             let index = state.get_reg(index_reg).as_i64();
             if let Some(reference) = super::list_storage::project_element(state, &receiver, index)? {

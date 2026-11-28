@@ -782,6 +782,24 @@ impl<'a> Validator<'a> {
                     reason: format!("invalid immediate fence ordering {ordering}"),
                 });
             }
+            Instruction::CbgrExtended { sub_op, operands }
+                if *sub_op == crate::instruction::CbgrSubOpcode::RefListElement.to_byte() =>
+            {
+                match crate::encoding::decode_element_projection(operands, &mut 0) {
+                    Ok((registers, access)) => {
+                        for register in registers { self.check_reg(register, max_reg, &func_name); }
+                        if access == crate::encoding::ElementProjectionAccess::Mutable
+                            && self.module.header.version_minor < crate::format::MUTABLE_ELEMENT_PROJECTION_VERSION
+                        {
+                            self.errors.push(VbcError::InvalidInstructionEncoding {
+                                offset: instr_start,
+                                reason: "writable element projection requires VBC minor 70 or newer".into(),
+                            });
+                        }
+                    }
+                    Err(error) => self.errors.push(error),
+                }
+            }
             Instruction::SyncExtended { sub_op, operands }
                 if matches!(
                     crate::instruction::SyncSubOpcode::from_byte(*sub_op),

@@ -5649,7 +5649,7 @@ impl VbcCodegen {
             Self::write_reg(&mut operands, dest.0);
             Self::write_reg(&mut operands, list_reg.0);
             Self::write_reg(&mut operands, index_reg.0);
-            crate::encoding::ProjectionAccess::for_borrow(op == UnOp::RefMut).encode(&mut operands);
+            crate::encoding::ElementProjectionAccess::for_borrow(op == UnOp::RefMut).encode(&mut operands);
             self.ctx.emit(Instruction::CbgrExtended {
                 sub_op: crate::instruction::CbgrSubOpcode::RefListElement as u8,
                 operands,

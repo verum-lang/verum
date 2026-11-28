@@ -719,10 +719,8 @@ implement<T> List<T> {
 
     // Iterator over mutable references.
     public fn iter_mut(&mut self) -> ListIterMut<T> {
-        ListIterMut {
-            ptr: self.ptr,
-            end: unsafe { self.ptr.offset(self.len) },
-        }
+        let back = self.len;
+        ListIterMut { items: &mut self[0..back], front: 0, back }
     }
 
     // =========================================================================
@@ -3241,63 +3239,45 @@ implement<T> IntoIterator for ListIter<T> {
 
 // Mutable iterator.
 public type ListIterMut<T> is {
-    ptr: &unsafe T,
-    end: &unsafe T,
+    items: &mut [T],
+    front: Int,
+    back: Int,
 };
 
 implement<T> Iterator for ListIterMut<T> {
     type Item = &mut T;
 
     fn next(&mut self) -> Maybe<&mut T> {
-        // Compare raw pointers by ADDRESS (identity), not via `==` on
-        // `&unsafe T`. Under AOT, `ptr == end` on raw pointers lowers to
-        // `verum_generic_eq`, which DEREFERENCES its operands to compare
-        // contents — and `self.end` is the one-past-the-end sentinel, so
-        // dereferencing it reads past the backing array and SIGSEGVs
-        // (AOT-ITER-1). Casting to `Int` forces an address-identity integer
-        // compare (the same `as Int` form `size_hint`/`len` already use).
-        if (self.ptr as Int) == (self.end as Int) {
+        if self.front == self.back {
             return Maybe.None;
         }
-        unsafe {
-            let item = &mut *self.ptr;
-            self.ptr = self.ptr.offset(1);
-            Maybe.Some(item)
-        }
+        let index = self.front;
+        self.front += 1;
+        Maybe.Some(&mut self.items[index])
     }
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
-        let remaining = (self.end as Int - self.ptr as Int) / T.size;
+        let remaining = self.back - self.front;
         (remaining, Maybe.Some(remaining))
     }
 }
 
 implement<T> DoubleEndedIterator for ListIterMut<T> {
     fn next_back(&mut self) -> Maybe<&mut T> {
-        // Compare raw pointers by ADDRESS (identity), not via `==` on
-        // `&unsafe T`. Under AOT, `ptr == end` on raw pointers lowers to
-        // `verum_generic_eq`, which DEREFERENCES its operands to compare
-        // contents — and `self.end` is the one-past-the-end sentinel, so
-        // dereferencing it reads past the backing array and SIGSEGVs
-        // (AOT-ITER-1). Casting to `Int` forces an address-identity integer
-        // compare (the same `as Int` form `size_hint`/`len` already use).
-        if (self.ptr as Int) == (self.end as Int) {
+        if self.front == self.back {
             return Maybe.None;
         }
-        unsafe {
-            self.end = self.end.offset(-1);
-            Maybe.Some(&mut *self.end)
-        }
+        self.back -= 1;
+        Maybe.Some(&mut self.items[self.back])
     }
 }
 
 implement<T> ExactSizeIterator for ListIterMut<T> {
     fn len(&self) -> Int {
-        (self.end as Int - self.ptr as Int) / T.size
+        self.back - self.front
     }
 }
 
-// IntoIterator for ListIterMut so it can be used in for loops
 implement<T> IntoIterator for ListIterMut<T> {
     type Item = &mut T;
     type IntoIter = ListIterMut<T>;

@@ -76,6 +76,11 @@ fn fixture() -> Interpreter {
             I::Ret { value: Reg(4) },
         ],
     );
+    function(
+        &mut module,
+        "mutable_element",
+        &[cbgr(C::RefListElement, &[4, 0, 1, 2]), I::Ret { value: Reg(4) }],
+    );
     function(&mut module, "swap", &[mem(M::Swap, &[0, 1]), I::RetV]);
     for width in [1, 2, 4, 8] {
         function(
@@ -409,4 +414,21 @@ fn swap_checks_both_encodings_and_permissions_before_writing() {
         stale(call(&mut vm, "swap", &args));
         assert_slots(&owner, Value::from_i64(300));
     }
+}
+
+#[test]
+fn a_writable_indexed_borrow_requires_an_exclusive_live_source() {
+    let mut vm = fixture();
+    let (_, backing, span, _) = packed(&mut vm);
+    let index = Value::from_i64(1);
+    let read = call(&mut vm, "readonly", &[span]).unwrap();
+    denied(call(&mut vm, "mutable_element", &[read, index]), Capabilities::WRITE);
+    assert_bytes(&backing, 254);
+    for index in [-1, 3] {
+        assert!(matches!(call(&mut vm, "mutable_element", &[span, Value::from_i64(index)]),
+            Err(InterpreterError::IndexOutOfBounds { .. })));
+    }
+    let reference = call(&mut vm, "mutable_element", &[span, index]).unwrap();
+    call(&mut vm, "write1", &[reference, Value::from_i64(73)]).unwrap();
+    assert_bytes(&backing, 73);
 }

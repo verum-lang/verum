@@ -168,7 +168,9 @@ pub const VERSION_MAJOR: u16 = 2;
 /// VBC 2.67 adds ListStorageEmptyLike to MemExtended.
 /// VBC 2.68 distinguishes an owned record transfer from a legacy raw write.
 /// VBC 2.69 carries the actual ordering and scope of a dynamic fence.
-pub const VERSION_MINOR: u16 = 69;
+/// VBC 2.70 distinguishes an indexed writable place from a legacy element view.
+pub const VERSION_MINOR: u16 = 70;
+pub const MUTABLE_ELEMENT_PROJECTION_VERSION: u16 = 70;
 /// First wire version with register-ordered thread and compiler fences.
 pub const ORDERED_FENCE_VERSION: u16 = 69;
 pub const PTR_WRITE_RECORD_VERSION: u16 = 68;

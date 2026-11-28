@@ -48,7 +48,8 @@ happened to be.
 |-----------------|--------|----------------|
 | `&self.field` | `CbgrExtended{RefField}` `0x0C` | the slot **ADDRESS** |
 | `unsafe { &(*ptr).field }` | `FfiExtended{StructFieldAddr}` `0x4F` | the slot **ADDRESS** |
-| `&self.items[i]` | `CbgrExtended{RefListElement}` `0x0B` | the slot **ADDRESS** (Tier 0, `Value` storage) / the element **VALUE** (Tier 1) |
+| `&self.items[i]` | `CbgrExtended{RefListElement}` `0x0B`, shared access | a checked element reference (Tier 0) / the element **VALUE** (Tier 1) |
+| `&mut self.items[i]` | `CbgrExtended{RefListElement}` `0x0B`, writable access | a checked element reference (Tier 0) / the storage **ADDRESS** with its physical width (Tier 1) |
 | `unsafe { &*p.offset(i) }` | `MemExtended{DerefValue}` `0x1E` | the element **VALUE** (Tier 0) / the **ADDRESS** (Tier 1) |
 
 Dumped, because the source spelling does not predict the opcode and
@@ -89,12 +90,21 @@ to elements and ranges can coexist. Taking a fresh exclusive borrow of the
 owner retires the earlier views. The incoming rights apply to older operands
 that omit the access byte.
 
-The native lowering performs the load and marks the register
+The shared native lowering performs the load and marks the register
 `interior_list_ref`, so its `Deref` arm passes the value through instead
 of loading a second time (`DEREF-INTERIOR-1`). Native consumers rely on
 that register mark within a function and on its preservation at call boundaries.
 The table records the current handler and lowering paths; an interpreter
 result does not validate the native carrier.
+
+VBC 2.70 encodes a writable indexed borrow with a trailing `2`. Earlier
+versions reject that operand. The VM checks read, write and exclusive rights
+against the source view and bounds against its current extent. The native
+producer checks the index and retains the selected address and storage width.
+Word-sized value slots use their ordinary addresses. Sub-word positions
+carry their width through calls, returns and variant payloads. A foreign
+pointer argument receives the underlying storage address. Ordinary `Deref`,
+assignment, `swap` and `replace` use the selected physical width.
 
 ### The fourth producer: `&*p` over an array of `Value`
 

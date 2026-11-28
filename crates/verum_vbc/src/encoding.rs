@@ -426,10 +426,58 @@ impl SliceProjectionLayout {
     }
 }
 
-/// Registers and access of an indexed element reference.
-pub fn decode_element_projection(data: &[u8], cursor: &mut usize) -> VbcResult<([Reg; 3], ProjectionAccess)> {
-    let registers = [decode_reg(data, cursor)?, decode_reg(data, cursor)?, decode_reg(data, cursor)?];
-    Ok((registers, ProjectionAccess::decode(data, cursor)?))
+/// Indexed borrows distinguish a writable place from older images that
+/// inherited authority without recording the source borrow's mutability.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ElementProjectionAccess {
+    Inherit,
+    Shared,
+    Mutable,
+}
+
+impl ElementProjectionAccess {
+    pub fn for_borrow(mutable: bool) -> Self {
+        if mutable { Self::Mutable } else { Self::Shared }
+    }
+
+    pub fn encode(self, output: &mut Vec<u8>) {
+        match self {
+            Self::Inherit => {}
+            Self::Shared => output.push(1),
+            Self::Mutable => output.push(2),
+        }
+    }
+
+    pub fn restrict(self, source: crate::value::Capabilities) -> crate::value::Capabilities {
+        if self == Self::Shared {
+            ProjectionAccess::Shared.restrict(source)
+        } else {
+            source
+        }
+    }
+}
+
+/// Decode the selected indexed place within its instruction envelope.
+pub fn decode_element_projection(
+    data: &[u8],
+    cursor: &mut usize,
+) -> VbcResult<([Reg; 3], ElementProjectionAccess)> {
+    let registers = [
+        decode_reg(data, cursor)?,
+        decode_reg(data, cursor)?,
+        decode_reg(data, cursor)?,
+    ];
+    let access = match &data[*cursor..] {
+        [] => ElementProjectionAccess::Inherit,
+        [1] => ElementProjectionAccess::Shared,
+        [2] => ElementProjectionAccess::Mutable,
+        _ => return Err(VbcError::InvalidInstructionEncoding {
+            offset: *cursor,
+            reason: "invalid indexed element access".into(),
+        }),
+    };
+    *cursor = data.len();
+    Ok((registers, access))
 }
 
 /// Operands of a raw slice view. Both VBC producers and both execution tiers

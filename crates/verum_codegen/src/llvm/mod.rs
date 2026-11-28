@@ -160,6 +160,7 @@ pub mod permissions;
 // sockaddr layout, socket-option constants, errno function names,
 // …) routes through these helpers — using `#[cfg(target_os)]` HOST
 // gates miscompiles cross builds.
+mod element_reference;
 pub mod slice_cell;
 pub mod target_triple;
 

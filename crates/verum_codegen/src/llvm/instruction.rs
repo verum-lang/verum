@@ -2184,7 +2184,7 @@ fn as_ptr<'ctx>(
 // (the receiver reference is loaded to reach the object) coherently.
 
 /// True when the coherent (tagged) reference model is active.
-fn ref_tagging_enabled() -> bool {
+pub(super) fn ref_tagging_enabled() -> bool {
     std::env::var_os("VERUM_PTR_TAGGING").is_some()
 }
 
@@ -2261,6 +2261,27 @@ fn untag_slot_ptr<'ctx>(
     ctx.builder()
         .build_int_to_ptr(untagged, ctx.types().ptr_type(), name)
         .or_llvm_err()
+}
+
+/// Only ordinary word slots can carry the optional low-bit slot marker.
+fn managed_ref_storage<'ctx>(
+    ctx: &FunctionContext<'_, 'ctx>, reference: BasicValueEnum<'ctx>,
+) -> Result<(PointerValue<'ctx>, IntValue<'ctx>)> {
+    let bits = as_i64(ctx, reference, "managed_reference")?;
+    let (address, width) = super::element_reference::decode(ctx, bits)?;
+    let pointer = super::element_reference::storage_pointer(ctx.llvm_context(), ctx.builder(), address, width)?;
+    Ok((pointer, width))
+}
+
+fn load_managed_ref<'ctx>(
+    ctx: &FunctionContext<'_, 'ctx>, reference: BasicValueEnum<'ctx>, name: &str,
+) -> Result<IntValue<'ctx>> {
+    if !super::element_reference::supported(ctx) {
+        let pointer = untag_slot_ptr(ctx, reference, name)?;
+        return Ok(ctx.builder().build_load(ctx.types().i64_type(), pointer, name).or_llvm_err()?.into_int_value());
+    }
+    let bits = as_i64(ctx, reference, "managed_reference")?;
+    super::element_reference::load(ctx.llvm_context(), ctx.get_module(), ctx.builder(), bits, name)
 }
 
 /// Convert any value to i64, handling all types correctly.
@@ -6131,12 +6152,8 @@ fn lower_instruction_impl<'ctx>(
                     ctx.set_register(dst.0, loaded);
                     ctx.mark_float_register(dst.0);
                 } else {
-                    let i64_type = ctx.types().i64_type();
-                    let loaded = ctx
-                        .builder()
-                        .build_load(i64_type, ptr, "deref_load")
-                        .or_llvm_err()?;
-                    ctx.set_register(dst.0, loaded);
+                    let loaded = load_managed_ref(ctx, val, "deref_load")?;
+                    ctx.set_register(dst.0, loaded.into());
                 }
             }
             Ok(())
@@ -6692,9 +6709,15 @@ fn lower_instruction_impl<'ctx>(
                 return Ok(());
             }
 
-            ctx.builder()
-                .build_store(ptr, store_val)
-                .or_llvm_err()?;
+            if !ref_val.is_struct_value() && store_val.is_int_value()
+                && store_val.into_int_value().get_type().get_bit_width() == 64
+            {
+                let (data, width) = managed_ref_storage(ctx, ref_val)?;
+                super::element_reference::check_values(ctx, &[(width, store_val.into_int_value())])?;
+                super::element_reference::store(ctx, data, width, store_val.into_int_value())?;
+            } else {
+                ctx.builder().build_store(ptr, store_val).or_llvm_err()?;
+            }
             Ok(())
         }
 
@@ -24267,6 +24290,8 @@ enum ReturnedReference {
     None,
     /// The ADDRESS of a slot; the caller owes one load to read it.
     SlotAddress,
+    /// An indexed mutable place keeps its address and physical width across calls.
+    IndexedPlace,
     /// An interior element the producer ALREADY loaded; the caller owes
     /// the `interior_list_ref` mark so its `Deref` does not load again.
     InteriorElementValue,
@@ -24317,8 +24342,15 @@ fn returned_register_kind(
             verum_vbc::Instruction::CbgrExtended { sub_op, operands }
                 if *sub_op == CBGR_SUB_REF_LIST_ELEMENT && operands.len() >= 3 =>
             {
-                if op_reg(operands, 0) == r {
-                    return ReturnedReference::InteriorElementValue;
+                if let Ok(([dst, _, _], access)) =
+                    verum_vbc::encoding::decode_element_projection(operands, &mut 0)
+                    && dst.0 == r
+                {
+                    return if access == verum_vbc::encoding::ElementProjectionAccess::Mutable {
+                        ReturnedReference::IndexedPlace
+                    } else {
+                        ReturnedReference::InteriorElementValue
+                    };
                 }
             }
             // Whether this wrote `r` cannot be read here, so assume it
@@ -24354,9 +24386,7 @@ const FFI_SUB_STRUCT_FIELD_ADDR: u8 = 0x4F;
 /// is what fails if it does not.
 const SHARED_INNER_VALUE_OFFSET: u64 = 16;
 
-/// `CbgrSubOpcode::RefListElement` — `&list[i]`. Its lowering arm LOADS
-/// the element and marks the register `interior_list_ref`, so a function
-/// returning one hands back a VALUE, not an address.
+/// Shared indexed borrows preload the element; writable borrows retain its place.
 const CBGR_SUB_REF_LIST_ELEMENT: u8 = 0x0B;
 
 /// Lower CbgrExtended instruction to LLVM IR.
@@ -24368,12 +24398,8 @@ fn lower_cbgr_extended<'ctx>(
     let mut ffi = FfiLowering::new(ctx.llvm_context());
     match sub_op {
         CBGR_SUB_REF_LIST_ELEMENT => {
-            // RefListElement — build a plain element pointer into a
-            // List<T> backing buffer. Produces an i64-encoded `*mut
-            // Value`; the existing DerefMut lowering for non-CBGR
-            // pointers writes through it directly, so `&mut arr[i];
-            // *r = v` becomes a real write into arr[i].
-            let ([dst, list_reg, index_reg], _) =
+            // Resolve the physical layout of the selected List, slice or pack.
+            let ([dst, list_reg, index_reg], access) =
                 verum_vbc::encoding::decode_element_projection(operands, &mut 0)
                     .map_err(|error| LlvmLoweringError::unsupported(error.to_string()))?;
             let dst = dst.0;
@@ -24407,7 +24433,7 @@ fn lower_cbgr_extended<'ctx>(
             // list} with the right data offset AND the right stride for each,
             // and its list arm reproduces the old behaviour exactly, so a genuine
             // `&list[i]` keeps the answer it had.
-            let (rle_data, _rle_len, rle_elem) = emit_container_view(ctx, list_ptr, "rle")?;
+            let (rle_data, rle_len, rle_elem) = emit_container_view(ctx, list_ptr, "rle")?;
             let rle_off = ctx
                 .builder()
                 .build_int_mul(index, rle_elem, "rle_off")
@@ -24416,6 +24442,22 @@ fn lower_cbgr_extended<'ctx>(
                 .builder()
                 .build_int_add(rle_data, rle_off, "rle_addr")
                 .or_llvm_err()?;
+            if access == verum_vbc::encoding::ElementProjectionAccess::Mutable {
+                let in_bounds = ctx.builder().build_int_compare(IntPredicate::ULT, index, rle_len, "element_in_bounds").or_llvm_err()?;
+                let representable = super::element_reference::address_fits(ctx, rle_addr, rle_elem)?;
+                let valid = ctx.builder().build_and(in_bounds, representable, "valid_element_place").or_llvm_err()?;
+                let yes = ctx.llvm_context().append_basic_block(ctx.function(), "element_place");
+                let no = ctx.llvm_context().append_basic_block(ctx.function(), "invalid_element_place");
+                ctx.builder().build_conditional_branch(valid, yes, no).or_llvm_err()?;
+                ctx.builder().position_at_end(no);
+                emit_runtime_abort(ctx, "invalid indexed mutable reference", "element_projection")?;
+                ctx.builder().build_unreachable().or_llvm_err()?;
+                ctx.builder().position_at_end(yes);
+                let reference = super::element_reference::encode(ctx, rle_addr, rle_elem)?;
+                ctx.set_register(dst, reference.into());
+                ctx.record_reference_site(super::native_call::ReferenceSiteKind::SlotOutput(dst));
+                return Ok(());
+            }
             let elem_ptr = ctx
                 .builder()
                 .build_int_to_ptr(rle_addr, ptr_type, "rle_elem_ptr")
@@ -25972,7 +26014,8 @@ fn lower_cbgr_extended<'ctx>(
             }
             let original = ctx.get_register(src)?;
             let address = field_address_or_value(ctx, src, original, "refield_raw_addr")?;
-            ctx.set_register(dst, address);
+            let raw = super::element_reference::decode(ctx, as_i64(ctx, address, "raw_reference")?)?.0;
+            ctx.set_register(dst, raw.into());
             if address == original {
                 ctx.record_reference_site(super::native_call::ReferenceSiteKind::PassthroughOutput {
                     register: dst, source: src,
@@ -27030,30 +27073,17 @@ fn lower_mem_extended<'ctx>(
             Ok(())
         }
         0x04 => {
-            // Swap: operands = [a_ptr, b_ptr] — exchange the i64 values at *a and *b
-            // Mirrors interpreter handler at log_extended.rs:256 (core::ptr::swap on u64).
-            // Was a no-op stub; that left core::base::memory::swap silently dropped at AOT.
             let a_reg = read_reg_varlen(operands, &mut pos)?;
             let b_reg = read_reg_varlen(operands, &mut pos)?;
-            let a_raw = ctx.get_register(a_reg)?;
-            let b_raw = ctx.get_register(b_reg)?;
-            let a_ptr = as_ptr(ctx, a_raw, "swap_a_ptr")?;
-            let b_ptr = as_ptr(ctx, b_raw, "swap_b_ptr")?;
-            let i64_ty = ctx.types().i64_type();
-            let a_val = ctx
-                .builder()
-                .build_load(i64_ty, a_ptr, "swap_a_val")
-                .or_llvm_err()?;
-            let b_val = ctx
-                .builder()
-                .build_load(i64_ty, b_ptr, "swap_b_val")
-                .or_llvm_err()?;
-            ctx.builder()
-                .build_store(a_ptr, b_val)
-                .or_llvm_err()?;
-            ctx.builder()
-                .build_store(b_ptr, a_val)
-                .or_llvm_err()?;
+            let a = ctx.get_register(a_reg)?;
+            let b = ctx.get_register(b_reg)?;
+            let a_value = load_managed_ref(ctx, a, "swap_a")?;
+            let b_value = load_managed_ref(ctx, b, "swap_b")?;
+            let (a_pointer, a_width) = managed_ref_storage(ctx, a)?;
+            let (b_pointer, b_width) = managed_ref_storage(ctx, b)?;
+            super::element_reference::check_values(ctx, &[(a_width, b_value), (b_width, a_value)])?;
+            super::element_reference::store(ctx, a_pointer, a_width, b_value)?;
+            super::element_reference::store(ctx, b_pointer, b_width, a_value)?;
             Ok(())
         }
         0x05 => {
@@ -27063,7 +27093,16 @@ fn lower_mem_extended<'ctx>(
             let new_val_reg = read_reg_varlen(operands, &mut pos)?;
             let ptr = ctx.get_register(ptr_reg)?;
             let new_val = ctx.get_register(new_val_reg)?;
-            // Load old value, store new value
+            if !ptr.is_struct_value() && new_val.is_int_value()
+                && new_val.into_int_value().get_type().get_bit_width() == 64
+            {
+                let old = load_managed_ref(ctx, ptr, "replace_old")?;
+                let (pointer, width) = managed_ref_storage(ctx, ptr)?;
+                super::element_reference::check_values(ctx, &[(width, new_val.into_int_value())])?;
+                super::element_reference::store(ctx, pointer, width, new_val.into_int_value())?;
+                ctx.set_register(dst, old.into());
+                return Ok(());
+            }
             let ptr_val = if ptr.is_struct_value() {
                 ctx.builder().build_extract_value(ptr.into_struct_value(), 0, "repl_ptr")
                     .or_llvm_err()?.into_pointer_value()
@@ -27329,7 +27368,10 @@ fn lower_mem_extended<'ctx>(
                 return Ok(());
             }
 
-            let ptr = as_ptr(ctx, ctx.get_register(ptr_reg)?, "ptr")?;
+            let value = ctx.get_register(ptr_reg)?;
+            let ptr = if sub_op == MemSubOpcode::DerefScalarRef as u8 {
+                managed_ref_storage(ctx, value)?.0
+            } else { as_ptr(ctx, value, "ptr")? };
             let value = ffi.lower_deref_raw(ctx.builder(), ptr, size_bytes)?;
 
             let i64_type = ctx.types().i64_type();
@@ -34051,7 +34093,7 @@ fn lower_ffi_extended<'ctx>(
                                 let pt = expected_ty.into_pointer_type();
                                 let cast = ctx
                                     .builder()
-                                    .build_int_to_ptr(arg_val.into_int_value(), pt, "ffi_inttoptr")
+                                    .build_int_to_ptr(super::element_reference::decode(ctx, as_i64(ctx, arg_val, "ffi_address")?)?.0, pt, "ffi_inttoptr")
                                     .or_llvm_err()?;
                                 BasicValueEnum::from(cast)
                             } else if expected_ty.is_int_type() && arg_val.is_int_value() {
@@ -34430,7 +34472,7 @@ layout is not all-8-byte slots — passed unchanged, still writes the object hea
                                 let pt = expected_ty.into_pointer_type();
                                 let cast = ctx
                                     .builder()
-                                    .build_int_to_ptr(arg_val.into_int_value(), pt, "ffi_inttoptr")
+                                    .build_int_to_ptr(super::element_reference::decode(ctx, as_i64(ctx, arg_val, "ffi_address")?)?.0, pt, "ffi_inttoptr")
                                     .or_llvm_err()?;
                                 BasicValueEnum::from(cast)
                             } else if expected_ty.is_int_type() && arg_val.is_int_value() {
@@ -34549,7 +34591,7 @@ layout is not all-8-byte slots — passed unchanged, still writes the object hea
                                 let pt = expected_ty.into_pointer_type();
                                 let cast = ctx
                                     .builder()
-                                    .build_int_to_ptr(arg_val.into_int_value(), pt, "ffi_inttoptr")
+                                    .build_int_to_ptr(super::element_reference::decode(ctx, as_i64(ctx, arg_val, "ffi_address")?)?.0, pt, "ffi_inttoptr")
                                     .or_llvm_err()?;
                                 BasicValueEnum::from(cast)
                             } else if expected_ty.is_int_type() && arg_val.is_int_value() {
@@ -37063,7 +37105,9 @@ fn lower_get_element<'ctx>(
         }
         _ => {}
     }
-    let arr_ptr = as_ptr(ctx, ctx.get_register(arr.0)?, "arr_ptr")?;
+    let container = ctx.get_register(arr.0)?;
+    let container = ctx.reference_value_view(arr.0, container)?;
+    let arr_ptr = as_ptr(ctx, container, "arr_ptr")?;
     let index = as_i64(ctx, ctx.get_register(idx.0)?, "index")?;
     let element = ctx.get_generic_type_args(arr.0).and_then(|args| args.first().cloned());
     let tag = if ctx.is_slice_register(arr.0) { "getem" } else { "geteu" };
@@ -37104,7 +37148,9 @@ fn lower_set_element<'ctx>(
         }
         _ => {}
     }
-    let arr_ptr = as_ptr(ctx, ctx.get_register(arr.0)?, "arr_ptr")?;
+    let container = ctx.get_register(arr.0)?;
+    let container = ctx.reference_value_view(arr.0, container)?;
+    let arr_ptr = as_ptr(ctx, container, "arr_ptr")?;
     let index = as_i64(ctx, ctx.get_register(idx.0)?, "index")?;
     let val = ctx.get_register(value.0)?;
     let val_i64 = as_i64(ctx, val, "sete_val")?;
