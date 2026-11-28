@@ -43,7 +43,7 @@ public mount .client.Patch;
 
 public mount .gateway.Gateway;
 public mount .gateway.GatewayClass;
-public mount .gateway.Listener;
+public mount .gateway.K8sListener as Listener;
 public mount .gateway.ListenerAddress;
 public mount .gateway.ListenerTls;
 

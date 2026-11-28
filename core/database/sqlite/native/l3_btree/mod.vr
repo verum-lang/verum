@@ -83,7 +83,7 @@ public mount .overflow.{
 };
 
 public mount .integrity.{
-    Violation, IntegrityReport,
+    Violation, BtreeIntegrityReport as IntegrityReport,
     integrity_report_new, integrity_is_ok,
     check_page, check_tree, check_freelist,
 };

@@ -73,7 +73,7 @@ mount core.database.sqlite.native.l1_pager.pager.{PagerError, PagerErrorKind};
 mount core.database.sqlite.native.l1_pager.journal.wal.{
     WalChecksum, wal_running_checksum,
 };
-mount core.database.sqlite.native.l0_vfs.vfs_protocol.SqliteVfs;
+mount core.database.sqlite.native.l0_vfs.vfs_protocol.VfsProtocol;
 mount core.database.sqlite.native.l1_pager.wal_index.{
     WalIndex, wal_index_new,
 };
@@ -214,7 +214,7 @@ public fn wal_writer_create_with_random<V>(
     page_size: Int,
     vfs: &V,
 ) -> Result<WalWriter, PagerError>
-where V: SqliteVfs
+where V: VfsProtocol
 {
     let bytes = match vfs.random_bytes(8) {
         Result.Ok(b)  => b,
@@ -492,7 +492,7 @@ public fn wal_writer_reset_with_random<V>(
     w: &mut WalWriter,
     vfs: &V,
 ) -> Result<(), PagerError>
-where V: SqliteVfs
+where V: VfsProtocol
 {
     let bytes = match vfs.random_bytes(8) {
         Result.Ok(b)  => b,

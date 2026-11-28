@@ -47,7 +47,7 @@
 //
 
 // // Decode
-// let mut cursor = wire.Cursor.new(&out);
+// let mut cursor = wire.ProtobufCursor.new(out.as_slice());
 // while !cursor.at_end() {
 //  let (field, wire_type) = cursor.read_tag()?;
 //  match (field, wire_type) {
@@ -71,7 +71,7 @@ public module wire;
 public module error;
 
 public mount .wire.WireType;
-public mount .wire.Cursor;
+public mount .wire.ProtobufCursor as Cursor;
 public mount .wire.write_tag;
 public mount .wire.write_varint;
 public mount .wire.write_sint32;

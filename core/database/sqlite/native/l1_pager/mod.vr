@@ -120,12 +120,12 @@ public mount .recovery.{
 };
 
 public mount .actor.{
-    PagerActor, PagerRequest, PagerReply, CheckpointMode,
+    PagerActor, PagerRequest, PagerReply, PagerCheckpointMode as CheckpointMode,
     actor_new, pager_apply, pager_apply_batch,
 };
 
 public mount .db_header.{
-    DatabaseHeader, FileFormat, TextEncoding,
+    DatabaseHeader, FileFormat, DbHeaderTextEncoding as TextEncoding,
     DB_HEADER_SIZE, DB_PAGE_SIZE_MIN, DB_PAGE_SIZE_MAX, DB_PAGE_SIZE_SENTINEL,
     DB_ENCODING_UTF8, DB_ENCODING_UTF16_LE, DB_ENCODING_UTF16_BE,
     parse_header, serialize_header, default_header,
@@ -134,7 +134,7 @@ public mount .db_header.{
 };
 
 public mount .savepoint.{
-    Savepoint, SavepointStack, SavepointError,
+    Savepoint, PagerSavepointStack as SavepointStack, SavepointError,
     savepoint_stack_new,
 };
 

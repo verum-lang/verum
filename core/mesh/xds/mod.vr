@@ -42,16 +42,16 @@ public mount .error.XdsError;
 
 public mount .types.TypeUrl;
 public mount .types.ResourceName;
-public mount .types.Node;
+public mount .types.XdsNode as Node;
 public mount .types.AdsConfig;
 
-public mount .resources.Listener;
+public mount .resources.XdsListener as Listener;
 public mount .resources.Cluster;
 public mount .resources.RouteConfiguration;
 public mount .resources.ClusterLoadAssignment;
 public mount .resources.XdsResource;
 
 public mount .client.AdsClient;
-public mount .client.Subscription;
+public mount .client.XdsSubscription as Subscription;
 public mount .client.DiscoveryResponse;
 public mount .client.DiscoveryDelta;

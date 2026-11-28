@@ -62,7 +62,7 @@ public mount .strict.{
 };
 
 public mount .type_coercion.{
-    SqliteApiValue, ValueClass,
+    CoercionSqliteApiValue as SqliteApiValue, ValueClass,
     classify, looks_int, looks_real,
     coerce, parse_int64, parse_int64_checked, parse_float64,
 };

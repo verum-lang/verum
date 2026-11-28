@@ -837,5 +837,8 @@ mod verify_attempt_source;
 #[path = "io_facade_visibility.rs"]
 mod io_facade_visibility;
 
+#[path = "renamed_facade_types.rs"]
+mod renamed_facade_types;
+
 #[path = "stdlib_evaluated_origins.rs"]
 mod stdlib_evaluated_origins;
