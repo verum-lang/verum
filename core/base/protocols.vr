@@ -46,6 +46,15 @@ public type PartialEq is protocol {
 /// This is a marker protocol that extends PartialEq.
 public type Eq is protocol extends PartialEq {};
 
+/// Compare a binary product through each component's declared relation.
+implement<A: PartialEq, B: PartialEq> PartialEq for (A, B) {
+    fn eq(&self, other: &Self) -> Bool {
+        self.0.eq(&other.0) && self.1.eq(&other.1)
+    }
+}
+
+implement<A: Eq, B: Eq> Eq for (A, B) {}
+
 /// Compare lengths first, then call each element's equality from left to right.
 /// The first mismatch ends the comparison.
 public fn equal_elements<T: PartialEq>(left: &[T], right: &[T]) -> Bool {

@@ -1,0 +1,18 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L2
+// @tags: collections, protocols, equality
+// @expected-error: E405
+// @description: A partial component prevents a product from satisfying Eq.
+mount core.base.protocols.{PartialEq, Eq};
+
+type Reading is { value: Float };
+implement PartialEq for Reading {
+    fn eq(&self, other: &Reading) -> Bool { self.value == other.value }
+}
+
+fn require_total<T: Eq>(value: &T) {}
+
+fn main() {
+    require_total(&(7, Reading { value: 2.0 }));
+}

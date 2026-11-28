@@ -1,0 +1,25 @@
+// @test: run
+// @tier: 0
+// @level: L2
+// @tags: collections, protocols, equality
+// @expected-exit: 0
+// @description: Binary products use the declared component relations in order.
+mount core.base.protocols.{PartialEq, Eq};
+
+type Key is { value: Int };
+implement PartialEq for Key {
+    fn eq(&self, other: &Key) -> Bool {
+        if self.value == 99 { panic("unreachable right component"); }
+        self.value % 10 == other.value % 10
+    }
+}
+
+fn equal<T: PartialEq>(a: &T, b: &T) -> Bool { a.eq(b) }
+fn total<T: Eq>(a: &T, b: &T) -> Bool { equal(a, b) }
+
+fn main() {
+    assert(total(&(3, 4), &(3, 4)));
+    assert(equal(&(Key { value: 2 }, Key { value: 1 }), &(Key { value: 12 }, Key { value: 11 })));
+    assert(!equal(&(Key { value: 2 }, Key { value: 1 }), &(Key { value: 2 }, Key { value: 5 })));
+    assert(!equal(&(Key { value: 2 }, Key { value: 99 }), &(Key { value: 3 }, Key { value: 99 })));
+}
