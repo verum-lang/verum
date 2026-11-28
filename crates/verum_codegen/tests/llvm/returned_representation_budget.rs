@@ -192,6 +192,50 @@ fn raw_place_requires_the_selected_local_borrow_and_conversion() {
 }
 
 #[test]
+fn an_attenuated_variant_payload_cell_only_supplies_its_proven_field_access() {
+    use verum_vbc::{instruction::CbgrSubOpcode, value::Capabilities};
+
+    let ast = verum_fast_parser::Parser::new("fn check(value: Int) -> Int { value }")
+        .parse_module().unwrap();
+    let mut module = verum_vbc::codegen::VbcCodegen::new().compile_module(&ast).unwrap();
+    let id = module.find_function_by_name("check").unwrap();
+    let mut calls = Map::new();
+    calls.insert(id.0, List::new());
+    for (mask, expected) in [
+        (Capabilities::READ_ONLY.0, R::ReadOnlyFieldSlot),
+        (Capabilities::MUT_EXCLUSIVE.0, R::ObjectFieldSlot),
+        (0, R::Unknown),
+    ] {
+        let mut attenuation = vec![2, 1];
+        attenuation.extend_from_slice(&mask.to_le_bytes());
+        module.functions.iter_mut().find(|f| f.id == id).unwrap().instructions = Some(vec![
+            I::GetVariantDataRef { dst: Reg(1), variant: Reg(0), field: 0 },
+            I::CbgrExtended { sub_op: CbgrSubOpcode::CapAttenuate.to_byte(), operands: attenuation },
+            I::CbgrExtended { sub_op: CbgrSubOpcode::ToRawPtr.to_byte(), operands: vec![3, 2] },
+            I::GetF { dst: Reg(4), obj: Reg(3), field_idx: 0 },
+            I::SetF { obj: Reg(3), field_idx: 0, value: Reg(4) },
+            I::Ret { value: Reg(3) },
+        ]);
+        for source in [0, 1] {
+            let mut sites = Map::new();
+            sites.insert(id.0, [
+                ReferenceSiteKind::SlotOutput(1),
+                ReferenceSiteKind::PassthroughOutput { register: 2, source },
+                ReferenceSiteKind::PassthroughOutput { register: 3, source: 2 },
+            ].into_iter().enumerate().map(|(instruction, kind)|
+                ReferenceSite { instruction, kind, anchor: None }
+            ).collect());
+            let facts = Analysis::new(&module, &calls, &sites).body(id);
+            let actual = if source == 1 { &expected } else { &R::Unknown };
+            assert_eq!(&facts.result, actual);
+            let adapts = |pc| facts.value_inputs.get(&pc).is_some_and(|regs| regs.contains(&3));
+            assert_eq!(adapts(3), *actual != R::Unknown);
+            assert_eq!(adapts(4), *actual == R::ObjectFieldSlot);
+        }
+    }
+}
+
+#[test]
 fn sparse_sidecars_are_bounded_even_after_register_facts_are_lost() {
     let mut cells = State::default();
     let mut origins = State::default();

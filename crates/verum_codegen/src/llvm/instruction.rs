@@ -26223,11 +26223,12 @@ fn lower_cbgr_extended<'ctx>(
         0x10 => {
             // CapAttenuate preserves the referenced place. Native carrier facts
             // must follow that place even when the result reuses its register.
-            if operands.len() < 3 {
-                return Ok(());
+            let mut cursor = 0;
+            let dst = read_reg_varlen(operands, &mut cursor)?;
+            let src = read_reg_varlen(operands, &mut cursor)?;
+            if operands.len() != cursor + 2 {
+                return Err(LlvmLoweringError::unsupported("invalid CapAttenuate mask"));
             }
-            let dst = op_reg(operands, 0);
-            let src = op_reg(operands, 1);
             let value = ctx.get_register(src)?;
             if dst != src {
                 let address = ctx.field_reference_address(src)?;
@@ -26237,6 +26238,9 @@ fn lower_cbgr_extended<'ctx>(
                     ctx.set_field_reference_address(dst, address)?;
                 }
             }
+            ctx.record_reference_site(super::native_call::ReferenceSiteKind::PassthroughOutput {
+                register: dst, source: src,
+            });
             Ok(())
         }
         0x11 | 0x34 => {
@@ -35382,11 +35386,13 @@ layout is not all-8-byte slots — passed unchanged, still writes the object hea
                     "StructFieldAddr: insufficient operands",
                 ));
             }
-            let dst_reg = op_reg(operands, 0);
-            let obj_ptr = as_ptr(ctx, ctx.get_register(op_reg(operands, 1))?, "sf_obj")?;
-            let offset_lo = operands[2] as u64;
-            let offset_hi = operands[3] as u64;
-            let field_offset = (offset_hi << 8) | offset_lo;
+            let mut cursor = 0usize;
+            let dst_reg = read_reg_varlen(operands, &mut cursor)?;
+            let base_reg = read_reg_varlen(operands, &mut cursor)?;
+            let [lo, hi, rest @ ..] = &operands[cursor..] else {
+                return Err(LlvmLoweringError::unsupported("missing StructFieldAddr byte offset"));
+            };
+            let field_offset = u64::from(u16::from_le_bytes([*lo, *hi]));
             // OBJECT_HEADER_SIZE = 24 (matches verum_vbc::interpreter::heap::OBJECT_HEADER_SIZE).
             // We hardcode here rather than introduce a Rust-side cross-crate
             // constant import because the layout is part of the ABI contract.
@@ -35410,7 +35416,14 @@ layout is not all-8-byte slots — passed unchanged, still writes the object hea
             // EMITTER now carries the fact in a fifth operand byte — it
             // is the only place that knows, and it knew all along
             // (`record_pointer_base` computed it and threw it away).
-            let headerless = operands.len() > 4 && operands[4] != 0;
+            let headerless = match rest {
+                [] | [0] => false,
+                [1] => true,
+                _ => return Err(LlvmLoweringError::unsupported("invalid StructFieldAddr storage kind")),
+            };
+            let base = ctx.get_register(base_reg)?;
+            let base = if headerless { base } else { ctx.reference_value_view(base_reg, base)? };
+            let obj_ptr = as_ptr(ctx, base, "sf_obj")?;
             let total_offset = if headerless { field_offset } else { 24u64 + field_offset };
             let i8_ty = ctx.llvm_context().i8_type();
             let i64_ty = ctx.types().i64_type();
@@ -35426,6 +35439,11 @@ layout is not all-8-byte slots — passed unchanged, still writes the object hea
                     .or_llvm_err()?
             };
             ctx.set_register(dst_reg, field_ptr.into());
+            // A declared boxed-record field occupies a Value slot. Raw foreign
+            // fields can be narrower and legacy operands carry no storage witness.
+            if rest == [0] && field_offset.is_multiple_of(8) {
+                ctx.record_reference_site(super::native_call::ReferenceSiteKind::SlotOutput(dst_reg));
+            }
             Ok(())
         }
 

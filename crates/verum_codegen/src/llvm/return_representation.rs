@@ -19,6 +19,10 @@ pub(super) enum Representation {
     Unknown,
     Value,
     Slot,
+    /// The selected native producer computed the address of a boxed field.
+    ObjectFieldSlot,
+    /// The same address after attenuating its access to read-only.
+    ReadOnlyFieldSlot,
     /// A mutable local address issued by the selected native RefLocal producer.
     MutableLocalSlot,
     /// A complete word spilled by a shared borrow, usable for field reads.
@@ -45,7 +49,7 @@ impl Nodes {
 }
 impl R {
     fn permits_object_view(&self) -> bool {
-        matches!(self, Self::Slot | Self::MutableLocalSlot)
+        matches!(self, Self::Slot | Self::ObjectFieldSlot | Self::MutableLocalSlot)
     }
     fn copy_bounded(&self, budget: &mut Nodes, depth: usize) -> Option<Self> {
         budget.take(depth)?;
@@ -543,7 +547,7 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                     }
                 } else if demand == 1 && state.registers.get(&reg.0).is_some_and(|value| {
                     value.permits_object_view()
-                        || (*value == R::SharedLocalSlot && matches!(instruction, I::GetF { .. }))
+                        || (matches!(value, R::ReadOnlyFieldSlot | R::SharedLocalSlot) && matches!(instruction, I::GetF { .. }))
                 }) {
                     value_inputs.entry(pc).or_default().insert(reg.0);
                 }
@@ -573,6 +577,36 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                     write = Some((*dst, R::Value));
                 }
                 I::CbgrExtended { sub_op, operands }
+                    if *sub_op == verum_vbc::instruction::CbgrSubOpcode::CapAttenuate.to_byte() =>
+                {
+                    let mut cursor = 0;
+                    let mut reg = || verum_vbc::encoding::decode_reg(operands, &mut cursor);
+                    let (Ok(dst), Ok(src)) = (reg(), reg()) else {
+                        return BodyFacts::unknown(instructions.len());
+                    };
+                    let Ok(bytes) = <[u8; 2]>::try_from(&operands[cursor..]) else {
+                        return BodyFacts::unknown(instructions.len());
+                    };
+                    let mask = u16::from_le_bytes(bytes);
+                    let retained = sites.get(&pc).is_some_and(|markers| markers.contains(
+                        &ReferenceSiteKind::PassthroughOutput { register: dst.0, source: src.0 }
+                    ));
+                    let value = if retained && mask & verum_vbc::value::Capabilities::READ != 0 {
+                        match (state.raw(src), mask & verum_vbc::value::Capabilities::WRITE != 0) {
+                            (R::ObjectFieldSlot | R::ReadOnlyFieldSlot, false) => R::ReadOnlyFieldSlot,
+                            (R::MutableLocalSlot | R::SharedLocalSlot, false) => R::SharedLocalSlot,
+                            (value, true) => value,
+                            _ => R::Unknown,
+                        }
+                    } else { R::Unknown };
+                    written_cell = if retained && mask & verum_vbc::value::Capabilities::READ != 0 {
+                        state.cells.get(&src.0).copied()
+                    } else {
+                        None
+                    };
+                    write = Some((dst, value));
+                }
+                I::CbgrExtended { sub_op, operands }
                     if *sub_op == verum_vbc::instruction::CbgrSubOpcode::ToRawPtr.to_byte() =>
                 {
                     let mut cursor = 0;
@@ -583,8 +617,8 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                     if cursor != operands.len() {
                         return BodyFacts::unknown(instructions.len());
                     }
-                    // The conversion consumes the address. A word-preserving conversion
-                    // retains the selected local producer's original access.
+                    // An unchanged address still designates the selected field
+                    // or local cell. Local slots keep their original access and scope.
                     use_input(src, 8, &state);
                     let preserved = sites.get(&pc).is_some_and(|sites| {
                         sites.contains(&ReferenceSiteKind::PassthroughOutput {
@@ -593,7 +627,7 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                         })
                     });
                     let value = match state.registers.get(&src.0) {
-                        Some(local @ (R::MutableLocalSlot | R::SharedLocalSlot)) if preserved => local.clone(),
+                        Some(cell @ (R::ObjectFieldSlot | R::ReadOnlyFieldSlot | R::MutableLocalSlot | R::SharedLocalSlot)) if preserved => cell.clone(),
                         _ => R::Unknown,
                     };
                     write = Some((dst, value));
@@ -640,7 +674,7 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                         if sites.get(&pc).is_some_and(|sites| {
                             sites.contains(&ReferenceSiteKind::SlotOutput(dst.0))
                         }) {
-                            R::Slot
+                            R::ObjectFieldSlot
                         } else {
                             R::Unknown
                         },
@@ -769,7 +803,10 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                                     ArgumentView::FieldCellOrRegister(reg) => (
                                         reg,
                                         match state.cells.get(&reg) {
-                                            Some(true) => R::Slot,
+                                            Some(true) => match state.raw(Reg(reg)) {
+                                                place @ (R::ReadOnlyFieldSlot | R::SharedLocalSlot) => place,
+                                                _ => R::Slot,
+                                            },
                                             Some(false) => state.value(Reg(reg)),
                                             None => R::Unknown,
                                         },
@@ -975,6 +1012,21 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                 }
                 I::ChkRef { ref_reg } => use_input(*ref_reg, 8, &state),
                 I::Nop | I::SetCallWitness { .. } | I::BindMethodReceiver { .. } => {}
+                I::FfiExtended { sub_op, operands }
+                    if *sub_op == verum_vbc::instruction::SystemSubOpcode::StructFieldAddr as u8 =>
+                {
+                    let mut cursor = 0;
+                    let mut reg = || verum_vbc::encoding::decode_reg(operands, &mut cursor);
+                    let (Ok(dst), Ok(base)) = (reg(), reg()) else {
+                        return BodyFacts::unknown(instructions.len());
+                    };
+                    let boxed = sites.get(&pc).is_some_and(|markers|
+                        markers.contains(&ReferenceSiteKind::SlotOutput(dst.0))
+                            && markers.contains(&ReferenceSiteKind::ValueInput(base.0))
+                    );
+                    use_input(base, if boxed { 1 } else { 8 }, &state);
+                    write = Some((dst, if boxed { R::ObjectFieldSlot } else { R::Unknown }));
+                }
                 // Unhandled writes/effects are a barrier, never a stale fact.
                 I::CbgrExtended { .. } | I::FfiExtended { .. }
                     if sites.get(&pc).is_some_and(|sites| {
@@ -992,7 +1044,7 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                         {
                             use_input(Reg(*base), 1, &state);
                             write =
-                                Some((Reg(*register), if *slot { R::Slot } else { R::Unknown }));
+                                Some((Reg(*register), if *slot { R::ObjectFieldSlot } else { R::Unknown }));
                             written_cell = Some(true);
                         }
                     }
@@ -1028,7 +1080,7 @@ impl<'a, 'ctx> Analysis<'a, 'ctx> {
                     // same instruction. A word's carrier and argument origins
                     // survive, but a previous allocation's tag cannot prove it.
                     incoming.registers.retain(|_, value| {
-                        matches!(value, R::Value | R::Slot | R::MutableLocalSlot | R::SharedLocalSlot | R::Parameter(..))
+                        matches!(value, R::Value | R::Slot | R::ObjectFieldSlot | R::ReadOnlyFieldSlot | R::MutableLocalSlot | R::SharedLocalSlot | R::Parameter(..))
                     });
                     incoming.guards.clear();
                     incoming.objects.clear();
