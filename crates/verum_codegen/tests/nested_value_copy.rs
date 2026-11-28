@@ -608,22 +608,39 @@ fn a_native_borrowed_newtype_copy_owns_its_nested_payload() {
 
 #[test]
 fn native_typed_destruction_of_a_generic_newtype_reaches_its_actual_payload() {
-    // Only the explicit generic disposal operation is a bytecode fixture.
-    // Constructors, witnesses and the counter-changing Drop body are source.
-    let source = r#"
-        module transparent_drop;
-        mount core.base.protocols.Drop;
-        type Guard is {count:&mut Int};
-        implement Drop for Guard {fn drop(&mut self) {*self.count=*self.count+1;}}
+    run_native_generic_disposal(r#"
         type Wrapped<T> is (T);
-        fn dispose<T>(value:T) {}
         fn main()->Int {
             let mut count=0;
             dispose<Wrapped<Guard>>(Wrapped(Guard{count:&mut count}));
             if count==1 {73}else{0}
         }
+    "#);
+}
+
+#[test]
+fn native_typed_destruction_of_an_array_visits_each_owned_element_once() {
+    run_native_generic_disposal(r#"
+        fn main()->Int {
+            let mut a=0; let mut b=0;
+            dispose<[Guard;2]>([Guard{count:&mut a},Guard{count:&mut b}]);
+            if a==1 && b==1 {73}else{0}
+        }
+    "#);
+}
+
+fn run_native_generic_disposal(body: &str) {
+    // Only the disposal boundary is injected. Source construction, concrete
+    // type witnesses and the destructor all cross the archive and native tiers.
+    let declarations = r#"
+        module transparent_drop;
+        mount core.base.protocols.Drop;
+        type Guard is {count:&mut Int};
+        implement Drop for Guard {fn drop(&mut self) {*self.count=*self.count+1;}}
+        fn dispose<T>(value:T) {}
     "#;
-    let ast = Parser::new(source).parse_module().unwrap();
+    let source = format!("{declarations}\n{body}");
+    let ast = Parser::new(&source).parse_module().unwrap();
     let mut generator =
         VbcCodegen::with_config(verum_vbc::codegen::CodegenConfig::new("transparent_drop"));
     canonical_drop::initialize(&mut generator);

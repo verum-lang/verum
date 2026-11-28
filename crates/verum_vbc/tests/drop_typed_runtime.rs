@@ -585,7 +585,7 @@ fn transparent_scalar_has_no_fictitious_object_destructor() {
 }
 
 #[test]
-fn array_destruction_depends_on_element_obligations_without_traversing_storage() {
+fn fixed_array_destruction_preserves_its_extent_and_element_obligations() {
     use verum_vbc::{drop_plan::{build, DropPlan}, types::{TypeId, TypeParamId, TypeRef}};
     let module = compile("", true);
     for length in [0, 1, 8, u64::MAX] {
@@ -597,8 +597,9 @@ fn array_destruction_depends_on_element_obligations_without_traversing_storage()
         }
         let guard = module.types.iter().find(|ty| module.get_string(ty.name) == Some("Guard")).unwrap().id;
         let array = TypeRef::Array { element: Box::new(TypeRef::Concrete(guard)), length };
-        let error = build(&module, &array).unwrap_err();
-        assert!(error.contains("requires a checked storage traversal"), "{error}");
+        assert!(matches!(build(&module, &array).unwrap(), DropPlan::SequenceStorage {
+            fixed_length: Some(n), element, ..
+        } if n == length && matches!(*element, DropPlan::Glue { owner, .. } if owner == guard)));
         let unresolved = TypeRef::Array { element: Box::new(TypeRef::Generic(TypeParamId(0))), length };
         assert!(build(&module, &unresolved).unwrap_err().contains("unresolved declaration witnesses"));
     }
@@ -616,4 +617,41 @@ fn a_const_generic_packed_field_survives_declared_owner_cleanup() {
         }
         fn probe()->Int { let buffer = Buffer<8>.new(); buffer.stride() }
     "#, 3);
+}
+
+#[test]
+fn owned_fixed_array_runs_each_element_destructor_once() {
+    run(r#"
+        fn probe() -> Int {
+            let mut a = 0; let mut b = 0;
+            dispose<[Guard;2]>([Guard { drops:&mut a, marker:1 }, Guard { drops:&mut b, marker:2 }]);
+            10*a + b
+        }
+    "#, 11);
+}
+
+
+#[test]
+fn owned_array_rejects_a_wrong_extent_before_detaching_its_elements() {
+    let source = r#"
+        type Item is { n: Int };
+        implement Drop for Item { fn drop(&mut self) { self.n = 0; } }
+        fn make() -> [Item; 1] { [Item { n: 7 }] }
+        fn one(items: [Item; 1]) {}
+        fn two(items: [Item; 2]) {}
+    "#;
+    for bootstrap in [false, true] {
+        let mut module = compile(source, bootstrap);
+        let make = module.find_function_by_name("drop_runtime.make").unwrap();
+        let one = module.find_function_by_name("drop_runtime.one").unwrap();
+        let two = module.find_function_by_name("drop_runtime.two").unwrap();
+        emit_parameter_drop(&mut module, one);
+        emit_parameter_drop(&mut module, two);
+        let mut vm = Interpreter::try_new_validated(Arc::new(module)).unwrap();
+        let short = vm.execute_function(make).unwrap();
+        let error = vm.execute_function_with_args(two, &[short]).unwrap_err();
+        assert!(error.to_string().contains("extent"), "{error}");
+        vm.execute_function_with_args(one, &[short])
+            .expect("failed extent check left the original owner intact");
+    }
 }

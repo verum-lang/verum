@@ -277,15 +277,23 @@ impl<'heap> OwnedElements<'heap> {
                 .add(heap::OBJECT_HEADER_SIZE)
                 .cast::<Value>()
         };
-        let len = unsafe { owner.read_unaligned() }
-            .try_as_i64()
-            .and_then(|n| usize::try_from(n).ok())
-            .filter(|&n| n <= storage.capacity)
-            .ok_or_else(|| invalid("List storage length exceeds capacity"))?;
+        let len = storage.len;
         let element = match plan {
-            drop_plan::DropPlan::ListStorage { element, .. } => (**element).clone(),
+            drop_plan::DropPlan::SequenceStorage { fixed_length, element, .. } => {
+                if let Some(expected) = fixed_length
+                    && u64::try_from(len).ok() != Some(*expected)
+                {
+                    return Err(invalid(format!(
+                        "fixed array extent mismatch during destruction: expected {expected} elements, found {len}"
+                    )));
+                }
+                (**element).clone()
+            }
             _ => drop_plan::build(&state.module, element).map_err(invalid)?,
         };
+        if !matches!(element, drop_plan::DropPlan::Ignore) && storage.encoding != TypeId::LIST {
+            return Err(invalid("owned sequence elements require managed value slots"));
+        }
         Ok(Some(Self {
             _heap: std::marker::PhantomData,
             storage,

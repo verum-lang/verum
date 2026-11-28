@@ -246,7 +246,7 @@ pub(super) fn emit<'ctx>(
         return Ok(());
     }
     let owner = match plan {
-        DropPlan::ListStorage { .. } => TypeId::LIST,
+        DropPlan::SequenceStorage { .. } => TypeId::LIST,
         DropPlan::Glue { owner, .. }
         | DropPlan::Record { owner, .. }
         | DropPlan::Sum { owner, .. } => *owner,
@@ -274,7 +274,7 @@ pub(super) fn emit<'ctx>(
     let invalid = ctx
         .llvm_context()
         .append_basic_block(ctx.function(), "drop_invalid_owner");
-    let list_element = if matches!(plan, DropPlan::Glue { .. } | DropPlan::ListStorage { .. }) {
+    let list_element = if matches!(plan, DropPlan::Glue { .. } | DropPlan::SequenceStorage { .. }) {
         plan.list_element(ctx.vbc_module().or_internal("DropTyped requires module")?)
             .map_err(LlvmLoweringError::UnprovenOwnedDestruction)?
     } else {
@@ -338,6 +338,13 @@ pub(super) fn emit<'ctx>(
             )
             .or_llvm_err()?
             .into_int_value();
+        if let DropPlan::SequenceStorage { fixed_length: Some(expected), .. } = plan {
+            let exact = ctx.builder()
+                .build_int_compare(IntPredicate::EQ, length, context.i64_type().const_int(*expected, false),
+                    "drop_fixed_array_count")
+                .or_llvm_err()?;
+            require_storage(ctx, exact)?;
+        }
         let address = ctx
             .get_module()
             .get_function("verum_list_storage_address")
@@ -379,7 +386,7 @@ pub(super) fn emit<'ctx>(
     ctx.builder().position_at_end(valid);
     match plan {
         DropPlan::Ignore | DropPlan::Text | DropPlan::Callable { .. } => unreachable!(),
-        DropPlan::ListStorage { element, .. } => retire_list_storage(ctx, pointer, element)?,
+        DropPlan::SequenceStorage { element, .. } => retire_list_storage(ctx, pointer, element)?,
         DropPlan::Glue {
             function,
             type_args,
