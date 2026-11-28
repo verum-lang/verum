@@ -1533,7 +1533,7 @@ impl VbcCodegen {
                 self.bind_pattern_declaration(pattern, declaration, None);
             }
             if transfer {
-                self.ctx.emit(Instruction::LoadUnit { dst: reg });
+                self.ctx.clear_transferred_source(reg);
             }
         }
 

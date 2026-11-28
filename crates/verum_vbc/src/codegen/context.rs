@@ -2224,14 +2224,22 @@ impl CodegenContext {
                 if *value == source
         ));
         self.emit_with_transfer(instr, Some(source));
-        self.emit(Instruction::LoadUnit { dst: source });
+        self.clear_transferred_source(source);
     }
 
     /// A receiving argument/local slot takes ownership before the source clears.
     pub(super) fn emit_transferring_value(&mut self, destination: Reg, source: Reg) {
         assert_ne!(destination, source);
         self.emit_with_transfer(Instruction::Mov { dst: destination, src: source }, Some(source));
+        self.clear_transferred_source(source);
+    }
+
+    pub(super) fn clear_transferred_source(&mut self, source: Reg) {
+        let field = self.registers.value_uses.active.get(&source).and_then(|fact| fact.retiring_variant_field);
         self.emit(Instruction::LoadUnit { dst: source });
+        if let Some((variant, field)) = field {
+            self.emit(Instruction::SetVariantData { variant, field, value: source });
+        }
     }
 
     fn emit_with_transfer(&mut self, instr: Instruction, transferred: Option<Reg>) {

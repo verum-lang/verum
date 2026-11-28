@@ -171,6 +171,63 @@ fn a_guard_that_publishes_a_payload_loan_preserves_its_owner_on_fallthrough() {
 }
 
 #[test]
+fn a_consuming_call_takes_only_its_selected_temporary_field_on_that_edge() {
+    run(r#"
+        mount core.base.protocols.Drop;
+        static mut dropped: Int = 0;
+        type affine Ticket is { weight:Int };
+        implement Drop for Ticket { fn drop(&mut self) { dropped = dropped + self.weight; } }
+        type Batch is Empty | Pair(Ticket, Ticket);
+        fn fresh()->Batch { Batch.Pair(Ticket {weight:7}, Ticket {weight:66}) }
+        fn finish(value:Ticket) { assert_eq(value.weight,7); }
+        fn route(take:Bool) {
+            match fresh() {
+                Batch.Pair(ticket, _) => {
+                    if take { finish(ticket); assert_eq(dropped,7); }
+                    else { assert_eq(ticket.weight,7); assert_eq(dropped,0); }
+                },
+                Batch.Empty => panic("expected pair"),
+            };
+        }
+        fn probe()->Int {
+            route(true);
+            assert_eq(dropped,73);
+            dropped=0;
+            route(false);
+            dropped
+        }
+    "#);
+}
+
+#[test]
+fn consuming_an_arm_field_requires_an_unborrowed_retiring_shell() {
+    for (subject, extra, guard) in [
+        ("input", "", ""),
+        ("fresh()", "implement Drop for Batch { fn drop(&mut self) {} }", ""),
+        ("fresh()", "", "Batch.Pair(ticket) if remember(saved,&ticket) => {},"),
+    ] {
+        let source = format!(r#"
+            mount core.base.protocols.Drop;
+            type affine Ticket is {{weight:Int}};
+            type Batch is Empty | Pair(Ticket);
+            type Saved is Absent | Loan(&Ticket);
+            fn fresh()->Batch {{ Batch.Pair(Ticket {{weight:73}}) }}
+            fn remember(saved:&mut Saved, ticket:&Ticket)->Bool {{ *saved=Saved.Loan(ticket); false }}
+            fn finish(value:Ticket) {{}}
+            {extra}
+            fn route(input:Batch, saved:&mut Saved) {{
+                match {subject} {{ {guard} Batch.Pair(ticket) => finish(ticket), _ => {{}}, }};
+            }}
+        "#);
+        let ast = Parser::new(&source).parse_module().unwrap();
+        let mut compiler = VbcCodegen::new();
+        canonical_drop::initialize(&mut compiler);
+        let error = compiler.compile_additional_module(&ast).expect_err("outstanding ownership");
+        assert!(error.to_string().contains("still owned by the scrutinee"), "{subject}: {error}");
+    }
+}
+
+#[test]
 fn assignment_preserves_nested_ownership() {
     run(r#"
         type Leaf is { value: Int };

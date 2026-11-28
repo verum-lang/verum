@@ -32,6 +32,9 @@ pub(super) struct BindingFact {
     /// Physical access to a refinement's base does not establish its predicate.
     pub(super) refinement_storage: Maybe<verum_common::Shared<TypeRef>>,
     pub discipline: ResourceDiscipline,
+    /// An exclusive pattern binding can take this field of an owned, temporary
+    /// sum on a consuming edge. Until that edge the shell keeps its drop obligation.
+    pub(super) retiring_variant_field: Option<(Reg, u32)>,
 }
 #[derive(Debug, Clone, Copy, Default)]
 pub(super) struct ReturnUseCapture {
@@ -71,6 +74,7 @@ impl ValueUseRecorder {
                 declaration_type: None,
                 refinement_storage: None,
                 discipline: ResourceDiscipline::Unknown,
+                retiring_variant_field: None,
             },
         );
         id
@@ -803,13 +807,14 @@ impl super::VbcCodegen {
 
     fn named_ownership_carrier(&self, name: &str, reg: Reg) -> Maybe<(&TypeRef, ResourceDiscipline)> {
         let binding = self.ctx.lookup_var(name)?;
-        if binding.reg != reg || binding.is_cell || binding.pattern_alias.is_some()
+        if binding.reg != reg || binding.is_cell
             || !matches!(binding.kind, super::RegisterKind::Local | super::RegisterKind::Parameter)
             || self.ctx.reference_bindings.contains(name) || self.ctx.is_raw_pointer(reg) {
             return None;
         }
         let fact = self.ctx.registers.value_uses.active.get(&reg)?;
         if fact.id != binding.binding_id { return None; }
+        if binding.pattern_alias.is_some() && fact.retiring_variant_field.is_none() { return None; }
         let carrier = fact.declaration_type.as_ref().or(fact.refinement_storage.as_deref())?;
         (!matches!(carrier, TypeRef::Reference { .. })).then_some((carrier, fact.discipline))
     }
@@ -957,7 +962,7 @@ impl super::VbcCodegen {
             dst: returned,
             src: source,
         });
-        self.ctx.emit(Instruction::LoadUnit { dst: source });
+        self.ctx.clear_transferred_source(source);
         for (_, binding) in bindings {
             // Reuse the existing lexical cleanup policy, keyed by the actual
             // declaration register even when an inner declaration shadows it.

@@ -19555,9 +19555,9 @@ impl VbcCodegen {
         );
         // A call temporary or a retiring by-value argument owns its sum shell.
         // A user destructor must always see the original active variant.
-        let retires_owner = returning_parameter == Some(scrutinee_reg)
-            || matches!(Self::normalized_place(scrutinee).kind, ExprKind::Call { .. } | ExprKind::MethodCall { .. });
-        let mut can_transfer = retires_owner && demand.is_used()
+        let temporary = matches!(Self::normalized_place(scrutinee).kind, ExprKind::Call { .. } | ExprKind::MethodCall { .. });
+        let retires_owner = returning_parameter == Some(scrutinee_reg) || temporary;
+        let mut can_transfer = retires_owner
             && scrutinee_type.as_ref().is_some_and(|ty| self.can_extract_sum_field(ty));
 
         // Record the scrutinee's static type (+ tuple element types, +
@@ -19616,8 +19616,11 @@ impl VbcCodegen {
             }
 
             // Compile arm body
+            if temporary && can_transfer {
+                self.record_retiring_pattern_fields(&arm.pattern, scrutinee_reg);
+            }
             let arm_start = self.ctx.instructions.len();
-            let field = can_transfer
+            let field = (can_transfer && demand.is_used())
                 .then(|| self.forwarded_variant_field(&arm.body, scrutinee_reg, bind_start, bind_end))
                 .flatten();
             let arm_demand = demand.for_branch();
@@ -19690,6 +19693,26 @@ impl VbcCodegen {
         self.retire_observed_operand(scrutinee, scrutinee_reg, scrutinee_type.as_ref());
 
         Ok(Some(result))
+    }
+
+    /// Direct by-value bindings are distinct slots of the selected variant.
+    /// Guard evaluation has finished. Observation leaves ownership in the
+    /// temporary, and a later consuming edge can retire just its own field.
+    fn record_retiring_pattern_fields(&mut self, pattern: &verum_ast::Pattern, owner: Reg) {
+        use verum_ast::{PatternKind, VariantPatternData};
+        use verum_common::ResourceDiscipline;
+        let PatternKind::Variant { data: Some(VariantPatternData::Tuple(parts)), .. } = &pattern.kind else { return };
+        for (field, part) in parts.iter().enumerate() {
+            let PatternKind::Ident { name, mutable: false, by_ref: false, subpattern: None } = &part.kind else { continue };
+            let Some(binding) = self.ctx.lookup_var(name.as_str()) else { continue };
+            if binding.pattern_alias != Some(super::registers::PatternAlias::Scrutinee) { continue; }
+            let (reg, id) = (binding.reg, binding.binding_id);
+            if let Some(fact) = self.ctx.registers.value_uses.active.get_mut(&reg)
+                && fact.id == id && matches!(fact.discipline, ResourceDiscipline::Affine | ResourceDiscipline::Linear)
+            {
+                fact.retiring_variant_field = Some((owner, field as u32));
+            }
+        }
     }
 
     /// Trace the selected binding back through this arm's emitted reads.
