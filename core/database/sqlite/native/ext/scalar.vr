@@ -136,22 +136,11 @@ public fn closure_scalar(
 implement ScalarFn for ClosureScalar {
     fn name(&self) -> Text { self.nm.clone() }
     fn arity(&self) -> Int { self.ar }
-    fn flags(&self) -> FnFlags { self.fl.clone() }
+    fn flags(&self) -> FnFlags { self.fl }
     fn eval(&self, args: &List<Register>) -> Result<Register, ScalarFnError> {
         match check_arity(self.ar, args.len()) {
             Result.Ok(_)  => (self.body)(args),
             Result.Err(e) => Result.Err(e),
-        }
-    }
-}
-
-implement FnFlags {
-    public fn clone(&self) -> FnFlags {
-        FnFlags {
-            deterministic: self.deterministic,
-            direct_only: self.direct_only,
-            subtype_aware: self.subtype_aware,
-            innocuous: self.innocuous,
         }
     }
 }

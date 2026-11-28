@@ -21,6 +21,10 @@ mount core.database.sqlite.native.l4_vdbe.register.{
 mount core.database.sqlite.native.ext.fn_flags.{
     FnFlags, flags_default, flags_pure, flags_random,
 };
+mount core.database.sqlite.native.result_codes.function.{
+    is_deterministic, is_innocuous, is_direct_only, is_subtype_aware,
+    new_flag_bits, has, produces_subtype, SQLITE_RESULT_SUBTYPE,
+};
 mount core.database.sqlite.native.ext.scalar.{
     ScalarFn, ScalarFnError, ArityMismatch,
     ClosureScalar, closure_scalar, check_arity,
@@ -65,17 +69,24 @@ mount base.{Result, Ok, Err, Maybe, Some, None, Bool};
 fn test_flags_builders() {
     // `pure` is a reserved Verum keyword, so use a non-conflicting binding name.
     let pure_flags = flags_pure();
-    assert(pure_flags.deterministic);
-    assert(pure_flags.innocuous);
-    assert(!pure_flags.direct_only);
+    assert(is_deterministic(&pure_flags));
+    assert(is_innocuous(&pure_flags));
+    assert(!is_direct_only(&pure_flags));
 
     let rng = flags_random();
-    assert(rng.direct_only);
-    assert(!rng.deterministic);
+    assert(is_direct_only(&rng));
+    assert(!is_deterministic(&rng));
 
     let custom = flags_default().with_deterministic().with_subtype_aware();
-    assert(custom.deterministic);
-    assert(custom.subtype_aware);
+    assert(is_deterministic(&custom));
+    assert(is_subtype_aware(&custom));
+
+    let original = new_flag_bits(SQLITE_RESULT_SUBTYPE | 0x40000000);
+    let changed: FnFlags = original.with_innocuous().with_deterministic();
+    assert(changed.is_pure());
+    assert(!original.is_pure());
+    assert(produces_subtype(&changed));
+    assert(has(&changed, 0x40000000));
 }
 
 // -----------------------------------------------------------------------------

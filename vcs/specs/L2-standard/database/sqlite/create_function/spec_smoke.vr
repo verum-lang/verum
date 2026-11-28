@@ -26,7 +26,7 @@ mount base.{Bool};
 
 fn test_new_spec_defaults_utf8() {
     let s = new_spec("upper".clone(), 1);
-    assert_eq(s.encoding, SQLITE_UTF8);
+    assert_eq(s.encoding(), SQLITE_UTF8);
     assert(!s.is_variadic());
 }
 
