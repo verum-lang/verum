@@ -1,0 +1,41 @@
+// @test: run-pass
+// @level: L2
+// @expected-exit: 0
+
+mount core.base.protocols.{PartialEq, Eq, equal_elements};
+
+static mut equality_calls: Int = 0;
+type Key is { id: Int, label: Int };
+implement PartialEq for Key {
+    fn eq(&self, other: &Key) -> Bool {
+        unsafe { equality_calls = equality_calls + 1; }
+        self.id == other.id
+    }
+}
+implement Eq for Key {}
+
+@derive(Eq) type Frame is { keys: [Key; 2] };
+
+fn equal<T: Eq>(a: &T, b: &T) -> Bool { a.eq(b) }
+fn key(id: Int, label: Int) -> Key { Key { id: id, label: label } }
+
+fn sequences_agree() -> Bool {
+    let first = Frame { keys: [key(3, 1), key(5, 1)] };
+    let same = Frame { keys: [key(3, 2), key(5, 2)] };
+    let other = Frame { keys: [key(3, 1), key(9, 1)] };
+    let stop = [key(1, 0), key(-1, 0)];
+    let short = [key(3, 1)];
+    let before = unsafe { equality_calls };
+    let differs = !equal(&stop, &same.keys);
+    let after = unsafe { equality_calls };
+    differs && after - before == 1 && equal(&first, &same) && !equal(&first, &other)
+        && equal_elements(&first.keys[..], &same.keys[..])
+        && equal_elements(&short[0..0], &short[0..0])
+        && !equal_elements(&short[..], &same.keys[..])
+}
+
+@main
+public fn main() -> Int {
+    assert(sequences_agree());
+    0
+}

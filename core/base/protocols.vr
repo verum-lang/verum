@@ -14,6 +14,7 @@
 )
 module core.base.protocols;
 mount core.intrinsics.conversion.f64_to_bits;
+mount core.intrinsics.memory.slice_len;
 mount core.base.ordering.{Ordering, Less, Equal, Greater};
 mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
@@ -44,6 +45,31 @@ public type PartialEq is protocol {
 /// Types implementing Eq guarantee that a == a is always true.
 /// This is a marker protocol that extends PartialEq.
 public type Eq is protocol extends PartialEq {};
+
+/// Compare lengths first, then call each element's equality from left to right.
+/// The first mismatch ends the comparison.
+public fn equal_elements<T: PartialEq>(left: &[T], right: &[T]) -> Bool {
+    let length = slice_len(left);
+    if length != slice_len(right) { return false; }
+    let mut i: USize = 0;
+    while i < length {
+        if !left[i].eq(&right[i]) { return false; }
+        i += 1;
+    }
+    true
+}
+
+implement<T: PartialEq> PartialEq for [T] {
+    fn eq(&self, other: &Self) -> Bool { equal_elements(self, other) }
+}
+
+implement<T: Eq> Eq for [T] {}
+
+implement<T: PartialEq, const N: Int> PartialEq for [T; N] {
+    fn eq(&self, other: &Self) -> Bool { equal_elements(self, other) }
+}
+
+implement<T: Eq, const N: Int> Eq for [T; N] {}
 
 // =============================================================================
 // Ordering Protocol
