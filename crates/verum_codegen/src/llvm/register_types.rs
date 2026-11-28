@@ -1318,27 +1318,6 @@ impl MethodDispatchTable {
         // ================================================================
         for method in &[
             "new",
-            "try_acquire",
-            "release",
-            "acquire",
-            "try_acquire_many",
-            "release_many",
-            "add_permits",
-            "forget_permit",
-            "available_permits",
-            "max_permits",
-        ] {
-            self.register(
-                "Semaphore",
-                method,
-                MethodDispatchTarget::CRuntime {
-                    symbol: "verum_sem_op",
-                },
-            );
-        }
-
-        for method in &[
-            "new",
             "read",
             "write",
             "try_read",
