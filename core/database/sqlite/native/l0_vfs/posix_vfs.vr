@@ -194,6 +194,54 @@ implement PosixFile {
     public fn fd(&self) -> FileDesc { self.fd }
     public fn path(&self) -> &Text { &self.path }
     public fn is_closed(&self) -> Bool { self.closed }
+
+    public(in core.database.sqlite.native) fn reserve_backup(&self) -> Result<(), VfsError> {
+        self.locks.reserve_backup()
+    }
+
+    public(in core.database.sqlite.native) fn release_backup(&self) -> Result<(), VfsError> {
+        self.locks.release_backup()
+    }
+
+    public(in core.database.sqlite.native) fn same_file(&self, other: &PosixFile) -> Result<Bool, VfsError> {
+        let first = match file_identity(self.fd) {
+            Result.Ok(id) => id, Result.Err(e) => return Result.Err(to_vfs_err(e)),
+        };
+        let second = match file_identity(other.fd) {
+            Result.Ok(id) => id, Result.Err(e) => return Result.Err(to_vfs_err(e)),
+        };
+        Result.Ok(first == second)
+    }
+
+    /// Each reader takes an independently releasable kernel lock on the same
+    /// inode. A renamed or replaced pathname cannot protect the original file.
+    public(in core.database.sqlite.native) fn backup_reader(&self) -> Result<PosixFile, VfsError> {
+        let vfs = PosixVfs {};
+        let mut reader = vfs.open(&self.path, core.database.sqlite.native.l0_vfs.vfs_protocol.flags_ro())?;
+        let status = match self.same_file(&reader) {
+            Result.Ok(true) => reader.lock(LockKind.Shared),
+            Result.Ok(false) => Result.Err(VfsError { kind: LockConflict, message: "backup source pathname changed" }),
+            Result.Err(e) => Result.Err(e),
+        };
+        match status {
+            Result.Ok(_) => Result.Ok(reader),
+            Result.Err(e) => { let _ = reader.close(); Result.Err(e) }
+        }
+    }
+}
+
+@cfg(target_os = "macos")
+fn file_identity(fd: FileDesc) -> Result<(UInt64, UInt64), OSError> {
+    let mut stat = platform_libsystem.safe_stat_zeroed();
+    platform_libsystem.safe_fstat(fd, &mut stat)?;
+    Result.Ok((stat.st_dev as UInt64, stat.st_ino))
+}
+
+@cfg(target_os = "linux")
+fn file_identity(fd: FileDesc) -> Result<(UInt64, UInt64), OSError> {
+    let mut stat = platform_syscall.stat_zeroed();
+    platform_syscall.fstat(fd, &mut stat)?;
+    Result.Ok((stat.st_dev, stat.st_ino))
 }
 
 // -----------------------------------------------------------------------------

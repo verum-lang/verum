@@ -213,3 +213,85 @@ fn sqlite_backup_handle_reports_progress_and_preserves_field_privacy() {
         );
     }
 }
+
+#[test]
+fn sqlite_backup_checks_storage_owners_and_public_copy_operations() {
+    let session = crate::Session::new(crate::CompilerOptions::default());
+    let (registry, phase) = release_stdlib_graph(&session);
+    for owner in [
+        "core.database.sqlite.connection",
+        "core.database.sqlite.native.l7_api.backup",
+        "core.database.sqlite.native.l6_session.connection",
+        "core.database.sqlite.native.l6_session.row_store",
+        "core.database.sqlite.native.l1_pager.pager",
+        "core.database.sqlite.native.l1_pager.db_header",
+    ] {
+        let module = registry.read().get_by_path(owner).unwrap().ast.clone();
+        check_source_module(&mut phase.configured_checker(), owner, &module, &registry)
+            .unwrap_or_else(|errors| panic!("{owner}: {errors:#?}"));
+    }
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../core-tests/database/sqlite/native/l7_api/online_backup_test.vr");
+    let source = std::fs::read_to_string(fixture).unwrap();
+    let module = Parser::new(&source).parse_module().unwrap();
+    check_source_module(
+        &mut phase.configured_checker(),
+        "core.database.sqlite.native.l7_api.tests.online_backup",
+        &module,
+        &registry,
+    )
+    .unwrap_or_else(|errors| panic!("file backup fixture: {errors:#?}"));
+    let client = r#"
+        module application;
+        mount core.base.result.Result;
+        mount core.database.sqlite.native.l7_api.database.{Database, SqliteApiDbError};
+        mount core.database.sqlite.native.l7_api.backup.{
+            BackupSession, backup_init_into, backup_step, backup_finish, backup_to_path_in_one_go,
+        };
+        mount core.database.sqlite.native.backup_api.request.from_n_pages;
+        mount core.database.sqlite.native.backup_api.outcome.BackupOutcome;
+
+        fn snapshot_to(source: &Database, path: &Text) -> Result<(), SqliteApiDbError> {
+            let snapshot = backup_to_path_in_one_go(source, path)?;
+            snapshot.close();
+            Result.Ok(())
+        }
+
+        fn drive(source: &Database, session: &mut BackupSession) -> Int {
+            let first = backup_step(session, source, from_n_pages(1));
+            if !(first is BackupOutcome.BoOk) { return 0; }
+            let remaining = session.remaining();
+            let final_step = backup_step(session, source, from_n_pages(-1));
+            if (final_step is BackupOutcome.BoDone) { remaining } else { 0 }
+        }
+
+        fn open_and_release(source: &Database, dst: Database) -> Int {
+            match backup_init_into(source, dst) {
+                Result.Ok(session) => {
+                    let count = session.page_count();
+                    backup_finish(session).close();
+                    count
+                }
+                Result.Err(_) => 0,
+            }
+        }
+    "#;
+    let module = Parser::new(client).parse_module().unwrap();
+    check_source_module(&mut phase.configured_checker(), "application", &module, &registry)
+        .unwrap_or_else(|errors| panic!("backup client: {errors:#?}"));
+
+    let private_session = Parser::new(r#"
+        module application;
+        mount core.database.sqlite.native.l7_api.backup.BackupSession;
+        fn finish_early(session: &mut BackupSession) {
+            match session {
+                BackupSession.ActiveBackup { progress, .. } => { progress.finish(); }
+            }
+        }
+    "#).parse_module().unwrap();
+    let errors = check_source_module(
+        &mut phase.configured_checker(), "application", &private_session, &registry,
+    ).expect_err("an external client changed the owned backup cursor");
+    assert!(errors.iter().any(|d| d.code() == Some("E202") && d.message().contains("progress")),
+        "{errors:#?}");
+}

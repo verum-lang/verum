@@ -1,0 +1,199 @@
+module core.database.sqlite.native.l7_api.tests.online_backup;
+
+mount core.base.env.temp_dir;
+mount core.base.result.Result;
+mount core.collections.List;
+mount core.id.nanoid.generate_len;
+mount core.io.fs.{read, remove_file, write};
+mount core.io.path.Path;
+mount core.database.sqlite.native.l1_pager.pager.{Pager, PageFrame, pager_open_file_rwc, pager_write, pager_commit, pager_close};
+mount core.database.sqlite.native.backup_api.outcome.{BackupOutcome, outcome_numeric};
+mount core.database.sqlite.native.backup_api.request.from_n_pages;
+mount core.database.sqlite.native.l7_api.database.{Database, SqliteApiDbError, open_admin, open_path_readonly};
+mount core.database.sqlite.native.l4_vdbe.register.Register;
+mount core.database.sqlite.native.l7_api.backup.{BackupSession, backup_init_into, backup_step, backup_finish, backup_to_path_in_one_go};
+
+// Rollback-journal database produced by SQLite: CREATE TABLE t(v text not null),
+// followed by the rows "amber" and "ocean".
+fn image_fragment(out: &mut List<Byte>, offset: Int, part: &[Byte]) {
+    let mut i = 0;
+    while i < part.len() { out[offset + i] = part[i]; i = i + 1; }
+}
+
+fn sqlite_image_page(number: Int) -> List<Byte> {
+    let mut bytes = List.from_elem(0 as Byte, 4096);
+    if number == 1 {
+        let part0: [Byte; 32] = [83, 81, 76, 105, 116, 101, 32, 102, 111, 114, 109, 97, 116, 32, 51, 0, 16, 0, 1, 1, 0, 64, 32, 32, 0, 0, 0, 2, 0, 0, 0, 2];
+        image_fragment(&mut bytes, 0, &part0[..]);
+        let part1: [Byte; 5] = [1, 0, 0, 0, 4];
+        image_fragment(&mut bytes, 43, &part1[..]);
+        let part2: [Byte; 1] = [1];
+        image_fragment(&mut bytes, 59, &part2[..]);
+        let part3: [Byte; 15] = [2, 0, 46, 153, 177, 13, 0, 0, 0, 1, 15, 209, 0, 15, 209];
+        image_fragment(&mut bytes, 95, &part3[..]);
+        let part4: [Byte; 47] = [45, 1, 6, 23, 15, 15, 1, 75, 116, 97, 98, 108, 101, 116, 116, 2, 67, 82, 69, 65, 84, 69, 32, 84, 65, 66, 76, 69, 32, 116, 40, 118, 32, 116, 101, 120, 116, 32, 110, 111, 116, 32, 110, 117, 108, 108, 41];
+        image_fragment(&mut bytes, 4049, &part4[..]);
+    } else {
+        let part0: [Byte; 12] = [13, 0, 0, 0, 2, 15, 238, 0, 15, 247, 15, 238];
+        image_fragment(&mut bytes, 0, &part0[..]);
+        let part1: [Byte; 18] = [7, 2, 2, 23, 111, 99, 101, 97, 110, 7, 1, 2, 23, 97, 109, 98, 101, 114];
+        image_fragment(&mut bytes, 4078, &part1[..]);
+    }
+    bytes
+}
+
+fn seed_pages(pager: &mut Pager) {
+    let first = PageFrame.new(1, sqlite_image_page(1));
+    let second = PageFrame.new(2, sqlite_image_page(2));
+    assert(pager_write(pager, &first).is_ok());
+    assert(pager_write(pager, &second).is_ok());
+    assert(pager_commit(pager).is_ok());
+}
+
+fn seed_source(path: &Text) {
+    let mut pager = pager_open_file_rwc(path).unwrap();
+    seed_pages(&mut pager);
+    assert(pager_close(&mut pager).is_ok());
+}
+
+@cfg(any(target_os = "macos", target_os = "linux"))
+@test
+fn one_shot_restores_the_source_and_returns_an_open_database() {
+    let suffix = generate_len(12);
+    let source_name = f"{temp_dir()}/verum-backup-one-src-{suffix}";
+    let destination_name = f"{temp_dir()}/verum-backup-one-dst-{suffix}";
+    seed_source(&source_name);
+    let source = open_path_readonly(&source_name).unwrap();
+    let result = backup_to_path_in_one_go(&source, &destination_name).unwrap();
+    assert(!result.pager_view().is_closed());
+    result.close();
+    source.close();
+    let source_path = Path.new(&source_name);
+    let dest_path = Path.new(&destination_name);
+    let prior = read(&source_path).unwrap();
+    let restored = read(&dest_path).unwrap();
+    let _ = remove_file(&source_path);
+    let _ = remove_file(&dest_path);
+    assert_eq(prior.len(), 8192);
+    assert_eq(restored, prior);
+}
+
+@test
+fn connection_only_rows_cannot_be_reported_as_a_completed_page_backup() {
+    let mut source = open_admin().unwrap();
+    let rows: List<List<Register>> = [[Register.RInt(71 as Int64)]];
+    source.conn_mut_for_blob().set_rows_at(2, rows);
+    let result = backup_to_path_in_one_go(&source, &"");
+    assert(result is Result.Err(SqliteApiDbError.DbUnsupported(_)));
+}
+
+fn check_resumed_cursor(session: &mut BackupSession, source: &Database, other: &Database) {
+    assert_eq(session.page_count(), 2);
+    assert(backup_step(session, source, from_n_pages(1)) is BackupOutcome.BoOk);
+    let rejected = backup_step(session, other, from_n_pages(1));
+    assert_eq(outcome_numeric(&rejected), 21);
+    assert_eq(session.remaining(), 1);
+    assert(backup_step(session, source, from_n_pages(-1)) is BackupOutcome.BoDone);
+    assert_eq(session.remaining(), 0);
+}
+
+@test
+fn only_the_original_source_can_advance_the_destination_cursor() {
+    let mut source = open_admin().unwrap();
+    seed_pages(source.pager_mut());
+    let mut other = open_admin().unwrap();
+    seed_pages(other.pager_mut());
+    let mut session = backup_init_into(&source, open_admin().unwrap()).unwrap();
+    check_resumed_cursor(&mut session, &source, &other);
+}
+
+@test
+fn rolled_back_row_changes_leave_a_clean_source_eligible() {
+    let mut source = open_admin().unwrap();
+    assert(source.begin().is_ok());
+    let rows: List<List<Register>> = [[Register.RInt(71 as Int64)]];
+    source.conn_mut_for_blob().set_rows_at(2, rows);
+    assert(backup_init_into(&source, open_admin().unwrap()) is Result.Err(SqliteApiDbError.DbBusy));
+    assert(source.rollback().is_ok());
+    let session = backup_init_into(&source, open_admin().unwrap()).unwrap();
+    backup_finish(session).close();
+}
+
+@test
+fn rolling_back_new_rows_keeps_prior_unpersisted_rows_ineligible() {
+    let mut source = open_admin().unwrap();
+    let original: List<List<Register>> = [[Register.RInt(37 as Int64)]];
+    source.conn_mut_for_blob().set_rows_at(2, original);
+    assert(source.begin().is_ok());
+    let changed: List<List<Register>> = [[Register.RInt(82 as Int64)]];
+    source.conn_mut_for_blob().set_rows_at(2, changed);
+    assert(source.rollback().is_ok());
+    let restored = source.conn_view_for_blob().rows_at(2);
+    assert(restored[0][0] is Register.RInt(37));
+    assert(backup_init_into(&source, open_admin().unwrap()) is Result.Err(SqliteApiDbError.DbUnsupported(_)));
+}
+
+@cfg(any(target_os = "macos", target_os = "linux"))
+@test
+fn a_wal_source_requires_its_wal_pages() {
+    let suffix = generate_len(12);
+    let name = f"{temp_dir()}/verum-backup-wal-{suffix}";
+    seed_source(&name);
+    let mut page = sqlite_image_page(1);
+    page[18] = 2 as Byte;
+    page[19] = 2 as Byte;
+    let mut pager = pager_open_file_rwc(&name).unwrap();
+    let first = PageFrame.new(1, page);
+    assert(pager_write(&mut pager, &first).is_ok());
+    assert(pager_commit(&mut pager).is_ok());
+    assert(pager_close(&mut pager).is_ok());
+    let source = open_path_readonly(&name).unwrap();
+    let result = backup_to_path_in_one_go(&source, &"");
+    assert(result is Result.Err(SqliteApiDbError.DbUnsupported(_)));
+    source.close();
+    let _ = remove_file(&Path.new(&name));
+}
+
+@cfg(any(target_os = "macos", target_os = "linux"))
+@test
+fn pending_journals_preserve_both_database_files() {
+    let suffix = generate_len(12);
+    let source_name = f"{temp_dir()}/verum-backup-journal-src-{suffix}";
+    let dest_name = f"{temp_dir()}/verum-backup-journal-dst-{suffix}";
+    let source_path = Path.new(&source_name);
+    let dest_path = Path.new(&dest_name);
+    let wal_name = f"{source_name}-wal";
+    let journal_name = f"{dest_name}-journal";
+    let wal = Path.new(&wal_name);
+    let journal = Path.new(&journal_name);
+    seed_source(&source_name);
+    let prior: [Byte; 8] = [22 as Byte; 8];
+    let marker: [Byte; 8] = [217, 213, 5, 249, 32, 161, 99, 215];
+    assert(write(&dest_path, &prior[..]).is_ok());
+    let source = open_path_readonly(&source_name).unwrap();
+    assert(write(&wal, &marker[..]).is_ok());
+    assert(backup_to_path_in_one_go(&source, &dest_name) is Result.Err(SqliteApiDbError.DbUnsupported(_)));
+    assert_eq(read(&wal).unwrap().len(), 8);
+    assert(remove_file(&wal).is_ok());
+    assert(write(&journal, &marker[..]).is_ok());
+    assert(backup_to_path_in_one_go(&source, &dest_name) is Result.Err(SqliteApiDbError.DbUnsupported(_)));
+    assert(read(&dest_path).unwrap().as_slice() == &prior[..]);
+    assert(read(&journal).unwrap().as_slice() == &marker[..]);
+    source.close();
+    assert(remove_file(&journal).is_ok());
+    assert(remove_file(&source_path).is_ok());
+    assert(remove_file(&dest_path).is_ok());
+}
+
+@cfg(any(target_os = "macos", target_os = "linux"))
+@test
+fn a_device_that_cannot_retain_the_source_extent_reports_an_io_error() {
+    let suffix = generate_len(12);
+    let name = f"{temp_dir()}/verum-backup-failure-{suffix}";
+    seed_source(&name);
+    let source = open_path_readonly(&name).unwrap();
+    let result = backup_to_path_in_one_go(&source, &"/dev/null");
+    assert(result is Result.Err(SqliteApiDbError.DbIoError(_)));
+    source.close();
+    let _ = remove_file(&Path.new(&name));
+}

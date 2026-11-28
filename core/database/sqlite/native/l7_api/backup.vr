@@ -5,319 +5,293 @@
 )
 module core.database.sqlite.native.l7_api.backup;
 
-// =============================================================================
-// l7_api/backup.vr — online backup (sqlite-native.md §13.4 / database.md §6.2.7)
-// =============================================================================
-// Layer: 7 — public API.
-// Spec: sqlite-native.md §13.4 (online_backup); SQLite sqlite3_backup_*.
-//
+// A backup copies committed pages from the source pager. An unfinished batch
+// stays in the destination cache. The last successful step installs the exact
+// source extent and synchronizes it before returning BoDone.
 
-// Online backup copies a source database to a destination *while the
-// source is being read or written by other transactions*. The
-// canonical SQLite C API:
-//
+mount core.base.result.Result;
+mount core.database.sqlite.native.l1_pager.pager.{Pager, pager_write, pager_close};
+mount core.database.sqlite.native.l1_pager.db_header.parse_header;
+mount core.database.sqlite.native.backup_api.handle.{BackupHandle, new_handle};
+mount core.database.sqlite.native.backup_api.outcome.BackupOutcome;
+mount core.database.sqlite.native.backup_api.request.{BackupStepRequest, requested_pages, is_noop};
+mount core.database.sqlite.native.errors.code.{ExtIoErrRead, ExtIoErrWrite, extended_of, PcMisuse};
+mount core.database.sqlite.native.l7_api.database.{Database, SqliteApiDbError, open_path_admin};
+mount core.database.sqlite.native.l6_session.connection.mode_can_write;
 
-//  handle = sqlite3_backup_init(pDest, "main", pSrc, "main");
-//  while (sqlite3_backup_step(handle, pages_per_step) == SQLITE_OK)
-//  /* poll progress, optionally sleep */;
-//  sqlite3_backup_finish(handle);
-//
+type SourceVersion is { pages: Int, writes: Int, change: UInt32 };
 
-// Pure-Verum equivalent:
-//
-
-//  let mut session = backup_init(&mut dst_db, &src_db)?;
-//  loop {
-//  match backup_step(&mut session, pages_per_step) {
-//  BoOk => { sleep_or_yield(); continue; }
-//  BoDone => break;
-//  BoBusy | BoLocked => { backoff(); continue; }
-//  BoFailed { code, reason } => return Result.Err(...);
-//  }
-//  }
-//  backup_finish(session);
-//
-
-// Concurrent-writer safety.
-//
-
-// SQLite's online backup tolerates concurrent writers on the source by
-// re-reading any page that was modified since the last `backup_step`
-// (the destination is written page-by-page; if a source page changes
-// before we copy it, the next step picks up the new image). The v1
-// loom backup runs page-by-page through `pager_read` / `pager_write`
-// — both of which are actor-mediated single-writer operations on
-// their respective Pager instances, so the per-page copy is itself
-// race-free. Multi-step concurrency story: every `backup_step` reads
-// `total_pages` afresh from the source, so a source that grows
-// mid-backup has its tail picked up on the next step.
-// =============================================================================
-
-mount collections.List;
-mount base.{Result, Ok, Err, Text};
-mount core.database.sqlite.native.l1_pager.pager.{
-    Pager, pager_read, pager_write,
+/// A backup owns its destination until finish or abandon returns it to the caller.
+public type affine BackupSession is ActiveBackup {
+    dst: Database, progress: BackupHandle, source: SourceVersion, scope: Shared<Int>,
 };
-mount core.database.sqlite.native.l0_vfs.memdb_vfs.{ memdb_size };
-mount core.database.sqlite.native.l1_pager.pager.{
-    PagerBackend, BeMemory, BeFile,
-};
-mount core.database.sqlite.native.backup_api.handle.{
-    BackupHandle, new_handle,
-};
-mount core.database.sqlite.native.backup_api.outcome.{
-    BackupOutcome, BoOk, BoDone, BoBusy, BoLocked, BoFailed,
-};
-mount core.database.sqlite.native.backup_api.request.{
-    BackupStepRequest, requested_pages, is_noop,
-    from_n_pages,
-};
-mount core.database.sqlite.native.errors.code.{ ExtendedCode, ExtIoErrRead, ExtIoErrWrite };
-mount core.database.sqlite.native.l7_api.database.{
-    Database, SqliteApiDbError,
-    DbCannotOpen, DbIoError, DbCorrupt, DbReadonly,
-    open_path_admin,
-};
-mount core.database.sqlite.native.l6_session.{ ConnectionMode};
 
-// -----------------------------------------------------------------------------
-// BackupSession — affine handle binding the source / destination pair
-// -----------------------------------------------------------------------------
-
-/// A live backup operation. Affine permits at most one consuming use; it
-/// does not require `backup_finish` at scope exit. Callers must explicitly
-/// finish or abandon the session and manage the returned destination Database.
-/// Neither terminal function closes or flushes the destination.
-///
-
-/// Holds the destination Database (owned — no other writer should
-/// touch the destination during a backup) plus the source's resolved
-/// pager state at-init time. Fresh pages added to the source after
-/// init are picked up on each subsequent `backup_step` because
-/// `read_total_pages` is re-read every step.
-public type affine BackupSession is {
-    /// The destination database (owned — backup writes pages directly
-    /// into this Database's pager).
-    dst: Database,
-    /// Page size locked in at init. Source and destination share it;
-    /// mismatched page sizes are rejected during init.
-    page_size: Int,
-    /// Progress tracking — total / remaining counters.
-    progress: BackupHandle,
-    /// Next source page index to copy (1-based). Walks through 1..N
-    /// over successive `backup_step` calls.
-    next_page_no: Int,
-}
-
-// -----------------------------------------------------------------------------
-// Helpers — read source page total without holding the source mutably
-// -----------------------------------------------------------------------------
-
-/// Compute the total page count of `src` from its backing file size.
-fn read_total_pages(src: &Database) -> Int {
-    let p = src.pager_view();
-    let backend = p.backend_view();
-    let size_bytes: Int = match backend {
-        BeMemory(ref f) => memdb_size(f),
-        BeFile(ref f)   => match f.file_size() {
-            Result.Ok(n)  => n,
-            Result.Err(_) => 0,
-        },
-    };
-    if p.page_size_view() <= 0 { return 0; }
-    // Round up so a half-filled tail page still counts.
-    (size_bytes + p.page_size_view() - 1) / p.page_size_view()
-}
-
-// -----------------------------------------------------------------------------
-// Public API
-// -----------------------------------------------------------------------------
-
-/// Open a destination database at `dst_path` (admin mode, RWC) and
-/// initialise an online-backup session that will copy from `src` to it.
-///
-
-/// Returns `Result.Err(DbCannotOpen)` if the destination cannot be opened,
-/// `Result.Err(DbReadonly)` if the destination opens but isn't writable, or
-/// `Result.Err(DbCorrupt)` if the source page-size disagrees with what the
-/// destination would adopt.
-public fn backup_init_to_path(
-    src: &Database,
-    dst_path: &Text,
-) -> Result<BackupSession, SqliteApiDbError> {
-    let mut dst = match open_path_admin(dst_path) {
-        Result.Ok(d)  => d,
-        Result.Err(e) => { return Result.Err(e); }
-    };
-    backup_init_into(src, dst)
-}
-
-/// Initialise a backup writing into an already-open destination.
-/// Useful for tests with `:memory:` destinations and for advanced
-/// flows that have already configured the destination.
-public fn backup_init_into(
-    src: &Database,
-    dst: Database,
-) -> Result<BackupSession, SqliteApiDbError> {
-    let src_page_size = src.pager_view().page_size_view();
-    let dst_page_size = dst.pager_view().page_size_view();
-    if src_page_size != dst_page_size {
-        return Result.Err(DbCorrupt(
-            "backup_init: src and dst page sizes disagree".clone(),
-        ));
+implement BackupSession {
+    public fn page_count(&self) -> Int {
+        match self { ActiveBackup { progress, .. } => progress.page_count() }
     }
-    if src_page_size <= 0 {
-        return Result.Err(DbCorrupt("backup_init: invalid page size on src".clone()));
+
+    public fn remaining(&self) -> Int {
+        match self { ActiveBackup { progress, .. } => progress.remaining() }
     }
-    let total = read_total_pages(src);
-    let progress = core.database.sqlite.native.backup_api.handle.new_handle(
-        0 as Int64,
-        0 as Int64, "main".clone(),
-        0 as Int64, "main".clone(),
-        total,
-    );
-    Result.Ok(BackupSession {
-        dst: dst,
-        page_size: src_page_size,
-        progress: progress,
-        next_page_no: 1,
-    })
 }
 
-/// Copy up to `pages` source pages into the destination. `pages` is
-/// clamped against the remaining count. Use `BsrAll` (via
-/// `from_n_pages(-1)`) to drain in one call.
-///
+fn backup_source(src: &Database) -> Result<&Pager, SqliteApiDbError> {
+    if src.is_in_tx() { return Result.Err(SqliteApiDbError.DbBusy); }
+    if src.has_unpersisted_sql() {
+        return Result.Err(SqliteApiDbError.DbUnsupported("the SQL connection has changes outside the pager"));
+    }
+    Result.Ok(src.pager_view())
+}
 
-/// Returns `BoOk` while pages remain (the caller may then `sleep` and
-/// loop), `BoDone` when the source is exhausted, `BoFailed` on
-/// unrecoverable I/O. `BoBusy` / `BoLocked` are reserved for future
-/// VFS-locked source / destination scenarios.
-public fn backup_step(
-    session: &mut BackupSession,
-    src: &mut Database,
-    req: BackupStepRequest,
+fn source_version(src: &Pager) -> Result<SourceVersion, SqliteApiDbError> {
+    if src.is_closed() {
+        return Result.Err(SqliteApiDbError.DbIoError("backup source is closed"));
+    }
+    if src.dirty_count_view() != 0 { return Result.Err(SqliteApiDbError.DbBusy); }
+    match src.has_backup_sidecar() {
+        Result.Ok(true) => return Result.Err(SqliteApiDbError.DbUnsupported("the source has a rollback journal or WAL")),
+        Result.Ok(false) => {}
+        Result.Err(_) => return Result.Err(SqliteApiDbError.DbIoError("cannot inspect source journals")),
+    }
+    let total = match src.stored_pages() {
+        Result.Ok(n) => n,
+        Result.Err(_) => return Result.Err(SqliteApiDbError.DbIoError("cannot determine source extent")),
+    };
+    let writes = src.write_generation();
+    if total == 0 { return Result.Ok(SourceVersion { pages: 0, writes, change: 0_u32 }); }
+    let first = match src.read_storage(1) {
+        Result.Ok(page) => page,
+        Result.Err(_) => return Result.Err(SqliteApiDbError.DbIoError("cannot read source header")),
+    };
+    let header = match parse_header(first.bytes()) {
+        Result.Ok(h) => h,
+        Result.Err(e) => return Result.Err(SqliteApiDbError.DbCorrupt(e)),
+    };
+    if header.page_bytes() != src.page_size_view() {
+        return Result.Err(SqliteApiDbError.DbCorrupt("source header and pager disagree on page size"));
+    }
+    if header.uses_wal() {
+        return Result.Err(SqliteApiDbError.DbUnsupported("backup requires a rollback-journal source"));
+    }
+    Result.Ok(SourceVersion { pages: total, writes, change: header.change_counter() })
+}
+
+fn same_version(a: &SourceVersion, b: &SourceVersion) -> Bool {
+    a.pages == b.pages && a.writes == b.writes && a.change == b.change
+}
+
+fn initial_source_version(src: &Pager) -> Result<SourceVersion, SqliteApiDbError> {
+    let mut guard = match src.backup_read_lock() {
+        Result.Ok(lock) => lock,
+        Result.Err(e) if e.is_busy() => return Result.Err(SqliteApiDbError.DbBusy),
+        Result.Err(_) => return Result.Err(SqliteApiDbError.DbIoError("cannot lock the backup source")),
+    };
+    let version = source_version(src);
+    if guard.release().is_err() {
+        return Result.Err(SqliteApiDbError.DbIoError("cannot release the backup source"));
+    }
+    version
+}
+
+public fn backup_init_to_path(src: &Database, dst_path: &Text) -> Result<BackupSession, SqliteApiDbError> {
+    let source = backup_source(src)?;
+    let version = initial_source_version(source)?;
+    let dst = open_path_admin(dst_path)?;
+    start_session(source, src.connection_scope(), dst, version)
+}
+
+public fn backup_init_into(src: &Database, dst: Database) -> Result<BackupSession, SqliteApiDbError> {
+    let scope = src.connection_scope();
+    if scope.ptr_eq(&dst.connection_scope()) {
+        return Result.Err(SqliteApiDbError.DbMisuse("backup source and destination share a connection"));
+    }
+    let source = match backup_source(src) {
+        Result.Ok(pager) => pager,
+        Result.Err(e) => { dst.close(); return Result.Err(e); }
+    };
+    let version = match initial_source_version(source) {
+        Result.Ok(v) => v,
+        Result.Err(e) => { dst.close(); return Result.Err(e); }
+    };
+    start_session(source, scope, dst, version)
+}
+
+fn start_session(source: &Pager, scope: Shared<Int>, dst: Database, version: SourceVersion) -> Result<BackupSession, SqliteApiDbError> {
+    let status = destination_status(source, &dst);
+    if !(status is DestReady) { dst.close(); return Result.Err(destination_error(status)); }
+    let progress = new_handle(0 as Int64, 0 as Int64, "main", 0 as Int64, "main", version.pages);
+    Result.Ok(ActiveBackup { dst, progress, source: version, scope })
+}
+
+type DestinationStatus is DestReady | DestReadOnly | DestBusy | DestWrongPageSize | DestHasJournal | DestJournalIo | DestSameFile;
+
+fn destination_status(source: &Pager, dst: &Database) -> DestinationStatus {
+    if !mode_can_write(dst.mode()) || dst.pager_view().is_read_only() { return DestReadOnly; }
+    if dst.is_in_tx() || dst.has_unpersisted_sql() || dst.pager_view().is_closed()
+        || dst.pager_view().dirty_count_view() != 0 { return DestBusy; }
+    if source.page_size_view() != dst.pager_view().page_size_view() { return DestWrongPageSize; }
+    match source.shares_backup_file(dst.pager_view()) {
+        Result.Ok(true) => return DestSameFile,
+        Result.Ok(false) => {}
+        Result.Err(_) => return DestJournalIo,
+    }
+    match dst.pager_view().reserve_backup() {
+        Result.Ok(_) => {}
+        Result.Err(e) if e.is_busy() => return DestBusy,
+        Result.Err(_) => return DestJournalIo,
+    }
+    match dst.pager_view().has_backup_sidecar() {
+        Result.Ok(true) => DestHasJournal,
+        Result.Ok(false) => DestReady,
+        Result.Err(_) => DestJournalIo,
+    }
+}
+
+fn destination_error(status: DestinationStatus) -> SqliteApiDbError {
+    match status {
+        DestReadOnly => SqliteApiDbError.DbReadonly,
+        DestWrongPageSize => SqliteApiDbError.DbCorrupt("incompatible backup page sizes"),
+        DestSameFile => SqliteApiDbError.DbMisuse("source and destination are the same database file"),
+        DestHasJournal => SqliteApiDbError.DbUnsupported("the destination has a rollback journal or WAL"),
+        DestJournalIo => SqliteApiDbError.DbIoError("cannot inspect destination journals"),
+        _ => SqliteApiDbError.DbBusy,
+    }
+}
+
+/// Copy a bounded batch and persist the complete destination before reporting BoDone.
+public fn backup_step(session: &mut BackupSession, src: &Database, req: BackupStepRequest) -> BackupOutcome {
+    match session {
+        ActiveBackup { dst, progress, source, scope } => {
+            if !scope.ptr_eq(&src.connection_scope()) {
+                return BackupOutcome.failed(extended_of(PcMisuse, 0), "backup step received a different source connection");
+            }
+            let pager = match backup_source(src) {
+                Result.Ok(p) => p,
+                Result.Err(SqliteApiDbError.DbBusy) => return BackupOutcome.BoBusy,
+                Result.Err(_) => return BackupOutcome.failed(ExtIoErrRead(), "source has changes outside the pager"),
+            };
+            copy_batch(dst.pager_mut(), progress, source, pager, &req)
+        }
+    }
+}
+
+fn copy_batch(
+    dst: &mut Pager, progress: &mut BackupHandle, previous: &mut SourceVersion,
+    src: &Pager, req: &BackupStepRequest,
 ) -> BackupOutcome {
-    if is_noop(&req) {
-        return BoOk;
-    }
-    if !session.progress.is_live() {
-        return BoDone;
-    }
-
-    // Refresh source's total — cheap probe; lets backups follow a
-    // growing source (writers appending pages mid-backup).
-    let current_total = read_total_pages(src);
-    if current_total > session.progress.total_pages {
-        let added = current_total - session.progress.total_pages;
-        session.progress.total_pages = current_total;
-        session.progress.remaining_pages = session.progress.remaining_pages + added;
-    }
-
-    let remaining = session.progress.remaining_pages;
-    if remaining <= 0 {
-        session.progress.finish();
-        return BoDone;
-    }
-
-    let to_copy = requested_pages(&req, remaining);
-    let mut copied: Int = 0;
-
-    while copied < to_copy {
-        let src_page_no = session.next_page_no;
-        if src_page_no > session.progress.total_pages {
-            break;
-        }
-
-        let frame = match pager_read(src.pager_mut(), src_page_no) {
-            Result.Ok(f) => f,
-            Result.Err(_) => {
-                return BoFailed {
-                    code: ExtIoErrRead(),
-                    reason: f"backup: pager_read failed at page {src_page_no}".clone(),
-                };
-            }
-        };
-        // Destination expects the same page_size; we already rejected
-        // mismatched sizes in backup_init_into.
-        match pager_write(session.dst.pager_mut(), &frame) {
-            Result.Ok(_) => {}
-            Result.Err(_) => {
-                return BoFailed {
-                    code: ExtIoErrWrite(),
-                    reason: f"backup: pager_write failed at page {src_page_no}".clone(),
-                };
-            }
-        }
-
-        session.next_page_no = session.next_page_no + 1;
-        copied = copied + 1;
-    }
-
-    session.progress.record_progress(copied);
-
-    if session.progress.remaining_pages == 0 {
-        session.progress.finish();
-        return BoDone;
-    }
-    BoOk
-}
-
-/// Consume the session and transfer its destination Database to the caller
-/// for further use or explicit close. This function neither closes nor
-/// flushes that database. Ownership transfer does not establish scope-exit,
-/// panic or cancellation cleanup on either backend.
-public fn backup_finish(session: BackupSession) -> Database {
-    // Move the destination out of the session before it goes out of scope.
-    let dst = session.dst;
-    let _ = session.progress;
-    let _ = session.page_size;
-    let _ = session.next_page_no;
-    dst
-}
-
-/// Affine consume that abandons the backup, returning the destination
-/// for cleanup (e.g. unlink the partial file). Equivalent to
-/// `backup_finish` semantically — naming preserved for symmetry with
-/// SQLite C API where `sqlite3_backup_finish` is the only terminator.
-public fn backup_abandon(session: BackupSession) -> Database {
-    backup_finish(session)
-}
-
-// -----------------------------------------------------------------------------
-// Convenience — high-level "backup to path, drain in one go"
-// -----------------------------------------------------------------------------
-
-/// Single-shot backup: open dst, copy *everything* in one step,
-/// finish, return the new database. Suitable for tests and for
-/// short-lived backups where you don't need to interleave progress
-/// reporting. For long backups use `backup_init_to_path` +
-/// `backup_step` + `backup_finish` so the user can throttle / sleep
-/// between steps.
-public fn backup_to_path_in_one_go(
-    src: &mut Database,
-    dst_path: &Text,
-) -> Result<Database, SqliteApiDbError> {
-    let session = match backup_init_to_path(src, dst_path) {
-        Result.Ok(s)  => s,
-        Result.Err(e) => { return Result.Err(e); }
+    if !progress.is_live() { return BackupOutcome.BoDone; }
+    if is_noop(req) { return BackupOutcome.BoOk; }
+    let mut guard = match src.backup_read_lock() {
+        Result.Ok(lock) => lock,
+        Result.Err(e) if e.is_busy() => return BackupOutcome.BoBusy,
+        Result.Err(_) => return BackupOutcome.failed(ExtIoErrRead(), "cannot lock the backup source"),
     };
-    let mut sess = session;
-    let req = from_n_pages(-1);   // BsrAll
+    let outcome = copy_locked_batch(dst, progress, previous, src, req);
+    if guard.release().is_err() {
+        return BackupOutcome.failed(ExtIoErrRead(), "cannot release the backup source");
+    }
+    outcome
+}
+
+fn copy_locked_batch(
+    dst: &mut Pager, progress: &mut BackupHandle, previous: &mut SourceVersion,
+    src: &Pager, req: &BackupStepRequest,
+) -> BackupOutcome {
+    let version = match source_version(src) {
+        Result.Ok(v) => v,
+        Result.Err(SqliteApiDbError.DbBusy) => return BackupOutcome.BoBusy,
+        Result.Err(_) => return BackupOutcome.failed(ExtIoErrRead(), "cannot read the backup source"),
+    };
+    if !same_version(previous, &version) {
+        dst.discard_backup();
+        progress.restart(version.pages);
+        *previous = version;
+    }
+
+    let count = requested_pages(req, progress.remaining());
+    let mut i = 0;
+    while i < count {
+        let number = progress.page_count() - progress.remaining() + 1;
+        let page = match src.read_storage(number) {
+            Result.Ok(p) => p,
+            Result.Err(_) => return BackupOutcome.failed(ExtIoErrRead(), f"cannot read backup page {number}"),
+        };
+        if pager_write(dst, &page).is_err() {
+            return BackupOutcome.failed(ExtIoErrWrite(), f"cannot write backup page {number}");
+        }
+        progress.record_progress(1);
+        i = i + 1;
+    }
+    if progress.remaining() > 0 { return BackupOutcome.BoOk; }
+    let final_version = match source_version(src) {
+        Result.Ok(v) => v,
+        Result.Err(SqliteApiDbError.DbBusy) => return BackupOutcome.BoBusy,
+        Result.Err(_) => return BackupOutcome.failed(ExtIoErrRead(), "cannot verify the backup source"),
+    };
+    if !same_version(previous, &final_version) {
+        dst.discard_backup();
+        progress.restart(final_version.pages);
+        *previous = final_version;
+        return BackupOutcome.BoOk;
+    }
+    match dst.has_backup_sidecar() {
+        Result.Ok(true) => return BackupOutcome.BoBusy,
+        Result.Ok(false) => {}
+        Result.Err(_) => return BackupOutcome.failed(ExtIoErrWrite(), "cannot inspect destination journals"),
+    }
+    if dst.finish_backup(progress.page_count()).is_err() {
+        return BackupOutcome.failed(ExtIoErrWrite(), "cannot finalize the backup destination");
+    }
+    progress.finish();
+    BackupOutcome.BoDone
+}
+
+/// Transfer the owned destination. Only BoDone establishes a completed backup.
+public fn backup_finish(session: BackupSession) -> Database {
+    match session { ActiveBackup { dst, .. } => dst }
+}
+
+/// Return the partial destination to its owner for cleanup.
+public fn backup_abandon(session: BackupSession) -> Database { backup_finish(session) }
+
+fn drain_and_close(
+    dst: &mut Pager, src: &Pager, progress: &mut BackupHandle, version: &mut SourceVersion,
+) -> BackupOutcome {
     loop {
-        let outcome = backup_step(&mut sess, src, req.clone());
+        let outcome = copy_batch(dst, progress, version, src, &BackupStepRequest.BsrAll);
         match outcome {
-            BoDone => { return Result.Ok(backup_finish(sess)); }
-            BoOk   => {}   // shouldn't happen with BsrAll, but loop safely
-            BoBusy | BoLocked => {
-                // No real busy story for a same-process source; convert to error
-                let _ = sess;
-                return Result.Err(DbIoError("backup: source unexpectedly busy".clone()));
+            BackupOutcome.BoOk => {}
+            BackupOutcome.BoDone => {
+                if pager_close(dst).is_err() {
+                    return BackupOutcome.failed(ExtIoErrWrite(), "cannot close the backup destination");
+                }
+                return BackupOutcome.BoDone;
             }
-            BoFailed { code: _code, reason } => {
-                let _ = sess;
-                return Result.Err(DbIoError(reason));
+            _ => {
+                dst.discard_backup();
+                let _ = pager_close(dst);
+                return outcome;
             }
         }
+    }
+}
+
+/// Copy the source and reopen the completed file after a successful close.
+public fn backup_to_path_in_one_go(src: &Database, dst_path: &Text) -> Result<Database, SqliteApiDbError> {
+    let source = backup_source(src)?;
+    let mut version = initial_source_version(source)?;
+    let mut dst = open_path_admin(dst_path)?;
+    let status = destination_status(source, &dst);
+    if !(status is DestReady) {
+        dst.close();
+        return Result.Err(destination_error(status));
+    }
+    let mut progress = new_handle(0 as Int64, 0 as Int64, "main", 0 as Int64, "main", version.pages);
+    let outcome = drain_and_close(dst.pager_mut(), source, &mut progress, &mut version);
+    match outcome {
+        BackupOutcome.BoDone => open_path_admin(dst_path),
+        BackupOutcome.BoBusy | BackupOutcome.BoLocked => Result.Err(SqliteApiDbError.DbBusy),
+        _ => Result.Err(SqliteApiDbError.DbIoError(outcome.failure_message())),
     }
 }

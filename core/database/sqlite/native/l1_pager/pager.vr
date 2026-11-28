@@ -66,7 +66,7 @@ mount core.database.sqlite.native.l0_vfs.posix_vfs.{
     PosixVfs, PosixFile,
 };
 mount core.database.sqlite.native.l0_vfs.vfs_protocol.{
-    OpenFlags, flags_default, flags_rwc, flags_ro, VfsError, VfsErrorKind, SqliteFile, VfsProtocol,
+    AccessKind, OpenFlags, flags_default, flags_rwc, flags_ro, VfsError, VfsErrorKind, SqliteFile, VfsProtocol,
     sync_default, sync_full,
 };
 mount core.database.sqlite.native.l1_pager.page_cache.{
@@ -168,6 +168,7 @@ implement PagerError {
     public(in core.database.sqlite.native.l1_pager) fn new(kind: PagerErrorKind, message: Text) -> PagerError {
         PagerError { kind, message }
     }
+    public(in core.database.sqlite.native) fn is_busy(&self) -> Bool { self.kind is PagerErrorKind.Busy }
 }
 
 public type PagerErrorKind is
@@ -289,6 +290,7 @@ public type Pager is {
     /// Number of dirty frames pending write-back. Cheap O(1) probe for
     /// `pager_dirty_count()` without iterating the cache.
     dirty_count: Int,
+    write_generation: Int,
     closed: Bool,
 };
 
@@ -330,6 +332,7 @@ public fn pager_open_memory_with_size(page_size: Int) -> Result<Pager, PagerErro
         cache: page_cache_new(DEFAULT_CACHE_PAGES),
         config: pager_config_default(),
         dirty_count: 0,
+        write_generation: 0,
         closed: false,
     })
 }
@@ -365,6 +368,7 @@ public fn pager_open_file(path: &Text, page_size: Int, flags: OpenFlags) -> Resu
         cache: page_cache_new(DEFAULT_CACHE_PAGES),
         config: cfg,
         dirty_count: 0,
+        write_generation: 0,
         closed: false,
     })
 }
@@ -559,27 +563,144 @@ public fn pager_read(p: &mut Pager, page_no: Int) -> Result<PageFrame, PagerErro
         }
     }
 
-    // 2. Backend fetch
-    let offset = (page_no - 1) * p.page_size;
-    let mut buf: List<Byte> = List.from_elem(0 as Byte, p.page_size);
-    let result = match &p.backend {
-        BeMemory(f) => memdb_read(f, &mut buf, offset),
-        BeFile(f) => f.read(&mut buf, offset),
-    };
-    match result {
-        Result.Ok(_) => {}
-        Result.Err(e) => match e.kind {
-            VfsErrorKind.ShortRead => match p.stored_pages() {
-                Result.Ok(pages) if page_no > pages => {}
-                Result.Ok(_) => return Result.Err(PagerError.new(PagerErrorKind.IoFailure, "short database page read")),
-                Result.Err(e) => return Result.Err(e),
-            },
-            _ => return Result.Err(PagerError.new(PagerErrorKind.IoFailure, "failed to read database page")),
-        },
-    }
-    let frame = PageFrame.new(page_no, buf);
+    let frame = p.read_storage(page_no)?;
     p.cache.store_page(&frame, false);
     Result.Ok(frame)
+}
+
+public(in core.database.sqlite.native) type BackupReadLock is NoBackupReader | FileBackupReader(PosixFile);
+
+implement BackupReadLock {
+    public(in core.database.sqlite.native) fn release(&mut self) -> Result<(), PagerError> {
+        match self {
+            NoBackupReader => Result.Ok(()),
+            FileBackupReader(file) => match file.close() {
+                Result.Ok(_) => Result.Ok(()),
+                Result.Err(e) => Result.Err(backup_lock_error(e)),
+            },
+        }
+    }
+}
+
+fn backup_lock_error(error: VfsError) -> PagerError {
+    let kind = if (error.kind is VfsErrorKind.LockConflict) { PagerErrorKind.Busy } else { PagerErrorKind.IoFailure };
+    PagerError.new(kind, error.message)
+}
+
+implement Pager {
+    public(in core.database.sqlite.native) fn write_generation(&self) -> Int { self.write_generation }
+
+    public(in core.database.sqlite.native) fn backup_read_lock(&self) -> Result<BackupReadLock, PagerError> {
+        match &self.backend {
+            BeMemory(_) => Result.Ok(NoBackupReader),
+            BeFile(file) => match file.backup_reader() {
+                Result.Ok(reader) => Result.Ok(FileBackupReader(reader)),
+                Result.Err(e) => Result.Err(backup_lock_error(e)),
+            },
+        }
+    }
+
+    public(in core.database.sqlite.native) fn reserve_backup(&self) -> Result<(), PagerError> {
+        match &self.backend {
+            BeMemory(_) => Result.Ok(()),
+            BeFile(file) => match file.reserve_backup() {
+                Result.Ok(_) => Result.Ok(()),
+                Result.Err(e) => Result.Err(backup_lock_error(e)),
+            },
+        }
+    }
+
+    public(in core.database.sqlite.native) fn shares_backup_file(&self, other: &Pager) -> Result<Bool, PagerError> {
+        match (&self.backend, &other.backend) {
+            (BeFile(a), BeFile(b)) => match a.same_file(b) {
+                Result.Ok(same) => Result.Ok(same),
+                Result.Err(e) => Result.Err(backup_lock_error(e)),
+            },
+            _ => Result.Ok(false),
+        }
+    }
+
+    /// A main-file copy cannot replay a rollback journal or committed WAL frames.
+    public(in core.database.sqlite.native) fn has_backup_sidecar(&self) -> Result<Bool, PagerError> {
+        match &self.backend {
+            BeMemory(_) => Result.Ok(false),
+            BeFile(file) => {
+                let vfs = PosixVfs {};
+                let path = file.path();
+                let journal = f"{path}-journal";
+                let wal = f"{path}-wal";
+                match vfs.access(&journal, AccessKind.Exists) {
+                    Result.Ok(true) => return Result.Ok(true),
+                    Result.Ok(false) => {}
+                    Result.Err(_) => return Result.Err(PagerError.new(PagerErrorKind.IoFailure, "cannot inspect rollback journal")),
+                }
+                match vfs.access(&wal, AccessKind.Exists) {
+                    Result.Ok(present) => Result.Ok(present),
+                    Result.Err(_) => Result.Err(PagerError.new(PagerErrorKind.IoFailure, "cannot inspect WAL")),
+                }
+            }
+        }
+    }
+
+    /// Read the backing file directly when a different connection can have changed its pages.
+    public(in core.database.sqlite.native) fn read_storage(&self, page_no: Int) -> Result<PageFrame, PagerError> {
+        if self.closed || page_no < 1 {
+            return Result.Err(PagerError.new(PagerErrorKind.IoFailure, "cannot read this database page"));
+        }
+        let offset = (page_no - 1) * self.page_size;
+        let mut buf: List<Byte> = List.from_elem(0 as Byte, self.page_size);
+        let result = match &self.backend {
+            BeMemory(f) => memdb_read(f, &mut buf, offset),
+            BeFile(f) => f.read(&mut buf, offset),
+        };
+        match result {
+            Result.Ok(_) => {}
+            Result.Err(e) => match e.kind {
+                VfsErrorKind.ShortRead => match self.stored_pages() {
+                    Result.Ok(pages) if page_no > pages => {}
+                    Result.Ok(_) => return Result.Err(PagerError.new(PagerErrorKind.IoFailure, "short database page read")),
+                    Result.Err(e) => return Result.Err(e),
+                },
+                _ => return Result.Err(PagerError.new(PagerErrorKind.IoFailure, "failed to read database page")),
+            },
+        }
+        Result.Ok(PageFrame.new(page_no, buf))
+    }
+
+    /// Install the exact extent of a completed backup, including a shorter replacement.
+    public(in core.database.sqlite.native) fn finish_backup(&mut self, pages: Int) -> Result<(), PagerError> {
+        if self.config.read_only || self.closed || pages < 0 || pages > 0xFFFFFFFF {
+            return Result.Err(PagerError.new(PagerErrorKind.IoFailure, "cannot finish database backup"));
+        }
+        pager_flush(self)?;
+        let bytes = pages * self.page_size;
+        let resized = match &mut self.backend {
+            BeMemory(file) => file.truncate(bytes),
+            BeFile(file) => file.truncate(bytes),
+        };
+        if resized.is_err() {
+            return Result.Err(PagerError.new(PagerErrorKind.IoFailure, "failed to resize backup database"));
+        }
+        match self.stored_pages() {
+            Result.Ok(n) if n == pages => {}
+            _ => return Result.Err(PagerError.new(PagerErrorKind.IoFailure, "backup destination did not retain its extent")),
+        }
+        self.cache.clear();
+        self.write_generation = self.write_generation + 1;
+        pager_commit(self)?;
+        match &self.backend {
+            BeMemory(_) => Result.Ok(()),
+            BeFile(file) => match file.release_backup() {
+                Result.Ok(_) => Result.Ok(()),
+                Result.Err(e) => Result.Err(backup_lock_error(e)),
+            },
+        }
+    }
+
+    public(in core.database.sqlite.native) fn discard_backup(&mut self) {
+        self.cache.clear();
+        self.dirty_count = 0;
+    }
 }
 
 /// Write a page. Updates the cache and marks the frame dirty;
@@ -621,6 +742,7 @@ public fn pager_write(p: &mut Pager, frame: &PageFrame) -> Result<(), PagerError
 
     // Mirror the write into the cache.
     p.cache.store_page(frame, true);
+    p.write_generation = p.write_generation + 1;
     Result.Ok(())
 }
 

@@ -94,10 +94,8 @@ mount core.database.sqlite.native.ext.hooks.{
     CommitHook, RollbackHook, UpdateHook, PreUpdateHook,
     AuthorizerHook, BusyHandler, ProgressHandler, TraceHook,
 };
-mount core.database.sqlite.native.l6_session.{
-    ConnectionMode, CmRead, CmWrite, CmAdmin,
-};
-mount core.database.sqlite.native.l4_vdbe.{Register, RNull, RInt, RReal, RText, RBlob, RRowId};
+mount core.database.sqlite.native.l6_session.ConnectionMode;
+mount core.database.sqlite.native.l4_vdbe.Register;
 
 // -----------------------------------------------------------------------------
 // SqliteValue — protocol-neutral cell.
@@ -121,23 +119,23 @@ implement SqliteValue {
     /// VDBE-internal concern.
     public fn from_register(r: Register) -> SqliteValue {
         match r {
-            RNull       => SvNull,
-            RInt(i)     => SvInt(i as Int),
-            RReal(x)    => SvReal(x),
-            RText(t)    => SvText(t),
-            RBlob(b)    => SvBlob(b),
-            RRowId(i)   => SvInt(i as Int),
+            Register.RNull       => SvNull,
+            Register.RInt(i)     => SvInt(i as Int),
+            Register.RReal(x)    => SvReal(x),
+            Register.RText(t)    => SvText(t),
+            Register.RBlob(b)    => SvBlob(b),
+            Register.RRowId(i)   => SvInt(i as Int),
         }
     }
 
     /// Demote a public value to a loom Register for binding.
     public fn to_register(self) -> Register {
         match self {
-            SvNull      => RNull,
-            SvInt(i)    => RInt(i as Int64),
-            SvReal(x)   => RReal(x),
-            SvText(t)   => RText(t),
-            SvBlob(b)   => RBlob(b),
+            SvNull      => Register.RNull,
+            SvInt(i)    => Register.RInt(i as Int64),
+            SvReal(x)   => Register.RReal(x),
+            SvText(t)   => Register.RText(t),
+            SvBlob(b)   => Register.RBlob(b),
         }
     }
 
@@ -162,9 +160,9 @@ public type SqliteCapability is
 implement SqliteCapability {
     public fn to_loom_mode(&self) -> ConnectionMode {
         match self {
-            ScRead       => CmRead,
-            ScReadWrite  => CmWrite,
-            ScAdmin      => CmAdmin,
+            ScRead       => ConnectionMode.CmRead,
+            ScReadWrite  => ConnectionMode.CmWrite,
+            ScAdmin      => ConnectionMode.CmAdmin,
         }
     }
 }
@@ -385,11 +383,11 @@ implement SqliteConnection {
     /// `BackupOutcome.BoOk` while progress remains, `BoDone` on
     /// completion, `BoFailed { code, reason }` on I/O failure.
     public fn backup_step(
-        &mut self,
+        &self,
         session: &mut BackupSession,
         req: BackupStepRequest,
     ) -> BackupOutcome {
-        backup_step(session, &mut self.inner, req)
+        backup_step(session, &self.inner, req)
     }
 
     /// Consume the backup session, returning the destination Database.
@@ -398,10 +396,10 @@ implement SqliteConnection {
     }
 
     /// Convenience: open dst, copy everything, finish.
-    public fn backup_to_path_in_one_go(&mut self, dst_path: &Text)
+    public fn backup_to_path_in_one_go(&self, dst_path: &Text)
         -> Result<core.database.sqlite.native.l7_api.database.Database, DbError>
     {
-        match backup_to_path_in_one_go(&mut self.inner, dst_path) {
+        match backup_to_path_in_one_go(&self.inner, dst_path) {
             Result.Ok(d)  => Result.Ok(d),
             Result.Err(e) => Result.Err(dberr_from_loom(e)),
         }
@@ -538,11 +536,10 @@ implement SqliteConnection {
     // Close — affine consume.
     // -------------------------------------------------------------------------
 
-    /// Consumes the connection. Further use is a compile error; loom's
-    /// underlying Database is moved-out so its destructor releases the
-    /// pager actor on drop.
+    /// Flush pending pages and close the underlying connection.
     public fn close(self) {
-        self.inner.close()
+        let mut connection = self;
+        let _ = connection.inner.close_storage();
     }
 }
 
