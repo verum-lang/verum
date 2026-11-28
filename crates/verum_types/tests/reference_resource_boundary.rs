@@ -139,8 +139,13 @@ fn replacing_a_live_linear_referent_cannot_drop_the_old_obligation() {
         let found = errors(&source);
         assert!(found.iter().any(|error| error.contains("linear") && error.contains("overwrite")), "{source}: {found:?}");
     }
-    let generic = errors("fn lose<T>(dst:&mut T,replacement:T){*dst=replacement;}");
-    assert!(generic.iter().any(|error| error.contains("cannot overwrite")), "{generic:?}");
+    let generic = "fn store<T>(dst:&mut T,replacement:T){*dst=replacement;}";
+    let ordinary = errors(&format!("{generic} fn set(dst:&mut Int) {{store(dst,73);}}"));
+    assert!(ordinary.is_empty(), "{ordinary:?}");
+    let linear = errors(&format!(
+        "{generic} type linear Ticket is {{id:Int}}; fn lose(dst:&mut Ticket,value:Ticket) {{store(dst,value);}}"
+    ));
+    assert!(linear.iter().any(|error| error.contains("linear") && error.contains("overwrite")), "{linear:?}");
     for (carrier, place) in [
         ("Envelope", "dst.payload"),
         ("Envelope", "(*dst).payload"),

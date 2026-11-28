@@ -777,6 +777,30 @@ fn imported_field_overwrites_check_linear_values_at_calls_and_at_function_value_
 }
 
 #[test]
+fn whole_referent_writes_preserve_linear_and_stored_reference_obligations() {
+    let provider = "public fn update<T>(slot:&mut T,value:T) { *slot=value; }";
+    let imports = "mount owner.update as replace; type linear Ticket is {id:Int};";
+    for (probe, error) in [
+        ("fn good(slot:&mut Int) { replace(slot,73); }", None),
+        ("fn good()->fn(&mut Int,Int)->Unit { replace }", None),
+        ("fn bad(slot:&mut Ticket,value:Ticket){replace(slot,value);}", Some("linear")),
+        ("fn bad()->fn(&mut Ticket,Ticket)->Unit { replace }", Some("linear")),
+        ("fn lose<T>()->fn(&mut T,T)->Unit { replace }", Some("overwrite")),
+    ] {
+        let errors = registered_errors([("owner",provider.into()),("consumer",format!("{imports} {probe}").into())]);
+        match error {
+            None => assert!(errors.is_empty(), "{probe}: {errors:?}"),
+            Some(message) => assert!(errors.iter().any(|error| error.contains(message)), "{probe}: {errors:?}"),
+        }
+    }
+    let expired = registered_errors([
+        ("owner", provider.into()),
+        ("consumer", format!("{imports} fn bad(input:&Int)->&Int {{let mut p=input; {{let local=73; replace(&mut p,&local);}} p}}").into()),
+    ]);
+    assert!(expired.iter().any(|e| e.contains("local") && e.contains("does not live long enough")), "{expired:?}");
+}
+
+#[test]
 fn overwriting_a_field_preserves_owned_linear_siblings_and_rejects_linear_sum_payloads() {
     for (declarations, caller, rejected) in [
         (

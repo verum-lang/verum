@@ -264,7 +264,9 @@ fn append_statements(
                         fields.push(field.name.clone());
                         root = unparen(expr);
                     }
-                    if fields.is_empty() {
+                    if let ExprKind::Unary { op: verum_ast::UnOp::Deref, expr } = &root.kind {
+                        root = unparen(expr);
+                    } else if fields.is_empty() {
                         return None;
                     }
                     fields.reverse();
@@ -1227,7 +1229,7 @@ impl TypeChecker {
                 } => *inner,
                 _ => return None,
             };
-            let mut through_borrow = false;
+            let mut through_borrow = write.fields.is_empty();
             for name in &write.fields {
                 field = match self.place_reference_head(&field, span).ok()? {
                     Type::Reference { mutable: true, inner }
