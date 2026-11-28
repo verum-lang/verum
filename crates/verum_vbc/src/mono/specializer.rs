@@ -662,6 +662,7 @@ impl<'a> BytecodeSpecializer<'a> {
             I::BindMethodReceiver { type_ref }
             | I::RetainCopy { type_ref, .. }
             | I::CloneTyped { type_ref, .. }
+            | I::PtrWriteRecord { type_ref, .. }
             | I::HeapSlot { type_ref, .. } | I::DropTyped { type_ref, .. }
             | I::TypeResource { type_ref, .. }
             | I::TargetHasAtomic { type_ref, .. }
@@ -866,7 +867,7 @@ impl<'a> BytecodeSpecializer<'a> {
         use crate::instruction::Instruction as I;
         match instr {
             I::RetainCopy { dst, .. } | I::CloneTyped { dst, .. } => Some(*dst),
-            I::DropTyped { src, .. } => Some(*src),
+            I::DropTyped { src, .. } | I::PtrWriteRecord { value: src, .. } => Some(*src),
             I::HeapSlot { dst, .. } | I::DerefWideRef { dst, .. } | I::Mov { dst, .. }
             | I::LoadI { dst, .. }
             | I::TypeResource { dst, .. }

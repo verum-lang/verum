@@ -3011,6 +3011,16 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             encode_varint(operands.len() as u64, output);
             output.extend_from_slice(&operands);
         }
+        Instruction::PtrWriteRecord { address, value, type_ref } => {
+            let mut operands = Vec::new();
+            encode_reg(*address, &mut operands);
+            encode_reg(*value, &mut operands);
+            encode_type_ref(type_ref, &mut operands);
+            output.push(Opcode::MemExtended.to_byte());
+            output.push(MemSubOpcode::PtrWriteRecord.to_byte());
+            encode_varint(operands.len() as u64, output);
+            output.extend_from_slice(&operands);
+        }
         Instruction::HeapSlot { dst, address, action, type_ref } => {
             let operation = match action {
                 HeapSlotAction::Init(_) => MemSubOpcode::HeapSlotInit,
@@ -5315,6 +5325,17 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     return Err(VbcError::InvalidInstructionEncoding { offset: *offset, reason: "trailing Heap slot operands".into() });
                 }
                 Ok(Instruction::HeapSlot { dst, address, action, type_ref })
+            } else if sub_op == MemSubOpcode::PtrWriteRecord.to_byte() {
+                let mut cursor = 0;
+                let address = decode_reg(&operands, &mut cursor)?;
+                let value = decode_reg(&operands, &mut cursor)?;
+                let type_ref = decode_type_ref(&operands, &mut cursor)?;
+                if cursor != operands.len() {
+                    return Err(VbcError::InvalidInstructionEncoding {
+                        offset: *offset, reason: "trailing PtrWriteRecord operands".into(),
+                    });
+                }
+                Ok(Instruction::PtrWriteRecord { address, value, type_ref })
             } else {
                 Ok(Instruction::MemExtended { sub_op, operands })
             }

@@ -35,6 +35,7 @@ mod callable_lifecycle;
 mod target_query;
 mod environment;
 mod field_carrier;
+mod flat_record;
 
 /// Emit a diagnosable runtime abort for an operation that has no honest
 /// Tier-1 lowering.
@@ -2538,6 +2539,8 @@ fn lower_instruction_impl<'ctx>(
 
         Instruction::RetainCopy { dst, src, counter, type_ref } => retain_copy::lower(ctx, *dst, *src, *counter, type_ref),
         Instruction::CloneTyped { dst, src, type_ref } => copy_typed::lower(ctx, *dst, *src, type_ref),
+        Instruction::PtrWriteRecord { address, value, type_ref } =>
+            flat_record::write(ctx, *address, *value, type_ref),
         Instruction::DerefWideRef { dst, reference } => {
             let pointer = as_ptr(ctx, ctx.get_register(reference.0)?, "wide_reference")?;
             let value = ctx.builder().build_load(ctx.llvm_context().i128_type(), pointer, "wide_referent").or_llvm_err()?;

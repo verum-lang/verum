@@ -122,6 +122,7 @@ pub fn rewrite_instruction_ids(instr: &mut Instruction, remap: &dyn IdRemap) {
         Instruction::BindMethodReceiver { type_ref }
         | Instruction::RetainCopy { type_ref, .. }
         | Instruction::CloneTyped { type_ref, .. }
+        | Instruction::PtrWriteRecord { type_ref, .. }
         | Instruction::HeapSlot { type_ref, .. } | Instruction::DropTyped { type_ref, .. }
         | Instruction::TypeResource { type_ref, .. }
         | Instruction::TargetHasAtomic { type_ref, .. }

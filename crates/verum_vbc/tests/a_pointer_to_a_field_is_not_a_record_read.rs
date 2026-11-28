@@ -34,6 +34,8 @@ use verum_vbc::bytecode::decode_instructions;
 use verum_vbc::codegen::{CodegenConfig, VbcCodegen};
 use verum_vbc::instruction::{Instruction, MemSubOpcode};
 use verum_vbc::module::VbcModule;
+#[path = "support/selected_stdlib.rs"]
+mod selected_stdlib;
 
 fn parse(source: &str) -> verum_ast::Module {
     let file_id = FileId::new(0);
@@ -48,9 +50,14 @@ fn parse(source: &str) -> verum_ast::Module {
 fn compile(module_name: &str, source: &str) -> VbcModule {
     let ast = parse(source);
     let mut codegen = VbcCodegen::with_config(CodegenConfig::new(module_name));
-    codegen
-        .compile_module(&ast)
-        .unwrap_or_else(|e| panic!("compile of `{}` failed: {}", module_name, e))
+    codegen.initialize();
+    let memory = selected_stdlib::source_unit("intrinsics/memory.vr", "ptr_read ptr_write", 1);
+    let units = [&memory, &ast];
+    codegen.collect_unit_declarations(&units).unwrap();
+    codegen.resolve_pending_imports();
+    codegen.compile_unit_items(&units, verum_vbc::codegen::ItemFailurePolicy::Strict)
+        .unwrap_or_else(|e| panic!("compile of `{}` failed: {}", module_name, e));
+    codegen.finalize_module().unwrap()
 }
 
 fn decoded_fn(module: &VbcModule, suffix: &str) -> Vec<Instruction> {
@@ -66,8 +73,23 @@ fn decoded_fn(module: &VbcModule, suffix: &str) -> Vec<Instruction> {
         .unwrap_or_else(|| panic!("function `{}` not found in module", suffix));
     let start = func.bytecode_offset as usize;
     let end = start + func.bytecode_length as usize;
-    decode_instructions(&module.bytecode[start..end])
-        .unwrap_or_else(|e| panic!("decode of `{}` bytecode failed: {:?}", suffix, e))
+    let mut body = decode_instructions(&module.bytecode[start..end])
+        .unwrap_or_else(|e| panic!("decode of `{}` bytecode failed: {:?}", suffix, e));
+    // A scalar operation can reach its intrinsic through the selected generic wrapper.
+    let calls: Vec<_> = body.iter().filter_map(|instruction| {
+        let target = match instruction {
+            Instruction::Call { func_id, .. } | Instruction::CallG { func_id, .. } => *func_id,
+            _ => return None,
+        };
+        let function = module.get_function(verum_vbc::FunctionId(target))?;
+        let name = module.get_string(function.name)?;
+        matches!(name, "core.intrinsics.memory.ptr_read" | "core.intrinsics.memory.ptr_write").then_some(function)
+    }).collect();
+    for call in calls {
+        let start = call.bytecode_offset as usize;
+        body.extend(decode_instructions(&module.bytecode[start..start + call.bytecode_length as usize]).unwrap());
+    }
+    body
 }
 
 /// Widths carried by every `ptr_read`/`ptr_write` emission in a function.

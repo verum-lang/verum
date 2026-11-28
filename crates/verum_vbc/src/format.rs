@@ -166,7 +166,9 @@ pub const VERSION_MAJOR: u16 = 2;
 // ownership boundary without publishing the exception as a raw register value.
 // v2.66 adds declared process argument operations to SysExtended.
 /// VBC 2.67 adds ListStorageEmptyLike to MemExtended.
-pub const VERSION_MINOR: u16 = 67;
+/// VBC 2.68 distinguishes an owned record transfer from a legacy raw write.
+pub const VERSION_MINOR: u16 = 68;
+pub const PTR_WRITE_RECORD_VERSION: u16 = 68;
 pub const LIST_STORAGE_EMPTY_LIKE_VERSION: u16 = 67;
 /// First wire version that can discard or forward a producer-owned exception.
 pub const EXCEPTION_DISPOSITION_VERSION: u16 = 65;

@@ -850,6 +850,23 @@ impl<'a> Validator<'a> {
                 self.check_reg(*dst, max_reg, &func_name);
                 self.check_reg(*reference, max_reg, &func_name);
             }
+            Instruction::PtrWriteRecord { address, value, type_ref } => {
+                if self.module.header.version_minor < crate::format::PTR_WRITE_RECORD_VERSION {
+                    self.errors.push(VbcError::InvalidInstructionEncoding {
+                        offset: instr_start, reason: "PtrWriteRecord requires VBC minor 68 or newer".into(),
+                    });
+                }
+                self.check_reg(*address, max_reg, &func_name);
+                self.check_reg(*value, max_reg, &func_name);
+                self.validate_type_ref(type_ref, 0);
+                if type_ref.base_type_id().and_then(|id| self.module.get_type(id))
+                    .is_none_or(|decl| decl.kind != crate::types::TypeKind::Record || decl.fields.len() < 2)
+                {
+                    self.errors.push(VbcError::InvalidInstructionEncoding {
+                        offset: instr_start, reason: "PtrWriteRecord requires a declared multi-field record".into(),
+                    });
+                }
+            }
             Instruction::HeapSlot { dst, address, action, type_ref } => {
                 self.check_reg(*dst, max_reg, &func_name);
                 self.check_reg(*address, max_reg, &func_name);

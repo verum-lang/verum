@@ -307,7 +307,7 @@ impl VbcEscapeAnalyzer {
 
                 // Typed destruction consumes the old register and may call
                 // user glue. It cannot preserve the old source provenance.
-                Instruction::DropTyped { src, .. } => {
+                Instruction::DropTyped { src, .. } | Instruction::PtrWriteRecord { value: src, .. } => {
                     provenance.insert(src.0, RegisterProvenance::Unknown);
                 }
 
@@ -354,6 +354,7 @@ impl VbcEscapeAnalyzer {
                 Instruction::DropTyped { src, .. } | Instruction::CloneTyped { src, .. } => {
                     escaping.insert(src.0);
                 }
+                Instruction::PtrWriteRecord { value, .. } => { escaping.insert(value.0); }
                 // Return escapes the function.
                 Instruction::Ret { value } => {
                     escaping.insert(value.0);

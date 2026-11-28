@@ -154,11 +154,79 @@ fn read_packed_array(
     read_operand(state, |bytes, cursor| layout.decode(bytes, cursor))
 }
 
+fn write_owned_record(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+    use super::super::super::heap::{Object, ObjectHeader, OBJECT_HEADER_SIZE};
+    let address_reg = read_reg(state)?;
+    let owner_reg = read_reg(state)?;
+    let declared = read_type_ref(state)?;
+    let invalid = |message: &str| InterpreterError::InvalidOperand { message: message.into() };
+    let declaration = declared.base_type_id().and_then(|id| state.module.get_type(id))
+        .filter(|decl| decl.kind == crate::types::TypeKind::Record && decl.fields.len() >= 2)
+        .ok_or_else(|| invalid("ptr_write requires a declared multi-field record"))?;
+    let size = declaration.fields.len().checked_mul(size_of::<Value>())
+        .ok_or_else(|| invalid("ptr_write record extent overflow"))?;
+    let value = state.get_reg(owner_reg);
+    if !value.is_regular_ptr() || value.is_nil() || !state.heap.contains(value.as_ptr()) {
+        return Err(invalid("ptr_write requires a live record owner"));
+    }
+    // SAFETY: membership in this heap establishes the complete source header.
+    let object = unsafe { Object::from_raw(value.as_ptr::<ObjectHeader>()) }
+        .ok_or_else(|| invalid("ptr_write requires a live record owner"))?;
+    if !object.header().is_valid() || object.header().type_id != declaration.id
+        || object.header().size as usize != size {
+        return Err(invalid("ptr_write source differs from its declared record extent"));
+    }
+    let address = state.get_reg(address_reg);
+    super::cbgr_helpers::require_reference_write(state, address)?;
+    if address.is_projected_slot() || super::cbgr_helpers::is_cbgr_ref(&address) {
+        return Err(invalid("ptr_write destination is a single Value slot"));
+    }
+    let destination = if address.is_thin_ref() {
+        state.heap.thin_ref(address)?.ptr
+    } else if address.is_fat_ref() {
+        address.as_fat_ref().ptr()
+    } else if address.is_regular_ptr() {
+        address.as_ptr::<u8>()
+    } else if let Some(raw) = address.try_as_i64() {
+        raw as *mut u8
+    } else {
+        return Err(invalid("ptr_write requires a raw destination"));
+    };
+    if destination.is_null() { return Err(InterpreterError::NullPointer); }
+    if !destination.cast::<Value>().is_aligned() {
+        return Err(invalid("ptr_write destination is not aligned for record slots"));
+    }
+    if super::cbgr::bridge_extent_room(state, destination as usize).is_some_and(|room| room < size) {
+        return Err(invalid("ptr_write destination is shorter than the record"));
+    }
+    let end = (destination as usize).checked_add(size)
+        .ok_or_else(|| invalid("ptr_write destination extent overflow"))?;
+    let source = object.as_ptr() as usize;
+    if (destination as usize) < source + OBJECT_HEADER_SIZE + size && end > source {
+        return Err(invalid("ptr_write destination overlaps the transferred object"));
+    }
+    let backing = state.heap.backing_view(destination);
+    if backing.owner.is_some() && (destination != backing.data || backing.payload_size.is_none_or(|room| room < size)) {
+        return Err(invalid("ptr_write destination does not cover the record in object storage"));
+    }
+    // SAFETY: both extents are disjoint. An untracked raw destination is the
+    // caller's unsafe pointer contract. The record now lives in the destination,
+    // so only its previous allocation is released, without running Drop glue.
+    unsafe {
+        std::ptr::copy_nonoverlapping(object.data_ptr(), destination, size);
+        state.heap.free(object);
+    }
+    state.set_reg(owner_reg, Value::unit());
+    state.cbgr_epoch = state.cbgr_epoch.wrapping_add(1);
+    Ok(DispatchResult::Continue)
+}
+
 fn mem_extended_body(
     state: &mut InterpreterState,
     sub_op: u8,
 ) -> InterpreterResult<DispatchResult> {
     match sub_op {
+        0x2B => write_owned_record(state),
         0x08..=0x0A => super::list_storage::access(state, sub_op),
         0x0C..=0x0F | 0x50..=0x51 => super::deque_storage::access(state, sub_op),
         0x0B => super::list_storage::resize(state),

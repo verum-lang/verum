@@ -7758,7 +7758,7 @@ impl VbcCodegen {
         // single-field record and every scalar keep their current
         // emission byte-for-byte, so no call site that works today
         // changes route.
-        if let Some(dest) = self.try_compile_flat_record_rw(&func_name, args)? {
+        if let Some(dest) = self.try_compile_flat_record_rw(&func_info, args)? {
             return Ok(Some(dest));
         }
 
@@ -35726,12 +35726,13 @@ impl VbcCodegen {
     /// `cbgr_alloc(T.size)` already asks for at every call site.
     fn try_compile_flat_record_rw(
         &mut self,
-        func_name: &str,
+        function: &FunctionInfo,
         args: &verum_common::List<Expr>,
     ) -> CodegenResult<Option<Reg>> {
-        let leaf = Self::call_leaf_name(func_name);
-        let is_read = leaf == "ptr_read";
-        let is_write = leaf == "ptr_write";
+        let selected = |name| self.ctx.functions.get(name)
+            .is_some_and(|declaration| declaration.id == function.id);
+        let is_read = selected("core.intrinsics.memory.ptr_read");
+        let is_write = selected("core.intrinsics.memory.ptr_write");
         if !(is_read || is_write) {
             return Ok(None);
         }
@@ -35836,18 +35837,17 @@ impl VbcCodegen {
             let Some(val_expr) = args.iter().nth(1) else {
                 return Ok(None);
             };
+            let start = self.ctx.instructions.len();
             let val_reg = match self.compile_expr(val_expr)? {
                 Some(r) => r,
                 None => return Ok(None),
             };
-            // ptr, value, size, type_id(u32 LE)
-            Self::write_reg(&mut ops, ptr_reg.0);
-            Self::write_reg(&mut ops, val_reg.0);
-            ops.push(size as u8);
-            ops.extend_from_slice(&type_id.0.to_le_bytes());
-            self.ctx.emit(Instruction::MemExtended {
-                sub_op: 0x1b,
-                operands: ops,
+            let actual = self.copy_source_type(val_expr, val_reg, start, self.ctx.instructions.len());
+            let owned = self.receive_owned_place(val_expr, val_reg, actual.as_ref(), ResultDemand::Used)?;
+            self.ctx.emit(Instruction::PtrWriteRecord {
+                address: ptr_reg,
+                value: owned,
+                type_ref: crate::types::TypeRef::Concrete(type_id),
             });
             self.ctx.emit(Instruction::LoadUnit { dst: dest });
         }

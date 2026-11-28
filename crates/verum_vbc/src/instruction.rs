@@ -5106,6 +5106,8 @@ pub enum MemSubOpcode {
     HeapSlotBorrow = 0x29,
     /// Mutably borrow the complete value slot in an owning allocation.
     HeapSlotBorrowMut = 0x2A,
+    /// Transfer a complete owned record into raw storage (address, owner, declaration).
+    PtrWriteRecord = 0x2B,
     // -- Byte/typed array primitives (0x30-0x3F), carried over from
     //    SystemSubOpcode 0x49-0x4E / 0x5E / 0x5F.
     /// Allocate a packed byte array (dst, len).
@@ -5182,6 +5184,7 @@ impl MemSubOpcode {
             0x28 => Some(Self::DerefWideRef),
             0x29 => Some(Self::HeapSlotBorrow),
             0x2A => Some(Self::HeapSlotBorrowMut),
+            0x2B => Some(Self::PtrWriteRecord),
             0x30 => Some(Self::NewByteArray),
             0x31 => Some(Self::ByteArrayElementAddr),
             0x32 => Some(Self::ByteArrayLoad),
@@ -11309,6 +11312,8 @@ pub enum Instruction {    // ===================================================
     },
     /// Dereference a managed 128-bit numeric place at its physical width.
     DerefWideRef { dst: Reg, reference: Reg },
+    /// Move all declared slots into raw storage and retire the source allocation.
+    PtrWriteRecord { address: Reg, value: Reg, type_ref: TypeRef },
     /// Access the complete declared value in a Heap allocation.
     HeapSlot {
         dst: Reg,
