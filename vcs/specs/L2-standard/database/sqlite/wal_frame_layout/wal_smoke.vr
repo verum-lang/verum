@@ -40,7 +40,7 @@ fn test_page_size_range() {
 }
 
 fn test_valid_page_sizes() {
-    assert(is_valid_page_size(1));
+    assert(!is_valid_page_size(1));
     assert(is_valid_page_size(512));
     assert(is_valid_page_size(1024));
     assert(is_valid_page_size(4096));

@@ -30,7 +30,7 @@ fn push_be32(buf: &mut List<Byte>, v: UInt32) {
 }
 
 fn empty_seed() -> WalChecksum {
-    WalChecksum { s1: 0 as UInt32, s2: 0 as UInt32 }
+    WalChecksum.from_words(0_u32, 0_u32, true)
 }
 
 fn one_pair_zero_zero_yields_zero() {
@@ -39,8 +39,8 @@ fn one_pair_zero_zero_yields_zero() {
     push_be32(&mut buf, 0 as UInt32);
     let out = wal_running_checksum(empty_seed(), buf.as_slice());
     // s1 = 0 + 0 + 0 = 0; s2 = 0 + 0 + 0 = 0
-    assert(out.s1 == 0_u32);
-    assert(out.s2 == 0_u32);
+    assert(out.words().0 == 0_u32);
+    assert(out.words().1 == 0_u32);
 }
 
 fn additive_not_xor() {
@@ -62,8 +62,8 @@ fn additive_not_xor() {
     //   s1 = 0 + 0xABCD0001 + 0      = 0xABCD0001
     //   s2 = 0 + 0x1234ABCD + s1     = 0x1234ABCD + 0xABCD0001
     //                                = 0xBE01ABCE
-    assert(out.s1 == 0xABCD0001_u32);
-    assert(out.s2 == 0xBE01ABCE_u32);
+    assert(out.words().0 == 0xABCD0001_u32);
+    assert(out.words().1 == 0xBE01ABCE_u32);
 }
 
 fn chaining_two_pairs() {
@@ -88,15 +88,15 @@ fn chaining_two_pairs() {
     push_be32(&mut tail, 4 as UInt32);
     let cs2 = wal_running_checksum(cs1, tail.as_slice());
 
-    assert(combined.s1 == cs2.s1);
-    assert(combined.s2 == cs2.s2);
+    assert(combined.words().0 == cs2.words().0);
+    assert(combined.words().1 == cs2.words().1);
 }
 
 fn empty_input_no_op() {
     let buf: List<Byte> = List.new();
     let out = wal_running_checksum(empty_seed(), buf.as_slice());
-    assert(out.s1 == 0_u32);
-    assert(out.s2 == 0_u32);
+    assert(out.words().0 == 0_u32);
+    assert(out.words().1 == 0_u32);
 }
 
 fn main() {

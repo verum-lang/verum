@@ -35,10 +35,8 @@ module core.database.sqlite.native.l1_pager.journal.wal;
 //  +--------------- frame i payload (page_size bytes) -+
 //
 
-// Checksums are computed by a **Fibonacci-based running 64-bit state**
-// (not CRC32 — CRC32 is for IEEE 802.3 links only, and CRC32C has a
-// different polynomial). The algorithm is simple, position-dependent,
-// and two-word; it matches the SQLite walformat.html spec §3.1.
+// SQLite WAL checksums accumulate two 32-bit words modulo 2^32. The last
+// magic byte selects the input word order. Stored checksums are big-endian.
 //
 
 // This module covers the *serialisation* surface only. The actor that
@@ -48,7 +46,8 @@ module core.database.sqlite.native.l1_pager.journal.wal;
 // =============================================================================
 
 mount collections.List;
-mount base.{Result, Ok, Err, Text};
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.wal_frame_layout.constants.is_valid_page_size;
 
 // -----------------------------------------------------------------------------
 // Constants
@@ -57,9 +56,7 @@ mount base.{Result, Ok, Err, Text};
 /// Magic bytes for a little-endian WAL. File header byte 0..3.
 public const WAL_MAGIC_LE: UInt32 = 0x377F0682;
 
-/// Magic bytes for a big-endian WAL — swapped layout requested by the
-/// database header's `file_format_write == 2` bit in the corresponding
-/// main DB file.
+/// WAL magic selecting big-endian checksum input words.
 public const WAL_MAGIC_BE: UInt32 = 0x377F0683;
 
 /// WAL format version — SQLite 3.7.0 onwards.
@@ -102,14 +99,45 @@ public type WalFrameHeader is {
 public type WalChecksum is {
     s1: UInt32,
     s2: UInt32,
+    big_endian: Bool,
 };
 
 implement WalChecksum {
-    public(in core.database.sqlite.native.l1_pager) fn from_words(s1: u32, s2: u32) -> WalChecksum {
-        WalChecksum { s1, s2 }
+    /// The WAL magic determines the byte order of input words throughout the chain.
+    public fn from_words(s1: u32, s2: u32, big_endian: Bool) -> WalChecksum {
+        WalChecksum { s1, s2, big_endian }
     }
 
-    public(in core.database.sqlite.native.l1_pager) fn words(&self) -> (u32, u32) { (self.s1, self.s2) }
+    public fn words(&self) -> (u32, u32) { (self.s1, self.s2) }
+
+    public(in core.database.sqlite.native.l1_pager) fn matches(&self, s1: u32, s2: u32) -> Bool {
+        self.s1 == s1 && self.s2 == s2
+    }
+
+    public(in core.database.sqlite.native.l1_pager) fn magic(&self) -> u32 {
+        if self.big_endian { WAL_MAGIC_BE } else { WAL_MAGIC_LE }
+    }
+
+    public(in core.database.sqlite.native.l1_pager) fn frame(
+        &self, header: &[Byte], payload: &[Byte],
+    ) -> WalChecksum {
+        let prefix = checksum_range(self, header, 0, 8);
+        wal_running_checksum(prefix, payload)
+    }
+
+    public(in core.database.sqlite.native.l1_pager) fn verify_frame(
+        &self, header: &[Byte], payload: &[Byte], salt1: u32, salt2: u32,
+    ) -> Maybe<WalChecksum> {
+        if read_u32_be(header, 0) == 0_u32 || read_u32_be(header, 8) != salt1
+            || read_u32_be(header, 12) != salt2 { return Maybe.None; }
+        let next = self.frame(header, payload);
+        if !next.matches(read_u32_be(header, 16), read_u32_be(header, 20)) { return Maybe.None; }
+        Maybe.Some(next)
+    }
+}
+
+implement Clone for WalChecksum {
+    fn clone(&self) -> WalChecksum { WalChecksum.from_words(self.s1, self.s2, self.big_endian) }
 }
 
 /// Live WAL state — runtime accumulator used by the pager actor.
@@ -147,7 +175,7 @@ public fn wal_new(
     // (everything up to the checksum_1 field).
     let seed_bytes = wal_header_serialize_seed(&header);
     let running = wal_running_checksum(
-        WalChecksum { s1: 0 as UInt32, s2: 0 as UInt32 },
+        WalChecksum.from_words(0_u32, 0_u32, false),
         seed_bytes.as_slice(),
     );
 
@@ -181,7 +209,7 @@ fn u32_be(buf: &mut List<Byte>, v: UInt32) {
     buf.push((v & 0xFF) as Byte);
 }
 
-fn read_u32_be(buf: &[Byte], offset: Int) -> UInt32 {
+public(in core.database.sqlite.native.l1_pager) fn read_u32_be(buf: &[Byte], offset: Int) -> UInt32 {
     let b0 = buf[offset] as UInt32;
     let b1 = buf[offset + 1] as UInt32;
     let b2 = buf[offset + 2] as UInt32;
@@ -269,37 +297,40 @@ public fn wal_frame_header_parse(buf: &[Byte]) -> Result<WalFrameHeader, Text> {
 // Running checksum (walformat.html §3.1)
 // -----------------------------------------------------------------------------
 
-/// Advance the running checksum over `data`. Data length must be a
-/// multiple of 8 bytes — WAL buffers always are (page_size is a
-/// power-of-two ≥ 512, and headers are 24/32 bytes both multiples of 8).
-///
-
-/// Per SQLite source `wal.c.walChecksumBytes` (NOT the public
-/// walformat.html prose, which is misleading):
-///
-
-///  s1 += word_be32(x[i]) + s2
-///  s2 += word_be32(x[i+1]) + s1
-///
-
-/// where word_be32 reads a big-endian u32 (or native-order under
-/// `WAL_MAGIC_BE`, which we don't yet emit). All arithmetic is
-/// wrapping 32-bit. An earlier revision of this file used `^` (xor)
-/// instead of `+ s2 / + s1` which produced WAL files that real SQLite
-/// would reject as torn — see the differential corpus regression in
-/// `vcs/specs/L2-standard/database/sqlite/l1_pager/wal_checksum.vr`.
+/// Advance the two unsigned 32-bit sums over complete pairs of input words.
 public fn wal_running_checksum(seed: WalChecksum, data: &[Byte]) -> WalChecksum {
-    let mut s1 = seed.s1;
-    let mut s2 = seed.s2;
-    let n = data.len();
-    let mut i: Int = 0;
-    // Consume two u32 words per iteration.
-    while i + 8 <= n {
-        let a = read_u32_be(data, i);
-        let b = read_u32_be(data, i + 4);
-        s1 = s1 + a + s2;
-        s2 = s2 + b + s1;
+    checksum_range(&seed, data, 0, data.len())
+}
+
+fn checksum_word(data: &[Byte], i: Int, big_endian: Bool) -> Int {
+    let a = data[i] as Int;
+    let b = data[i + 1] as Int;
+    let c = data[i + 2] as Int;
+    let d = data[i + 3] as Int;
+    if big_endian { (a << 24) | (b << 16) | (c << 8) | d }
+    else { a | (b << 8) | (c << 16) | (d << 24) }
+}
+
+fn checksum_range(seed: &WalChecksum, data: &[Byte], start: Int, end: Int) -> WalChecksum {
+    let mut s1 = seed.s1 as Int;
+    let mut s2 = seed.s2 as Int;
+    let mut i = start;
+    while i + 8 <= end {
+        s1 = (s1 + checksum_word(data, i, seed.big_endian) + s2) & 0xFFFFFFFF;
+        s2 = (s2 + checksum_word(data, i + 4, seed.big_endian) + s1) & 0xFFFFFFFF;
         i = i + 8;
     }
-    WalChecksum { s1: s1, s2: s2 }
+    WalChecksum.from_words(s1 as u32, s2 as u32, seed.big_endian)
+}
+
+/// Validate the full on-disk header before accepting its seed or any frames.
+public(in core.database.sqlite.native.l1_pager) fn verified_header_seed(bytes: &[Byte]) -> Maybe<WalChecksum> {
+    if bytes.len() < WAL_HEADER_SIZE { return Maybe.None; }
+    let magic = read_u32_be(bytes, 0);
+    if (magic != WAL_MAGIC_LE && magic != WAL_MAGIC_BE) || read_u32_be(bytes, 4) != WAL_FORMAT_VERSION
+        || !is_valid_page_size(read_u32_be(bytes, 8) as Int) { return Maybe.None; }
+    let seed = WalChecksum.from_words(0_u32, 0_u32, magic == WAL_MAGIC_BE);
+    let checksum = checksum_range(&seed, bytes, 0, 24);
+    if !checksum.matches(read_u32_be(bytes, 24), read_u32_be(bytes, 28)) { return Maybe.None; }
+    Maybe.Some(checksum)
 }

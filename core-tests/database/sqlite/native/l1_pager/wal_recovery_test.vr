@@ -1,0 +1,255 @@
+module core.database.sqlite.native.l1_pager.tests.wal_recovery;
+
+mount core.base.maybe.Maybe;
+mount core.base.result.Result;
+mount core.collections.List;
+mount core.database.sqlite.native.l0_vfs.memdb_vfs.{MemDbFile, open_memory_rwc, memdb_write, memdb_close};
+mount core.database.sqlite.native.l1_pager.wal_writer.{
+    WalBackend, WalWriter, wal_writer_create, wal_writer_open, wal_writer_append_frame, wal_writer_reset,
+};
+mount core.database.sqlite.native.l1_pager.wal_reader.recover_state;
+mount core.database.sqlite.native.l1_pager.journal.wal.{WalChecksum, wal_running_checksum};
+mount core.database.sqlite.native.l1_pager.recovery.wal_scan;
+
+fn put_word(bytes: &mut List<Byte>, offset: Int, value: u32) {
+    let word = value as Int;
+    bytes[offset] = ((word >> 24) & 255) as Byte;
+    bytes[offset + 1] = ((word >> 16) & 255) as Byte;
+    bytes[offset + 2] = ((word >> 8) & 255) as Byte;
+    bytes[offset + 3] = (word & 255) as Byte;
+}
+
+// A 512-byte-page SQLite database held a table t(v). The first transaction
+// inserted 'prior', the second 'ordinary'. After the first transaction the
+// big-endian copy was rechecksummed independently. A live SQLite reader held
+// its snapshot while SQLite itself appended the second frame in each mode.
+fn sqlite_wal(big_endian: Bool) -> List<Byte> {
+    let mut bytes: List<Byte> = List.from_elem(0 as Byte, 1104);
+    put_word(&mut bytes, 4, 0x002de218_u32);
+    put_word(&mut bytes, 8, 0x00000200_u32);
+    put_word(&mut bytes, 12, 0x00000001_u32);
+    put_word(&mut bytes, 16, 0x66e60cfb_u32);
+    put_word(&mut bytes, 20, 0xdefd3958_u32);
+    put_word(&mut bytes, 32, 0x00000002_u32);
+    put_word(&mut bytes, 36, 0x00000002_u32);
+    put_word(&mut bytes, 40, 0x66e60cfb_u32);
+    put_word(&mut bytes, 44, 0xdefd3958_u32);
+    put_word(&mut bytes, 56, 0x0d000000_u32);
+    put_word(&mut bytes, 60, 0x0101f700_u32);
+    put_word(&mut bytes, 64, 0x01f70000_u32);
+    put_word(&mut bytes, 556, 0x00000007_u32);
+    put_word(&mut bytes, 560, 0x01021770_u32);
+    put_word(&mut bytes, 564, 0x72696f72_u32);
+    put_word(&mut bytes, 568, 0x00000002_u32);
+    put_word(&mut bytes, 572, 0x00000002_u32);
+    put_word(&mut bytes, 576, 0x66e60cfb_u32);
+    put_word(&mut bytes, 580, 0xdefd3958_u32);
+    put_word(&mut bytes, 592, 0x0d000000_u32);
+    put_word(&mut bytes, 596, 0x0201eb00_u32);
+    put_word(&mut bytes, 600, 0x01f701eb_u32);
+    put_word(&mut bytes, 1080, 0x0000000a_u32);
+    put_word(&mut bytes, 1084, 0x02021d6f_u32);
+    put_word(&mut bytes, 1088, 0x7264696e_u32);
+    put_word(&mut bytes, 1092, 0x61727907_u32);
+    put_word(&mut bytes, 1096, 0x01021770_u32);
+    put_word(&mut bytes, 1100, 0x72696f72_u32);
+    if big_endian {
+        put_word(&mut bytes, 0, 0x377f0683_u32);
+        put_word(&mut bytes, 24, 0x7cead7d3_u32);
+        put_word(&mut bytes, 28, 0x02c0eae5_u32);
+        put_word(&mut bytes, 48, 0x3313856e_u32);
+        put_word(&mut bytes, 52, 0xf2bf3134_u32);
+        put_word(&mut bytes, 584, 0xd8ea7a8f_u32);
+        put_word(&mut bytes, 588, 0x409ffe95_u32);
+    } else {
+        put_word(&mut bytes, 0, 0x377f0682_u32);
+        put_word(&mut bytes, 24, 0xd0d7e979_u32);
+        put_word(&mut bytes, 28, 0xe1ebbefc_u32);
+        put_word(&mut bytes, 48, 0x68afa7cd_u32);
+        put_word(&mut bytes, 52, 0x1a304704_u32);
+        put_word(&mut bytes, 584, 0xeeef2720_u32);
+        put_word(&mut bytes, 588, 0xe7975c57_u32);
+    }
+    bytes
+}
+
+fn memory_wal(bytes: &[Byte]) -> MemDbFile {
+    let mut file = match open_memory_rwc(&"sqlite-oracle") {
+        Result.Ok(f) => f,
+        Result.Err(_) => panic("could not open memory file"),
+    };
+    match memdb_write(&mut file, bytes, 0) {
+        Result.Ok(_) => file,
+        Result.Err(_) => panic("could not load SQLite fixture"),
+    }
+}
+
+fn open_wal(bytes: &[Byte]) -> WalWriter {
+    match wal_writer_open(WalBackend.WbMem(memory_wal(bytes))) {
+        Result.Ok(writer) => writer,
+        Result.Err(_) => panic("SQLite WAL was rejected"),
+    }
+}
+
+fn assert_prefix(bytes: &[Byte], valid: Int, committed: Int) {
+    let plan = match wal_scan(bytes, 512) {
+        Result.Ok(p) => p,
+        Result.Err(_) => panic("WAL scan failed"),
+    };
+    assert_eq(plan.valid_frames(), valid);
+    assert_eq(plan.last_commit(), committed - 1);
+    assert_eq(plan.database_pages(), if committed > 0 { 2 } else { 0 });
+    let saved = match plan.offset_for(2) { Maybe.Some(n) => n, Maybe.None => -1 };
+    assert_eq(saved, if committed > 0 { 32 + (committed - 1) * 536 } else { -1 });
+    let mut writer = open_wal(bytes);
+    let mut pass = 0;
+    while pass < 2 {
+        assert_eq(writer.mx_frame(), committed);
+        let frame = match writer.index().find_frame(2, 10, 0) { Maybe.Some(n) => n, Maybe.None => 0 };
+        assert_eq(frame, committed);
+        match recover_state(&mut writer) {
+            Result.Ok(_) => {}
+            Result.Err(_) => panic("WAL recovery failed"),
+        }
+        pass = pass + 1;
+    }
+}
+
+fn append_sqlite_transaction(bytes: &[Byte], original_length: Int) {
+    let mut writer = open_wal(&bytes[..original_length]);
+    assert_eq(writer.mx_frame(), 1);
+    match wal_writer_append_frame(&mut writer, 2, &bytes[592..1104], 2) {
+        Result.Ok(_) => {}
+        Result.Err(_) => panic("WAL append failed"),
+    }
+    let mut actual: List<Byte> = List.from_elem(0 as Byte, 1104);
+    match writer.read_at(&mut actual, 0) {
+        Result.Ok(true) => {}
+        _ => panic("could not read the appended transaction"),
+    }
+    let mut i = 0;
+    while i < actual.len() { assert_eq(actual[i], bytes[i]); i = i + 1; }
+    assert_prefix(actual.as_slice(), 2, 2);
+}
+
+@test
+fn little_and_big_endian_append_match_sqlite() {
+    let little = sqlite_wal(false);
+    let big = sqlite_wal(true);
+    append_sqlite_transaction(little.as_slice(), 568);
+    append_sqlite_transaction(big.as_slice(), 568);
+    append_sqlite_transaction(little.as_slice(), 811);
+}
+
+@test
+fn corrupt_and_partial_frames_stop_both_recovery_paths() {
+    let mut bytes = sqlite_wal(false);
+    {
+        let data = bytes.as_slice();
+        assert_prefix(&data[..32], 0, 0);
+        assert_prefix(&data[..567], 0, 0);
+        assert_prefix(&data[..569], 1, 1);
+        assert_prefix(&data[..1103], 1, 1);
+    }
+    // Change an interior payload byte while preserving its header and file length.
+    bytes[870] = 1 as Byte;
+    assert_prefix(bytes.as_slice(), 1, 1);
+    bytes[870] = 0 as Byte;
+    // An invalid salt or frame checksum also ends the verified prefix.
+    bytes[578] = (bytes[578] ^ 1) as Byte;
+    assert_prefix(bytes.as_slice(), 1, 1);
+    bytes[578] = (bytes[578] ^ 1) as Byte;
+    bytes[584] = (bytes[584] ^ 1) as Byte;
+    assert_prefix(bytes.as_slice(), 1, 1);
+    bytes[584] = (bytes[584] ^ 1) as Byte;
+    // A frame with a valid checksum still needs a nonzero page number.
+    put_word(&mut bytes, 568, 0_u32);
+    put_word(&mut bytes, 584, 0x2aef2720_u32);
+    put_word(&mut bytes, 588, 0x99975c57_u32);
+    assert_prefix(bytes.as_slice(), 1, 1);
+    bytes = sqlite_wal(false);
+    // Alter the first frame. The intact second commit cannot restart the chain.
+    bytes[300] = 1 as Byte;
+    assert_prefix(bytes.as_slice(), 0, 0);
+}
+
+@test
+fn verified_uncommitted_replacement_preserves_the_previous_page() {
+    let mut bytes = sqlite_wal(false);
+    // Independent checksum for page 2 with a zero commit marker in frame two.
+    put_word(&mut bytes, 572, 0_u32);
+    put_word(&mut bytes, 584, 0x64ef2720_u32);
+    put_word(&mut bytes, 588, 0x23975c57_u32);
+    assert_prefix(bytes.as_slice(), 2, 1);
+    let mut writer = open_wal(bytes.as_slice());
+    assert(wal_writer_append_frame(&mut writer, 2, &bytes.as_slice()[592..1104], 2).is_ok());
+    let mut actual: List<Byte> = List.from_elem(0 as Byte, 1104);
+    match writer.read_at(&mut actual, 0) { Result.Ok(true) => {}, _ => panic("read failed") }
+    let expected = sqlite_wal(false);
+    let mut i = 0;
+    while i < actual.len() { assert_eq(actual[i], expected[i]); i = i + 1; }
+}
+
+@test
+fn invalid_headers_and_closed_files_are_errors() {
+    let valid = sqlite_wal(true);
+    let mut file = memory_wal(valid.as_slice());
+    assert(memdb_close(&mut file).is_ok());
+    assert(wal_writer_open(WalBackend.WbMem(file)).is_err());
+    let mut bytes = sqlite_wal(true);
+    bytes[25] = (bytes[25] ^ 1) as Byte;
+    assert(wal_writer_open(WalBackend.WbMem(memory_wal(bytes.as_slice()))).is_err());
+    assert(wal_scan(bytes.as_slice(), 512).is_err());
+    assert(wal_scan(valid.as_slice(), 4096).is_err());
+    bytes = sqlite_wal(true);
+    put_word(&mut bytes, 4, 3007001_u32);
+    put_word(&mut bytes, 24, 0x7cead7d6_u32);
+    put_word(&mut bytes, 28, 0x02c0eaea_u32);
+    assert(wal_writer_open(WalBackend.WbMem(memory_wal(bytes.as_slice()))).is_err());
+    assert(wal_scan(bytes.as_slice(), 512).is_err());
+    bytes = sqlite_wal(true);
+    put_word(&mut bytes, 8, 1_u32);
+    put_word(&mut bytes, 24, 0x7cead3d5_u32);
+    put_word(&mut bytes, 28, 0x02c0e4e8_u32);
+    assert(wal_writer_open(WalBackend.WbMem(memory_wal(bytes.as_slice()))).is_err());
+    assert(wal_scan(bytes.as_slice(), 512).is_err());
+}
+
+@test
+fn both_checksum_words_wrap_in_file_selected_order() {
+    let data: [Byte; 8] = [1 as Byte, 2 as Byte, 3 as Byte, 4 as Byte,
+                           5 as Byte, 6 as Byte, 7 as Byte, 8 as Byte];
+    let little = wal_running_checksum(WalChecksum.from_words(0xFFFFFFFF_u32, 0xFFFFFFFE_u32, false), &data[..]);
+    let big = wal_running_checksum(WalChecksum.from_words(0xFFFFFFFF_u32, 0xFFFFFFFE_u32, true), &data[..]);
+    let (little1, little2) = little.words();
+    let (big1, big2) = big.words();
+    assert_eq(little1, 0x040301FE_u32);
+    assert_eq(little2, 0x0C0A0801_u32);
+    assert_eq(big1, 0x01020301_u32);
+    assert_eq(big2, 0x06080A07_u32);
+}
+
+@test
+fn restarted_wal_keeps_word_order_and_create_truncates_existing_files() {
+    let bytes = sqlite_wal(true);
+    let mut w = open_wal(bytes.as_slice());
+    assert(wal_writer_reset(&mut w, 11_u32, 22_u32).is_ok());
+    assert_eq(w.mx_frame(), 0);
+    let mut hdr: List<Byte> = List.from_elem(0 as Byte, 32);
+    match w.read_at(&mut hdr, 0) { Result.Ok(true) => {}, _ => panic("header read failed") }
+    assert_eq(hdr[3], 0x83 as Byte);
+    assert_eq(hdr[15], 2 as Byte);
+    assert_prefix(hdr.as_slice(), 0, 0);
+    assert(recover_state(&mut w).is_ok());
+
+    let old = memory_wal(bytes.as_slice());
+    let fresh = match wal_writer_create(WalBackend.WbMem(old), 1, 11_u32, 22_u32) {
+        Result.Ok(writer) => writer,
+        Result.Err(_) => panic("could not initialize requested maximum-size WAL"),
+    };
+    assert_eq(fresh.page_size(), 65536);
+    match fresh.read_at(&mut hdr, 0) { Result.Ok(true) => {}, _ => panic("header read failed") }
+    assert_eq(hdr[9], 1 as Byte);
+    assert_eq(hdr[11], 0 as Byte);
+    match fresh.read_at(&mut hdr, 32) { Result.Ok(false) => {}, _ => panic("stale WAL frames") }
+}

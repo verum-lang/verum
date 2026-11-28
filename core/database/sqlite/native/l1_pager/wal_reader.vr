@@ -14,7 +14,7 @@ module core.database.sqlite.native.l1_pager.wal_reader;
 // Two responsibilities:
 //
 //   1. **Recovery** — walk an existing WAL file, validate frame
-//      salts and complete frame extents, rebuild the in-memory `frame_index` +
+//      salts and rolling checksums over the full payload, rebuild the in-memory `frame_index` +
 //      `mx_frame` + `last_commit_db_size`.  Frames past the last
 //      commit-marker are silently dropped (incomplete txn).
 //
@@ -28,7 +28,8 @@ module core.database.sqlite.native.l1_pager.wal_reader;
 // =============================================================================
 
 mount collections.List;
-mount base.Result;
+mount base.{Result, Maybe};
+mount core.database.sqlite.native.l1_pager.journal.wal.WalChecksum;
 mount core.database.sqlite.native.wal_frame_layout.constants.{
     file_header_size, frame_header_size,
 };
@@ -56,11 +57,9 @@ public fn frame_offset(frame_no: Int, page_size: Int) -> Int {
 // -----------------------------------------------------------------------------
 
 public type RecoveryReport is {
-    /// Complete frames with matching salts, including the uncommitted trailer.
+    /// Checksum-valid frames, including the uncommitted trailer.
     raw_frame_count: Int,
-    /// Frames accepted into the rebuilt frame_index — those with
-    /// matching salts AND that fall before/equal to the last
-    /// commit-marker.
+    /// Verified frames through the last commit marker, installed in both indexes.
     accepted_frames: Int,
     /// Frame number of the last commit-marker (0 if none).
     last_commit_frame: Int,
@@ -85,18 +84,28 @@ fn recovery_report_empty() -> RecoveryReport {
 // Recovery — walk the WAL file and rebuild the writer's state
 // -----------------------------------------------------------------------------
 
-/// Scan complete frames with the current salts. Each commit marker makes the
+/// Scan frames with the active salts and rolling checksum. Each commit marker makes the
 /// preceding frames visible. Once the scan finishes, the writer installs that
 /// prefix in both indexes and retains the checkpoint and active reader marks.
 public fn recover_state(writer: &mut WalWriter) -> Result<RecoveryReport, PagerError> {
+    match writer.recovery_seed() {
+        Result.Ok(seed) => recover_from_header(writer, seed),
+        Result.Err(e) => Result.Err(e),
+    }
+}
+
+public(in core.database.sqlite.native.l1_pager) fn recover_from_header(
+    writer: &mut WalWriter, seed: WalChecksum,
+) -> Result<RecoveryReport, PagerError> {
+    let mut rolling = seed.clone();
+    let mut committed = seed;
     let mut report = recovery_report_empty();
     let page_size = writer.page_size();
     let (salt1, salt2) = writer.salts();
 
     let mut pages: List<Int> = List.new();
     let mut hdr_buf: List<Byte> = List.from_elem(0 as Byte, frame_header_size());
-    // A byte-addressable WAL has a complete frame when its last byte can be read.
-    let mut last_byte: List<Byte> = List.from_elem(0 as Byte, 1);
+    let mut payload: List<Byte> = List.from_elem(0 as Byte, page_size);
     let mut frame_no: Int = 1;
 
     while true {
@@ -107,14 +116,19 @@ public fn recover_state(writer: &mut WalWriter) -> Result<RecoveryReport, PagerE
             Result.Err(e) => return Result.Err(e),
         }
         let fh = decode_frame_header(&hdr_buf, 0);
-        if !salts_match(&fh, salt1, salt2) || fh.page_number() == 0 as u32 { break; }
-        match writer.read_at(&mut last_byte, off + frame_header_size() + page_size - 1) {
+        if fh.page_number() == 0_u32 || !salts_match(&fh, salt1, salt2) { break; }
+        match writer.read_at(&mut payload, off + frame_header_size()) {
             Result.Ok(true) => {}
             Result.Ok(false) => break,
             Result.Err(e) => return Result.Err(e),
         }
+        match rolling.verify_frame(hdr_buf.as_slice(), payload.as_slice(), salt1, salt2) {
+            Maybe.Some(next) => rolling = next,
+            Maybe.None => break,
+        }
         pages.push(fh.page_number() as Int);
         if is_commit_frame(&fh) {
+            committed = rolling.clone();
             report.last_commit_frame = frame_no;
             report.last_commit_db_size = fh.commit_size() as Int;
         }
@@ -125,7 +139,7 @@ public fn recover_state(writer: &mut WalWriter) -> Result<RecoveryReport, PagerE
     report.accepted_frames = report.last_commit_frame;
     report.incomplete_trailer = pages.len() - report.last_commit_frame;
     pages.truncate(report.last_commit_frame);
-    writer.publish_recovery(pages.as_slice(), report.last_commit_db_size);
+    writer.publish_recovery(pages.as_slice(), report.last_commit_db_size, committed);
     Result.Ok(report)
 }
 

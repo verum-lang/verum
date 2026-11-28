@@ -57,8 +57,7 @@ public fn is_non_commit_frame(h: &WalFrameHeader) -> Bool {
     h.commit_size == (0 as u32)
 }
 
-// Per §6.4: a frame is valid iff its salts match the file header salts and
-// its checksum matches the rolling Fossil SHA1 of (prior_checksum, payload).
+// The salts identify the frame generation. Recovery also verifies the rolling checksum.
 public fn salts_match(h: &WalFrameHeader, file_s1: u32, file_s2: u32) -> Bool {
     h.salt1 == file_s1 && h.salt2 == file_s2
 }

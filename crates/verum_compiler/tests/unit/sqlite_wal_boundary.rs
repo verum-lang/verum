@@ -11,6 +11,8 @@ fn sqlite_wal_reader_uses_the_private_writer_and_wire_header_contracts() {
         "core.database.sqlite.native.l1_pager.wal_state",
         "core.database.sqlite.native.l1_pager.wal_index",
         "core.database.sqlite.native.l1_pager.journal.wal",
+        "core.database.sqlite.native.l1_pager.recovery",
+        "core.database.sqlite.native.wal_frame_layout.constants",
         "core.database.sqlite.native.wal_frame_layout.file_header",
         "core.database.sqlite.native.wal_frame_layout.frame_header",
     ] {
@@ -24,6 +26,18 @@ fn sqlite_wal_reader_uses_the_private_writer_and_wire_header_contracts() {
         )
         .unwrap_or_else(|errors| panic!("{owner}: {errors:#?}"));
     }
+
+    let fixture = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../core-tests/database/sqlite/native/l1_pager/wal_recovery_test.vr"),
+    )
+    .expect("SQLite WAL fixture");
+    let module = Parser::new(&fixture)
+        .parse_module()
+        .expect("SQLite WAL fixture");
+    let owner = "core.database.sqlite.native.l1_pager.tests.wal_recovery";
+    check_source_module(&mut phase.configured_checker(), owner, &module, &registry)
+        .unwrap_or_else(|errors| panic!("{owner}: {errors:#?}"));
 
     for owner in ["core.database.sqlite.native.l1_pager.probe", "application"] {
         let module = |body: &str| {
@@ -50,6 +64,14 @@ fn sqlite_wal_reader_uses_the_private_writer_and_wire_header_contracts() {
             (
                 "fn borrow(writer: &mut WalWriter) { let backend = &mut writer.backend; }",
                 "backend",
+            ),
+            (
+                "fn steal(writer: &mut WalWriter) { let seed = &mut writer.header_seed; }",
+                "header_seed",
+            ),
+            (
+                "fn steal(writer: &mut WalWriter) { let sum = &mut writer.running; }",
+                "running",
             ),
             (
                 "fn seek(writer: &mut WalWriter) { writer.write_cursor = 0; }",

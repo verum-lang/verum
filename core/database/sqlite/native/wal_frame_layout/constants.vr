@@ -19,15 +19,14 @@ public fn magic_big() -> u32    { 0x377f0683 as u32 }
 // Current SQLite WAL format version.
 public fn current_format_version() -> u32 { 3007000 as u32 }
 
-// Page sizes: SQLite allows 512..65536 (powers of two), plus the sentinel 1.
+// WAL page sizes occupy four bytes and represent 65536 directly.
 public fn min_page_size() -> Int { 512 }
 public fn max_page_size() -> Int { 65536 }
 
-// A page size of 1 in the file header is a stand-in for 65536 (too large for 16 bits).
+// The 16-bit main database header uses 1 for 65536. The WAL writer expands this input.
 public fn sentinel_for_65536() -> Int { 1 }
 
 public fn is_valid_page_size(n: Int) -> Bool {
-    if n == sentinel_for_65536() { return true; }
     if n < min_page_size() { return false; }
     if n > max_page_size() { return false; }
     // must be a power of two

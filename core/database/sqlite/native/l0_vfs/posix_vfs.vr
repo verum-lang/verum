@@ -46,7 +46,7 @@ mount sys.common.{
 // `mount X as Y` rename-aliases don't surface to AOT codegen (task #11).
 // Use fully-qualified paths at call sites:
 //   sys_file_size    → sys.common.file_size
-//   sys_truncate     → sys.common.truncate
+//   sys_truncate     → core.sys.common.truncate
 //   sys_access       → sys.common.access
 //   sys_random_bytes → sys.common.random_bytes (this one was via separate mount)
 mount sys.durability;
@@ -273,7 +273,7 @@ implement SqliteFile for PosixFile {
         if self.closed {
             return Result.Err(VfsError { kind: Closed, message: "truncate on closed file" });
         }
-        match sys.common.truncate(self.fd, size) {
+        match core.sys.common.truncate(self.fd, size) {
             Result.Ok(_)  => Result.Ok(()),
             Result.Err(e) => Result.Err(to_vfs_err(e)),
         }

@@ -35,9 +35,7 @@ module core.database.sqlite.native.l1_pager.recovery;
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l1_pager.journal.wal.{
-    WalHeader, WalFrameHeader, WalChecksum,
-    WAL_HEADER_SIZE, WAL_FRAME_HEADER_SIZE,
-    wal_header_parse, wal_frame_header_parse, wal_running_checksum,
+    WAL_HEADER_SIZE, WAL_FRAME_HEADER_SIZE, verified_header_seed, read_u32_be,
 };
 
 // -----------------------------------------------------------------------------
@@ -60,6 +58,13 @@ public type RecoveryPlan is {
     /// falling through to the main DB file on miss.
     page_map: Map<Int, Int>,
 };
+
+implement RecoveryPlan {
+    public fn valid_frames(&self) -> Int { self.valid_frame_count }
+    public fn last_commit(&self) -> Int { self.last_commit_index }
+    public fn database_pages(&self) -> Int { self.db_size_after }
+    public fn offset_for(&self, page: Int) -> Maybe<Int> { self.page_map.get(page) }
+}
 
 /// Errors distinguishable from "empty WAL, do nothing".
 public type RecoveryError is
@@ -104,26 +109,8 @@ implement Eq for RecoveryError {}
 // Main entry point
 // -----------------------------------------------------------------------------
 
-/// Analyse a byte stream representing a `<db>-wal` file. Returns a
-/// `RecoveryPlan` describing which prefix of frames is trustworthy.
-///
-
-/// Algorithm (§8.5):
-///
-
-///  1. Parse the 32-byte header. If short / bad magic → error.
-///  2. Initialise a running checksum over the header-seed bytes.
-///  3. For each frame:
-///  a. Parse its 24-byte header and extract the expected
-///  (checksum_1, checksum_2).
-///  b. Compute the running checksum across (frame_header[0..8]
-///  + frame_payload).
-///  c. If salt or checksum mismatches, STOP — every frame past
-///  this point is invalid.
-///  d. Otherwise, this frame is valid. If it's a commit marker,
-///  remember the index and DB size. Record page_no → offset.
-///  4. Truncate the plan at the last commit marker — frames after it
-///  are "uncommitted" (valid checksums but no commit quorum).
+/// Validate a SQLite WAL header and contiguous frame chain. Page offsets are
+/// published in file order through the last complete transaction.
 public fn wal_scan(
     wal_bytes: &[Byte],
     page_size: Int,
@@ -135,129 +122,46 @@ public fn wal_scan(
         return Result.Err(ShortFile(wal_bytes.len()));
     }
 
-    let header = match wal_header_parse(wal_bytes) {
-        Result.Ok(h)  => h,
-        Result.Err(_) => { return Result.Err(RecoveryError.BadMagic); }
+    let mut running = match verified_header_seed(wal_bytes) {
+        Maybe.Some(seed) => seed,
+        Maybe.None => return Result.Err(RecoveryError.BadMagic),
     };
-
-    // Seed the running checksum over the header's pre-checksum bytes
-    // (first 24 bytes). Identical to `wal_header_serialize_seed` in
-    // `wal.vr`; the function is private there so we replicate the
-    // slice here (cheap — 24 bytes).
-    let mut seed: List<Byte> = List.new();
-    let mut i: Int = 0;
-    while i < 24 {
-        seed.push(wal_bytes[i]);
-        i = i + 1;
-    }
-    let mut running = wal_running_checksum(
-        WalChecksum { s1: 0_u32, s2: 0_u32 },
-        seed.as_slice(),
-    );
-
-    // Validate the header's own checksum-of-self. A header whose stored
-    // (cksum_1, cksum_2) doesn't match the running state we just
-    // computed is corrupted at rest — refuse the entire WAL rather
-    // than silently recovering against a tampered salt/page_size pair
-    // (which would mis-classify every subsequent frame's salt
-    // comparison and could allow an attacker to swap salts to bypass
-    // the torn-tail invariant).
-    if running.s1 != header.checksum_1 || running.s2 != header.checksum_2 {
-        return Result.Err(RecoveryError.BadMagic);
-    }
-
+    if (read_u32_be(wal_bytes, 8) as Int) != page_size { return Result.Err(RecoveryError.BadMagic); }
+    let salt1 = read_u32_be(wal_bytes, 16);
+    let salt2 = read_u32_be(wal_bytes, 20);
     let frame_stride = WAL_FRAME_HEADER_SIZE + page_size;
-    let mut offset: Int = WAL_HEADER_SIZE;
-    let mut valid_count: Int = 0;
-    let mut last_commit_idx: Int = -1;
-    let mut db_size_after: Int = 0;
-    let mut page_map: Map<Int, Int> = Map.new();
-    // Parallel ordered key list — workaround for the in-tree
-    // `MapKeys.next` dispatch gap, and zero-cost relative to the
-    // hash iteration we'd otherwise perform.
-    let mut page_keys: List<Int> = List.new();
-
+    let mut offset = WAL_HEADER_SIZE;
+    let mut pages: List<Int> = List.new();
+    let mut last_commit_idx = -1;
+    let mut db_size_after = 0;
     while offset + frame_stride <= wal_bytes.len() {
-        // Parse the frame header.
-        let mut fh_slice: List<Byte> = List.new();
-        let mut j: Int = 0;
-        while j < WAL_FRAME_HEADER_SIZE {
-            fh_slice.push(wal_bytes[offset + j]);
-            j = j + 1;
-        }
-        let fh = match wal_frame_header_parse(&fh_slice) {
-            Result.Ok(h)  => h,
-            Result.Err(_) => break,
-        };
-
-        // Salt mismatch → invalid; every subsequent frame is also invalid.
-        if fh.salt_1 != header.salt_1 || fh.salt_2 != header.salt_2 {
-            break;
-        }
-
-        // Running-checksum the first 8 bytes of the frame header
-        // (page_number + db_size_after_commit), then the page payload.
-        let mut chk_bytes: List<Byte> = List.new();
-        let mut k: Int = 0;
-        while k < 8 {
-            chk_bytes.push(wal_bytes[offset + k]);
-            k = k + 1;
-        }
         let payload_start = offset + WAL_FRAME_HEADER_SIZE;
-        let mut p: Int = 0;
-        while p < page_size {
-            chk_bytes.push(wal_bytes[payload_start + p]);
-            p = p + 1;
+        let header = &wal_bytes[offset..payload_start];
+        let payload = &wal_bytes[payload_start..offset + frame_stride];
+        match running.verify_frame(header, payload, salt1, salt2) {
+            Maybe.Some(next) => running = next,
+            Maybe.None => break,
         }
-        let new_running = wal_running_checksum(
-            WalChecksum { s1: running.s1, s2: running.s2 },
-            chk_bytes.as_slice(),
-        );
-
-        if new_running.s1 != fh.checksum_1 || new_running.s2 != fh.checksum_2 {
-            break;
+        pages.push(read_u32_be(header, 0) as Int);
+        let db_size = read_u32_be(header, 4) as Int;
+        if db_size > 0 {
+            last_commit_idx = pages.len() - 1;
+            db_size_after = db_size;
         }
-
-        running = new_running;
-
-        // Frame is valid — record its position.
-        let pn = fh.page_number as Int;
-        if !page_map.contains_key(pn) { page_keys.push(pn); }
-        let _ = page_map.insert(pn, offset);
-        if fh.db_size_after_commit != 0_u32 {
-            last_commit_idx = valid_count;
-            db_size_after = fh.db_size_after_commit as Int;
-        }
-        valid_count = valid_count + 1;
         offset = offset + frame_stride;
     }
 
-    // If there was no commit, the page map must be empty — the body of
-    // any prefix without a commit is logically absent.
-    let final_page_map: Map<Int, Int> = if last_commit_idx < 0 {
-        Map.new()
-    } else {
-        // Keep only entries whose frame index is ≤ last_commit_idx.
-        let mut out: Map<Int, Int> = Map.new();
-        let mut ii: Int = 0;
-        while ii < page_keys.len() {
-            let k2 = page_keys[ii];
-            let off = page_map.get(k2);
-            // Frame index = (off - WAL_HEADER_SIZE) / frame_stride
-            let idx = (off - WAL_HEADER_SIZE) / frame_stride;
-            if idx <= last_commit_idx {
-                let _ = out.insert(k2, off);
-            }
-            ii = ii + 1;
-        }
-        out
-    };
-
+    let mut page_map: Map<Int, Int> = Map.new();
+    let mut index = 0;
+    while index <= last_commit_idx {
+        let _ = page_map.insert(pages[index], WAL_HEADER_SIZE + index * frame_stride);
+        index = index + 1;
+    }
     Result.Ok(RecoveryPlan {
-        valid_frame_count: valid_count,
+        valid_frame_count: pages.len(),
         last_commit_index: last_commit_idx,
         db_size_after: db_size_after,
-        page_map: final_page_map,
+        page_map: page_map,
     })
 }
 

@@ -15,7 +15,7 @@ mount base.{Bool};
 public type WalFileHeader is {
     magic: u32,
     format_version: u32,
-    page_size: Int,        // decoded (sentinel 1 → 65536)
+    page_size: Int,        // four-byte WAL header field
     checkpoint_seq: u32,
     salt1: u32,
     salt2: u32,
