@@ -2,6 +2,10 @@
 mod selected_stdlib;
 
 pub fn module() -> verum_vbc::VbcModule {
+    module_with_client(include_str!("borrowed_list_iteration.vr"))
+}
+
+pub fn module_with_client(source: &str) -> verum_vbc::VbcModule {
     use verum_ast::{
         FileId, ItemKind,
         decl::{ProtocolItemKind, TypeDeclBody},
@@ -18,10 +22,12 @@ pub fn module() -> verum_vbc::VbcModule {
         ("base/protocols.vr", "Drop"),
         ("base/mod.vr", "Maybe"),
         ("mod.vr", ""),
-        ("intrinsics/memory.vr", "list_storage_read list_storage_resize"),
+        ("intrinsics/memory.vr", "list_storage_read list_storage_resize list_storage_stride list_storage_write"),
+        ("intrinsics/arithmetic.vr", "checked_mul"),
+        ("base/primitives.vr", "Int.checked_mul"),
         (
             "collections/list.vr",
-            "List ListIter Drop@List<T>.drop List<T>.clear List<T>.truncate List<T>.free_buffer List<T>.iter Iterator@ListIter<T>.next Iterator@ListIter<T>.size_hint IntoIterator@ListIter<T>.into_iter DoubleEndedIterator@ListIter<T>.next_back ExactSizeIterator@ListIter<T>.len",
+            "List list_max_len List<T>.push List<T>.grow List<T>.next_cap List<T>.resize_buffer List<T>.len ListIter Drop@List<T>.drop List<T>.clear List<T>.truncate List<T>.free_buffer List<T>.iter Iterator@ListIter<T>.next Iterator@ListIter<T>.size_hint IntoIterator@ListIter<T>.into_iter DoubleEndedIterator@ListIter<T>.next_back ExactSizeIterator@ListIter<T>.len",
         ),
     ];
     let mut units: verum_common::List<_> = selection
@@ -52,7 +58,7 @@ pub fn module() -> verum_vbc::VbcModule {
         })
         .collect();
     let client = FastParser::new()
-        .parse_module_str(include_str!("borrowed_list_iteration.vr"), FileId::new(100))
+        .parse_module_str(source, FileId::new(100))
         .unwrap();
     units.last_mut().unwrap().items.extend(client.items);
     let inputs: verum_common::List<_> = units.iter().collect();

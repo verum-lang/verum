@@ -217,7 +217,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         builder: &Builder<'ctx>,
         module: &Module<'ctx>,
     ) -> Result<PointerValue<'ctx>> {
-        self.lower_new_list_storage(builder, module, self.context.i64_type().const_zero())
+        self.lower_new_list_storage(builder, module, self.context.i64_type().const_zero(), verum_vbc::types::TypeId::LIST)
     }
 
     /// Create a value-slot list with CBGR-backed reserved capacity.
@@ -231,6 +231,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
             builder,
             module,
             self.context.i64_type().const_int(capacity, false),
+            verum_vbc::types::TypeId::LIST,
         )
     }
 
@@ -266,6 +267,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         builder: &Builder<'ctx>,
         module: &Module<'ctx>,
         capacity: IntValue<'ctx>,
+        encoding: verum_vbc::types::TypeId,
     ) -> Result<PointerValue<'ctx>> {
         let function = super::error::get_or_declare_function(
             module,
@@ -285,7 +287,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                     capacity.into(),
                     self.context
                         .i32_type()
-                        .const_int(verum_vbc::types::TypeId::LIST.0 as u64, false)
+                        .const_int(u64::from(encoding.0), false)
                         .into(),
                 ],
                 "list_obj",

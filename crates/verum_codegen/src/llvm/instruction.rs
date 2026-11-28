@@ -27082,44 +27082,17 @@ fn lower_mem_extended<'ctx>(
             Ok(())
         }
         0x06 => {
-            // NewByteList: operands = [dst, cap_reg]
-            //
-            // Allocates a `List<Byte>` with packed-byte backing — 1 byte
-            // per element instead of 8 bytes (NaN-boxed Value).  Closes
-            // red-team §4 runtime memory amplification.  Calls the
-            // runtime helper `verum_alloc_byte_list_packed(cap: i64)
-            // -> *mut u8` which mirrors interpreter's
-            // `alloc_byte_list_packed`: builds a 3-Value header tagged
-            // `TypeId::BYTE_LIST` + a `[u8; cap]` packed backing.
             let dst = read_reg_varlen(operands, &mut pos)?;
             let cap_reg = read_reg_varlen(operands, &mut pos)?;
-            let cap_raw = ctx.get_register(cap_reg)?;
-            let cap_i64 = as_i64(ctx, cap_raw, "byte_list_cap")?;
-            let module = ctx.get_module();
-            let ptr_ty = ctx.types().ptr_type();
-            let i64_ty = ctx.types().i64_type();
-            let fn_type = ptr_ty.fn_type(&[i64_ty.into()], false);
-            let alloc_fn = module
-                .get_function("verum_alloc_byte_list_packed")
-                .unwrap_or_else(|| {
-                    module.add_function(
-                        "verum_alloc_byte_list_packed",
-                        fn_type,
-                        None,
-                    )
-                });
-            let result = ctx
-                .builder()
-                .build_call(alloc_fn, &[cap_i64.into()], "byte_list_packed")
-                .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .ok_or_else(|| {
-                    LlvmLoweringError::internal(
-                        "NewByteList: expected return value",
-                    )
-                })?;
-            ctx.set_register(dst, result);
+            let capacity = as_i64(ctx, ctx.get_register(cap_reg)?, "byte_list_capacity")?;
+            let word = ctx.types().i64_type();
+            let minimum = word.const_int(16, false);
+            let small = ctx.builder().build_int_compare(IntPredicate::SLT, capacity, minimum, "small_capacity").or_llvm_err()?;
+            let capacity = ctx.builder().build_select(small, minimum, capacity, "packed_capacity").or_llvm_err()?.into_int_value();
+            let runtime = super::runtime::RuntimeLowering::new(ctx.llvm_context());
+            let list = runtime.lower_new_list_storage(ctx.builder(), ctx.get_module(), capacity, TypeId::BYTE_LIST)?;
+            ctx.set_register(dst, list.into());
+            ctx.mark_list_register(dst);
             Ok(())
         }
         op if op == MemSubOpcode::ListStorageEmptyLike.to_byte() => {

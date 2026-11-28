@@ -44,7 +44,7 @@ fn snapshot_storage<'ctx>(
 ) -> Result<(PointerValue<'ctx>, PointerValue<'ctx>)> {
     let b = ctx.builder();
     let rt = RuntimeLowering::new(ctx.llvm_context());
-    let owner = rt.lower_new_list_storage(b, ctx.get_module(), length)?;
+    let owner = rt.lower_new_list_storage(b, ctx.get_module(), length, verum_vbc::types::TypeId::LIST)?;
     let len = rt.list_field_address(
         b,
         owner,
