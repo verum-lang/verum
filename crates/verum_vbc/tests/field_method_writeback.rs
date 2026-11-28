@@ -3,14 +3,18 @@
 use std::sync::Arc;
 use verum_fast_parser::Parser;
 use verum_vbc::{
-    codegen::{CodegenConfig, ItemFailurePolicy, VbcCodegen},
+    codegen::{CodegenConfig, VbcCodegen},
     deserialize::deserialize_module,
     interpreter::Interpreter,
     serialize::serialize_module,
 };
 
+#[path = "fixtures/canonical_deref.rs"]
+mod canonical_deref;
+
 const TYPES: &str = r#"
-type Deref is protocol { type Target; fn deref(&self) -> &Self.Target; };
+module field_writeback;
+mount core.base.protocols.{Deref, DerefMut};
 type Slot is { value: Int };
 implement Slot {
     fn take(&mut self) -> Int { let previous = self.value; *self = Slot { value: 0 }; previous }
@@ -21,6 +25,9 @@ implement<T> Deref for Guard<T> {
     type Target = T;
     fn deref(&self) -> &T { self.target }
 }
+implement<T> DerefMut for Guard<T> {
+    fn deref_mut(&mut self) -> &mut T { self.target }
+}
 "#;
 
 fn run(source: &str) -> i64 {
@@ -28,12 +35,19 @@ fn run(source: &str) -> i64 {
     let ast = Parser::new(&source).parse_module().unwrap();
     let mut values = [0; 2];
     for (index, bootstrap) in [false, true].into_iter().enumerate() {
-        let mut cg = VbcCodegen::with_config(CodegenConfig::new("field_writeback"));
+        let config = CodegenConfig::new("field_writeback");
         let module = if bootstrap {
-            cg.collect_unit_declarations(&[&ast]).unwrap();
-            cg.compile_unit_items(&[&ast], ItemFailurePolicy::Strict).unwrap();
-            cg.finalize_module_from_state().unwrap()
-        } else { cg.compile_module(&ast).unwrap() };
+            canonical_deref::compile(config, &ast)
+        } else {
+            let protocols = canonical_deref::declarations();
+            let archive = VbcCodegen::with_config(CodegenConfig::new("core.base.protocols"))
+                .compile_module(&protocols).unwrap();
+            let archive = deserialize_module(&serialize_module(&archive).unwrap()).unwrap();
+            let mut codegen = VbcCodegen::with_config(config);
+            codegen.initialize();
+            codegen.import_archive_module_types(&archive);
+            codegen.compile_additional_module(&ast)
+        }.unwrap();
         let module = deserialize_module(&serialize_module(&module).unwrap()).unwrap();
         let entry = module.find_function_by_name("field_writeback.probe").unwrap();
         values[index] = Interpreter::new(Arc::new(module)).execute_function(entry).unwrap().as_i64();
@@ -77,12 +91,28 @@ fn probe() -> Int {
 }
 
 #[test]
+fn an_owned_scalar_receiver_only_reads_its_shared_parent() {
+    assert_eq!(run(r#"
+implement Int { fn advance(self, delta: Int) -> Int { self + delta } }
+type Reading is { value: Int };
+fn observe(shared: &Reading) -> Int { shared.value.advance(3) }
+fn probe() -> Int {
+    let reading = Reading { value: 19 };
+    observe(&reading) + reading.value
+}
+"#), 41);
+}
+
+#[test]
 fn a_wrappers_own_field_precedes_its_deref_target() {
     assert_eq!(run(r#"
 type OwnGuard is { left: Slot, target: &mut Store };
 implement Deref for OwnGuard {
     type Target = Store;
     fn deref(&self) -> &Store { self.target }
+}
+implement DerefMut for OwnGuard {
+    fn deref_mut(&mut self) -> &mut Store { self.target }
 }
 fn probe() -> Int {
     let mut store = Store { left: Slot { value: 17 }, right: Slot { value: 23 } };

@@ -16565,6 +16565,9 @@ impl VbcCodegen {
         } else {
             receiver_reg
         };
+        // Only this reborrow can replace the extracted field. A later owned
+        // argument transfer may also allocate a register, without writing it.
+        let write_back_receiver = actual_receiver != receiver_reg;
 
         // A by-value self parameter consumes the same declared owner as an
         // ordinary argument. Borrow adjustments preserve the caller's binding.
@@ -16948,27 +16951,8 @@ impl VbcCodegen {
             }
         }
 
-        // **Field-receiver writeback emission** (closes task #11
-        // chained-field case — see the matching capture-side comment
-        // before `compile_expr(receiver)` above).
-        //
-        // The post-call receiver_reg holds whatever value the method
-        // body wrote through `*self = …` (via the CBGR ref the
-        // `RefMut` instruction created), OR the unchanged extracted
-        // field value if the body didn't mutate.  Either way, the
-        // SetF below makes the parent-record-field invariant
-        // truthful again: `b.inner.<&mut self method>()` now leaves
-        // `b.inner` reflecting whatever the method's body decided.
-        //
-        // Only fires when (a) the receiver was actually a field
-        // expression (captured upfront) AND (b) the method actually
-        // takes `&mut self` (so a RefMut was emitted, so the body
-        // could have mutated the temp).  For value-receiver methods
-        // (`&self`, owned `self`) the writeback is skipped — they
-        // can't have mutated the temp.
         if let Some((base_reg, field_idx, wb_guessed, wb_field)) = field_writeback_target {
-            let did_refmut = actual_receiver != receiver_reg;
-            if did_refmut {
+            if write_back_receiver {
                 self.emit_field_write(base_reg, field_idx, receiver_reg, wb_guessed, &wb_field);
             }
             self.ctx.free_temp(base_reg);
