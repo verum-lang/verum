@@ -580,8 +580,29 @@ pub(super) fn handle_bound_method(
     execute_method_call(state, declared_receiver, instruction_pc, dst, receiver_reg, method_id, args)
 }
 
-/// Enter a resolved body using its declared self convention. Mutable methods
-/// borrow the caller's slot when their receiver is an unwrapped value.
+/// Pass an existing place through, or borrow the actual caller slot holding
+/// the value. A Deref redispatch can supply a different place from that slot.
+fn borrow_method_receiver(
+    state: &InterpreterState, receiver: Value, register: Reg, mutable: bool,
+) -> InterpreterResult<Value> {
+    use super::cbgr_helpers::{encode_cbgr_ref, encode_cbgr_ref_mut, strip_cbgr_ref_mutability};
+    if is_cbgr_ref(&receiver) {
+        return Ok(if mutable { receiver } else { strip_cbgr_ref_mutability(receiver) });
+    }
+    if receiver.is_thin_ref() || receiver.is_fat_ref() {
+        return Ok(receiver);
+    }
+    if state.get_reg(register).to_bits() != receiver.to_bits() {
+        return Err(InterpreterError::InvalidOperand {
+            message: "a borrowed method receiver must identify its originating place".into(),
+        });
+    }
+    let slot = state.reg_base() + u32::from(register.0);
+    let generation = state.registers.get_generation(slot);
+    Ok(if mutable { encode_cbgr_ref_mut(slot, generation) } else { encode_cbgr_ref(slot, generation) })
+}
+
+/// Enter a resolved body using the receiver convention on its declaration.
 fn enter_resolved_method(
     state: &mut InterpreterState,
     target: FunctionId,
@@ -598,17 +619,12 @@ fn enter_resolved_method(
     let takes_self = first.is_some_and(|p| {
         state.module.get_string(p.name).is_none_or(|name| name == "self")
     });
-    let borrows_mut = first.is_some_and(|p| state.module.get_string(p.name) == Some("self")
-        && matches!(p.type_ref, crate::types::TypeRef::Reference {
-            mutability: crate::types::Mutability::Mutable, ..
-        }));
     let caller = state.reg_base();
-    let self_value = if borrows_mut && !is_cbgr_ref(&receiver)
-        && !receiver.is_thin_ref() && !receiver.is_fat_ref()
-    {
-        let slot = caller + u32::from(receiver_reg.0);
-        super::cbgr_helpers::encode_cbgr_ref_mut(slot, state.registers.get_generation(slot))
-    } else { receiver };
+    let self_value = match first.filter(|p| state.module.get_string(p.name) == Some("self")).map(|p| &p.type_ref) {
+        Some(crate::types::TypeRef::Reference { mutability, .. }) =>
+            borrow_method_receiver(state, receiver, receiver_reg, *mutability == crate::types::Mutability::Mutable)?,
+        _ => receiver,
+    };
     let base = state.call_stack.push_frame(target, reg_count, state.pc(), dst)?;
     state.registers.push_frame(reg_count);
     if let Some(witnesses) = witnesses {
@@ -933,13 +949,8 @@ fn execute_method_call(
     {
         let slot = state.reg_base() + u32::from(receiver_reg.0);
         let receiver_slot = (!target.borrows_self).then_some(slot);
-        let receiver = if target.borrows_self && !is_cbgr_ref(&receiver) {
-            let generation = state.registers.get_generation(slot);
-            if target.mutable_self {
-                super::cbgr_helpers::encode_cbgr_ref_mut(slot, generation)
-            } else {
-                super::cbgr_helpers::encode_cbgr_ref(slot, generation)
-            }
+        let receiver = if target.borrows_self {
+            borrow_method_receiver(state, receiver, receiver_reg, target.mutable_self)?
         } else {
             receiver
         };

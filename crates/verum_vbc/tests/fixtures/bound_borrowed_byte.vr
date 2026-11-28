@@ -1,0 +1,12 @@
+type Sample is protocol { fn sample(&self) -> Byte; };
+implement Sample for Byte { fn sample(&self) -> Byte { *self } }
+
+fn read<T: Sample>(values: &[T]) -> Byte { values[1].sample() }
+fn read_place<T: Sample>(value: &T) -> Byte { value.sample() }
+fn run() -> Int {
+    let values: [Byte; 2] = [17_u8, 73_u8];
+    let value: Byte = 11_u8;
+    assert_eq(read_place<Byte>(&value), 11_u8);
+    read<Byte>(&values) as Int
+}
+fn main() -> Int { run() }

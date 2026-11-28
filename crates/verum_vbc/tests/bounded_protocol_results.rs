@@ -213,6 +213,12 @@ fn execute_source_and_wire(module: VbcModule, expected: i64) {
 }
 
 #[test]
+fn a_protocol_call_passes_its_declared_shared_receiver_to_a_scalar_body() {
+    let source = parse(concat!("module consumer;\n", include_str!("fixtures/bound_borrowed_byte.vr")));
+    execute_source_and_wire(compile(&[&source]).unwrap(), 73);
+}
+
+#[test]
 fn constrained_dispatch_executes_the_selected_protocol_implementation() {
     let module = constrained(r#"
         mount provider.Outcome as OwnedOutcome;
