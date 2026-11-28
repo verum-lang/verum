@@ -19501,8 +19501,8 @@ impl VbcCodegen {
             }
 
             // Compile arm body
-            if temporary && can_transfer {
-                self.record_retiring_pattern_fields(&arm.pattern, scrutinee_reg);
+            if can_transfer {
+                self.record_retiring_pattern_fields(&arm.pattern, scrutinee_reg, temporary, &arm.body, subject);
             }
             let arm_start = self.ctx.instructions.len();
             let field = (can_transfer && demand.is_used())
@@ -19583,19 +19583,55 @@ impl VbcCodegen {
     /// Direct by-value bindings are distinct slots of the selected variant.
     /// Guard evaluation has finished. Observation leaves ownership in the
     /// temporary, and a later consuming edge can retire just its own field.
-    fn record_retiring_pattern_fields(&mut self, pattern: &verum_ast::Pattern, owner: Reg) {
+    fn record_retiring_pattern_fields(
+        &mut self, pattern: &verum_ast::Pattern, owner: Reg, temporary: bool, body: &Expr, subject: Option<&str>,
+    ) {
+        use super::value_uses::RetiringVariantField;
         use verum_ast::{PatternKind, VariantPatternData};
         use verum_common::ResourceDiscipline;
         let PatternKind::Variant { data: Some(VariantPatternData::Tuple(parts)), .. } = &pattern.kind else { return };
+        // A straight-line result can hand an owned operand directly to its
+        // declared destination. Captures, repeated evaluation, and observing
+        // the original sum all keep the ownership obligation in its shell.
+        let mut pending = vec![body];
+        let mut names = verum_common::Map::<&str, u8>::new();
+        while let Some(expr) = pending.pop() {
+            match &Self::normalized_place(expr).kind {
+                ExprKind::Path(path) => {
+                    let name = match path.segments.first() {
+                        Some(verum_ast::PathSegment::Name(name)) => name.as_str(),
+                        Some(verum_ast::PathSegment::SelfValue) => "self",
+                        _ => continue,
+                    };
+                    if subject == Some(name) { names.clear(); break; }
+                    let count = names.entry(name).or_default();
+                    *count = count.saturating_add(1);
+                }
+                ExprKind::Call { func, args, .. } => {
+                    pending.push(func);
+                    pending.extend(args.iter());
+                }
+                ExprKind::MethodCall { receiver, args, .. } => {
+                    pending.push(receiver);
+                    pending.extend(args.iter());
+                }
+                ExprKind::Field { expr, .. } | ExprKind::NamedArg { value: expr, .. } => pending.push(expr),
+                ExprKind::Tuple(elements) => pending.extend(elements.iter()),
+                ExprKind::Literal(_) => {}
+                _ => { names.clear(); break; }
+            }
+        }
         for (field, part) in parts.iter().enumerate() {
             let PatternKind::Ident { name, mutable: false, by_ref: false, subpattern: None } = &part.kind else { continue };
             let Some(binding) = self.ctx.lookup_var(name.as_str()) else { continue };
             if binding.pattern_alias != Some(super::registers::PatternAlias::Scrutinee) { continue; }
             let (reg, id) = (binding.reg, binding.binding_id);
+            let final_use = names.get(&name.as_str()) == Some(&1);
             if let Some(fact) = self.ctx.registers.value_uses.active.get_mut(&reg)
-                && fact.id == id && matches!(fact.discipline, ResourceDiscipline::Affine | ResourceDiscipline::Linear)
+                && fact.id == id && (final_use || temporary
+                    && matches!(fact.discipline, ResourceDiscipline::Affine | ResourceDiscipline::Linear))
             {
-                fact.retiring_variant_field = Some((owner, field as u32));
+                fact.retiring_variant_field = Some(RetiringVariantField { owner, field: field as u32, final_use });
             }
         }
     }

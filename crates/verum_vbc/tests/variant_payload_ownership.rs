@@ -484,3 +484,27 @@ fn a_condition_preserves_a_field_observed_by_its_guard_or_subject_destructor() {
         }
     }
 }
+
+#[test]
+fn a_retiring_generic_sum_transfers_its_field_to_a_constructor_or_value_parameter() {
+    run(concat!("mount core.base.protocols.Drop;\n", include_str!("fixtures/forward_owned_variant.vr")));
+}
+
+#[test]
+fn a_forwarding_arm_cannot_consume_a_field_observed_by_its_guard() {
+    let source = r#"
+        type affine Token is { value: Int };
+        type Message<T> is Present(T) | Absent;
+        fn allows(item:&Token) -> Bool { item.value > 0 }
+        fn forward(input:Message<Token>) -> Message<Token> {
+            match input {
+                Message.Present(item) if allows(&item) => Message.Present(item),
+                _ => Message.Absent,
+            }
+        }
+    "#;
+    for unit in [false, true] {
+        let error = compile(source, unit).expect_err("the guard observed this owned field");
+        assert!(error.to_string().contains("still owned by the scrutinee"), "{error}");
+    }
+}

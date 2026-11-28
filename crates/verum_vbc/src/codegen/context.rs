@@ -2237,8 +2237,8 @@ impl CodegenContext {
     pub(super) fn clear_transferred_source(&mut self, source: Reg) {
         let field = self.registers.value_uses.active.get(&source).and_then(|fact| fact.retiring_variant_field);
         self.emit(Instruction::LoadUnit { dst: source });
-        if let Some((variant, field)) = field {
-            self.emit(Instruction::SetVariantData { variant, field, value: source });
+        if let Some(field) = field {
+            self.emit(Instruction::SetVariantData { variant: field.owner, field: field.field, value: source });
         }
     }
 

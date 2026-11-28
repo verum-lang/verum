@@ -25,6 +25,14 @@ pub(super) enum ParameterOwnership {
     RawAddress,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(super) struct RetiringVariantField {
+    pub owner: Reg,
+    pub field: u32,
+    /// The selected arm evaluates exactly one occurrence and cannot revisit it.
+    pub final_use: bool,
+}
+
 #[derive(Debug, Clone)]
 pub(super) struct BindingFact {
     pub id: BindingId,
@@ -34,7 +42,7 @@ pub(super) struct BindingFact {
     pub discipline: ResourceDiscipline,
     /// An exclusive pattern binding can take this field of an owned, temporary
     /// sum on a consuming edge. Until that edge the shell keeps its drop obligation.
-    pub(super) retiring_variant_field: Option<(Reg, u32)>,
+    pub(super) retiring_variant_field: Option<RetiringVariantField>,
 }
 #[derive(Debug, Clone, Copy, Default)]
 pub(super) struct ReturnUseCapture {
@@ -384,6 +392,11 @@ impl super::VbcCodegen {
         let ty = self.runtime_member_witness(ty);
         let result = self.ctx.registers.alloc_fresh();
         let unrestricted = self.resource_is_unrestricted(ty.clone());
+        if self.takes_final_variant_field(source) {
+            self.ctx.free_temp(unrestricted);
+            self.ctx.emit_transferring_value(result, source);
+            return result;
+        }
         let copy_label = self.ctx.new_label("resource_copy");
         let done = self.ctx.new_label("resource_received");
         self.ctx.emit_forward_jump(&copy_label, |offset| Instruction::JmpIf { cond: unrestricted, offset });
@@ -822,7 +835,13 @@ impl super::VbcCodegen {
     /// Shorthand fields use the same exact binding contract as expression fields.
     pub(super) fn consumes_named_binding(&self, name: &str, reg: Reg) -> bool {
         self.named_ownership_carrier(name, reg).is_some_and(|(_, discipline)|
-            matches!(discipline, ResourceDiscipline::Affine | ResourceDiscipline::Linear))
+            matches!(discipline, ResourceDiscipline::Affine | ResourceDiscipline::Linear)
+                || self.takes_final_variant_field(reg))
+    }
+
+    fn takes_final_variant_field(&self, reg: Reg) -> bool {
+        self.ctx.registers.value_uses.active.get(&reg)
+            .and_then(|fact| fact.retiring_variant_field).is_some_and(|field| field.final_use)
     }
 
     /// A pattern alias has no owned cleanup only when the current binding's

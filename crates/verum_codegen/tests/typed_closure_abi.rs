@@ -329,6 +329,28 @@ fn compile_cleanup_source(source: &str) -> VbcModule {
     compiler.finalize_module_from_state().unwrap()
 }
 
+#[test]
+fn final_generic_variant_fields_reach_their_owning_native_destinations() {
+    let source = include_str!("../../verum_vbc/tests/fixtures/forward_owned_variant.vr");
+    let module = specialize_closures(compile_cleanup_source(source));
+    let image = verum_vbc::serialize::serialize_module(&module).unwrap();
+    let decoded = verum_vbc::deserialize::deserialize_module_validated(&image).unwrap();
+    for mut module in [module, decoded] {
+        for function in &mut module.functions {
+            let start = function.bytecode_offset as usize;
+            let end = start + function.bytecode_length as usize;
+            let mut body = verum_vbc::bytecode::decode_instructions(&module.bytecode[start..end]).unwrap();
+            verum_vbc::bytecode::jump_offsets_to_instr_indices(&mut body);
+            function.instructions = Some(body);
+        }
+        with_native(&module, |library| {
+            // SAFETY: the generated adapter has probe's zero-argument Int signature.
+            let result = unsafe { library.get::<unsafe extern "C" fn() -> i64>(b"invoke_probe").unwrap()() };
+            assert_eq!(result, 73);
+        });
+    }
+}
+
 fn typed_cleanup_module(body: &str) -> VbcModule {
     use verum_vbc::{Instruction, bytecode::encode_instruction, instruction::Reg};
     let mut module = compile_cleanup_source(&format!(r#"

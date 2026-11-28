@@ -1,0 +1,31 @@
+type affine Ticket is { weight: Int };
+type Receipt is { weight: Int };
+type Message<T> is Success(T) | Failure(T);
+
+fn count(delta: Int) -> Int {
+    static mut TOTAL: Int = 0;
+    TOTAL += delta;
+    TOTAL
+}
+
+implement Drop for Ticket { fn drop(&mut self) { let _ = count(self.weight); } }
+implement Drop for Receipt { fn drop(&mut self) { let _ = count(self.weight); } }
+
+fn deliver<T>(item: T) -> T { item }
+
+fn forward<T>(input: Message<T>) -> Message<T> {
+    match input {
+        Message.Success(item) => Message.Success(item),
+        Message.Failure(item) => Message.Failure(deliver<T>(item)),
+    }
+}
+
+fn probe() -> Int {
+    {
+        let first = forward<Ticket>(Message.Success(Ticket { weight: 1 }));
+        let second = forward<Ticket>(Message.Failure(Ticket { weight: 8 }));
+        let third = forward<Receipt>(Message.Success(Receipt { weight: 64 }));
+        if count(0) != 0 { return -1; }
+    }
+    count(0)
+}
