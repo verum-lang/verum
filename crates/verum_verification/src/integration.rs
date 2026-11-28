@@ -159,8 +159,7 @@ impl TypeSystemIntegration {
             // CapabilityRestricted types - check base type for refinements
             Type::CapabilityRestricted { base, .. } => Self::has_refinement(base),
 
-            // Dynamic protocol types - check associated type bindings for refinements
-            Type::DynProtocol { bindings, .. } => bindings.values().any(Self::has_refinement),
+            Type::DynProtocol { bounds } => bounds.iter().flat_map(|bound| bound.types()).any(Self::has_refinement),
         }
     }
 

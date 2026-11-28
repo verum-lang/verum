@@ -1689,17 +1689,25 @@ fn parse_descriptor_type(raw: &str, resolve_bound: &impl Fn(&str) -> Text) -> Ty
             .strip_prefix("dyn:")
             .or_else(|| trimmed.strip_prefix("dyn "));
         if let Some(body) = dyn_body {
-            let bounds: List<Text> = body
-                .split('+')
-                .map(str::trim)
-                .filter(|bound| !bound.is_empty())
-                .map(resolve_bound)
-                .collect();
-            if !bounds.is_empty() {
-                return Type::DynProtocol {
-                    bounds,
-                    bindings: verum_common::Map::new(),
-                };
+            let bounds = split_top_level(body, '+').into_iter().map(|part| {
+                let part = part.trim();
+                let (owner, arguments) = part.strip_suffix('>').and_then(|applied| applied.split_once('<'))
+                    .map_or((part, None), |(owner, args)| (owner.trim(), Some(args)));
+                let mut bound = crate::protocol::ProtocolBound::object(&resolve_bound(owner));
+                for arg in arguments.into_iter().flat_map(split_top_level_commas) {
+                    let fields = split_top_level(arg, '=');
+                    match fields.as_slice() {
+                        [argument] => bound.args.push(parse(argument.trim())),
+                        [name, value] => {
+                            bound.associated_types.insert(name.trim().into(), parse(value.trim()));
+                        }
+                        _ => return None,
+                    }
+                }
+                Some(bound)
+            }).collect::<Option<List<_>>>();
+            if let Some(bounds) = bounds {
+                return Type::DynProtocol { bounds };
             }
         }
     }
@@ -1888,6 +1896,10 @@ fn parse_descriptor_type(raw: &str, resolve_bound: &impl Fn(&str) -> Text) -> Ty
 /// nesting in `<>`/`()`/`[]`.  Used by
 /// `parse_descriptor_type_string` for generic-arg lists.
 pub(crate) fn split_top_level_commas(s: &str) -> Vec<&str> {
+    split_top_level(s, ',')
+}
+
+fn split_top_level(s: &str, separator: char) -> Vec<&str> {
     let mut depth: i32 = 0;
     let mut start = 0;
     let mut out = Vec::new();
@@ -1895,7 +1907,7 @@ pub(crate) fn split_top_level_commas(s: &str) -> Vec<&str> {
         match c {
             '<' | '(' | '[' => depth += 1,
             '>' | ')' | ']' => depth -= 1,
-            ',' if depth == 0 => {
+            c if c == separator && depth == 0 => {
                 out.push(&s[start..i]);
                 start = i + c.len_utf8();
             }

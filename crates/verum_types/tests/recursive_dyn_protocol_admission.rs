@@ -283,10 +283,7 @@ fn recursive_source_sidecar_replays_complete_dyn_header() {
     let verum_types::Type::DynProtocol { bounds, .. } = inner.as_ref() else {
         panic!("dyn result")
     };
-    assert_eq!(
-        bounds.as_slice(),
-        &[verum_common::Text::from("owner.Recursive")]
-    );
+    assert_eq!(bounds.as_slice(), &[verum_types::protocol::ProtocolBound::object("owner.Recursive")]);
 }
 #[test]
 fn unsafe_recursive_source_sidecar_never_publishes() {
@@ -409,23 +406,28 @@ fn recursive_object_obligations_keep_independent_associated_bindings() {
 
 #[test]
 fn associated_object_results_survive_source_and_metadata_replay() {
-    let provider = "public type Feed is protocol { type Item; fn get(&self) -> Self.Item; };";
-    for (result, valid) in [("Int", true), ("Bool", false)] {
-        let consumer = format!("mount fixture.lib.Feed as Renamed;
-            fn read(x: &dyn Renamed<Item = Int>) -> {result} {{ x.get() }}");
-        let mut checker = replay("type Feed is protocol { type Item; fn get(&self) -> Self.Item; };");
-        checker.set_current_module_path("fixture.client");
-        let metadata_consumer = format!("mount owner.Feed;
-            fn read(x: &dyn Feed<Item = Int>) -> {result} {{ x.get() }}");
-        let archive_ast = FastParser::new().parse_module_str(&metadata_consumer, FileId::new(19)).unwrap();
-        let mut diagnostics = checker.prepare_module_declarations(&archive_ast);
-        for item in &archive_ast.items {
-            if let Err(error) = checker.check_item(item) { diagnostics.push(error); }
+    for (provider, application, argument) in [
+        ("public type Feed is protocol {type Item; fn get(&self)->Self.Item;};", "<Item=Int>", ""),
+        ("public type Feed<T,N:meta Int> is protocol {type Item; fn get(&self, key:T)->Self.Item;};",
+            "<Bool,7,Item=Int>", "true"),
+    ] {
+        for (result, valid) in [("Int", true), ("Bool", false)] {
+            let consumer = format!("mount fixture.lib.Feed as Renamed;
+                fn read(x:&dyn Renamed{application})->{result} {{x.get({argument})}}");
+            let mut checker = replay(provider);
+            checker.set_current_module_path("fixture.client");
+            let metadata_consumer = format!("mount owner.Feed;
+                fn read(x:&dyn Feed{application})->{result} {{x.get({argument})}}");
+            let archive_ast = FastParser::new().parse_module_str(&metadata_consumer, FileId::new(19)).unwrap();
+            let mut diagnostics = checker.prepare_module_declarations(&archive_ast);
+            for item in &archive_ast.items {
+                if let Err(error) = checker.check_item(item) { diagnostics.push(error); }
+            }
+            diagnostics.extend(checker.take_deferred_errors());
+            assert_eq!(diagnostics.is_empty(), valid, "{metadata_consumer}: {diagnostics:?}");
+            let errors = imported(&consumer, provider, None);
+            assert_eq!(errors.is_empty(), valid, "{consumer}: {errors:?}");
         }
-        diagnostics.extend(checker.take_deferred_errors());
-        assert_eq!(diagnostics.is_empty(), valid, "{metadata_consumer}: {diagnostics:?}");
-        let errors = imported(&consumer, provider, None);
-        assert_eq!(errors.is_empty(), valid, "{consumer}: {errors:?}");
     }
 }
 
@@ -638,8 +640,7 @@ fn unknown_dynamic_owner_cannot_supply_a_protocol_bound() {
     ));
     for owner in ["owner.Source", "foreign.Source", "Missing"] {
         let object = Type::DynProtocol {
-            bounds: [owner.into()].into_iter().collect(),
-            bindings: Default::default(),
+            bounds: [ProtocolBound::object(owner)].into_iter().collect(),
         };
         assert_eq!(
             registry
@@ -671,8 +672,7 @@ fn unverified_dynamic_telescope_cannot_reuse_prior_evidence() {
         Default::default(),
     )));
     let object = Type::DynProtocol {
-        bounds: ["owner.Source".into()].into_iter().collect(),
-        bindings: Default::default(),
+        bounds: [ProtocolBound::object("owner.Source")].into_iter().collect(),
     };
     let valid = checker
         .protocol_checker
@@ -739,22 +739,85 @@ fn dynamic_inheritance_cannot_erase_an_unproved_refined_value_domain() {
 }
 
 #[test]
-fn generic_dynamic_bounds_are_never_silently_erased() {
-    for source in [
-        "type Policy<T> is protocol {fn read(&self)->Int;}; fn inspect(value:&dyn Policy<Int>)->Int {73}",
-        "type Policy<T> is protocol {fn read(&self)->Int;}; fn inspect<T>(value:&dyn Policy<T>)->Int {73}",
-        "type Policy<T> is protocol {fn read(&self)->Int;}; type Plain is protocol {fn read(&self)->Int;}; fn inspect(value:&dyn Policy<Int>+Plain)->Int {73}",
-    ] {
-        let failures = errors(source);
-        assert!(failures.iter().any(|error| error.contains("generic dynamic protocol bounds require declaration-owned argument support")),
-            "unsupported application disappeared: {source}\n{failures:#?}");
-    }
+fn generic_dynamic_arguments_control_dispatch_erasure_and_generic_calls() {
+    let declarations = "
+        type Policy<T> is protocol {fn read(&self)->T; fn put(&self, x:T);};
+        type Marker is protocol {};
+        type Log is ();
+        implement Policy<Int> for Log {fn read(&self)->Int {41} fn put(&self, x:Int) {}}
+        fn need<S:Policy<Int>>(value:&S)->Int { value.read() }";
+    for body in [
+        "fn inspect(value:&dyn Policy<Int>)->Int {value.put(41); value.read()}",
+        "fn erase(value:&Log)->&dyn Policy<Int> {value}",
+        "fn inspect<T>(value:&dyn Policy<T>, x:T)->T {value.put(x); value.read()}",
+        "fn inspect(value:&dyn Marker + Policy<Int>)->Int {need(value)}",
+    ] { good(&format!("{declarations} {body}")); }
+    for body in [
+        "fn inspect(value:&dyn Policy<Int>)->Bool {value.read()}",
+        "fn inspect(value:&dyn Policy<Int>) {value.put(true);}",
+        "fn inspect(value:&dyn Policy<Bool>)->Int {need(value)}",
+        "fn erase(value:&Log)->&dyn Policy<Bool> {value}",
+        "fn swap(x:&dyn Policy<Bool>)->&dyn Policy<Int> {x}",
+        "fn missing(value:&dyn Policy) {}",
+        "fn extra(value:&dyn Policy<Int,Bool>) {}",
+        "fn wrong_kind(value:&dyn Policy<7>) {}",
+        "fn unknown(value:&dyn Policy<Missing>) {}",
+    ] { bad(&format!("{declarations} {body}")); }
 }
 
 #[test]
-fn imported_generic_dynamic_bounds_keep_the_same_refusal() {
-    let failures = imported("mount fixture.lib.Policy; fn inspect(value:&dyn Policy<Int>)->Int {73}",
-        "public type Policy<T> is protocol {fn read(&self)->Int;};", None);
-    assert!(failures.iter().any(|error| error.contains("generic dynamic protocol bounds require declaration-owned argument support")),
-        "{failures:#?}");
+fn dynamic_application_defaults_kinds_constraints_and_inheritance() {
+    let declarations = "
+        type Flag is protocol {}; type Yes is (); implement Flag for Yes {}
+        type Gate<T:Flag> is protocol {fn accept(&self, x:T);};
+        type Family<T,N:meta Int> is protocol {fn read(&self)->T;};
+        type Child<A> is protocol extends Family<A,7> {};
+        type Copied<A,B=A> is protocol {fn value(&self)->B;};
+        type Identity<A=Self> is protocol {};";
+    for body in [
+        "fn inherit(x:&dyn Child<Bool>)->Bool {x.read()}",
+        "fn read<A:Flag>(x:&dyn Gate<A>, a:A) {x.accept(a);}",
+        "fn concrete(x:&dyn Gate<Yes>) {}",
+        "fn defaulted(x:&dyn Copied<Int>)->Int {x.value()}",
+        "fn need<P:Family<Int,7>>(x:&P) {} fn check(x:&dyn Family<Int,7>) {need(x);}",
+        "fn explicit(x:&dyn Identity<Int>) {}",
+    ] { good(&format!("{declarations} {body}")); }
+    for body in [
+        "fn inherit(x:&dyn Child<Bool>)->Int {x.read()}",
+        "fn wrong(x:&dyn Gate<Bool>) {}",
+        "fn unproved<T>(x:&dyn Gate<T>) {}",
+        "fn wrong(x:&dyn Family<Int,Bool>) {}",
+        "fn need<P:Family<Int,8>>(x:&P) {} fn check(x:&dyn Family<Int,7>) {need(x);}",
+        "fn erased_self(x:&dyn Identity) {}",
+    ] { bad(&format!("{declarations} {body}")); }
+}
+
+#[test]
+fn failed_parent_cannot_replace_the_childs_parameter_domain() {
+    let source = "type Flag is protocol {}; type Gate<T:Flag> is protocol {};
+        type Broken<T:Flag> is protocol {fn get(&self)->Self.Missing;};
+        type Child<T:Flag> is protocol extends Broken<T> {fn edit(&self, x:&dyn Gate<T>);};";
+    let diagnostics = errors(source);
+    assert!(diagnostics.iter().any(|error| error.contains("Missing")), "{diagnostics:?}");
+    assert!(!diagnostics.iter().any(|error| error.contains("no implementation proves")), "{diagnostics:?}");
+}
+
+#[test]
+fn imported_dynamic_arguments_keep_owner_and_associated_equality() {
+    let provider = "public type Policy<T> is protocol {type Item; fn read(&self, t:T)->Self.Item;};";
+    let source = "mount fixture.lib.Policy as Chosen;
+        fn client(x:&dyn Chosen<Int,Item=Bool>)->Bool {x.read(2)}";
+    let diagnostics = imported(source, provider, None);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    for source in [
+        "mount fixture.lib.Policy as Chosen;
+            fn client(x:&dyn Chosen<Int,Item=Bool>)->Bool {x.read(false)}",
+        "mount fixture.lib.Policy;
+            fn client(x:&dyn Policy<Int,Item=Bool>)->Int {x.read(2)}",
+        "mount fixture.lib.Policy; mount fixture.foreign.Policy as Other;
+            fn client(x:&dyn Policy<Int,Item=Bool>)->&dyn Other<Int,Item=Bool> {x}",
+        "mount fixture.lib.Policy; fn client(x:&dyn Policy<Int,Other=Bool>) {}",
+    ] {
+        assert!(!imported(source, provider, Some(provider)).is_empty(), "{source}");
+    }
 }

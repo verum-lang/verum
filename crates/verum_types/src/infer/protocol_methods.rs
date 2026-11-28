@@ -607,6 +607,22 @@ impl TypeChecker {
         arguments: &[Type],
         span: Span,
     ) -> Result<ProtocolMethod> {
+        // Erasure binds a method's Self projections to its exact declaring
+        // application. Substitute them before argument types enter the signature.
+        let mut object_method;
+        let method = if let ProtocolMethodReceiver::Call(subject @ Type::DynProtocol { .. }) = receiver
+            && method.ty.contains_type(|ty| ty.self_projection_name().is_some())
+        {
+            object_method = method.clone();
+            let registry = self.protocol_checker.read();
+            let path = Self::text_to_path(owner);
+            object_method.ty.try_replace_types(|ty| {
+                let Some(name) = ty.self_projection_name() else { return Ok(None) };
+                registry.resolve_associated_type_for_instantiation(subject, &path, arguments, &name.into())
+                    .map(Some).map_err(|error| invalid(span, error.to_string()))
+            })?;
+            &object_method
+        } else { method };
         let mut applied = method
             .apply_owner(arguments, receiver.declared())
             .map_err(|message| invalid(span, message))?;

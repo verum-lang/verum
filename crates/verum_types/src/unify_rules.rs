@@ -652,74 +652,30 @@ impl Unifier {
         t2: &Type,
         span: Span,
     ) -> Result<Substitution> {
-        let (
-            DynProtocol {
-                bounds: b1,
-                bindings: bi1,
-            },
-            DynProtocol {
-                bounds: b2,
-                bindings: bi2,
-            },
-        ) = (t1, t2)
-        else {
+        let (DynProtocol { bounds: left }, DynProtocol { bounds: right }) = (t1, t2) else {
             unreachable!("unification rule selected for different constructors")
         };
-
-        // Bounds must match (same protocols)
-        if b1.len() != b2.len() {
-            return Err(TypeError::Mismatch {
-                expected: t2.diagnostic_text(),
-                actual: t1.diagnostic_text(),
-                span,
-            });
-        }
-
-        // Check each bound matches (order-sensitive)
-        for (bound1, bound2) in b1.iter().zip(b2.iter()) {
-            if bound1 != bound2 {
-                return Err(TypeError::Mismatch {
-                    expected: t2.diagnostic_text(),
-                    actual: t1.diagnostic_text(),
-                    span,
-                });
-            }
-        }
-
-        // Unify associated type bindings
-        if bi1.len() != bi2.len() {
-            return Err(TypeError::Mismatch {
-                expected: t2.diagnostic_text(),
-                actual: t1.diagnostic_text(),
-                span,
-            });
-        }
-
+        let mismatch = || TypeError::Mismatch {
+            expected: t2.diagnostic_text(), actual: t1.diagnostic_text(), span,
+        };
+        if left.len() != right.len() { return Err(mismatch()); }
         let mut subst = Substitution::new();
-        for (name, ty1) in bi1.iter() {
-            match bi2.get(name) {
-                Some(ty2) => {
-                    let s = self.unify_inner(
-                        &ty1.try_apply_subst(&subst)
-                            .map_err(|message| TypeError::UniverseBinding { message, span })?,
-                        &ty2.try_apply_subst(&subst)
-                            .map_err(|message| TypeError::UniverseBinding { message, span })?,
-                        span,
-                    )?;
-                    subst = subst
-                        .compose(&s)
-                        .map_err(|message| TypeError::UniverseBinding { message, span })?;
-                }
-                None => {
-                    return Err(TypeError::Mismatch {
-                        expected: t2.diagnostic_text(),
-                        actual: t1.diagnostic_text(),
-                        span,
-                    });
-                }
+        for (a, b) in left.iter().zip(right) {
+            if a.is_negative || b.is_negative || !crate::ty::same_type_path(&a.protocol, &b.protocol)
+                || a.args.len() != b.args.len() || a.associated_types.len() != b.associated_types.len()
+            {
+                return Err(mismatch());
+            }
+            let args = a.args.iter().zip(&b.args).map(|(a, b)| (a, Some(b)));
+            let equalities = a.associated_types.iter().map(|(name, a)| (a, b.associated_types.get(name)));
+            for (a, b) in args.chain(equalities) {
+                let b = b.ok_or_else(&mismatch)?;
+                let apply = |ty: &Type| ty.try_apply_subst(&subst)
+                    .map_err(|message| TypeError::UniverseBinding { message, span });
+                let next = self.unify_inner(&apply(a)?, &apply(b)?, span)?;
+                subst = subst.compose(&next).map_err(|message| TypeError::UniverseBinding { message, span })?;
             }
         }
-
         Ok(subst)
     }
     pub(super) fn unify_references(

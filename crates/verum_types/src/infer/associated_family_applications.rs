@@ -169,7 +169,7 @@ impl TypeChecker {
                     | Type::Tensor { element, .. } => pending.push(element),
                     Type::Record(fields) | Type::Variant(fields) => pending.extend(fields.values()),
                     Type::ExtensibleRecord { fields, .. } => pending.extend(fields.values()),
-                    Type::DynProtocol { bindings, .. } => pending.extend(bindings.values()),
+                    Type::DynProtocol { bounds } => pending.extend(bounds.iter().flat_map(|bound| bound.types())),
                     Type::Forall { body, .. } | Type::Exists { body, .. } => pending.push(body),
                     Type::Refined { base, .. } | Type::CapabilityRestricted { base, .. } => {
                         pending.push(base)

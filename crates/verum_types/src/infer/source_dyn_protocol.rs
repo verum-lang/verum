@@ -1,8 +1,8 @@
 //! Recursive `dyn` uses carry an obligation until their complete source
 //! declaration has been checked. A nominal placeholder alone is not authority.
 use super::TypeChecker;
-use crate::{Result, Type, TypeError, protocol::{ObjectSafetyError, Protocol, ProtocolBound, ProtocolChecker}};
-use verum_ast::{Span, ty::{TypeBinding, TypeBound, TypeBoundKind}};
+use crate::{Result, Type, TypeError, protocol::{ObjectSafetyError, Protocol, ProtocolBound, ProtocolChecker, ProtocolConstraints}};
+use verum_ast::{GenericArg, Span, ty::{TypeBinding, TypeBound, TypeBoundKind, TypeKind}};
 use verum_common::{List, Map, Set, Text};
 
 fn binding_error(span: Span, message: impl Into<Text>) -> TypeError {
@@ -67,7 +67,7 @@ impl TypeChecker {
         bindings: Option<&[TypeBinding]>,
         span: Span,
     ) -> Result<Type> {
-        let mut names = List::new();
+        let mut applications = List::new();
         let mut binding_types = Map::new();
         for binding in bindings.into_iter().flatten() {
             let ty = self.ast_to_type(&binding.ty)?;
@@ -77,68 +77,124 @@ impl TypeChecker {
         }
         let mut bound_members = Set::new();
         for bound in bounds {
-            let TypeBoundKind::Protocol(path) = &bound.kind else {
-                return Err(binding_error(bound.span, match &bound.kind {
-                    TypeBoundKind::GenericProtocol(_) =>
-                        "generic dynamic protocol bounds require declaration-owned argument support",
-                    _ => "dynamic bound requires a supported protocol declaration",
-                }));
+            let (path, raw_args) = match &bound.kind {
+                TypeBoundKind::Protocol(path) => (path, &[][..]),
+                TypeBoundKind::GenericProtocol(ty) => match &ty.kind {
+                    TypeKind::Generic { base, args } => match &base.kind {
+                        TypeKind::Path(path) => (path, args.as_slice()),
+                        _ => return Err(binding_error(bound.span, "dynamic application requires a declared protocol path")),
+                    },
+                    _ => return Err(binding_error(bound.span, "invalid dynamic protocol application")),
+                },
+                _ => return Err(binding_error(bound.span, "dynamic bound requires a positive protocol declaration")),
             };
             let lexical = self.path_to_string(path);
-            let (ty, key) = self.resolve_qualified_type_with_parameter_key(path, span)?;
+            let (ty, key) = self.resolve_qualified_type_with_parameter_key(path, bound.span)?;
             let declaration = match &ty {
                 Type::Named { path, .. } => self.path_to_string(path),
                 Type::Generic { name, .. } => name.clone(),
                 _ => key.clone().unwrap_or_else(|| lexical.clone()),
             };
-            // The selected source declaration's key outranks a same-spelling
-            // ambient protocol. A header may only satisfy its own exact key.
-            let identity = key.clone().unwrap_or_else(|| declaration.clone());
-            if let Some(index) = self.source_type_registration.headers.iter()
-                .rposition(|header| header.identity == identity)
-            {
-                // Referencing an ancestor can publish a dependent declaration
-                // before this obligation is discharged. It therefore requires
-                // the existing source group's rollback journal.
+            let identity = key.unwrap_or_else(|| declaration.clone());
+            let header = self.source_type_registration.headers.iter()
+                .rposition(|header| header.identity == identity);
+            let selected = if let Some(index) = header {
                 if index + 1 != self.source_type_registration.headers.len()
                     && !self.source_type_registration.pending.contains_key(&identity)
                 {
-                    return Err(TypeError::Other(format!(
+                    return Err(binding_error(bound.span, format!(
                         "recursive dyn bound `{identity}` has no shared source registration transaction"
-                    ).into()));
+                    )));
                 }
-                let header = &mut self.source_type_registration.headers[index];
-                let matched = bind_object_members(&header.associated, &binding_types, &mut bound_members, span)?;
-                header.dyn_required.push((span, matched));
-                names.push(identity);
-                continue;
-            }
-            if !self.protocol_checker.read().has_protocol(&declaration)
-                && let Some(metadata) = self.core_metadata.clone()
-                && metadata.protocols.contains_key(&declaration)
-            {
-                self.register_stdlib_protocol_for_name(&declaration, &metadata);
-            }
-            let registry = self.protocol_checker.read();
-            let selected = if registry.has_protocol(&identity) {
                 identity
-            } else if declaration.contains(".") && registry.has_protocol(&declaration) {
-                declaration
             } else {
-                return Err(TypeError::Other(format!(
-                    "dyn bound `{identity}` requires a protocol declaration"
-                ).into()));
+                if !self.protocol_checker.read().has_protocol(&declaration)
+                    && let Some(metadata) = self.core_metadata.clone()
+                    && metadata.protocols.contains_key(&declaration)
+                {
+                    self.register_stdlib_protocol_for_name(&declaration, &metadata);
+                }
+                let registry = self.protocol_checker.read();
+                if registry.has_protocol(&identity) { identity }
+                else if declaration.contains(".") && registry.has_protocol(&declaration) { declaration }
+                else { return Err(binding_error(bound.span, format!("dyn bound `{identity}` requires a protocol declaration"))); }
             };
-            let protocol = registry.get_protocol_definition(selected.as_str())
-                .ok_or_else(|| binding_error(span, format!("dynamic protocol `{selected}` has no declaration")))?;
-            let matched = bind_object_members(&protocol.associated_types, &binding_types, &mut bound_members, span)?;
-            require_object_result_bindings(protocol, &matched, span, &registry)?;
-            names.push(selected);
+
+            let mut application = ProtocolBound::object(&selected);
+            let mut positional = List::new();
+            for arg in raw_args {
+                if let GenericArg::Binding(binding) = arg {
+                    let value = self.ast_to_type(&binding.ty)?;
+                    if application.associated_types.insert(binding.name.name.clone(), value).is_some()
+                        || binding_types.contains_key(&binding.name.name)
+                    {
+                        return Err(binding_error(binding.span, format!("duplicate dynamic associated type binding `{}`", binding.name)));
+                    }
+                } else { positional.push(arg.clone()); }
+            }
+            let mut use_path = application.protocol.clone();
+            use_path.span = bound.span;
+            application.args = self.protocol_application_arguments(&use_path, &positional, None)?;
+
+            // Legacy equality-only syntax has a single list for all bounds. Select
+            // its unique declaring application, then store the equality on that owner.
+            let mut bind_members = |associated: &Map<_, _>| -> Result<Set<Text>> {
+                let matched = bind_object_members(associated, &binding_types, &mut bound_members, span)?;
+                let mut claimed = Set::new();
+                let direct = bind_object_members(associated, &application.associated_types, &mut claimed, span)?;
+                if direct.len() != application.associated_types.len() {
+                    return Err(binding_error(span, format!("dynamic protocol `{selected}` does not declare the named associated type")));
+                }
+                for name in &matched {
+                    application.associated_types.insert(name.clone(), binding_types[name].clone());
+                }
+                Ok(application.associated_types.keys().cloned().collect())
+            };
+            let constraints = if let Some(index) = header {
+                let header = &mut self.source_type_registration.headers[index];
+                let available = bind_members(&header.associated)?;
+                header.dyn_required.push((span, available));
+                header.constraints.clone()
+            } else {
+                let registry = self.protocol_checker.read();
+                let protocol = registry.get_protocol_definition(&selected)
+                    .ok_or_else(|| binding_error(span, format!("dynamic protocol `{selected}` has no declaration")))?;
+                let available = bind_members(&protocol.associated_types)?;
+                require_object_result_bindings(protocol, &available, span, &registry)?;
+                protocol.constraints.clone()
+            };
+            self.check_dynamic_arguments(&application, positional.len(), &constraints, bound.span)?;
+            applications.push(application);
         }
         if let Some(name) = binding_types.keys().find(|name| !bound_members.contains(*name)) {
             return Err(binding_error(span, format!("no selected dynamic protocol declares associated type `{name}`")));
         }
-        Ok(Type::DynProtocol { bounds: names, bindings: binding_types })
+        Ok(Type::DynProtocol { bounds: applications })
+    }
+
+    fn check_dynamic_arguments(
+        &mut self,
+        application: &ProtocolBound,
+        supplied: usize,
+        constraints: &ProtocolConstraints,
+        span: Span,
+    ) -> Result<()> {
+        let ProtocolConstraints::Declared { self_type, defaults, parameter_bounds, .. } = constraints else {
+            if application.args.is_empty() { return Ok(()); }
+            return Err(binding_error(span, "dynamic application lacks its declaration-owned telescope"));
+        };
+        if defaults.iter().skip(supplied).flatten().any(|ty| ty.free_vars().contains(self_type)) {
+            return Err(binding_error(span, "an erased Self cannot supply a dynamic protocol's default argument"));
+        }
+        // The hidden implementing type supplies no assumptions while checking the
+        // argument domain. Its actual witness is selected when a value is erased.
+        let subject = Type::Var(crate::ty::TypeVar::fresh());
+        let scope = constraints.application(&subject, &application.args)
+            .map_err(|message| binding_error(span, message))?;
+        let requirements = parameter_bounds.iter().filter(|clause| !clause.bounds.is_empty())
+            .map(|clause| clause.try_apply_subst(&scope).map_err(|message| binding_error(span, message)))
+            .collect::<Result<_>>()?;
+        self.prove_protocol_application_requirements(requirements, span)
     }
 
     /// Erasure requires evidence for the selected declaration and its indices.
@@ -170,6 +226,9 @@ impl TypeChecker {
         if let Some(required) = registry.object_protocol_bounds(expected) {
             if required.is_empty() {
                 return false;
+            }
+            if matches!(actual, Type::DynProtocol { .. }) {
+                return registry.check_bounds(actual, &required).is_ok();
             }
             let declared = match actual {
                 Type::Var(var) => Some(self.get_type_var_bounds(var)),

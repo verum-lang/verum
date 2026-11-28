@@ -448,17 +448,9 @@ impl TypeTranslator {
             // type system — unwrap like other reference forms.
             Type::VolatilePointer { inner, .. } => self.translate_independent_sort(inner),
 
-            // Dynamic protocol objects. Key the uninterpreted sort by the
-            // stable bounds concatenation so `dyn Eq` and `dyn Eq + Ord`
-            // get distinct sorts.
-            Type::DynProtocol { bounds, .. } => {
-                let mut name = String::from("Dyn");
-                for b in bounds.iter() {
-                    name.push('_');
-                    name.push_str(b.as_str());
-                }
-                Ok(Sort::uninterpreted(Symbol::String(name)))
-            }
+            // Use the same full identity as the sort cache. Diagnostic text
+            // renders distinct type variables as "_" and loses value binder IDs.
+            Type::DynProtocol { .. } => Ok(Sort::uninterpreted(Symbol::String(ty_key.to_string()))),
 
             // Cubical path types. Computational content lives in the
             // cubical normalizer; at the Z3 level `Path<A>(a,b)` acts

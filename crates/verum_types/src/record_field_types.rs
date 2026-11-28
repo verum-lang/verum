@@ -69,9 +69,10 @@ macro_rules! push_type_children {
                     $stack.push(field);
                 }
             }
-            Type::DynProtocol { bindings, .. } => {
-                for (_, ty) in bindings {
-                    $stack.push(ty);
+            Type::DynProtocol { bounds } => {
+                for bound in bounds {
+                    $stack.extend(& $($m)? bound.args);
+                    for (_, ty) in & $($m)? bound.associated_types { $stack.push(ty); }
                 }
             }
             Type::Reference { inner, .. } | Type::CheckedReference { inner, .. }

@@ -1033,6 +1033,30 @@ pub struct ProtocolBound {
 }
 
 impl ProtocolBound {
+    /// Canonical identity of a dynamic object's bound, independent of its use-site span.
+    pub fn object(owner: &str) -> Self {
+        let span = Span::default();
+        Self::simple(Path::new(
+            owner.split('.').map(|part| verum_ast::PathSegment::Name(Ident::new(part, span))).collect(),
+            span,
+        ))
+    }
+
+    pub fn types(&self) -> impl Iterator<Item = &Type> {
+        self.args.iter().chain(self.associated_types.values())
+    }
+
+    pub(crate) fn map_types<'a>(&'a self, mut map: impl FnMut(&'a Type) -> Type) -> Self {
+        let args = self.args.iter().map(&mut map).collect();
+        // The substitution work queue rebuilds children in the destination map's order.
+        let mut associated_types: Map<_, _> = self.associated_types.keys()
+            .map(|name| (name.clone(), Type::Unit)).collect();
+        for (name, value) in &mut associated_types {
+            *value = map(&self.associated_types[name]);
+        }
+        Self { protocol: self.protocol.clone(), args, associated_types, is_negative: self.is_negative }
+    }
+
     /// Create a new positive protocol bound
     pub fn positive(protocol: Path, args: List<Type>) -> Self {
         Self {
@@ -6662,6 +6686,10 @@ impl ProtocolChecker {
             |left, right| self.types_structurally_equal(left, right))
         { return equal; }
         match (ty1, ty2) {
+            (Type::DynProtocol { bounds: left }, Type::DynProtocol { bounds: right }) =>
+                left.len() == right.len() && left.iter().zip(right).all(|(a, b)| {
+                    self.bound_entails(a, b) && self.bound_entails(b, a)
+                }),
             (Type::Named { path, args }, primitive) | (primitive, Type::Named { path, args })
                 if args.is_empty()
                     && primitive.primitive_name().is_some()
@@ -7593,27 +7621,20 @@ impl ProtocolChecker {
                 Span::default(),
             )
         };
-        if let Type::DynProtocol { bounds, bindings } = ty {
-            let mut required = List::new();
-            for name in bounds {
-                let protocol = self.get_protocol_definition(name.as_str())?;
-                if !protocol.type_params.is_empty() {
-                    return None; // The erased spelling cannot supply an omitted positional argument.
-                }
-                required.push(ProtocolBound::simple(path(name)));
-            }
-            for (name, value) in bindings {
-                let mut owners = required.iter_mut().filter(|bound| {
-                    self.lookup_associated_type_by_path(&bound.protocol, name)
-                        .is_some()
-                });
-                let owner = owners.next()?;
-                if owners.next().is_some() {
+        if let Type::DynProtocol { bounds } = ty {
+            for bound in bounds {
+                let protocol = self.lookup_protocol(&bound.protocol)?;
+                if bound.is_negative || protocol.name != self.make_protocol_key(&bound.protocol)
+                    || protocol.source_parameters.as_ref().map_or(protocol.type_params.len(), |p| p.len()) != bound.args.len()
+                    || bound.associated_types.keys().any(|name| !protocol.associated_types.contains_key(name))
+                {
                     return None;
                 }
-                owner.associated_types.insert(name.clone(), value.clone());
+                if !bound.args.is_empty() {
+                    protocol.constraints.application(ty, &bound.args).ok()?;
+                }
             }
-            return Some(required);
+            return Some(bounds.clone());
         }
         let (name, args) = match ty {
             Type::Named { path, args } => (self.make_protocol_key(path), args),
@@ -10652,10 +10673,10 @@ impl ProtocolChecker {
         // `Heap<dyn Tracer>.start_span(...)` (after auto-deref to
         // `dyn Tracer`) both resolve.
         if let Type::DynProtocol { bounds, .. } = ty {
-            for proto_name in bounds.iter() {
-                if let Maybe::Some(proto) = self.get_protocol(proto_name) {
+            for bound in bounds {
+                if let Some(proto) = self.lookup_protocol(&bound.protocol) {
                     if let Some(pm) = proto.methods.get(method_name) {
-                        if let Ok(applied) = pm.apply_owner(&[], ty) {
+                        if let Ok(applied) = pm.apply_owner(&bound.args, ty) {
                             results.push(applied.ty);
                         }
                     }
@@ -11222,25 +11243,20 @@ impl ProtocolChecker {
             // Unknown type - a safe top type with no inner structure
             Unknown => "Unknown".into(),
 
-            // DynProtocol - dynamic protocol object (dyn Display + Debug)
-            DynProtocol { bounds, bindings } => {
+            DynProtocol { bounds } => {
                 let mut key = verum_common::Text::from("dyn:");
-                for (i, bound) in bounds.iter().enumerate() {
-                    if i > 0 {
-                        key.push('+');
+                for (index, bound) in bounds.iter().enumerate() {
+                    if index > 0 { key.push('+'); }
+                    key.push_str(self.make_protocol_key(&bound.protocol).as_str());
+                    if bound.args.is_empty() && bound.associated_types.is_empty() { continue; }
+                    let mut entries: List<_> = bound.args.iter().map(|arg| self.make_type_key(arg)).collect();
+                    let mut names: List<_> = bound.associated_types.keys().collect();
+                    names.sort();
+                    for name in names {
+                        entries.push(format!("{name}={}", self.make_type_key(&bound.associated_types[name])).into());
                     }
-                    key.push_str(bound.as_str());
-                }
-                if !bindings.is_empty() {
                     key.push('<');
-                    for (i, (name, ty)) in bindings.iter().enumerate() {
-                        if i > 0 {
-                            key.push(',');
-                        }
-                        key.push_str(name.as_str());
-                        key.push('=');
-                        key.push_str(self.make_type_key(ty).as_str());
-                    }
+                    key.push_str(&entries.join(","));
                     key.push('>');
                 }
                 key
@@ -12430,13 +12446,8 @@ impl ProtocolChecker {
             // Unknown type - a safe top type with no inner types to substitute
             Type::Unknown => Type::Unknown,
 
-            // DynProtocol - substitute in associated type bindings
-            Type::DynProtocol { bounds, bindings } => Type::DynProtocol {
-                bounds: bounds.clone(),
-                bindings: bindings
-                    .iter()
-                    .map(|(k, v)| (k.clone(), self.substitute_type_params(v, subst_map)))
-                    .collect(),
+            Type::DynProtocol { bounds } => Type::DynProtocol {
+                bounds: bounds.iter().map(|bound| bound.map_types(|ty| self.substitute_type_params(ty, subst_map))).collect(),
             },
         }
     }

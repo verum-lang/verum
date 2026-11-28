@@ -2127,14 +2127,7 @@ impl Unifier {
 
             // Dynamic protocol objects (dyn Display, dyn Error, dyn Display + Debug, etc.)
             (
-                DynProtocol {
-                    bounds: b1,
-                    bindings: bi1,
-                },
-                DynProtocol {
-                    bounds: b2,
-                    bindings: bi2,
-                },
+                DynProtocol { .. }, DynProtocol { .. },
             ) => { self.unify_dynamic_protocols(unification_left, unification_right, span) }
 
             // Erasing a concrete carrier requires implementation evidence.
@@ -3724,13 +3717,8 @@ impl Unifier {
             // Unknown type - no inner types to rename
             Type::Unknown => ty.clone(),
 
-            // DynProtocol - rename in associated type bindings
-            Type::DynProtocol { bounds, bindings } => Type::DynProtocol {
-                bounds: bounds.clone(),
-                bindings: bindings
-                    .iter()
-                    .map(|(k, v)| (k.clone(), Self::rename_bound_var(v, from, to)))
-                    .collect(),
+            Type::DynProtocol { bounds } => Type::DynProtocol {
+                bounds: bounds.iter().map(|bound| bound.map_types(|ty| Self::rename_bound_var(ty, from, to))).collect(),
             },
         }
     }

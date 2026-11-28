@@ -17327,44 +17327,50 @@ impl TypeChecker {
 
     fn resolve_dyn_method(
         &mut self,
-        bounds: &[Text],
-        bindings: &Map<Text, Type>,
+        receiver: &Type,
+        bounds: &[crate::protocol::ProtocolBound],
         method: &Ident,
+        type_args: &List<verum_ast::GenericArg>,
         args: &[Expr],
         span: Span,
     ) -> Result<Option<InferResult>> {
+        use super::protocol_methods::{AppliedProtocolMethod, ProtocolMethodReceiver};
+        let mut candidates: List<AppliedProtocolMethod> = List::new();
         for bound in bounds {
-            let lookup = |checker: &Self| {
-                checker.protocol_checker.read()
-                    .dyn_method_contract(bound.as_str(), method.name.as_str())
-                    .map(|decl| (decl.ty.clone(), decl.receiver_kind()))
-            };
-            let contract = lookup(self).or_else(|| {
-                self.ensure_stdlib_type_loaded_transitive(bound);
-                lookup(self)
-            });
-            if let Some((mut signature, receiver)) = contract {
-                signature.try_replace_types(|ty| {
-                    let Some(slot) = ty.self_projection_name() else { return Ok(None) };
-                    bindings.get(&Text::from(slot)).cloned().map(Some).ok_or_else(|| TypeError::OtherWithCodeSpanned {
-                        code: "E405".into(),
-                        msg: format!("dynamic method `{method}` requires associated type binding `{slot}`").into(),
-                        span,
-                    })
-                })?;
-                let Type::Function { params, return_type, .. } = signature else {
-                    return Err(TypeError::NotAFunction { ty: signature.to_string().into(), span });
-                };
-                if params.len() != args.len() {
-                    return Err(self.arity_error(method.name.clone(), params.len(), args.len(), span));
+            let owner = self.path_to_string(&bound.protocol);
+            if !self.protocol_checker.read().has_protocol(&owner) {
+                self.ensure_stdlib_type_loaded_transitive(&owner);
+            }
+            for candidate in self.applied_protocol_methods_in_hierarchy(
+                &owner, &bound.args, ProtocolMethodReceiver::Call(receiver), &method.name, span,
+            )? {
+                if !candidates.iter().any(|prior| prior.owner == candidate.owner
+                    && prior.arguments.len() == candidate.arguments.len()
+                    && prior.arguments.iter().zip(&candidate.arguments).all(|(a, b)|
+                        self.protocol_checker.read().types_structurally_equal(a, b)))
+                {
+                    candidates.push(candidate);
                 }
-                for (arg, param) in args.iter().zip(&params) {
-                    self.check_expr(arg, &self.unifier.apply(param))?;
-                }
-                return Ok(Some(InferResult::method(self.unifier.apply(&return_type), receiver)));
             }
         }
-        Ok(None)
+        let selected = match candidates.as_slice() {
+            [] => return Ok(None),
+            [candidate] => &candidate.method,
+            _ => return Err(TypeError::OtherWithCodeSpanned {
+                code: "E405".into(), msg: format!("multiple dynamic protocol applications declare method `{method}`").into(), span,
+            }),
+        };
+        let signature = self.instantiate_applied_protocol_method(selected, receiver, type_args, span)?;
+        let Type::Function { params, return_type, .. } = signature else {
+            return Err(TypeError::NotAFunction { ty: signature.to_string().into(), span });
+        };
+        if params.len() != args.len() {
+            return Err(self.arity_error(method.name.clone(), params.len(), args.len(), span));
+        }
+        for (arg, param) in args.iter().zip(&params) {
+            self.check_expr(arg, &self.unifier.apply(param))?;
+        }
+        Ok(Some(InferResult::method(self.unifier.apply(&return_type), selected.receiver_kind())))
     }
 
     fn resolve_method_call(
@@ -17724,8 +17730,8 @@ impl TypeChecker {
         // When receiver is &dyn Protocol (DynProtocol type), resolve method
         // from the protocol's declared methods. Look up via protocol_checker.
         // ============================================================
-        if let Type::DynProtocol { ref bounds, ref bindings } = recv_ty
-            && let Some(result) = self.resolve_dyn_method(bounds, bindings, method, args, span)?
+        if let Type::DynProtocol { ref bounds } = recv_ty
+            && let Some(result) = self.resolve_dyn_method(&recv_ty, bounds, method, type_args, args, span)?
         {
             return Ok(result);
         }
@@ -17925,8 +17931,8 @@ impl TypeChecker {
                 | Type::Ownership { inner, .. } => inner.as_ref(),
                 other => other,
             };
-            if let Type::DynProtocol { bounds, bindings } = peeled
-                && let Some(result) = self.resolve_dyn_method(bounds, bindings, method, args, span)?
+            if let Type::DynProtocol { bounds } = peeled
+                && let Some(result) = self.resolve_dyn_method(peeled, bounds, method, type_args, args, span)?
             {
                 return Ok(result);
             }
@@ -22472,8 +22478,9 @@ impl TypeChecker {
                 // itself defines the method.
                 if let Type::DynProtocol { bounds, .. } = &normalised {
                     let checker = self.protocol_checker.read();
-                    for proto_name in bounds.iter() {
-                        if let Maybe::Some(proto) = checker.get_protocol(proto_name) {
+                    for bound in bounds {
+                        let proto_name = self.path_to_string(&bound.protocol);
+                        if let Maybe::Some(proto) = checker.get_protocol(&proto_name) {
                             if proto.methods.contains_key(&method_name_for_hint) {
                                 return Err(TypeError::MethodNotFound {
                                     ty: recv_ty.to_text(),

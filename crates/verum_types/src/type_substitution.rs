@@ -150,6 +150,7 @@ impl Scope<'_> {
             | Type::Named { .. }
             | Type::Generic { .. }
             | Type::Record(_)
+            | Type::DynProtocol { .. }
             | Type::Tuple(_)
             | Type::Variant(_)
             | Type::Reference { .. }

@@ -637,10 +637,9 @@ pub enum Type {
     /// - `dyn Display + Debug` - multiple protocol bounds
     /// - `dyn Iterator<Item = Int>` - with associated type bindings
     DynProtocol {
-        /// Protocol bounds that the dynamic type must satisfy
-        bounds: List<Text>,
-        /// Associated type bindings (e.g., Item = Int for Iterator)
-        bindings: Map<Text, Type>,
+        /// Positive, declaration-owned protocol applications, with their ordered
+        /// arguments and individual associated equalities.
+        bounds: List<crate::protocol::ProtocolBound>,
     },
 
     /// Universally quantified type (for type schemes)
@@ -2755,10 +2754,8 @@ impl Type {
                     vars.insert(*row);
                 }
             }
-            Type::DynProtocol { bindings, .. } => {
-                // `bounds` are protocol NAMES; the associated-type bindings
-                // are real types and can mention variables.
-                for ty in bindings.values() {
+            Type::DynProtocol { bounds } => {
+                for ty in bounds.iter().flat_map(|bound| bound.types()) {
                     ty.collect_type_variables(vars, include_bound, remaining_depth)?;
                 }
             }
@@ -3404,21 +3401,22 @@ impl fmt::Display for TypeDisplay<'_> {
             Type::Unknown => write!(f, "Unknown"),
 
             // DynProtocol - dynamic protocol object (dyn Display + Debug)
-            Type::DynProtocol { bounds, bindings } => {
+            Type::DynProtocol { bounds } => {
                 write!(f, "dyn ")?;
                 for (i, bound) in bounds.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, " + ")?;
-                    }
-                    write!(f, "{}", bound)?;
-                }
-                if !bindings.is_empty() {
+                    if i > 0 { write!(f, " + ")?; }
+                    write!(f, "{}", nominal_path_name(&bound.protocol).ok_or(fmt::Error)?)?;
+                    if bound.args.is_empty() && bound.associated_types.is_empty() { continue; }
                     write!(f, "<")?;
-                    for (i, (name, ty)) in bindings.iter().enumerate() {
-                        if i > 0 {
-                            write!(f, ", ")?;
-                        }
-                        write!(f, "{} = {}", name, self.child(ty))?;
+                    for (j, arg) in bound.args.iter().enumerate() {
+                        if j > 0 { write!(f, ", ")?; }
+                        write!(f, "{}", self.child(arg))?;
+                    }
+                    let mut names: List<_> = bound.associated_types.keys().collect();
+                    names.sort();
+                    for (j, name) in names.into_iter().enumerate() {
+                        if j > 0 || !bound.args.is_empty() { write!(f, ", ")?; }
+                        write!(f, "{} = {}", name, self.child(&bound.associated_types[name]))?;
                     }
                     write!(f, ">")?;
                 }
@@ -3769,11 +3767,10 @@ mod free_vars_covers_every_carrier {
         let (tv, t) = v();
         let mut bindings = Map::new();
         bindings.insert(Text::from("Item"), t);
+        let mut bound = crate::protocol::ProtocolBound::object("fixture.Iterator");
+        bound.associated_types = bindings;
         assert_reaches(
-            Type::DynProtocol {
-                bounds: List::new(),
-                bindings,
-            },
+            Type::DynProtocol { bounds: List::from_single(bound) },
             tv,
             "DynProtocol.bindings",
         );

@@ -30,9 +30,11 @@ impl Type {
                     visit(ty);
                 }
             }
-            Type::DynProtocol { bindings, .. } => {
-                for ty in bindings.values_mut() {
-                    visit(ty);
+            Type::DynProtocol { bounds } => {
+                for bound in bounds {
+                    for ty in bound.args.iter_mut().chain(bound.associated_types.values_mut()) {
+                        visit(ty);
+                    }
                 }
             }
             Type::Array { element, size } => {
@@ -344,21 +346,9 @@ impl Type {
             | Type::Text
             | Type::Lifetime { .. }
             | Type::Placeholder { .. } => self.clone(),
-            Type::DynProtocol { bounds, bindings } => {
-                // Map uses a randomized hash table. Schedule children in the
-                // destination's order, which is also its reconstruction order.
-                let mut mapped: verum_common::Map<_, _> = bindings
-                    .keys()
-                    .map(|name| (name.clone(), Type::Unit))
-                    .collect();
-                for (name, value) in mapped.iter_mut() {
-                    *value = map(&bindings[name]);
-                }
-                Type::DynProtocol {
-                    bounds: bounds.clone(),
-                    bindings: mapped,
-                }
-            }
+            Type::DynProtocol { bounds } => Type::DynProtocol {
+                bounds: bounds.iter().map(|bound| bound.map_types(&mut map)).collect(),
+            },
             Type::ExtensibleRecord { fields, row_var } => {
                 let new_fields = fields.iter().map(|(k, v)| (k.clone(), map(v))).collect();
                 Type::ExtensibleRecord {

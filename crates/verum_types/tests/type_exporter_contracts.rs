@@ -79,6 +79,18 @@ fn nested_callable_and_qualified_nominal_identity_survive() {
     });
 }
 #[test]
+fn dynamic_snapshot_retains_each_protocol_application() {
+    use verum_types::protocol::ProtocolBound;
+    let mut source = ProtocolBound::object("streams.Source");
+    source.args.push(Type::Bool);
+    source.associated_types.insert("Item".into(), Type::Text);
+    let mut sink = ProtocolBound::object("streams.Sink");
+    sink.args.push(Type::Tuple(vec![Type::Int, Type::Float].into()));
+    sink.associated_types.insert("Item".into(), Type::Int);
+    roundtrip(Type::DynProtocol { bounds: vec![source, sink].into() });
+}
+
+#[test]
 fn unsupported_local_binders_are_never_erased_even_when_nested() {
     for ty in [
         Type::Var(TypeVar::new(42)),

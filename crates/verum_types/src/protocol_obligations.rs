@@ -92,7 +92,7 @@ impl ProtocolChecker {
         Ok(())
     }
 
-    fn bound_entails(&self, actual: &ProtocolBound, expected: &ProtocolBound) -> bool {
+    pub(super) fn bound_entails(&self, actual: &ProtocolBound, expected: &ProtocolBound) -> bool {
         self.paths_equal(&actual.protocol, &expected.protocol)
             && actual.is_negative == expected.is_negative
             && actual.args.len() == expected.args.len()

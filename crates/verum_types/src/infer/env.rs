@@ -2349,8 +2349,8 @@ impl TypeChecker {
         // Dyn-protocol direct method check.
         if let Type::DynProtocol { bounds, .. } = inner_ty {
             let checker = self.protocol_checker.read();
-            for proto_name in bounds.iter() {
-                if let Maybe::Some(proto) = checker.get_protocol(proto_name) {
+            for bound in bounds {
+                if let Some(proto) = checker.get_protocol_definition(&self.path_to_string(&bound.protocol)) {
                     if proto.methods.contains_key(method_name) {
                         return true;
                     }
@@ -4363,10 +4363,8 @@ impl TypeChecker {
             // Neither rigid field identities nor the top type are inference holes.
             Type::RecordField { .. } | Type::Unknown => false,
 
-            // DynProtocol - check bindings for unresolved vars
-            Type::DynProtocol { bindings, .. } => {
-                bindings.values().any(|t| self.has_unresolved_vars(t))
-            }
+            Type::DynProtocol { bounds } => bounds.iter().flat_map(|bound| bound.types())
+                .any(|ty| self.has_unresolved_vars(ty)),
         }
     }
 
@@ -9858,11 +9856,6 @@ impl TypeChecker {
                         if self.reference_mode(&scheme.ty, val.span)?.is_some() {
                             let shared = self.is_shared_reference_head(&scheme.ty, val.span)?;
                             self.bind_reference_result(val, &name.name, shared)?
-                        } else if !is_mutable_binding
-                            && let Some(element) = self.writable_raw_element(&scheme.ty, val.span)
-                        {
-                            self.raw_store_destinations(val, &element)
-                                .map(|targets| crate::context::ReferenceOrigin::RawAddress(targets.into_boxed_slice()))
                         } else {
                             self.bind_aggregate_result(val, &scheme.ty)?
                         }

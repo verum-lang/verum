@@ -668,7 +668,8 @@ const TAG_CHECKED_REF: u8 = 14;
 const TAG_UNSAFE_REF: u8 = 15;
 const TAG_RECORD: u8 = 16;
 const TAG_VARIANT: u8 = 17;
-const TAG_DYN_PROTOCOL: u8 = 18;
+const TAG_DYN_PROTOCOL: u8 = 18; // V2 name-only bounds
+const TAG_DYN_APPLICATIONS: u8 = 29;
 const TAG_SLICE: u8 = 19;
 const TAG_POINTER: u8 = 21;
 const TAG_OWNERSHIP: u8 = 24;
@@ -873,16 +874,23 @@ impl BinaryWriter {
                 }
             }
 
-            Type::DynProtocol { bounds, bindings } => {
-                self.write_u8(TAG_DYN_PROTOCOL);
+            Type::DynProtocol { bounds } => {
+                self.write_u8(TAG_DYN_APPLICATIONS);
                 self.write_u32(bounds.len() as u32);
-                for b in bounds.iter() {
-                    self.write_text(b);
-                }
-                self.write_u32(bindings.len() as u32);
-                for (k, v) in bindings.iter() {
-                    self.write_text(k);
-                    self.write_type(v)?;
+                for bound in bounds {
+                    let owner = crate::ty::nominal_path_name(&bound.protocol)
+                        .filter(|_| !bound.is_negative)
+                        .ok_or_else(|| ExportError("dynamic bound requires a declared protocol path".into()))?;
+                    self.write_str(&owner);
+                    self.write_u32(bound.args.len() as u32);
+                    for ty in &bound.args { self.write_type(ty)?; }
+                    self.write_u32(bound.associated_types.len() as u32);
+                    let mut names: List<_> = bound.associated_types.keys().collect();
+                    names.sort();
+                    for name in names {
+                        self.write_text(name);
+                        self.write_type(&bound.associated_types[name])?;
+                    }
                 }
             }
 
@@ -1302,26 +1310,42 @@ impl<'a> BinaryReader<'a> {
                 Some(Type::Variant(variants))
             }
 
-            TAG_DYN_PROTOCOL => {
-                let bounds_count = self.read_u32()? as usize;
+            TAG_DYN_PROTOCOL | TAG_DYN_APPLICATIONS => {
+                let count = self.read_u32()?;
+                if count == 0 { return None; }
                 let mut bounds = List::new();
-                for _ in 0..bounds_count {
-                    bounds.push(self.read_text()?);
+                for _ in 0..count {
+                    let owner = self.read_text()?;
+                    if owner.as_str().split('.').any(str::is_empty) { return None; }
+                    let mut bound = crate::protocol::ProtocolBound::object(&owner);
+                    if tag == TAG_DYN_APPLICATIONS {
+                        for _ in 0..self.read_u32()? { bound.args.push(self.read_type()?); }
+                        self.read_dynamic_equalities(&mut bound)?;
+                    }
+                    bounds.push(bound);
                 }
-                let bindings_count = self.read_u32()? as usize;
-                let mut bindings = Map::new();
-                for _ in 0..bindings_count {
-                    let k = self.read_text()?;
-                    let v = self.read_type()?;
-                    if bindings.insert(k, v).is_some() {
+                if tag == TAG_DYN_PROTOCOL {
+                    if bounds.len() == 1 {
+                        self.read_dynamic_equalities(&mut bounds[0])?;
+                    } else if self.read_u32()? != 0 {
+                        // The old snapshot omitted which application declared each equality.
                         return None;
                     }
                 }
-                Some(Type::DynProtocol { bounds, bindings })
+                Some(Type::DynProtocol { bounds })
             }
 
             _ => None,
         }
+    }
+
+    fn read_dynamic_equalities(&mut self, bound: &mut crate::protocol::ProtocolBound) -> Option<()> {
+        for _ in 0..self.read_u32()? {
+            let name = self.read_text()?;
+            let ty = self.read_type()?;
+            if bound.associated_types.insert(name, ty).is_some() { return None; }
+        }
+        Some(())
     }
 
     fn read_type_param(&mut self) -> Option<TypeParam> {

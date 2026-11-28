@@ -86,16 +86,15 @@ fn named_substitution_preserves_value_identity_and_dynamic_field_keys() {
     assert_eq!(*carrier, Type::Bool);
     let mut bindings = verum_common::Map::new();
     bindings.insert("Payload".into(), parameter);
-    let ty = Type::DynProtocol {
-        bounds: List::new(),
-        bindings,
-    };
-    let Type::DynProtocol { bindings, .. } = ty.try_substitute_params(&substitution).unwrap()
+    let mut bound = verum_types::protocol::ProtocolBound::object("fixture.Policy");
+    bound.associated_types = bindings;
+    let ty = Type::DynProtocol { bounds: List::from_single(bound) };
+    let Type::DynProtocol { bounds } = ty.try_substitute_params(&substitution).unwrap()
     else {
         panic!("dynamic protocol identity lost");
     };
     assert_eq!(
-        bindings.get(&verum_common::Text::from("Payload")),
+        bounds[0].associated_types.get(&verum_common::Text::from("Payload")),
         Some(&Type::Bool)
     );
 }
@@ -159,18 +158,12 @@ fn dynamic_associated_types_keep_their_keys_during_reconstruction() {
         bindings.insert(name.clone(), Type::Var(variable));
         expected.insert(name, value);
     }
-    let ty = Type::DynProtocol {
-        bounds: List::new(),
-        bindings,
-    };
+    let mut bound = verum_types::protocol::ProtocolBound::object("fixture.Policy");
+    bound.associated_types = bindings;
+    let ty = Type::DynProtocol { bounds: List::from_single(bound) };
     let actual = ty.try_apply_subst(&substitution).unwrap();
-    assert_eq!(
-        actual,
-        Type::DynProtocol {
-            bounds: List::new(),
-            bindings: expected
-        }
-    );
+    let Type::DynProtocol { bounds } = actual else { panic!("dynamic application") };
+    assert_eq!(bounds[0].associated_types, expected);
 }
 
 #[test]

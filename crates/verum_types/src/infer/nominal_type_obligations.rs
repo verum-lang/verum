@@ -200,16 +200,6 @@ impl TypeChecker {
         else {
             return Ok(());
         };
-        let mut assumptions = self.source_type_registration.projection_assumptions.clone();
-        assumptions.extend(
-            self.type_var_bounds
-                .iter()
-                .filter(|(var, _)| self.unifier.is_rigid(**var))
-                .map(|(var, bounds)| WhereClause {
-                    ty: self.unifier.apply(&Type::Var(*var)),
-                    bounds: bounds.clone(),
-                }),
-        );
         let parameters = match self.ctx.lookup_type(&format!("__type_params_{key}")) {
             Some(Type::Record(parameters)) => parameters,
             _ => {
@@ -243,10 +233,31 @@ impl TypeChecker {
         self.pop_decl_param_frame();
         self.resolving_source_signature = previous_source;
         self.current_module_path = previous_owner;
-        let requirements = requirements?;
+        self.prove_application_requirements(requirements?, span)
+    }
+
+    pub(super) fn prove_protocol_application_requirements(
+        &mut self,
+        protocols: List<WhereClause>,
+        span: Span,
+    ) -> Result<()> {
+        self.prove_application_requirements(NominalPremises { protocols, ..Default::default() }, span)
+    }
+
+    fn prove_application_requirements(&mut self, requirements: NominalPremises, span: Span) -> Result<()> {
         if requirements.protocols.is_empty() && requirements.callables.is_empty() {
             return Ok(());
         }
+        let mut assumptions = self.source_type_registration.projection_assumptions.clone();
+        assumptions.extend(
+            self.type_var_bounds
+                .iter()
+                .filter(|(var, _)| self.unifier.is_rigid(**var))
+                .map(|(var, bounds)| WhereClause {
+                    ty: self.unifier.apply(&Type::Var(*var)),
+                    bounds: bounds.clone(),
+                }),
+        );
         // Named slots are an older source template representation. Only the
         // current declaration roster authorizes turning them into rigid proof
         // variables; supplied nominal names never acquire binder identity.

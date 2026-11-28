@@ -47,7 +47,7 @@ impl TypeChecker {
         parameters: &[GenericParam],
         supers: &[verum_ast::Type],
         where_clauses: &[Option<&verum_ast::WhereClause>],
-    ) -> (ProtocolConstraints, Option<List<ProtocolBound>>) {
+    ) -> Result<(ProtocolConstraints, Option<List<ProtocolBound>>)> {
         let saved_self = self.current_self_type.clone();
         let self_type = TypeVar::fresh();
         for parameter in parameters {
@@ -72,7 +72,7 @@ impl TypeChecker {
                         GenericParamKind::Const { ty, .. } => value_type_has_obligations(ty),
                         _ => true,
                     });
-                return (
+                return Ok((
                     if has_constraints {
                         ProtocolConstraints::Unsupported(
                         "universal protocol constraints require declaration-owned type or value parameters"
@@ -82,7 +82,7 @@ impl TypeChecker {
                         ProtocolConstraints::Unknown
                     },
                     None,
-                );
+                ));
             }
         }
         self.push_decl_param_frame(indexmap::IndexMap::new());
@@ -118,8 +118,10 @@ impl TypeChecker {
                     });
                 }
             }
-            let bounds = Self::source_super_protocol_bounds(supers)?;
-            let supers = self.elaborate_family_bounds(&bounds)?;
+            // A failed ancestor is a source error. Discarding it here would
+            // replace this valid parameter telescope with unconstrained variables.
+            let supers = Self::source_super_protocol_bounds(supers)
+                .and_then(|bounds| self.elaborate_family_bounds(&bounds));
             Ok((
                 ProtocolConstraints::Declared {
                     self_type,
@@ -133,11 +135,8 @@ impl TypeChecker {
         self.pop_decl_param_frame();
         self.set_current_self_type(saved_self);
         match result {
-            Ok((scope, supers)) => (scope, Some(supers)),
-            Err(error) => (
-                ProtocolConstraints::Unsupported(error.to_string().into()),
-                None,
-            ),
+            Ok((scope, supers)) => Ok((scope, Some(supers?))),
+            Err(error) => Ok((ProtocolConstraints::Unsupported(error.to_string().into()), None)),
         }
     }
 

@@ -4906,13 +4906,8 @@ fn substitute_refinement_binder(
             // Unknown type - no normalization needed (it's already fully reduced)
             Unknown => ty.clone(),
 
-            // DynProtocol - normalize the associated type bindings
-            DynProtocol { bounds, bindings } => Type::DynProtocol {
-                bounds: bounds.clone(),
-                bindings: bindings
-                    .iter()
-                    .map(|(k, v)| (k.clone(), self.normalize_type_impl(v, depth + 1)))
-                    .collect(),
+            Type::DynProtocol { bounds } => Type::DynProtocol {
+                bounds: bounds.iter().map(|bound| bound.map_types(|ty| self.normalize_type_impl(ty, depth + 1))).collect(),
             },
         }
     }
@@ -5873,18 +5868,8 @@ fn substitute_refinement_binder(
             // Unknown type - no inner types to substitute
             Unknown => ty.clone(),
 
-            // DynProtocol - substitute in associated type bindings
-            DynProtocol { bounds, bindings } => Type::DynProtocol {
-                bounds: bounds.clone(),
-                bindings: bindings
-                    .iter()
-                    .map(|(k, v)| {
-                        (
-                            k.clone(),
-                            self.substitute_term_in_type_impl(v, var_name, term, next_depth),
-                        )
-                    })
-                    .collect(),
+            Type::DynProtocol { bounds } => Type::DynProtocol {
+                bounds: bounds.iter().map(|bound| bound.map_types(|ty| self.substitute_term_in_type_impl(ty, var_name, term, next_depth))).collect(),
             },
         }
     }

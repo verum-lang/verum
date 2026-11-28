@@ -14,8 +14,7 @@ fn path(name: &str) -> Path {
 
 fn object(name: &str) -> Type {
     Type::DynProtocol {
-        bounds: List::from_iter([name.into()]),
-        bindings: Default::default(),
+        bounds: List::from_single(ProtocolBound::object(name)),
     }
 }
 
@@ -138,8 +137,7 @@ fn active_cycle_is_refused_before_reusing_a_completed_branch() {
         .super_protocols
         .push(ProtocolBound::simple(path("fixture.owner.Second")));
     let receiver = Type::DynProtocol {
-        bounds: List::from_iter(["fixture.owner.First".into(), "fixture.owner.Valid".into()]),
-        bindings: Default::default(),
+        bounds: ["fixture.owner.First", "fixture.owner.Valid"].into_iter().map(ProtocolBound::object).collect(),
     };
     let mut remaining = PROTOCOL_OBLIGATION_BUDGET;
     let error = checker

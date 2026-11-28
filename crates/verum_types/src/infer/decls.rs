@@ -1944,7 +1944,7 @@ impl TypeChecker {
                 let (constraint_scope, declared_supers) = self.protocol_constraint_scope(
                     &type_decl.generics, &protocol_body.extends,
                     &[type_decl.generic_where_clause.as_ref(), protocol_body.generic_where_clause.as_ref()],
-                );
+                )?;
 
                 let super_protocols = match declared_supers {
                     Some(supers) => supers,
@@ -3285,7 +3285,7 @@ impl TypeChecker {
                 let (constraint_scope, declared_supers) = self.protocol_constraint_scope(
                     &type_decl.generics, &protocol_body.extends,
                     &[type_decl.generic_where_clause.as_ref(), protocol_body.generic_where_clause.as_ref()],
-                );
+                )?;
 
                 let super_protocols = match declared_supers {
                     Some(supers) => supers,
