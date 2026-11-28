@@ -1,0 +1,25 @@
+// @test: run
+// @tier: 0
+// @level: L2
+// @tags: dns, net
+// @expected-exit: 0
+// @description: Numeric and reserved localhost names resolve to their declared address families without external DNS.
+mount core.net.addr.IpAddr;
+mount core.net.dns.{DnsError, lookup_host, resolve};
+
+fn main() {
+    let numeric = lookup_host(&"127.0.0.8").unwrap();
+    assert(numeric.len() == 1);
+    match numeric[0] {
+        IpAddr.V4(ip) => {
+            let (a, b, c, d) = ip.octets();
+            assert(a == 127_u8 && b == 0_u8 && c == 0_u8 && d == 8_u8);
+        },
+        _ => panic("expected IPv4"),
+    }
+    let local = resolve(&"unit.LOCALHOST", 6380).unwrap();
+    assert(local.len() == 2);
+    assert(local[0].is_ipv4() && local[1].is_ipv6());
+    assert(local[0].port() == 6380 && local[1].port() == 6380);
+    assert(lookup_host(&"") is Result.Err(DnsError.InvalidName));
+}

@@ -66,6 +66,8 @@ module core.net.dns;
 // Explicitly import comparison Ordering to avoid conflict with core.sync.atomic.Ordering
 mount core.base.ordering.{Ordering};
 mount net.addr.{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, AddrParseError};
+mount core.net.resolve.ToSocketAddrs;
+mount core.io.protocols.{Read, Write};
 mount net.udp.UdpSocket;
 mount net.tcp.TcpStream;
 
@@ -509,23 +511,26 @@ fn decode_domain_name(buf: &[Byte], start: Int) -> Result<(Text, Int), DnsError>
 // =============================================================================
 
 /// Build a DNS query packet.
-fn build_query(name: &Text, qtype: UInt16, id: UInt16) -> Result<List<Byte>, DnsError> {
-    let header = DnsHeader.new_query(id);
-    let mut packet = header.to_bytes();
+fn build_query(name: &Text, qtype: UInt16, id: UInt16, packet: &mut [Byte]) -> Result<Int, DnsError> {
+    let header = DnsHeader.new_query(id).to_bytes();
+    let encoded = encode_domain_name(name)?;
+    let question = header.len() + encoded.len();
+    if question + 4 > packet.len() { return Result.Err(DnsError.InvalidName); }
 
-    // Question section.
-    let encoded_name = encode_domain_name(name)?;
-    packet.extend_from_slice(encoded_name.as_slice());
-
-    // QTYPE (2 bytes).
-    packet.push((qtype >> 8) as Byte);
-    packet.push((qtype & 0xFF) as Byte);
-
-    // QCLASS (2 bytes) - IN class.
-    packet.push((DNS_CLASS_IN >> 8) as Byte);
-    packet.push((DNS_CLASS_IN & 0xFF) as Byte);
-
-    Result.Ok(packet)
+    let mut index = 0;
+    while index < header.len() {
+        packet[index] = header[index];
+        index += 1;
+    }
+    while index < question {
+        packet[index] = encoded[index - header.len()];
+        index += 1;
+    }
+    packet[question] = (qtype >> 8) as Byte;
+    packet[question + 1] = (qtype & 0xFF) as Byte;
+    packet[question + 2] = (DNS_CLASS_IN >> 8) as Byte;
+    packet[question + 3] = (DNS_CLASS_IN & 0xFF) as Byte;
+    Result.Ok(question + 4)
 }
 
 // =============================================================================
@@ -861,31 +866,30 @@ fn read_ptr_at(buf: &List<Byte>, offset: Int) -> UInt64 {
 /// loopback names are answered from the hardcoded table regardless.
 @cfg(any(target_os = "linux", target_os = "macos"))
 fn read_system_file(path: &Text) -> Maybe<Text> {
-    let path_bytes = path.as_bytes();
-    let fd_result = sys_open(path_bytes, O_RDONLY | O_CLOEXEC, 0);
-
-    if let Result.Ok(fd) = fd_result {
-        let mut buf = List.with_capacity(65536);
-        for _ in 0..65536 {
-            buf.push(0);
+    let fd = match sys_open(path.as_bytes(), O_RDONLY | O_CLOEXEC, 0) {
+        Result.Ok(fd) => fd,
+        Result.Err(_) => return Maybe.None,
+    };
+    let mut bytes: List<Byte> = List.new();
+    let mut buffer: [Byte; 4096] = [0_u8; 4096];
+    let ok = loop {
+        let remaining = 65536 - bytes.len();
+        if remaining == 0 { break true; }
+        let count = remaining.min(buffer.len());
+        match sys_read(fd, &mut buffer[..count]) {
+            Result.Ok(0) => break true,
+            Result.Ok(n) => bytes.extend_from_slice(&buffer[..n]),
+            Result.Err(error) if error.interrupted() => continue,
+            Result.Err(_) => break false,
         }
-
-        let read_result = sys_read(fd, &mut buf);
-        let _ = sys_close(fd);
-
-        if let Result.Ok(bytes_read) = read_result {
-            if bytes_read > 0 {
-                return Maybe.Some(Text.from_utf8_lossy(&buf[..(bytes_read as Int)]));
-            }
-        }
-    }
-
-    Maybe.None
+    };
+    let _ = sys_close(fd);
+    if ok && !bytes.is_empty() { Maybe.Some(Text.from_utf8_lossy(bytes.as_slice())) } else { Maybe.None }
 }
 
 /// Read system nameservers from /etc/resolv.conf (Unix) or GetNetworkParams (Windows).
 fn read_system_nameservers() -> List<Ipv4Addr> {
-    let mut nameservers = List.new();
+    let mut nameservers: List<Ipv4Addr> = List.new();
 
     // Unix: parse /etc/resolv.conf. The linux and macos syscall
     // surfaces are identical here (both mount `sys_open`/`sys_read`/
@@ -895,10 +899,9 @@ fn read_system_nameservers() -> List<Ipv4Addr> {
     {
         if let Maybe.Some(content) = read_system_file(&"/etc/resolv.conf") {
             for line in content.lines() {
-                let trimmed = line.trim();
-                if trimmed.starts_with("nameserver ") {
-                    let addr_str = trimmed[11..].trim();
-                    if let Result.Ok(ip) = Ipv4Addr.parse(&addr_str) {
+                let fields = line.split_whitespace();
+                if fields.len() >= 2 && fields[0] == "nameserver" {
+                    if let Result.Ok(ip) = Ipv4Addr.parse(&fields[1]) {
                         nameservers.push(ip);
                     }
                 }
@@ -1020,7 +1023,7 @@ fn read_system_nameservers() -> List<Ipv4Addr> {
 /// network, which is why the file read is factored into
 /// `read_system_file`.
 fn parse_hosts_content(content: &Text) -> List<(IpAddr, Text)> {
-    let mut pairs = List.new();
+    let mut pairs: List<(IpAddr, Text)> = List.new();
 
     for line in content.lines() {
         // Strip any trailing comment.
@@ -1075,7 +1078,7 @@ fn parse_hosts_content(content: &Text) -> List<(IpAddr, Text)> {
 /// Matching is case-insensitive (DNS names are case-insensitive per
 /// RFC 4343).
 fn lookup_static_hosts(hostname: &Text) -> List<IpAddr> {
-    let mut out = List.new();
+    let mut out: List<IpAddr> = List.new();
     let lower = hostname.to_lowercase();
 
     // RFC 6761 loopback names — answered without touching any file.
@@ -1264,9 +1267,10 @@ implement Resolver {
     }
 
     /// Perform a raw DNS query over UDP.
-    fn query_udp(&self, name: &Text, qtype: UInt16, nameserver: &Ipv4Addr) -> Result<List<DnsRecordEntry>, DnsError> {
+    fn query_udp(&self, name: &Text, qtype: UInt16, nameserver: &SocketAddr) -> Result<List<DnsRecordEntry>, DnsError> {
         let query_id = generate_query_id();
-        let packet = build_query(name, qtype, query_id)?;
+        let mut packet: [Byte; DNS_MAX_UDP_SIZE] = [0_u8; DNS_MAX_UDP_SIZE];
+        let packet_len = build_query(name, qtype, query_id, &mut packet[..])?;
 
         // Create UDP socket.
         let socket = UdpSocket.bind(SocketAddr.new_v4(Ipv4Addr.new(0, 0, 0, 0), 0))
@@ -1277,23 +1281,16 @@ implement Resolver {
             .map_err(DnsError.from_io_error)?;
 
         // Send query to nameserver.
-        let target = SocketAddr.new_v4(*nameserver, DNS_PORT);
-        socket.send_to(&packet, target)
+        socket.send_to(&packet[..packet_len], *nameserver)
             .map_err(DnsError.from_io_error)?;
 
         // Receive response.
-        let mut recv_buf = List.with_capacity(DNS_MAX_UDP_SIZE);
-        for _ in 0..DNS_MAX_UDP_SIZE {
-            recv_buf.push(0);
-        }
+        let mut recv_buf: [Byte; DNS_MAX_UDP_SIZE] = [0_u8; DNS_MAX_UDP_SIZE];
 
-        let (bytes_read, _from) = socket.recv_from(&mut recv_buf)
-            .map_err(|e| {
-                // Check for timeout.
-                match e {
-                    TimedOut => DnsError.Timeout,
-                    _ => DnsError.from_io_error(e),
-                }
+        let (bytes_read, _from) = socket.recv_from(&mut recv_buf[..])
+            .map_err(|error| match error.kind() {
+                IoErrorKind.WouldBlock | IoErrorKind.TimedOut => DnsError.Timeout,
+                _ => DnsError.from_io_error(error),
             })?;
 
         // Parse response.
@@ -1305,33 +1302,32 @@ implement Resolver {
 
     /// DNS over TCP uses a 2-byte length prefix before the query/response
     /// per RFC 1035 Section 4.2.2.
-    fn query_tcp(&self, name: &Text, qtype: UInt16, nameserver: &Ipv4Addr) -> Result<List<DnsRecordEntry>, DnsError> {
+    fn query_tcp(&self, name: &Text, qtype: UInt16, nameserver: &SocketAddr) -> Result<List<DnsRecordEntry>, DnsError> {
         let query_id = generate_query_id();
-        let packet = build_query(name, qtype, query_id)?;
+        let mut packet: [Byte; DNS_MAX_UDP_SIZE] = [0_u8; DNS_MAX_UDP_SIZE];
+        let packet_len = build_query(name, qtype, query_id, &mut packet[..])?;
 
         // Connect to nameserver on DNS port via TCP.
-        let target = SocketAddr.new_v4(*nameserver, DNS_PORT);
-        let mut stream = TcpStream.connect(target)
+        let mut stream = TcpStream.connect_timeout(*nameserver, self.timeout_ms)
             .map_err(DnsError.from_io_error)?;
 
         // Set read timeout.
-        stream.set_read_timeout(Maybe.Some(self.timeout_ms as Int))
-            .map_err(DnsError.from_io_error)?;
+        stream.set_read_timeout(Maybe.Some(self.timeout_ms)).map_err(DnsError.from_io_error)?;
+        stream.set_write_timeout(Maybe.Some(self.timeout_ms)).map_err(DnsError.from_io_error)?;
 
         // Send length-prefixed query (2-byte big-endian length + query).
-        let pkt_len = packet.len();
-        let len_prefix: List<Byte> = [
-            ((pkt_len >> 8) & 0xFF) as Byte,
-            (pkt_len & 0xFF) as Byte,
+        let len_prefix: [Byte; 2] = [
+            ((packet_len >> 8) & 0xFF) as Byte,
+            (packet_len & 0xFF) as Byte,
         ];
-        stream.write_all(&len_prefix)
+        stream.write_all(&len_prefix[..])
             .map_err(DnsError.from_io_error)?;
-        stream.write_all(&packet)
+        stream.write_all(&packet[..packet_len])
             .map_err(DnsError.from_io_error)?;
 
         // Read 2-byte response length.
-        let mut len_buf: List<Byte> = [0, 0];
-        stream.read_exact(&mut len_buf)
+        let mut len_buf: [Byte; 2] = [0_u8; 2];
+        stream.read_exact(&mut len_buf[..])
             .map_err(DnsError.from_io_error)?;
         let resp_len = ((len_buf[0] as Int) << 8) | (len_buf[1] as Int);
 
@@ -1345,22 +1341,19 @@ implement Resolver {
         }
 
         // Read full response.
-        let mut recv_buf = List.with_capacity(resp_len);
-        for _ in 0..resp_len {
-            recv_buf.push(0);
-        }
-        stream.read_exact(&mut recv_buf)
+        let mut recv_buf: List<Byte> = List.from_elem(0_u8, resp_len);
+        stream.read_exact(recv_buf.as_mut_slice())
             .map_err(DnsError.from_io_error)?;
 
         // Parse response (TCP responses are NOT truncated).
-        parse_response(&recv_buf, query_id)
+        parse_response(recv_buf.as_slice(), query_id)
     }
 
     /// Query a specific nameserver with retries.
     fn query_nameserver(
         &self,
         name: &Text,
-        nameserver: &Ipv4Addr,
+        nameserver: &SocketAddr,
         qtype: UInt16
     ) -> Result<List<DnsRecordEntry>, DnsError> {
         let mut last_err = DnsError.Timeout;
@@ -1403,7 +1396,7 @@ implement Resolver {
     /// Resolve hostname to IP addresses.
     public fn lookup(&self, hostname: &Text) -> Result<List<IpAddr>, DnsError> {
         // For unqualified names, try with search domains.
-        let dot_count = hostname.chars().filter(|c| *c == '.').count();
+        let dot_count = hostname.count_matches(&".");
 
         if dot_count < self.ndots && !self.search_domains.is_empty() {
             for domain in &self.search_domains {
@@ -1430,13 +1423,14 @@ implement Resolver {
             return Result.Err(DnsError.NetworkError("no nameservers configured".to_text()));
         }
 
-        let mut addrs = List.new();
+        let mut addrs: List<IpAddr> = List.new();
         let mut last_err = DnsError.NotFound;
 
         // Try each nameserver.
         for ns in &nameservers {
+            let server = SocketAddr.new_v4(*ns, DNS_PORT);
             // Query for A records.
-            match self.query_nameserver(hostname, ns, DNS_TYPE_A) {
+            match self.query_nameserver(hostname, &server, DNS_TYPE_A) {
                 Result.Ok(records) => {
                     for entry in records {
                         if let A(ip) = entry.record {
@@ -1450,7 +1444,7 @@ implement Resolver {
             }
 
             // Query for AAAA records.
-            match self.query_nameserver(hostname, ns, DNS_TYPE_AAAA) {
+            match self.query_nameserver(hostname, &server, DNS_TYPE_AAAA) {
                 Result.Ok(records) => {
                     for entry in records {
                         if let AAAA(ip) = entry.record {
@@ -1490,7 +1484,8 @@ implement Resolver {
         }
 
         // Try first nameserver.
-        self.query_nameserver(name, &nameservers[0], qtype)
+        let server = SocketAddr.new_v4(nameservers[0], DNS_PORT);
+        self.query_nameserver(name, &server, qtype)
     }
 
     /// Look up MX records for a domain.
@@ -1806,18 +1801,16 @@ public async fn lookup_host_async(hostname: &Text) -> Result<List<IpAddr>, DnsEr
     let ns = &nameservers[0];
 
     // Query A records.
-    let packet = build_query(hostname, DNS_TYPE_A, query_id)?;
+    let mut packet: [Byte; DNS_MAX_UDP_SIZE] = [0_u8; DNS_MAX_UDP_SIZE];
+    let packet_len = build_query(hostname, DNS_TYPE_A, query_id, &mut packet[..])?;
     let target = SocketAddr.new_v4(*ns, DNS_PORT);
 
-    socket.send_to_async(&packet, target).await
+    socket.send_to_async(&packet[..packet_len], target).await
         .map_err(DnsError.from_io_error)?;
 
-    let mut recv_buf = List.with_capacity(DNS_MAX_UDP_SIZE);
-    for _ in 0..DNS_MAX_UDP_SIZE {
-        recv_buf.push(0);
-    }
+    let mut recv_buf: [Byte; DNS_MAX_UDP_SIZE] = [0_u8; DNS_MAX_UDP_SIZE];
 
-    let (bytes_read, _) = socket.recv_from_async(&mut recv_buf).await
+    let (bytes_read, _) = socket.recv_from_async(&mut recv_buf[..]).await
         .map_err(DnsError.from_io_error)?;
 
     if let Result.Ok(records) = parse_response(&recv_buf[..bytes_read], query_id) {
@@ -1830,12 +1823,12 @@ public async fn lookup_host_async(hostname: &Text) -> Result<List<IpAddr>, DnsEr
 
     // Query AAAA records.
     let query_id_v6 = generate_query_id();
-    let packet_v6 = build_query(hostname, DNS_TYPE_AAAA, query_id_v6)?;
+    let packet_v6_len = build_query(hostname, DNS_TYPE_AAAA, query_id_v6, &mut packet[..])?;
 
-    socket.send_to_async(&packet_v6, target).await
+    socket.send_to_async(&packet[..packet_v6_len], target).await
         .map_err(DnsError.from_io_error)?;
 
-    let (bytes_read_v6, _) = socket.recv_from_async(&mut recv_buf).await
+    let (bytes_read_v6, _) = socket.recv_from_async(&mut recv_buf[..]).await
         .map_err(DnsError.from_io_error)?;
 
     if let Result.Ok(records) = parse_response(&recv_buf[..bytes_read_v6], query_id_v6) {
@@ -1866,18 +1859,16 @@ public async fn lookup_addr_async(addr: &IpAddr) -> Result<Text, DnsError> {
         .map_err(DnsError.from_io_error)?;
 
     let query_id = generate_query_id();
-    let packet = build_query(&ptr_name, DNS_TYPE_PTR, query_id)?;
+    let mut packet: [Byte; DNS_MAX_UDP_SIZE] = [0_u8; DNS_MAX_UDP_SIZE];
+    let packet_len = build_query(&ptr_name, DNS_TYPE_PTR, query_id, &mut packet[..])?;
     let target = SocketAddr.new_v4(nameservers[0], DNS_PORT);
 
-    socket.send_to_async(&packet, target).await
+    socket.send_to_async(&packet[..packet_len], target).await
         .map_err(DnsError.from_io_error)?;
 
-    let mut recv_buf = List.with_capacity(DNS_MAX_UDP_SIZE);
-    for _ in 0..DNS_MAX_UDP_SIZE {
-        recv_buf.push(0);
-    }
+    let mut recv_buf: [Byte; DNS_MAX_UDP_SIZE] = [0_u8; DNS_MAX_UDP_SIZE];
 
-    let (bytes_read, _) = socket.recv_from_async(&mut recv_buf).await
+    let (bytes_read, _) = socket.recv_from_async(&mut recv_buf[..]).await
         .map_err(DnsError.from_io_error)?;
 
     let records = parse_response(&recv_buf[..bytes_read], query_id)?;
@@ -1912,7 +1903,7 @@ public async fn lookup_addr_async(addr: &IpAddr) -> Result<Text, DnsError> {
 /// ```
 public fn resolve(hostname: &Text, port: Int) -> Result<List<SocketAddr>, DnsError> {
     let ips = lookup_host(hostname)?;
-    let mut addrs = List.new();
+    let mut addrs: List<SocketAddr> = List.new();
 
     for ip in ips {
         let addr = match ip {
@@ -2075,11 +2066,11 @@ fn test_build_ptr_name() {
 
 @test
 fn test_dns_record_type() {
-    let record = DnsRecord.A(Ipv4Addr.new(192, 168, 1, 1));
-    assert_eq(record.record_type(), &"A");
+    let address: DnsRecord = DnsRecord.A(Ipv4Addr.new(192, 168, 1, 1));
+    assert_eq(*address.record_type(), "A");
 
-    let record = DnsRecord.MX { priority: 10, exchange: "mail.example.com".to_text() };
-    assert_eq(record.record_type(), &"MX");
+    let mail: DnsRecord = DnsRecord.MX { priority: 10, exchange: "mail.example.com".to_text() };
+    assert_eq(*mail.record_type(), "MX");
 }
 
 @test
